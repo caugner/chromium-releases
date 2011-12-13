@@ -19,11 +19,6 @@
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/l10n/l10n_util.h"
-#if defined(TOUCH_UI)
-#include "content/common/content_notification_types.h"
-#include "content/common/notification_service.h"
-#include "views/ime/input_method.h"
-#endif
 
 // static
 const char BrowserRootView::kViewClassName[] =
@@ -34,28 +29,6 @@ BrowserRootView::BrowserRootView(BrowserView* browser_view,
     : views::internal::RootView(widget),
       browser_view_(browser_view),
       forwarding_to_tab_strip_(false) { }
-
-#if defined(TOUCH_UI)
-ui::TouchStatus BrowserRootView::OnTouchEvent(const views::TouchEvent& event) {
-  const ui::TouchStatus status = views::internal::RootView::OnTouchEvent(event);
-
-  if (event.type() != ui::ET_TOUCH_PRESSED)
-    return status;
-
-  views::InputMethod* input_method = GetInputMethod();
-  if (!input_method)
-    return status;
-
-  ui::TextInputType text_input_type = input_method->GetTextInputType();
-  if (text_input_type != ui::TEXT_INPUT_TYPE_NONE) {
-    NotificationService::current()->Notify(
-        chrome::NOTIFICATION_EDITABLE_ELEMENT_TOUCHED,
-        Source<View>(this),
-        Details<ui::TextInputType>(&text_input_type));
-  }
-  return status;
-}
-#endif
 
 bool BrowserRootView::GetDropFormats(
       int* formats,

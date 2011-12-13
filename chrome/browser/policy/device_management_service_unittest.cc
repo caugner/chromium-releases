@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <ostream>
 #include <vector>
 
 #include "base/message_loop.h"
@@ -14,6 +15,9 @@
 #include "content/browser/browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "net/base/escape.h"
+#include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
+#include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_status.h"
 #include "net/url_request/url_request_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -94,6 +98,12 @@ struct FailedRequestParams {
   int http_status_;
   std::string response_;
 };
+
+void PrintTo(const FailedRequestParams& params, std::ostream* os) {
+  *os << "FailedRequestParams " << params.expected_error_
+      << " " << params.request_status_.status()
+      << " " << params.http_status_;
+}
 
 // A parameterized test case for erroneous response situations, they're mostly
 // the same for all kinds of requests.
@@ -240,23 +250,23 @@ class QueryParams {
     bool found = false;
     for (ParamMap::const_iterator i(params_.begin()); i != params_.end(); ++i) {
       std::string unescaped_name(
-          UnescapeURLComponent(i->first,
-                               UnescapeRule::NORMAL |
-                               UnescapeRule::SPACES |
-                               UnescapeRule::URL_SPECIAL_CHARS |
-                               UnescapeRule::CONTROL_CHARS |
-                               UnescapeRule::REPLACE_PLUS_WITH_SPACE));
+          net::UnescapeURLComponent(i->first,
+                                    UnescapeRule::NORMAL |
+                                    UnescapeRule::SPACES |
+                                    UnescapeRule::URL_SPECIAL_CHARS |
+                                    UnescapeRule::CONTROL_CHARS |
+                                    UnescapeRule::REPLACE_PLUS_WITH_SPACE));
       if (unescaped_name == name) {
         if (found)
           return false;
         found = true;
         std::string unescaped_value(
-            UnescapeURLComponent(i->second,
-                                 UnescapeRule::NORMAL |
-                                 UnescapeRule::SPACES |
-                                 UnescapeRule::URL_SPECIAL_CHARS |
-                                 UnescapeRule::CONTROL_CHARS |
-                                 UnescapeRule::REPLACE_PLUS_WITH_SPACE));
+            net::UnescapeURLComponent(i->second,
+                                      UnescapeRule::NORMAL |
+                                      UnescapeRule::SPACES |
+                                      UnescapeRule::URL_SPECIAL_CHARS |
+                                      UnescapeRule::CONTROL_CHARS |
+                                      UnescapeRule::REPLACE_PLUS_WITH_SPACE));
         if (unescaped_value != expected_value)
           return false;
       }
@@ -512,6 +522,77 @@ TEST_F(DeviceManagementServiceTest, CancelDuringCallback) {
 
   // Backend should have been reset.
   EXPECT_FALSE(backend_.get());
+}
+
+TEST_F(DeviceManagementServiceTest, RetryOnProxyError) {
+  // Make a request.
+  DeviceRegisterResponseDelegateMock mock;
+  EXPECT_CALL(mock, HandleRegisterResponse(_)).Times(0);
+  EXPECT_CALL(mock, OnError(_)).Times(0);
+
+  em::DeviceRegisterRequest request;
+  backend_->ProcessRegisterRequest(kGaiaAuthToken, kOAuthToken,
+                                   kDeviceId, request, &mock);
+  TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
+  ASSERT_TRUE(fetcher);
+  EXPECT_TRUE((fetcher->load_flags() & net::LOAD_BYPASS_PROXY) == 0);
+  const GURL original_url(fetcher->original_url());
+  const std::string upload_data(fetcher->upload_data());
+
+  // Generate a callback with a proxy failure.
+  net::URLRequestStatus status(net::URLRequestStatus::FAILED,
+                               net::ERR_PROXY_CONNECTION_FAILED);
+  fetcher->delegate()->OnURLFetchComplete(fetcher,
+                                          GURL(kServiceUrl),
+                                          status,
+                                          0,
+                                          net::ResponseCookies(),
+                                          "");
+
+  // Verify that a new URLFetcher was started that bypasses the proxy.
+  fetcher = factory_.GetFetcherByID(0);
+  ASSERT_TRUE(fetcher);
+  EXPECT_TRUE(fetcher->load_flags() & net::LOAD_BYPASS_PROXY);
+  EXPECT_EQ(original_url, fetcher->original_url());
+  EXPECT_EQ(upload_data, fetcher->upload_data());
+}
+
+TEST_F(DeviceManagementServiceTest, RetryOnBadResponseFromProxy) {
+  // Make a request.
+  DeviceRegisterResponseDelegateMock mock;
+  EXPECT_CALL(mock, HandleRegisterResponse(_)).Times(0);
+  EXPECT_CALL(mock, OnError(_)).Times(0);
+
+  em::DeviceRegisterRequest request;
+  backend_->ProcessRegisterRequest(kGaiaAuthToken, kOAuthToken,
+                                   kDeviceId, request, &mock);
+  TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
+  ASSERT_TRUE(fetcher);
+  EXPECT_TRUE((fetcher->load_flags() & net::LOAD_BYPASS_PROXY) == 0);
+  const GURL original_url(fetcher->original_url());
+  const std::string upload_data(fetcher->upload_data());
+  fetcher->set_was_fetched_via_proxy(true);
+  scoped_refptr<net::HttpResponseHeaders> headers;
+  headers = new net::HttpResponseHeaders(
+      "HTTP/1.1 200 OK\0Content-type: bad/type\0\0");
+  fetcher->set_response_headers(headers);
+
+  // Generate a callback with a valid http response, that was generated by
+  // a bad/wrong proxy.
+  net::URLRequestStatus status;
+  fetcher->delegate()->OnURLFetchComplete(fetcher,
+                                          GURL(kServiceUrl),
+                                          status,
+                                          200,
+                                          net::ResponseCookies(),
+                                          "");
+
+  // Verify that a new URLFetcher was started that bypasses the proxy.
+  fetcher = factory_.GetFetcherByID(0);
+  ASSERT_TRUE(fetcher);
+  EXPECT_TRUE((fetcher->load_flags() & net::LOAD_BYPASS_PROXY) != 0);
+  EXPECT_EQ(original_url, fetcher->original_url());
+  EXPECT_EQ(upload_data, fetcher->upload_data());
 }
 
 }  // namespace policy

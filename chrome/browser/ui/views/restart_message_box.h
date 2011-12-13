@@ -24,11 +24,11 @@ class RestartMessageBox : public views::DialogDelegate {
  protected:
   // views::DialogDelegate:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
 
-  // views::WindowDelegate:
+  // views::WidgetDelegate:
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;

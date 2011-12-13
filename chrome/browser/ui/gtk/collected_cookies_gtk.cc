@@ -163,7 +163,7 @@ void CollectedCookiesGtk::Init() {
   blocked_cookies_tree_adapter_->Init();
   EnableControls();
   ShowCookieInfo(gtk_notebook_get_current_page(GTK_NOTEBOOK(notebook_)));
-  window_ = new ConstrainedWindowGtk(wrapper_->tab_contents(), this);
+  window_ = new ConstrainedWindowGtk(wrapper_, this);
 }
 
 GtkWidget* CollectedCookiesGtk::CreateAllowedPane() {
@@ -428,8 +428,9 @@ void CollectedCookiesGtk::Observe(int type,
 
 void CollectedCookiesGtk::OnClose(GtkWidget* close_button) {
   if (status_changed_) {
-    wrapper_->infobar_tab_helper()->AddInfoBar(
-        new CollectedCookiesInfoBarDelegate(wrapper_->tab_contents()));
+    InfoBarTabHelper* infobar_helper = wrapper_->infobar_tab_helper();
+    infobar_helper->AddInfoBar(
+        new CollectedCookiesInfoBarDelegate(infobar_helper));
   }
   window_->CloseConstrainedWindow();
 }

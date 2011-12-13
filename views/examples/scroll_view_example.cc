@@ -5,6 +5,7 @@
 #include "views/examples/scroll_view_example.h"
 
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/button/radio_button.h"
 #include "views/layout/grid_layout.h"
 #include "views/view.h"
@@ -18,7 +19,7 @@ class ScrollViewExample::ScrollableView : public views::View {
   ScrollableView() {
     SetColor(SK_ColorRED, SK_ColorCYAN);
     AddChildView(new views::TextButton(NULL, L"Button"));
-    AddChildView(new views::RadioButton(L"Radio Button", 0));
+    AddChildView(new views::RadioButton(ASCIIToUTF16("Radio Button"), 0));
   }
 
   virtual gfx::Size GetPreferredSize() {
@@ -47,14 +48,10 @@ class ScrollViewExample::ScrollableView : public views::View {
 };
 
 ScrollViewExample::ScrollViewExample(ExamplesMain* main)
-    : ExampleBase(main) {
+    : ExampleBase(main, "Scroll View") {
 }
 
 ScrollViewExample::~ScrollViewExample() {
-}
-
-std::wstring ScrollViewExample::GetExampleTitle() {
-  return L"Scroll View";
 }
 
 void ScrollViewExample::CreateExampleView(views::View* container) {

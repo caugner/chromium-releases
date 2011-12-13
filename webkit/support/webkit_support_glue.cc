@@ -30,7 +30,6 @@ void GetPlugins(bool refresh,
     webkit::WebPluginInfo plugin_info = plugins->at(i);
     for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
       if (plugin_info.path.BaseName() == FilePath(kPluginBlackList[j])) {
-        webkit::npapi::PluginList::Singleton()->DisablePlugin(plugin_info.path);
         plugins->erase(plugins->begin() + i);
       }
     }
@@ -49,30 +48,6 @@ bool IsProtocolSupportedForMedia(const GURL& url) {
   return false;
 }
 
-std::string GetWebKitLocale() {
-  return "en-US";
-}
-
-void CloseCurrentConnections() {
-}
-
-void SetCacheMode(bool enabled) {
-}
-
-void ClearCache(bool preserve_ssl_info) {
-}
-
-void ClearHostResolverCache() {
-}
-
-void ClearPredictorCache() {
-}
-
-std::string BuildUserAgent(bool mimic_windows) {
-  return webkit_glue::BuildUserAgentHelper(mimic_windows,
-                                           "DumpRenderTree/0.0.0.0");
-}
-
 bool GetPluginFinderURL(std::string* plugin_finder_url) {
   return false;
 }
@@ -83,26 +58,10 @@ bool DownloadUrl(const std::string& url, HWND caller_window) {
 }
 #endif
 
-bool IsSingleProcess() {
-  return true;
-}
-
 void EnableSpdy(bool enable) {
 }
 
 void UserMetricsRecordAction(const std::string& action) {
 }
-
-#if defined(OS_LINUX)
-int MatchFontWithFallback(const std::string& face, bool bold,
-                          bool italic, int charset) {
-  return -1;
-}
-
-bool GetFontTable(int fd, uint32_t table, uint8_t* output,
-                  size_t* output_length) {
-  return false;
-}
-#endif
 
 }  // namespace webkit_glue

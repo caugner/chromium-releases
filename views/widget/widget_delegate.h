@@ -20,6 +20,7 @@ class Rect;
 }
 
 namespace views {
+class BubbleDelegate;
 class ClientView;
 class DialogDelegate;
 class NonClientFrameView;
@@ -49,6 +50,7 @@ class VIEWS_EXPORT WidgetDelegate {
   // Moved from WindowDelegate: ------------------------------------------------
   // TODO(beng): sort
 
+  virtual BubbleDelegate* AsBubbleDelegate();
   virtual DialogDelegate* AsDialogDelegate();
 
   // Returns true if the window can ever be resized.
@@ -69,10 +71,10 @@ class VIEWS_EXPORT WidgetDelegate {
   virtual ui::AccessibilityTypes::State GetAccessibleWindowState() const;
 
   // Returns the title to be read with screen readers.
-  virtual std::wstring GetAccessibleWindowTitle() const;
+  virtual string16 GetAccessibleWindowTitle() const;
 
   // Returns the text to be displayed in the window title.
-  virtual std::wstring GetWindowTitle() const;
+  virtual string16 GetWindowTitle() const;
 
   // Returns true if the window should show a title in the title bar.
   virtual bool ShouldShowWindowTitle() const;
@@ -96,7 +98,7 @@ class VIEWS_EXPORT WidgetDelegate {
 
   // Returns the window's name identifier. Used to identify this window for
   // state restoration.
-  virtual std::wstring GetWindowName() const;
+  virtual std::string GetWindowName() const;
 
   // Saves the window's bounds and "show" state. By default this uses the
   // process' local state keyed by window name (See GetWindowName above). This
@@ -177,4 +179,3 @@ class VIEWS_EXPORT WidgetDelegateView : public WidgetDelegate, public View {
 }  // namespace views
 
 #endif  // VIEWS_WIDGET_WIDGET_DELEGATE_H_
-

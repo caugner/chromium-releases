@@ -13,10 +13,10 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_gtk.h"
-#include "chrome/browser/tab_contents/web_drag_dest_gtk.h"
+#include "chrome/browser/tab_contents/web_drag_bookmark_handler_gtk.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
-#include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/sad_tab_gtk.h"
 #include "chrome/browser/ui/gtk/tab_contents_drag_source.h"
 #include "content/browser/renderer_host/render_process_host.h"
@@ -26,8 +26,9 @@
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/common/content_notification_types.h"
+#include "content/browser/tab_contents/web_drag_dest_gtk.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 #include "ui/gfx/point.h"
@@ -152,7 +153,9 @@ RenderWidgetHostView* TabContentsViewGtk::CreateViewForWidget(
   InsertIntoContentArea(content_view);
 
   // Renderer target DnD.
-  drag_dest_.reset(new WebDragDestGtk(tab_contents_, content_view));
+  drag_dest_.reset(new content::WebDragDestGtk(tab_contents_, content_view));
+  bookmark_handler_gtk_.reset(new WebDragBookmarkHandlerGtk);
+  drag_dest_->set_delegate(bookmark_handler_gtk_.get());
 
   return view;
 }
@@ -186,16 +189,22 @@ void TabContentsViewGtk::GetContainerBounds(gfx::Rect* out) const {
                requested_size_.width(), requested_size_.height());
 }
 
-void TabContentsViewGtk::SetPageTitle(const std::wstring& title) {
+void TabContentsViewGtk::SetPageTitle(const string16& title) {
   // Set the window name to include the page title so it's easier to spot
   // when debugging (e.g. via xwininfo -tree).
   gfx::NativeView content_view = GetContentNativeView();
   if (content_view && content_view->window)
-    gdk_window_set_title(content_view->window, WideToUTF8(title).c_str());
+    gdk_window_set_title(content_view->window, UTF16ToUTF8(title).c_str());
 }
 
 void TabContentsViewGtk::OnTabCrashed(base::TerminationStatus status,
                                       int error_code) {
+  // Only show the sad tab if we're not in browser shutdown, so that TabContents
+  // objects that are not in a browser (e.g., HTML dialogs) and thus are
+  // visible do not flash a sad tab page.
+  if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
+    return;
+
   if (tab_contents_ != NULL && !sad_tab_.get()) {
     sad_tab_.reset(new SadTabGtk(
         tab_contents_,

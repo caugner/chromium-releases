@@ -6,19 +6,22 @@
 
 #include <deque>
 
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/message_loop.h"
 #include "base/task.h"
-#include "media/base/callback.h"
+#include "media/base/demuxer.h"
 #include "media/base/filter_host.h"
 #include "media/base/filters.h"
 #include "media/base/limits.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
+#include "third_party/libjingle/source/talk/session/phone/videoframe.h"
 
 using media::CopyUPlane;
 using media::CopyVPlane;
 using media::CopyYPlane;
 using media::DemuxerStream;
-using media::FilterCallback;
 using media::FilterStatusCB;
 using media::kNoTimestamp;
 using media::Limits;
@@ -30,8 +33,7 @@ using media::VideoFrame;
 RTCVideoDecoder::RTCVideoDecoder(MessageLoop* message_loop,
                                  const std::string& url)
     : message_loop_(message_loop),
-      width_(176),
-      height_(144),
+      visible_size_(176, 144),
       url_(url),
       state_(kUnInitialized) {
 }
@@ -39,15 +41,14 @@ RTCVideoDecoder::RTCVideoDecoder(MessageLoop* message_loop,
 RTCVideoDecoder::~RTCVideoDecoder() {}
 
 void RTCVideoDecoder::Initialize(DemuxerStream* demuxer_stream,
-                                 FilterCallback* filter_callback,
-                                 StatisticsCallback* stat_callback) {
+                                 const base::Closure& filter_callback,
+                                 const StatisticsCallback& stat_callback) {
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &RTCVideoDecoder::Initialize,
-                          make_scoped_refptr(demuxer_stream),
-                          filter_callback, stat_callback));
+        base::Bind(&RTCVideoDecoder::Initialize, this,
+                   make_scoped_refptr(demuxer_stream),
+                   filter_callback, stat_callback));
     return;
   }
 
@@ -59,19 +60,16 @@ void RTCVideoDecoder::Initialize(DemuxerStream* demuxer_stream,
 
   state_ = kNormal;
 
-  filter_callback->Run();
-  delete filter_callback;
+  filter_callback.Run();
 
   // TODO(acolwell): Implement stats.
-  delete stat_callback;
 }
 
-void RTCVideoDecoder::Play(FilterCallback* callback) {
+void RTCVideoDecoder::Play(const base::Closure& callback) {
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(FROM_HERE,
-                             NewRunnableMethod(this,
-                                               &RTCVideoDecoder::Play,
-                                               callback));
+                            base::Bind(&RTCVideoDecoder::Play,
+                                       this, callback));
     return;
   }
 
@@ -80,12 +78,11 @@ void RTCVideoDecoder::Play(FilterCallback* callback) {
   VideoDecoder::Play(callback);
 }
 
-void RTCVideoDecoder::Pause(FilterCallback* callback) {
+void RTCVideoDecoder::Pause(const base::Closure& callback) {
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(FROM_HERE,
-                            NewRunnableMethod(this,
-                                              &RTCVideoDecoder::Pause,
-                                              callback));
+                            base::Bind(&RTCVideoDecoder::Pause,
+                                       this, callback));
     return;
   }
 
@@ -96,12 +93,11 @@ void RTCVideoDecoder::Pause(FilterCallback* callback) {
   VideoDecoder::Pause(callback);
 }
 
-void RTCVideoDecoder::Stop(FilterCallback* callback) {
+void RTCVideoDecoder::Stop(const base::Closure& callback) {
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(FROM_HERE,
-                            NewRunnableMethod(this,
-                                              &RTCVideoDecoder::Stop,
-                                              callback));
+                            base::Bind(&RTCVideoDecoder::Stop,
+                                       this, callback));
     return;
   }
 
@@ -115,8 +111,8 @@ void RTCVideoDecoder::Stop(FilterCallback* callback) {
 void RTCVideoDecoder::Seek(base::TimeDelta time, const FilterStatusCB& cb) {
   if (MessageLoop::current() != message_loop_) {
      message_loop_->PostTask(FROM_HERE,
-                             NewRunnableMethod(this, &RTCVideoDecoder::Seek,
-                                               time, cb));
+                             base::Bind(&RTCVideoDecoder::Seek, this,
+                                        time, cb));
      return;
   }
 
@@ -124,9 +120,10 @@ void RTCVideoDecoder::Seek(base::TimeDelta time, const FilterStatusCB& cb) {
 
   state_ = kSeeking;
   // Create output buffer pool and pass the frames to renderer
-  // so that the renderer can complete the seeking
+  // so that the renderer can complete the seeking.
   for (size_t i = 0; i < Limits::kMaxVideoFrames; ++i) {
-    VideoFrameReady(VideoFrame::CreateBlackFrame(width_, height_));
+    VideoFrameReady(VideoFrame::CreateBlackFrame(
+        visible_size_.width(), visible_size_.height()));
   }
 
   state_ = kNormal;
@@ -139,8 +136,7 @@ void RTCVideoDecoder::ProduceVideoFrame(
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &RTCVideoDecoder::ProduceVideoFrame, video_frame));
+        base::Bind(&RTCVideoDecoder::ProduceVideoFrame, this, video_frame));
     return;
   }
   DCHECK_EQ(MessageLoop::current(), message_loop_);
@@ -148,19 +144,16 @@ void RTCVideoDecoder::ProduceVideoFrame(
   frame_queue_available_.push_back(video_frame);
 }
 
-int RTCVideoDecoder::width() {
-  return width_;
-}
-
-int RTCVideoDecoder::height() {
-  return height_;
+gfx::Size RTCVideoDecoder::natural_size() {
+  // TODO(vrk): Return natural size when aspect ratio support is implemented.
+  return visible_size_;
 }
 
 bool RTCVideoDecoder::SetSize(int width, int height, int reserved) {
-  width_ = width;
-  height_ = height;
+  visible_size_.SetSize(width, height);
 
-  host()->SetVideoSize(width_, height_);
+  // TODO(vrk): Provide natural size when aspect ratio support is implemented.
+  host()->SetNaturalVideoSize(visible_size_);
   return true;
 }
 
@@ -170,7 +163,7 @@ bool RTCVideoDecoder::RenderFrame(const cricket::VideoFrame* frame) {
   if (state_ != kNormal)
     return true;
 
-  // This is called from another thread
+  // This is called from another thread.
   scoped_refptr<VideoFrame> video_frame;
   {
     base::AutoLock auto_lock(lock_);
@@ -181,16 +174,24 @@ bool RTCVideoDecoder::RenderFrame(const cricket::VideoFrame* frame) {
     frame_queue_available_.pop_front();
   }
 
-  // Check if there's a size change
-  if (video_frame->width() != width_ || video_frame->height() != height_) {
-    // Allocate new buffer based on the new size
+  // Check if there's a size change.
+  // TODO(vrk): Remove casts when media::VideoFrame is updated with gfx::Sizes
+  // for width/height.
+  if (video_frame->width() != static_cast<size_t>(visible_size_.width()) ||
+      video_frame->height() != static_cast<size_t>(visible_size_.height())) {
+    // Allocate new buffer based on the new size.
     video_frame = VideoFrame::CreateFrame(VideoFrame::YV12,
-                                          width_,
-                                          height_,
+                                          visible_size_.width(),
+                                          visible_size_.height(),
                                           kNoTimestamp,
                                           kNoTimestamp);
   }
 
+  // Only YV12 frames are supported.
+  DCHECK(video_frame->format() == VideoFrame::YV12);
+  // Aspect ratio unsupported; DCHECK when there are non-square pixels.
+  DCHECK(frame->GetPixelWidth() == 1);
+  DCHECK(frame->GetPixelHeight() == 1);
   video_frame->SetTimestamp(host()->GetTime());
   video_frame->SetDuration(base::TimeDelta::FromMilliseconds(30));
 
@@ -203,9 +204,7 @@ bool RTCVideoDecoder::RenderFrame(const cricket::VideoFrame* frame) {
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &RTCVideoDecoder::VideoFrameReady,
-                          video_frame));
+        base::Bind(&RTCVideoDecoder::VideoFrameReady, this, video_frame));
   } else {
     VideoFrameReady(video_frame);
   }

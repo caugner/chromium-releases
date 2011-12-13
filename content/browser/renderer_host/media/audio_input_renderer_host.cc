@@ -4,11 +4,15 @@
 
 #include "content/browser/renderer_host/media/audio_input_renderer_host.h"
 
+#include "base/bind.h"
 #include "base/metrics/histogram.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "content/browser/renderer_host/media/audio_common.h"
+#include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
+#include "content/browser/renderer_host/media/media_stream_manager.h"
+#include "content/browser/resource_context.h"
 #include "content/common/media/audio_messages.h"
 #include "ipc/ipc_logging.h"
 
@@ -20,7 +24,10 @@ AudioInputRendererHost::AudioEntry::AudioEntry()
 
 AudioInputRendererHost::AudioEntry::~AudioEntry() {}
 
-AudioInputRendererHost::AudioInputRendererHost() {}
+AudioInputRendererHost::AudioInputRendererHost(
+    const content::ResourceContext* resource_context)
+    : resource_context_(resource_context) {
+}
 
 AudioInputRendererHost::~AudioInputRendererHost() {
   DCHECK(audio_entries_.empty());
@@ -42,9 +49,9 @@ void AudioInputRendererHost::OnCreated(
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(
-          this,
+      base::Bind(
           &AudioInputRendererHost::DoCompleteCreation,
+          this,
           make_scoped_refptr(controller)));
 }
 
@@ -53,9 +60,9 @@ void AudioInputRendererHost::OnRecording(
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(
-          this,
+      base::Bind(
           &AudioInputRendererHost::DoSendRecordingMessage,
+          this,
           make_scoped_refptr(controller)));
 }
 
@@ -65,9 +72,8 @@ void AudioInputRendererHost::OnError(
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(this,
-                        &AudioInputRendererHost::DoHandleError,
-                        make_scoped_refptr(controller),
+      base::Bind(&AudioInputRendererHost::DoHandleError, this,
+                 make_scoped_refptr(controller),
                         error_code));
 }
 
@@ -167,6 +173,7 @@ bool AudioInputRendererHost::OnMessageReceived(const IPC::Message& message,
                                                bool* message_was_ok) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP_EX(AudioInputRendererHost, message, *message_was_ok)
+    IPC_MESSAGE_HANDLER(AudioInputHostMsg_StartDevice, OnStartDevice)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_CreateStream, OnCreateStream)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_RecordStream, OnRecordStream)
     IPC_MESSAGE_HANDLER(AudioInputHostMsg_CloseStream, OnCloseStream)
@@ -176,6 +183,21 @@ bool AudioInputRendererHost::OnMessageReceived(const IPC::Message& message,
   IPC_END_MESSAGE_MAP_EX()
 
   return handled;
+}
+void AudioInputRendererHost::OnStartDevice(int stream_id, int session_id) {
+  VLOG(1) << "AudioInputRendererHost::OnStartDevice(stream_id="
+          << stream_id << ", session_id = " << session_id << ")";
+
+  // Get access to the AudioInputDeviceManager to start the device.
+  media_stream::AudioInputDeviceManager* audio_input_man =
+      resource_context_->media_stream_manager()->audio_input_device_manager();
+
+  // Add the session entry to the map.
+  session_entries_[session_id] = stream_id;
+
+  // Start the device with the session_id. If the device is started
+  // successfully, OnDeviceStarted() callback will be triggered.
+  audio_input_man->Start(session_id, this);
 }
 
 void AudioInputRendererHost::OnCreateStream(
@@ -257,6 +279,11 @@ void AudioInputRendererHost::OnCloseStream(int stream_id) {
 
   if (entry)
     CloseAndDeleteStream(entry);
+
+  int session_id = LookupSessionById(stream_id);
+
+  if (session_id)
+    StopAndDeleteDevice(session_id);
 }
 
 void AudioInputRendererHost::OnSetVolume(int stream_id, double volume) {
@@ -300,6 +327,53 @@ void AudioInputRendererHost::DeleteEntries() {
   }
 }
 
+void AudioInputRendererHost::OnDeviceStarted(int session_id, int index) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  SessionEntryMap::iterator it = session_entries_.find(session_id);
+  if (it == session_entries_.end()) {
+    DLOG(WARNING) << "AudioInputRendererHost::OnDeviceStarted()"
+        " session does not exist.";
+    return;
+  }
+
+  // Notify the renderer that the device has been started.
+  Send(new AudioInputMsg_NotifyDeviceStarted(it->second, index));
+}
+
+void AudioInputRendererHost::OnDeviceStopped(int session_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  SessionEntryMap::iterator it = session_entries_.find(session_id);
+  // Return if the stream has been closed.
+  if (it == session_entries_.end())
+    return;
+
+  int stream_id = it->second;
+  AudioEntry* entry = LookupById(stream_id);
+
+  if (entry) {
+    // Device has been stopped, close the input stream.
+    CloseAndDeleteStream(entry);
+    // Notify the renderer that the state of the input stream has changed.
+    Send(new AudioInputMsg_NotifyStreamStateChanged(stream_id,
+                                                    kAudioStreamPaused));
+  }
+
+  // Delete the session entry.
+  session_entries_.erase(it);
+}
+
+void AudioInputRendererHost::StopAndDeleteDevice(int session_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  media_stream::AudioInputDeviceManager* audio_input_man =
+      resource_context_->media_stream_manager()->audio_input_device_manager();
+  audio_input_man->Stop(session_id);
+
+  // Delete the session entry.
+  session_entries_.erase(session_id);
+}
+
 void AudioInputRendererHost::CloseAndDeleteStream(AudioEntry* entry) {
   if (!entry->pending_close) {
     entry->pending_close = true;
@@ -315,7 +389,7 @@ void AudioInputRendererHost::OnStreamClosed(AudioEntry* entry) {
   // Delete the entry after we've closed the stream.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &AudioInputRendererHost::DeleteEntry, entry));
+      base::Bind(&AudioInputRendererHost::DeleteEntry, this, entry));
 }
 
 void AudioInputRendererHost::DeleteEntry(AudioEntry* entry) {
@@ -359,4 +433,16 @@ AudioInputRendererHost::AudioEntry* AudioInputRendererHost::LookupByController(
       return i->second;
   }
   return NULL;
+}
+
+int AudioInputRendererHost::LookupSessionById(int stream_id) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+
+  for (SessionEntryMap::iterator it = session_entries_.begin();
+       it != session_entries_.end(); ++it) {
+    if (stream_id == it->second) {
+      return it->first;
+    }
+  }
+  return 0;
 }

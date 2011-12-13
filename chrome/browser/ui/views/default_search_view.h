@@ -9,17 +9,14 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "content/browser/tab_contents/constrained_window.h"
 #include "views/window/dialog_delegate.h"
 
-#if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/ui/gtk/constrained_window_gtk.h"
-#endif
-
 class PrefService;
+class Profile;
 class TabContents;
 class TemplateURL;
 class TemplateURLService;
+class ThemeService;
 
 namespace gfx {
 class Canvas;
@@ -34,15 +31,14 @@ class View;
 
 // Responsible for displaying the contents of the default search
 // prompt for when InstallSearchProvider(url, true) is called.
-class DefaultSearchView
-    : public views::View,
-      public views::ButtonListener,
-      public views::DialogDelegate {
+class DefaultSearchView : public views::View,
+                          public views::ButtonListener,
+                          public views::DialogDelegate {
  public:
   // Takes ownership of |proposed_default_turl|.
   static void Show(TabContents* tab_contents,
-                   TemplateURL* ,
-                   TemplateURLService* template_url_service);
+                   TemplateURL* proposed_default_turl,
+                   Profile* profile);
 
   virtual ~DefaultSearchView();
 
@@ -57,19 +53,20 @@ class DefaultSearchView
 
   // views::DialogDelegate:
   // TODO(beng): Figure out why adding OVERRIDE to these methods annoys Clang.
-  virtual std::wstring GetWindowTitle() const;
-  virtual views::View* GetInitiallyFocusedView();
-  virtual views::View* GetContentsView();
-  virtual int GetDialogButtons() const;
-  virtual bool Accept();
-  virtual views::Widget* GetWidget();
-  virtual const views::Widget* GetWidget() const;
+  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual views::View* GetInitiallyFocusedView() OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
+  virtual int GetDialogButtons() const OVERRIDE;
+  virtual bool Accept() OVERRIDE;
+  virtual views::Widget* GetWidget() OVERRIDE;
+  virtual const views::Widget* GetWidget() const OVERRIDE;
 
  private:
   // Takes ownership of |proposed_default_turl|.
   DefaultSearchView(TabContents* tab_contents,
                     TemplateURL* proposed_default_turl,
-                    TemplateURLService* template_url_service);
+                    TemplateURLService* template_url_service,
+                    PrefService* prefs);
 
   // Initializes the labels and controls in the view.
   void SetupControls(PrefService* prefs);

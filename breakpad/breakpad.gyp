@@ -56,6 +56,7 @@
             'src/common/mac',
           ],
           'sources': [
+            'src/client/mac/crash_generation/ConfigFile.mm',
             'src/client/mac/crash_generation/Inspector.mm',
             'src/client/mac/crash_generation/InspectorMain.mm',
           ],
@@ -79,6 +80,7 @@
           'sources': [
             'src/common/mac/HTTPMultipartUpload.m',
             'src/client/mac/sender/crash_report_sender.m',
+            'src/client/mac/sender/uploader.m',
             'src/common/mac/GTMLogger.m',
           ],
           'mac_bundle_resources': [
@@ -104,6 +106,12 @@
         {
           'target_name': 'dump_syms',
           'type': 'executable',
+          'variables': {
+            # Turn off PIE because it may interfere with dump_syms' ability to
+            # allocate a contiguous region in memory large enough to mmap the
+            # entire unstripped framework in a 32-bit dump_syms process.
+            'mac_pie': 0,
+          },
           'include_dirs++': [
             # ++ ensures this comes before src brought in from target_defaults.
             'pending/src',

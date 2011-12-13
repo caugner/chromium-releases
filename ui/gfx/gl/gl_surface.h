@@ -50,26 +50,31 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
 
   static bool InitializeOneOff();
 
-  // Called after a context is made current with this surface.
-  virtual void OnMakeCurrent(GLContext* context);
+  // Called after a context is made current with this surface. Returns false
+  // on error.
+  virtual bool OnMakeCurrent(GLContext* context);
 
-#if !defined(OS_MACOSX)
+  virtual void SetVisible(bool visible);
+
   // Create a GL surface that renders directly to a view.
   static scoped_refptr<GLSurface> CreateViewGLSurface(
       bool software,
       gfx::PluginWindowHandle window);
-#endif
 
   // Create a GL surface used for offscreen rendering.
   static scoped_refptr<GLSurface> CreateOffscreenGLSurface(
       bool software,
       const gfx::Size& size);
 
+  static GLSurface* GetCurrent();
+
  protected:
   virtual ~GLSurface();
+  static void SetCurrent(GLSurface* surface);
 
  private:
   friend class base::RefCounted<GLSurface>;
+  friend class GLContext;
   DISALLOW_COPY_AND_ASSIGN(GLSurface);
 };
 

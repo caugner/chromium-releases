@@ -58,7 +58,8 @@ cr.define('oobe', function() {
       { name: 'error',
         button: 'cancel' },
       { name: 'success',
-        button: 'done' }
+        button: 'done',
+        focusButton: true },
     ],
 
     /** @inheritDoc */
@@ -111,26 +112,40 @@ cr.define('oobe', function() {
      * URL.
      */
     onBeforeShow: function(data) {
-      this.signin_url_ = data.signin_url;
+      var url = data.signin_url;
+      if (data.gaiaOrigin)
+        url += '?gaiaOrigin=' + encodeURIComponent(data.gaiaOrigin);
+      this.signin_url_ = url;
       $('oauth-enroll-signin-frame').contentWindow.location.href =
           this.signin_url_;
       this.showStep('signin');
     },
 
     /**
+     * Cancels enrollment and drops the user back to the login screen.
+     */
+    cancel: function() {
+      chrome.send('oauthEnrollClose', []);
+    },
+
+    /**
      * Switches between the different steps in the enrollment flow.
-     * @param screen {string} the steps to show, one of "signin", "working",
+     * @param step {string} the steps to show, one of "signin", "working",
      * "error", "success".
      */
     showStep: function(step) {
       $('oauth-enroll-cancel-button').hidden = true;
       $('oauth-enroll-done-button').hidden = true;
       for (var i = 0; i < this.steps_.length; i++) {
-        var the_step = this.steps_[i];
-        var active = (the_step.name == step);
-        $('oauth-enroll-step-' + the_step.name).hidden = !active;
-        if (active)
-          $('oauth-enroll-' + the_step.button + '-button').hidden = false;
+        var theStep = this.steps_[i];
+        var active = (theStep.name == step);
+        $('oauth-enroll-step-' + theStep.name).hidden = !active;
+        if (active) {
+          var button = $('oauth-enroll-' + theStep.button + '-button');
+          button.hidden = false;
+          if (theStep.focusButton)
+            button.focus();
+        }
       }
     },
 

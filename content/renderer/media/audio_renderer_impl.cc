@@ -8,12 +8,12 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "content/common/child_process.h"
-#include "content/common/content_switches.h"
 #include "content/common/media/audio_messages.h"
-#include "content/renderer/render_thread.h"
-#include "content/renderer/render_view.h"
+#include "content/public/common/content_switches.h"
+#include "content/renderer/render_thread_impl.h"
 #include "media/audio/audio_buffers_state.h"
 #include "media/audio/audio_output_controller.h"
 #include "media/audio/audio_util.h"
@@ -35,17 +35,24 @@ AudioRendererImpl::AudioRendererImpl()
       pending_request_(false),
       prerolling_(false),
       preroll_bytes_(0) {
-  filter_ = RenderThread::current()->audio_message_filter();
+  filter_ = RenderThreadImpl::current()->audio_message_filter();
   // Figure out if we are planning to use high or low latency code path.
   // We are initializing only one variable and double initialization is Ok,
   // so there would not be any issues caused by CPU memory model.
   if (latency_type_ == kUninitializedLatency) {
-    if (CommandLine::ForCurrentProcess()->HasSwitch(
-        switches::kLowLatencyAudio)) {
+    // Urgent workaround for
+    // http://code.google.com/p/chromium-os/issues/detail?id=21491
+    // TODO(enal): Fix it properly.
+#if defined(OS_CHROMEOS)
+    latency_type_ = kHighLatency;
+#else
+    if (!CommandLine::ForCurrentProcess()->HasSwitch(
+        switches::kHighLatencyAudio)) {
       latency_type_ = kLowLatency;
     } else {
       latency_type_ = kHighLatency;
     }
+#endif
   }
 }
 
@@ -83,15 +90,17 @@ void AudioRendererImpl::UpdateEarliestEndTime(int bytes_filled,
   }
 }
 
-bool AudioRendererImpl::OnInitialize(const media::AudioDecoderConfig& config) {
-  AudioParameters params(config);
-  params.format = AudioParameters::AUDIO_PCM_LINEAR;
+bool AudioRendererImpl::OnInitialize(int bits_per_channel,
+                                     ChannelLayout channel_layout,
+                                     int sample_rate) {
+  AudioParameters params(AudioParameters::AUDIO_PCM_LINEAR, channel_layout,
+                         sample_rate, bits_per_channel, 0);
 
   bytes_per_second_ = params.GetBytesPerSecond();
 
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &AudioRendererImpl::CreateStreamTask, params));
+      base::Bind(&AudioRendererImpl::CreateStreamTask, this, params));
   return true;
 }
 
@@ -113,7 +122,7 @@ void AudioRendererImpl::OnStop() {
 
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &AudioRendererImpl::DestroyTask));
+        base::Bind(&AudioRendererImpl::DestroyTask, this));
   }
 
   if (audio_thread)
@@ -125,7 +134,7 @@ void AudioRendererImpl::NotifyDataAvailableIfNecessary() {
     // Post a task to render thread to notify a packet reception.
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &AudioRendererImpl::NotifyPacketReadyTask));
+        base::Bind(&AudioRendererImpl::NotifyPacketReadyTask, this));
   }
 }
 
@@ -159,12 +168,12 @@ void AudioRendererImpl::SetPlaybackRate(float rate) {
   if (GetPlaybackRate() == 0.0f && rate != 0.0f) {
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &AudioRendererImpl::PlayTask));
+        base::Bind(&AudioRendererImpl::PlayTask, this));
   } else if (GetPlaybackRate() != 0.0f && rate == 0.0f) {
     // Pause is easy, we can always pause.
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &AudioRendererImpl::PauseTask));
+        base::Bind(&AudioRendererImpl::PauseTask, this));
   }
   AudioRendererBase::SetPlaybackRate(rate);
 
@@ -175,7 +184,7 @@ void AudioRendererImpl::SetPlaybackRate(float rate) {
   }
 }
 
-void AudioRendererImpl::Pause(media::FilterCallback* callback) {
+void AudioRendererImpl::Pause(const base::Closure& callback) {
   AudioRendererBase::Pause(callback);
   base::AutoLock auto_lock(lock_);
   if (stopped_)
@@ -183,7 +192,7 @@ void AudioRendererImpl::Pause(media::FilterCallback* callback) {
 
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &AudioRendererImpl::PauseTask));
+      base::Bind(&AudioRendererImpl::PauseTask, this));
 }
 
 void AudioRendererImpl::Seek(base::TimeDelta time,
@@ -195,11 +204,11 @@ void AudioRendererImpl::Seek(base::TimeDelta time,
 
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &AudioRendererImpl::SeekTask));
+      base::Bind(&AudioRendererImpl::SeekTask, this));
 }
 
 
-void AudioRendererImpl::Play(media::FilterCallback* callback) {
+void AudioRendererImpl::Play(const base::Closure& callback) {
   AudioRendererBase::Play(callback);
   base::AutoLock auto_lock(lock_);
   if (stopped_)
@@ -208,11 +217,11 @@ void AudioRendererImpl::Play(media::FilterCallback* callback) {
   if (GetPlaybackRate() != 0.0f) {
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &AudioRendererImpl::PlayTask));
+        base::Bind(&AudioRendererImpl::PlayTask, this));
   } else {
     ChildProcess::current()->io_message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &AudioRendererImpl::PauseTask));
+        base::Bind(&AudioRendererImpl::PauseTask, this));
   }
 }
 
@@ -222,7 +231,7 @@ void AudioRendererImpl::SetVolume(float volume) {
     return;
   ChildProcess::current()->io_message_loop()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &AudioRendererImpl::SetVolumeTask, volume));
+      base::Bind(&AudioRendererImpl::SetVolumeTask, this, volume));
 }
 
 void AudioRendererImpl::OnCreated(base::SharedMemoryHandle handle,
@@ -462,12 +471,19 @@ void AudioRendererImpl::WillDestroyCurrentMessageLoop() {
 // Our audio thread runs here. We receive requests for more data and send it
 // on this thread.
 void AudioRendererImpl::Run() {
+  DCHECK_EQ(kLowLatency, latency_type_);
   audio_thread_->SetThreadPriority(base::kThreadPriority_RealtimeAudio);
 
   int bytes;
   while (sizeof(bytes) == socket_->Receive(&bytes, sizeof(bytes))) {
-    if (bytes == media::AudioOutputController::kPauseMark)
+    if (bytes == media::AudioOutputController::kPauseMark) {
+      // When restarting playback, host should get new data,
+      // not what is currently in the buffer.
+      media::SetActualDataSizeInBytes(shared_memory_.get(),
+                                      shared_memory_size_,
+                                      0);
       continue;
+    }
     else if (bytes < 0)
       break;
     base::AutoLock auto_lock(lock_);

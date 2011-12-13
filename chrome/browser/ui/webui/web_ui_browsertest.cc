@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
@@ -38,13 +40,16 @@ bool LogHandler(int severity,
                 int line,
                 size_t message_start,
                 const std::string& str) {
-  if (severity == logging::LOG_ERROR)
+  if (severity == logging::LOG_ERROR &&
+      file &&
+      std::string("CONSOLE") == file) {
     error_messages_.Get().push_back(str);
+  }
 
   return false;
 }
 
-} // namespace
+}  // namespace
 
 WebUIBrowserTest::~WebUIBrowserTest() {}
 
@@ -181,7 +186,7 @@ void WebUIBrowserTest::BrowsePreload(const GURL& browse_to,
           &browser()->GetSelectedTabContentsWrapper()->controller()),
       this, 1);
   browser::NavigateParams params(
-      browser(), GURL(browse_to), PageTransition::TYPED);
+      browser(), GURL(browse_to), content::PAGE_TRANSITION_TYPED);
   params.disposition = CURRENT_TAB;
   browser::Navigate(&params);
   navigation_observer.WaitForObservation();
@@ -207,7 +212,8 @@ const char WebUIBrowserTest::kDummyURL[] = "chrome://DummyURL";
 
 WebUIBrowserTest::WebUIBrowserTest()
     : test_handler_(new WebUITestHandler()),
-      libraries_preloaded_(false) {}
+      libraries_preloaded_(false),
+      override_selected_web_ui_(NULL) {}
 
 namespace {
 
@@ -254,6 +260,10 @@ void WebUIBrowserTest::TearDownInProcessBrowserTestFixture() {
   TestChromeWebUIFactory::RemoveFactoryOverride(GURL(kDummyURL).host());
 }
 
+void WebUIBrowserTest::SetWebUIInstance(WebUI* web_ui) {
+  override_selected_web_ui_ = web_ui;
+}
+
 WebUIMessageHandler* WebUIBrowserTest::GetMockMessageHandler() {
   return NULL;
 }
@@ -262,8 +272,7 @@ GURL WebUIBrowserTest::WebUITestDataPathToURL(
     const FilePath::StringType& path) {
   FilePath dir_test_data;
   EXPECT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &dir_test_data));
-  FilePath test_path(dir_test_data.AppendASCII("webui"));
-  test_path = test_path.Append(path);
+  FilePath test_path(dir_test_data.Append(kWebUITestFolder).Append(path));
   EXPECT_TRUE(file_util::PathExists(test_path));
   return net::FilePathToFileURL(test_path);
 }
@@ -310,7 +319,7 @@ string16 WebUIBrowserTest::BuildRunTestJSCall(
   for (arguments_iterator = test_func_args.begin();
        arguments_iterator != test_func_args.end();
        ++arguments_iterator) {
-    baked_argument_list.Append((Value *)*arguments_iterator);
+    baked_argument_list.Append(const_cast<Value*>(*arguments_iterator));
   }
   arguments.push_back(&baked_argument_list);
   return WebUI::GetJavascriptCall(std::string("runTest"), arguments);
@@ -363,10 +372,11 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
 }
 
 void WebUIBrowserTest::SetupHandlers() {
-  WebUI* web_ui_instance =
+  WebUI* web_ui_instance = override_selected_web_ui_ ?
+      override_selected_web_ui_ :
       browser()->GetSelectedTabContents()->web_ui();
   ASSERT_TRUE(web_ui_instance != NULL);
-  web_ui_instance->register_callback_overwrites(true);
+  web_ui_instance->set_register_callback_overwrites(true);
   test_handler_->Attach(web_ui_instance);
 
   if (GetMockMessageHandler())
@@ -458,14 +468,18 @@ class WebUIBrowserAsyncTest : public WebUIBrowserTest {
 
    private:
     virtual void RegisterMessages() OVERRIDE {
-      web_ui_->RegisterMessageCallback("startAsyncTest", NewCallback(
-          this, &AsyncWebUIMessageHandler::HandleStartAsyncTest));
-      web_ui_->RegisterMessageCallback("testContinues", NewCallback(
-          this, &AsyncWebUIMessageHandler::HandleTestContinues));
-      web_ui_->RegisterMessageCallback("testFails", NewCallback(
-          this, &AsyncWebUIMessageHandler::HandleTestFails));
-      web_ui_->RegisterMessageCallback("testPasses", NewCallback(
-          this, &AsyncWebUIMessageHandler::HandleTestPasses));
+      web_ui_->RegisterMessageCallback("startAsyncTest",
+          base::Bind(&AsyncWebUIMessageHandler::HandleStartAsyncTest,
+                     base::Unretained(this)));
+      web_ui_->RegisterMessageCallback("testContinues",
+          base::Bind(&AsyncWebUIMessageHandler::HandleTestContinues,
+                     base::Unretained(this)));
+      web_ui_->RegisterMessageCallback("testFails",
+          base::Bind(&AsyncWebUIMessageHandler::HandleTestFails,
+                     base::Unretained(this)));
+      web_ui_->RegisterMessageCallback("testPasses",
+          base::Bind(&AsyncWebUIMessageHandler::HandleTestPasses,
+                     base::Unretained(this)));
     }
 
     // Starts the test in |list_value|[0] with the runAsync wrapper.

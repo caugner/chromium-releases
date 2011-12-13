@@ -9,6 +9,7 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
+#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -29,7 +30,7 @@
 #if defined(OS_ANDROID)
 #include "base/message_pump_android.h"
 #endif
-#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
+#if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
 #include <gdk/gdkx.h>
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -151,7 +152,7 @@ MessageLoop::MessageLoop(Type type)
 #elif defined(USE_WAYLAND)
 #define MESSAGE_PUMP_UI new base::MessagePumpWayland()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
-#elif defined(TOUCH_UI)
+#elif defined(TOUCH_UI) || defined(USE_AURA)
 #define MESSAGE_PUMP_UI new base::MessagePumpX()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #elif defined(OS_NACL)
@@ -305,7 +306,7 @@ void MessageLoop::PostNonNestableDelayedTask(
 
 void MessageLoop::PostTask(
     const tracked_objects::Location& from_here, const base::Closure& task) {
-  CHECK(!task.is_null());
+  CHECK(!task.is_null()) << from_here.ToString();
   PendingTask pending_task(task, from_here, CalculateDelayedRuntime(0), true);
   AddToIncomingQueue(&pending_task);
 }
@@ -313,7 +314,7 @@ void MessageLoop::PostTask(
 void MessageLoop::PostDelayedTask(
     const tracked_objects::Location& from_here, const base::Closure& task,
     int64 delay_ms) {
-  CHECK(!task.is_null());
+  CHECK(!task.is_null()) << from_here.ToString();
   PendingTask pending_task(task, from_here,
                            CalculateDelayedRuntime(delay_ms), true);
   AddToIncomingQueue(&pending_task);
@@ -321,7 +322,7 @@ void MessageLoop::PostDelayedTask(
 
 void MessageLoop::PostNonNestableTask(
     const tracked_objects::Location& from_here, const base::Closure& task) {
-  CHECK(!task.is_null());
+  CHECK(!task.is_null()) << from_here.ToString();
   PendingTask pending_task(task, from_here, CalculateDelayedRuntime(0), false);
   AddToIncomingQueue(&pending_task);
 }
@@ -329,7 +330,7 @@ void MessageLoop::PostNonNestableTask(
 void MessageLoop::PostNonNestableDelayedTask(
     const tracked_objects::Location& from_here, const base::Closure& task,
     int64 delay_ms) {
-  CHECK(!task.is_null());
+  CHECK(!task.is_null()) << from_here.ToString();
   PendingTask pending_task(task, from_here,
                            CalculateDelayedRuntime(delay_ms), false);
   AddToIncomingQueue(&pending_task);
@@ -362,6 +363,12 @@ void MessageLoop::QuitNow() {
   } else {
     NOTREACHED() << "Must be inside Run to call Quit";
   }
+}
+
+// static
+base::Closure MessageLoop::QuitClosure() {
+  return base::Bind(&MessageLoop::Quit,
+                    base::Unretained(MessageLoop::current()));
 }
 
 void MessageLoop::SetNestableTasksAllowed(bool allowed) {
@@ -458,6 +465,9 @@ bool MessageLoop::ProcessNextDelayedNonNestableTask() {
 }
 
 void MessageLoop::RunTask(const PendingTask& pending_task) {
+  UNSHIPPED_TRACE_EVENT2("task", "MessageLoop::RunTask",
+                         "src_file", pending_task.posted_from.file_name(),
+                         "src_func", pending_task.posted_from.function_name());
   DCHECK(nestable_tasks_allowed_);
   // Execute the task and assume the worst: It is probably not reentrant.
   nestable_tasks_allowed_ = false;
@@ -467,27 +477,30 @@ void MessageLoop::RunTask(const PendingTask& pending_task) {
   // crashes. Be careful not to assume that the variable itself will have the
   // expected value when displayed by the optimizer in an optimized build.
   // Look at a memory dump of the stack.
-  const void* program_counter = pending_task.birth_program_counter;
+  const void* program_counter =
+      pending_task.posted_from.program_counter();
   base::debug::Alias(&program_counter);
 
   HistogramEvent(kTaskRunEvent);
+
+#if defined(TRACK_ALL_TASK_OBJECTS)
+  TimeTicks start_of_run = tracked_objects::ThreadData::Now();
+#endif  // defined(TRACK_ALL_TASK_OBJECTS)
+
   FOR_EACH_OBSERVER(TaskObserver, task_observers_,
                     WillProcessTask(pending_task.time_posted));
   pending_task.task.Run();
   FOR_EACH_OBSERVER(TaskObserver, task_observers_,
                     DidProcessTask(pending_task.time_posted));
-
 #if defined(TRACK_ALL_TASK_OBJECTS)
-  tracked_objects::ThreadData::TallyADeathIfActive(
-      pending_task.post_births,
-      TimeTicks::Now() - pending_task.time_posted);
+  tracked_objects::ThreadData::TallyADeathIfActive(pending_task.post_births,
+    pending_task.time_posted, pending_task.delayed_run_time, start_of_run);
 #endif  // defined(TRACK_ALL_TASK_OBJECTS)
 
   nestable_tasks_allowed_ = true;
 }
 
-bool MessageLoop::DeferOrRunPendingTask(
-    const PendingTask& pending_task) {
+bool MessageLoop::DeferOrRunPendingTask(const PendingTask& pending_task) {
   if (pending_task.nestable || state_->run_depth == 1) {
     RunTask(pending_task);
     // Show that we ran a task (Note: a new one might arrive as a
@@ -765,9 +778,9 @@ MessageLoop::PendingTask::PendingTask(
     : task(task),
       time_posted(TimeTicks::Now()),
       delayed_run_time(delayed_run_time),
+      posted_from(posted_from),
       sequence_num(0),
-      nestable(nestable),
-      birth_program_counter(posted_from.program_counter()) {
+      nestable(nestable) {
 #if defined(TRACK_ALL_TASK_OBJECTS)
   post_births = tracked_objects::ThreadData::TallyABirthIfActive(posted_from);
 #endif  // defined(TRACK_ALL_TASK_OBJECTS)
@@ -822,6 +835,14 @@ void MessageLoopForUI::Run(Dispatcher* dispatcher) {
   state_->dispatcher = dispatcher;
   RunHandler();
 }
+
+void MessageLoopForUI::RunAllPendingWithDispatcher(Dispatcher* dispatcher) {
+  AutoRunState save_state(this);
+  state_->dispatcher = dispatcher;
+  state_->quit_received = true;  // Means run until we would otherwise block.
+  RunHandler();
+}
+
 #endif  //  !defined(OS_MACOSX) && !defined(OS_NACL) && !defined(OS_ANDROID)
 
 //------------------------------------------------------------------------------

@@ -16,10 +16,6 @@
         ['exclude', 'views/'],
       ]}],
       ['touchui==0', {'sources/': [
-        ['exclude', 'event_x.cc$'],
-        ['exclude', 'native_menu_x.cc$'],
-        ['exclude', 'native_menu_x.h$'],
-        ['exclude', 'touchui/'],
         ['exclude', '_(touch)\\.cc$'],
       ]}],
     ],
@@ -79,13 +75,16 @@
         'base/animation/tween.h',
         'base/clipboard/clipboard.cc',
         'base/clipboard/clipboard.h',
-        'base/clipboard/clipboard_linux.cc',
+        'base/clipboard/clipboard_aura.cc',
+        'base/clipboard/clipboard_gtk.cc',
         'base/clipboard/clipboard_mac.mm',
         'base/clipboard/clipboard_util_win.cc',
         'base/clipboard/clipboard_util_win.h',
         'base/clipboard/clipboard_win.cc',
         'base/clipboard/scoped_clipboard_writer.cc',
         'base/clipboard/scoped_clipboard_writer.h',
+        'base/cocoa/base_view.h',
+        'base/cocoa/base_view.mm',
         'base/dragdrop/drag_drop_types_gtk.cc',
         'base/dragdrop/drag_drop_types.h',
         'base/dragdrop/drag_drop_types_win.cc',
@@ -97,6 +96,7 @@
         'base/dragdrop/gtk_dnd_util.h',
         'base/dragdrop/os_exchange_data.cc',
         'base/dragdrop/os_exchange_data.h',
+        'base/dragdrop/os_exchange_data_provider_aura.cc',
         'base/dragdrop/os_exchange_data_provider_gtk.cc',
         'base/dragdrop/os_exchange_data_provider_gtk.h',
         'base/dragdrop/os_exchange_data_provider_win.cc',
@@ -112,8 +112,9 @@
         'base/gtk/gtk_floating_container.h',
         'base/gtk/gtk_im_context_util.cc',
         'base/gtk/gtk_im_context_util.h',
-        'base/gtk/gtk_hig_constants.cc',
         'base/gtk/gtk_hig_constants.h',
+        'base/gtk/gtk_screen_utils.cc',
+        'base/gtk/gtk_screen_utils.h',
         'base/gtk/gtk_signal.h',
         'base/gtk/gtk_signal_registrar.cc',
         'base/gtk/gtk_signal_registrar.h',
@@ -176,6 +177,8 @@
         'base/resource/data_pack.h',
         'base/resource/resource_bundle.cc',
         'base/resource/resource_bundle.h',
+        'base/resource/resource_bundle_aurax11.cc',
+        'base/resource/resource_bundle_gtk.cc',
         'base/resource/resource_bundle_linux.cc',
         'base/resource/resource_bundle_mac.mm',
         'base/resource/resource_bundle_posix.cc',
@@ -186,6 +189,8 @@
         'base/text/text_elider.h',
         'base/theme_provider.cc',
         'base/theme_provider.h',
+        'base/touch/touch_factory.cc',
+        'base/touch/touch_factory.h',
         'base/ui_base_exports.cc',
         'base/ui_base_paths.cc',
         'base/ui_base_paths.h',
@@ -195,6 +200,8 @@
         'base/ui_export.h',
         'base/view_prop.cc',
         'base/view_prop.h',
+        'base/wayland/events_wayland.cc',
+        'base/win/events_win.cc',
         'base/win/hwnd_util.cc',
         'base/win/hwnd_util.h',
         'base/win/ime_input.cc',
@@ -207,6 +214,7 @@
         'base/win/window_impl.h',
         'base/x/active_window_watcher_x.cc',
         'base/x/active_window_watcher_x.h',
+        'base/x/events_x.cc',
         'base/x/x11_util.cc',
         'base/x/x11_util.h',
         'base/x/x11_util_internal.h',
@@ -229,6 +237,7 @@
         'gfx/color_analysis.h',
         'gfx/color_utils.cc',
         'gfx/color_utils.h',
+        'gfx/favicon_size.cc',
         'gfx/favicon_size.h',
         'gfx/font.h',
         'gfx/font.cc',
@@ -248,14 +257,27 @@
         'gfx/mac/scoped_ns_disable_screen_updates.h',
         'gfx/native_theme.cc',
         'gfx/native_theme.h',
+        'gfx/native_theme_aura.cc',
+        'gfx/native_theme_aura.h',
+        'gfx/native_theme_base.cc',
+        'gfx/native_theme_base.h',
+        'gfx/native_theme_chromeos.cc',
+        'gfx/native_theme_chromeos.h',
+        'gfx/native_theme_gtk.cc',
+        'gfx/native_theme_gtk.h',
+        'gfx/native_theme_win.cc',
+        'gfx/native_theme_win.h',
         'gfx/native_widget_types.h',
+        'gfx/pango_util.h',
+        'gfx/pango_util.cc',
         'gfx/path.cc',
         'gfx/path.h',
+        'gfx/path_aura.cc',
         'gfx/path_gtk.cc',
         'gfx/path_win.cc',
         'gfx/platform_font.h',
-        'gfx/platform_font_gtk.h',
-        'gfx/platform_font_gtk.cc',
+        'gfx/platform_font_pango.h',
+        'gfx/platform_font_pango.cc',
         'gfx/platform_font_mac.h',
         'gfx/platform_font_mac.mm',
         'gfx/platform_font_win.h',
@@ -273,6 +295,7 @@
         'gfx/screen.h',
         'gfx/screen_aura.cc',
         'gfx/screen_gtk.cc',
+        'gfx/screen_mac.mm',
         'gfx/screen_wayland.cc',
         'gfx/screen_win.cc',
         'gfx/scoped_cg_context_save_gstate_mac.h',
@@ -280,6 +303,8 @@
         'gfx/scoped_ns_graphics_context_save_gstate_mac.mm',
         'gfx/scrollbar_size.cc',
         'gfx/scrollbar_size.h',
+        'gfx/selection_model.cc',
+        'gfx/selection_model.h',
         'gfx/size.cc',
         'gfx/size.h',
         'gfx/skbitmap_operations.cc',
@@ -294,29 +319,44 @@
       'conditions': [
         ['use_aura==1', {
           'sources/': [
+            ['exclude', 'gfx/gtk_'],
+            ['exclude', 'gfx/gtk_util.cc'],
+            ['exclude', 'gfx/gtk_util.h'],
+            ['exclude', 'gfx/screen_gtk.cc'],
+            ['exclude', 'gfx/native_theme_chromeos.cc'],
+            ['exclude', 'gfx/native_theme_chromeos.h'],
             ['exclude', 'gfx/screen_win.cc'],
             ['exclude', 'base/win/mouse_wheel_util.cc'],
-            ['exclude', 'base/win/mouse_wheel_util.h'],            
+            ['exclude', 'base/win/mouse_wheel_util.h'],
+            ['exclude', 'base/x/active_window_watcher_x.cc'],
+            ['exclude', 'base/x/active_window_watcher_x.h'],
+           ],
+        }, {  # use_aura!=1
+          'sources!': [
+            'gfx/native_theme_aura.cc',
+            'gfx/native_theme_aura.h',
+          ]
+        }],
+        ['use_aura==1 and OS=="win"', {
+          'sources/': [
+            ['exclude', 'base/dragdrop/os_exchange_data_provider_aura.cc'],
+            ['exclude', 'gfx/native_theme_win.cc'],
+            ['exclude', 'gfx/native_theme_win.h'],
+            ['exclude', 'gfx/path_win.cc'],
           ],
         }],
-        ['toolkit_uses_gtk == 1', {
+        ['use_glib == 1', {
           'dependencies': [
             # font_gtk.cc uses fontconfig.
-            # TODO(evanm): I think this is wrong; it should just use GTK.
             '../build/linux/system.gyp:fontconfig',
-            '../build/linux/system.gyp:gtk',
+            '../build/linux/system.gyp:glib',
+            '../build/linux/system.gyp:pangocairo',
             '../build/linux/system.gyp:x11',
             '../build/linux/system.gyp:xext',
           ],
           'sources': [
-            'gfx/gtk_native_view_id_manager.cc',
-            'gfx/gtk_native_view_id_manager.h',
-            'gfx/gtk_preserve_window.cc',
-            'gfx/gtk_preserve_window.h',
-            'gfx/gtk_util.cc',
-            'gfx/gtk_util.h',
-            'gfx/native_theme_linux.cc',
-            'gfx/native_theme_linux.h',
+            'gfx/linux_util.cc',
+            'gfx/linux_util.h',
           ],
           'link_settings': {
             'libraries': [
@@ -343,6 +383,27 @@
             }],
           ],
         }],
+        ['toolkit_uses_gtk == 1', {
+          'dependencies': [
+            '../build/linux/system.gyp:gtk',
+          ],
+          'sources': [
+            'gfx/gtk_native_view_id_manager.cc',
+            'gfx/gtk_native_view_id_manager.h',
+            'gfx/gtk_preserve_window.cc',
+            'gfx/gtk_preserve_window.h',
+            'gfx/gtk_util.cc',
+            'gfx/gtk_util.h',
+          ],
+          'sources!': [
+            'base/clipboard/clipboard_aura.cc',
+          ],
+        }, {  # toolkit_uses_gtk != 1
+          'sources!': [
+            'gfx/native_theme_gtk.cc',
+            'gfx/native_theme_gtk.h',
+          ]
+        }],
         ['use_wayland == 1', {
           'sources/': [
             ['exclude', '_(gtk|x)\\.cc$'],
@@ -358,8 +419,10 @@
             ['include', 'gfx/gtk_util.cc'],
             ['include', 'gfx/gtk_util.h'],
             ['include', 'gfx/path_gtk.cc'],
-            ['include', 'gfx/platform_font_gtk.cc'],
-            ['include', 'gfx/platform_font_gtk.h'],
+            ['include', 'gfx/platform_font_pango.cc'],
+            ['include', 'gfx/platform_font_pango.h'],
+            ['include', 'gfx/linux_util.cc'],
+            ['include', 'gfx/linux_util.h'],
           ],
         }],
         ['OS=="win"', {
@@ -374,6 +437,15 @@
             'gfx/native_theme_win.h',
             'gfx/win_util.cc',
             'gfx/win_util.h',
+          ],
+          'sources!': [
+            'base/clipboard/clipboard_aura.cc',
+            'base/touch/touch_factory.cc',
+            'base/touch/touch_factory.h',
+            'gfx/pango_util.h',
+            'gfx/pango_util.cc',
+            'gfx/platform_font_pango.cc',
+            'gfx/platform_font_pango.h',
           ],
           'include_dirs': [
             '../',
@@ -406,14 +478,22 @@
             'base/dragdrop/drop_target.cc',
             'base/dragdrop/drop_target.h',
             'base/dragdrop/os_exchange_data.cc',
-            'base/view_prop.cc',
-            'base/view_prop.h',
+            'gfx/native_theme_win.cc',
+            'gfx/native_theme_win.h',
           ],
           'sources/': [
             ['exclude', '^base/win/*'],
           ],
         }],
         ['OS=="mac"', {
+          'sources!': [
+            'base/touch/touch_factory.cc',
+            'base/touch/touch_factory.h',
+            'gfx/pango_util.h',
+            'gfx/pango_util.cc',
+            'gfx/platform_font_pango.h',
+            'gfx/platform_font_pango.cc',
+          ],
           'link_settings': {
             'libraries': [
               '$(SDKROOT)/System/Library/Frameworks/Accelerate.framework',
@@ -437,22 +517,46 @@
           'sources!': [
             'base/keycodes/keyboard_code_conversion_x.cc',
             'base/keycodes/keyboard_code_conversion_x.h',
+            'base/x/active_window_watcher_x.cc',
+            'base/x/active_window_watcher_x.h',
+            'base/x/events_x.cc',
+            'base/x/x11_util.cc',
+            'base/x/x11_util.h',
+            'base/x/x11_util_internal.h',
           ],
         }],
         ['chromeos==1', {
-          'sources': [
+          # On Chrome OS we replace the default GTK look with a special look.
+          'sources!': [
+            'gfx/native_theme_gtk.cc',
+            'gfx/native_theme_gtk.h',
+          ]
+        }, {  # chromeos != 1
+          'sources!': [
             'gfx/native_theme_chromeos.cc',
             'gfx/native_theme_chromeos.h',
-          ],
+          ]
         }],
         ['toolkit_views==0', {
           'sources!': [
+            'base/view_prop.cc',
+            'base/view_prop.h',
             'gfx/render_text.cc',
             'gfx/render_text.h',
             'gfx/render_text_linux.cc',
             'gfx/render_text_linux.h',
             'gfx/render_text_win.cc',
             'gfx/render_text_win.h',
+          ],
+        }],
+        ['OS=="android"', {
+          'sources!': [
+            'base/touch/touch_factory.cc',
+            'base/touch/touch_factory.h',
+            'gfx/pango_util.h',
+            'gfx/pango_util.cc',
+            'gfx/platform_font_pango.cc',
+            'gfx/platform_font_pango.h',
           ],
         }],
       ],
@@ -512,36 +616,6 @@
               ]
             }
           ],
-        },
-      ],
-    }],
-    ['OS=="win"', {
-      'targets': [
-        {
-          'target_name': 'ui_nacl_win64',
-          'type': '<(component)',
-          'dependencies': [
-            '../base/base.gyp:base_nacl_win64',
-          ],
-          'defines': [
-            'UI_IMPLEMENTATION',
-            '<@(nacl_win64_defines)',
-          ],
-          'sources': [
-            'base/resource/resource_bundle_dummy.cc',
-            'base/ui_base_paths.h',
-            'base/ui_base_paths.cc',
-            'base/ui_base_switches.h',
-            'base/ui_base_switches.cc',
-          ],
-          'include_dirs': [
-            '..',
-          ],
-          'configurations': {
-            'Common_Base': {
-              'msvs_target_platform': 'x64',
-            },
-          },
         },
       ],
     }],

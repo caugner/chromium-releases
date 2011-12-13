@@ -52,14 +52,13 @@ int ExternalProtocolDialog::GetDialogButtons() const {
   return ui::MessageBoxFlags::DIALOGBUTTON_OK;
 }
 
-std::wstring ExternalProtocolDialog::GetDialogButtonLabel(
+string16 ExternalProtocolDialog::GetDialogButtonLabel(
     ui::MessageBoxFlags::DialogButton button) const {
-  return UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_OK_BUTTON_TEXT));
+  return l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_OK_BUTTON_TEXT);
 }
 
-std::wstring ExternalProtocolDialog::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_TITLE));
+string16 ExternalProtocolDialog::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_TITLE);
 }
 
 void ExternalProtocolDialog::DeleteDelegate() {
@@ -103,18 +102,18 @@ ExternalProtocolDialog::ExternalProtocolDialog(TabContents* tab_contents,
   ui::ElideString(ASCIIToUTF16(url.possibly_invalid_spec()),
       kMaxUrlWithoutSchemeSize, &elided_url_without_scheme);
 
-  std::wstring message_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+  string16 message_text = l10n_util::GetStringFUTF16(
       IDS_EXTERNAL_PROTOCOL_INFORMATION,
       ASCIIToUTF16(url.scheme() + ":"),
-      elided_url_without_scheme) + ASCIIToUTF16("\n\n"));
+      elided_url_without_scheme) + ASCIIToUTF16("\n\n");
 
   message_box_view_ = new views::MessageBoxView(
       ui::MessageBoxFlags::kIsConfirmMessageBox,
       message_text,
-      std::wstring(),
+      string16(),
       kMessageWidth);
-  message_box_view_->SetCheckBoxLabel(UTF16ToWide(
-      l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_CHECKBOX_TEXT)));
+  message_box_view_->SetCheckBoxLabel(
+      l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_CHECKBOX_TEXT));
 
   gfx::NativeWindow parent_window;
   if (tab_contents) {

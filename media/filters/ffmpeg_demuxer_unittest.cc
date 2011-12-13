@@ -58,7 +58,7 @@ class FFmpegDemuxerTest : public testing::Test {
   virtual ~FFmpegDemuxerTest() {
     if (demuxer_) {
       // Call Stop() to shut down internal threads.
-      demuxer_->Stop(NewExpectedCallback());
+      demuxer_->Stop(NewExpectedClosure());
     }
 
     // Finish up any remaining tasks.
@@ -177,18 +177,27 @@ TEST_F(FFmpegDemuxerTest, Initialize_NoStreams) {
 TEST_F(FFmpegDemuxerTest, Initialize_Successful) {
   InitializeDemuxer(CreateDataSource("bear-320x240.webm"));
 
-  // First stream should be video and support the FFmpegDemuxerStream interface.
+  // Video stream should be present.
   scoped_refptr<DemuxerStream> stream =
       demuxer_->GetStream(DemuxerStream::VIDEO);
   ASSERT_TRUE(stream);
   EXPECT_EQ(DemuxerStream::VIDEO, stream->type());
   ASSERT_TRUE(stream->GetAVStream());
 
-  // Other stream should be audio and support the FFmpegDemuxerStream interface.
+  // Audio stream should be present.
   stream = demuxer_->GetStream(DemuxerStream::AUDIO);
   ASSERT_TRUE(stream);
   EXPECT_EQ(DemuxerStream::AUDIO, stream->type());
   ASSERT_TRUE(stream->GetAVStream());
+
+  // FFmpegDemuxer's audio streams support AudioDecoderConfig structs.
+  const AudioDecoderConfig& config = stream->audio_decoder_config();
+  EXPECT_EQ(kCodecVorbis, config.codec());
+  EXPECT_EQ(16, config.bits_per_channel());
+  EXPECT_EQ(CHANNEL_LAYOUT_STEREO, config.channel_layout());
+  EXPECT_EQ(44100, config.samples_per_second());
+  EXPECT_TRUE(config.extra_data());
+  EXPECT_GT(config.extra_data_size(), 0u);
 }
 
 TEST_F(FFmpegDemuxerTest, Read_Audio) {
@@ -235,9 +244,6 @@ TEST_F(FFmpegDemuxerTest, Read_Video) {
 TEST_F(FFmpegDemuxerTest, Read_VideoNonZeroStart) {
   // Test the start time is the first timestamp of the video and audio stream.
   InitializeDemuxer(CreateDataSource("nonzero-start-time.webm"));
-
-  const base::TimeDelta kExpectedTimestamp =
-      base::TimeDelta::FromMicroseconds(396000);
 
   // Attempt a read from the video stream and run the message loop until done.
   scoped_refptr<DemuxerStream> video =
@@ -386,7 +392,7 @@ TEST_F(FFmpegDemuxerTest, Stop) {
       demuxer_->GetStream(DemuxerStream::AUDIO);
   ASSERT_TRUE(audio);
 
-  demuxer_->Stop(NewExpectedCallback());
+  demuxer_->Stop(NewExpectedClosure());
 
   // Expect all calls in sequence.
   InSequence s;
@@ -422,7 +428,7 @@ TEST_F(FFmpegDemuxerTest, StreamReadAfterStopAndDemuxerDestruction) {
       demuxer_->GetStream(DemuxerStream::AUDIO);
   ASSERT_TRUE(audio);
 
-  demuxer_->Stop(NewExpectedCallback());
+  demuxer_->Stop(NewExpectedClosure());
 
   // Finish up any remaining tasks.
   message_loop_.RunAllPending();
@@ -501,17 +507,16 @@ class MockFFmpegDemuxer : public FFmpegDemuxer {
 };
 
 // A gmock helper method to execute the callback and deletes it.
-void RunCallback(size_t size, DataSource::ReadCallback* callback) {
-  DCHECK(callback);
-  callback->RunWithParams(Tuple1<size_t>(size));
-  delete callback;
+void RunCallback(size_t size, const DataSource::ReadCallback& callback) {
+  DCHECK(!callback.is_null());
+  callback.Run(size);
 }
 
 TEST_F(FFmpegDemuxerTest, ProtocolRead) {
   scoped_refptr<StrictMock<MockDataSource> > data_source =
       new StrictMock<MockDataSource>();
 
-  EXPECT_CALL(*data_source, Stop(NotNull()))
+  EXPECT_CALL(*data_source, Stop(_))
       .WillRepeatedly(Invoke(&RunStopFilterCallback));
 
   // Creates a demuxer.
@@ -526,7 +531,7 @@ TEST_F(FFmpegDemuxerTest, ProtocolRead) {
   // Actions taken in the first read.
   EXPECT_CALL(*data_source, GetSize(_))
       .WillOnce(DoAll(SetArgPointee<0>(1024), Return(true)));
-  EXPECT_CALL(*data_source, Read(0, 512, kBuffer, NotNull()))
+  EXPECT_CALL(*data_source, Read(0, 512, kBuffer, _))
       .WillOnce(WithArgs<1, 3>(Invoke(&RunCallback)));
   EXPECT_CALL(*demuxer, SignalReadCompleted(512));
   EXPECT_CALL(*demuxer, WaitForRead())
@@ -536,7 +541,7 @@ TEST_F(FFmpegDemuxerTest, ProtocolRead) {
   // Second read.
   EXPECT_CALL(*data_source, GetSize(_))
       .WillOnce(DoAll(SetArgPointee<0>(1024), Return(true)));
-  EXPECT_CALL(*data_source, Read(512, 512, kBuffer, NotNull()))
+  EXPECT_CALL(*data_source, Read(512, 512, kBuffer, _))
       .WillOnce(WithArgs<1, 3>(Invoke(&RunCallback)));
   EXPECT_CALL(*demuxer, SignalReadCompleted(512));
   EXPECT_CALL(*demuxer, WaitForRead())
@@ -563,7 +568,7 @@ TEST_F(FFmpegDemuxerTest, ProtocolRead) {
 
   // This read complete signal is generated when demuxer is stopped.
   EXPECT_CALL(*demuxer, SignalReadCompleted(DataSource::kReadError));
-  demuxer->Stop(NewExpectedCallback());
+  demuxer->Stop(NewExpectedClosure());
   message_loop_.RunAllPending();
 }
 
@@ -621,6 +626,67 @@ TEST_F(FFmpegDemuxerTest, ProtocolIsStreaming) {
 
   EXPECT_FALSE(data_source->IsStreaming());
   EXPECT_FALSE(demuxer_->IsStreaming());
+}
+
+// Verify that seek works properly when the WebM cues data is at the start of
+// the file instead of at the end.
+TEST_F(FFmpegDemuxerTest, SeekWithCuesBeforeFirstCluster) {
+  InitializeDemuxer(CreateDataSource("bear-320x240-cues-in-front.webm"));
+
+  // Get our streams.
+  scoped_refptr<DemuxerStream> video =
+      demuxer_->GetStream(DemuxerStream::VIDEO);
+  scoped_refptr<DemuxerStream> audio =
+      demuxer_->GetStream(DemuxerStream::AUDIO);
+  ASSERT_TRUE(video);
+  ASSERT_TRUE(audio);
+
+  // Read a video packet and release it.
+  scoped_refptr<DemuxerStreamReader> reader(new DemuxerStreamReader());
+  reader->Read(video);
+  message_loop_.RunAllPending();
+  EXPECT_TRUE(reader->called());
+  ValidateBuffer(FROM_HERE, reader->buffer(), 22084, 0);
+
+  // Release the video packet and verify the other packets are still queued.
+  reader->Reset();
+  message_loop_.RunAllPending();
+
+  // Issue a simple forward seek, which should discard queued packets.
+  demuxer_->Seek(base::TimeDelta::FromMicroseconds(2500000),
+                 NewExpectedStatusCB(PIPELINE_OK));
+  message_loop_.RunAllPending();
+
+  // Audio read #1.
+  reader->Read(audio);
+  message_loop_.RunAllPending();
+  EXPECT_TRUE(reader->called());
+  ValidateBuffer(FROM_HERE, reader->buffer(), 40, 2403000);
+
+  // Audio read #2.
+  reader->Reset();
+  reader->Read(audio);
+  message_loop_.RunAllPending();
+  EXPECT_TRUE(reader->called());
+  ValidateBuffer(FROM_HERE, reader->buffer(), 42, 2406000);
+
+  // Video read #1.
+  reader->Reset();
+  reader->Read(video);
+  message_loop_.RunAllPending();
+  EXPECT_TRUE(reader->called());
+  ValidateBuffer(FROM_HERE, reader->buffer(), 5276, 2402000);
+
+  // Video read #2.
+  reader->Reset();
+  reader->Read(video);
+  message_loop_.RunAllPending();
+  EXPECT_TRUE(reader->called());
+  ValidateBuffer(FROM_HERE, reader->buffer(), 1740, 2436000);
+
+  // Manually release the last reference to the buffer and verify it was freed.
+  reader->Reset();
+  message_loop_.RunAllPending();
 }
 
 }  // namespace media

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -52,7 +52,7 @@ int32_t Begin(PP_Instance instance,
               const_cast<PP_PrintSettings_Dev*>(print_settings)),
           &pages_required);
 
-  DebugPrintf("PPP_Printing_Dev::QuerySupportedFormats: %s\n",
+  DebugPrintf("PPP_Printing_Dev::Begin: %s\n",
               NaClSrpcErrorString(srpc_result));
   return pages_required;
 }
@@ -74,7 +74,7 @@ PP_Resource PrintPages(PP_Instance instance,
           page_range_count,
           &image_data);
 
-  DebugPrintf("PPP_Printing_Dev::QuerySupportedFormats: %s\n",
+  DebugPrintf("PPP_Printing_Dev::PrintPages: %s\n",
               NaClSrpcErrorString(srpc_result));
   return image_data;
 }
@@ -89,6 +89,22 @@ void End(PP_Instance instance) {
   DebugPrintf("PPP_Printing_Dev::End: %s\n", NaClSrpcErrorString(srpc_result));
 }
 
+PP_Bool IsScalingDisabled(PP_Instance instance) {
+  DebugPrintf("PPP_Printing_Dev::IsScalingDisabled: "
+              "instance=%"NACL_PRIu32"\n", instance);
+
+  int32_t scaling_disabled = 0;
+  NaClSrpcError srpc_result =
+      PppPrintingRpcClient::PPP_Printing_IsScalingDisabled(
+          GetMainSrpcChannel(instance),
+          instance,
+          &scaling_disabled);
+
+  DebugPrintf("PPP_Printing_Dev::IsScalingDisabled: %s\n",
+              NaClSrpcErrorString(srpc_result));
+  return scaling_disabled ? PP_TRUE : PP_FALSE;
+}
+
 }  // namespace
 
 const PPP_Printing_Dev* BrowserPrinting::GetInterface() {
@@ -96,7 +112,8 @@ const PPP_Printing_Dev* BrowserPrinting::GetInterface() {
     QuerySupportedFormats,
     Begin,
     PrintPages,
-    End
+    End,
+    IsScalingDisabled
   };
   return &printing_interface;
 }

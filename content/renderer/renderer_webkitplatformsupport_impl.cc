@@ -10,20 +10,19 @@
 #include "base/platform_file.h"
 #include "base/shared_memory.h"
 #include "base/utf_string_conversions.h"
-#include "content/common/content_switches.h"
 #include "content/common/database_util.h"
 #include "content/common/file_system/webfilesystem_impl.h"
 #include "content/common/file_utilities_messages.h"
 #include "content/common/mime_registry_messages.h"
+#include "content/common/npobject_util.h"
 #include "content/common/view_messages.h"
 #include "content/common/webblobregistry_impl.h"
 #include "content/common/webmessageportchannel_impl.h"
-#include "content/plugin/npobject_util.h"
-#include "content/renderer/content_renderer_client.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/renderer/media/audio_device.h"
-#include "content/renderer/render_thread.h"
-#include "content/renderer/render_view.h"
+#include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_webaudiodevice_impl.h"
 #include "content/renderer/renderer_webidbfactory_impl.h"
 #include "content/renderer/renderer_webstoragenamespace_impl.h"
@@ -47,12 +46,13 @@
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
 
 #if defined(OS_WIN)
+#include "content/common/child_process_messages.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebSandboxSupport.h"
 #endif
 
 #if defined(OS_MACOSX)
-#include "content/common/font_descriptor_mac.h"
-#include "content/common/font_loader_mac.h"
+#include "content/common/mac/font_descriptor.h"
+#include "content/common/mac/font_loader.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/mac/WebSandboxSupport.h"
 #endif
 
@@ -61,7 +61,7 @@
 #include <map>
 
 #include "base/synchronization/lock.h"
-#include "content/common/child_process_sandbox_support_linux.h"
+#include "content/common/child_process_sandbox_support_impl_linux.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebSandboxSupport.h"
 #endif
 
@@ -116,7 +116,9 @@ class RendererWebKitPlatformSupportImpl::SandboxSupport
   virtual bool ensureFontLoaded(HFONT);
 #elif defined(OS_MACOSX)
   virtual bool loadFont(
-      NSFont* srcFont, ATSFontContainerRef* container, uint32* fontID);
+      NSFont* src_font,
+      CGFontRef* container,
+      uint32* font_id);
 #elif defined(OS_POSIX)
   virtual WebKit::WebString getFontFamilyForCharacters(
       const WebKit::WebUChar* characters,
@@ -189,7 +191,7 @@ bool RendererWebKitPlatformSupportImpl::sandboxEnabled() {
 
 bool RendererWebKitPlatformSupportImpl::SendSyncMessageFromAnyThread(
     IPC::SyncMessage* msg) {
-  RenderThread* render_thread = RenderThread::current();
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
   if (render_thread)
     return render_thread->Send(msg);
 
@@ -250,13 +252,12 @@ void RendererWebKitPlatformSupportImpl::cacheMetadata(
   // browser may cache it and return it on subsequent responses to speed
   // the processing of this resource.
   std::vector<char> copy(data, data + size);
-  RenderThread::current()->Send(new ViewHostMsg_DidGenerateCacheableMetadata(
-      url, response_time, copy));
+  RenderThreadImpl::current()->Send(
+      new ViewHostMsg_DidGenerateCacheableMetadata(url, response_time, copy));
 }
 
 WebString RendererWebKitPlatformSupportImpl::defaultLocale() {
-  // TODO(darin): Eliminate this webkit_glue call.
-  return ASCIIToUTF16(webkit_glue::GetWebKitLocale());
+  return ASCIIToUTF16(RenderThreadImpl::Get()->GetLocale());
 }
 
 void RendererWebKitPlatformSupportImpl::suddenTerminationChanged(bool enabled) {
@@ -274,7 +275,7 @@ void RendererWebKitPlatformSupportImpl::suddenTerminationChanged(bool enabled) {
       return;
   }
 
-  RenderThread* thread = RenderThread::current();
+  RenderThreadImpl* thread = RenderThreadImpl::current();
   if (thread)  // NULL in unittests.
     thread->Send(new ViewHostMsg_SuddenTerminationChanged(enabled));
 }
@@ -353,7 +354,7 @@ RendererWebKitPlatformSupportImpl::MimeRegistry::mimeTypeForExtension(
   // The sandbox restricts our access to the registry, so we need to proxy
   // these calls over to the browser process.
   std::string mime_type;
-  RenderThread::current()->Send(
+  RenderThreadImpl::current()->Send(
       new MimeRegistryMsg_GetMimeTypeFromExtension(
           webkit_glue::WebStringToFilePathString(file_extension), &mime_type));
   return ASCIIToUTF16(mime_type);
@@ -368,7 +369,7 @@ WebString RendererWebKitPlatformSupportImpl::MimeRegistry::mimeTypeFromFile(
   // The sandbox restricts our access to the registry, so we need to proxy
   // these calls over to the browser process.
   std::string mime_type;
-  RenderThread::current()->Send(new MimeRegistryMsg_GetMimeTypeFromFile(
+  RenderThreadImpl::current()->Send(new MimeRegistryMsg_GetMimeTypeFromFile(
       FilePath(webkit_glue::WebStringToFilePathString(file_path)),
       &mime_type));
   return ASCIIToUTF16(mime_type);
@@ -384,7 +385,7 @@ RendererWebKitPlatformSupportImpl::MimeRegistry::preferredExtensionForMIMEType(
   // The sandbox restricts our access to the registry, so we need to proxy
   // these calls over to the browser process.
   FilePath::StringType file_extension;
-  RenderThread::current()->Send(
+  RenderThreadImpl::current()->Send(
       new MimeRegistryMsg_GetPreferredExtensionForMimeType(
           UTF16ToASCII(mime_type), &file_extension));
   return webkit_glue::FilePathStringToWebString(file_extension);
@@ -408,7 +409,8 @@ void RendererWebKitPlatformSupportImpl::FileUtilities::revealFolderInOS(
     const WebString& path) {
   FilePath file_path(webkit_glue::WebStringToFilePath(path));
   file_util::AbsolutePath(&file_path);
-  RenderThread::current()->Send(new ViewHostMsg_RevealFolderInOS(file_path));
+  RenderThreadImpl::current()->Send(
+      new ViewHostMsg_RevealFolderInOS(file_path));
 }
 
 bool RendererWebKitPlatformSupportImpl::FileUtilities::getFileModificationTime(
@@ -442,43 +444,38 @@ bool RendererWebKitPlatformSupportImpl::SandboxSupport::ensureFontLoaded(
     HFONT font) {
   LOGFONT logfont;
   GetObject(font, sizeof(LOGFONT), &logfont);
-  return RenderThread::current()->Send(new ViewHostMsg_PreCacheFont(logfont));
+  RenderThreadImpl::current()->PreCacheFont(logfont);
+  return true;
 }
 
 #elif defined(OS_MACOSX)
 
 bool RendererWebKitPlatformSupportImpl::SandboxSupport::loadFont(
-    NSFont* srcFont, ATSFontContainerRef* container, uint32* fontID) {
-  DCHECK(srcFont);
-  DCHECK(container);
-  DCHECK(fontID);
-
+    NSFont* src_font, CGFontRef* out, uint32* font_id) {
   uint32 font_data_size;
-  FontDescriptor src_font_descriptor(srcFont);
+  FontDescriptor src_font_descriptor(src_font);
   base::SharedMemoryHandle font_data;
-  if (!RenderThread::current()->Send(new ViewHostMsg_LoadFont(
-        src_font_descriptor, &font_data_size, &font_data, fontID))) {
-    LOG(ERROR) << "Sending ViewHostMsg_LoadFont() IPC failed for " <<
-        src_font_descriptor.font_name;
-    *container = kATSFontContainerRefUnspecified;
-    *fontID = 0;
+  if (!RenderThreadImpl::current()->Send(new ViewHostMsg_LoadFont(
+        src_font_descriptor, &font_data_size, &font_data, font_id))) {
+    *out = NULL;
+    *font_id = 0;
     return false;
   }
 
   if (font_data_size == 0 || font_data == base::SharedMemory::NULLHandle() ||
-      *fontID == 0) {
-    LOG(ERROR) << "Bad response from ViewHostMsg_LoadFont() for " <<
+      *font_id == 0) {
+    NOTREACHED() << "Bad response from ViewHostMsg_LoadFont() for " <<
         src_font_descriptor.font_name;
-    *container = kATSFontContainerRefUnspecified;
-    *fontID = 0;
+    *out = NULL;
+    *font_id = 0;
     return false;
   }
 
   // TODO(jeremy): Need to call back into WebKit to make sure that the font
   // isn't already activated, based on the font id.  If it's already
   // activated, don't reactivate it here - crbug.com/72727 .
-  return FontLoader::ATSFontContainerFromBuffer(font_data, font_data_size,
-      container);
+
+  return FontLoader::CGFontRefFromBuffer(font_data, font_data_size, out);
 }
 
 #elif defined(OS_POSIX)
@@ -495,11 +492,10 @@ RendererWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacters(
   if (iter != unicode_font_families_.end())
     return WebString::fromUTF8(iter->second);
 
-  const std::string family_name =
-      child_process_sandbox_support::getFontFamilyForCharacters(
-          characters,
-          num_characters,
-          preferred_locale);
+  const std::string family_name = content::GetFontFamilyForCharacters(
+      characters,
+      num_characters,
+      preferred_locale);
   unicode_font_families_.insert(make_pair(key, family_name));
   return WebString::fromUTF8(family_name);
 }
@@ -507,8 +503,7 @@ RendererWebKitPlatformSupportImpl::SandboxSupport::getFontFamilyForCharacters(
 void
 RendererWebKitPlatformSupportImpl::SandboxSupport::getRenderStyleForStrike(
     const char* family, int sizeAndStyle, WebKit::WebFontRenderStyle* out) {
-  child_process_sandbox_support::getRenderStyleForStrike(family, sizeAndStyle,
-                                                         out);
+  content::GetRenderStyleForStrike(family, sizeAndStyle, out);
 }
 
 #endif
@@ -557,7 +552,8 @@ RendererWebKitPlatformSupportImpl::createGraphicsContext3D() {
   // layout tests (though not through this code) as well as for
   // debugging and bringing up new ports.
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
-    return new webkit::gpu::WebGraphicsContext3DInProcessImpl();
+    return new webkit::gpu::WebGraphicsContext3DInProcessImpl(
+        gfx::kNullPluginWindow, NULL);
   } else {
 #if defined(ENABLE_GPU)
     return new WebGraphicsContext3DCommandBufferImpl();
@@ -569,6 +565,10 @@ RendererWebKitPlatformSupportImpl::createGraphicsContext3D() {
 
 double RendererWebKitPlatformSupportImpl::audioHardwareSampleRate() {
   return AudioDevice::GetAudioHardwareSampleRate();
+}
+
+size_t RendererWebKitPlatformSupportImpl::audioHardwareBufferSize() {
+  return AudioDevice::GetAudioHardwareBufferSize();
 }
 
 WebAudioDevice*
@@ -591,7 +591,7 @@ RendererWebKitPlatformSupportImpl::signedPublicKeyAndChallengeString(
     const WebKit::WebString& challenge,
     const WebKit::WebURL& url) {
   std::string signed_public_key;
-  RenderThread::current()->Send(new ViewHostMsg_Keygen(
+  RenderThreadImpl::current()->Send(new ViewHostMsg_Keygen(
       static_cast<uint32>(key_size_index),
       challenge.utf8(),
       GURL(url),
@@ -602,8 +602,9 @@ RendererWebKitPlatformSupportImpl::signedPublicKeyAndChallengeString(
 //------------------------------------------------------------------------------
 
 WebBlobRegistry* RendererWebKitPlatformSupportImpl::blobRegistry() {
-  // RenderThread::current can be NULL when running some tests.
-  if (!blob_registry_.get() && RenderThread::current())
-    blob_registry_.reset(new WebBlobRegistryImpl(RenderThread::current()));
+  // ChildThread::current can be NULL when running some tests.
+  if (!blob_registry_.get() && ChildThread::current()) {
+    blob_registry_.reset(new WebBlobRegistryImpl(ChildThread::current()));
+  }
   return blob_registry_.get();
 }

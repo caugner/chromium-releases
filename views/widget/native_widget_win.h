@@ -17,10 +17,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/win_util.h"
 #include "ui/base/win/window_impl.h"
+#include "ui/gfx/compositor/compositor.h"
 #include "views/focus/focus_manager.h"
 #include "views/layout/layout_manager.h"
 #include "views/widget/native_widget_private.h"
@@ -79,6 +81,7 @@ const int WM_NCUAHDRAWFRAME = 0xAF;
 ///////////////////////////////////////////////////////////////////////////////
 class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
                                      public MessageLoopForUI::Observer,
+                                     public ui::CompositorDelegate,
                                      public internal::NativeWidgetPrivate {
  public:
   explicit NativeWidgetWin(internal::NativeWidgetDelegate* delegate);
@@ -180,6 +183,9 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
     return ::GetClientRect(GetNativeView(), rect);
   }
 
+  // Overridden from ui::CompositorDelegate:
+  virtual void ScheduleDraw();
+
   // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
@@ -193,9 +199,10 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual void MarkLayerDirty() OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor) OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
+      ui::Layer** layer_parent) OVERRIDE;
+  virtual void ReorderLayers() OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
@@ -212,10 +219,10 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual void GetWindowPlacement(
      gfx::Rect* bounds,
      ui::WindowShowState* show_state) const OVERRIDE;
-  virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetWindowTitle(const string16& title) OVERRIDE;
   virtual void SetWindowIcons(const SkBitmap& window_icon,
                               const SkBitmap& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const std::wstring& name) OVERRIDE;
+  virtual void SetAccessibleName(const string16& name) OVERRIDE;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void BecomeModal() OVERRIDE;
@@ -261,6 +268,7 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
   virtual bool ConvertPointFromAncestor(
       const Widget* ancestor, gfx::Point* point) const OVERRIDE;
+  virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
 
  protected:
   // Information saved before going into fullscreen mode, used to restore the
@@ -273,8 +281,9 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   };
 
   // Overridden from MessageLoop::Observer:
-  void WillProcessMessage(const MSG& msg) OVERRIDE;
-  virtual void DidProcessMessage(const MSG& msg) OVERRIDE;
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 
   // Overridden from WindowImpl:
   virtual HICON GetDefaultWindowIcon() const OVERRIDE;
@@ -531,7 +540,7 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
 
   // The following factory is used for calls to close the NativeWidgetWin
   // instance.
-  ScopedRunnableMethodFactory<NativeWidgetWin> close_widget_factory_;
+  base::WeakPtrFactory<NativeWidgetWin> close_widget_factory_;
 
   // The flags currently being used with TrackMouseEvent to track mouse
   // messages. 0 if there is no active tracking. The value of this member is
@@ -567,7 +576,7 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
   gfx::Rect invalid_rect_;
 
   // A factory that allows us to schedule a redraw for layered windows.
-  ScopedRunnableMethodFactory<NativeWidgetWin> paint_layered_window_factory_;
+  base::WeakPtrFactory<NativeWidgetWin> paint_layered_window_factory_;
 
   // See class documentation for Widget in widget.h for a note about ownership.
   Widget::InitParams::Ownership ownership_;
@@ -630,7 +639,7 @@ class VIEWS_EXPORT NativeWidgetWin : public ui::WindowImpl,
 
   // The following factory is used to ignore SetWindowPos() calls for short time
   // periods.
-  ScopedRunnableMethodFactory<NativeWidgetWin> ignore_pos_changes_factory_;
+  base::WeakPtrFactory<NativeWidgetWin> ignore_pos_changes_factory_;
 
   // The last-seen monitor containing us, and its rect and work area.  These are
   // used to catch updates to the rect and work area and react accordingly.

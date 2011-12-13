@@ -18,7 +18,10 @@ namespace webkit {
 namespace ppapi {
 
 PPB_Flash_NetConnector_Impl::PPB_Flash_NetConnector_Impl(PP_Instance instance)
-    : Resource(instance) {
+    : Resource(instance),
+      socket_out_(NULL),
+      local_addr_out_(NULL),
+      remote_addr_out_(NULL) {
 }
 
 PPB_Flash_NetConnector_Impl::~PPB_Flash_NetConnector_Impl() {
@@ -40,10 +43,8 @@ int32_t PPB_Flash_NetConnector_Impl::ConnectTcp(
   if (!socket_out)
     return PP_ERROR_BADARGUMENT;
 
-  if (!callback.func) {
-    NOTIMPLEMENTED();
-    return PP_ERROR_BADARGUMENT;
-  }
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
 
   if (callback_.get() && !callback_->completed())
     return PP_ERROR_INPROGRESS;
@@ -77,10 +78,8 @@ int32_t PPB_Flash_NetConnector_Impl::ConnectTcpAddress(
   if (!socket_out)
     return PP_ERROR_BADARGUMENT;
 
-  if (!callback.func) {
-    NOTIMPLEMENTED();
-    return PP_ERROR_BADARGUMENT;
-  }
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
 
   if (callback_.get() && !callback_->completed())
     return PP_ERROR_INPROGRESS;

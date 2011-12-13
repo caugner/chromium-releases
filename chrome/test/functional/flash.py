@@ -93,22 +93,13 @@ class FlashTest(pyauto.PyUITest):
     # Verify shockwave flash process not present.
     self._AssertFlashProcessNotPresent()
 
-  def testYouTubeVideo(self):
-    """Verify able to watch youtube.com."""
-    youtube_url = 'http://www.youtube.com/watch?v=0QRO3gKj3qw'
-    # Verify no flash process is present.
-    self._AssertFlashProcessNotPresent()
-    # Play YouTube video.
-    self.NavigateToURL(youtube_url)
-    self._AssertFlashProcessPresent()
-
   def testFlashIncognitoMode(self):
     """Verify we can play flash on an incognito window."""
-    if self.IsMac():
-      # On Mac 10.5, flash files loaded too quickly after firing browser ends
-      # up getting downloaded, which seems to indicate that the plugin hasn't
-      # been registered yet.
-      # Hack to register Flash plugin on Mac 10.5.  crbug.com/94123
+    if self.IsWin() or self.IsMac():
+      # On Mac 10.5 and XP, flash files loaded too quickly after firing browser
+      # ends up getting downloaded, which seems to indicate that the plugin
+      # hasn't been registered yet.
+      # Hack to register Flash plugin on Mac 10.5 and XP.  crbug.com/94123
       self.GetPluginsInfo()
     # Verify no flash process is currently running
     self._AssertFlashProcessNotPresent()

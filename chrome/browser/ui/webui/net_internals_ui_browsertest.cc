@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -47,8 +50,10 @@ NetInternalsTestMessageHandler::NetInternalsTestMessageHandler()
 }
 
 void NetInternalsTestMessageHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("openNewTab", NewCallback(
-      this, &NetInternalsTestMessageHandler::OpenNewTab));
+  web_ui_->RegisterMessageCallback(
+      "openNewTab",
+      base::Bind(&NetInternalsTestMessageHandler::OpenNewTab,
+                 base::Unretained(this)));
 }
 
 void NetInternalsTestMessageHandler::OpenNewTab(const ListValue* list_value) {
@@ -92,8 +97,8 @@ NetInternalsTest::~NetInternalsTest() {
 void NetInternalsTest::SetUpCommandLine(CommandLine* command_line) {
   WebUIBrowserTest::SetUpCommandLine(command_line);
   // Needed to test the prerender view.
-  command_line->AppendSwitchASCII(switches::kPrerender,
-                                  switches::kPrerenderSwitchValueEnabled);
+  command_line->AppendSwitchASCII(switches::kPrerenderMode,
+                                  switches::kPrerenderModeSwitchValueEnabled);
 }
 
 void NetInternalsTest::SetUpInProcessBrowserTestFixture() {
@@ -105,9 +110,10 @@ void NetInternalsTest::SetUpInProcessBrowserTestFixture() {
                           "net_internals/net_internals_test.js")));
 
   // Add Javascript files needed for individual tests.
-  AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/main.js")));
+  AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/hsts_view.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/log_util.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/log_view_painter.js")));
+  AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/main.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/prerender_view.js")));
   AddLibrary(FilePath(FILE_PATH_LITERAL("net_internals/test_view.js")));
 }
@@ -120,7 +126,7 @@ void NetInternalsTest::SetUpOnMainThread() {
   // as debug builds use more memory and often go over the usual limit.
   Profile* profile = browser()->GetSelectedTabContentsWrapper()->profile();
   prerender::PrerenderManager* prerender_manager =
-      profile->GetPrerenderManager();
+      prerender::PrerenderManagerFactory::GetForProfile(profile);
   prerender_manager->mutable_config().max_bytes = 1000 * 1024 * 1024;
 }
 
@@ -203,9 +209,8 @@ IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTestViewPassTwice) {
       Value::CreateIntegerValue(2)));
 }
 
-// Runs the test suite twice, expecting a failing result the first time.  Checks
-// the first result, the order of events that occur, and the number of rows in
-// the table.
+// Runs the test suite twice.  Checks the exact error code of the first result,
+// the order of events that occur, and the number of rows in the HTML table.
 IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTestViewFailTwice) {
   EXPECT_TRUE(RunJavascriptAsyncTest(
       "netInternalsTestView",
@@ -215,6 +220,61 @@ IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsTestViewFailTwice) {
       Value::CreateIntegerValue(net::ERR_UNSAFE_PORT),
       // Number of times to run the test suite.
       Value::CreateIntegerValue(2)));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// hsts_view.js
+////////////////////////////////////////////////////////////////////////////////
+
+// Checks that querying a domain that was never added fails.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewQueryNotFound) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewQueryNotFound"));
+}
+
+// Checks that querying a domain with an invalid name returns an error.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewQueryError) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewQueryError"));
+}
+
+// Deletes a domain that was never added.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewDeleteNotFound) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewDeleteNotFound"));
+}
+
+// Deletes a domain that returns an error on lookup.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewDeleteError) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewDeleteNotFound"));
+}
+
+// Adds a domain and then deletes it.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewAddDelete) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewAddDelete"));
+}
+
+// Tries to add a domain with an invalid name.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewAddFail) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewAddError"));
+}
+
+// Tries to add a domain with a name that errors out on lookup due to having
+// non-ASCII characters in it.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewAddError) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewAddError"));
+}
+
+// Adds a domain with an invalid hash.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewAddInvalidHash) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewAddInvalidHash"));
+}
+
+// Adds the same domain twice in a row, modifying some values the second time.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewAddOverwrite) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewAddOverwrite"));
+}
+
+// Adds two different domains and then deletes them.
+IN_PROC_BROWSER_TEST_F(NetInternalsTest, NetInternalsHSTSViewAddTwice) {
+  EXPECT_TRUE(RunJavascriptAsyncTest("netInternalsHSTSViewAddTwice"));
 }
 
 ////////////////////////////////////////////////////////////////////////////////

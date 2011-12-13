@@ -21,6 +21,7 @@
 #include "base/task.h"
 #include "ipc/ipc_channel.h"
 #include "chrome/service/service_child_process_host.h"
+#include "printing/pdf_render_settings.h"
 
 class CommandLine;
 class ScopedTempDir;
@@ -80,7 +81,6 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
     friend class base::RefCountedThreadSafe<Client>;
     friend class ServiceUtilityProcessHost;
 
-    bool OnMessageReceived(const IPC::Message& message);
     // Invoked when a metafile file is ready.
     void MetafileAvailable(const FilePath& metafile_path,
                            int highest_rendered_page_number);
@@ -97,8 +97,7 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
   // pages than the specified page ranges, it will render as many as available.
   bool StartRenderPDFPagesToMetafile(
       const FilePath& pdf_path,
-      const gfx::Rect& render_area,
-      int render_dpi,
+      const printing::PdfRenderSettings& render_settings,
       const std::vector<printing::PageRange>& page_ranges);
 
   // Starts a process to get capabilities and defaults for the specified
@@ -126,11 +125,20 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
   // Called when at least one page in the specified PDF has been rendered
   // successfully into metafile_path_;
   void OnRenderPDFPagesToMetafileSucceeded(int highest_rendered_page_number);
-  // Any other messages to be handled by the client.
-  bool MessageForClient(const IPC::Message& message);
+  // Called when PDF rendering failed.
+  void OnRenderPDFPagesToMetafileFailed();
+  // Called when the printer capabilities and defaults have been
+  // retrieved successfully.
+  void OnGetPrinterCapsAndDefaultsSucceeded(
+      const std::string& printer_name,
+      const printing::PrinterCapsAndDefaults& caps_and_defaults);
+  // Called when the printer capabilities and defaults could not be
+  // retrieved successfully.
+  void OnGetPrinterCapsAndDefaultsFailed(const std::string& printer_name);
 
 #if defined(OS_WIN)  // This hack is Windows-specific.
   void OnPreCacheFont(const LOGFONT& font);
+  void OnReleaseCachedFonts();
 #endif  // defined(OS_WIN)
 
   // A pointer to our client interface, who will be informed of progress.
@@ -141,6 +149,8 @@ class ServiceUtilityProcessHost : public ServiceChildProcessHost {
   FilePath metafile_path_;
   // The temporary folder created for the metafile.
   scoped_ptr<ScopedTempDir> scratch_metafile_dir_;
+  // The unique id created for the process.
+  int process_id_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceUtilityProcessHost);
 };

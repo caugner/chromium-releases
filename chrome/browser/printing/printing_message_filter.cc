@@ -47,8 +47,8 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
   params->printable_size.SetSize(
       settings.page_setup_device_units().content_area().width(),
       settings.page_setup_device_units().content_area().height());
-  params->margin_top = settings.page_setup_device_units().content_area().x();
-  params->margin_left = settings.page_setup_device_units().content_area().y();
+  params->margin_top = settings.page_setup_device_units().content_area().y();
+  params->margin_left = settings.page_setup_device_units().content_area().x();
   params->dpi = settings.dpi();
   // Currently hardcoded at 1.25. See PrintSettings' constructor.
   params->min_shrink = settings.min_shrink;
@@ -73,12 +73,6 @@ void RenderParamsFromPrintSettings(const printing::PrintSettings& settings,
 
 PrintingMessageFilter::PrintingMessageFilter()
     : print_job_manager_(g_browser_process->print_job_manager()) {
-#if defined(OS_CHROMEOS)
-  cloud_print_enabled_ = true;
-#else
-  cloud_print_enabled_ = CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableCloudPrint);
-#endif
 }
 
 PrintingMessageFilter::~PrintingMessageFilter() {
@@ -166,15 +160,13 @@ void PrintingMessageFilter::OnTempFileForPrintingWritten(int sequence_number) {
     return;
   }
 
-  if (cloud_print_enabled_)
-    print_dialog_cloud::CreatePrintDialogForFile(
-        it->second,
-        string16(),
-        string16(),
-        std::string("application/pdf"),
-        true);
-  else
-    NOTIMPLEMENTED();
+  print_dialog_cloud::CreatePrintDialogForFile(
+      it->second,
+      string16(),
+      string16(),
+      std::string("application/pdf"),
+      true,
+      false);
 
   // Erase the entry in the map.
   map->erase(it);
@@ -205,7 +197,7 @@ void PrintingMessageFilter::OnGetDefaultPrintSettings(IPC::Message* reply_msg) {
                              NULL,
                              0,
                              false,
-                             true,
+                             printing::DEFAULT_MARGINS,
                              task);
 }
 
@@ -256,7 +248,7 @@ void PrintingMessageFilter::OnScriptedPrint(
                              host_view,
                              params.expected_pages_count,
                              params.has_selection,
-                             params.use_overlays,
+                             params.margin_type,
                              task);
 }
 
@@ -287,22 +279,29 @@ void PrintingMessageFilter::OnUpdatePrintSettings(
     int document_cookie, const DictionaryValue& job_settings,
     IPC::Message* reply_msg) {
   scoped_refptr<printing::PrinterQuery> printer_query;
-  print_job_manager_->PopPrinterQuery(document_cookie, &printer_query);
-  if (printer_query.get()) {
-    CancelableTask* task = NewRunnableMethod(
-        this,
-        &PrintingMessageFilter::OnUpdatePrintSettingsReply,
-        printer_query,
-        reply_msg);
-    printer_query->SetSettings(job_settings, task);
+  if (!print_job_manager_->printing_enabled()) {
+    // Reply with NULL query.
+    OnUpdatePrintSettingsReply(printer_query, reply_msg);
+    return;
   }
+
+  print_job_manager_->PopPrinterQuery(document_cookie, &printer_query);
+  if (!printer_query.get())
+    printer_query = new printing::PrinterQuery;
+  CancelableTask* task = NewRunnableMethod(
+      this,
+      &PrintingMessageFilter::OnUpdatePrintSettingsReply,
+      printer_query,
+      reply_msg);
+  printer_query->SetSettings(job_settings, task);
 }
 
 void PrintingMessageFilter::OnUpdatePrintSettingsReply(
     scoped_refptr<printing::PrinterQuery> printer_query,
     IPC::Message* reply_msg) {
   PrintMsg_PrintPages_Params params;
-  if (printer_query->last_status() != printing::PrintingContext::OK) {
+  if (!printer_query.get() ||
+      printer_query->last_status() != printing::PrintingContext::OK) {
     params.Reset();
   } else {
     RenderParamsFromPrintSettings(printer_query->settings(), &params.params);
@@ -313,10 +312,12 @@ void PrintingMessageFilter::OnUpdatePrintSettingsReply(
   PrintHostMsg_UpdatePrintSettings::WriteReplyParams(reply_msg, params);
   Send(reply_msg);
   // If user hasn't cancelled.
-  if (printer_query->cookie() && printer_query->settings().dpi())
-    print_job_manager_->QueuePrinterQuery(printer_query.get());
-  else
-    printer_query->StopWorker();
+  if (printer_query.get()) {
+    if (printer_query->cookie() && printer_query->settings().dpi())
+      print_job_manager_->QueuePrinterQuery(printer_query.get());
+    else
+      printer_query->StopWorker();
+  }
 }
 
 void PrintingMessageFilter::OnCheckForCancel(const std::string& preview_ui_addr,

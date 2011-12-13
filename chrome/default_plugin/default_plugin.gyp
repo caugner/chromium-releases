@@ -5,7 +5,10 @@
 {
   'variables': {
     'chromium_code': 1,
-   },
+  },
+  'includes': [
+    '../../build/win_precompile.gypi',
+  ],
   'targets': [
     {
       'target_name': 'default_plugin',
@@ -26,6 +29,8 @@
         '<(DEPTH)/third_party/wtl/include',
       ],
       'sources': [
+        'plugin_impl_aura.cc',
+        'plugin_impl_aura.h',
         'plugin_impl_gtk.cc',
         'plugin_impl_gtk.h',
         'plugin_impl_mac.h',
@@ -33,17 +38,11 @@
         'plugin_impl_win.cc',
         'plugin_impl_win.h',
         'plugin_installer_base.cc',
-        'plugin_installer_base.h',      
+        'plugin_installer_base.h',
         'plugin_main.cc',
         'plugin_main.h',
       ],
       'conditions': [
-        ['use_aura==1', {
-          'sources/': [
-            ['exclude', '^plugin_impl_win.cc'],
-            ['exclude', '^plugin_impl_win.h'],
-          ],
-        }],
         ['OS=="win"', {
           'link_settings': {
             'libraries': ['-lurlmon.lib'],

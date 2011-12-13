@@ -32,7 +32,6 @@
 #include "chrome/browser/profiles/profile_dependency_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/themes/theme_service.h"
-#include "chrome/browser/transport_security_persister.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
@@ -57,7 +56,6 @@
 #include "content/browser/webui/web_ui.h"
 #include "content/common/notification_service.h"
 #include "grit/locale_settings.h"
-#include "net/base/transport_security_state.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/quota/quota_manager.h"
@@ -79,16 +77,11 @@ net::URLRequestContextGetter* Profile::default_request_context_;
 
 namespace {
 
-// Used to tag the first profile launched in a Chrome session.
-bool g_first_profile_launched = true;
-
 }  // namespace
 
 Profile::Profile()
     : restored_last_session_(false),
-      first_launched_(g_first_profile_launched),
       accessibility_pause_level_(0) {
-  g_first_profile_launched = false;
 }
 
 // static
@@ -99,7 +92,16 @@ Profile* Profile::FromBrowserContext(content::BrowserContext* browser_context) {
 
 // static
 Profile* Profile::FromWebUI(WebUI* web_ui) {
+  // TODO(dhollowa): Crash diagnosis http://crbug.com/97802
+  CHECK(web_ui);
+  CHECK(web_ui->tab_contents());
+  CHECK(web_ui->tab_contents()->browser_context());
+
   return FromBrowserContext(web_ui->tab_contents()->browser_context());
+}
+
+TestingProfile* Profile::AsTestingProfile() {
+  return NULL;
 }
 
 // static
@@ -142,7 +144,7 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kEnableAutoSpellCorrect,
                              true,
                              PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterBooleanPref(prefs::kSpeechInputCensorResults,
+  prefs->RegisterBooleanPref(prefs::kSpeechInputFilterProfanities,
                              true,
                              PrefService::UNSYNCABLE_PREF);
 #if defined(TOOLKIT_USES_GTK)
@@ -167,6 +169,8 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kDisableExtensions,
                              false,
                              PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kExtensionAlertsInitializedPref,
+                             false, PrefService::UNSYNCABLE_PREF);
   prefs->RegisterStringPref(prefs::kSelectFileLastDirectory,
                             "",
                             PrefService::UNSYNCABLE_PREF);
@@ -175,6 +179,9 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
                             PrefService::UNSYNCABLE_PREF);
   prefs->RegisterDictionaryPref(prefs::kPerHostZoomLevels,
                                 PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterStringPref(prefs::kDefaultApps,
+                            "install",
+                            PrefService::UNSYNCABLE_PREF);
 #if defined(OS_CHROMEOS)
   // TODO(dilmah): For OS_CHROMEOS we maintain kApplicationLocale in both
   // local state and user's profile.  For other platforms we maintain
@@ -191,10 +198,6 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
                             "",
                             PrefService::UNSYNCABLE_PREF);
 #endif
-
-  prefs->RegisterBooleanPref(prefs::kSyncPromoExpanded,
-                             true,
-                             PrefService::UNSYNCABLE_PREF);
 }
 
 // static

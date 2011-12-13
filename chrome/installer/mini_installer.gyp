@@ -7,6 +7,9 @@
     'msvs_use_common_release': 0,
     'msvs_use_common_linker_extras': 0,
   },
+  'includes': [
+    '../../build/win_precompile.gypi',
+  ],
   'conditions': [
     ['OS=="win"', {
       'target_defaults': {
@@ -172,6 +175,12 @@
         {
           'target_name': 'mini_installer',
           'type': 'executable',
+
+          # Disable precompiled headers for this project, to avoid
+          # linker errors when building with VS 2008.
+          'msvs_precompiled_header': '',
+          'msvs_precompiled_source': '',
+
           'sources': [
             'mini_installer/chrome.release',
             'mini_installer/chrome_appid.cc',
@@ -189,7 +198,6 @@
                 '<(PRODUCT_DIR)/chrome.exe',
                 '<(PRODUCT_DIR)/chrome.dll',
                 '<(PRODUCT_DIR)/nacl64.exe',
-                '<(PRODUCT_DIR)/nacl64.dll',
                 '<(PRODUCT_DIR)/ppGoogleNaClPluginChrome.dll',
                 '<(PRODUCT_DIR)/nacl_irt_x86_32.nexe',
                 '<(PRODUCT_DIR)/nacl_irt_x86_64.nexe',

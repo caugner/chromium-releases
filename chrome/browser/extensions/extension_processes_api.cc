@@ -14,7 +14,7 @@
 
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_processes_api_constants.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/task_manager.h"
@@ -22,7 +22,7 @@
 #include "chrome/common/extensions/extension_error_utils.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
+#include "content/public/browser/notification_types.h"
 
 namespace keys = extension_processes_api_constants;
 

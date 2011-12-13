@@ -34,21 +34,21 @@ class DownloadInProgressDialogView : public views::DialogDelegateView {
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
   // views::DialogDelegate:
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
 
   Browser* browser_;
   views::Label* warning_;
   views::Label* explanation_;
 
-  std::wstring ok_button_text_;
-  std::wstring cancel_button_text_;
+  string16 ok_button_text_;
+  string16 cancel_button_text_;
 
   string16 product_name_;
 

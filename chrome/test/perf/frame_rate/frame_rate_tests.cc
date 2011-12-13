@@ -10,6 +10,7 @@
 #include "base/test/test_timeouts.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/javascript_test_util.h"
 #include "chrome/test/ui/ui_perf_test.h"
@@ -22,6 +23,10 @@ class FrameRateTest : public UIPerfTest {
   FrameRateTest() {
     show_window_ = true;
     dom_automation_enabled_ = true;
+    // Since this is a performance test, try to use the host machine's GPU
+    // instead of falling back to software-rendering.
+    force_use_osmesa_ = false;
+    disable_accelerated_compositing_ = false;
   }
 
   virtual FilePath GetDataPath(const std::string& name) {
@@ -35,7 +40,19 @@ class FrameRateTest : public UIPerfTest {
     return test_path;
   }
 
-  void RunTest(const std::string& name, const std::string& suffix) {
+  virtual void SetUp() {
+    // UI tests boot up render views starting from about:blank. This causes the
+    // renderer to start up thinking it cannot use the GPU. To work around that,
+    // and allow the frame rate test to use the GPU, we must pass
+    // kAllowWebUICompositing.
+    launch_arguments_.AppendSwitch(switches::kAllowWebUICompositing);
+
+    UIPerfTest::SetUp();
+  }
+
+  void RunTest(const std::string& name,
+               const std::string& suffix,
+               bool make_body_composited) {
     FilePath test_path = GetDataPath(name);
     ASSERT_TRUE(file_util::DirectoryExists(test_path))
         << "Missing test directory: " << test_path.value();
@@ -47,6 +64,11 @@ class FrameRateTest : public UIPerfTest {
 
     ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
               tab->NavigateToURL(net::FilePathToFileURL(test_path)));
+
+    if (make_body_composited) {
+      ASSERT_TRUE(tab->NavigateToURLAsync(
+          GURL("javascript:__make_body_composited();")));
+    }
 
     // Start the tests.
     ASSERT_TRUE(tab->NavigateToURLAsync(GURL("javascript:__start_all();")));
@@ -96,12 +118,29 @@ class FrameRateTest_Reference : public FrameRateTest {
 
 #define FRAME_RATE_TEST(content) \
 TEST_F(FrameRateTest, content) { \
-  RunTest(#content, ""); \
+  RunTest(#content, "", false); \
 } \
 TEST_F(FrameRateTest_Reference, content) { \
-  RunTest(#content, "_ref"); \
+  RunTest(#content, "_ref", false); \
 }
-FRAME_RATE_TEST(blank);
-FRAME_RATE_TEST(googleblog);
+
+
+// Tests that trigger compositing with a -webkit-translateZ(0)
+#define FRAME_RATE_TEST_WITH_AND_WITHOUT_ACCELERATED_COMPOSITING(content) \
+TEST_F(FrameRateTest, content) { \
+  RunTest(#content, "", false); \
+} \
+TEST_F(FrameRateTest, content ## _comp) { \
+  RunTest(#content, "_comp", true); \
+} \
+TEST_F(FrameRateTest_Reference, content) { \
+  RunTest(#content, "_ref", false); \
+} \
+TEST_F(FrameRateTest_Reference, content ## _comp) { \
+  RunTest(#content, "_comp_ref", true); \
+}
+
+FRAME_RATE_TEST_WITH_AND_WITHOUT_ACCELERATED_COMPOSITING(blank);
+FRAME_RATE_TEST_WITH_AND_WITHOUT_ACCELERATED_COMPOSITING(googleblog);
 
 }  // namespace

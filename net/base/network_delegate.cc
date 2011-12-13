@@ -9,7 +9,7 @@
 namespace net {
 
 int NetworkDelegate::NotifyBeforeURLRequest(URLRequest* request,
-                                            CompletionCallback* callback,
+                                            OldCompletionCallback* callback,
                                             GURL* new_url) {
   DCHECK(CalledOnValidThread());
   DCHECK(request);
@@ -18,7 +18,7 @@ int NetworkDelegate::NotifyBeforeURLRequest(URLRequest* request,
 }
 
 int NetworkDelegate::NotifyBeforeSendHeaders(URLRequest* request,
-                                             CompletionCallback* callback,
+                                             OldCompletionCallback* callback,
                                              HttpRequestHeaders* headers) {
   DCHECK(CalledOnValidThread());
   DCHECK(headers);
@@ -30,6 +30,18 @@ void NetworkDelegate::NotifySendHeaders(URLRequest* request,
                                         const HttpRequestHeaders& headers) {
   DCHECK(CalledOnValidThread());
   OnSendHeaders(request, headers);
+}
+
+int NetworkDelegate::NotifyHeadersReceived(
+    URLRequest* request,
+    OldCompletionCallback* callback,
+    HttpResponseHeaders* original_response_headers,
+    scoped_refptr<HttpResponseHeaders>* override_response_headers) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(original_response_headers);
+  DCHECK(callback);
+  return OnHeadersReceived(request, callback, original_response_headers,
+                           override_response_headers);
 }
 
 void NetworkDelegate::NotifyResponseStarted(URLRequest* request) {
@@ -69,10 +81,13 @@ void NetworkDelegate::NotifyPACScriptError(int line_number,
   OnPACScriptError(line_number, error);
 }
 
-void NetworkDelegate::NotifyAuthRequired(URLRequest* request,
-                                         const AuthChallengeInfo& auth_info) {
+NetworkDelegate::AuthRequiredResponse NetworkDelegate::NotifyAuthRequired(
+    URLRequest* request,
+    const AuthChallengeInfo& auth_info,
+    const AuthCallback& callback,
+    AuthCredentials* credentials) {
   DCHECK(CalledOnValidThread());
-  OnAuthRequired(request, auth_info);
+  return OnAuthRequired(request, auth_info, callback, credentials);
 }
 
 }  // namespace net

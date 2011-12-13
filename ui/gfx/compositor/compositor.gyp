@@ -39,21 +39,24 @@
         'compositor_export.h',
         'compositor_gl.cc',
         'compositor_gl.h',
+        'compositor_observer.h',
+        'compositor_stub.cc',
         'compositor_win.cc',
         'layer.cc',
         'layer.h',
         'layer_animator.cc',
         'layer_animator.h',
+        'layer_animator_delegate.h',
       ],
       'conditions': [
         ['os_posix == 1 and OS != "mac"', {
           'sources!': [
-            'compositor.cc',
+            'compositor_stub.cc',
           ],
         }],
         ['OS == "win" and views_compositor == 1', {
           'sources!': [
-            'compositor.cc',
+            'compositor_stub.cc',
           ],
           # TODO(sky): before we make this real need to remove
           # IDR_BITMAP_BRUSH_IMAGE.
@@ -93,12 +96,30 @@
       'sources': [
         'layer_unittest.cc',
         'run_all_unittests.cc',
+        'test_compositor.cc',
+        'test_compositor.h',
         'test_compositor_host.h',
+        'test_compositor_host_linux.cc',
         'test_compositor_host_win.cc',
         'test_suite.cc',
         'test_suite.h',
+        'test_texture.cc',
+        'test_texture.h',
         '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
+      ],
+      'conditions': [
+        # osmesa GL implementation is used on linux.
+        ['OS=="linux"', {
+          'dependencies': [
+            '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
+          ],
+        }],
+        ['OS!="mac"', {
+          'dependencies': [
+            '<(DEPTH)/chrome/chrome.gyp:packed_resources',
+           ],
+        }],
       ],
     },
   ],

@@ -12,6 +12,7 @@
 #include "base/base64.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/json/json_value_serializer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
@@ -23,7 +24,6 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/web_apps.h"
-#include "content/common/json_value_serializer.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -46,12 +46,11 @@ const char kIconsDirName[] = "icons";
 // auto-updated using ExtensionUpdater. But Chrome does notice updates to the
 // manifest and regenerates these extensions.
 std::string GenerateKey(const GURL& manifest_url) {
-  char raw[crypto::SHA256_LENGTH] = {0};
+  char raw[crypto::kSHA256Length] = {0};
   std::string key;
-  crypto::SHA256HashString(manifest_url.spec().c_str(),
-                           raw,
-                           crypto::SHA256_LENGTH);
-  base::Base64Encode(std::string(raw, crypto::SHA256_LENGTH), &key);
+  crypto::SHA256HashString(manifest_url.spec().c_str(), raw,
+                           crypto::kSHA256Length);
+  base::Base64Encode(std::string(raw, crypto::kSHA256Length), &key);
   return key;
 }
 

@@ -21,9 +21,14 @@ namespace sync_notifier {
 
 InvalidationNotifier::InvalidationNotifier(
     const notifier::NotifierOptions& notifier_options,
+    const InvalidationVersionMap& initial_max_invalidation_versions,
+    const browser_sync::WeakHandle<InvalidationVersionTracker>&
+        invalidation_version_tracker,
     const std::string& client_info)
     : state_(STOPPED),
       notifier_options_(notifier_options),
+      initial_max_invalidation_versions_(initial_max_invalidation_versions),
+      invalidation_version_tracker_(invalidation_version_tracker),
       client_info_(client_info) {
   DCHECK_EQ(notifier::NOTIFICATION_SERVER,
             notifier_options.notification_method);
@@ -50,16 +55,20 @@ void InvalidationNotifier::RemoveObserver(SyncNotifierObserver* observer) {
 void InvalidationNotifier::SetUniqueId(const std::string& unique_id) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   invalidation_client_id_ = unique_id;
+  VLOG(1) << "Setting unique ID to " << unique_id;
+  CHECK(!invalidation_client_id_.empty());
 }
 
 void InvalidationNotifier::SetState(const std::string& state) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   invalidation_state_ = state;
+  VLOG(1) << "Setting new state";
 }
 
 void InvalidationNotifier::UpdateCredentials(
     const std::string& email, const std::string& token) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
+  CHECK(!invalidation_client_id_.empty());
   VLOG(1) << "Updating credentials for " << email;
   buzz::XmppClientSettings xmpp_client_settings =
       notifier::MakeXmppClientSettings(notifier_options_,
@@ -85,6 +94,7 @@ void InvalidationNotifier::UpdateCredentials(
 void InvalidationNotifier::UpdateEnabledTypes(
     const syncable::ModelTypeSet& enabled_types) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
+  CHECK(!invalidation_client_id_.empty());
   invalidation_client_.RegisterTypes(enabled_types);
 }
 
@@ -95,20 +105,20 @@ void InvalidationNotifier::SendNotification(
 }
 
 void InvalidationNotifier::OnConnect(
-    base::WeakPtr<talk_base::Task> base_task) {
+    base::WeakPtr<buzz::XmppTaskParentInterface> base_task) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   VLOG(1) << "OnConnect";
   if (state_ >= STARTED) {
     invalidation_client_.ChangeBaseTask(base_task);
   } else {
-    VLOG(1) << "First time connecting: starting invalidation client";
-    // TODO(akalin): Make cache_guid() part of the client ID.  If we
-    // do so and we somehow propagate it up to the server somehow, we
-    // can make it so that we won't receive any notifications that
-    // were generated from our own changes.
-    const std::string kClientId = "invalidation_notifier";
+    VLOG(1) << "First time connecting: starting invalidation client with id "
+            << invalidation_client_id_ << " and client info "
+            << client_info_;
     invalidation_client_.Start(
-        kClientId, client_info_, invalidation_state_, this, this, base_task);
+        invalidation_client_id_, client_info_, invalidation_state_,
+        initial_max_invalidation_versions_,
+        invalidation_version_tracker_,
+        this, this, base_task);
     invalidation_state_.clear();
     state_ = STARTED;
   }

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
@@ -9,6 +11,9 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_history.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -22,8 +27,8 @@
 #include "content/browser/download/download_persistent_store_info.h"
 #include "content/browser/net/url_request_mock_http_job.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -39,10 +44,16 @@ static const char* kAppendedExtension =
 
 class SavePageBrowserTest : public InProcessBrowserTest {
  protected:
-  void SetUp() {
+  void SetUp() OVERRIDE {
     ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_dir_));
     ASSERT_TRUE(save_dir_.CreateUniqueTempDir());
     InProcessBrowserTest::SetUp();
+  }
+
+  void SetUpOnMainThread() OVERRIDE {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   }
 
   GURL NavigateToMockURL(const std::string& prefix) {
@@ -75,7 +86,15 @@ class SavePageBrowserTest : public InProcessBrowserTest {
     return Details<DownloadItem>(observer.details()).ptr()->original_url();
   }
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
+  const ActiveDownloadsUI::DownloadList& GetDownloads() const {
+    TabContents* download_contents = ActiveDownloadsUI::GetPopup(NULL);
+    ActiveDownloadsUI* downloads_ui = static_cast<ActiveDownloadsUI*>(
+        download_contents->web_ui());
+    EXPECT_TRUE(downloads_ui);
+    return downloads_ui->GetDownloads();
+  }
+#elif defined(OS_CHROMEOS)
   const ActiveDownloadsUI::DownloadList& GetDownloads() const {
     Browser* popup = ActiveDownloadsUI::GetPopup();
     EXPECT_TRUE(popup);
@@ -106,7 +125,8 @@ class SavePageBrowserTest : public InProcessBrowserTest {
 
   DownloadManager* GetDownloadManager() const {
     DownloadManager* download_manager =
-        browser()->profile()->GetDownloadManager();
+        DownloadServiceFactory::GetForProfile(
+            browser()->profile())->GetDownloadManager();
     EXPECT_TRUE(download_manager);
     return download_manager;
   }
@@ -117,8 +137,8 @@ class SavePageBrowserTest : public InProcessBrowserTest {
       static_cast<ChromeDownloadManagerDelegate*>(
           GetDownloadManager()->delegate());
     delegate->download_history()->Load(
-        NewCallback(this,
-                    &SavePageBrowserTest::OnQueryDownloadEntriesComplete));
+        base::Bind(&SavePageBrowserTest::OnQueryDownloadEntriesComplete,
+                   base::Unretained(this)));
 
     // Run message loop until a quit message is sent from
     // OnQueryDownloadEntriesComplete().

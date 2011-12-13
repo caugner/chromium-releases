@@ -6,8 +6,8 @@
 #define VIEWS_CONTROLS_TEXTFIELD_NATIVE_TEXTFIELD_VIEWS_H_
 #pragma once
 
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
-#include "base/task.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/font.h"
 #include "views/border.h"
@@ -112,6 +112,8 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual bool IsIMEComposing() const OVERRIDE;
   virtual void GetSelectedRange(ui::Range* range) const OVERRIDE;
   virtual void SelectRange(const ui::Range& range) OVERRIDE;
+  virtual void GetSelectionModel(gfx::SelectionModel* sel) const OVERRIDE;
+  virtual void SelectSelectionModel(const gfx::SelectionModel& sel) OVERRIDE;
   virtual size_t GetCursorPosition() const OVERRIDE;
   virtual bool HandleKeyPressed(const KeyEvent& e) OVERRIDE;
   virtual bool HandleKeyReleased(const KeyEvent& e) OVERRIDE;
@@ -148,7 +150,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void ClearCompositionText() OVERRIDE;
   virtual void InsertText(const string16& text) OVERRIDE;
   virtual void InsertChar(char16 ch, int flags) OVERRIDE;
-  virtual ui::TextInputType GetTextInputType() OVERRIDE;
+  virtual ui::TextInputType GetTextInputType() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;
   virtual bool HasCompositionText() OVERRIDE;
   virtual bool GetTextRange(ui::Range* range) OVERRIDE;
@@ -239,7 +241,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   bool initiating_drag_;
 
   // A runnable method factory for callback to update the cursor.
-  ScopedRunnableMethodFactory<NativeTextfieldViews> cursor_timer_;
+  base::WeakPtrFactory<NativeTextfieldViews> cursor_timer_;
 
   // State variables used to track double and triple clicks.
   size_t aggregated_clicks_;

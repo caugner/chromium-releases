@@ -9,7 +9,7 @@
 #include "views/controls/label.h"
 
 TranslateMessageInfoBar::TranslateMessageInfoBar(
-    TabContentsWrapper* owner,
+    InfoBarTabHelper* owner,
     TranslateInfoBarDelegate* delegate)
     : TranslateInfoBarBase(owner, delegate),
       label_(NULL),
@@ -57,6 +57,8 @@ void TranslateMessageInfoBar::ViewHierarchyChanged(bool is_add,
 
 void TranslateMessageInfoBar::ButtonPressed(views::Button* sender,
                                             const views::Event& event) {
+  if (!owned())
+    return;  // We're closing; don't call anything, it might access the owner.
   if (sender == button_)
     GetDelegate()->MessageInfoBarButtonPressed();
   else

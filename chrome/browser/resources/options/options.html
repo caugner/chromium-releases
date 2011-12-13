@@ -2,7 +2,6 @@
 <html id="t" i18n-values="dir:textdirection">
 <head>
 <meta charset="utf-8">
-<include src="../content_security_policy.html"/>
 <!-- Set the title to that of the default page so that the title doesn't flash
      on load (for the most common case). -->
 <title i18n-content="browserPageTabTitle"></title>
@@ -51,12 +50,13 @@
   <link rel="stylesheet" href="chromeos/proxy.css">
   <link rel="stylesheet" href="chromeos/system_options_page.css">
 </if>
-<if expr="pp_ifdef('chromeos') and pp_ifdef('touchui')">
+<if expr="pp_ifdef('chromeos') and pp_ifdef('use_virtual_keyboard')">
   <link rel="stylesheet" href="chromeos/virtual_keyboard.css">
 </if>
 
 <if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
   <link rel="stylesheet" href="certificate_manager.css">
+  <link rel="stylesheet" href="certificate_tree.css">
 </if>
 
 <script src="chrome://resources/css/tree.css.js"></script>
@@ -107,7 +107,7 @@
 <div id="main-content">
   <div id="navbar-container">
      <h1 id="navbar-content-title" i18n-content="title"></h1>
-     <ul id="navbar" role="tablist">
+     <ul id="navbar">
      </ul>
   </div>
   <div id="mainview">
@@ -164,7 +164,7 @@
                <include src="chromeos/language_mozc_options.html">
                <include src="chromeos/language_pinyin_options.html">
              </if>
-             <if expr="pp_ifdef('chromeos') and pp_ifdef('touchui')">
+             <if expr="pp_ifdef('chromeos') and pp_ifdef('use_virtual_keyboard')">
                <include src="chromeos/virtual_keyboard.html">
              </if>
              <include src="cookies_view.html">

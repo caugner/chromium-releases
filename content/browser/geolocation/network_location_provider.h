@@ -12,11 +12,13 @@
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/threading/thread.h"
 #include "content/browser/geolocation/device_data_provider.h"
 #include "content/browser/geolocation/location_provider.h"
 #include "content/browser/geolocation/network_location_request.h"
+#include "content/common/content_export.h"
 #include "content/common/geoposition.h"
 
 class URLFetcherProtectEntry;
@@ -28,7 +30,7 @@ class NetworkLocationProvider
       public NetworkLocationRequest::ListenerInterface {
  public:
   // Cache of recently resolved locations. Public for tests.
-  class PositionCache {
+  class CONTENT_EXPORT PositionCache {
    public:
     // The maximum size of the cache of positions for previously requested
     // device data.
@@ -126,7 +128,7 @@ class NetworkLocationProvider
   // The network location request object, and the url it uses.
   scoped_ptr<NetworkLocationRequest> request_;
 
-  ScopedRunnableMethodFactory<NetworkLocationProvider> delayed_start_task_;
+  base::WeakPtrFactory<NetworkLocationProvider> weak_factory_;
   // The cache of positions.
   scoped_ptr<PositionCache> position_cache_;
 

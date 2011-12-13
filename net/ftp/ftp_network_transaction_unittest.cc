@@ -451,6 +451,28 @@ class FtpSocketDataProviderFileDownloadZeroSize
   DISALLOW_COPY_AND_ASSIGN(FtpSocketDataProviderFileDownloadZeroSize);
 };
 
+class FtpSocketDataProviderFileDownloadCWD451
+    : public FtpSocketDataProviderFileDownload {
+ public:
+  FtpSocketDataProviderFileDownloadCWD451() {
+  }
+
+  virtual MockWriteResult OnWrite(const std::string& data) OVERRIDE {
+    if (InjectFault())
+      return MockWriteResult(true, data.length());
+    switch (state()) {
+      case PRE_CWD:
+        return Verify("CWD /file\r\n", data, PRE_RETR,
+                      "451 not a directory\r\n");
+      default:
+        return FtpSocketDataProviderFileDownload::OnWrite(data);
+    }
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FtpSocketDataProviderFileDownloadCWD451);
+};
+
 class FtpSocketDataProviderVMSFileDownload : public FtpSocketDataProvider {
  public:
   FtpSocketDataProviderVMSFileDownload() {
@@ -798,7 +820,7 @@ class FtpNetworkTransactionTest : public PlatformTest {
   scoped_refptr<FtpNetworkSession> session_;
   MockClientSocketFactory mock_socket_factory_;
   FtpNetworkTransaction transaction_;
-  TestCompletionCallback callback_;
+  TestOldCompletionCallback callback_;
 };
 
 TEST_F(FtpNetworkTransactionTest, FailedLookup) {
@@ -961,6 +983,11 @@ TEST_F(FtpNetworkTransactionTest, DownloadTransactionZeroSize) {
   ExecuteTransaction(&ctrl_socket, "ftp://host/file", OK);
 }
 
+TEST_F(FtpNetworkTransactionTest, DownloadTransactionCWD451) {
+  FtpSocketDataProviderFileDownloadCWD451 ctrl_socket;
+  ExecuteTransaction(&ctrl_socket, "ftp://host/file", OK);
+}
+
 TEST_F(FtpNetworkTransactionTest, DownloadTransactionVMS) {
   FtpSocketDataProviderVMSFileDownload ctrl_socket;
   ExecuteTransaction(&ctrl_socket, "ftp://host/file", OK);
@@ -978,40 +1005,40 @@ TEST_F(FtpNetworkTransactionTest, DownloadTransactionInvalidResponse) {
 
 TEST_F(FtpNetworkTransactionTest, DownloadTransactionEvilPasvReallyBadFormat) {
   FtpSocketDataProviderEvilPasv ctrl_socket("227 Portscan (127,0,0,\r\n",
-                                           FtpSocketDataProvider::PRE_QUIT);
+                                            FtpSocketDataProvider::PRE_QUIT);
   ExecuteTransaction(&ctrl_socket, "ftp://host/file", ERR_INVALID_RESPONSE);
 }
 
 TEST_F(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafePort1) {
   FtpSocketDataProviderEvilPasv ctrl_socket("227 Portscan (127,0,0,1,0,22)\r\n",
-                                           FtpSocketDataProvider::PRE_QUIT);
+                                            FtpSocketDataProvider::PRE_QUIT);
   ExecuteTransaction(&ctrl_socket, "ftp://host/file", ERR_UNSAFE_PORT);
 }
 
 TEST_F(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafePort2) {
   // Still unsafe. 1 * 256 + 2 = 258, which is < 1024.
   FtpSocketDataProviderEvilPasv ctrl_socket("227 Portscan (127,0,0,1,1,2)\r\n",
-                                           FtpSocketDataProvider::PRE_QUIT);
+                                            FtpSocketDataProvider::PRE_QUIT);
   ExecuteTransaction(&ctrl_socket, "ftp://host/file", ERR_UNSAFE_PORT);
 }
 
 TEST_F(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafePort3) {
   // Still unsafe. 3 * 256 + 4 = 772, which is < 1024.
   FtpSocketDataProviderEvilPasv ctrl_socket("227 Portscan (127,0,0,1,3,4)\r\n",
-                                           FtpSocketDataProvider::PRE_QUIT);
+                                            FtpSocketDataProvider::PRE_QUIT);
   ExecuteTransaction(&ctrl_socket, "ftp://host/file", ERR_UNSAFE_PORT);
 }
 
 TEST_F(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafePort4) {
   // Unsafe. 8 * 256 + 1 = 2049, which is used by nfs.
   FtpSocketDataProviderEvilPasv ctrl_socket("227 Portscan (127,0,0,1,8,1)\r\n",
-                                           FtpSocketDataProvider::PRE_QUIT);
+                                            FtpSocketDataProvider::PRE_QUIT);
   ExecuteTransaction(&ctrl_socket, "ftp://host/file", ERR_UNSAFE_PORT);
 }
 
 TEST_F(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafeHost) {
   FtpSocketDataProviderEvilPasv ctrl_socket(
-      "227 Portscan (10,1,2,3,4,123,456)\r\n", FtpSocketDataProvider::PRE_SIZE);
+      "227 Portscan (10,1,2,3,123,456)\r\n", FtpSocketDataProvider::PRE_SIZE);
   std::string mock_data("mock-data");
   MockRead data_reads[] = {
     MockRead(mock_data.c_str()),
@@ -1039,7 +1066,7 @@ TEST_F(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafeHost) {
   // or ::1 depending on whether we use IPv6).
   const struct addrinfo* addrinfo = data_socket->addresses().head();
   while (addrinfo) {
-    EXPECT_NE("1.2.3.4", NetAddressToString(addrinfo));
+    EXPECT_NE("10.1.2.3", NetAddressToString(addrinfo));
     addrinfo = addrinfo->ai_next;
   }
 }

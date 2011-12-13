@@ -4,6 +4,12 @@
 
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 
+#if defined(OS_WIN)
+#include <commctrl.h>
+#include <dwmapi.h>
+#include <objidl.h>
+#endif
+
 #include "base/compiler_specific.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
@@ -33,18 +39,10 @@
 #include "views/widget/widget.h"
 
 #if defined(OS_WIN)
-#include <commctrl.h>
-#include <dwmapi.h>
-#include <objidl.h>
-
 #include "base/win/scoped_gdi_object.h"
 #if !defined(USE_AURA)
 #include "views/widget/native_widget_win.h"
 #endif
-#endif
-
-#if defined(TOOLKIT_USES_GTK)
-#include "ui/gfx/skia_utils_gtk.h"
 #endif
 
 namespace {
@@ -117,27 +115,6 @@ class OptInButtonBorder : public views::Border {
 
   DISALLOW_COPY_AND_ASSIGN(OptInButtonBorder);
 };
-
-gfx::NativeView GetRelativeWindowForPopup(gfx::NativeView edit_native_view) {
-#if defined(USE_AURA)
-  // TODO(beng):
-  NOTIMPLEMENTED();
-  return NULL;
-#elif defined(OS_WIN)
-  // When an IME is attached to the rich-edit control, retrieve its window
-  // handle and show this popup window under the IME windows.
-  // Otherwise, show this popup window under top-most windows.
-  // TODO(hbono): http://b/1111369 if we exclude this popup window from the
-  // display area of IME windows, this workaround becomes unnecessary.
-  HWND ime_window = ImmGetDefaultIMEWnd(edit_native_view);
-  return ime_window ? ime_window : HWND_NOTOPMOST;
-#elif defined(TOOLKIT_USES_GTK)
-  GtkWidget* toplevel = gtk_widget_get_toplevel(edit_native_view);
-  DCHECK(GTK_WIDGET_TOPLEVEL(toplevel));
-  return toplevel;
-#endif
-}
-
 }  // namespace
 
 class AutocompletePopupContentsView::AutocompletePopupWidget
@@ -148,7 +125,7 @@ class AutocompletePopupContentsView::AutocompletePopupWidget
   virtual ~AutocompletePopupWidget() {}
 
  private:
-   DISALLOW_COPY_AND_ASSIGN(AutocompletePopupWidget);
+  DISALLOW_COPY_AND_ASSIGN(AutocompletePopupWidget);
 };
 
 class AutocompletePopupContentsView::InstantOptInView
@@ -163,7 +140,7 @@ class AutocompletePopupContentsView::InstantOptInView
                         SkColorSetRGB(255, 242, 183),
                         SkColorSetRGB(250, 230, 145))) {
     views::Label* label = new views::Label(
-        UTF16ToWide(l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_LABEL)));
+        l10n_util::GetStringUTF16(IDS_INSTANT_OPT_IN_LABEL));
     label->SetFont(label_font);
 
     views::GridLayout* layout = new views::GridLayout(this);
@@ -211,8 +188,8 @@ class AutocompletePopupContentsView::InstantOptInView
   views::View* CreateButton(int id, const gfx::Font& font) {
     // NOTE: we can't use NativeButton as the popup is a layered window and
     // native buttons don't draw  in layered windows.
-    // TODO: these buttons look crap. Figure out the right border/background to
-    // use.
+    // TODO(sky): these buttons look crap. Figure out the right
+    // border/background to use.
     views::TextButton* button =
         new views::TextButton(this, UTF16ToWide(l10n_util::GetStringUTF16(id)));
     button->set_border(new OptInButtonBorder());
@@ -320,7 +297,7 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
   // we have enough row views.
   size_t child_rv_count = child_count();
   if (opt_in_view_) {
-    DCHECK(child_rv_count > 0);
+    DCHECK_GT(child_rv_count, 0u);
     child_rv_count--;
   }
   for (size_t i = 0; i < model_->result().size(); ++i) {
@@ -368,13 +345,12 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     params.bounds = GetPopupBounds();
     popup_->Init(params);
     popup_->SetContentsView(this);
-    popup_->MoveAbove(
-        GetRelativeWindowForPopup(omnibox_view_->GetNativeView()));
+    popup_->MoveAbove(omnibox_view_->GetRelativeWindowForPopup());
     if (!popup_.get()) {
       // For some IMEs GetRelativeWindowForPopup triggers the omnibox to lose
       // focus, thereby closing (and destroying) the popup.
-      // TODO: this won't be needed once we close the omnibox on input window
-      // showing.
+      // TODO(sky): this won't be needed once we close the omnibox on input
+      // window showing.
       return;
     }
     popup_->Show();
@@ -520,7 +496,7 @@ void AutocompletePopupContentsView::OnMouseExited(
 // AutocompletePopupContentsView, protected:
 
 void AutocompletePopupContentsView::PaintResultViews(gfx::CanvasSkia* canvas) {
-  canvas->drawColor(AutocompleteResultView::GetColor(
+  canvas->sk_canvas()->drawColor(AutocompleteResultView::GetColor(
       AutocompleteResultView::NORMAL, AutocompleteResultView::BACKGROUND));
   View::PaintChildren(canvas);
 }
@@ -570,7 +546,7 @@ void AutocompletePopupContentsView::OnPaint(gfx::Canvas* canvas) {
   paint.setAntiAlias(true);
 
   SkShader* shader = SkShader::CreateBitmapShader(
-      contents_canvas.getDevice()->accessBitmap(false),
+      contents_canvas.sk_canvas()->getDevice()->accessBitmap(false),
       SkShader::kClamp_TileMode,
       SkShader::kClamp_TileMode);
   paint.setShader(shader);
@@ -578,7 +554,7 @@ void AutocompletePopupContentsView::OnPaint(gfx::Canvas* canvas) {
 
   gfx::Path path;
   MakeContentsPath(&path, GetContentsBounds());
-  canvas->AsCanvasSkia()->drawPath(path, paint);
+  canvas->GetSkCanvas()->drawPath(path, paint);
 
   // Now we paint the border, so it will be alpha-blended atop the contents.
   // This looks slightly better in the corners than drawing the contents atop
@@ -644,7 +620,7 @@ void AutocompletePopupContentsView::MakeCanvasTransparent(
   // Allow the window blur effect to show through the popup background.
   SkAlpha alpha = GetThemeProvider()->ShouldUseNativeFrame() ?
       kGlassPopupAlpha : kOpaquePopupAlpha;
-  canvas->AsCanvasSkia()->drawColor(SkColorSetA(
+  canvas->GetSkCanvas()->drawColor(SkColorSetA(
       AutocompleteResultView::GetColor(AutocompleteResultView::NORMAL,
       AutocompleteResultView::BACKGROUND), alpha), SkXfermode::kDstIn_Mode);
 }

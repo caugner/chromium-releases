@@ -12,6 +12,11 @@ def Main(args):
   pwd = os.environ.get('PWD', '')
   is_integration_bot = 'nacl-chrome' in pwd
 
+  if not is_integration_bot and sys.platform == 'darwin':
+    # TODO: Reenable.
+    sys.stdout.write('Skipping nacl_integration, see http://crbug.com/100518\n')
+    return
+
   # On the main Chrome waterfall, we may need to control where the tests are
   # run.
   # If there is serious skew in the PPAPI interface that causes all of
@@ -35,9 +40,12 @@ def Main(args):
     # See http://code.google.com/p/nativeclient/issues/detail?id=2124
     # TODO(mseaborn): Reenable when this issue is resolved.
     tests_to_disable.append('run_ppapi_ppb_var_browser_test')
-    # Te behavior of the URLRequest changed slightly and this test needs to be
+    # The behavior of the URLRequest changed slightly and this test needs to be
     # updated. http://code.google.com/p/chromium/issues/detail?id=94352
     tests_to_disable.append('run_ppapi_ppb_url_request_info_browser_test')
+    # This test failed and caused the build's gatekeep to close the tree.
+    # http://code.google.com/p/chromium/issues/detail?id=96434
+    tests_to_disable.append('run_ppapi_example_post_message_test')
 
     # TODO(ncbray) why did these tests flake?
     # http://code.google.com/p/nativeclient/issues/detail?id=2230
@@ -49,6 +57,10 @@ def Main(args):
         'run_srpc_manifest_file_chrome_browser_test',
         'run_srpc_nameservice_chrome_browser_test',
         'run_srpc_nrd_xfer_chrome_browser_test',
+        'run_no_fault_pm_nameservice_chrome_browser_test',
+        'run_fault_pm_nameservice_chrome_browser_test',
+        'run_fault_pq_os_pm_nameservice_chrome_browser_test',
+        'run_fault_pq_dep_pm_nameservice_chrome_browser_test',
         ])
 
   if sys.platform == 'darwin':

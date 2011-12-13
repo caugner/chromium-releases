@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/time.h"
@@ -88,11 +89,10 @@ void SearchEngineDialogControllerBridge::OnTemplateURLServiceChanged() {
   searchEnginesModel_->AddObserver(bridge_.get());
 
   if (searchEnginesModel_->loaded()) {
-    MessageLoop::current()->PostTask(
-        FROM_HERE,
-        NewRunnableMethod(
-            bridge_.get(),
-            &SearchEngineDialogControllerBridge::OnTemplateURLServiceChanged));
+    MessageLoop::current()->PostTask(FROM_HERE,
+        base::Bind(
+            &SearchEngineDialogControllerBridge::OnTemplateURLServiceChanged,
+            bridge_.get()));
   } else {
     searchEnginesModel_->Load();
   }
@@ -196,6 +196,7 @@ void SearchEngineDialogControllerBridge::OnTemplateURLServiceChanged() {
   NSView* engineIdentifier = nil;  // either the logo or the text label
 
   int logoId = engine->logo_id();
+  NSString* shortName = SysUTF16ToNSString(engine->short_name());
   if (useImages && logoId > 0) {
     NSImage* logoImage =
         ResourceBundle::GetSharedInstance().GetNativeImageNamed(logoId);
@@ -207,7 +208,9 @@ void SearchEngineDialogControllerBridge::OnTemplateURLServiceChanged() {
     [logoView setEditable:NO];
 
     // Tooltip text provides accessibility.
-    [logoView setToolTip:base::SysUTF16ToNSString(engine->short_name())];
+    [logoView setToolTip:shortName];
+    [logoView accessibilitySetOverrideValue:shortName
+        forAttribute:NSAccessibilityDescriptionAttribute];
     engineIdentifier = logoView;
   } else {
     // No logo -- we must show a text label.
@@ -226,9 +229,8 @@ void SearchEngineDialogControllerBridge::OnTemplateURLServiceChanged() {
         paragraphStyle.get(), NSParagraphStyleAttributeName,
         nil];
 
-    NSString* value = base::SysUTF16ToNSString(engine->short_name());
     scoped_nsobject<NSAttributedString> attrValue(
-        [[NSAttributedString alloc] initWithString:value
+        [[NSAttributedString alloc] initWithString:shortName
                                         attributes:attrs]);
 
     [labelField setAttributedStringValue:attrValue.get()];
@@ -247,6 +249,11 @@ void SearchEngineDialogControllerBridge::OnTemplateURLServiceChanged() {
   [chooseButton setTag:index];
   [chooseButton setTarget:self];
   [chooseButton setAction:@selector(searchEngineSelected:)];
+
+  // Provide a more descriptive accessibility description.
+  id accElement = NSAccessibilityUnignoredDescendant(engineIdentifier);
+  [[chooseButton cell] accessibilitySetOverrideValue:accElement
+      forAttribute:NSAccessibilityTitleUIElementAttribute];
 
   // Put 'em together.
   NSRect engineIdentifierFrame = [engineIdentifier frame];

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 The Native Client Authors. All rights reserved.
+ * Copyright (c) 2011 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -15,9 +15,11 @@
 #include <utility>
 #include <vector>
 
+#include "base/compiler_specific.h"
+
 #include "native_client/src/include/portability_io.h"
-#include "native_client/src/include/nacl_scoped_ptr.h"
 #include "native_client/src/include/nacl_macros.h"
+#include "native_client/src/include/nacl_scoped_ptr.h"
 #include "native_client/src/include/nacl_string.h"
 #include "native_client/src/shared/imc/nacl_imc.h"
 #include "native_client/src/shared/platform/nacl_check.h"
@@ -56,11 +58,15 @@ namespace plugin {
 PluginReverseInterface::PluginReverseInterface(
     nacl::WeakRefAnchor* anchor,
     Plugin* plugin,
-    pp::CompletionCallback init_done_cb)
+    ServiceRuntime* service_runtime,
+    pp::CompletionCallback init_done_cb,
+    pp::CompletionCallback crash_cb)
       : anchor_(anchor),
         plugin_(plugin),
+        service_runtime_(service_runtime),
         shutting_down_(false),
-        init_done_cb_(init_done_cb) {
+        init_done_cb_(init_done_cb),
+        crash_cb_(crash_cb) {
   NaClXMutexCtor(&mu_);
   NaClXCondVarCtor(&cv_);
 }
@@ -71,9 +77,11 @@ PluginReverseInterface::~PluginReverseInterface() {
 }
 
 void PluginReverseInterface::ShutDown() {
+  NaClLog(4, "PluginReverseInterface::Shutdown: entered\n");
   nacl::MutexLocker take(&mu_);
   shutting_down_ = true;
   NaClXCondVarBroadcast(&cv_);
+  NaClLog(4, "PluginReverseInterface::Shutdown: broadcasted, exiting\n");
 }
 
 void PluginReverseInterface::Log(nacl::string message) {
@@ -84,7 +92,7 @@ void PluginReverseInterface::Log(nacl::string message) {
   plugin::WeakRefCallOnMainThread(
       anchor_,
       0,  /* delay in ms */
-      this,
+      ALLOW_THIS_IN_INITIALIZER_LIST(this),
       &plugin::PluginReverseInterface::Log_MainThreadContinuation,
       continuation);
 }
@@ -321,8 +329,25 @@ void PluginReverseInterface::CloseManifestEntry_MainThreadContinuation(
   // cls automatically deleted
 }
 
+void PluginReverseInterface::ReportCrash() {
+  NaClLog(0, "PluginReverseInterface::ReportCrash\n");
+  if (crash_cb_.pp_completion_callback().func != NULL) {
+    NaClLog(0, "PluginReverseInterface::ReportCrash: invoking CB\n");
+    pp::Module::Get()->core()->CallOnMainThread(0, crash_cb_, PP_OK);
+  } else {
+    NaClLog(0,
+            "PluginReverseInterface::ReportCrash:"
+            " crash_cb_ not valid, skipping\n");
+  }
+}
+
+void PluginReverseInterface::ReportExitStatus(int exit_status) {
+  service_runtime_->set_exit_status(exit_status);
+}
+
 ServiceRuntime::ServiceRuntime(Plugin* plugin,
-                               pp::CompletionCallback init_done_cb)
+                               pp::CompletionCallback init_done_cb,
+                               pp::CompletionCallback crash_cb)
     : plugin_(plugin),
       browser_interface_(plugin->browser_interface()),
       reverse_service_(NULL),
@@ -331,8 +356,11 @@ ServiceRuntime::ServiceRuntime(Plugin* plugin,
       async_send_desc_(NULL),
       anchor_(new nacl::WeakRefAnchor()),
       rev_interface_(new PluginReverseInterface(anchor_, plugin,
-                                                init_done_cb)) {
+                                                this,
+                                                init_done_cb, crash_cb)),
+      exit_status_(-1) {
   NaClSrpcChannelInitialize(&command_channel_);
+  NaClXMutexCtor(&mu_);
 }
 
 bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
@@ -545,6 +573,17 @@ ServiceRuntime::~ServiceRuntime() {
   rev_interface_->Unref();
 
   anchor_->Unref();
+  NaClMutexDtor(&mu_);
+}
+
+int ServiceRuntime::exit_status() {
+  nacl::MutexLocker take(&mu_);
+  return exit_status_;
+}
+
+void ServiceRuntime::set_exit_status(int exit_status) {
+  nacl::MutexLocker take(&mu_);
+  exit_status_ = exit_status & 0xff;
 }
 
 }  // namespace plugin

@@ -11,7 +11,6 @@
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
-#include "net/http/http_alternate_protocols.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_request_info.h"
@@ -211,7 +210,7 @@ class HttpStreamFactoryImpl::Job {
   SSLConfig proxy_ssl_config_;
   const BoundNetLog net_log_;
 
-  CompletionCallbackImpl<Job> io_callback_;
+  OldCompletionCallbackImpl<Job> io_callback_;
   scoped_ptr<ClientSocketHandle> connection_;
   HttpNetworkSession* const session_;
   HttpStreamFactoryImpl* const stream_factory_;

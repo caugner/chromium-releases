@@ -8,41 +8,58 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/task.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/native_web_keyboard_event_views.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/backing_store_skia.h"
 #include "content/browser/renderer_host/render_widget_host.h"
+#include "content/common/notification_service.h"
 #include "content/common/result_codes.h"
 #include "content/common/view_messages.h"
+#include "grit/ui_strings.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/gtk/WebInputEventFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/x11/WebScreenInfoFactory.h"
+#include "ui/base/clipboard/clipboard.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia.h"
 #include "views/events/event.h"
 #include "views/ime/input_method.h"
+#include "views/views_delegate.h"
 #include "views/widget/tooltip_manager.h"
 #include "views/widget/widget.h"
+
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+#include "base/bind.h"
+#include "chrome/browser/renderer_host/accelerated_surface_container_touch.h"
+#include "content/browser/gpu/gpu_process_host_ui_shim.h"
+#include "content/common/gpu/gpu_messages.h"
+#include "ui/gfx/gl/gl_bindings.h"
+#endif
 
 #if defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
 #include <gtk/gtkwindow.h>
 #include <gdk/gdkx.h>
+#include "content/browser/renderer_host/gtk_window_utils.h"
+#include "views/widget/native_widget_gtk.h"
 #endif
 
-#if defined(TOUCH_UI)
-#include "chrome/browser/renderer_host/accelerated_surface_container_touch.h"
+#if defined(OS_POSIX)
+#include "content/browser/renderer_host/gtk_window_utils.h"
 #endif
 
 static const int kMaxWindowWidth = 4000;
 static const int kMaxWindowHeight = 4000;
+static const int kTouchControllerUpdateDelay = 150;
 
 // static
 const char RenderWidgetHostViewViews::kViewClassName[] =
@@ -81,6 +98,15 @@ void InitializeWebMouseEventFromViewsEvent(const views::LocatedEvent& event,
   wmevent->globalY = wmevent->y + origin.y();
 }
 
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+void AcknowledgeSwapBuffers(int32 route_id, int gpu_host_id) {
+  // It's possible that gpu_host_id is no longer valid at this point (like if
+  // gpu process was restarted after a crash).  SendToGpuHost handles this.
+  GpuProcessHostUIShim::SendToGpuHost(gpu_host_id,
+      new AcceleratedSurfaceMsg_BuffersSwappedACK(route_id));
+}
+#endif
+
 }  // namespace
 
 RenderWidgetHostViewViews::RenderWidgetHostViewViews(RenderWidgetHost* host)
@@ -88,20 +114,23 @@ RenderWidgetHostViewViews::RenderWidgetHostViewViews(RenderWidgetHost* host)
       about_to_validate_and_paint_(false),
       is_hidden_(false),
       is_loading_(false),
-      native_cursor_(NULL),
+      native_cursor_(gfx::kNullCursor),
       is_showing_context_menu_(false),
       visually_deemphasized_(false),
       touch_event_(),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
       has_composition_text_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(touch_selection_controller_(
-          views::TouchSelectionController::create(this))) {
+          views::TouchSelectionController::create(this))),
+      ALLOW_THIS_IN_INITIALIZER_LIST(update_touch_selection_(this)) {
   set_focusable(true);
   host_->SetView(this);
 
 #if defined(TOUCH_UI)
   SetPaintToLayer(true);
-  SetFillsBoundsOpaquely(true);
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_KEYBOARD_VISIBLE_BOUNDS_CHANGED,
+                 NotificationService::AllSources());
 #endif
 }
 
@@ -155,11 +184,6 @@ void RenderWidgetHostViewViews::DidBecomeSelected() {
   is_hidden_ = false;
   if (host_)
     host_->WasRestored();
-
-  if (touch_selection_controller_.get()) {
-    touch_selection_controller_->SelectionChanged(selection_start_,
-                                                  selection_end_);
-  }
 }
 
 void RenderWidgetHostViewViews::WasHidden() {
@@ -176,8 +200,8 @@ void RenderWidgetHostViewViews::WasHidden() {
   if (host_)
     host_->WasHidden();
 
-  if (touch_selection_controller_.get())
-    touch_selection_controller_->ClientViewLostFocus();
+  if (!update_touch_selection_.empty())
+    update_touch_selection_.RevokeAll();
 }
 
 void RenderWidgetHostViewViews::SetSize(const gfx::Size& size) {
@@ -194,7 +218,8 @@ void RenderWidgetHostViewViews::SetSize(const gfx::Size& size) {
 }
 
 void RenderWidgetHostViewViews::SetBounds(const gfx::Rect& rect) {
-  NOTIMPLEMENTED();
+  // TODO(oshima): chromeos/touch doesn't allow moving window.
+  SetSize(rect.size());
 }
 
 gfx::NativeView RenderWidgetHostViewViews::GetNativeView() const {
@@ -251,22 +276,23 @@ void RenderWidgetHostViewViews::SetIsLoading(bool is_loading) {
 #endif  // TOOLKIT_USES_GTK
 }
 
-void RenderWidgetHostViewViews::ImeUpdateTextInputState(
+void RenderWidgetHostViewViews::TextInputStateChanged(
     ui::TextInputType type,
-    bool can_compose_inline,
-    const gfx::Rect& caret_rect) {
+    bool can_compose_inline) {
   // TODO(kinaba): currently, can_compose_inline is ignored and always treated
   // as true. We need to support "can_compose_inline=false" for PPAPI plugins
   // that may want to avoid drawing composition-text by themselves and pass
   // the responsibility to the browser.
-  DCHECK(GetInputMethod());
+
+  // This is async message and by the time the ipc arrived,
+  // RWHVV may be detached from Top level widget, in which case
+  // GetInputMethod may return NULL;
+  views::InputMethod* input_method = GetInputMethod();
+
   if (text_input_type_ != type) {
     text_input_type_ = type;
-    GetInputMethod()->OnTextInputTypeChanged(this);
-  }
-  if (caret_bounds_ != caret_rect) {
-    caret_bounds_ = caret_rect;
-    GetInputMethod()->OnCaretBoundsChanged(this);
+    if (input_method)
+      input_method->OnTextInputTypeChanged(this);
   }
 }
 
@@ -326,28 +352,105 @@ void RenderWidgetHostViewViews::Destroy() {
     parent()->RemoveChildView(this);
   }
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+
+#if defined(TOUCH_UI)
+  // Send out all outstanding ACKs so that we don't block the GPU
+  // process.
+  for (std::vector< base::Callback<void(void)> >::const_iterator
+      it = on_compositing_ended_callbacks_.begin();
+      it != on_compositing_ended_callbacks_.end(); ++it) {
+    it->Run();
+  }
+  on_compositing_ended_callbacks_.clear();
+
+  // Remove dangling reference.
+  if (GetWidget() && GetWidget()->GetCompositor()) {
+    ui::Compositor *compositor = GetWidget()->GetCompositor();
+    if (compositor->HasObserver(this))
+      compositor->RemoveObserver(this);
+  }
+#endif
 }
 
-void RenderWidgetHostViewViews::SetTooltipText(const std::wstring& tip) {
+void RenderWidgetHostViewViews::SetTooltipText(const string16& tip) {
   const int kMaxTooltipLength = 8 << 10;
   // Clamp the tooltip length to kMaxTooltipLength so that we don't
   // accidentally DOS the user with a mega tooltip.
-  tooltip_text_ =
-      ui::TruncateString(WideToUTF16Hack(tip), kMaxTooltipLength);
+  tooltip_text_ = ui::TruncateString(tip, kMaxTooltipLength);
   if (GetWidget())
     GetWidget()->TooltipTextChanged(this);
 }
 
-void RenderWidgetHostViewViews::SelectionChanged(const std::string& text,
-                                                 const ui::Range& range,
-                                                 const gfx::Point& start,
-                                                 const gfx::Point& end) {
+void RenderWidgetHostViewViews::SelectionChanged(const string16& text,
+                                                 size_t offset,
+                                                 const ui::Range& range) {
+  selection_text_ = text;
+  selection_text_offset_ = offset;
+  selection_range_ = range;
+
   // TODO(anicolao): deal with the clipboard without GTK
   NOTIMPLEMENTED();
-  selection_start_ = start;
-  selection_end_ = end;
-  if (touch_selection_controller_.get())
-    touch_selection_controller_->SelectionChanged(start, end);
+}
+
+void RenderWidgetHostViewViews::SelectionBoundsChanged(
+    const gfx::Rect& start_rect,
+    const gfx::Rect& end_rect) {
+  views::InputMethod* input_method = GetInputMethod();
+
+  if (selection_start_rect_ == start_rect && selection_end_rect_ == end_rect)
+    return;
+
+  selection_start_rect_ = start_rect;
+  selection_end_rect_ = end_rect;
+
+  if (input_method)
+    input_method->OnCaretBoundsChanged(this);
+
+  // TODO(sad): This is a workaround for a webkit bug:
+  // https://bugs.webkit.org/show_bug.cgi?id=67464
+  // Remove this when the bug gets fixed.
+  //
+  // Webkit can send spurious selection-change on text-input (e.g. when
+  // inserting text at the beginning of a non-empty text control). But in those
+  // cases, it does send the correct selection information quickly afterwards.
+  // So delay the notification to the touch-selection controller.
+  if (update_touch_selection_.empty()) {
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        update_touch_selection_.NewRunnableMethod(
+          &RenderWidgetHostViewViews::UpdateTouchSelectionController),
+        kTouchControllerUpdateDelay);
+  }
+}
+
+void RenderWidgetHostViewViews::Observe(int type,
+                                        const NotificationSource& source,
+                                        const NotificationDetails& details) {
+#if defined(TOUCH_UI)
+  if (type != chrome::NOTIFICATION_KEYBOARD_VISIBLE_BOUNDS_CHANGED) {
+    NOTREACHED();
+    return;
+  }
+
+  if (!GetWidget())
+    return;
+
+  gfx::Rect keyboard_rect = *Details<gfx::Rect>(details).ptr();
+  if (keyboard_rect != keyboard_rect_) {
+    keyboard_rect_ = keyboard_rect;
+    gfx::Rect screen_bounds = GetScreenBounds();
+    gfx::Rect intersecting_rect = screen_bounds.Intersect(keyboard_rect);
+    gfx::Rect available_rect = screen_bounds.Subtract(intersecting_rect);
+
+    // Convert available rect to window (RWHVV) coordinates.
+    gfx::Point origin = available_rect.origin();
+    gfx::Rect r = GetWidget()->GetClientAreaScreenBounds();
+    origin.SetPoint(origin.x() - r.x(), origin.y() - r.y());
+    views::View::ConvertPointFromWidget(this, &origin);
+    available_rect.set_origin(origin);
+    if (!available_rect.IsEmpty())
+      host_->ScrollFocusedEditableNodeIntoRect(available_rect);
+  }
+#endif
 }
 
 void RenderWidgetHostViewViews::ShowingContextMenu(bool showing) {
@@ -362,7 +465,7 @@ BackingStore* RenderWidgetHostViewViews::AllocBackingStore(
 void RenderWidgetHostViewViews::SetBackground(const SkBitmap& background) {
   RenderWidgetHostView::SetBackground(background);
   if (host_)
-    host_->Send(new ViewMsg_SetBackground(host_->routing_id(), background));
+    host_->SetBackground(background);
 }
 
 void RenderWidgetHostViewViews::SetVisuallyDeemphasized(
@@ -382,10 +485,19 @@ void RenderWidgetHostViewViews::SetScrollOffsetPinning(
     bool is_pinned_to_left, bool is_pinned_to_right) {
 }
 
+bool RenderWidgetHostViewViews::LockMouse() {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+void RenderWidgetHostViewViews::UnlockMouse() {
+  NOTIMPLEMENTED();
+}
+
 void RenderWidgetHostViewViews::SelectRect(const gfx::Point& start,
                                            const gfx::Point& end) {
   if (host_)
-    host_->Send(new ViewMsg_SelectRange(host_->routing_id(), start, end));
+    host_->SelectRange(start, end);
 }
 
 bool RenderWidgetHostViewViews::IsCommandIdChecked(int command_id) const {
@@ -394,8 +506,26 @@ bool RenderWidgetHostViewViews::IsCommandIdChecked(int command_id) const {
 }
 
 bool RenderWidgetHostViewViews::IsCommandIdEnabled(int command_id) const {
-  // TODO(varunjain): implement this.
-  NOTIMPLEMENTED();
+  bool editable = GetTextInputType() != ui::TEXT_INPUT_TYPE_NONE;
+  bool has_selection = !selection_range_.is_empty();
+  string16 result;
+  switch (command_id) {
+    case IDS_APP_CUT:
+      return editable && has_selection;
+    case IDS_APP_COPY:
+      return has_selection;
+    case IDS_APP_PASTE:
+      views::ViewsDelegate::views_delegate->GetClipboard()->
+          ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
+      return editable && !result.empty();
+    case IDS_APP_DELETE:
+      return editable && has_selection;
+    case IDS_APP_SELECT_ALL:
+      return true;
+    default:
+      NOTREACHED();
+      return false;
+  }
   return true;
 }
 
@@ -407,8 +537,25 @@ bool RenderWidgetHostViewViews::GetAcceleratorForCommandId(
 }
 
 void RenderWidgetHostViewViews::ExecuteCommand(int command_id) {
-  // TODO(varunjain): implement this.
-  NOTIMPLEMENTED();
+  switch (command_id) {
+    case IDS_APP_CUT:
+      host_->Cut();
+      break;
+    case IDS_APP_COPY:
+      host_->Copy();
+      break;
+    case IDS_APP_PASTE:
+      host_->Paste();
+      break;
+    case IDS_APP_DELETE:
+      host_->Delete();
+      break;
+    case IDS_APP_SELECT_ALL:
+      host_->SelectAll();
+      break;
+    default:
+      NOTREACHED();
+  }
 }
 
 std::string RenderWidgetHostViewViews::GetClassName() const {
@@ -529,10 +676,10 @@ views::TextInputClient* RenderWidgetHostViewViews::GetTextInputClient() {
 }
 
 bool RenderWidgetHostViewViews::GetTooltipText(const gfx::Point& p,
-                                               std::wstring* tooltip) {
+                                               string16* tooltip) {
   if (tooltip_text_.length() == 0)
     return false;
-  *tooltip = UTF16ToWide(tooltip_text_);
+  *tooltip = tooltip_text_;
   return true;
 }
 
@@ -591,12 +738,12 @@ void RenderWidgetHostViewViews::InsertChar(char16 ch, int flags) {
   }
 }
 
-ui::TextInputType RenderWidgetHostViewViews::GetTextInputType() {
+ui::TextInputType RenderWidgetHostViewViews::GetTextInputType() const {
   return text_input_type_;
 }
 
 gfx::Rect RenderWidgetHostViewViews::GetCaretBounds() {
-  return caret_bounds_;
+  return selection_start_rect_.Union(selection_end_rect_);
 }
 
 bool RenderWidgetHostViewViews::HasCompositionText() {
@@ -669,15 +816,21 @@ views::View* RenderWidgetHostViewViews::GetOwnerViewOfTextInputClient() {
 }
 
 void RenderWidgetHostViewViews::OnPaint(gfx::Canvas* canvas) {
-  if (is_hidden_ || !host_ || host_->is_accelerated_compositing_active())
+  if (is_hidden_ || !host_)
     return;
 
-  // Paint a "hole" in the canvas so that the render of the web page is on
+  DCHECK(!host_->is_accelerated_compositing_active() ||
+         get_use_acceleration_when_possible());
+
+  // If we aren't using the views compositor, then
+  // paint a "hole" in the canvas so that the render of the web page is on
   // top of whatever else has already been painted in the views hierarchy.
   // Later views might still get to paint on top.
-  canvas->FillRectInt(SK_ColorBLACK, 0, 0,
-                      bounds().width(), bounds().height(),
-                      SkXfermode::kClear_Mode);
+  if (!get_use_acceleration_when_possible()) {
+    canvas->FillRectInt(SK_ColorBLACK, 0, 0,
+                        bounds().width(), bounds().height(),
+                        SkXfermode::kClear_Mode);
+  }
 
   DCHECK(!about_to_validate_and_paint_);
 
@@ -700,7 +853,7 @@ void RenderWidgetHostViewViews::OnPaint(gfx::Canvas* canvas) {
     // Only render the widget if it is attached to a window; there's a short
     // period where this object isn't attached to a window but hasn't been
     // Destroy()ed yet and it receives paint messages...
-    if (GetInnerNativeView()->window) {
+    if (IsReadyToPaint()) {
 #endif
       if (!visually_deemphasized_) {
         // In the common case, use XCopyArea. We don't draw more than once, so
@@ -740,6 +893,10 @@ void RenderWidgetHostViewViews::OnPaint(gfx::Canvas* canvas) {
   } else {
     if (whiteout_start_time_.is_null())
       whiteout_start_time_ = base::TimeTicks::Now();
+
+    if (get_use_acceleration_when_possible())
+      canvas->FillRectInt(SK_ColorWHITE, 0, 0,
+                          bounds().width(), bounds().height());
   }
 }
 
@@ -763,6 +920,8 @@ void RenderWidgetHostViewViews::OnFocus() {
   ShowCurrentCursor();
   host_->GotFocus();
   host_->SetInputMethodActive(GetInputMethod()->IsActive());
+
+  UpdateTouchSelectionController();
 }
 
 void RenderWidgetHostViewViews::OnBlur() {
@@ -774,6 +933,9 @@ void RenderWidgetHostViewViews::OnBlur() {
   if (!is_showing_context_menu_ && !is_hidden_)
     host_->Blur();
   host_->SetInputMethodActive(false);
+
+  if (touch_selection_controller_.get())
+    touch_selection_controller_->ClientViewLostFocus();
 }
 
 bool RenderWidgetHostViewViews::NeedsInputGrab() {
@@ -816,3 +978,190 @@ void RenderWidgetHostViewViews::FinishImeCompositionSession() {
   GetInputMethod()->CancelComposition(this);
   has_composition_text_ = false;
 }
+
+void RenderWidgetHostViewViews::UpdateTouchSelectionController() {
+  gfx::Point start = selection_start_rect_.origin();
+  start.Offset(0, selection_start_rect_.height());
+  gfx::Point end = selection_end_rect_.origin();
+  end.Offset(0, selection_end_rect_.height());
+
+  if (touch_selection_controller_.get())
+    touch_selection_controller_->SelectionChanged(start, end);
+}
+
+#if !defined(OS_WIN)
+void RenderWidgetHostViewViews::UpdateCursor(const WebCursor& cursor) {
+  // Optimize the common case, where the cursor hasn't changed.
+  // However, we can switch between different pixmaps, so only on the
+  // non-pixmap branch.
+#if defined(TOOLKIT_USES_GTK)
+  if (current_cursor_.GetCursorType() != GDK_CURSOR_IS_PIXMAP &&
+      current_cursor_.GetCursorType() == cursor.GetCursorType()) {
+    return;
+  }
+#endif
+  current_cursor_ = cursor;
+  ShowCurrentCursor();
+}
+
+void RenderWidgetHostViewViews::ShowCurrentCursor() {
+#if !defined(USE_AURA)
+  // The widget may not have a window. If that's the case, abort mission. This
+  // is the same issue as that explained above in Paint().
+  if (!IsReadyToPaint())
+    return;
+#endif
+
+  native_cursor_ = current_cursor_.GetNativeCursor();
+}
+
+#if defined(TOOLKIT_USES_GTK)
+bool RenderWidgetHostViewViews::IsReadyToPaint() {
+  views::Widget* top = NULL;
+
+  // TODO(oshima): move this functionality to Widget.
+  if (views::ViewsDelegate::views_delegate &&
+      views::ViewsDelegate::views_delegate->GetDefaultParentView()) {
+    top = views::ViewsDelegate::views_delegate->GetDefaultParentView()->
+        GetWidget();
+  } else {
+    // Use GetTopLevelWidget()'s native view to get platform
+    // native widget. This is a workaround to get window's NativeWidgetGtk
+    // under both views desktop (where toplevel is NativeWidgetViews,
+    // whose GetNativeView returns gtk widget of the native window)
+    // and non views desktop (where toplevel is NativeWidgetGtk).
+    top = GetWidget() ?
+        views::Widget::GetWidgetForNativeView(
+            GetWidget()->GetTopLevelWidget()->GetNativeView()) :
+        NULL;
+  }
+
+  return top ?
+      !!(static_cast<const views::NativeWidgetGtk*>(top->native_widget())->
+         window_contents()->window) : false;
+}
+#endif
+
+#endif  // !OS_WIN
+
+#if defined(TOOLKIT_USES_GTK)
+void RenderWidgetHostViewViews::CreatePluginContainer(
+    gfx::PluginWindowHandle id) {
+  // TODO(anicolao): plugin_container_manager_.CreatePluginContainer(id);
+}
+
+void RenderWidgetHostViewViews::DestroyPluginContainer(
+    gfx::PluginWindowHandle id) {
+  // TODO(anicolao): plugin_container_manager_.DestroyPluginContainer(id);
+}
+
+void RenderWidgetHostViewViews::AcceleratedCompositingActivated(
+    bool activated) {
+#if defined(TOUCH_UI)
+  // If we don't use a views compositor, we currently have no way of
+  // supporting rendering via the GPU process.
+  if (!get_use_acceleration_when_possible() && activated)
+    NOTREACHED();
+#else
+  if (activated)
+    NOTIMPLEMENTED();
+#endif
+}
+#endif  // TOOLKIT_USES_GTK
+
+#if defined(OS_POSIX)
+void RenderWidgetHostViewViews::GetDefaultScreenInfo(
+    WebKit::WebScreenInfo* results) {
+  NOTIMPLEMENTED();
+}
+
+void RenderWidgetHostViewViews::GetScreenInfo(WebKit::WebScreenInfo* results) {
+#if !defined(USE_AURA)
+  views::Widget* widget = GetWidget() ? GetWidget()->GetTopLevelWidget() : NULL;
+  if (widget && widget->GetNativeView())
+    content::GetScreenInfoFromNativeWindow(widget->GetNativeView()->window,
+                                           results);
+  else
+    RenderWidgetHostView::GetDefaultScreenInfo(results);
+#else
+  RenderWidgetHostView::GetDefaultScreenInfo(results);
+#endif
+}
+
+gfx::Rect RenderWidgetHostViewViews::GetRootWindowBounds() {
+  views::Widget* widget = GetWidget() ? GetWidget()->GetTopLevelWidget() : NULL;
+  return widget ? widget->GetWindowScreenBounds() : gfx::Rect();
+}
+#endif
+
+#if !defined(OS_WIN) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+gfx::PluginWindowHandle RenderWidgetHostViewViews::GetCompositingSurface() {
+  // TODO(oshima): The original implementation was broken as
+  // GtkNativeViewManager doesn't know about NativeWidgetGtk. Figure
+  // out if this makes sense without compositor. If it does, then find
+  // out the right way to handle.
+  NOTIMPLEMENTED();
+  return gfx::kNullPluginWindow;
+}
+#endif
+
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+gfx::PluginWindowHandle RenderWidgetHostViewViews::GetCompositingSurface() {
+  // On TOUCH_UI builds, the GPU process renders to an offscreen surface
+  // (created by the GPU process), which is later displayed by the browser.
+  // As the GPU process creates this surface, we can return any non-zero value.
+  return 1;
+}
+
+void RenderWidgetHostViewViews::AcceleratedSurfaceNew(
+    int32 width,
+    int32 height,
+    uint64* surface_id,
+    TransportDIB::Handle* surface_handle) {
+  scoped_ptr<AcceleratedSurfaceContainerTouch> surface(
+      AcceleratedSurfaceContainerTouch::CreateAcceleratedSurfaceContainer(
+          gfx::Size(width, height)));
+  if (!surface->Initialize(surface_id)) {
+    LOG(ERROR) << "Failed to create AcceleratedSurfaceContainer";
+    return;
+  }
+  *surface_handle = surface->Handle();
+
+  accelerated_surface_containers_[*surface_id] = surface.release();
+}
+
+void RenderWidgetHostViewViews::AcceleratedSurfaceRelease(uint64 surface_id) {
+  accelerated_surface_containers_.erase(surface_id);
+}
+
+void RenderWidgetHostViewViews::AcceleratedSurfaceBuffersSwapped(
+    uint64 surface_id,
+    int32 route_id,
+    int gpu_host_id) {
+  SetExternalTexture(accelerated_surface_containers_[surface_id].get());
+  glFlush();
+
+  if (!GetWidget() || !GetWidget()->GetCompositor()) {
+    // We have no compositor, so we have no way to display the surface
+    AcknowledgeSwapBuffers(route_id, gpu_host_id);  // Must still send the ACK
+  } else {
+    // Add sending an ACK to the list of things to do OnCompositingEnded
+    on_compositing_ended_callbacks_.push_back(
+        base::Bind(AcknowledgeSwapBuffers, route_id, gpu_host_id));
+    ui::Compositor *compositor = GetWidget()->GetCompositor();
+    if (!compositor->HasObserver(this))
+      compositor->AddObserver(this);
+  }
+}
+
+void RenderWidgetHostViewViews::OnCompositingEnded(ui::Compositor* compositor) {
+  for (std::vector< base::Callback<void(void)> >::const_iterator
+      it = on_compositing_ended_callbacks_.begin();
+      it != on_compositing_ended_callbacks_.end(); ++it) {
+    it->Run();
+  }
+  on_compositing_ended_callbacks_.clear();
+  compositor->RemoveObserver(this);
+}
+
+#endif

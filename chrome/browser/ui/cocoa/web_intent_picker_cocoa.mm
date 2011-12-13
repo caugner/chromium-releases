@@ -7,7 +7,8 @@
 #include "content/browser/tab_contents/tab_contents.h"
 
 // static
-WebIntentPicker* WebIntentPicker::Create(TabContents* tab_contents,
+WebIntentPicker* WebIntentPicker::Create(Browser* browser,
+                                         TabContentsWrapper* wrapper,
                                          WebIntentPickerDelegate* delegate) {
   // TODO(binji) Implement. See http://crbug.com/93915.
   return NULL;

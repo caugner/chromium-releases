@@ -14,6 +14,7 @@
 
 #include "base/callback.h"
 #include "base/format_macros.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/pickle.h"
@@ -50,6 +51,7 @@ HttpNetworkSession* CreateNetworkSession(
     SSLConfigService* ssl_config_service,
     HttpAuthHandlerFactory* http_auth_handler_factory,
     NetworkDelegate* network_delegate,
+    HttpServerProperties* http_server_properties,
     NetLog* net_log) {
   HttpNetworkSession::Params params;
   params.host_resolver = host_resolver;
@@ -62,6 +64,7 @@ HttpNetworkSession* CreateNetworkSession(
   params.ssl_config_service = ssl_config_service;
   params.http_auth_handler_factory = http_auth_handler_factory;
   params.network_delegate = network_delegate;
+  params.http_server_properties = http_server_properties;
   params.net_log = net_log;
   return new HttpNetworkSession(params);
 }
@@ -87,7 +90,7 @@ HttpCache::BackendFactory* HttpCache::DefaultBackend::InMemory(int max_bytes) {
 
 int HttpCache::DefaultBackend::CreateBackend(NetLog* net_log,
                                              disk_cache::Backend** backend,
-                                             CompletionCallback* callback) {
+                                             OldCompletionCallback* callback) {
   DCHECK_GE(max_bytes_, 0);
   return disk_cache::CreateCacheBackend(type_, path_, max_bytes_, true,
                                         thread_, net_log, backend, callback);
@@ -120,7 +123,7 @@ struct HttpCache::PendingOp {
   disk_cache::Entry* disk_entry;
   disk_cache::Backend* backend;
   WorkItem* writer;
-  CompletionCallback* callback;  // BackendCallback.
+  OldCompletionCallback* callback;  // BackendCallback.
   WorkItemList pending_queue;
 };
 
@@ -142,7 +145,7 @@ class HttpCache::WorkItem {
       : operation_(operation), trans_(trans), entry_(entry), callback_(NULL),
         backend_(NULL) {}
   WorkItem(WorkItemOperation operation, Transaction* trans,
-           CompletionCallback* cb, disk_cache::Backend** backend)
+           OldCompletionCallback* cb, disk_cache::Backend** backend)
       : operation_(operation), trans_(trans), entry_(NULL), callback_(cb),
         backend_(backend) {}
   ~WorkItem() {}
@@ -179,13 +182,13 @@ class HttpCache::WorkItem {
   WorkItemOperation operation_;
   Transaction* trans_;
   ActiveEntry** entry_;
-  CompletionCallback* callback_;  // User callback.
+  OldCompletionCallback* callback_;  // User callback.
   disk_cache::Backend** backend_;
 };
 
 //-----------------------------------------------------------------------------
 
-// This class is a specialized type of CompletionCallback that allows us to
+// This class is a specialized type of OldCompletionCallback that allows us to
 // pass multiple arguments to the completion routine.
 class HttpCache::BackendCallback : public CallbackRunner<Tuple1<int> > {
  public:
@@ -240,7 +243,7 @@ class HttpCache::MetadataWriter {
   scoped_refptr<IOBuffer> buf_;
   int buf_len_;
   base::Time expected_response_time_;
-  CompletionCallbackImpl<MetadataWriter> callback_;
+  OldCompletionCallbackImpl<MetadataWriter> callback_;
   HttpRequestInfo request_info_;
   DISALLOW_COPY_AND_ASSIGN(MetadataWriter);
 };
@@ -320,6 +323,7 @@ HttpCache::HttpCache(HostResolver* host_resolver,
                      SSLConfigService* ssl_config_service,
                      HttpAuthHandlerFactory* http_auth_handler_factory,
                      NetworkDelegate* network_delegate,
+                     HttpServerProperties* http_server_properties,
                      NetLog* net_log,
                      BackendFactory* backend_factory)
     : net_log_(net_log),
@@ -342,6 +346,7 @@ HttpCache::HttpCache(HostResolver* host_resolver,
                   ssl_config_service,
                   http_auth_handler_factory,
                   network_delegate,
+                  http_server_properties,
                   net_log))),
       ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
 }
@@ -419,7 +424,7 @@ HttpCache::~HttpCache() {
 }
 
 int HttpCache::GetBackend(disk_cache::Backend** backend,
-                          CompletionCallback* callback) {
+                          OldCompletionCallback* callback) {
   DCHECK(callback != NULL);
 
   if (disk_cache_.get()) {
@@ -465,6 +470,14 @@ void HttpCache::CloseAllConnections() {
   HttpNetworkSession* session = network->GetSession();
   if (session)
     session->CloseAllConnections();
+  }
+
+void HttpCache::CloseIdleConnections() {
+  net::HttpNetworkLayer* network =
+      static_cast<net::HttpNetworkLayer*>(network_layer_.get());
+  HttpNetworkSession* session = network->GetSession();
+  if (session)
+    session->CloseIdleConnections();
 }
 
 void HttpCache::OnExternalCacheHit(const GURL& url,
@@ -501,7 +514,7 @@ HttpNetworkSession* HttpCache::GetSession() {
 //-----------------------------------------------------------------------------
 
 int HttpCache::CreateBackend(disk_cache::Backend** backend,
-                             CompletionCallback* callback) {
+                             OldCompletionCallback* callback) {
   if (!backend_factory_.get())
     return ERR_FAILED;
 

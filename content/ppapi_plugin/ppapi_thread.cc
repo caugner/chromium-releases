@@ -11,17 +11,18 @@
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "content/common/child_process.h"
-#include "content/common/content_switches.h"
 #include "content/common/sandbox_init_wrapper.h"
 #include "content/ppapi_plugin/broker_process_dispatcher.h"
 #include "content/ppapi_plugin/plugin_process_dispatcher.h"
 #include "content/ppapi_plugin/ppapi_webkit_thread.h"
+#include "content/public/common/content_switches.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ppapi/c/dev/ppp_network_state_dev.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "ppapi/proxy/interface_list.h"
 #include "webkit/plugins/ppapi/webkit_forwarding_impl.h"
 
 #if defined(OS_WIN)
@@ -80,6 +81,12 @@ bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
                                 OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashTCPSocket_WriteACK,
                                 OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashUDPSocket_RecvFromACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashUDPSocket_SendToACK,
+                                OnPluginDispatcherMessageReceived(msg))
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashUDPSocket_BindACK,
+                                OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER(PpapiMsg_SetNetworkState, OnMsgSetNetworkState)
   IPC_END_MESSAGE_MAP()
   return true;
@@ -136,7 +143,8 @@ void PpapiThread::Unregister(uint32 plugin_dispatcher_id) {
 }
 
 void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
-  base::ScopedNativeLibrary library(base::LoadNativeLibrary(path, NULL));
+  std::string error;
+  base::ScopedNativeLibrary library(base::LoadNativeLibrary(path, &error));
 
 #if defined(OS_WIN)
   // Once we lower the token the sandbox is locked down and no new modules
@@ -155,7 +163,8 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
 #endif
 
   if (!library.is_valid()) {
-    LOG(ERROR) << "Failed to load pepper module";
+    LOG(ERROR) << "Failed to load Pepper module from "
+      << path.value() << " (error: " << error << ")";
     return;
   }
 
@@ -209,7 +218,7 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
     }
     int32_t init_error = init_module(
         local_pp_module_,
-        &ppapi::proxy::PluginDispatcher::GetInterfaceFromDispatcher);
+        &ppapi::proxy::PluginDispatcher::GetBrowserInterface);
     if (init_error != PP_OK) {
       LOG(WARNING) << "InitModule failed with error " << init_error;
       return;

@@ -33,10 +33,10 @@ class ImportLockDialogView : public views::DialogDelegateView {
   virtual void Layout() OVERRIDE;
 
   // views::DialogDelegate:
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;

@@ -1,8 +1,8 @@
+
 // Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_url_handler.h"
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
@@ -12,6 +12,7 @@
 #include "content/common/content_client.h"
 #include "content/common/dom_storage_common.h"
 #include "content/common/view_messages.h"
+#include "content/test/test_browser_context.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
@@ -22,7 +23,7 @@ using webkit_glue::PasswordForm;
 void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
                         int page_id,
                         const GURL& url,
-                        PageTransition::Type transition) {
+                        content::PageTransition transition) {
   params->page_id = page_id;
   params->url = url;
   params->referrer = GURL();
@@ -77,11 +78,11 @@ bool TestRenderViewHost::TestOnMessageReceived(const IPC::Message& msg) {
 }
 
 void TestRenderViewHost::SendNavigate(int page_id, const GURL& url) {
-  SendNavigateWithTransition(page_id, url, PageTransition::LINK);
+  SendNavigateWithTransition(page_id, url, content::PAGE_TRANSITION_LINK);
 }
 
 void TestRenderViewHost::SendNavigateWithTransition(
-    int page_id, const GURL& url, PageTransition::Type transition) {
+    int page_id, const GURL& url, content::PageTransition transition) {
   ViewHostMsg_FrameNavigate_Params params;
 
   params.page_id = page_id;
@@ -227,8 +228,7 @@ void TestRenderWidgetHostView::AcceleratedSurfaceBuffersSwapped(
     uint64 surface_id,
     int renderer_id,
     int32 route_id,
-    int gpu_host_id,
-    uint64 swap_buffers_count) {
+    int gpu_host_id) {
 }
 
 void TestRenderWidgetHostView::GpuRenderingStateDidChange() {
@@ -250,6 +250,13 @@ gfx::Rect TestRenderWidgetHostView::GetRootWindowBounds() {
 
 gfx::PluginWindowHandle TestRenderWidgetHostView::GetCompositingSurface() {
   return gfx::kNullPluginWindow;
+}
+
+bool TestRenderWidgetHostView::LockMouse() {
+  return false;
+}
+
+void TestRenderWidgetHostView::UnlockMouse() {
 }
 
 TestRenderViewHostFactory::TestRenderViewHostFactory(
@@ -300,15 +307,15 @@ TestRenderViewHost* RenderViewHostTestHarness::rvh() {
 
 TestRenderViewHost* RenderViewHostTestHarness::pending_rvh() {
   return static_cast<TestRenderViewHost*>(
-      contents()->render_manager()->pending_render_view_host());
+      contents()->render_manager_for_testing()->pending_render_view_host());
 }
 
 TestRenderViewHost* RenderViewHostTestHarness::active_rvh() {
   return pending_rvh() ? pending_rvh() : rvh();
 }
 
-TestingProfile* RenderViewHostTestHarness::profile() {
-  return profile_.get();
+content::BrowserContext* RenderViewHostTestHarness::browser_context() {
+  return browser_context_.get();
 }
 
 MockRenderProcessHost* RenderViewHostTestHarness::process() {
@@ -326,14 +333,15 @@ void RenderViewHostTestHarness::SetContents(TestTabContents* contents) {
 }
 
 TestTabContents* RenderViewHostTestHarness::CreateTestTabContents() {
-  // See comment above profile_ decl for why we check for NULL here.
-  if (!profile_.get())
-    profile_.reset(new TestingProfile());
+  // See comment above browser_context_ decl for why we check for NULL here.
+  if (!browser_context_.get())
+    browser_context_.reset(new TestBrowserContext());
 
   // This will be deleted when the TabContents goes away.
-  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
+  SiteInstance* instance =
+      SiteInstance::CreateSiteInstance(browser_context_.get());
 
-  return new TestTabContents(profile_.get(), instance);
+  return new TestTabContents(browser_context_.get(), instance);
 }
 
 void RenderViewHostTestHarness::NavigateAndCommit(const GURL& url) {
@@ -355,10 +363,10 @@ void RenderViewHostTestHarness::TearDown() {
   SetContents(NULL);
 
   // Make sure that we flush any messages related to TabContents destruction
-  // before we destroy the profile.
+  // before we destroy the browser context.
   MessageLoop::current()->RunAllPending();
 
-  // Release the profile on the UI thread.
-  message_loop_.DeleteSoon(FROM_HERE, profile_.release());
+  // Release the browser context on the UI thread.
+  message_loop_.DeleteSoon(FROM_HERE, browser_context_.release());
   message_loop_.RunAllPending();
 }

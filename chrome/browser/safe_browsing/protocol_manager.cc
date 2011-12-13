@@ -12,8 +12,8 @@
 #include "base/metrics/histogram.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/task.h"
 #include "base/timer.h"
 #include "chrome/browser/safe_browsing/protocol_parser.h"
@@ -264,7 +264,7 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
       HandleGetHashError(Time::Now());
       if (status.status() == net::URLRequestStatus::FAILED) {
         VLOG(1) << "SafeBrowsing GetHash request for: " << source->url()
-                << " failed with os error: " << status.os_error();
+                << " failed with error: " << status.error();
       } else {
         VLOG(1) << "SafeBrowsing GetHash request for: " << source->url()
                 << " failed with error: " << response_code;
@@ -338,7 +338,7 @@ void SafeBrowsingProtocolManager::OnURLFetchComplete(
       UpdateFinished(false);
       if (status.status() == net::URLRequestStatus::FAILED) {
         VLOG(1) << "SafeBrowsing request for: " << source->url()
-                << " failed with os error: " << status.os_error();
+                << " failed with error: " << status.error();
       } else {
         VLOG(1) << "SafeBrowsing request for: " << source->url()
                 << " failed with error: " << response_code;
@@ -797,9 +797,9 @@ GURL SafeBrowsingProtocolManager::SafeBrowsingHitUrl(
   }
   return GURL(base::StringPrintf("%s&evts=%s&evtd=%s&evtr=%s&evhr=%s&evtb=%d",
       url.c_str(), threat_list.c_str(),
-      EscapeQueryParamValue(malicious_url.spec(), true).c_str(),
-      EscapeQueryParamValue(page_url.spec(), true).c_str(),
-      EscapeQueryParamValue(referrer_url.spec(), true).c_str(),
+      net::EscapeQueryParamValue(malicious_url.spec(), true).c_str(),
+      net::EscapeQueryParamValue(page_url.spec(), true).c_str(),
+      net::EscapeQueryParamValue(referrer_url.spec(), true).c_str(),
       is_subresource));
 }
 

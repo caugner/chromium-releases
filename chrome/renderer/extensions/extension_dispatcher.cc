@@ -11,15 +11,19 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/extensions/extension_permission_set.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/renderer/extensions/chrome_app_bindings.h"
+#include "chrome/renderer/chrome_render_process_observer.h"
+#include "chrome/renderer/extensions/app_bindings.h"
+#include "chrome/renderer/extensions/chrome_v8_context.h"
+#include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/chrome_webstore_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_groups.h"
 #include "chrome/renderer/extensions/extension_process_bindings.h"
-#include "chrome/renderer/extensions/js_only_v8_extensions.h"
+#include "chrome/renderer/extensions/file_browser_private_bindings.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
-#include "content/renderer/render_thread.h"
+#include "content/public/renderer/render_thread.h"
+#include "grit/renderer_resources.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
@@ -36,16 +40,17 @@ using WebKit::WebDataSource;
 using WebKit::WebFrame;
 using WebKit::WebSecurityPolicy;
 using WebKit::WebString;
+using content::RenderThread;
 
 ExtensionDispatcher::ExtensionDispatcher()
     : is_webkit_initialized_(false) {
-  std::string type_str = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-      switches::kProcessType);
-  is_extension_process_ = type_str == switches::kExtensionProcess ||
-      CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
+  const CommandLine& command_line = *(CommandLine::ForCurrentProcess());
+  is_extension_process_ =
+      command_line.HasSwitch(switches::kExtensionProcess) ||
+      command_line.HasSwitch(switches::kSingleProcess);
 
   if (is_extension_process_) {
-    RenderThread::current()->set_idle_notification_delay_in_s(
+    RenderThread::Get()->SetIdleNotificationDelayInS(
         kInitialExtensionIdleHandlerDelayS);
   }
 
@@ -82,18 +87,21 @@ void ExtensionDispatcher::WebKitInitialized() {
   if (is_extension_process_) {
     forced_idle_timer_.Start(FROM_HERE,
         base::TimeDelta::FromSeconds(kMaxExtensionIdleHandlerDelayS),
-        RenderThread::current(), &RenderThread::IdleHandler);
+        RenderThread::Get(), &RenderThread::IdleHandler);
   }
 
-  RegisterExtension(extensions_v8::ChromeAppExtension::Get(this), false);
+  RegisterExtension(new AppBindings(this), false);
   RegisterExtension(ChromeWebstoreExtension::Get(), false);
 
   // Add v8 extensions related to chrome extensions.
-  RegisterExtension(ExtensionProcessBindings::Get(this), true);
-  RegisterExtension(JsonSchemaJsV8Extension::Get(), true);
+  RegisterExtension(new ChromeV8Extension(
+      "extensions/json_schema.js", IDR_JSON_SCHEMA_JS, NULL), true);
   RegisterExtension(EventBindings::Get(this), true);
+  RegisterExtension(new FileBrowserPrivateBindings(), true);
   RegisterExtension(RendererExtensionBindings::Get(this), true);
-  RegisterExtension(ExtensionApiTestV8Extension::Get(), true);
+  RegisterExtension(ExtensionProcessBindings::Get(this), true);
+  RegisterExtension(new ChromeV8Extension(
+      "extensions/apitest.js", IDR_EXTENSION_APITEST_JS, NULL), true);
 
   // Initialize host permissions for any extensions that were activated before
   // WebKit was initialized.
@@ -112,12 +120,12 @@ void ExtensionDispatcher::IdleNotification() {
     // Dampen the forced delay as well if the extension stays idle for long
     // periods of time.
     int64 forced_delay_s = std::max(static_cast<int64>(
-        RenderThread::current()->idle_notification_delay_in_s()),
+        RenderThread::Get()->GetIdleNotificationDelayInS()),
         kMaxExtensionIdleHandlerDelayS);
     forced_idle_timer_.Stop();
     forced_idle_timer_.Start(FROM_HERE,
         base::TimeDelta::FromSeconds(forced_delay_s),
-        RenderThread::current(), &RenderThread::IdleHandler);
+        RenderThread::Get(), &RenderThread::IdleHandler);
   }
 }
 
@@ -132,22 +140,24 @@ void ExtensionDispatcher::OnMessageInvoke(const std::string& extension_id,
                                           const std::string& function_name,
                                           const ListValue& args,
                                           const GURL& event_url) {
-  EventBindings::CallFunction(
+  v8_context_set_.DispatchChromeHiddenMethod(
       extension_id, function_name, args, NULL, event_url);
 
   // Reset the idle handler each time there's any activity like event or message
   // dispatch, for which Invoke is the chokepoint.
   if (is_extension_process_) {
-    RenderThread::current()->ScheduleIdleHandler(
+    RenderThread::Get()->ScheduleIdleHandler(
         kInitialExtensionIdleHandlerDelayS);
   }
 }
 
 void ExtensionDispatcher::OnDeliverMessage(int target_port_id,
                                            const std::string& message) {
-  RendererExtensionBindings::DeliverMessage(target_port_id,
-                                            message,
-                                            NULL);  // All render views.
+  RendererExtensionBindings::DeliverMessage(
+      v8_context_set_.GetAll(),
+      target_port_id,
+      message,
+      NULL);  // All render views.
 }
 
 void ExtensionDispatcher::OnLoaded(const ExtensionMsg_Loaded_Params& params) {
@@ -193,33 +203,71 @@ bool ExtensionDispatcher::AllowScriptExtension(
     const std::string& v8_extension_name,
     int extension_group) {
   // NULL in unit tests.
-  if (!RenderThread::current())
+  if (!RenderThread::Get())
     return true;
 
   // If we don't know about it, it was added by WebCore, so we should allow it.
-  if (!RenderThread::current()->IsRegisteredExtension(v8_extension_name))
+  if (!RenderThread::Get()->IsRegisteredExtension(v8_extension_name))
     return true;
 
   // If the V8 extension is not restricted, allow it to run anywhere.
   if (!restricted_v8_extensions_.count(v8_extension_name))
     return true;
 
-  // Note: we prefer the provisional URL here instead of the document URL
-  // because we might be currently loading an URL into a blank page.
-  // See http://code.google.com/p/chromium/issues/detail?id=10924
-  WebDataSource* ds = frame->provisionalDataSource();
-  if (!ds)
-    ds = frame->dataSource();
-
   // Extension-only bindings should be restricted to content scripts and
   // extension-blessed URLs.
   if (extension_group == EXTENSION_GROUP_CONTENT_SCRIPTS ||
-      extensions_.ExtensionBindingsAllowed(ds->request().url())) {
+      extensions_.ExtensionBindingsAllowed(
+          UserScriptSlave::GetLatestURLForFrame(frame))) {
     return true;
   }
 
   return false;
+}
 
+void ExtensionDispatcher::DidCreateScriptContext(
+    WebFrame* frame, v8::Handle<v8::Context> v8_context, int world_id) {
+  std::string extension_id;
+  if (!test_extension_id_.empty()) {
+    extension_id = test_extension_id_;
+  } else if (world_id != 0) {
+    extension_id = user_script_slave_->GetExtensionIdForIsolatedWorld(world_id);
+  } else {
+    GURL frame_url = UserScriptSlave::GetLatestURLForFrame(frame);
+    extension_id = extensions_.GetIdByURL(frame_url);
+  }
+
+  ChromeV8Context* context =
+      new ChromeV8Context(v8_context, frame, extension_id);
+  v8_context_set_.Add(context);
+
+  context->DispatchOnLoadEvent(
+      is_extension_process_,
+      ChromeRenderProcessObserver::is_incognito_process());
+
+  VLOG(1) << "Num tracked contexts: " << v8_context_set_.size();
+}
+
+void ExtensionDispatcher::WillReleaseScriptContext(
+    WebFrame* frame, v8::Handle<v8::Context> v8_context, int world_id) {
+  ChromeV8Context* context = v8_context_set_.GetByV8Context(v8_context);
+  if (!context)
+    return;
+
+  context->DispatchOnUnloadEvent();
+
+  ChromeV8Extension::InstanceSet extensions = ChromeV8Extension::GetAll();
+  for (ChromeV8Extension::InstanceSet::const_iterator iter = extensions.begin();
+       iter != extensions.end(); ++iter) {
+    (*iter)->ContextWillBeReleased(context);
+  }
+
+  v8_context_set_.Remove(context);
+  VLOG(1) << "Num tracked contexts: " << v8_context_set_.size();
+}
+
+void ExtensionDispatcher::SetTestExtensionId(const std::string& id) {
+  test_extension_id_ = id;
 }
 
 void ExtensionDispatcher::OnActivateApplication(
@@ -233,8 +281,7 @@ void ExtensionDispatcher::OnActivateExtension(
 
   // This is called when starting a new extension page, so start the idle
   // handler ticking.
-  RenderThread::current()->ScheduleIdleHandler(
-      kInitialExtensionIdleHandlerDelayS);
+  RenderThread::Get()->ScheduleIdleHandler(kInitialExtensionIdleHandlerDelayS);
 
   UpdateActiveExtensions();
 
@@ -340,5 +387,5 @@ void ExtensionDispatcher::RegisterExtension(v8::Extension* extension,
   if (restrict_to_extensions)
     restricted_v8_extensions_.insert(extension->name());
 
-  RenderThread::current()->RegisterExtension(extension);
+  RenderThread::Get()->RegisterExtension(extension);
 }

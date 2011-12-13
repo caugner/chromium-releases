@@ -5,6 +5,8 @@
 #include "chrome/browser/bookmarks/bookmark_html_writer.h"
 
 #include "base/base64.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
@@ -187,7 +189,8 @@ class Writer : public Task {
   // Writes raw text out returning true on success. This does not escape
   // the text in anyway.
   bool Write(const std::string& text) {
-    size_t wrote = file_stream_.Write(text.c_str(), text.length(), NULL);
+    size_t wrote = file_stream_.Write(text.c_str(), text.length(),
+                                      net::CompletionCallback());
     bool result = (wrote == text.length());
     DCHECK(result);
     return result;
@@ -207,7 +210,7 @@ class Writer : public Task {
         break;
 
       case CONTENT:
-        utf8_string = EscapeForHTML(text);
+        utf8_string = net::EscapeForHTML(text);
         break;
 
       default:
@@ -448,7 +451,8 @@ bool BookmarkFaviconFetcher::FetchNextFavicon() {
           profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
       favicon_service->GetFaviconForURL(GURL(url), history::FAVICON,
           &favicon_consumer_,
-          NewCallback(this, &BookmarkFaviconFetcher::OnFaviconDataAvailable));
+          base::Bind(&BookmarkFaviconFetcher::OnFaviconDataAvailable,
+                     base::Unretained(this)));
       return true;
     } else {
       bookmark_urls_.pop_front();

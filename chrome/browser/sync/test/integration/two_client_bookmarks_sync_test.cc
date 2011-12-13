@@ -18,6 +18,7 @@ using bookmarks_helper::CreateFavicon;
 using bookmarks_helper::GetBookmarkBarNode;
 using bookmarks_helper::GetOtherNode;
 using bookmarks_helper::GetUniqueNodeByURL;
+using bookmarks_helper::HasNodeWithURL;
 using bookmarks_helper::IndexedFolderName;
 using bookmarks_helper::IndexedSubfolderName;
 using bookmarks_helper::IndexedSubsubfolderName;
@@ -132,13 +133,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
 
 // Test Scribe ID - 370489.
 // TODO(rsimha): Enable after http://crbug.com/94941 is fixed.
-#if defined(OS_MACOSX)
 IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
                        FAILS_SC_AddFirstBMWithFavicon) {
-#else
-IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest,
-                       SC_AddFirstBMWithFavicon) {
-#endif
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   ASSERT_TRUE(AllModelsMatchVerifier());
 
@@ -1522,7 +1518,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, DisableSync) {
 
   ASSERT_TRUE(GetClient(1)->DisableSyncForAllDatatypes());
   ASSERT_TRUE(AddFolder(0, IndexedFolderName(0)) != NULL);
-  ASSERT_TRUE(GetClient(0)->AwaitSyncCycleCompletion("Added a folder."));
+  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion("Added a folder."));
   ASSERT_FALSE(AllModelsMatch());
 
   ASSERT_TRUE(AddFolder(1, IndexedFolderName(1)) != NULL);
@@ -1556,6 +1552,38 @@ IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, MC_DuplicateFolders) {
   ASSERT_TRUE(AwaitQuiescence());
   ASSERT_TRUE(AllModelsMatch());
   ASSERT_FALSE(ContainsDuplicateBookmarks(0));
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientBookmarksSyncTest, MC_DeleteBookmark) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(GetClient(1)->DisableSyncForDatatype(syncable::BOOKMARKS));
+
+  const GURL bar_url("http://example.com/bar");
+  const GURL other_url("http://example.com/other");
+
+  ASSERT_TRUE(AddURL(0, GetBookmarkBarNode(0), 0, L"bar", bar_url) != NULL);
+  ASSERT_TRUE(AddURL(0, GetOtherNode(0), 0, L"other", other_url) != NULL);
+
+  ASSERT_TRUE(AwaitQuiescence());
+
+  ASSERT_TRUE(HasNodeWithURL(0, bar_url));
+  ASSERT_TRUE(HasNodeWithURL(0, other_url));
+  ASSERT_FALSE(HasNodeWithURL(1, bar_url));
+  ASSERT_FALSE(HasNodeWithURL(1, other_url));
+
+  Remove(0, GetBookmarkBarNode(0), 0);
+  ASSERT_TRUE(AwaitQuiescence());
+
+  ASSERT_FALSE(HasNodeWithURL(0, bar_url));
+  ASSERT_TRUE(HasNodeWithURL(0, other_url));
+
+  ASSERT_TRUE(GetClient(1)->EnableSyncForDatatype(syncable::BOOKMARKS));
+  ASSERT_TRUE(AwaitQuiescence());
+
+  ASSERT_FALSE(HasNodeWithURL(0, bar_url));
+  ASSERT_TRUE(HasNodeWithURL(0, other_url));
+  ASSERT_FALSE(HasNodeWithURL(1, bar_url));
+  ASSERT_TRUE(HasNodeWithURL(1, other_url));
 }
 
 // TCM ID - 3719307 - Test a scenario of updating the name of the same bookmark

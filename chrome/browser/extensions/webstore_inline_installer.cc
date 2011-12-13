@@ -6,11 +6,14 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
@@ -62,8 +65,7 @@ class SafeWebstoreResponseParser : public UtilityProcessHost::Client {
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &SafeWebstoreResponseParser::StartWorkOnIOThread));
+        base::Bind(&SafeWebstoreResponseParser::StartWorkOnIOThread, this));
   }
 
   void StartWorkOnIOThread() {
@@ -114,8 +116,7 @@ class SafeWebstoreResponseParser : public UtilityProcessHost::Client {
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &SafeWebstoreResponseParser::ReportResultOnUIThread));
+        base::Bind(&SafeWebstoreResponseParser::ReportResultOnUIThread, this));
   }
 
   void ReportResultOnUIThread() {
@@ -149,7 +150,9 @@ WebstoreInlineInstaller::WebstoreInlineInstaller(TabContents* tab_contents,
       install_id_(install_id),
       id_(webstore_item_id),
       requestor_url_(requestor_url),
-      delegate_(delegate) {}
+      delegate_(delegate),
+      average_rating_(0.0),
+      rating_count_(0) {}
 
 WebstoreInlineInstaller::~WebstoreInlineInstaller() {
 }
@@ -230,7 +233,8 @@ void WebstoreInlineInstaller::OnWebstoreResponseParseSuccess(
         GURL(redirect_url),
         tab_contents()->GetURL(),
         NEW_FOREGROUND_TAB,
-        PageTransition::AUTO_BOOKMARK));
+        content::PAGE_TRANSITION_AUTO_BOOKMARK,
+        false));
     CompleteInstall(kInlineInstallSupportedError);
     return;
   }
@@ -337,17 +341,15 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
                                       average_rating_,
                                       rating_count_);
 
-  ShowExtensionInstallDialogForManifest(profile,
-                                        this,
-                                        manifest,
-                                        id_,
-                                        localized_name_,
-                                        localized_description_,
-                                        &icon_,
-                                        prompt,
-                                        &dummy_extension_);
-
-  if (!dummy_extension_.get()) {
+  if (!ShowExtensionInstallDialogForManifest(profile,
+                                             this,
+                                             manifest,
+                                             id_,
+                                             localized_name_,
+                                             localized_description_,
+                                             &icon_,
+                                             prompt,
+                                             &dummy_extension_)) {
     CompleteInstall(kInvalidManifestError);
     return;
   }
@@ -375,21 +377,17 @@ void WebstoreInlineInstaller::InstallUIProceed() {
   entry->use_app_installed_bubble = true;
   CrxInstaller::SetWhitelistEntry(id_, entry);
 
-  GURL install_url(extension_urls::GetWebstoreInstallUrl(
-      id_, g_browser_process->GetApplicationLocale()));
+  Profile* profile = Profile::FromBrowserContext(
+      tab_contents()->browser_context());
 
-  NavigationController& controller = tab_contents()->controller();
-  // TODO(mihaip): we pretend like the referrer is the gallery in order to pass
-  // the checks in ExtensionService::IsDownloadFromGallery. We should instead
-  // pass the real referrer, track that this is an inline install in the
-  // whitelist entry and look that up when checking that this is a valid
-  // download.
-  GURL referrer(extension_urls::GetWebstoreItemDetailURLPrefix() + id_);
-  controller.LoadURL(install_url, referrer, PageTransition::LINK);
+  WebstoreInstaller* installer =
+      profile->GetExtensionService()->webstore_installer();
+  installer->InstallExtension(id_, NULL,
+                              WebstoreInstaller::FLAG_INLINE_INSTALL);
 
   // TODO(mihaip): the success message should happen later, when the extension
-  // is actually downloaded and installed (when NOTIFICATION_EXTENSION_INSTALLED
-  // or NOTIFICATION_EXTENSION_INSTALL_ERROR fire).
+  // is actually downloaded and installed (by using the callbacks on
+  // ExtensionInstaller::Delegate).
   CompleteInstall("");
 }
 

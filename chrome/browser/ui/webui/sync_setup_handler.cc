@@ -4,16 +4,23 @@
 
 #include "chrome/browser/ui/webui/sync_setup_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
+#include "chrome/browser/sync/util/oauth.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/webui/sync_promo_ui.h"
+#include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
@@ -66,7 +73,7 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
     return false;
 
   DictionaryValue* result = static_cast<DictionaryValue*>(parsed_value.get());
-  if (!result->GetBoolean("keepEverythingSynced", &config->sync_everything))
+  if (!result->GetBoolean("syncAllDataTypes", &config->sync_everything))
     return false;
 
   // These values need to be kept in sync with where they are written in
@@ -171,7 +178,9 @@ bool GetPassphrase(const std::string& json, std::string* passphrase) {
 
 }  // namespace
 
-SyncSetupHandler::SyncSetupHandler() : flow_(NULL) {
+SyncSetupHandler::SyncSetupHandler(ProfileManager* profile_manager)
+    : flow_(NULL),
+      profile_manager_(profile_manager) {
 }
 
 SyncSetupHandler::~SyncSetupHandler() {
@@ -194,9 +203,6 @@ void SyncSetupHandler::GetStaticLocalizedValues(
   localized_strings->SetString(
       "cannotAccessAccountURL",
       google_util::StringAppendGoogleLocaleParam(kCanNotAccessAccountUrl));
-  localized_strings->SetString(
-      "createNewAccountURL",
-      google_util::StringAppendGoogleLocaleParam(kCreateNewAccountUrl));
   localized_strings->SetString(
       "introduction",
       GetStringFUTF16(IDS_SYNC_LOGIN_INTRODUCTION,
@@ -221,29 +227,47 @@ void SyncSetupHandler::GetStaticLocalizedValues(
       GetStringFUTF16(IDS_SYNC_PASSPHRASE_RECOVER,
                       ASCIIToUTF16(google_util::StringAppendGoogleLocaleParam(
                           chrome::kSyncGoogleDashboardURL))));
+  localized_strings->SetString(
+      "promoTitle",
+      GetStringFUTF16(IDS_SYNC_PROMO_TITLE,
+                      GetStringUTF16(IDS_PRODUCT_NAME)));
+  localized_strings->SetString(
+      "promoMessageTitle",
+      GetStringFUTF16(IDS_SYNC_PROMO_MESSAGE_TITLE,
+                      GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
+
+  std::string create_account_url =
+      google_util::StringAppendGoogleLocaleParam(kCreateNewAccountUrl);
+  string16 create_account = GetStringUTF16(IDS_SYNC_CREATE_ACCOUNT);
+  create_account= UTF8ToUTF16("<a id='create-account-link' target='_blank' "
+      "class='account-link' href='" + create_account_url + "'>") +
+      create_account + UTF8ToUTF16("</a>");
+  localized_strings->SetString("createAccountLinkHTML",
+      GetStringFUTF16(IDS_SYNC_CREATE_ACCOUNT_PREFIX, create_account));
 
   static OptionsStringResource resources[] = {
     { "syncSetupOverlayTitle", IDS_SYNC_SETUP_TITLE },
     { "syncSetupConfigureTitle", IDS_SYNC_SETUP_CONFIGURE_TITLE },
-    { "signinPrefix", IDS_SYNC_LOGIN_SIGNIN_PREFIX },
-    { "signinSuffix", IDS_SYNC_LOGIN_SIGNIN_SUFFIX },
     { "cannotBeBlank", IDS_SYNC_CANNOT_BE_BLANK },
-    { "emailLabel", IDS_SYNC_LOGIN_EMAIL },
-    { "passwordLabel", IDS_SYNC_LOGIN_PASSWORD },
+    { "emailLabel", IDS_SYNC_LOGIN_EMAIL_NEW_LINE },
+    { "passwordLabel", IDS_SYNC_LOGIN_PASSWORD_NEW_LINE },
     { "invalidCredentials", IDS_SYNC_INVALID_USER_CREDENTIALS },
     { "signin", IDS_SYNC_SIGNIN },
     { "couldNotConnect", IDS_SYNC_LOGIN_COULD_NOT_CONNECT },
+    { "unrecoverableError", IDS_SYNC_UNRECOVERABLE_ERROR },
+    { "errorLearnMore", IDS_LEARN_MORE },
+    { "unrecoverableErrorHelpURL", IDS_SYNC_UNRECOVERABLE_ERROR_HELP_URL },
     { "cannotAccessAccount", IDS_SYNC_CANNOT_ACCESS_ACCOUNT },
-    { "createAccount", IDS_SYNC_CREATE_ACCOUNT },
     { "cancel", IDS_CANCEL },
     { "settingUp", IDS_SYNC_LOGIN_SETTING_UP },
     { "errorSigningIn", IDS_SYNC_ERROR_SIGNING_IN },
+    { "signinHeader", IDS_SYNC_PROMO_SIGNIN_HEADER},
     { "captchaInstructions", IDS_SYNC_GAIA_CAPTCHA_INSTRUCTIONS },
     { "invalidAccessCode", IDS_SYNC_INVALID_ACCESS_CODE_LABEL },
     { "enterAccessCode", IDS_SYNC_ENTER_ACCESS_CODE_LABEL },
     { "getAccessCodeHelp", IDS_SYNC_ACCESS_CODE_HELP_LABEL },
     { "getAccessCodeURL", IDS_SYNC_GET_ACCESS_CODE_URL },
-    { "keepEverythingSynced", IDS_SYNC_EVERYTHING },
+    { "syncAllDataTypes", IDS_SYNC_EVERYTHING },
     { "chooseDataTypes", IDS_SYNC_CHOOSE_DATATYPES },
     { "bookmarks", IDS_SYNC_DATATYPE_BOOKMARKS },
     { "preferences", IDS_SYNC_DATATYPE_PREFERENCES },
@@ -254,9 +278,9 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "typedURLs", IDS_SYNC_DATATYPE_TYPED_URLS },
     { "apps", IDS_SYNC_DATATYPE_APPS },
     { "searchEngines", IDS_SYNC_DATATYPE_SEARCH_ENGINES },
-    { "foreignSessions", IDS_SYNC_DATATYPE_SESSIONS },
+    { "openTabs", IDS_SYNC_DATATYPE_TABS },
     { "syncZeroDataTypesError", IDS_SYNC_ZERO_DATA_TYPES_ERROR },
-    { "abortedError", IDS_SYNC_SETUP_ABORTED_BY_PENDING_CLEAR },
+    { "serviceUnavailableError", IDS_SYNC_SETUP_ABORTED_BY_PENDING_CLEAR },
     { "encryptAllLabel", IDS_SYNC_ENCRYPT_ALL_LABEL },
     { "googleOption", IDS_SYNC_PASSPHRASE_OPT_GOOGLE },
     { "explicitOption", IDS_SYNC_PASSPHRASE_OPT_EXPLICIT },
@@ -276,7 +300,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "enterPassphraseTitle", IDS_SYNC_ENTER_PASSPHRASE_TITLE },
     { "enterPassphraseBody", IDS_SYNC_ENTER_PASSPHRASE_BODY },
     { "enterOtherPassphraseBody", IDS_SYNC_ENTER_OTHER_PASSPHRASE_BODY },
-    { "enterGooglePassphraseBody", IDS_SYNC_ENTER_PASSPHRASE_BODY },
+    { "enterGooglePassphraseBody", IDS_SYNC_ENTER_GOOGLE_PASSPHRASE_BODY },
     { "passphraseLabel", IDS_SYNC_PASSPHRASE_LABEL },
     { "incorrectPassphrase", IDS_SYNC_INCORRECT_PASSPHRASE },
     { "passphraseWarning", IDS_SYNC_PASSPHRASE_WARNING },
@@ -291,6 +315,14 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "encryptSensitiveOption", IDS_SYNC_ENCRYPT_SENSITIVE_DATA },
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
+    { "aspWarningText", IDS_SYNC_ASP_PASSWORD_WARNING_TEXT },
+    { "promoPageTitle", IDS_NEW_TAB_TITLE},
+    { "promoMessageBody", IDS_SYNC_PROMO_MESSAGE_BODY},
+    { "promoSkipButton", IDS_SYNC_PROMO_SKIP_BUTTON},
+    { "promoAdvanced", IDS_SYNC_PROMO_ADVANCED},
+    { "promoLearnMoreShow", IDS_SYNC_PROMO_LEARN_MORE_SHOW},
+    { "promoLearnMoreHide", IDS_SYNC_PROMO_LEARN_MORE_HIDE},
+    { "promoInformation", IDS_SYNC_PROMO_INFORMATION},
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -299,23 +331,40 @@ void SyncSetupHandler::GetStaticLocalizedValues(
 void SyncSetupHandler::Initialize() {
 }
 
+void SyncSetupHandler::OnGetOAuthTokenSuccess(const std::string& oauth_token) {
+  flow_->OnUserSubmittedOAuth(oauth_token);
+}
+
+void SyncSetupHandler::OnGetOAuthTokenFailure(
+    const GoogleServiceAuthError& error) {
+  CloseSyncSetup();
+}
+
 void SyncSetupHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("SyncSetupDidClosePage",
-      NewCallback(this, &SyncSetupHandler::OnDidClosePage));
+      base::Bind(&SyncSetupHandler::OnDidClosePage,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SyncSetupSubmitAuth",
-      NewCallback(this, &SyncSetupHandler::HandleSubmitAuth));
+      base::Bind(&SyncSetupHandler::HandleSubmitAuth,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SyncSetupConfigure",
-      NewCallback(this, &SyncSetupHandler::HandleConfigure));
+      base::Bind(&SyncSetupHandler::HandleConfigure,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SyncSetupPassphrase",
-      NewCallback(this, &SyncSetupHandler::HandlePassphraseEntry));
+      base::Bind(&SyncSetupHandler::HandlePassphraseEntry,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SyncSetupPassphraseCancel",
-      NewCallback(this, &SyncSetupHandler::HandlePassphraseCancel));
+      base::Bind(&SyncSetupHandler::HandlePassphraseCancel,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SyncSetupAttachHandler",
-      NewCallback(this, &SyncSetupHandler::HandleAttachHandler));
+      base::Bind(&SyncSetupHandler::HandleAttachHandler,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SyncSetupShowErrorUI",
-      NewCallback(this, &SyncSetupHandler::HandleShowErrorUI));
+      base::Bind(&SyncSetupHandler::HandleShowErrorUI,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("SyncSetupShowSetupUI",
-      NewCallback(this, &SyncSetupHandler::HandleShowSetupUI));
+      base::Bind(&SyncSetupHandler::HandleShowSetupUI,
+                 base::Unretained(this)));
 }
 
 // Ideal(?) solution here would be to mimic the ClientLogin overlay.  Since
@@ -323,11 +372,19 @@ void SyncSetupHandler::RegisterMessages() {
 // The current implementation is functional, but fails asthetically.
 // TODO(rickcam): Bug 90711: Update UI for OAuth sign-in flow
 void SyncSetupHandler::ShowOAuthLogin() {
+  DCHECK(browser_sync::IsUsingOAuth());
+
   Profile* profile = Profile::FromWebUI(web_ui_);
-  profile->GetProfileSyncService()->signin()->StartOAuthSignIn();
+  oauth_login_.reset(new GaiaOAuthFetcher(this,
+                                          profile->GetRequestContext(),
+                                          profile,
+                                          GaiaConstants::kSyncServiceOAuth));
+  oauth_login_->SetAutoFetchLimit(GaiaOAuthFetcher::OAUTH1_REQUEST_TOKEN);
+  oauth_login_->StartGetOAuthToken();
 }
 
 void SyncSetupHandler::ShowGaiaLogin(const DictionaryValue& args) {
+  DCHECK(!browser_sync::IsUsingOAuth());
   StringValue page("login");
   web_ui_->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page, args);
@@ -363,6 +420,10 @@ void SyncSetupHandler::ShowSetupDone(const std::wstring& user) {
   StringValue page("done");
   web_ui_->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page);
+
+  // Suppress the sync promo once the user signs into sync. This way the user
+  // doesn't see the sync promo even if they sign out of sync later on.
+  SyncPromoUI::SetUserSkippedSyncPromo(Profile::FromWebUI(web_ui_));
 }
 
 void SyncSetupHandler::SetFlow(SyncSetupFlow* flow) {
@@ -392,6 +453,12 @@ void SyncSetupHandler::HandleSubmitAuth(const ListValue* args) {
     // The page sent us something that we didn't understand.
     // This probably indicates a programming error.
     NOTREACHED();
+    return;
+  }
+
+  string16 error_message;
+  if (!IsLoginAuthDataValid(username, &error_message)) {
+    ShowLoginErrorMessage(error_message);
     return;
   }
 
@@ -507,4 +574,40 @@ void SyncSetupHandler::OpenSyncSetup() {
     web_ui_->CallJavascriptFunction("OptionsPage.closeOverlay");
     service->get_wizard().Focus();
   }
+}
+
+bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,
+                                            string16* error_message) {
+  // Happens during unit tests.
+  if (!web_ui_ || !profile_manager_)
+    return true;
+
+  if (username.empty())
+    return true;
+
+  // Check if the username is already in use by another profile.
+  const ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
+  size_t current_profile_index = cache.GetIndexOfProfileWithPath(
+      Profile::FromWebUI(web_ui_)->GetPath());
+  string16 username_utf16 = UTF8ToUTF16(username);
+
+  for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
+    if (i != current_profile_index &&
+        cache.GetUserNameOfProfileAtIndex(i) == username_utf16) {
+        *error_message = l10n_util::GetStringUTF16(
+            IDS_SYNC_USER_NAME_IN_USE_ERROR);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+void SyncSetupHandler::ShowLoginErrorMessage(const string16& error_message) {
+  DictionaryValue args;
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  ProfileSyncService* service = profile->GetProfileSyncService();
+  SyncSetupFlow::GetArgsForGaiaLogin(service, &args);
+  args.SetString("error_message", error_message);
+  ShowGaiaLogin(args);
 }

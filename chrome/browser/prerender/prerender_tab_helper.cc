@@ -8,6 +8,7 @@
 #include "base/string_number_conversions.h"
 #include "base/time.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -176,8 +177,10 @@ PrerenderTabHelper::PrerenderTabHelper(TabContentsWrapper* tab)
 PrerenderTabHelper::~PrerenderTabHelper() {
 }
 
-void PrerenderTabHelper::ProvisionalChangeToMainFrameUrl(const GURL& url,
-                                                         bool has_opener_set) {
+void PrerenderTabHelper::ProvisionalChangeToMainFrameUrl(
+    const GURL& url,
+    const GURL& opener_url) {
+  url_ = url;
   RecordPageviewEvent(PAGEVIEW_EVENT_NEW_URL);
   if (IsTopSite(url))
     RecordPageviewEvent(PAGEVIEW_EVENT_TOP_SITE_NEW_URL);
@@ -189,7 +192,7 @@ void PrerenderTabHelper::ProvisionalChangeToMainFrameUrl(const GURL& url,
   if (prerender_manager->IsTabContentsPrerendering(tab_contents()))
     return;
   prerender_manager->MarkTabContentsAsNotPrerendered(tab_contents());
-  MaybeUsePrerenderedPage(url, has_opener_set);
+  MaybeUsePrerenderedPage(url, opener_url);
 }
 
 void PrerenderTabHelper::UpdateTargetURL(int32 page_id, const GURL& url) {
@@ -210,7 +213,7 @@ void PrerenderTabHelper::DidStopLoading() {
   // Compute the PPLT metric and report it in a histogram, if needed.
   if (!pplt_load_start_.is_null() && !IsPrerendering()) {
     PrerenderManager::RecordPerceivedPageLoadTime(
-        base::TimeTicks::Now() - pplt_load_start_, tab_contents());
+        base::TimeTicks::Now() - pplt_load_start_, tab_contents(), url_);
   }
 
   // Reset the PPLT metric.
@@ -240,22 +243,19 @@ void PrerenderTabHelper::DidStartProvisionalLoadForFrame(
 }
 
 PrerenderManager* PrerenderTabHelper::MaybeGetPrerenderManager() const {
-  Profile* profile =
-      Profile::FromBrowserContext(tab_contents()->browser_context());
-  if (!profile)
-    return NULL;
-  return profile->GetPrerenderManager();
+  return PrerenderManagerFactory::GetForProfile(
+      Profile::FromBrowserContext(tab_contents()->browser_context()));
 }
 
 bool PrerenderTabHelper::MaybeUsePrerenderedPage(const GURL& url,
-                                                 bool has_opener_set) {
+                                                 const GURL& opener_url) {
   PrerenderManager* prerender_manager = MaybeGetPrerenderManager();
   if (!prerender_manager)
     return false;
   DCHECK(!prerender_manager->IsTabContentsPrerendering(tab_contents()));
   return prerender_manager->MaybeUsePrerenderedPage(tab_contents(),
                                                     url,
-                                                    has_opener_set);
+                                                    opener_url);
 }
 
 bool PrerenderTabHelper::IsPrerendering() {
@@ -271,7 +271,7 @@ void PrerenderTabHelper::PrerenderSwappedIn() {
   if (pplt_load_start_.is_null()) {
     // If we have already finished loading, report a 0 PPLT.
     PrerenderManager::RecordPerceivedPageLoadTime(base::TimeDelta(),
-                                                  tab_contents());
+                                                  tab_contents(), url_);
   } else {
     // If we have not finished loading yet, rebase the start time to now.
     pplt_load_start_ = base::TimeTicks::Now();

@@ -214,6 +214,9 @@ void URLRequestJob::OnSuspend() {
   Kill();
 }
 
+void URLRequestJob::NotifyURLRequestDestroyed() {
+}
+
 URLRequestJob::~URLRequestJob() {
   base::SystemMonitor* system_monitor = base::SystemMonitor::Get();
   if (system_monitor)
@@ -228,12 +231,12 @@ void URLRequestJob::NotifyCertificateRequested(
   request_->NotifyCertificateRequested(cert_request_info);
 }
 
-void URLRequestJob::NotifySSLCertificateError(int cert_error,
-                                              X509Certificate* cert) {
+void URLRequestJob::NotifySSLCertificateError(const SSLInfo& ssl_info,
+                                              bool is_hsts_host) {
   if (!request_)
     return;  // The request was destroyed, so there is no more work to do.
 
-  request_->NotifySSLCertificateError(cert_error, cert);
+  request_->NotifySSLCertificateError(ssl_info, is_hsts_host);
 }
 
 bool URLRequestJob::CanGetCookies(const CookieList& cookie_list) const {
@@ -412,7 +415,7 @@ void URLRequestJob::NotifyDone(const URLRequestStatus &status) {
         request_->net_log().AddEvent(
             NetLog::TYPE_FAILED,
             make_scoped_refptr(new NetLogIntegerParameter("net_error",
-                                                          status.os_error())));
+                                                          status.error())));
       }
       request_->set_status(status);
     }

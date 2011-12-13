@@ -201,7 +201,7 @@ DictionaryValue* CreateDictionaryWithPolicies(
     if (policy_map) {
       policy::PolicyMap::const_iterator i;
       for (i = policy_map->begin(); i != policy_map->end(); i++)
-        dict->Set(policy::key::kMapPolicyString[i->first],
+        dict->Set(policy::GetPolicyName(i->first),
                   i->second->DeepCopy());
     }
   }
@@ -346,19 +346,19 @@ void TestingAutomationProvider::GetBatteryInfo(DictionaryValue* args,
   scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
 
   return_value->SetBoolean("battery_is_present",
-                           power_library->battery_is_present());
-  return_value->SetBoolean("line_power_on", power_library->line_power_on());
-  if (power_library->battery_is_present()) {
+                           power_library->IsBatteryPresent());
+  return_value->SetBoolean("line_power_on", power_library->IsLinePowerOn());
+  if (power_library->IsBatteryPresent()) {
     return_value->SetBoolean("battery_fully_charged",
-                             power_library->battery_fully_charged());
+                             power_library->IsBatteryFullyCharged());
     return_value->SetDouble("battery_percentage",
-                            power_library->battery_percentage());
-    if (power_library->line_power_on()) {
-      int time = power_library->battery_time_to_full().InSeconds();
-      if (time > 0 || power_library->battery_fully_charged())
+                            power_library->GetBatteryPercentage());
+    if (power_library->IsLinePowerOn()) {
+      int time = power_library->GetBatteryTimeToFull().InSeconds();
+      if (time > 0 || power_library->IsBatteryFullyCharged())
         return_value->SetInteger("battery_time_to_full", time);
     } else {
-      int time = power_library->battery_time_to_empty().InSeconds();
+      int time = power_library->GetBatteryTimeToEmpty().InSeconds();
       if (time > 0)
         return_value->SetInteger("battery_time_to_empty", time);
     }
@@ -553,6 +553,54 @@ void TestingAutomationProvider::SetProxySettings(DictionaryValue* args,
   reply.SendSuccess(NULL);
 }
 
+void TestingAutomationProvider::ConnectToCellularNetwork(
+    DictionaryValue* args, IPC::Message* reply_message) {
+  if (!EnsureCrosLibraryLoaded(this, reply_message))
+    return;
+
+  std::string service_path;
+  if (!args->GetString("service_path", &service_path)) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "Invalid or missing args.");
+    return;
+  }
+
+  NetworkLibrary* network_library = CrosLibrary::Get()->GetNetworkLibrary();
+  chromeos::CellularNetwork* cellular =
+      network_library->FindCellularNetworkByPath(service_path);
+  if (!cellular) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "No network found with specified service path.");
+    return;
+  }
+
+  // Set up an observer (it will delete itself).
+  new ServicePathConnectObserver(this, reply_message, service_path);
+
+  network_library->ConnectToCellularNetwork(cellular);
+  network_library->RequestNetworkScan();
+}
+
+void TestingAutomationProvider::DisconnectFromCellularNetwork(
+    DictionaryValue* args, IPC::Message* reply_message) {
+  if (!EnsureCrosLibraryLoaded(this, reply_message))
+    return;
+
+  NetworkLibrary* network_library = CrosLibrary::Get()->GetNetworkLibrary();
+  const chromeos::CellularNetwork* cellular =
+        network_library->cellular_network();
+  if (!cellular) {
+    AutomationJSONReply(this, reply_message).SendError(
+        "Not connected to any cellular network.");
+    return;
+  }
+
+  // Set up an observer (it will delete itself).
+  new NetworkDisconnectObserver(this, reply_message, cellular->service_path());
+
+  network_library->DisconnectFromNetwork(cellular);
+}
+
 void TestingAutomationProvider::ConnectToWifiNetwork(
     DictionaryValue* args, IPC::Message* reply_message) {
   if (!EnsureCrosLibraryLoaded(this, reply_message))
@@ -738,11 +786,15 @@ void TestingAutomationProvider::AddPrivateNetwork(
     }
     new VirtualConnectObserver(this, reply_message, service_name);
     // Connect using a pre-shared key.
-    network_library->ConnectToVirtualNetworkPSK(service_name,
-                                                hostname,
-                                                key,
-                                                username,
-                                                password);
+    chromeos::NetworkLibrary::VPNConfigData config_data;
+    config_data.psk = key;
+    config_data.username = username;
+    config_data.user_passphrase = password;
+    network_library->ConnectToUnconfiguredVirtualNetwork(
+        service_name,
+        hostname,
+        chromeos::PROVIDER_TYPE_L2TP_IPSEC_PSK,
+        config_data);
   } else if (provider_type == VPNProviderTypeToString(
       chromeos::PROVIDER_TYPE_L2TP_IPSEC_USER_CERT)) {
     if (!args->GetString("cert_id", &cert_id) ||
@@ -753,18 +805,32 @@ void TestingAutomationProvider::AddPrivateNetwork(
     }
     new VirtualConnectObserver(this, reply_message, service_name);
     // Connect using a user certificate.
-    network_library->ConnectToVirtualNetworkCert(service_name,
-                                                 hostname,
-                                                 cert_nss,
-                                                 cert_id,
-                                                 username,
-                                                 password);
+    chromeos::NetworkLibrary::VPNConfigData config_data;
+    config_data.server_ca_cert_nss_nickname = cert_nss;
+    config_data.client_cert_pkcs11_id = cert_id;
+    config_data.username = username;
+    config_data.user_passphrase = password;
+    network_library->ConnectToUnconfiguredVirtualNetwork(
+        service_name,
+        hostname,
+        chromeos::PROVIDER_TYPE_L2TP_IPSEC_USER_CERT,
+        config_data);
   } else if (provider_type == VPNProviderTypeToString(
       chromeos::PROVIDER_TYPE_OPEN_VPN)) {
-    // Connect using OPEN_VPN. Not yet supported by the VPN implementation.
-    AutomationJSONReply(this, reply_message)
-      .SendError("Provider type OPEN_VPN is not yet supported.");
-    return;
+    std::string otp;
+    args->GetString("otp", &otp);
+    // Connect using OPEN_VPN.
+    chromeos::NetworkLibrary::VPNConfigData config_data;
+    config_data.server_ca_cert_nss_nickname = cert_nss;
+    config_data.client_cert_pkcs11_id = cert_id;
+    config_data.username = username;
+    config_data.user_passphrase = password;
+    config_data.otp = otp;
+    network_library->ConnectToUnconfiguredVirtualNetwork(
+        service_name,
+        hostname,
+        chromeos::PROVIDER_TYPE_OPEN_VPN,
+        config_data);
   } else {
     AutomationJSONReply(this, reply_message)
         .SendError("Unsupported provider type.");
@@ -1073,11 +1139,16 @@ void TestingAutomationProvider::SetReleaseTrack(DictionaryValue* args,
 
 void TestingAutomationProvider::GetVolumeInfo(DictionaryValue* args,
                                               IPC::Message* reply_message) {
+  AutomationJSONReply reply(this, reply_message);
   scoped_ptr<DictionaryValue> return_value(new DictionaryValue);
   chromeos::AudioHandler* audio_handler = chromeos::AudioHandler::GetInstance();
+  if (!audio_handler) {
+    reply.SendError("AudioHandler not initialized.");
+    return;
+  }
   return_value->SetDouble("volume", audio_handler->GetVolumePercent());
   return_value->SetBoolean("is_mute", audio_handler->IsMuted());
-  AutomationJSONReply(this, reply_message).SendSuccess(return_value.get());
+  reply.SendSuccess(return_value.get());
 }
 
 void TestingAutomationProvider::SetVolume(DictionaryValue* args,
@@ -1088,8 +1159,11 @@ void TestingAutomationProvider::SetVolume(DictionaryValue* args,
     reply.SendError("Invalid or missing args.");
     return;
   }
-
   chromeos::AudioHandler* audio_handler = chromeos::AudioHandler::GetInstance();
+  if (!audio_handler) {
+    reply.SendError("AudioHandler not initialized.");
+    return;
+  }
   audio_handler->SetVolumePercent(volume_percent);
   reply.SendSuccess(NULL);
 }
@@ -1102,8 +1176,11 @@ void TestingAutomationProvider::SetMute(DictionaryValue* args,
     reply.SendError("Invalid or missing args.");
     return;
   }
-
   chromeos::AudioHandler* audio_handler = chromeos::AudioHandler::GetInstance();
+  if (!audio_handler) {
+    reply.SendError("AudioHandler not initialized.");
+    return;
+  }
   audio_handler->SetMuted(mute);
   reply.SendSuccess(NULL);
 }

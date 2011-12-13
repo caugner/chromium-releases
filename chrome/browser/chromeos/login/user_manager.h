@@ -11,9 +11,10 @@
 
 #include "base/basictypes.h"
 #include "base/hash_tables.h"
-#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
+#include "chrome/browser/chromeos/login/profile_image_downloader.h"
 #include "chrome/browser/chromeos/login/user_image_loader.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -32,6 +33,7 @@ class RemoveUserDelegate;
 // This class provides a mechanism for discovering users who have logged
 // into this chromium os device before and updating that list.
 class UserManager : public UserImageLoader::Delegate,
+                    public ProfileImageDownloader::Delegate,
                     public NotificationObserver {
  public:
   // User OAuth token status according to the last check.
@@ -47,7 +49,10 @@ class UserManager : public UserImageLoader::Delegate,
     // Returned as default_image_index when user-selected file or photo
     // is used as user image.
     static const int kExternalImageIndex = -1;
-    static const int kInvalidImageIndex = -2;
+    // Returned as default_image_index when user profile image is used as
+    // user image.
+    static const int kProfileImageIndex = -2;
+    static const int kInvalidImageIndex = -3;
 
     User();
     ~User();
@@ -137,34 +142,41 @@ class UserManager : public UserImageLoader::Delegate,
   // and sends LOGIN_USER_IMAGE_CHANGED notification about the image
   // changed via NotificationService.
   void SaveUserImage(const std::string& username,
-                     const SkBitmap& image);
+                     const SkBitmap& image,
+                     int image_index);
 
   // Saves user's oauth token status in local state preferences.
   void SaveUserOAuthStatus(const std::string& username,
                            OAuthTokenStatus oauth_token_status);
 
   // Gets user's oauth token status in local state preferences.
-  OAuthTokenStatus GetUserOAuthStatus(const std::string& username);
+  OAuthTokenStatus GetUserOAuthStatus(const std::string& username) const;
 
   // Saves user image path for the user. Can be used to set default images.
   // Sends LOGIN_USER_IMAGE_CHANGED notification about the image changed
   // via NotificationService.
   void SaveUserImagePath(const std::string& username,
-                         const std::string& image_path);
+                         const std::string& image_path,
+                         int image_index);
 
   // Returns the index of user's default image or |kInvalidImageIndex|
-  // if some error occurs (like Local State corruption).
+  // if user has a non-default image or some error occurs (like Local State
+  // corruption).
   int GetUserDefaultImageIndex(const std::string& username);
 
   // chromeos::UserImageLoader::Delegate implementation.
   virtual void OnImageLoaded(const std::string& username,
                              const SkBitmap& image,
+                             int image_index,
                              bool save_image);
+
+  // ProfileImageDownloader::Delegate implementation.
+  virtual void OnDownloadSuccess(const SkBitmap& image) OVERRIDE;
 
   // NotificationObserver implementation.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   // Accessor for current_user_is_owner_
   virtual bool current_user_is_owner() const;
@@ -199,6 +211,10 @@ class UserManager : public UserImageLoader::Delegate,
 
   void NotifyLocalStateChanged();
 
+  // Starts downloading the profile image for the logged-in user.
+  // Used to post a delayed task for that.
+  void DownloadProfileImage();
+
  protected:
   UserManager();
   virtual ~UserManager();
@@ -219,6 +235,30 @@ class UserManager : public UserImageLoader::Delegate,
                     const SkBitmap& image,
                     int default_image_index,
                     bool save_image);
+
+  // Stores path to the image and its index in local state. Runs on UI thread.
+  // If |is_async| is true, it has been posted from the FILE thread after
+  // saving the image.
+  void SaveImageToLocalState(const std::string& username,
+                             const std::string& image_path,
+                             int image_index,
+                             bool is_async);
+
+  // Saves image to file with specified path. Runs on FILE thread.
+  // Posts task for saving image info to local state on UI thread.
+  void SaveImageToFile(const SkBitmap& image,
+                       const FilePath& image_path,
+                       const std::string& username,
+                       int image_index);
+
+  // Deletes user's image file. Runs on FILE thread.
+  void DeleteUserImage(const FilePath& image_path);
+
+  // Updates current user ownership on UI thread.
+  void UpdateOwnership(bool is_owner);
+
+  // Checks current user's ownership on file thread.
+  void CheckOwnership();
 
   // Loads user image from its file.
   scoped_refptr<UserImageLoader> image_loader_;
@@ -250,6 +290,14 @@ class UserManager : public UserImageLoader::Delegate,
   friend struct base::DefaultLazyInstanceTraits<UserManager>;
 
   ObserverList<Observer> observer_list_;
+
+  // Download user profile image on login to update it if it's changed.
+  scoped_ptr<ProfileImageDownloader> profile_image_downloader_;
+
+  // True if the last user image required async save operation (which may not
+  // have been completed yet). This flag is used to avoid races when user image
+  // is first set with |SaveUserImage| and then with |SaveUserImagePath|.
+  bool last_image_set_async_;
 
   DISALLOW_COPY_AND_ASSIGN(UserManager);
 };

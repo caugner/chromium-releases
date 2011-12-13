@@ -7,13 +7,14 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/string16.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
@@ -24,6 +25,10 @@
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 
 namespace chromeos {
 
@@ -39,10 +44,9 @@ VersionInfoUpdater::~VersionInfoUpdater() {
 
 void VersionInfoUpdater::StartUpdate(bool is_official_build) {
   if (CrosLibrary::Get()->EnsureLoaded()) {
-    version_loader_.EnablePlatformVersions(true);
     version_loader_.GetVersion(
         &version_consumer_,
-        NewCallback(this, &VersionInfoUpdater::OnVersion),
+        base::Bind(&VersionInfoUpdater::OnVersion, base::Unretained(this)),
         is_official_build ?
             VersionLoader::VERSION_SHORT_WITH_DATE :
             VersionLoader::VERSION_FULL);
@@ -199,4 +203,3 @@ void VersionInfoUpdater::OnPolicyStateChanged(
 }
 
 }  // namespace chromeos
-

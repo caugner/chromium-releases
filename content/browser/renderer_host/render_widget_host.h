@@ -15,8 +15,10 @@
 #include "base/process_util.h"
 #include "base/string16.h"
 #include "base/timer.h"
-#include "content/common/native_web_keyboard_event.h"
+#include "content/common/content_export.h"
+#include "content/common/page_zoom.h"
 #include "content/common/property_bag.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
@@ -48,6 +50,9 @@ class RenderWidgetHostView;
 class TransportDIB;
 class WebCursor;
 struct ViewHostMsg_UpdateRect_Params;
+struct WebPreferences;
+struct EditCommand;
+class GURL;
 
 // This class manages the browser side of a browser<->renderer HWND connection.
 // The HWND lives in the browser process, and windows events are sent over
@@ -123,8 +128,8 @@ struct ViewHostMsg_UpdateRect_Params;
 // anything else. When the view is live, these messages are forwarded to it by
 // the RenderWidgetHost's IPC message map.
 //
-class RenderWidgetHost : public IPC::Channel::Listener,
-                         public IPC::Channel::Sender {
+class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
+                                        public IPC::Channel::Sender {
  public:
   // Used as the details object for a
   // RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK notification.
@@ -190,6 +195,9 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   void Focus();
   void Blur();
   virtual void LostCapture();
+
+  // Called to notify the RenderWidget that it has lost the mouse lock.
+  virtual void LostMouseLock();
 
   // Tells us whether the page is rendered directly via the GPU process.
   bool is_accelerated_compositing_active() {
@@ -340,6 +348,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // * when it receives a "commit" signal of GtkIMContext (on Linux);
   // * when insertText of NSTextInput is called (on Mac).
   void ImeConfirmComposition(const string16& text);
+  void ImeConfirmComposition(const string16& text,
+                             const ui::Range& replacement_range);
 
   // Finishes an ongoing composition with the composition text set by last
   // SetComposition() call.
@@ -371,6 +381,52 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   // Notification that the user has made some kind of input that could
   // perform an action. See OnUserGesture for more details.
   void StartUserGesture();
+
+  // Stops loading the page.
+  void Stop();
+
+  // Set the RenderView background.
+  void SetBackground(const SkBitmap& background);
+
+  // Notifies the renderer that the next key event is bound to one or more
+  // pre-defined edit commands
+  void SetEditCommandsForNextKeyEvent(
+      const std::vector<EditCommand>& commands);
+
+  // Relay a request from assistive technology to perform the default action
+  // on a given node.
+  void AccessibilityDoDefaultAction(int object_id);
+
+  // Relay a request from assistive technology to set focus to a given node.
+  void AccessibilitySetFocus(int object_id);
+
+  // Executes the edit command on the RenderView.
+  void ExecuteEditCommand(const std::string& command,
+                          const std::string& value);
+
+  // Tells the renderer to scroll the currently focused node into rect only if
+  // the currently focused node is a Text node (textfield, text area or content
+  // editable divs).
+  void ScrollFocusedEditableNodeIntoRect(const gfx::Rect& rect);
+
+  // Requests the renderer to select the region between two points.
+  void SelectRange(const gfx::Point& start, const gfx::Point& end);
+
+  // Edit operations.
+  void Undo();
+  void Redo();
+  void Cut();
+  void Copy();
+  void CopyToFindPboard();
+  void Paste();
+  void PasteAndMatchStyle();
+  void Delete();
+  void SelectAll();
+
+  // Called when the reponse to a pending mouse lock request has arrived.
+  // Returns true if |allowed| is true and the mouse has been successfully
+  // locked.
+  bool GotResponseToLockMouseRequest(bool allowed);
 
  protected:
   // Internal implementation of the public Forward*Event() methods.
@@ -420,6 +476,18 @@ class RenderWidgetHost : public IPC::Channel::Listener,
   virtual void NotifyRendererUnresponsive() {}
   virtual void NotifyRendererResponsive() {}
 
+  // RenderViewHost overrides this method to impose further restrictions on when
+  // to allow mouse lock.
+  // Once the request is approved or rejected, GotResponseToLockMouseRequest()
+  // will be called.
+  virtual void RequestToLockMouse();
+
+  void RejectMouseLockOrUnlockIfNecessary();
+  bool IsMouseLocked() const;
+
+  // RenderViewHost overrides this method to report when in fullscreen mode.
+  virtual bool IsFullscreen() const;
+
  protected:
   // true if a renderer has once been valid. We use this flag to display a sad
   // tab only when we lose our renderer and not if a paint occurs during
@@ -453,18 +521,21 @@ class RenderWidgetHost : public IPC::Channel::Listener,
                            WebKit::WebTextDirection text_direction_hint);
   void OnMsgPaintAtSizeAck(int tag, const gfx::Size& size);
   void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
-  void OnMsgInputEventAck(const IPC::Message& message);
+  void OnMsgInputEventAck(WebKit::WebInputEvent::Type event_type,
+                          bool processed);
   virtual void OnMsgFocus();
   virtual void OnMsgBlur();
 
   void OnMsgSetCursor(const WebCursor& cursor);
-  void OnMsgImeUpdateTextInputState(ui::TextInputType type,
-                                    bool can_compose_inline,
-                                    const gfx::Rect& caret_rect);
+  void OnMsgTextInputStateChanged(ui::TextInputType type,
+                                  bool can_compose_inline);
   void OnMsgImeCompositionRangeChanged(const ui::Range& range);
   void OnMsgImeCancelComposition();
 
   void OnMsgDidActivateAcceleratedCompositing(bool activated);
+
+  void OnMsgLockMouse();
+  void OnMsgUnlockMouse();
 
 #if defined(OS_POSIX)
   void OnMsgGetScreenInfo(gfx::NativeViewId view,
@@ -676,6 +747,8 @@ class RenderWidgetHost : public IPC::Channel::Listener,
 
   // The last scroll offset of the render widget.
   gfx::Point last_scroll_offset_;
+
+  bool pending_mouse_lock_request_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHost);
 };

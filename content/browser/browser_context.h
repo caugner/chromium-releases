@@ -29,6 +29,7 @@ class ChromeBlobStorageContext;
 class DownloadManager;
 class FilePath;
 class GeolocationPermissionContext;
+class SpeechInputPreferences;
 class HostZoomMap;
 class SSLHostState;
 class WebKitContext;
@@ -41,6 +42,8 @@ class ResourceContext;
 // It lives on the UI thread.
 class BrowserContext {
  public:
+  virtual ~BrowserContext() {};
+
   // Returns the path of the directory where this context's data is stored.
   virtual FilePath GetPath() = 0;
 
@@ -55,7 +58,6 @@ class BrowserContext {
 
   // Returns the DownloadManager associated with this context.
   virtual DownloadManager* GetDownloadManager() = 0;
-  virtual bool HasCreatedDownloadManager() const = 0;
 
   // Returns the request context information associated with this context.  Call
   // this only on the UI thread, since it can send notifications that should
@@ -83,6 +85,10 @@ class BrowserContext {
 
   // Returns the geolocation permission context for this context.
   virtual GeolocationPermissionContext* GetGeolocationPermissionContext() = 0;
+
+  // Returns the speech input preferences. SpeechInputPreferences is a
+  // ref counted class, so callers should take a reference if needed.
+  virtual SpeechInputPreferences* GetSpeechInputPreferences() = 0;
 
   // Returns true if the last time this context was open it was exited cleanly.
   // This doesn't belong here; http://crbug.com/90737

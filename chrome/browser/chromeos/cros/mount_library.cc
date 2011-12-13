@@ -5,6 +5,7 @@
 #include "chrome/browser/chromeos/cros/mount_library.h"
 
 #include <set>
+#include <sys/statvfs.h>
 #include <vector>
 
 #include "base/message_loop.h"
@@ -75,7 +76,8 @@ MountLibrary::Disk::Disk(const std::string& device_path,
     bool is_parent,
     bool is_read_only,
     bool has_media,
-    bool on_boot_device)
+    bool on_boot_device,
+    bool is_hidden)
     : device_path_(device_path),
       mount_path_(mount_path),
       system_path_(system_path),
@@ -89,7 +91,8 @@ MountLibrary::Disk::Disk(const std::string& device_path,
       is_parent_(is_parent),
       is_read_only_(is_read_only),
       has_media_(has_media),
-      on_boot_device_(on_boot_device) {
+      on_boot_device_(on_boot_device),
+      is_hidden_(is_hidden) {
 }
 
 MountLibrary::Disk::~Disk() {}
@@ -101,43 +104,45 @@ class MountLibcrosProxyImpl : public MountLibcrosProxy {
                              const MountPathOptions& options,
                              MountCompletedMonitor callback,
                              void* object) OVERRIDE {
-    MountSourcePath(source_path, type, options, callback, object);
+    chromeos::MountSourcePath(source_path, type, options, callback, object);
   }
 
   virtual void CallUnmountPath(const char* path,
                                UnmountRequestCallback callback,
                                void* object) OVERRIDE {
-    UnmountMountPoint(path, callback, object);
+    chromeos::UnmountMountPoint(path, callback, object);
   }
 
   virtual void CallRequestMountInfo(RequestMountInfoCallback callback,
                                     void* object) OVERRIDE {
-    RequestMountInfo(callback, object);
+    chromeos::RequestMountInfo(callback, object);
   }
 
   virtual void CallFormatDevice(const char* file_path,
                                 const char* filesystem,
                                 FormatRequestCallback callback,
                                 void* object) OVERRIDE {
-    FormatDevice(file_path, filesystem, callback, object);
+    chromeos::FormatDevice(file_path, filesystem, callback, object);
   }
 
   virtual void CallGetDiskProperties(const char* device_path,
                                      GetDiskPropertiesCallback callback,
                                      void* object) OVERRIDE {
-    GetDiskProperties(device_path, callback, object);
+    chromeos::GetDiskProperties(device_path, callback, object);
   }
 
-  virtual MountEventConnection MonitorCrosDisks(MountEventMonitor monitor,
+  virtual MountEventConnection MonitorCrosDisks(
+      MountEventMonitor monitor,
       MountCompletedMonitor mount_completed_monitor,
       void* object) OVERRIDE {
-    return MonitorAllMountEvents(monitor, mount_completed_monitor, object);
+    return chromeos::MonitorAllMountEvents(
+        monitor, mount_completed_monitor, object);
   }
 
-  virtual void DisconnectCrosDisksMonitorIfSet(MountEventConnection conn)
-      OVERRIDE {
+  virtual void DisconnectCrosDisksMonitorIfSet(
+      MountEventConnection conn) OVERRIDE {
     if (conn)
-      DisconnectMountEventMonitor(conn);
+      chromeos::DisconnectMountEventMonitor(conn);
   }
 };
 
@@ -163,10 +168,6 @@ class MountLibraryImpl : public MountLibrary {
  public:
   MountLibraryImpl() : libcros_proxy_(new MountLibcrosProxyImpl()),
                        mount_status_connection_(NULL) {
-    if (CrosLibrary::Get()->EnsureLoaded())
-      Init();
-    else
-      LOG(ERROR) << kLibraryNotLoaded;
   }
 
   virtual ~MountLibraryImpl() {
@@ -175,6 +176,13 @@ class MountLibraryImpl : public MountLibrary {
   }
 
   // MountLibrary overrides.
+  virtual void Init() OVERRIDE {
+    DCHECK(CrosLibrary::Get()->libcros_loaded());
+    // Getting the monitor status so that the daemon starts up.
+    mount_status_connection_ = libcros_proxy_->MonitorCrosDisks(
+        &MonitorMountEventsHandler, &MountCompletedHandler, this);
+  }
+
   virtual void AddObserver(Observer* observer) OVERRIDE {
     observers_.AddObserver(observer);
   }
@@ -186,41 +194,47 @@ class MountLibraryImpl : public MountLibrary {
   virtual void MountPath(const char* source_path,
                          MountType type,
                          const MountPathOptions& options) OVERRIDE {
-    CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    if (!CrosLibrary::Get()->EnsureLoaded()) {
-      OnMountCompleted(MOUNT_ERROR_LIBRARY_NOT_LOADED,
-                       MountPointInfo(source_path,
-                                      NULL,
-                                      type,
-                                      MOUNT_CONDITION_NONE));
-      return;
+    // Hidden and non-existent devices should not be mounted.
+    if (type == MOUNT_TYPE_DEVICE) {
+      DiskMap::const_iterator it = disks_.find(source_path);
+      if (it == disks_.end() || it->second->is_hidden()) {
+        MountCompletedHandler(this, MOUNT_ERROR_INTERNAL, source_path, type,
+            NULL);
+        return;
+      }
     }
+    CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     libcros_proxy_->CallMountPath(source_path, type, options,
                                   &MountCompletedHandler, this);
   }
 
   virtual void UnmountPath(const char* mount_path) OVERRIDE {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    if (!CrosLibrary::Get()->EnsureLoaded()) {
-      OnUnmountPath(mount_path,
-                    MOUNT_METHOD_ERROR_LOCAL,
-                    kLibraryNotLoaded);
-      return;
-    }
-
     libcros_proxy_->CallUnmountPath(mount_path, &UnmountMountPointCallback,
                                     this);
   }
 
+  virtual void GetSizeStatsOnFileThread(const char* mount_path,
+      size_t* total_size_kb, size_t* remaining_size_kb) OVERRIDE {
+    CHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+    uint64_t total_size_uint64 = 0;
+    uint64_t remaining_size_uint64 = 0;
+
+    struct statvfs stat;
+    if (statvfs(mount_path, &stat) == 0) {
+      total_size_uint64 =
+          static_cast<uint64_t>(stat.f_blocks) * stat.f_frsize;
+      remaining_size_uint64 =
+          static_cast<uint64_t>(stat.f_bfree) * stat.f_frsize;
+    }
+
+    *total_size_kb = static_cast<size_t>(total_size_uint64 / 1024);
+    *remaining_size_kb = static_cast<size_t>(remaining_size_uint64 / 1024);
+  }
+
   virtual void FormatUnmountedDevice(const char* file_path) OVERRIDE {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    if (!CrosLibrary::Get()->EnsureLoaded()) {
-      OnFormatDevice(file_path,
-                     false,
-                     MOUNT_METHOD_ERROR_LOCAL,
-                     kLibraryNotLoaded);
-      return;
-    }
     for (MountLibrary::DiskMap::iterator it = disks_.begin();
         it != disks_.end(); ++it) {
       if (it->second->file_path().compare(file_path) == 0 &&
@@ -274,30 +288,25 @@ class MountLibraryImpl : public MountLibrary {
     const char* error_message = NULL;
     std::vector<const char*> devices_to_unmount;
 
-    if (!CrosLibrary::Get()->EnsureLoaded()) {
-      success = false;
-      error_message = kLibraryNotLoaded;
-    } else {
-      // Get list of all devices to unmount.
-      int device_path_len = strlen(device_path);
-      for (DiskMap::iterator it = disks_.begin(); it != disks_.end(); ++it) {
-        if (!it->second->mount_path().empty() &&
-            strncmp(device_path, it->second->device_path().c_str(),
-                    device_path_len) == 0) {
-          devices_to_unmount.push_back(it->second->mount_path().c_str());
-        }
+    // Get list of all devices to unmount.
+    int device_path_len = strlen(device_path);
+    for (DiskMap::iterator it = disks_.begin(); it != disks_.end(); ++it) {
+      if (!it->second->mount_path().empty() &&
+          strncmp(device_path, it->second->device_path().c_str(),
+                  device_path_len) == 0) {
+        devices_to_unmount.push_back(it->second->mount_path().c_str());
       }
+    }
 
-      // We should detect at least original device.
-      if (devices_to_unmount.size() == 0) {
-        if (disks_.find(device_path) == disks_.end()) {
-          success = false;
-          error_message = kDeviceNotFound;
-        } else {
-          // Nothing to unmount.
-          callback(user_data, true);
-          return;
-        }
+    // We should detect at least original device.
+    if (devices_to_unmount.size() == 0) {
+      if (disks_.find(device_path) == disks_.end()) {
+        success = false;
+        error_message = kDeviceNotFound;
+      } else {
+        // Nothing to unmount.
+        callback(user_data, true);
+        return;
       }
     }
 
@@ -322,13 +331,6 @@ class MountLibraryImpl : public MountLibrary {
 
   virtual void RequestMountInfoRefresh() OVERRIDE {
     CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    if (!CrosLibrary::Get()->EnsureLoaded()) {
-      OnRequestMountInfo(NULL,
-                         0,
-                         MOUNT_METHOD_ERROR_LOCAL,
-                         kLibraryNotLoaded);
-      return;
-    }
     libcros_proxy_->CallRequestMountInfo(RequestMountInfoCallback, this);
   }
 
@@ -546,9 +548,8 @@ class MountLibraryImpl : public MountLibrary {
     }
   }
 
-
   void OnGetDiskProperties(const char* device_path,
-                           const DiskInfo* disk1,
+                           const DiskInfo* disk,
                            MountMethodErrorType error,
                            const char* error_message) {
     DCHECK(device_path);
@@ -559,8 +560,6 @@ class MountLibraryImpl : public MountLibrary {
 
       // This cast is temporal solution, until we merge DiskInfo and
       // DiskInfoAdvanced into single interface.
-      const DiskInfoAdvanced* disk =
-          reinterpret_cast<const DiskInfoAdvanced*>(disk1);
       if (disk->on_boot_device())
         return;
 
@@ -617,7 +616,8 @@ class MountLibraryImpl : public MountLibrary {
                                 disk->is_drive(),
                                 disk->is_read_only(),
                                 disk->has_media(),
-                                disk->on_boot_device());
+                                disk->on_boot_device(),
+                                disk->is_hidden());
       disks_.insert(
           std::pair<std::string, Disk*>(device_path_string, new_disk));
       FireDiskStatusUpdate(is_new ? MOUNT_DISK_ADDED : MOUNT_DISK_CHANGED,
@@ -722,12 +722,6 @@ class MountLibraryImpl : public MountLibrary {
     FireDeviceStatusUpdate(type, std::string(device_path));
   }
 
-  void Init() {
-    // Getting the monitor status so that the daemon starts up.
-    mount_status_connection_ = libcros_proxy_->MonitorCrosDisks(
-        &MonitorMountEventsHandler, &MountCompletedHandler, this);
-  }
-
   void FireDiskStatusUpdate(MountLibraryEventType evt,
                             const Disk* disk) {
     // Make sure we run on UI thread.
@@ -813,6 +807,7 @@ class MountLibraryStubImpl : public MountLibrary {
   virtual ~MountLibraryStubImpl() {}
 
   // MountLibrary overrides.
+  virtual void Init() OVERRIDE {}
   virtual void AddObserver(Observer* observer) OVERRIDE {}
   virtual void RemoveObserver(Observer* observer) OVERRIDE {}
   virtual const DiskMap& disks() const OVERRIDE { return disks_; }
@@ -823,6 +818,8 @@ class MountLibraryStubImpl : public MountLibrary {
   virtual void MountPath(const char* source_path, MountType type,
                          const MountPathOptions& options) OVERRIDE {}
   virtual void UnmountPath(const char* mount_path) OVERRIDE {}
+  virtual void GetSizeStatsOnFileThread(const char* mount_path,
+      size_t* total_size_kb, size_t* remaining_size_kb) OVERRIDE {}
   virtual void FormatUnmountedDevice(const char* device_path) OVERRIDE {}
   virtual void FormatMountedDevice(const char* mount_path) OVERRIDE {}
   virtual void UnmountDeviceRecursive(const char* device_path,
@@ -838,15 +835,13 @@ class MountLibraryStubImpl : public MountLibrary {
 
 // static
 MountLibrary* MountLibrary::GetImpl(bool stub) {
+  MountLibrary* impl;
   if (stub)
-    return new MountLibraryStubImpl();
+    impl = new MountLibraryStubImpl();
   else
-    return new MountLibraryImpl();
+    impl = new MountLibraryImpl();
+  impl->Init();
+  return impl;
 }
 
 }  // namespace chromeos
-
-// Allows InvokeLater without adding refcounting. This class is a Singleton and
-// won't be deleted until it's last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::MountLibraryImpl);
-

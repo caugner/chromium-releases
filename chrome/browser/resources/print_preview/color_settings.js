@@ -14,12 +14,14 @@ cr.define('print_preview', function() {
     this.colorOption_ = $('color-option');
     this.colorRadioButton_ = $('color');
     this.bwRadioButton_ = $('bw');
-    this.GRAY = 1;
-    this.COLOR = 2;
-    this.CMYK = 3;  // cmyk - Cyan, magenta, yellow, black
-    this.printerColorModelForColor_ = this.COLOR;
+
+    this.printerColorModelForColor_ = ColorSettings.COLOR;
+    this.printerColorModelForBlack_ = ColorSettings.GRAY;
+    this.addEventListeners_();
   }
 
+  ColorSettings.GRAY = 1;
+  ColorSettings.COLOR = 2;
   cr.addSingletonGetter(ColorSettings);
 
   ColorSettings.prototype = {
@@ -40,20 +42,20 @@ cr.define('print_preview', function() {
     },
 
     /**
-     * Returns the color mode for print preview.
-     * @return {Number} Returns the printer color space
+     * @return {number} The color mode for print preview.
      */
     get colorMode() {
-      if (this.bwRadioButton_.checked)
-        return this.GRAY;
-      return this.printerColorModelForColor_;
+      return this.bwRadioButton_.checked ?
+             this.printerColorModelForBlack_:
+             this.printerColorModelForColor_;
     },
 
     /**
      * Adding listeners to all color related controls. The listeners take care
      * of altering their behavior depending on |hasPendingPreviewRequest|.
+     * @private
      */
-    addEventListeners: function() {
+    addEventListeners_: function() {
       this.colorRadioButton_.onclick = function() {
         setColor(true);
       };
@@ -77,15 +79,25 @@ cr.define('print_preview', function() {
       this.colorOption_.setAttribute('aria-hidden', disableColorOption);
 
       var setColorAsDefault = e.printerCapabilities.setColorAsDefault;
-      this.printerColorModelForColor_ =
-          e.printerCapabilities.printerColorModelForColor;
+      if (e.printerCapabilities.printerColorModelForColor) {
+        this.printerColorModelForColor_ =
+            e.printerCapabilities.printerColorModelForColor;
+      } else {
+        this.printerColorModelForColor_ = ColorSettings.COLOR;
+      }
+      if (e.printerCapabilities.printerColorModelForBlack) {
+        this.printerColorModelForBlack_ =
+            e.printerCapabilities.printerColorModelForBlack;
+      } else {
+        this.printerColorModelForBlack_ = ColorSettings.GRAY;
+      }
       this.colorRadioButton_.checked = setColorAsDefault;
       this.bwRadioButton_.checked = !setColorAsDefault;
       setColor(this.colorRadioButton_.checked);
     },
 
     /**
-     * Listener executing when a PDFLoaded event occurs.
+     * Executes when a PDFLoaded event occurs.
      * @private
      */
     onPDFLoaded_: function() {

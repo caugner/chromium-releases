@@ -31,7 +31,7 @@
 
 namespace {
 
-const char16 kEllipsis[] = { 0x2026 };
+const char16 kEllipsis[] = { 0x2026, 0x0 };
 
 // The minimum distance between the top and bottom of the {icon|text} and the
 // top or bottom of the row.
@@ -139,6 +139,12 @@ SkColor AutocompleteResultView::GetColor(ResultViewState state,
     colors[SELECTED][BACKGROUND] = color_utils::GetSysSkColor(COLOR_HIGHLIGHT);
     colors[NORMAL][TEXT] = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
     colors[SELECTED][TEXT] = color_utils::GetSysSkColor(COLOR_HIGHLIGHTTEXT);
+#elif defined(USE_AURA)
+    // TODO(beng): source from theme provider.
+    colors[NORMAL][BACKGROUND] = SK_ColorWHITE;
+    colors[SELECTED][BACKGROUND] = SK_ColorBLUE;
+    colors[NORMAL][TEXT] = SK_ColorBLACK;
+    colors[SELECTED][TEXT] = SK_ColorWHITE;
 #elif defined(TOOLKIT_USES_GTK)
     GdkColor bg_color, selected_bg_color, text_color, selected_text_color;
     gtk_util::GetTextColors(
@@ -516,7 +522,7 @@ void AutocompleteResultView::Layout() {
 void AutocompleteResultView::OnPaint(gfx::Canvas* canvas) {
   const ResultViewState state = GetState();
   if (state != NORMAL)
-    canvas->AsCanvasSkia()->drawColor(GetColor(state, BACKGROUND));
+    canvas->GetSkCanvas()->drawColor(GetColor(state, BACKGROUND));
 
   // Paint the icon.
   canvas->DrawBitmapInt(*GetIcon(), GetMirroredXForRect(icon_bounds_),

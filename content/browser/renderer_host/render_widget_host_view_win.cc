@@ -2,14 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Need Win 7 headers for WM_GESTURE and ChangeWindowMessageFilterEx
-// TODO(jschuh): See crbug.com/92941 for longterm fix.
-#undef  WINVER
-#define WINVER _WIN32_WINNT_WIN7
-#undef  _WIN32_WINNT
-#define _WIN32_WINNT _WIN32_WINNT_WIN7
-#include <windows.h>
-
 #include "content/browser/renderer_host/render_widget_host_view_win.h"
 
 #include <algorithm>
@@ -33,11 +25,12 @@
 #include "content/browser/renderer_host/backing_store_win.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
-#include "content/common/content_switches.h"
-#include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_service.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
 #include "skia/ext/skia_utils_win.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
@@ -170,7 +163,7 @@ void DrawDeemphasized(const SkColor& color,
                       HDC paint_dc) {
   gfx::CanvasSkia canvas(paint_rect.width(), paint_rect.height(), true);
   {
-    skia::ScopedPlatformPaint scoped_platform_paint(&canvas);
+    skia::ScopedPlatformPaint scoped_platform_paint(canvas.sk_canvas());
     HDC dc = scoped_platform_paint.GetPlatformSurface();
     BitBlt(dc,
            0,
@@ -183,7 +176,7 @@ void DrawDeemphasized(const SkColor& color,
            SRCCOPY);
   }
   canvas.FillRectInt(color, 0, 0, paint_rect.width(), paint_rect.height());
-  skia::DrawToNativeContext(&canvas, paint_dc, paint_rect.x(),
+  skia::DrawToNativeContext(canvas.sk_canvas(), paint_dc, paint_rect.x(),
                             paint_rect.y(), NULL);
 }
 
@@ -238,14 +231,16 @@ RenderWidgetHostViewWin::RenderWidgetHostViewWin(RenderWidgetHost* widget)
       is_loading_(false),
       overlay_color_(0),
       text_input_type_(ui::TEXT_INPUT_TYPE_NONE),
-      is_fullscreen_(false) {
+      is_fullscreen_(false),
+      ignore_mouse_movement_(true) {
   render_widget_host_->SetView(this);
   registrar_.Add(this,
                  content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 RenderWidgetHostViewWin::~RenderWidgetHostViewWin() {
+  UnlockMouse();
   ResetTooltip();
 }
 
@@ -300,11 +295,6 @@ void RenderWidgetHostViewWin::WasHidden() {
   // If we have a renderer, then inform it that we are being hidden so it can
   // reduce its resource utilization.
   render_widget_host_->WasHidden();
-
-  // TODO(darin): what about constrained windows?  it doesn't look like they
-  // see a message when their parent is hidden.  maybe there is something more
-  // generic we can do at the TabContents API level instead of relying on
-  // Windows messages.
 }
 
 void RenderWidgetHostViewWin::SetSize(const gfx::Size& size) {
@@ -468,6 +458,7 @@ HWND RenderWidgetHostViewWin::ReparentWindow(HWND window) {
     // chrome_content_client.cc ChromeContentClient::SandboxPlugin
     g_ChangeWindowMessageFilterEx(parent, WM_MOUSEWHEEL, MSGFLT_ALLOW, NULL);
     g_ChangeWindowMessageFilterEx(parent, WM_GESTURE, MSGFLT_ALLOW, NULL);
+    g_ChangeWindowMessageFilterEx(parent, WM_APPCOMMAND, MSGFLT_ALLOW, NULL);
     ::RemovePropW(orig_parent, webkit::npapi::kNativeWindowClassFilterProp);
   }
   ::SetParent(window, parent);
@@ -602,10 +593,9 @@ void RenderWidgetHostViewWin::SetIsLoading(bool is_loading) {
   UpdateCursorIfOverSelf();
 }
 
-void RenderWidgetHostViewWin::ImeUpdateTextInputState(
+void RenderWidgetHostViewWin::TextInputStateChanged(
     ui::TextInputType type,
-    bool can_compose_inline,
-    const gfx::Rect& caret_rect) {
+    bool can_compose_inline) {
   // TODO(kinaba): currently, can_compose_inline is ignored and always treated
   // as true. We need to support "can_compose_inline=false" for PPAPI plugins
   // that may want to avoid drawing composition-text by themselves and pass
@@ -619,10 +609,16 @@ void RenderWidgetHostViewWin::ImeUpdateTextInputState(
     else
       ime_input_.DisableIME(m_hWnd);
   }
+}
 
+void RenderWidgetHostViewWin::SelectionBoundsChanged(
+    const gfx::Rect& start_rect,
+    const gfx::Rect& end_rect) {
+  bool is_enabled = (text_input_type_ != ui::TEXT_INPUT_TYPE_NONE &&
+      text_input_type_ != ui::TEXT_INPUT_TYPE_PASSWORD);
   // Only update caret position if the input method is enabled.
   if (is_enabled)
-    ime_input_.UpdateCaretRect(m_hWnd, caret_rect);
+    ime_input_.UpdateCaretRect(m_hWnd, start_rect.Union(end_rect));
 }
 
 void RenderWidgetHostViewWin::ImeCancelComposition() {
@@ -702,9 +698,7 @@ void RenderWidgetHostViewWin::RenderViewGone(base::TerminationStatus status,
                                              int error_code) {
   // TODO(darin): keep this around, and draw sad-tab into it.
   UpdateCursorIfOverSelf();
-  being_destroyed_ = true;
-  CleanupCompositorWindow();
-  DestroyWindow();
+  Destroy();
 }
 
 void RenderWidgetHostViewWin::WillWmDestroy() {
@@ -724,11 +718,11 @@ void RenderWidgetHostViewWin::Destroy() {
   DestroyWindow();
 }
 
-void RenderWidgetHostViewWin::SetTooltipText(const std::wstring& tooltip_text) {
+void RenderWidgetHostViewWin::SetTooltipText(const string16& tooltip_text) {
   // Clamp the tooltip length to kMaxTooltipLength so that we don't
   // accidentally DOS the user with a mega tooltip (since Windows doesn't seem
   // to do this itself).
-  const std::wstring& new_tooltip_text =
+  const string16 new_tooltip_text =
       ui::TruncateString(tooltip_text, kMaxTooltipLength);
 
   if (new_tooltip_text != tooltip_text_) {
@@ -759,8 +753,7 @@ BackingStore* RenderWidgetHostViewWin::AllocBackingStore(
 
 void RenderWidgetHostViewWin::SetBackground(const SkBitmap& background) {
   RenderWidgetHostView::SetBackground(background);
-  Send(new ViewMsg_SetBackground(render_widget_host_->routing_id(),
-                                 background));
+  render_widget_host_->SetBackground(background);
 }
 
 void RenderWidgetHostViewWin::SetVisuallyDeemphasized(const SkColor* color,
@@ -979,8 +972,8 @@ void RenderWidgetHostViewWin::DrawBackground(const RECT& dirty_rect,
                         dc_rect.right - dc_rect.left,
                         dc_rect.bottom - dc_rect.top);
 
-    skia::DrawToNativeContext(&canvas, *dc, dirty_rect.left, dirty_rect.top,
-                              NULL);
+    skia::DrawToNativeContext(canvas.sk_canvas(), *dc, dirty_rect.left,
+                              dirty_rect.top, NULL);
   } else {
     HBRUSH white_brush = reinterpret_cast<HBRUSH>(GetStockObject(WHITE_BRUSH));
     dc->FillRect(&dirty_rect, white_brush);
@@ -1093,17 +1086,19 @@ LRESULT RenderWidgetHostViewWin::OnNotify(int w_param, NMHDR* header) {
     case TTN_GETDISPINFO: {
       NMTTDISPINFOW* tooltip_info = reinterpret_cast<NMTTDISPINFOW*>(header);
       tooltip_info->szText[0] = L'\0';
-      tooltip_info->lpszText = const_cast<wchar_t*>(tooltip_text_.c_str());
+      tooltip_info->lpszText = const_cast<WCHAR*>(tooltip_text_.c_str());
       ::SendMessage(
         tooltip_hwnd_, TTM_SETMAXTIPWIDTH, 0, kTooltipMaxWidthPixels);
       SetMsgHandled(TRUE);
       break;
-                          }
+    }
     case TTN_POP:
       tooltip_showing_ = false;
       SetMsgHandled(TRUE);
       break;
     case TTN_SHOW:
+      // Tooltip shouldn't be shown when the mouse is locked.
+      DCHECK(!mouse_locked_);
       tooltip_showing_ = true;
       SetMsgHandled(TRUE);
       break;
@@ -1224,6 +1219,15 @@ LRESULT RenderWidgetHostViewWin::OnMouseEvent(UINT message, WPARAM wparam,
                                               LPARAM lparam, BOOL& handled) {
   handled = TRUE;
 
+  if (message == WM_MOUSELEAVE)
+    ignore_mouse_movement_ = true;
+
+  if (mouse_locked_) {
+    HandleLockedMouseEvent(message, wparam, lparam);
+    MoveCursorToCenter();
+    return 0;
+  }
+
   if (::IsWindow(tooltip_hwnd_)) {
     // Forward mouse events through to the tooltip window
     MSG msg;
@@ -1286,11 +1290,12 @@ LRESULT RenderWidgetHostViewWin::OnKeyEvent(UINT message, WPARAM wparam,
                                             LPARAM lparam, BOOL& handled) {
   handled = TRUE;
 
-  // Force fullscreen windows to close on Escape.
-  if (is_fullscreen_ && (message == WM_KEYDOWN || message == WM_KEYUP) &&
-      wparam == VK_ESCAPE) {
-    SendMessage(WM_CANCELMODE);
-    return 0;
+  // When Escape is pressed, force fullscreen windows to close if necessary.
+  if ((message == WM_KEYDOWN || message == WM_KEYUP) && wparam == VK_ESCAPE) {
+    if (is_fullscreen_) {
+      SendMessage(WM_CANCELMODE);
+      return 0;
+    }
   }
 
   // If we are a pop-up, forward tab related messages to our parent HWND, so
@@ -1475,6 +1480,52 @@ void RenderWidgetHostViewWin::OnAccessibilityNotifications(
   browser_accessibility_manager_->OnAccessibilityNotifications(params);
 }
 
+bool RenderWidgetHostViewWin::LockMouse() {
+  if (mouse_locked_)
+    return true;
+
+  mouse_locked_ = true;
+
+  // Hide the tooltip window if it is currently visible. When the mouse is
+  // locked, no mouse message is relayed to the tooltip window, so we don't need
+  // to worry that it will reappear.
+  if (::IsWindow(tooltip_hwnd_) && tooltip_showing_) {
+    ::SendMessage(tooltip_hwnd_, TTM_POP, 0, 0);
+    // Sending a TTM_POP message doesn't seem to actually hide the tooltip
+    // window, although we will receive a TTN_POP notification. As a result,
+    // ShowWindow() is explicitly called to hide the window.
+    ::ShowWindow(tooltip_hwnd_, SW_HIDE);
+  }
+
+  // TODO(yzshen): Show an invisible cursor instead of using
+  // ::ShowCursor(FALSE), so that MoveCursorToCenter() works with Remote
+  // Desktop.
+  ::ShowCursor(FALSE);
+
+  MoveCursorToCenter();
+
+  CRect rect;
+  GetWindowRect(&rect);
+  ::ClipCursor(&rect);
+
+  return true;
+}
+
+void RenderWidgetHostViewWin::UnlockMouse() {
+  if (!mouse_locked_)
+    return;
+
+  mouse_locked_ = false;
+
+  ::ClipCursor(NULL);
+  ::SetCursorPos(last_global_mouse_position_.x(),
+                 last_global_mouse_position_.y());
+  ::ShowCursor(TRUE);
+
+  if (render_widget_host_)
+    render_widget_host_->LostMouseLock();
+}
+
 void RenderWidgetHostViewWin::Observe(int type,
                                       const NotificationSource& source,
                                       const NotificationDetails& details) {
@@ -1627,16 +1678,14 @@ void RenderWidgetHostViewWin::SetAccessibilityFocus(int acc_obj_id) {
   if (!render_widget_host_)
     return;
 
-  render_widget_host_->Send(new ViewMsg_SetAccessibilityFocus(
-      render_widget_host_->routing_id(), acc_obj_id));
+  render_widget_host_->AccessibilitySetFocus(acc_obj_id);
 }
 
 void RenderWidgetHostViewWin::AccessibilityDoDefaultAction(int acc_obj_id) {
   if (!render_widget_host_)
     return;
 
-  render_widget_host_->Send(new ViewMsg_AccessibilityDoDefaultAction(
-      render_widget_host_->routing_id(), acc_obj_id));
+  render_widget_host_->AccessibilityDoDefaultAction(acc_obj_id);
 }
 
 IAccessible* RenderWidgetHostViewWin::GetIAccessible() {
@@ -1795,6 +1844,31 @@ void RenderWidgetHostViewWin::ForwardMouseEventToRenderer(UINT message,
   WebMouseEvent event(
       WebInputEventFactory::mouseEvent(m_hWnd, message, wparam, lparam));
 
+  if (mouse_locked_) {
+    CPoint center = GetClientCenter();
+
+    event.movementX = event.windowX - center.x;
+    event.movementY = event.windowY - center.y;
+    event.x = last_mouse_position_.x();
+    event.y = last_mouse_position_.y();
+    event.windowX = last_mouse_position_.x();
+    event.windowY = last_mouse_position_.y();
+    event.globalX = last_global_mouse_position_.x();
+    event.globalY = last_global_mouse_position_.y();
+  } else {
+    if (ignore_mouse_movement_) {
+      ignore_mouse_movement_ = false;
+      event.movementX = 0;
+      event.movementY = 0;
+    } else {
+      event.movementX = event.globalX - last_global_mouse_position_.x();
+      event.movementY = event.globalY - last_global_mouse_position_.y();
+    }
+
+    last_mouse_position_.SetPoint(event.windowX, event.windowY);
+    last_global_mouse_position_.SetPoint(event.globalX, event.globalY);
+  }
+
   // Send the event to the renderer before changing mouse capture, so that the
   // capturelost event arrives after mouseup.
   render_widget_host_->ForwardMouseEvent(event);
@@ -1843,3 +1917,32 @@ void RenderWidgetHostViewWin::DoPopupOrFullscreenInit(HWND parent_hwnd,
   EnsureTooltip();
   ShowWindow(IsActivatable() ? SW_SHOW : SW_SHOWNA);
 }
+
+CPoint RenderWidgetHostViewWin::GetClientCenter() const {
+  CRect rect;
+  GetClientRect(&rect);
+  return rect.CenterPoint();
+}
+
+void RenderWidgetHostViewWin::MoveCursorToCenter() const {
+  CPoint center = GetClientCenter();
+  ClientToScreen(&center);
+  if (!::SetCursorPos(center.x, center.y))
+    LOG_GETLASTERROR(WARNING) << "Failed to set cursor position.";
+}
+
+void RenderWidgetHostViewWin::HandleLockedMouseEvent(UINT message,
+                                                     WPARAM wparam,
+                                                     LPARAM lparam) {
+  DCHECK(mouse_locked_);
+
+  if (message == WM_MOUSEMOVE) {
+    CPoint center = GetClientCenter();
+    // Ignore WM_MOUSEMOVE messages generated by MoveCursorToCenter().
+    if (LOWORD(lparam) == center.x && HIWORD(lparam) == center.y)
+      return;
+  }
+
+  ForwardMouseEventToRenderer(message, wparam, lparam);
+}
+

@@ -22,6 +22,7 @@ class GLSurface;
 
 namespace gpu {
 
+class StreamTextureManager;
 class SurfaceManager;
 
 namespace gles2 {
@@ -29,10 +30,14 @@ namespace gles2 {
 class ContextGroup;
 class GLES2Util;
 
-struct DisallowedExtensions {
-  DisallowedExtensions() : multisampling(false) {}
+struct DisallowedFeatures {
+  DisallowedFeatures()
+      : multisampling(false),
+        driver_bug_workarounds(false) {
+  }
 
   bool multisampling;
+  bool driver_bug_workarounds;
 };
 
 // This class implements the AsyncAPIInterface interface, decoding GLES2
@@ -69,7 +74,7 @@ class GLES2Decoder : public CommonDecoder {
   virtual bool Initialize(const scoped_refptr<gfx::GLSurface>& surface,
                           const scoped_refptr<gfx::GLContext>& context,
                           const gfx::Size& size,
-                          const DisallowedExtensions& disallowed_extensions,
+                          const DisallowedFeatures& disallowed_features,
                           const char* allowed_extensions,
                           const std::vector<int32>& attribs) = 0;
 
@@ -106,6 +111,8 @@ class GLES2Decoder : public CommonDecoder {
   // Sets a callback which is called when a SwapBuffers command is processed.
   virtual void SetSwapBuffersCallback(Callback0::Type* callback) = 0;
 #endif
+
+  virtual void SetStreamTextureManager(StreamTextureManager* manager) = 0;
 
   // Get the service texture ID corresponding to a client texture ID.
   // If no such record is found then return false.

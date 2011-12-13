@@ -5,6 +5,8 @@
 #ifndef PPAPI_THUNK_INSTANCE_API_H_
 #define PPAPI_THUNK_INSTANCE_API_H_
 
+#include "ppapi/c/dev/ppb_url_util_dev.h"
+#include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/ppb_instance.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_size.h"
@@ -28,10 +30,36 @@ class PPB_Instance_FunctionAPI {
                                PP_Var script,
                                PP_Var* exception) = 0;
 
+  // CharSet.
+  virtual PP_Var GetDefaultCharSet(PP_Instance instance) = 0;
+
+  // Console.
+  virtual void Log(PP_Instance instance,
+                   int log_level,
+                   PP_Var value) = 0;
+  virtual void LogWithSource(PP_Instance instance,
+                             int log_level,
+                             PP_Var source,
+                             PP_Var value) = 0;
+
+  // Find.
+  virtual void NumberOfFindResultsChanged(PP_Instance instance,
+                                          int32_t total,
+                                          PP_Bool final_result) = 0;
+  virtual void SelectedFindResultChanged(PP_Instance instance,
+                                         int32_t index) = 0;
+
   // Fullscreen.
   virtual PP_Bool IsFullscreen(PP_Instance instance) = 0;
-  virtual PP_Bool SetFullscreen(PP_Instance instance, PP_Bool fullscreen) = 0;
+  virtual PP_Bool SetFullscreen(PP_Instance instance,
+                                PP_Bool fullscreen) = 0;
   virtual PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size) = 0;
+
+  // FlashFullscreen.
+  virtual PP_Bool FlashIsFullscreen(PP_Instance instance) = 0;
+  virtual PP_Bool FlashSetFullscreen(PP_Instance instance,
+                                     PP_Bool fullscreen) = 0;
+  virtual PP_Bool FlashGetScreenSize(PP_Instance instance, PP_Size* size) = 0;
 
   // InputEvent.
   virtual int32_t RequestInputEvents(PP_Instance instance,
@@ -44,6 +72,11 @@ class PPB_Instance_FunctionAPI {
   // Messaging.
   virtual void PostMessage(PP_Instance instance, PP_Var message) = 0;
 
+  // MouseLock.
+  virtual int32_t LockMouse(PP_Instance instance,
+                            PP_CompletionCallback callback) = 0;
+  virtual void UnlockMouse(PP_Instance instance) = 0;
+
   // Zoom.
   virtual void ZoomChanged(PP_Instance instance, double factor) = 0;
   virtual void ZoomLimitsChanged(PP_Instance instance,
@@ -52,6 +85,19 @@ class PPB_Instance_FunctionAPI {
 
   // QueryPolicy.
   virtual void SubscribeToPolicyUpdates(PP_Instance instance) = 0;
+
+  // URLUtil.
+  virtual PP_Var ResolveRelativeToDocument(
+      PP_Instance instance,
+      PP_Var relative,
+      PP_URLComponents_Dev* components) = 0;
+  virtual PP_Bool DocumentCanRequest(PP_Instance instance, PP_Var url) = 0;
+  virtual PP_Bool DocumentCanAccessDocument(PP_Instance instance,
+                                            PP_Instance target) = 0;
+  virtual PP_Var GetDocumentURL(PP_Instance instance,
+                                PP_URLComponents_Dev* components) = 0;
+  virtual PP_Var GetPluginInstanceURL(PP_Instance instance,
+                                      PP_URLComponents_Dev* components) = 0;
 
   static const proxy::InterfaceID interface_id =
       proxy::INTERFACE_ID_PPB_INSTANCE;

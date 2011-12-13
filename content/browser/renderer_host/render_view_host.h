@@ -9,11 +9,13 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/process_util.h"
 #include "content/browser/renderer_host/render_widget_host.h"
+#include "content/common/content_export.h"
 #include "content/common/window_container_type.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
@@ -42,6 +44,7 @@ struct ViewMsg_Navigate_Params;
 struct WebDropData;
 struct UserMetricsAction;
 struct ViewHostMsg_RunFileChooser_Params;
+struct ViewMsg_StopFinding_Params;
 
 namespace base {
 class ListValue;
@@ -57,10 +60,12 @@ class Range;
 
 namespace webkit_glue {
 struct WebAccessibility;
+struct CustomContextMenuContext;
 }  // namespace webkit_glue
 
 namespace WebKit {
 struct WebMediaPlayerAction;
+struct WebFindOptions;
 }  // namespace WebKit
 
 namespace net {
@@ -94,7 +99,7 @@ class URLRequestContextGetter;
 //  if we want to bring that and other functionality down into this object so
 //  it can be shared by others.
 //
-class RenderViewHost : public RenderWidgetHost {
+class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
  public:
   // Returns the RenderViewHost given its ID and the ID of its render process.
   // Returns NULL if the IDs do not correspond to a live RenderViewHost.
@@ -253,16 +258,6 @@ class RenderViewHost : public RenderWidgetHost {
   int ExecuteJavascriptInWebFrameNotifyResult(const string16& frame_xpath,
                                               const string16& jscript);
 
-  // Edit operations.
-  void Undo();
-  void Redo();
-  void Cut();
-  void Copy();
-  void CopyToFindPboard();
-  void Paste();
-  void Delete();
-  void SelectAll();
-
   // Notifies the RenderView that the JavaScript message that was shown was
   // closed by the user.
   void JavaScriptDialogClosed(IPC::Message* reply_msg,
@@ -312,8 +307,11 @@ class RenderViewHost : public RenderWidgetHost {
       const FilePath& local_directory_name);
 
   // Notifies the Listener that one or more files have been chosen by the user
-  // from an Open File dialog for the form.
-  void FilesSelectedInChooser(const std::vector<FilePath>& files);
+  // from a file chooser dialog for the form. |permissions| are flags from the
+  // base::PlatformFileFlags enum which specify which file permissions should
+  // be granted to the renderer.
+  void FilesSelectedInChooser(const std::vector<FilePath>& files,
+                              int permissions);
 
   // Notifies the listener that a directory enumeration is complete.
   void DirectoryEnumerationFinished(int request_id,
@@ -330,19 +328,18 @@ class RenderViewHost : public RenderWidgetHost {
     sudden_termination_allowed_ = enabled;
   }
 
-  // Message the renderer that we should be counted as a new document and not
-  // as a popup.
-  void DisassociateFromPopupCount();
-
   // RenderWidgetHost public overrides.
-  virtual void Shutdown();
-  virtual bool IsRenderView() const;
-  virtual bool OnMessageReceived(const IPC::Message& msg);
-  virtual void GotFocus();
-  virtual void LostCapture();
-  virtual void ForwardMouseEvent(const WebKit::WebMouseEvent& mouse_event);
-  virtual void OnMouseActivate();
-  virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
+  virtual void Shutdown() OVERRIDE;
+  virtual bool IsRenderView() const OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
+  virtual void GotFocus() OVERRIDE;
+  virtual void LostCapture() OVERRIDE;
+  virtual void LostMouseLock() OVERRIDE;
+  virtual void ForwardMouseEvent(
+      const WebKit::WebMouseEvent& mouse_event) OVERRIDE;
+  virtual void OnMouseActivate() OVERRIDE;
+  virtual void ForwardKeyboardEvent(
+      const NativeWebKeyboardEvent& key_event) OVERRIDE;
 
   // Creates a new RenderView with the given route id.
   void CreateNewWindow(int route_id,
@@ -363,25 +360,89 @@ class RenderViewHost : public RenderWidgetHost {
 
   void ToggleSpeechInput();
 
-#if defined(UNIT_TEST)
-  // These functions shouldn't be necessary outside of testing.
-
   void set_save_accessibility_tree_for_testing(bool save) {
     save_accessibility_tree_for_testing_ = save;
   }
 
-  const webkit_glue::WebAccessibility& accessibility_tree() {
+  const webkit_glue::WebAccessibility& accessibility_tree_for_testing() {
     return accessibility_tree_;
   }
 
-  bool is_waiting_for_unload_ack() { return is_waiting_for_unload_ack_; }
-#endif
+  bool is_waiting_for_unload_ack_for_testing() {
+    return is_waiting_for_unload_ack_;
+  }
 
   // Checks that the given renderer can request |url|, if not it sets it to an
   // empty url.
   static void FilterURL(ChildProcessSecurityPolicy* policy,
                         int renderer_id,
                         GURL* url);
+
+  // Sets the alternate error page URL (link doctor) for the renderer process.
+  void SetAltErrorPageURL(const GURL& url);
+
+  // Asks the renderer to exit fullscreen
+  void ExitFullscreen();
+
+  // Passes a list of Webkit preferences to the renderer.
+  void UpdateWebkitPreferences(const WebPreferences& prefs);
+
+  // Tells the renderer to clear the focused node (if any).
+  void ClearFocusedNode();
+
+  // Set the zoom level for the current main frame
+  void SetZoomLevel(double level);
+
+  // Changes the zoom level for the current main frame.
+  void Zoom(PageZoom::Function zoom_function);
+
+  // Reloads the current focused frame.
+  void ReloadFrame();
+
+  // Finds text on a page.
+  void Find(int request_id, const string16& search_text,
+            const WebKit::WebFindOptions& options);
+
+  // Requests the renderer to evaluate an xpath to a frame and insert css
+  // into that frame's document.
+  void InsertCSS(const string16& frame_xpath, const std::string& css);
+
+  // Tells the renderer not to add scrollbars with height and width below a
+  // threshold.
+  void DisableScrollbarsForThreshold(const gfx::Size& size);
+
+  // Instructs the RenderView to send back updates to the preferred size.
+  void EnablePreferredSizeMode(int flags);
+
+  // Executes custom context menu action that was provided from WebKit.
+  void ExecuteCustomContextMenuCommand(
+      int action, const webkit_glue::CustomContextMenuContext& context);
+
+  // Let the renderer know that the menu has been closed.
+  void NotifyContextMenuClosed(
+      const webkit_glue::CustomContextMenuContext& context);
+
+  // Copies the image at location x, y to the clipboard (if there indeed is an
+  // image at that location).
+  void CopyImageAt(int x, int y);
+
+  // Tells the renderer to perform the given action on the media player
+  // located at the given point.
+  void ExecuteMediaPlayerActionAtLocation(
+      const gfx::Point& location, const WebKit::WebMediaPlayerAction& action);
+
+  // Sent to the renderer when a popup window should no longer count against
+  // the current popup count (either because it's not a popup or because it was
+  // a generated by a user action).
+  void DisassociateFromPopupCount();
+
+  // Notification that a move or resize renderer's containing window has
+  // started.
+  void NotifyMoveOrResizeStarted();
+
+  // Notifies the renderer that the user has closed the FindInPage window
+  // (and what action to take regarding the selection).
+  void StopFinding(const ViewMsg_StopFinding_Params& params);
 
   // NOTE: Do not add functions that just send an IPC message that are called in
   // one or two places.  Have the caller send the IPC message directly.
@@ -396,13 +457,16 @@ class RenderViewHost : public RenderWidgetHost {
 
   // RenderWidgetHost protected overrides.
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut);
-  virtual void UnhandledKeyboardEvent(const NativeWebKeyboardEvent& event);
-  virtual void OnUserGesture();
-  virtual void NotifyRendererUnresponsive();
-  virtual void NotifyRendererResponsive();
-  virtual void OnMsgFocus();
-  virtual void OnMsgBlur();
+                                      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void UnhandledKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void OnUserGesture() OVERRIDE;
+  virtual void NotifyRendererUnresponsive() OVERRIDE;
+  virtual void NotifyRendererResponsive() OVERRIDE;
+  virtual void RequestToLockMouse() OVERRIDE;
+  virtual bool IsFullscreen() const OVERRIDE;
+  virtual void OnMsgFocus() OVERRIDE;
+  virtual void OnMsgBlur() OVERRIDE;
 
   // IPC message handlers.
   void OnMsgShowView(int route_id,
@@ -431,16 +495,21 @@ class RenderViewHost : public RenderWidgetHost {
   void OnMsgDocumentOnLoadCompletedInMainFrame(int32 page_id);
   void OnMsgContextMenu(const ContextMenuParams& params);
   void OnMsgToggleFullscreen(bool enter_fullscreen);
-  void OnMsgOpenURL(const GURL& url, const GURL& referrer,
-                    WindowOpenDisposition disposition);
+  void OnMsgOpenURL(const GURL& url,
+                    const GURL& referrer,
+                    WindowOpenDisposition disposition,
+                    int64 source_frame_id);
   void OnMsgDidContentsPreferredSizeChange(const gfx::Size& new_size);
   void OnMsgDidChangeScrollbarsForMainFrame(bool has_horizontal_scrollbar,
                                             bool has_vertical_scrollbar);
   void OnMsgDidChangeScrollOffsetPinningForMainFrame(bool is_pinned_to_left,
                                                      bool is_pinned_to_right);
   void OnMsgDidChangeNumWheelEvents(int count);
-  void OnMsgSelectionChanged(const std::string& text, const ui::Range& range,
-                             const gfx::Point& start, const gfx::Point& end);
+  void OnMsgSelectionChanged(const string16& text,
+                             size_t offset,
+                             const ui::Range& range);
+  void OnMsgSelectionBoundsChanged(const gfx::Rect& start_rect,
+                                   const gfx::Rect& end_rect);
   void OnMsgPasteFromSelectionClipboard();
   void OnMsgRunJavaScriptMessage(const string16& message,
                                  const string16& default_prompt,
@@ -474,12 +543,14 @@ class RenderViewHost : public RenderWidgetHost {
   void OnShowDesktopNotification(
       const DesktopNotificationHostMsg_Show_Params& params);
   void OnCancelDesktopNotification(int notification_id);
+  void OnRunFileChooser(const ViewHostMsg_RunFileChooser_Params& params);
+
+  void OnWebUISend(const GURL& source_url, const std::string& name,
+                   const base::ListValue& args);
 
 #if defined(OS_MACOSX)
   void OnMsgShowPopup(const ViewHostMsg_ShowPopup_Params& params);
 #endif
-
-  void OnRunFileChooser(const ViewHostMsg_RunFileChooser_Params& params);
 
  private:
   friend class TestRenderViewHost;

@@ -75,9 +75,9 @@ void GLES2DecoderTestBase::InitDecoder(
   InSequence sequence;
 
   TestHelper::SetupContextGroupInitExpectations(gl_.get(),
-      DisallowedExtensions(), extensions);
+      DisallowedFeatures(), extensions);
 
-  EXPECT_TRUE(group_->Initialize(DisallowedExtensions(), NULL));
+  EXPECT_TRUE(group_->Initialize(DisallowedFeatures(), NULL));
 
   EXPECT_CALL(*gl_, EnableVertexAttribArray(0))
       .Times(1)
@@ -182,7 +182,7 @@ void GLES2DecoderTestBase::InitDecoder(
 
   decoder_.reset(GLES2Decoder::Create(group_.get()));
   decoder_->Initialize(
-      surface_, context_, surface_->GetSize(), DisallowedExtensions(),
+      surface_, context_, surface_->GetSize(), DisallowedFeatures(),
       NULL, attribs);
   decoder_->set_engine(engine_.get());
 
@@ -221,8 +221,7 @@ void GLES2DecoderTestBase::TearDown() {
       .RetiresOnSaturation();
   decoder_->Destroy();
   decoder_.reset();
-  group_->set_have_context(false);
-  group_ = NULL;
+  group_->Destroy(false);
   engine_.reset();
   ::gfx::GLInterface::SetGLInterface(NULL);
   gl_.reset();

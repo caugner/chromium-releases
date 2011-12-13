@@ -61,6 +61,7 @@
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_input_event.h"
 #include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/ppp_mouse_lock.h"
 #include "ppapi/c/private/ppb_uma_private.h"
 #include "ppapi/cpp/dev/find_dev.h"
 #include "ppapi/cpp/dev/printing_dev.h"
@@ -72,6 +73,7 @@
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/input_event.h"
 #include "ppapi/cpp/module.h"
+#include "ppapi/cpp/mouse_lock.h"
 #include "ppapi/cpp/rect.h"
 
 using ppapi_proxy::BrowserPpp;
@@ -101,6 +103,10 @@ const char* const kNaClManifestAttribute = "nacl";
 // for the null termination character.
 const size_t kNaClManifestMaxFileBytes = 1024 * 1024;
 
+// Define an argument name to enable 'dev' interfaces. To make sure it doesn't
+// collide with any user-defined HTML attribute, make the first character '@'.
+const char* const kDevAttribute = "@dev";
+
 // URL schemes that we treat in special ways.
 const char* const kChromeExtensionUriScheme = "chrome-extension";
 const char* const kDataUriScheme = "data";
@@ -114,6 +120,15 @@ bool GetLastError(void* obj, SrpcParams* params) {
 
   Plugin* plugin = static_cast<Plugin*>(obj);
   outs[0]->arrays.str = strdup(plugin->last_error_string().c_str());
+  return true;
+}
+
+bool GetExitStatus(void* obj, SrpcParams* params) {
+  NaClSrpcArg** outs = params->outs();
+  PLUGIN_PRINTF(("GetExitStatus (obj=%p)\n", obj));
+
+  Plugin* plugin = static_cast<Plugin*>(obj);
+  outs[0]->u.ival = plugin->exit_status();
   return true;
 }
 
@@ -295,6 +310,32 @@ class FindAdapter : public pp::Find_Dev {
 };
 
 
+// Derive a class from pp::MouseLock to forward PPP_MouseLock calls to
+// the plugin.
+class MouseLockAdapter : public pp::MouseLock {
+ public:
+  explicit MouseLockAdapter(Plugin* plugin)
+    : pp::MouseLock(plugin),
+      plugin_(plugin) {
+    BrowserPpp* proxy = plugin_->ppapi_proxy();
+    CHECK(proxy != NULL);
+    ppp_mouse_lock_ = static_cast<const PPP_MouseLock*>(
+        proxy->GetPluginInterface(PPP_MOUSELOCK_INTERFACE));
+  }
+
+  void MouseLockLost() {
+    if (ppp_mouse_lock_ != NULL)
+      ppp_mouse_lock_->MouseLockLost(plugin_->pp_instance());
+  }
+
+ private:
+  Plugin* plugin_;
+  const PPP_MouseLock* ppp_mouse_lock_;
+
+  NACL_DISALLOW_COPY_AND_ASSIGN(MouseLockAdapter);
+};
+
+
 // Derive a class from pp::Printing_Dev to forward PPP_Printing_Dev calls to
 // the plugin.
 class PrintingAdapter : public pp::Printing_Dev {
@@ -336,6 +377,14 @@ class PrintingAdapter : public pp::Printing_Dev {
   void PrintEnd() {
     if (ppp_printing_ != NULL)
       ppp_printing_->End(plugin_->pp_instance());
+  }
+
+  bool IsPrintScalingDisabled() {
+    if (ppp_printing_ != NULL) {
+      PP_Bool result = ppp_printing_->IsScalingDisabled(plugin_->pp_instance());
+      return result == PP_TRUE;
+    }
+    return false;
   }
 
  private:
@@ -589,10 +638,12 @@ void Plugin::ShutDownSubprocesses() {
 bool Plugin::LoadNaClModuleCommon(nacl::DescWrapper* wrapper,
                                   NaClSubprocess* subprocess,
                                   ErrorInfo* error_info,
-                                  pp::CompletionCallback init_done_cb) {
+                                  pp::CompletionCallback init_done_cb,
+                                  pp::CompletionCallback crash_cb) {
   ServiceRuntime* new_service_runtime = new(std::nothrow) ServiceRuntime(
       this,
-      init_done_cb);
+      init_done_cb,
+      crash_cb);
   subprocess->set_service_runtime(new_service_runtime);
   PLUGIN_PRINTF(("Plugin::LoadNaClModuleCommon (service_runtime=%p)\n",
                  static_cast<void*>(new_service_runtime)));
@@ -661,14 +712,15 @@ bool Plugin::StartJSObjectProxy(NaClSubprocess* subprocess,
 
 bool Plugin::LoadNaClModule(nacl::DescWrapper* wrapper,
                             ErrorInfo* error_info,
-                            pp::CompletionCallback init_done_cb) {
+                            pp::CompletionCallback init_done_cb,
+                            pp::CompletionCallback crash_cb) {
   // Before forking a new sel_ldr process, ensure that we do not leak
   // the ServiceRuntime object for an existing subprocess, and that any
   // associated listener threads do not go unjoined because if they
   // outlive the Plugin object, they will not be memory safe.
   ShutDownSubprocesses();
   if (!(LoadNaClModuleCommon(wrapper, &main_subprocess_, error_info,
-                             init_done_cb))) {
+                             init_done_cb, crash_cb))) {
     return false;
   }
   PLUGIN_PRINTF(("Plugin::LoadNaClModule (%s)\n",
@@ -698,10 +750,15 @@ NaClSubprocessId Plugin::LoadHelperNaClModule(nacl::DescWrapper* wrapper,
   }
 
   if (!(LoadNaClModuleCommon(wrapper, nacl_subprocess.get(), error_info,
+                             pp::BlockUntilComplete(),
                              pp::BlockUntilComplete())
         // We need not wait for the init_done callback.  We can block
         // here in StartSrpcServicesCommon, since helper NaCl modules
         // are spawned from a private thread.
+        //
+        // TODO(bsy): if helper module crashes, we should abort.
+        // crash_cb is not used here, so we are relying on crashes
+        // being detected in StartSrpcServicesCommon or later.
         //
         // NB: More refactoring might be needed, however, if helper
         // NaCl modules have their own manifest.  Currently the
@@ -839,6 +896,11 @@ bool Plugin::Init(uint32_t argc, const char* argn[], const char* argv[]) {
       const_cast<char**>(argn),
       const_cast<char**>(argv));
   if (status) {
+    // Look for the developer attribute; if it's present, enable 'dev'
+    // interfaces.
+    const char* dev_settings = LookupArgument(kDevAttribute);
+    enable_dev_interfaces_ = (dev_settings != NULL);
+
     const char* type_attr = LookupArgument(kTypeAttribute);
     if (type_attr != NULL) {
       mime_type_ = nacl::string(type_attr);
@@ -851,7 +913,6 @@ bool Plugin::Init(uint32_t argc, const char* argn[], const char* argv[]) {
     // and 'nacl' will be the URL for the manifest.
     if (IsForeignMIMEType()) {
       manifest_url = LookupArgument(kNaClManifestAttribute);
-      enable_dev_interfaces_ = RequiresDevInterfaces(manifest_url);
     }
     // Use the document URL as the base for resolving relative URLs to find the
     // manifest.  This takes into account the setting of <base> tags that
@@ -882,6 +943,8 @@ bool Plugin::Init(uint32_t argc, const char* argn[], const char* argv[]) {
 
   // Export a property to allow us to get the last error description.
   AddPropertyGet(GetLastError, "lastError", "s");
+  // Export a property to allow us to get the nexe exit status.
+  AddPropertyGet(GetExitStatus, "exitStatus", "i");
 
   PLUGIN_PRINTF(("Plugin::Init (status=%d)\n", status));
   return status;
@@ -897,6 +960,7 @@ Plugin::Plugin(PP_Instance pp_instance)
       argv_(NULL),
       main_subprocess_(kMainSubprocessId, NULL, NULL),
       nacl_ready_state_(UNSENT),
+      nexe_error_reported_(false),
       wrapper_factory_(NULL),
       last_error_string_(""),
       ppapi_proxy_(NULL),
@@ -940,10 +1004,37 @@ Plugin::~Plugin() {
   ShutdownProxy();
   ScriptableHandle* scriptable_handle_ = scriptable_handle();
   ScriptableHandle::Unref(&scriptable_handle_);
-  NaClSrpcModuleFini();
 
-  // TODO(sehr,polina): We should not need to call ShutDownSubprocesses() here.
+  // ShutDownSubprocesses shuts down the subprocesses, which shuts
+  // down the main ServiceRuntime object, which kills the subprocess.
+  // As a side effect of the subprocess being killed, the reverse
+  // services thread(s) will get EOF on the reverse channel(s), and
+  // the thread(s) will exit.  In ServiceRuntime::Shutdown, we invoke
+  // ReverseService::WaitForServiceThreadsToExit(), so that there will
+  // not be an extent thread(s) hanging around.  This means that the
+  // ~Plugin will block until this happens.  This is a requirement,
+  // since the renderer should be free to unload the plugin code, and
+  // we cannot have threads running code that gets unloaded before
+  // they exit.
+  //
+  // By waiting for the threads here, we also ensure that the Plugin
+  // object and the subprocess and ServiceRuntime objects is not
+  // (fully) destroyed while the threads are running, so resources
+  // that are destroyed after ShutDownSubprocesses (below) are
+  // guaranteed to be live and valid for access from the service
+  // threads.
+  //
+  // The main_subprocess object, which wraps the main service_runtime
+  // object, is dtor'd implicitly after the explicit code below runs,
+  // so the main service runtime object will not have been dtor'd,
+  // though the Shutdown method may have been called, during the
+  // lifetime of the service threads.
   ShutDownSubprocesses();
+
+  // Shutdown Srpc module only after the service threads are done.
+  // NB: NaClSrpcModuleInit and Fini should be invoked at dll
+  // load/unload and not in the Plugin ctor/dtor.
+  NaClSrpcModuleFini();
 
   delete wrapper_factory_;
   delete browser_interface_;
@@ -1113,7 +1204,8 @@ void Plugin::NexeFileDidOpen(int32_t pp_error) {
   NaClLog(4, "NexeFileDidOpen: invoking LoadNaClModule\n");
   bool was_successful = LoadNaClModule(
       wrapper.get(), &error_info,
-      callback_factory_.NewCallback(&Plugin::NexeFileDidOpenContinuation));
+      callback_factory_.NewCallback(&Plugin::NexeFileDidOpenContinuation),
+      callback_factory_.NewCallback(&Plugin::NexeDidCrash));
 
   if (!was_successful) {
     ReportLoadError(error_info);
@@ -1148,6 +1240,33 @@ void Plugin::NexeFileDidOpenContinuation(int32_t pp_error) {
   NaClLog(4, "Leaving NexeFileDidOpenContinuation\n");
 }
 
+void Plugin::NexeDidCrash(int32_t pp_error) {
+  PLUGIN_PRINTF(("Plugin::NexeDidCrash (pp_error=%"NACL_PRId32")\n",
+                 pp_error));
+  if (pp_error != PP_OK) {
+    PLUGIN_PRINTF(("Plugin::NexeDidCrash: CallOnMainThread callback with"
+                   " non-PP_OK arg -- SHOULD NOT HAPPEN\n"));
+  }
+  PLUGIN_PRINTF(("Plugin::NexeDidCrash: crash event!\n"));
+  // If the crash occurs during load, we just want to report an error
+  // that fits into our load progress event grammar.  If the crash
+  // occurs after loaded/loadend, then we use ReportDeadNexe to send a
+  // "crash" event.
+  if (nexe_error_reported()) {
+    PLUGIN_PRINTF(("Plugin::NexeDidCrash: error already reported;"
+                   " suppressing\n"));
+    return;
+  }
+  if (nacl_ready_state() == DONE) {
+    ReportDeadNexe();
+  } else {
+    ErrorInfo error_info;
+    error_info.SetReport(ERROR_START_PROXY_CRASH,  // Not quite right.
+                         "Nexe crashed during startup");
+    ReportLoadError(error_info);
+  }
+}
+
 void Plugin::BitcodeDidTranslate(int32_t pp_error) {
   PLUGIN_PRINTF(("Plugin::BitcodeDidTranslate (pp_error=%"NACL_PRId32")\n",
                  pp_error));
@@ -1166,7 +1285,8 @@ void Plugin::BitcodeDidTranslate(int32_t pp_error) {
   ErrorInfo error_info;
   bool was_successful = LoadNaClModule(
       wrapper.get(), &error_info,
-      callback_factory_.NewCallback(&Plugin::BitcodeDidTranslateContinuation));
+      callback_factory_.NewCallback(&Plugin::BitcodeDidTranslateContinuation),
+      pp::BlockUntilComplete());
 
   if (!was_successful) {
     ReportLoadError(error_info);
@@ -1186,21 +1306,6 @@ void Plugin::BitcodeDidTranslateContinuation(int32_t pp_error) {
   } else {
     ReportLoadError(error_info);
   }
-}
-
-// Check manifest_url and return whether or not to enable PPAPI Dev interfaces.
-// Returning true here will enable the PPAPI Dev interfaces regardless of
-// the environment variable NACL_ENABLE_PPAPI_DEV.
-bool Plugin::RequiresDevInterfaces(const nacl::string& manifest_url) {
-  const char* extensions[] = {
-      "chrome-extension://acadkphlmlegjaadjagenfimbpphcgnh/",  // PDF
-  };
-  for (size_t i = 0; i < sizeof(extensions) / sizeof(const char*); ++i) {
-    if (manifest_url.find(extensions[i]) == 0) {
-      return true;
-    }
-  }
-  return false;
 }
 
 bool Plugin::StartProxiedExecution(NaClSrpcChannel* srpc_channel,
@@ -1273,6 +1378,7 @@ bool Plugin::StartProxiedExecution(NaClSrpcChannel* srpc_channel,
 
   // Create PPP* interface adapters to forward calls to .nexe.
   find_adapter_.reset(new(std::nothrow) FindAdapter(this));
+  mouse_lock_adapter_.reset(new(std::nothrow) MouseLockAdapter(this));
   printing_adapter_.reset(new(std::nothrow) PrintingAdapter(this));
   selection_adapter_.reset(new(std::nothrow) SelectionAdapter(this));
   widget_client_adapter_.reset(new(std::nothrow) WidgetClientAdapter(this));
@@ -1304,7 +1410,7 @@ void Plugin::ReportDeadNexe() {
   if (ppapi_proxy_ != NULL)
     ppapi_proxy_->ReportDeadNexe();
 
-  if (nacl_ready_state() == DONE) {  // After loadEnd.
+  if (nacl_ready_state() == DONE && !nexe_error_reported()) {  // After loadEnd.
     int64_t crash_time = NaClGetTimeOfDayMicroseconds();
     // Crashes will be more likely near startup, so use a medium histogram
     // instead of a large one.
@@ -1312,11 +1418,16 @@ void Plugin::ReportDeadNexe() {
         "NaCl.ModuleUptime.Crash",
         (crash_time - ready_time_) / NACL_MICROS_PER_MILLI);
 
+    nacl::string message = nacl::string("NaCl module crashed");
+    set_last_error_string(message);
+    browser_interface()->AddToConsole(this, message);
+
     EnqueueProgressEvent("crash",
                          LENGTH_IS_NOT_COMPUTABLE,
                          kUnknownBytes,
                          kUnknownBytes);
-    CHECK(ppapi_proxy_ != NULL && !ppapi_proxy_->is_valid());
+    set_nexe_error_reported(true);
+    CHECK(ppapi_proxy_ == NULL || !ppapi_proxy_->is_valid());
     ShutdownProxy();
   }
   // else ReportLoadError() and ReportAbortError() will be used by loading code
@@ -1706,6 +1817,7 @@ void Plugin::ReportLoadError(const ErrorInfo& error_info) {
                  error_info.message().c_str()));
   // Set the readyState attribute to indicate we need to start over.
   set_nacl_ready_state(DONE);
+  set_nexe_error_reported(true);
   // Report an error in lastError and on the JavaScript console.
   nacl::string message = nacl::string("NaCl module load failed: ") +
       error_info.message();
@@ -1731,6 +1843,7 @@ void Plugin::ReportLoadAbort() {
   PLUGIN_PRINTF(("Plugin::ReportLoadAbort\n"));
   // Set the readyState attribute to indicate we need to start over.
   set_nacl_ready_state(DONE);
+  set_nexe_error_reported(true);
   // Report an error in lastError and on the JavaScript console.
   nacl::string error_string("NaCl module load failed: user aborted");
   set_last_error_string(error_string);

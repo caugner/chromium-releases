@@ -36,30 +36,39 @@ class ProfileInfoCache : public ProfileInfoInterface {
 
   void AddProfileToCache(const FilePath& profile_path,
                          const string16& name,
+                         const string16& username,
                          size_t icon_index);
   void DeleteProfileFromCache(const FilePath& profile_path);
 
   // ProfileInfoInterface:
   virtual size_t GetNumberOfProfiles() const OVERRIDE;
+  // Don't cache this value and reuse, because resorting the menu could cause
+  // the item being referred to to change out from under you.
   virtual size_t GetIndexOfProfileWithPath(
       const FilePath& profile_path) const OVERRIDE;
   virtual string16 GetNameOfProfileAtIndex(size_t index) const OVERRIDE;
   virtual FilePath GetPathOfProfileAtIndex(size_t index) const OVERRIDE;
+  virtual string16 GetUserNameOfProfileAtIndex(size_t index) const OVERRIDE;
   virtual const gfx::Image& GetAvatarIconOfProfileAtIndex(
+      size_t index) const OVERRIDE;
+  virtual bool GetBackgroundStatusOfProfileAtIndex(
       size_t index) const OVERRIDE;
 
   size_t GetAvatarIconIndexOfProfileAtIndex(size_t index) const;
 
   void SetNameOfProfileAtIndex(size_t index, const string16& name);
+  void SetUserNameOfProfileAtIndex(size_t index, const string16& user_name);
   void SetAvatarIconOfProfileAtIndex(size_t index, size_t icon_index);
+  void SetBackgroundStatusOfProfileAtIndex(size_t index,
+                                           bool running_background_apps);
 
   // Returns unique name that can be assigned to a newly created profile.
-  string16 ChooseNameForNewProfile();
+  string16 ChooseNameForNewProfile(size_t icon_index);
 
   // Returns an avatar icon index that can be assigned to a newly created
   // profile. Note that the icon may not be unique since there are a limited
   // set of default icons.
-  int ChooseAvatarIconIndexForNewProfile();
+  size_t ChooseAvatarIconIndexForNewProfile() const;
 
   const FilePath& GetUserDataDir() const;
 
@@ -80,13 +89,22 @@ class ProfileInfoCache : public ProfileInfoInterface {
  private:
   const base::DictionaryValue* GetInfoForProfileAtIndex(size_t index) const;
   // Saves the profile info to a cache and takes ownership of |info|.
-  // Currently the only information that is cached is the profiles name and
-  // avatar icon.
+  // Currently the only information that is cached is the profiles name,
+  // user name, and avatar icon.
   void SetInfoForProfileAtIndex(size_t index, base::DictionaryValue* info);
   std::string CacheKeyFromProfilePath(const FilePath& profile_path) const;
   std::vector<std::string>::iterator FindPositionForProfile(
       std::string search_key,
       const string16& search_name);
+
+  // Returns true if the given icon index is not in use by another profie.
+  bool IconIndexIsUnique(size_t icon_index) const;
+
+  // Tries to find an icon index that satisfies all the given conditions.
+  // Returns true if an icon was found, false otherwise.
+  bool ChooseAvatarIconIndexForNewProfile(bool allow_generic_icon,
+                                          bool must_be_unique,
+                                          size_t* out_icon_index) const;
 
   PrefService* prefs_;
   std::vector<std::string> sorted_keys_;

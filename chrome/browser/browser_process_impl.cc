@@ -17,8 +17,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/automation/automation_provider_list.h"
 #include "chrome/browser/background/background_mode_manager.h"
-#include "chrome/browser/browser_main.h"
-#include "chrome/browser/browser_process_sub_thread.h"
+#include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/browser_trial.h"
 #include "chrome/browser/chrome_plugin_service_filter.h"
 #include "chrome/browser/component_updater/component_updater_configurator.h"
@@ -28,6 +27,7 @@
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_tab_id_map.h"
+#include "chrome/browser/extensions/network_delay_listener.h"
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/google/google_url_tracker.h"
@@ -37,7 +37,7 @@
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/net/chrome_net_log.h"
-#include "chrome/browser/net/predictor_api.h"
+#include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -54,6 +54,7 @@
 #include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/tab_closeable_state_watcher.h"
+#include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/web_resource/gpu_blacklist_updater.h"
 #include "chrome/common/chrome_constants.h"
@@ -69,10 +70,12 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "content/browser/browser_child_process_host.h"
+#include "content/browser/browser_process_sub_thread.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/debugger/devtools_manager.h"
 #include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/download_status_updater.h"
 #include "content/browser/download/mhtml_generation_manager.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
@@ -80,8 +83,8 @@
 #include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/common/net/url_fetcher.h"
 #include "content/common/notification_service.h"
-#include "content/common/url_fetcher.h"
 #include "ipc/ipc_logging.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -91,6 +94,8 @@
 
 #if defined(OS_WIN)
 #include "views/focus/view_storage.h"
+#elif defined(OS_MACOSX)
+#include "chrome/browser/chrome_browser_main_mac.h"
 #endif
 
 #if defined(IPC_MESSAGE_LOG_ENABLED)
@@ -100,6 +105,7 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #include "chrome/browser/chromeos/web_socket_proxy_controller.h"
+#include "chrome/browser/oom_priority_manager.h"
 #endif  // defined(OS_CHROMEOS)
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
@@ -146,15 +152,19 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
       module_ref_count_(0),
       did_start_(false),
       checked_for_new_frames_(false),
-      using_new_frames_(false) {
+      using_new_frames_(false),
+      thumbnail_generator_(new ThumbnailGenerator),
+      download_status_updater_(new DownloadStatusUpdater) {
   g_browser_process = this;
   clipboard_.reset(new ui::Clipboard);
-  main_notification_service_.reset(new NotificationService);
 
   // Must be created after the NotificationService.
   print_job_manager_.reset(new printing::PrintJobManager);
 
   net_log_.reset(new ChromeNetLog);
+
+  ChildProcessSecurityPolicy::GetInstance()->RegisterWebSafeScheme(
+      chrome::kExtensionScheme);
 
   extension_event_router_forwarder_ = new ExtensionEventRouterForwarder;
 
@@ -283,9 +293,6 @@ BrowserProcessImpl::~BrowserProcessImpl() {
   // former registers for notifications.
   tab_closeable_state_watcher_.reset();
 
-  // Now OK to destroy NotificationService.
-  main_notification_service_.reset();
-
   g_browser_process = NULL;
 }
 
@@ -306,6 +313,7 @@ static void Signal(base::WaitableEvent* event) {
 
 unsigned int BrowserProcessImpl::AddRefModule() {
   DCHECK(CalledOnValidThread());
+  CHECK(!IsShuttingDown());
   did_start_ = true;
   module_ref_count_++;
   return module_ref_count_;
@@ -319,11 +327,16 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
     // Allow UI and IO threads to do blocking IO on shutdown, since we do a lot
     // of it on shutdown for valid reasons.
     base::ThreadRestrictions::SetIOAllowed(true);
+    CHECK(!BrowserList::GetLastActive());
     io_thread()->message_loop()->PostTask(
         FROM_HERE,
         NewRunnableFunction(&base::ThreadRestrictions::SetIOAllowed, true));
+
+#if defined(OS_MACOSX)
     MessageLoop::current()->PostTask(
-        FROM_HERE, NewRunnableFunction(content::DidEndMainMessageLoop));
+        FROM_HERE,
+        NewRunnableFunction(ChromeBrowserMainPartsMac::DidEndMainMessageLoop));
+#endif
     MessageLoop::current()->Quit();
   }
   return module_ref_count_;
@@ -350,11 +363,16 @@ void BrowserProcessImpl::EndSession() {
   // then proceed with normal shutdown.
 #if defined(USE_X11)
   //  Can't run a local loop on linux. Instead create a waitable event.
-  base::WaitableEvent done_writing(false, false);
+  scoped_ptr<base::WaitableEvent> done_writing(
+      new base::WaitableEvent(false, false));
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      NewRunnableFunction(Signal, &done_writing));
-  done_writing.TimedWait(
-      base::TimeDelta::FromSeconds(kEndSessionTimeoutSeconds));
+      NewRunnableFunction(Signal, done_writing.get()));
+  // If all file writes haven't cleared in the timeout, leak the WaitableEvent
+  // so that there's no race to reference it in Signal().
+  if (!done_writing->TimedWait(
+      base::TimeDelta::FromSeconds(kEndSessionTimeoutSeconds)))
+    ignore_result(done_writing.release());
+
 #elif defined(OS_WIN)
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
       NewRunnableFunction(PostQuit, MessageLoop::current()));
@@ -486,6 +504,13 @@ BrowserProcessImpl::chromeos_proxy_config_service_impl() {
   }
   return chromeos_proxy_config_service_impl_;
 }
+
+browser::OomPriorityManager* BrowserProcessImpl::oom_priority_manager() {
+  DCHECK(CalledOnValidThread());
+  if (!oom_priority_manager_.get())
+    oom_priority_manager_.reset(new browser::OomPriorityManager());
+  return oom_priority_manager_.get();
+}
 #endif  // defined(OS_CHROMEOS)
 
 ExtensionEventRouterForwarder*
@@ -520,14 +545,13 @@ IconManager* BrowserProcessImpl::icon_manager() {
 }
 
 ThumbnailGenerator* BrowserProcessImpl::GetThumbnailGenerator() {
-  return &thumbnail_generator_;
+  return thumbnail_generator_.get();
 }
 
-AutomationProviderList* BrowserProcessImpl::InitAutomationProviderList() {
+AutomationProviderList* BrowserProcessImpl::GetAutomationProviderList() {
   DCHECK(CalledOnValidThread());
-  if (automation_provider_list_.get() == NULL) {
-    automation_provider_list_.reset(AutomationProviderList::GetInstance());
-  }
+  if (automation_provider_list_.get() == NULL)
+    automation_provider_list_.reset(new AutomationProviderList());
   return automation_provider_list_.get();
 }
 
@@ -601,7 +625,7 @@ void BrowserProcessImpl::SetApplicationLocale(const std::string& locale) {
 }
 
 DownloadStatusUpdater* BrowserProcessImpl::download_status_updater() {
-  return &download_status_updater_;
+  return download_status_updater_.get();
 }
 
 DownloadRequestLimiter* BrowserProcessImpl::download_request_limiter() {
@@ -721,14 +745,28 @@ ComponentUpdateService* BrowserProcessImpl::component_updater() {
 #endif
 }
 
+CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
+#if defined(OS_CHROMEOS)
+  // There's no component updater on ChromeOS so there can't be a CRLSetFetcher
+  // either.
+  return NULL;
+#else
+  if (!crl_set_fetcher_.get()) {
+    crl_set_fetcher_ = new CRLSetFetcher();
+  }
+  return crl_set_fetcher_.get();
+#endif
+}
+
 void BrowserProcessImpl::CreateResourceDispatcherHost() {
   DCHECK(!created_resource_dispatcher_host_ &&
          resource_dispatcher_host_.get() == NULL);
   created_resource_dispatcher_host_ = true;
 
-  // UserScriptListener will delete itself.
+  // UserScriptListener and NetworkDelayListener will delete themselves.
   ResourceQueue::DelegateSet resource_queue_delegates;
   resource_queue_delegates.insert(new UserScriptListener());
+  resource_queue_delegates.insert(new NetworkDelayListener());
 
   resource_dispatcher_host_.reset(
       new ResourceDispatcherHost(resource_queue_delegates));
@@ -968,7 +1006,6 @@ void BrowserProcessImpl::CreateIntranetRedirectDetector() {
 void BrowserProcessImpl::CreateNotificationUIManager() {
   DCHECK(notification_ui_manager_.get() == NULL);
   notification_ui_manager_.reset(NotificationUIManager::Create(local_state()));
-
   created_notification_ui_manager_ = true;
 }
 
@@ -980,7 +1017,8 @@ void BrowserProcessImpl::CreateTabCloseableStateWatcher() {
 void BrowserProcessImpl::CreateBackgroundModeManager() {
   DCHECK(background_mode_manager_.get() == NULL);
   background_mode_manager_.reset(
-      new BackgroundModeManager(CommandLine::ForCurrentProcess()));
+      new BackgroundModeManager(CommandLine::ForCurrentProcess(),
+                                &profile_manager()->GetProfileInfoCache()));
 }
 
 void BrowserProcessImpl::CreateStatusTray() {

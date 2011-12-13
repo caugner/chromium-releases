@@ -73,7 +73,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandler {
   int GenerateAuthToken(const string16* username,
                         const string16* password,
                         const HttpRequestInfo* request,
-                        CompletionCallback* callback,
+                        OldCompletionCallback* callback,
                         std::string* auth_token);
 
   // The authentication scheme as an enumerated value.
@@ -81,7 +81,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandler {
     return auth_scheme_;
   }
 
-  // The realm value that was parsed during Init().
+  // The realm, encoded as UTF-8. This may be empty.
   const std::string& realm() const {
     return realm_;
   }
@@ -160,13 +160,13 @@ class NET_EXPORT_PRIVATE HttpAuthHandler {
   virtual int GenerateAuthTokenImpl(const string16* username,
                                     const string16* password,
                                     const HttpRequestInfo* request,
-                                    CompletionCallback* callback,
+                                    OldCompletionCallback* callback,
                                     std::string* auth_token) = 0;
 
   // The auth-scheme as an enumerated value.
   HttpAuth::Scheme auth_scheme_;
 
-  // The realm.  Used by "basic" and "digest".
+  // The realm, encoded as UTF-8. Used by "basic" and "digest".
   std::string realm_;
 
   // The auth challenge.
@@ -192,8 +192,8 @@ class NET_EXPORT_PRIVATE HttpAuthHandler {
   void OnGenerateAuthTokenComplete(int rv);
   void FinishGenerateAuthToken();
 
-  CompletionCallback* original_callback_;
-  CompletionCallbackImpl<HttpAuthHandler> wrapper_callback_;
+  OldCompletionCallback* original_callback_;
+  OldCompletionCallbackImpl<HttpAuthHandler> wrapper_callback_;
 };
 
 }  // namespace net

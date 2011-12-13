@@ -13,10 +13,12 @@ using preferences_helper::AppendStringPref;
 using preferences_helper::BooleanPrefMatches;
 using preferences_helper::ChangeBooleanPref;
 using preferences_helper::ChangeIntegerPref;
+using preferences_helper::ChangeInt64Pref;
 using preferences_helper::ChangeListPref;
 using preferences_helper::ChangeStringPref;
 using preferences_helper::GetPrefs;
 using preferences_helper::IntegerPrefMatches;
+using preferences_helper::Int64PrefMatches;
 using preferences_helper::ListPrefMatches;
 using preferences_helper::StringPrefMatches;
 
@@ -72,17 +74,17 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
 
 // TCM ID - 3699293.
 IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest,
-                       kKeepEverythingSynced) {
+                       kSyncKeepEverythingSynced) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
   DisableVerifier();
 
   ASSERT_TRUE(BooleanPrefMatches(
-      prefs::kKeepEverythingSynced));
+      prefs::kSyncKeepEverythingSynced));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kSyncThemes));
 
   GetClient(0)->DisableSyncForDatatype(syncable::THEMES);
   ASSERT_FALSE(BooleanPrefMatches(
-      prefs::kKeepEverythingSynced));
+      prefs::kSyncKeepEverythingSynced));
 }
 
 // TCM ID - 3661290.
@@ -118,7 +120,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, DisableSync) {
 
   GetClient(1)->DisableSyncForAllDatatypes();
   ChangeBooleanPref(0, prefs::kPasswordManagerEnabled);
-  ASSERT_TRUE(GetClient(0)->AwaitSyncCycleCompletion("Changed a preference."));
+  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion("Changed a preference."));
   ASSERT_FALSE(BooleanPrefMatches(
       prefs::kPasswordManagerEnabled));
 
@@ -143,7 +145,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, SignInDialog) {
   ASSERT_TRUE(BooleanPrefMatches(prefs::kSyncExtensions));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kSyncAutofill));
   ASSERT_TRUE(BooleanPrefMatches(
-      prefs::kKeepEverythingSynced));
+      prefs::kSyncKeepEverythingSynced));
 
   GetClient(0)->DisableSyncForDatatype(syncable::PREFERENCES);
   GetClient(1)->EnableSyncForDatatype(syncable::PREFERENCES);
@@ -164,7 +166,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, SignInDialog) {
   ASSERT_FALSE(BooleanPrefMatches(prefs::kSyncExtensions));
   ASSERT_FALSE(BooleanPrefMatches(prefs::kSyncAutofill));
   ASSERT_FALSE(BooleanPrefMatches(
-      prefs::kKeepEverythingSynced));
+      prefs::kSyncKeepEverythingSynced));
 }
 
 // TCM ID - 3666296.
@@ -175,6 +177,25 @@ IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kShowBookmarkBar) {
   ChangeBooleanPref(0, prefs::kShowBookmarkBar);
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_TRUE(BooleanPrefMatches(prefs::kShowBookmarkBar));
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientPreferencesSyncTest, kEnableInstant) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantConfirmDialogShown));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabled));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabledOnce));
+  ASSERT_TRUE(Int64PrefMatches(prefs::kInstantEnabledTime));
+
+  ChangeBooleanPref(0, prefs::kInstantConfirmDialogShown);
+  ChangeBooleanPref(0, prefs::kInstantEnabled);
+  ChangeBooleanPref(0, prefs::kInstantEnabledOnce);
+  ChangeInt64Pref(0, prefs::kInstantEnabledTime, 1);
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantConfirmDialogShown));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabled));
+  ASSERT_TRUE(BooleanPrefMatches(prefs::kInstantEnabledOnce));
+  ASSERT_TRUE(Int64PrefMatches(prefs::kInstantEnabledTime));
 }
 
 // TCM ID - 3611311.

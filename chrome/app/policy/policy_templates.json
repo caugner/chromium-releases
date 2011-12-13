@@ -69,17 +69,23 @@
 #   platform name, e.g.: 'chrome.win' is read as 'Chrome on Windows'. Version
 #   numbers can be any string that does not contain ':' or '-' characters.
 #
-# Currently supported product names:
-#     'chrome_frame', 'chrome_os'
-#     'chrome.win', 'chrome.linux', 'chrome.mac', 'chrome.*'
-#   For example if 'chrome.*:5-10' is specified for a policy, then it should
-#   be read as:
-#     'chrome.linux:5-10', 'chrome.mac:5-10', 'chrome.win:5-10'
-#   The product name also affects in which templates will the policy be included.
-#     chrome.*, chrome.win, chrome_frame -> ADM,ADMX,ADML,doc
-#     chrome.*, chrome.linux -> JSON,doc
-#     chrome.*, chrome.mac -> plist, plist_strings,doc
+#   Currently supported product names:
+#       'chrome_frame', 'chrome_os'
+#       'chrome.win', 'chrome.linux', 'chrome.mac', 'chrome.*'
+#     For example if 'chrome.*:5-10' is specified for a policy, then it should
+#     be read as:
+#       'chrome.linux:5-10', 'chrome.mac:5-10', 'chrome.win:5-10'
+#
+#   The product name also affects in which templates the policy is included:
+#     chrome.*, chrome.win, chrome_frame -> ADM, ADMX, ADML, doc
+#     chrome.*, chrome.linux -> JSON, doc
+#     chrome.*, chrome.mac -> plist, plist_strings, doc
 #     everything else -> doc
+#
+#   The default list of policies supported by Chrome is also generated based
+#   on the product names:
+#     chrome.* -> Chrome policy definition list
+#     chrome_os -> Chrome policy definition list, when building OS_CHROMEOS
 #
 # Annotations:
 #   Additional information is specified under keys 'features' and
@@ -94,7 +100,7 @@
 #   persistent IDs for all fields (but not for groups!) are needed. These are
 #   specified by the 'id' keys of each policy. NEVER CHANGE EXISTING IDs,
 #   because doing so would break the deployed wire format!
-#   For your editing convenience: highest ID currently used: 104
+#   For your editing convenience: highest ID currently used: 108
 #
 # Placeholders:
 #   The following placeholder strings are automatically substituted:
@@ -384,7 +390,7 @@
     {
       'name': 'CloudPrintProxyEnabled',
       'type': 'main',
-      'supported_on': [],
+      'supported_on': ['chrome.*:X-'],
       'features': {'dynamic_refresh': 1},
       'future': True,
       'example_value': True,
@@ -1390,6 +1396,26 @@
           'id': 76,
           'caption': '''Block popups on these sites''',
           'desc': '''Allows you to set a list of url patterns that specify sites which are not allowed to open popups.''',
+        },
+        {
+          'name': 'NotificationsAllowedForUrls',
+          'type': 'list',
+          'supported_on': ['chrome.*:16-', 'chrome_os:0.16-'],
+          'features': {'dynamic_refresh': 1},
+          'example_value': ['http://www.example.com', '[*.]example.edu'],
+          'id': 105,
+          'caption': '''Allow notifications on these sites''',
+          'desc': '''Allows you to set a list of url patterns that specify sites which are allowed to display notifications.''',
+        },
+        {
+          'name': 'NotificationsBlockedForUrls',
+          'type': 'list',
+          'supported_on': ['chrome.*:16-', 'chrome_os:0.16-'],
+          'features': {'dynamic_refresh': 1},
+          'example_value': ['http://www.example.com', '[*.]example.edu'],
+          'id': 106,
+          'caption': '''Block notifications on these sites''',
+          'desc': '''Allows you to set a list of url patterns that specify sites which are not allowed to display notifications.''',
         }
       ],
     },
@@ -1584,9 +1610,9 @@
       'example_value': True,
       'id': 82,
       'caption': '''Enable Bookmark Bar''',
-      'desc': '''Enables the bookmark bar on the new tab page on <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
+      'desc': '''Enables the bookmark bar on <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph>.
 
-      If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will show a bookmark bar on the "New tab" page.
+      If you enable this setting, <ph name="PRODUCT_NAME">$1<ex>Google Chrome</ex></ph> will show a bookmark bar.
 
       If you disable this setting, users will never see the bookmark bar.
 
@@ -1795,7 +1821,29 @@
 
       This policy is limited to 100 entries; subsequent entries will be ignored.''',
     },
-
+    {
+      'name': 'UserNetworkConfiguration',
+      'type': 'string',
+      'supported_on': ['chrome_os:0.16-'],
+      'features': {'dynamic_refresh': 1},
+      'future': False,
+      'example_value': '{ "NetworkConfigurations": [ { "GUID": "{4b224dfd-6849-7a63-5e394343244ae9c9}", "Name": "my WiFi", "Type": "WiFi", "WiFi": { "SSID": "my WiFi", "HiddenSSID": false, "Security": "None", "AutoConnect": true } } ] }',
+      'id': 107,
+      'caption': '''User-level network configuration''',
+      'desc': '''Allows pushing network configuration to be applied per-user to a <ph name="PRODUCT_OS_NAME">$2<ex>Chromium OS</ex></ph> device. The network configuration is a JSON-formatted string as defined by the Open Network Configuration format described at https://sites.google.com/a/chromium.org/dev/chromium-os/chromiumos-design-docs/open-network-configuration''',
+    },
+    {
+      'name': 'DeviceNetworkConfiguration',
+      'type': 'string',
+      'supported_on': ['chrome_os:0.16-'],
+      'device_only': True,
+      'features': {'dynamic_refresh': 1},
+      'future': True,
+      'example_value': '{ "NetworkConfigurations": [ { "GUID": "{4b224dfd-6849-7a63-5e394343244ae9c9}", "Name": "my WiFi", "Type": "WiFi", "WiFi": { "SSID": "my WiFi", "HiddenSSID": false, "Security": "None", "AutoConnect": true } } ] }',
+      'id': 108,
+      'caption': '''Device-level network configuration''',
+      'desc': '''Allows pushing network configuration to be applied for all useers of a <ph name="PRODUCT_OS_NAME">$2<ex>Chromium OS</ex></ph> device. The network configuration is a JSON-formatted string as defined by the Open Network Configuration format described at https://sites.google.com/a/chromium.org/dev/chromium-os/chromiumos-design-docs/open-network-configuration''',
+    },
   ],
   'messages': {
     # Messages that are not associated to any policies.

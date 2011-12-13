@@ -6,12 +6,10 @@
 #define CHROME_BROWSER_PASSWORD_MANAGER_NATIVE_BACKEND_KWALLET_X_H_
 #pragma once
 
-#include <dbus/dbus-glib.h>
-#include <glib.h>
-
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 #include "base/time.h"
 #include "chrome/browser/password_manager/password_store_x.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,6 +19,15 @@ class PrefService;
 
 namespace webkit_glue {
 struct PasswordForm;
+}
+
+namespace base {
+class WaitableEvent;
+}
+
+namespace dbus {
+class Bus;
+class ObjectProxy;
 }
 
 // NativeBackend implementation using KWallet.
@@ -40,16 +47,37 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
       const base::Time& delete_begin, const base::Time& delete_end) OVERRIDE;
   virtual bool GetLogins(const webkit_glue::PasswordForm& form,
                          PasswordFormList* forms) OVERRIDE;
-  virtual bool GetLoginsCreatedBetween(const base::Time& delete_begin,
-                                       const base::Time& delete_end,
+  virtual bool GetLoginsCreatedBetween(const base::Time& get_begin,
+                                       const base::Time& get_end,
                                        PasswordFormList* forms) OVERRIDE;
   virtual bool GetAutofillableLogins(PasswordFormList* forms) OVERRIDE;
   virtual bool GetBlacklistLogins(PasswordFormList* forms) OVERRIDE;
 
+ protected:
+  // Invalid handle returned by WalletHandle().
+  static const int kInvalidKWalletHandle = -1;
+
+  // Internally used by Init(), but also for testing to provide a mock bus.
+  bool InitWithBus(scoped_refptr<dbus::Bus> optional_bus);
+
+  // Deserializes a list of PasswordForms from the wallet.
+  static void DeserializeValue(const std::string& signon_realm,
+                               const Pickle& pickle,
+                               PasswordFormList* forms);
+
  private:
+  enum InitResult {
+    INIT_SUCCESS,    // Init succeeded.
+    TEMPORARY_FAIL,  // Init failed, but might succeed after StartKWalletd().
+    PERMANENT_FAIL   // Init failed, and is not likely to work later either.
+  };
+
   // Initialization.
   bool StartKWalletd();
-  bool InitWallet();
+  InitResult InitWallet();
+  void InitOnDBThread(scoped_refptr<dbus::Bus> optional_bus,
+                      base::WaitableEvent* event,
+                      bool* success);
 
   // Reads PasswordForms from the wallet that match the given signon_realm.
   bool GetLoginsList(PasswordFormList* forms,
@@ -77,11 +105,6 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
                      const std::string& signon_realm,
                      int wallet_handle);
 
-  // Checks if the last DBus call returned an error. If it did, logs the error
-  // message, frees it and returns true.
-  // This must be called after every DBus call.
-  bool CheckError();
-
   // Opens the wallet and ensures that the "Chrome Form Data" folder exists.
   // Returns kInvalidWalletHandle on error.
   int WalletHandle();
@@ -99,12 +122,8 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
 
   // Checks a serialized list of PasswordForms for sanity. Returns true if OK.
   // Note that |realm| is only used for generating a useful warning message.
-  static bool CheckSerializedValue(const GArray* byte_array, const char* realm);
-
-  // Deserializes a list of PasswordForms from the wallet.
-  static void DeserializeValue(const std::string& signon_realm,
-                               const Pickle& pickle,
-                               PasswordFormList* forms);
+  static bool CheckSerializedValue(const uint8_t* byte_array, size_t length,
+                                   const std::string& realm);
 
   // Convenience function to read a GURL from a Pickle. Assumes the URL has
   // been written as a std::string. Returns true on success.
@@ -117,16 +136,13 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   // Name of the folder to store passwords in.
   static const char kKWalletFolder[];
 
-  // DBus stuff.
+  // DBus service, path, and interface names for klauncher and kwalletd.
   static const char kKWalletServiceName[];
   static const char kKWalletPath[];
   static const char kKWalletInterface[];
   static const char kKLauncherServiceName[];
   static const char kKLauncherPath[];
   static const char kKLauncherInterface[];
-
-  // Invalid handle returned by WalletHandle().
-  static const int kInvalidKWalletHandle = -1;
 
   // Generates a profile-specific folder name based on profile_id_.
   std::string GetProfileSpecificFolderName() const;
@@ -146,13 +162,10 @@ class NativeBackendKWallet : public PasswordStoreX::NativeBackend {
   // True once MigrateToProfileSpecificLogins() has been attempted.
   bool migrate_tried_;
 
-  // Error from the last DBus call. NULL when there's no error. Freed and
-  // cleared by CheckError().
-  GError* error_;
-  // Connection to the DBus session bus.
-  DBusGConnection* connection_;
-  // Proxy to the kwallet DBus service.
-  DBusGProxy* proxy_;
+  // DBus handle for communication with klauncher and kwalletd.
+  scoped_refptr<dbus::Bus> session_bus_;
+  // Object proxy for kwalletd. We do not own this.
+  dbus::ObjectProxy* kwallet_proxy_;
 
   // The name of the wallet we've opened. Set during Init().
   std::string wallet_name_;

@@ -80,6 +80,7 @@ ChromeMainTest.AppLaunch
 
 # See http://crbug.com/46783
 SessionHistoryTest.LocationReplace
+SessionHistoryTest.FragmentBackForward
 
 # UNIMPLEMENTED reached, see http://crbug.com/51387
 AutomatedUITestBase.CloseTab
@@ -121,8 +122,6 @@ HistoryTester.VerifyHistoryLength3
 HostRulesTest.TestMap
 IFrameTest.Crash
 IFrameTest.InEmptyFrame
-LocaleTestsDa.TestStart
-LocaleTestsZhTw.TestStart
 LoginPromptTest.SupplyRedundantAuths
 LoginPromptTest.TestCancelAuth
 MetricsServiceTest.CrashRenderers
@@ -202,10 +201,6 @@ DomStorageEmptyDatabaseTest.EmptyDirAfterGet
 # Hangs; See http://crbug.com/58569
 SearchProviderTest.TestIsSearchProviderInstalled
 
-# Following tests crash with LOG(FATAL) on valgrind mac; See http://crbug.com/60036
-OptionsUITest.TwoCommandsOneTab
-OptionsUITest.CommandAgainGoesBackToOptionsTab
-
 # Times out, see http://crbug.com/50297
 DOMStorageTest.RootLayoutTests
 
@@ -230,6 +225,9 @@ HistoryTester.VerifyHistoryLength1
 HistoryTester.VerifyHistoryLength2
 RedirectTest.ClientServerServer
 DomCheckerTest.File
+OptionsUITest.LoadOptionsByURL
+OutOfProcessPPAPITest.FileSystem
+OutOfProcessPPAPITest.Graphics2D
 PPAPITest.Broker
 PPAPITest.Core
 PPAPITest.Memory
@@ -295,7 +293,6 @@ LocaleTestsHe.TestStart
 NewTabUITest.ChromeHangInNTP
 
 # http://crbug.com/88244
-NoStartupWindowTest.NoStartupWindowBasicTest
 RunInBackgroundTest.RunInBackgroundBasicTest
 
 # http://crbug.com/88254
@@ -310,3 +307,7 @@ AutomatedUITestBase.OpenCloseBrowserWindowWithAccelerator
 # http://crbug.com/92177
 CustomHandlerMailStartupTest.CustomHandlerMailStartup
 CustomHandlerWebcalStartupTest.CustomHandlerWebcalStartup
+
+# http://crbug.com/99828
+OutOfProcessPPAPITest.Crypto
+PPAPITest.Crypto

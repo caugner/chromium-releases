@@ -7,6 +7,7 @@
 #include <schnlsp.h>
 #include <map>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/stl_util.h"
@@ -554,7 +555,7 @@ SSLClientSocketWin::GetNextProto(std::string* proto) {
   return kNextProtoUnsupported;
 }
 
-int SSLClientSocketWin::Connect(CompletionCallback* callback) {
+int SSLClientSocketWin::Connect(OldCompletionCallback* callback) {
   DCHECK(transport_.get());
   DCHECK(next_state_ == STATE_NONE);
   DCHECK(!user_connect_callback_);
@@ -753,7 +754,7 @@ base::TimeDelta SSLClientSocketWin::GetConnectTimeMicros() const {
 }
 
 int SSLClientSocketWin::Read(IOBuffer* buf, int buf_len,
-                             CompletionCallback* callback) {
+                             OldCompletionCallback* callback) {
   DCHECK(completed_handshake());
   DCHECK(!user_read_callback_);
 
@@ -795,7 +796,7 @@ int SSLClientSocketWin::Read(IOBuffer* buf, int buf_len,
 }
 
 int SSLClientSocketWin::Write(IOBuffer* buf, int buf_len,
-                              CompletionCallback* callback) {
+                              OldCompletionCallback* callback) {
   DCHECK(completed_handshake());
   DCHECK(!user_write_callback_);
 
@@ -835,7 +836,7 @@ void SSLClientSocketWin::OnHandshakeIOComplete(int result) {
     // (which occurs because we are in the middle of a Read when the
     // renegotiation process starts).  So we complete the Read here.
     if (!user_connect_callback_) {
-      CompletionCallback* c = user_read_callback_;
+      OldCompletionCallback* c = user_read_callback_;
       user_read_callback_ = NULL;
       user_read_buf_ = NULL;
       user_read_buf_len_ = 0;
@@ -843,7 +844,7 @@ void SSLClientSocketWin::OnHandshakeIOComplete(int result) {
       return;
     }
     net_log_.EndEvent(NetLog::TYPE_SSL_CONNECT, NULL);
-    CompletionCallback* c = user_connect_callback_;
+    OldCompletionCallback* c = user_connect_callback_;
     user_connect_callback_ = NULL;
     c->Run(rv);
   }
@@ -857,7 +858,7 @@ void SSLClientSocketWin::OnReadComplete(int result) {
     result = DoPayloadDecrypt();
   if (result != ERR_IO_PENDING) {
     DCHECK(user_read_callback_);
-    CompletionCallback* c = user_read_callback_;
+    OldCompletionCallback* c = user_read_callback_;
     user_read_callback_ = NULL;
     user_read_buf_ = NULL;
     user_read_buf_len_ = 0;
@@ -871,7 +872,7 @@ void SSLClientSocketWin::OnWriteComplete(int result) {
   int rv = DoPayloadWriteComplete(result);
   if (rv != ERR_IO_PENDING) {
     DCHECK(user_write_callback_);
-    CompletionCallback* c = user_write_callback_;
+    OldCompletionCallback* c = user_write_callback_;
     user_write_callback_ = NULL;
     user_write_buf_ = NULL;
     user_write_buf_len_ = 0;
@@ -1157,7 +1158,7 @@ int SSLClientSocketWin::DoVerifyCert() {
   next_state_ = STATE_VERIFY_CERT_COMPLETE;
 
   DCHECK(server_cert_);
-  int cert_status;
+  CertStatus cert_status;
   if (ssl_config_.IsAllowedBadCert(server_cert_, &cert_status)) {
     VLOG(1) << "Received an expected bad cert with status: " << cert_status;
     server_cert_verify_result_.Reset();
@@ -1172,9 +1173,11 @@ int SSLClientSocketWin::DoVerifyCert() {
   if (ssl_config_.verify_ev_cert)
     flags |= X509Certificate::VERIFY_EV_CERT;
   verifier_.reset(new SingleRequestCertVerifier(cert_verifier_));
-  return verifier_->Verify(server_cert_, host_and_port_.host(), flags,
-                           &server_cert_verify_result_,
-                           &handshake_io_callback_);
+  return verifier_->Verify(
+      server_cert_, host_and_port_.host(), flags,
+      &server_cert_verify_result_,
+      base::Bind(&SSLClientSocketWin::OnHandshakeIOComplete,
+                 base::Unretained(this)));
 }
 
 int SSLClientSocketWin::DoVerifyCertComplete(int result) {

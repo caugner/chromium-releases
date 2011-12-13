@@ -2,11 +2,25 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
+/* From dev/pp_video_capture_dev.idl modified Wed Oct  5 15:55:11 2011. */
+
 #ifndef PPAPI_C_DEV_PP_VIDEO_CAPTURE_DEV_H_
 #define PPAPI_C_DEV_PP_VIDEO_CAPTURE_DEV_H_
 
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_stdint.h"
 
+/**
+ * @file
+ * Structs for dealing with video capture.
+ */
+
+
+/**
+ * @addtogroup Structs
+ * @{
+ */
 /**
  * PP_VideoCaptureDeviceInfo_Dev is a structure that represent a video capture
  * configuration, such as resolution and frame rate.
@@ -17,7 +31,14 @@ struct PP_VideoCaptureDeviceInfo_Dev {
   uint32_t frames_per_second;
 };
 PP_COMPILE_ASSERT_STRUCT_SIZE_IN_BYTES(PP_VideoCaptureDeviceInfo_Dev, 12);
+/**
+ * @}
+ */
 
+/**
+ * @addtogroup Enums
+ * @{
+ */
 /**
  * PP_VideoCaptureStatus_Dev is an enumeration that defines the various possible
  * states of a VideoCapture.
@@ -45,5 +66,9 @@ typedef enum {
   PP_VIDEO_CAPTURE_STATUS_STOPPING
 } PP_VideoCaptureStatus_Dev;
 PP_COMPILE_ASSERT_SIZE_IN_BYTES(PP_VideoCaptureStatus_Dev, 4);
+/**
+ * @}
+ */
 
 #endif  /* PPAPI_C_DEV_PP_VIDEO_CAPTURE_DEV_H_ */
+

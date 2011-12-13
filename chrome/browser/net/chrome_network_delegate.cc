@@ -33,12 +33,12 @@ void ForwardProxyErrors(net::URLRequest* request,
                         ExtensionEventRouterForwarder* event_router,
                         void* profile) {
   if (request->status().status() == net::URLRequestStatus::FAILED) {
-    switch (request->status().os_error()) {
+    switch (request->status().error()) {
       case net::ERR_PROXY_AUTH_UNSUPPORTED:
       case net::ERR_PROXY_CONNECTION_FAILED:
       case net::ERR_TUNNEL_CONNECTION_FAILED:
         ExtensionProxyEventRouter::GetInstance()->OnProxyError(
-            event_router, profile, request->status().os_error());
+            event_router, profile, request->status().error());
     }
   }
 }
@@ -73,7 +73,7 @@ void ChromeNetworkDelegate::InitializeReferrersEnabled(
 
 int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
-    net::CompletionCallback* callback,
+    net::OldCompletionCallback* callback,
     GURL* new_url) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // TODO(joaodasilva): This prevents extensions from seeing URLs that are
@@ -98,7 +98,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
 
 int ChromeNetworkDelegate::OnBeforeSendHeaders(
     net::URLRequest* request,
-    net::CompletionCallback* callback,
+    net::OldCompletionCallback* callback,
     net::HttpRequestHeaders* headers) {
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeSendHeaders(
       profile_, extension_info_map_.get(), request, callback, headers);
@@ -109,6 +109,16 @@ void ChromeNetworkDelegate::OnSendHeaders(
     const net::HttpRequestHeaders& headers) {
   ExtensionWebRequestEventRouter::GetInstance()->OnSendHeaders(
       profile_, extension_info_map_.get(), request, headers);
+}
+
+int ChromeNetworkDelegate::OnHeadersReceived(
+    net::URLRequest* request,
+    net::OldCompletionCallback* callback,
+    net::HttpResponseHeaders* original_response_headers,
+    scoped_refptr<net::HttpResponseHeaders>* override_response_headers) {
+  return ExtensionWebRequestEventRouter::GetInstance()->OnHeadersReceived(
+      profile_, extension_info_map_.get(), request, callback,
+      original_response_headers, override_response_headers);
 }
 
 void ChromeNetworkDelegate::OnBeforeRedirect(net::URLRequest* request,
@@ -160,9 +170,13 @@ void ChromeNetworkDelegate::OnPACScriptError(int line_number,
       event_router_.get(), profile_, line_number, error);
 }
 
-void ChromeNetworkDelegate::OnAuthRequired(
+net::NetworkDelegate::AuthRequiredResponse
+ChromeNetworkDelegate::OnAuthRequired(
     net::URLRequest* request,
-    const net::AuthChallengeInfo& auth_info) {
-  ExtensionWebRequestEventRouter::GetInstance()->OnAuthRequired(
-      profile_, extension_info_map_.get(), request, auth_info);
+    const net::AuthChallengeInfo& auth_info,
+    const AuthCallback& callback,
+    net::AuthCredentials* credentials) {
+  return ExtensionWebRequestEventRouter::GetInstance()->OnAuthRequired(
+      profile_, extension_info_map_.get(), request, auth_info,
+      callback, credentials);
 }

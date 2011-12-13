@@ -8,6 +8,7 @@
 #include "base/message_loop_proxy.h"
 #include "base/string_number_conversions.h"
 #include "content/browser/browser_thread.h"
+#include "content/common/content_client.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
@@ -18,7 +19,6 @@
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_status.h"
-#include "webkit/glue/webkit_glue.h"
 
 namespace browser_sync {
 
@@ -102,7 +102,7 @@ HttpBridge::RequestContext::RequestContext(
 
   // We default to the browser's user agent. This can (and should) be overridden
   // with set_user_agent.
-  set_user_agent(webkit_glue::GetUserAgent(GURL()));
+  set_user_agent(content::GetUserAgent(GURL()));
 
   set_net_log(baseline_context->net_log());
 }
@@ -117,7 +117,7 @@ HttpBridge::URLFetchState::URLFetchState() : url_poster(NULL),
                                              request_completed(false),
                                              request_succeeded(false),
                                              http_response_code(-1),
-                                             os_error_code(-1) {}
+                                             error_code(-1) {}
 HttpBridge::URLFetchState::~URLFetchState() {}
 
 HttpBridge::HttpBridge(HttpBridge::RequestContextGetter* context_getter)
@@ -181,7 +181,7 @@ void HttpBridge::SetPostPayload(const char* content_type,
   }
 }
 
-bool HttpBridge::MakeSynchronousPost(int* os_error_code, int* response_code) {
+bool HttpBridge::MakeSynchronousPost(int* error_code, int* response_code) {
   DCHECK_EQ(MessageLoop::current(), created_on_loop_);
   if (DCHECK_IS_ON()) {
     base::AutoLock lock(fetch_state_lock_);
@@ -198,13 +198,13 @@ bool HttpBridge::MakeSynchronousPost(int* os_error_code, int* response_code) {
     return false;
   }
 
-  if (!http_post_completed_.Wait())  // Block until network request completes
-    NOTREACHED();                    // or is aborted. See OnURLFetchComplete
-                                     // and Abort.
+  // Block until network request completes or is aborted. See
+  // OnURLFetchComplete and Abort.
+  http_post_completed_.Wait();
 
   base::AutoLock lock(fetch_state_lock_);
   DCHECK(fetch_state_.request_completed || fetch_state_.aborted);
-  *os_error_code = fetch_state_.os_error_code;
+  *error_code = fetch_state_.error_code;
   *response_code = fetch_state_.http_response_code;
   return fetch_state_.request_succeeded;
 }
@@ -261,7 +261,7 @@ void HttpBridge::Abort() {
   BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE,
                             fetch_state_.url_poster);
   fetch_state_.url_poster = NULL;
-  fetch_state_.os_error_code = net::ERR_ABORTED;
+  fetch_state_.error_code = net::ERR_ABORTED;
   http_post_completed_.Signal();
 }
 
@@ -280,7 +280,7 @@ void HttpBridge::OnURLFetchComplete(const URLFetcher *source,
   fetch_state_.request_succeeded =
       (net::URLRequestStatus::SUCCESS == status.status());
   fetch_state_.http_response_code = response_code;
-  fetch_state_.os_error_code = status.os_error();
+  fetch_state_.error_code = status.error();
 
   fetch_state_.response_content = data;
   fetch_state_.response_headers = source->response_headers();

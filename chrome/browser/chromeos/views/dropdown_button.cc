@@ -3,11 +3,13 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/views/dropdown_button.h"
+
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 
 namespace {
+
 // Asset icon particularities makes us offset focus frame.
 const int kFocusFrameTopOffset = 0;
 const int kFocusFrameLeftOffset = 0;
@@ -58,7 +60,7 @@ DropDownButtonBorder::DropDownButtonBorder() {
 namespace chromeos {
 
 DropDownButton::DropDownButton(views::ButtonListener* listener,
-                               const std::wstring& text,
+                               const string16& text,
                                views::ViewMenuDelegate* menu_delegate,
                                bool show_menu_marker)
     : MenuButton(listener, text, menu_delegate, show_menu_marker) {
@@ -75,8 +77,8 @@ void DropDownButton::OnPaintFocusBorder(gfx::Canvas* canvas) {
                           height() - kFocusFrameBottomOffset);
 }
 
-void DropDownButton::SetText(const std::wstring& text) {
-  text_ = WideToUTF16Hack(text);
+void DropDownButton::SetText(const string16& text) {
+  text_ = text;
   UpdateTextSize();
 }
 

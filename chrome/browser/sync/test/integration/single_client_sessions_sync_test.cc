@@ -12,6 +12,8 @@ using sessions_helper::CheckInitialState;
 using sessions_helper::GetLocalWindows;
 using sessions_helper::GetSessionData;
 using sessions_helper::OpenTabAndGetLocalWindows;
+using sessions_helper::ScopedWindowMap;
+using sessions_helper::SyncedSessionVector;
 using sessions_helper::WindowsMatch;
 
 class SingleClientSessionsSyncTest : public SyncTest {
@@ -23,17 +25,24 @@ class SingleClientSessionsSyncTest : public SyncTest {
   DISALLOW_COPY_AND_ASSIGN(SingleClientSessionsSyncTest);
 };
 
-IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, Sanity) {
+// Timeout on Windows, see http://crbug.com/99819
+#if defined(OS_WIN)
+#define MAYBE_Sanity DISABLED_Sanity
+#else
+#define MAYBE_Sanity Sanity
+#endif
+
+IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, MAYBE_Sanity) {
   ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
 
   ASSERT_TRUE(CheckInitialState(0));
 
-  ScopedVector<SessionWindow> old_windows;
+  ScopedWindowMap old_windows;
   ASSERT_TRUE(OpenTabAndGetLocalWindows(0,
                                         GURL("about:bubba"),
-                                        old_windows.get()));
+                                        old_windows.GetMutable()));
 
-  ASSERT_TRUE(GetClient(0)->AwaitSyncCycleCompletion(
+  ASSERT_TRUE(GetClient(0)->AwaitFullSyncCompletion(
       "Waiting for session change."));
 
   // Get foreign session data from client 0.
@@ -42,7 +51,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientSessionsSyncTest, Sanity) {
   ASSERT_EQ(0U, sessions.size());
 
   // Verify client didn't change.
-  ScopedVector<SessionWindow> new_windows;
-  ASSERT_TRUE(GetLocalWindows(0, new_windows.get()));
-  ASSERT_TRUE(WindowsMatch(old_windows.get(), new_windows.get()));
+  ScopedWindowMap new_windows;
+  ASSERT_TRUE(GetLocalWindows(0, new_windows.GetMutable()));
+  ASSERT_TRUE(WindowsMatch(*old_windows.Get(), *new_windows.Get()));
 }

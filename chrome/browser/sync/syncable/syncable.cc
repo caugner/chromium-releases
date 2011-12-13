@@ -4,20 +4,6 @@
 
 #include "chrome/browser/sync/syncable/syncable.h"
 
-#include "build/build_config.h"
-
-#include <sys/stat.h>
-#if defined(OS_POSIX)
-#include <sys/time.h>
-#endif
-#include <sys/types.h>
-#include <time.h>
-#if defined(OS_MACOSX)
-#include <CoreFoundation/CoreFoundation.h>
-#elif defined(OS_WIN)
-#include <shlwapi.h>  // for PathMatchSpec
-#endif
-
 #include <algorithm>
 #include <cstring>
 #include <functional>
@@ -27,8 +13,10 @@
 #include <set>
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/perftimer.h"
@@ -36,7 +24,6 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/time.h"
-#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/sync/protocol/proto_value_conversions.h"
@@ -64,13 +51,9 @@ static const InvariantCheckLevel kInvariantCheckLevel = VERIFY_IN_MEMORY;
 
 // Max number of milliseconds to spend checking syncable entry invariants
 static const int kInvariantCheckMaxMs = 50;
-
-// Max number of mutations in a mutation set we permit passing to observers.
-static const size_t kMutationObserverLimit = 1000;
 }  // namespace
 
 using std::string;
-
 
 namespace syncable {
 
@@ -92,7 +75,40 @@ std::string WriterTagToString(WriterTag writer_tag) {
 
 #undef ENUM_CASE
 
-namespace {
+WriteTransactionInfo::WriteTransactionInfo(
+    int64 id,
+    tracked_objects::Location location,
+    WriterTag writer,
+    ImmutableEntryKernelMutationMap mutations)
+    : id(id),
+      location_string(location.ToString()),
+      writer(writer),
+      mutations(mutations) {}
+
+WriteTransactionInfo::WriteTransactionInfo()
+    : id(-1), writer(INVALID) {}
+
+WriteTransactionInfo::~WriteTransactionInfo() {}
+
+base::DictionaryValue* WriteTransactionInfo::ToValue(
+    size_t max_mutations_size) const {
+  DictionaryValue* dict = new DictionaryValue();
+  dict->SetString("id", base::Int64ToString(id));
+  dict->SetString("location", location_string);
+  dict->SetString("writer", WriterTagToString(writer));
+  Value* mutations_value = NULL;
+  const size_t mutations_size = mutations.Get().size();
+  if (mutations_size <= max_mutations_size) {
+    mutations_value = EntryKernelMutationMapToValue(mutations.Get());
+  } else {
+    mutations_value =
+        Value::CreateStringValue(
+            base::Uint64ToString(static_cast<uint64>(mutations_size)) +
+            " mutations");
+  }
+  dict->Set("mutations", mutations_value);
+  return dict;
+}
 
 DictionaryValue* EntryKernelMutationToValue(
     const EntryKernelMutation& mutation) {
@@ -102,35 +118,14 @@ DictionaryValue* EntryKernelMutationToValue(
   return dict;
 }
 
-}  // namespace
-
-ListValue* EntryKernelMutationSetToValue(
-    const EntryKernelMutationSet& mutations) {
+ListValue* EntryKernelMutationMapToValue(
+    const EntryKernelMutationMap& mutations) {
   ListValue* list = new ListValue();
-  for (EntryKernelMutationSet::const_iterator it = mutations.begin();
+  for (EntryKernelMutationMap::const_iterator it = mutations.begin();
        it != mutations.end(); ++it) {
-    list->Append(EntryKernelMutationToValue(*it));
+    list->Append(EntryKernelMutationToValue(it->second));
   }
   return list;
-}
-
-int64 Now() {
-#if defined(OS_WIN)
-  FILETIME filetime;
-  SYSTEMTIME systime;
-  GetSystemTime(&systime);
-  SystemTimeToFileTime(&systime, &filetime);
-  // MSDN recommends converting via memcpy like this.
-  LARGE_INTEGER n;
-  memcpy(&n, &filetime, sizeof(filetime));
-  return n.QuadPart;
-#elif defined(OS_POSIX)
-  struct timeval tv;
-  gettimeofday(&tv, NULL);
-  return static_cast<int64>(tv.tv_sec);
-#else
-#error NEED OS SPECIFIC Now() implementation
-#endif
 }
 
 namespace {
@@ -217,7 +212,10 @@ bool ParentIdAndHandleIndexer::ShouldInclude(const EntryKernel* a) {
 // EntryKernel
 
 EntryKernel::EntryKernel() : dirty_(false) {
-  memset(int64_fields, 0, sizeof(int64_fields));
+  // Everything else should already be default-initialized.
+  for (int i = INT64_FIELDS_BEGIN; i < INT64_FIELDS_END; ++i) {
+    int64_fields[i] = 0;
+  }
 }
 
 EntryKernel::~EntryKernel() {}
@@ -279,6 +277,10 @@ StringValue* Int64ToValue(int64 i) {
   return Value::CreateStringValue(base::Int64ToString(i));
 }
 
+StringValue* TimeToValue(const base::Time& t) {
+  return Value::CreateStringValue(browser_sync::GetTimeDebugString(t));
+}
+
 StringValue* IdToValue(const Id& id) {
   return id.ToValue();
 }
@@ -299,6 +301,11 @@ DictionaryValue* EntryKernel::ToValue() const {
   SetFieldValues(*this, kernel_info,
                  &GetInt64FieldString, &Int64ToValue,
                  BASE_VERSION + 1, INT64_FIELDS_END - 1);
+
+  // Time fields.
+  SetFieldValues(*this, kernel_info,
+                 &GetTimeFieldString, &TimeToValue,
+                 TIME_FIELDS_BEGIN, TIME_FIELDS_END - 1);
 
   // ID fields.
   SetFieldValues(*this, kernel_info,
@@ -377,6 +384,7 @@ Directory::Kernel::Kernel(const FilePath& db_path,
                           DirectoryChangeDelegate* delegate)
     : db_path(db_path),
       refcount(1),
+      next_write_transaction_id(0),
       name(name),
       metahandles_index(new Directory::MetahandlesIndex),
       ids_index(new Directory::IdsIndex),
@@ -579,21 +587,6 @@ void Directory::GetChildHandlesByHandle(
 
 EntryKernel* Directory::GetRootEntry() {
   return GetEntryById(Id());
-}
-
-void ZeroFields(EntryKernel* entry, int first_field) {
-  int i = first_field;
-  // Note that bitset<> constructor sets all bits to zero, and strings
-  // initialize to empty.
-  for ( ; i < INT64_FIELDS_END; ++i)
-    entry->put(static_cast<Int64Field>(i), 0);
-  for ( ; i < ID_FIELDS_END; ++i)
-    entry->mutable_ref(static_cast<IdField>(i)).Clear();
-  for ( ; i < BIT_FIELDS_END; ++i)
-    entry->put(static_cast<BitField>(i), false);
-  if (i < PROTO_FIELDS_END)
-    i = PROTO_FIELDS_END;
-  entry->clear_dirty(NULL);
 }
 
 void Directory::InsertEntry(EntryKernel* entry) {
@@ -992,14 +985,14 @@ class SomeIdsFilter : public IdFilter {
 };
 
 void Directory::CheckTreeInvariants(syncable::BaseTransaction* trans,
-                                    const EntryKernelMutationSet& mutations) {
+                                    const EntryKernelMutationMap& mutations) {
   MetahandleSet handles;
   SomeIdsFilter filter;
   filter.ids_.reserve(mutations.size());
-  for (EntryKernelMutationSet::const_iterator i = mutations.begin(),
-         end = mutations.end(); i != end; ++i) {
-    filter.ids_.push_back(i->mutated.ref(ID));
-    handles.insert(i->original.ref(META_HANDLE));
+  for (EntryKernelMutationMap::const_iterator it = mutations.begin(),
+         end = mutations.end(); it != end; ++it) {
+    filter.ids_.push_back(it->second.mutated.ref(ID));
+    handles.insert(it->first);
   }
   std::sort(filter.ids_.begin(), filter.ids_.end());
   CheckTreeInvariants(trans, handles, filter);
@@ -1203,37 +1196,41 @@ void WriteTransaction::SaveOriginal(const EntryKernel* entry) {
     return;
   }
   // Insert only if it's not already there.
-  EntryKernelSet::iterator it = originals_.lower_bound(*entry);
-  if (it == originals_.end() ||
-      it->ref(META_HANDLE) != entry->ref(META_HANDLE)) {
-    originals_.insert(it, *entry);
+  const int64 handle = entry->ref(META_HANDLE);
+  EntryKernelMutationMap::iterator it = mutations_.lower_bound(handle);
+  if (it == mutations_.end() || it->first != handle) {
+    EntryKernelMutation mutation;
+    mutation.original = *entry;
+    ignore_result(mutations_.insert(it, std::make_pair(handle, mutation)));
   }
 }
 
-EntryKernelMutationSet WriteTransaction::RecordMutations() {
+ImmutableEntryKernelMutationMap WriteTransaction::RecordMutations() {
   dirkernel_->transaction_mutex.AssertAcquired();
-  EntryKernelMutationSet mutations;
-  for (syncable::EntryKernelSet::iterator it = originals_.begin();
-       it != originals_.end(); ++it) {
-    int64 id = it->ref(syncable::META_HANDLE);
-    EntryKernel* kernel = directory()->GetEntryByHandle(id);
+  for (syncable::EntryKernelMutationMap::iterator it = mutations_.begin();
+       it != mutations_.end();) {
+    EntryKernel* kernel = directory()->GetEntryByHandle(it->first);
     if (!kernel) {
       NOTREACHED();
       continue;
     }
-    EntryKernelMutation mutation;
-    mutation.original = *it;
-    mutation.mutated = *kernel;
-    mutations.insert(mutation);
+    if (kernel->is_dirty()) {
+      it->second.mutated = *kernel;
+      ++it;
+    } else {
+      DCHECK(!it->second.original.is_dirty());
+      // Not actually mutated, so erase from |mutations_|.
+      mutations_.erase(it++);
+    }
   }
-  return mutations;
+  return ImmutableEntryKernelMutationMap(&mutations_);
 }
 
 void WriteTransaction::UnlockAndNotify(
-    const EntryKernelMutationSet& mutations) {
+    const ImmutableEntryKernelMutationMap& mutations) {
   // Work while transaction mutex is held.
   ModelTypeBitSet models_with_changes;
-  bool has_mutations = !mutations.empty();
+  bool has_mutations = !mutations.Get().empty();
   if (has_mutations) {
     models_with_changes = NotifyTransactionChangingAndEnding(mutations);
   }
@@ -1246,34 +1243,32 @@ void WriteTransaction::UnlockAndNotify(
 }
 
 ModelTypeBitSet WriteTransaction::NotifyTransactionChangingAndEnding(
-    const EntryKernelMutationSet& mutations) {
+    const ImmutableEntryKernelMutationMap& mutations) {
   dirkernel_->transaction_mutex.AssertAcquired();
-  DCHECK(!mutations.empty());
+  DCHECK(!mutations.Get().empty());
 
+  WriteTransactionInfo write_transaction_info(
+      dirkernel_->next_write_transaction_id, from_here_, writer_, mutations);
+  ++dirkernel_->next_write_transaction_id;
+
+  ImmutableWriteTransactionInfo immutable_write_transaction_info(
+      &write_transaction_info);
   DirectoryChangeDelegate* const delegate = dirkernel_->delegate;
   if (writer_ == syncable::SYNCAPI) {
-    delegate->HandleCalculateChangesChangeEventFromSyncApi(mutations, this);
+    delegate->HandleCalculateChangesChangeEventFromSyncApi(
+        immutable_write_transaction_info, this);
   } else {
-    delegate->HandleCalculateChangesChangeEventFromSyncer(mutations, this);
+    delegate->HandleCalculateChangesChangeEventFromSyncer(
+        immutable_write_transaction_info, this);
   }
 
   ModelTypeBitSet models_with_changes =
-      delegate->HandleTransactionEndingChangeEvent(this);
+      delegate->HandleTransactionEndingChangeEvent(
+          immutable_write_transaction_info, this);
 
-  // These notifications pass the mutation list around by value, which when we
-  // rewrite all sync data can be extremely large and result in out of memory
-  // errors (see crbug.com/90169). As a result, when there are more than
-  // kMutationObserverLimit mutations, we pass around an empty mutation set.
-  if (mutations.size() < kMutationObserverLimit) {
-    dirkernel_->observers->Notify(
-        &TransactionObserver::OnTransactionMutate,
-        from_here_, writer_, mutations, models_with_changes);
-  } else {
-    EntryKernelMutationSet dummy_mutations;  // Empty set.
-    dirkernel_->observers->Notify(
-        &TransactionObserver::OnTransactionMutate,
-        from_here_, writer_, dummy_mutations, models_with_changes);
-  }
+  dirkernel_->observers->Notify(
+      &TransactionObserver::OnTransactionWrite,
+      immutable_write_transaction_info, models_with_changes);
 
   return models_with_changes;
 }
@@ -1285,14 +1280,14 @@ void WriteTransaction::NotifyTransactionComplete(
 }
 
 WriteTransaction::~WriteTransaction() {
-  EntryKernelMutationSet mutations = RecordMutations();
+  const ImmutableEntryKernelMutationMap& mutations = RecordMutations();
 
   if (OFF != kInvariantCheckLevel) {
     const bool full_scan = (FULL_DB_VERIFICATION == kInvariantCheckLevel);
     if (full_scan)
       directory()->CheckTreeInvariants(this, full_scan);
     else
-      directory()->CheckTreeInvariants(this, mutations);
+      directory()->CheckTreeInvariants(this, mutations.Get());
   }
 
   UnlockAndNotify(mutations);
@@ -1408,14 +1403,13 @@ MutableEntry::MutableEntry(WriteTransaction* trans, Create,
 
 void MutableEntry::Init(WriteTransaction* trans, const Id& parent_id,
                         const string& name) {
-  kernel_ = new EntryKernel;
-  ZeroFields(kernel_, BEGIN_FIELDS);
+  kernel_ = new EntryKernel();
   kernel_->put(ID, trans->directory_->NextId());
   kernel_->put(META_HANDLE, trans->directory_->NextMetahandle());
   kernel_->mark_dirty(trans->directory_->kernel_->dirty_metahandles);
   kernel_->put(PARENT_ID, parent_id);
   kernel_->put(NON_UNIQUE_NAME, name);
-  const int64 now = Now();
+  const base::Time& now = base::Time::Now();
   kernel_->put(CTIME, now);
   kernel_->put(MTIME, now);
   // We match the database defaults here
@@ -1435,8 +1429,7 @@ MutableEntry::MutableEntry(WriteTransaction* trans, CreateNewUpdateItem,
     kernel_ = NULL;  // already have an item with this ID.
     return;
   }
-  kernel_ = new EntryKernel;
-  ZeroFields(kernel_, BEGIN_FIELDS);
+  kernel_ = new EntryKernel();
   kernel_->put(ID, id);
   kernel_->put(META_HANDLE, trans->directory_->NextMetahandle());
   kernel_->mark_dirty(trans->directory_->kernel_->dirty_metahandles);
@@ -1490,7 +1483,11 @@ bool MutableEntry::PutIsDel(bool is_del) {
   }
 
   if (!is_del)
-    PutPredecessor(Id());  // Restores position to the 0th index.
+    // Restores position to the 0th index.
+    if (!PutPredecessor(Id())) {
+      // TODO(lipalani) : Propagate the error to caller. crbug.com/100444.
+      NOTREACHED();
+    }
 
   return true;
 }
@@ -1511,6 +1508,15 @@ bool MutableEntry::Put(Int64Field field, const int64& value) {
   return true;
 }
 
+bool MutableEntry::Put(TimeField field, const base::Time& value) {
+  DCHECK(kernel_);
+  if (kernel_->ref(field) != value) {
+    kernel_->put(field, value);
+    kernel_->mark_dirty(dir()->kernel_->dirty_metahandles);
+  }
+  return true;
+}
+
 bool MutableEntry::Put(IdField field, const Id& value) {
   DCHECK(kernel_);
   if (kernel_->ref(field) != value) {
@@ -1519,7 +1525,11 @@ bool MutableEntry::Put(IdField field, const Id& value) {
         return false;
     } else if (PARENT_ID == field) {
       PutParentIdPropertyOnly(value);  // Makes sibling order inconsistent.
-      PutPredecessor(Id());  // Fixes up the sibling order inconsistency.
+      // Fixes up the sibling order inconsistency.
+      if (!PutPredecessor(Id())) {
+        // TODO(lipalani) : Propagate the error to caller. crbug.com/100444.
+        NOTREACHED();
+      }
     } else {
       kernel_->put(field, value);
     }
@@ -1696,7 +1706,11 @@ bool MutableEntry::PutPredecessor(const Id& predecessor_id) {
   Id successor_id;
   if (!predecessor_id.IsRoot()) {
     MutableEntry predecessor(write_transaction(), GET_BY_ID, predecessor_id);
-    CHECK(predecessor.good());
+    if (!predecessor.good()) {
+      LOG(ERROR) << "Predecessor is not good : "
+                 << predecessor_id.GetServerId();
+      return false;
+    }
     if (predecessor.Get(PARENT_ID) != Get(PARENT_ID))
       return false;
     successor_id = predecessor.Get(NEXT_ID);
@@ -1707,7 +1721,11 @@ bool MutableEntry::PutPredecessor(const Id& predecessor_id) {
   }
   if (!successor_id.IsRoot()) {
     MutableEntry successor(write_transaction(), GET_BY_ID, successor_id);
-    CHECK(successor.good());
+    if (!successor.good()) {
+      LOG(ERROR) << "Successor is not good: "
+                 << successor_id.GetServerId();
+      return false;
+    }
     if (successor.Get(PARENT_ID) != Get(PARENT_ID))
       return false;
     successor.Put(PREV_ID, Get(ID));
@@ -1882,6 +1900,11 @@ std::ostream& operator<<(std::ostream& os, const Entry& entry) {
   for (i = BEGIN_FIELDS; i < INT64_FIELDS_END; ++i) {
     os << g_metas_columns[i].name << ": "
        << kernel->ref(static_cast<Int64Field>(i)) << ", ";
+  }
+  for ( ; i < TIME_FIELDS_END; ++i) {
+    os << g_metas_columns[i].name << ": "
+       << browser_sync::GetTimeDebugString(
+           kernel->ref(static_cast<TimeField>(i))) << ", ";
   }
   for ( ; i < ID_FIELDS_END; ++i) {
     os << g_metas_columns[i].name << ": "

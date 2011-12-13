@@ -8,6 +8,7 @@
 #include <map>
 #include <string>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/time.h"
@@ -20,6 +21,7 @@
 #include "ui/gfx/gtk_util.h"
 #include "views/accelerator.h"
 #include "views/controls/menu/menu_2.h"
+#include "views/controls/menu/menu_listener.h"
 #include "views/controls/menu/nested_dispatcher_gtk.h"
 #include "views/views_delegate.h"
 #include "views/widget/native_widget_gtk.h"
@@ -120,9 +122,7 @@ void NativeMenuGtk::RunMenuAt(const gfx::Point& point, int alignment) {
   DCHECK(menu_hidden_);
   menu_hidden_ = false;
 
-  for (unsigned int i = 0; i < listeners_.size(); ++i) {
-    listeners_[i]->OnMenuOpened();
-  }
+  FOR_EACH_OBSERVER(MenuListener, listeners_, OnMenuOpened());
 
   // Listen for "hide" signal so that we know when to return from the blocking
   // RunMenuAt call.
@@ -160,8 +160,8 @@ void NativeMenuGtk::RunMenuAt(const gfx::Point& point, int alignment) {
 
   if (activated_menu_) {
     MessageLoop::current()->PostTask(FROM_HERE,
-                                     activate_factory_.NewRunnableMethod(
-                                         &NativeMenuGtk::ProcessActivate));
+        base::Bind(&NativeMenuGtk::ProcessActivate,
+                   activate_factory_.GetWeakPtr()));
   }
 
   model_->MenuClosed();
@@ -228,18 +228,11 @@ NativeMenuGtk::MenuAction NativeMenuGtk::GetMenuAction() const {
 }
 
 void NativeMenuGtk::AddMenuListener(MenuListener* listener) {
-  listeners_.push_back(listener);
+  listeners_.AddObserver(listener);
 }
 
 void NativeMenuGtk::RemoveMenuListener(MenuListener* listener) {
-  for (std::vector<MenuListener*>::iterator iter = listeners_.begin();
-    iter != listeners_.end();
-    ++iter) {
-      if (*iter == listener) {
-        listeners_.erase(iter);
-        return;
-      }
-  }
+  listeners_.RemoveObserver(listener);
 }
 
 void NativeMenuGtk::SetMinimumWidth(int width) {
@@ -607,12 +600,11 @@ void NativeMenuGtk::SendAccessibilityEvent() {
   name = gtk_menu_item_get_label(GTK_MENU_ITEM(menu_item));
 
   if (ViewsDelegate::views_delegate) {
-    ViewsDelegate::views_delegate->NotifyMenuItemFocused(
-        L"",
-        UTF8ToWide(name),
-        index,
-        count,
-        submenu != NULL);
+    ViewsDelegate::views_delegate->NotifyMenuItemFocused(string16(),
+                                                         UTF8ToUTF16(name),
+                                                         index,
+                                                         count,
+                                                         submenu != NULL);
   }
 }
 

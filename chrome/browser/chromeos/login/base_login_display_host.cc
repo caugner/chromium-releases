@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/customization_document.h"
@@ -25,13 +26,12 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -40,6 +40,9 @@
 // TODO(altimofeev): move to ViewsLoginDisplayHost
 #include "chrome/browser/chromeos/login/views_oobe_display.h"
 
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 
 namespace {
 
@@ -50,7 +53,7 @@ const int64 kPolicyServiceInitializationDelayMilliseconds = 100;
 
 // Determines the hardware keyboard from the given locale code
 // and the OEM layout information, and saves it to "Locale State".
-// The information will be used in input_method::GetHardwareInputMethodId().
+// The information will be used in InputMethodUtil::GetHardwareInputMethodId().
 void DetermineAndSaveHardwareKeyboard(const std::string& locale,
                                       const std::string& oem_layout) {
   std::string layout;
@@ -58,9 +61,11 @@ void DetermineAndSaveHardwareKeyboard(const std::string& locale,
     // If the OEM layout information is provided, use it.
     layout = oem_layout;
   } else {
+    chromeos::input_method::InputMethodManager* manager =
+        chromeos::input_method::InputMethodManager::GetInstance();
     // Otherwise, determine the hardware keyboard from the locale.
     std::vector<std::string> input_method_ids;
-    if (chromeos::input_method::GetInputMethodIdsFromLanguageCode(
+    if (manager->GetInputMethodUtil()->GetInputMethodIdsFromLanguageCode(
             locale,
             chromeos::input_method::kKeyboardLayoutsOnly,
             &input_method_ids)) {
@@ -219,14 +224,21 @@ namespace browser {
 // TODO(nkostylev): Split this into a smaller functions.
 void ShowLoginWizard(const std::string& first_screen_name,
                      const gfx::Size& size) {
+  if (browser_shutdown::IsTryingToQuit())
+    return;
+
   VLOG(1) << "Showing OOBE screen: " << first_screen_name;
 
   // The login screen will enable alternate keyboard layouts, but we don't want
   // to start the IME process unless one is selected.
-  chromeos::input_method::InputMethodManager::GetInstance()->
-      SetDeferImeStartup(true);
+  chromeos::input_method::InputMethodManager* manager =
+      chromeos::input_method::InputMethodManager::GetInstance();
+  manager->SetDeferImeStartup(true);
+
+#if defined(TOOLKIT_USES_GTK)
   // Tell the window manager that the user isn't logged in.
   chromeos::WmIpc::instance()->SetLoggedInProperty(false);
+#endif
 
   // Set up keyboards. For example, when |locale| is "en-US", enable US qwerty
   // and US dvorak keyboard layouts.
@@ -239,9 +251,9 @@ void ShowLoginWizard(const std::string& first_screen_name,
     if (initial_input_method_id.empty()) {
       // If kPreferredKeyboardLayout is not specified, use the hardware layout.
       initial_input_method_id =
-          chromeos::input_method::GetHardwareInputMethodId();
+          manager->GetInputMethodUtil()->GetHardwareInputMethodId();
     }
-    chromeos::input_method::EnableInputMethods(
+    manager->EnableInputMethods(
         locale, chromeos::input_method::kKeyboardLayoutsOnly,
         initial_input_method_id);
   }
@@ -255,11 +267,16 @@ void ShowLoginWizard(const std::string& first_screen_name,
       first_screen_name == chromeos::WizardController::kLoginScreenName;
 
   chromeos::LoginDisplayHost* display_host;
+#if defined(USE_AURA)
+  // Under Aura we always use the WebUI.
+  display_host = new chromeos::WebUILoginDisplayHost(screen_bounds);
+#else
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin)) {
     display_host = new chromeos::WebUILoginDisplayHost(screen_bounds);
   } else {
     display_host = new chromeos::ViewsLoginDisplayHost(screen_bounds);
   }
+#endif
 
   if (show_login_screen && chromeos::CrosLibrary::Get()->EnsureLoaded()) {
     // R11 > R12 migration fix. See http://crosbug.com/p/4898.
@@ -270,10 +287,10 @@ void ShowLoginWizard(const std::string& first_screen_name,
     if (!prefs->HasPrefPath(prefs::kApplicationLocale)) {
       std::string locale = chromeos::WizardController::GetInitialLocale();
       prefs->SetString(prefs::kApplicationLocale, locale);
-      chromeos::input_method::EnableInputMethods(
+      manager->EnableInputMethods(
           locale,
           chromeos::input_method::kKeyboardLayoutsOnly,
-          chromeos::input_method::GetHardwareInputMethodId());
+          manager->GetInputMethodUtil()->GetHardwareInputMethodId());
       base::ThreadRestrictions::ScopedAllowIO allow_io;
       const std::string loaded_locale =
           ResourceBundle::ReloadSharedInstance(locale);
@@ -312,10 +329,10 @@ void ShowLoginWizard(const std::string& first_screen_name,
       // initial locale and save it in preferences.
       DetermineAndSaveHardwareKeyboard(locale, layout);
       // Then, enable the hardware keyboard.
-      chromeos::input_method::EnableInputMethods(
+      manager->EnableInputMethods(
           locale,
           chromeos::input_method::kKeyboardLayoutsOnly,
-          chromeos::input_method::GetHardwareInputMethodId());
+          manager->GetInputMethodUtil()->GetHardwareInputMethodId());
       // Reloading resource bundle causes us to do blocking IO on UI thread.
       // Temporarily allow it until we fix http://crosbug.com/11102
       base::ThreadRestrictions::ScopedAllowIO allow_io;

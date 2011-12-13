@@ -5,7 +5,6 @@
 #include "content/app/content_main.h"
 
 #include "base/at_exit.h"
-#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/i18n/icu_util.h"
@@ -17,12 +16,14 @@
 #include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "content/app/content_main_delegate.h"
+#include "content/app/startup_helper_win.h"
+#include "content/browser/browser_main.h"
 #include "content/common/content_constants.h"
 #include "content/common/content_paths.h"
-#include "content/common/content_switches.h"
 #include "content/common/main_function_params.h"
 #include "content/common/sandbox_init_wrapper.h"
 #include "content/common/set_process_title.h"
+#include "content/public/common/content_switches.h"
 #include "crypto/nss_util.h"
 #include "ipc/ipc_switches.h"
 #include "ui/base/ui_base_switches.h"
@@ -31,7 +32,6 @@
 #if defined(OS_WIN)
 #include <atlbase.h>
 #include <atlapp.h>
-#include <new.h>
 #include <malloc.h>
 #elif defined(OS_MACOSX)
 #include "base/mach_ipc_mac.h"
@@ -57,12 +57,11 @@ int tc_set_new_mode(int mode);
 }
 #endif
 
-extern int BrowserMain(const MainFunctionParams&);
-extern int RendererMain(const MainFunctionParams&);
 extern int GpuMain(const MainFunctionParams&);
 extern int PluginMain(const MainFunctionParams&);
 extern int PpapiPluginMain(const MainFunctionParams&);
 extern int PpapiBrokerMain(const MainFunctionParams&);
+extern int RendererMain(const MainFunctionParams&);
 extern int WorkerMain(const MainFunctionParams&);
 extern int UtilityMain(const MainFunctionParams&);
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -75,31 +74,6 @@ namespace {
 #if defined(OS_WIN)
 
 static CAppModule _Module;
-
-#pragma optimize("", off)
-// Handlers for invalid parameter and pure call. They generate a breakpoint to
-// tell breakpad that it needs to dump the process.
-void InvalidParameter(const wchar_t* expression, const wchar_t* function,
-                      const wchar_t* file, unsigned int line,
-                      uintptr_t reserved) {
-  __debugbreak();
-  _exit(1);
-}
-
-void PureCall() {
-  __debugbreak();
-  _exit(1);
-}
-#pragma optimize("", on)
-
-// Register the invalid param handler and pure call handler to be able to
-// notify breakpad when it happens.
-void RegisterInvalidParamHandler() {
-  _set_invalid_parameter_handler(InvalidParameter);
-  _set_purecall_handler(PureCall);
-  // Also enable the new handler for malloc() based failures.
-  _set_new_mode(1);
-}
 
 #elif defined(OS_MACOSX)
 
@@ -154,19 +128,6 @@ void SetupSignalHandlers() {
 
 #endif  // OS_POSIX
 
-void SetupCRT(const CommandLine& command_line) {
-#if defined(OS_WIN)
-#if defined(_CRTDBG_MAP_ALLOC)
-  _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
-  _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
-#else
-  if (!command_line.HasSwitch(switches::kDisableBreakpad)) {
-    _CrtSetReportMode(_CRT_ASSERT, 0);
-  }
-#endif
-#endif
-}
-
 void CommonSubprocessInit(const std::string& process_type) {
 #if defined(OS_WIN)
   // HACK: Let Windows know that we have started.  This is needed to suppress
@@ -196,8 +157,7 @@ void InitializeStatsTable(base::ProcessId browser_pid,
   // Chrome.  These lines can be commented out to effectively turn
   // counters 'off'.  The table is created and exists for the life
   // of the process.  It is not cleaned up.
-  if (command_line.HasSwitch(switches::kEnableStatsTable) ||
-      command_line.HasSwitch(switches::kEnableBenchmarking)) {
+  if (command_line.HasSwitch(switches::kEnableStatsTable)) {
     // NOTIMPLEMENTED: we probably need to shut this down correctly to avoid
     // leaking shared memory regions on posix platforms.
     std::string statsfile =
@@ -319,11 +279,11 @@ int ContentMain(HINSTANCE instance,
   int argc = 0;
   char** argv = NULL;
 
-  RegisterInvalidParamHandler();
+  content::RegisterInvalidParamHandler();
   _Module.Init(NULL, static_cast<HINSTANCE>(instance));
 #else
 int ContentMain(int argc,
-                char** argv,
+                const char** argv,
                 ContentMainDelegate* delegate) {
   // NOTE(willchan): One might ask why this call is done here rather than in
   // process_util_linux.cc with the definition of
@@ -392,6 +352,8 @@ int ContentMain(int argc,
       (!delegate || delegate->ShouldSendMachPort(process_type))) {
     SendTaskPortToParentProcess();
   }
+#elif defined(OS_WIN)
+  content::SetupCRT(command_line);
 #endif
 
 #if defined(OS_POSIX)
@@ -411,8 +373,6 @@ int ContentMain(int argc,
       signal(SIGINT, SIG_IGN);
   }
 #endif
-
-  SetupCRT(command_line);
 
 #if defined(USE_NSS)
   crypto::EarlySetupForNSSInit();

@@ -4,7 +4,7 @@
 
 #include "views/controls/textfield/textfield.h"
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdkkeysyms.h>
 #endif
 
@@ -17,6 +17,7 @@
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
 #include "ui/gfx/insets.h"
+#include "ui/gfx/selection_model.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/textfield/native_textfield_wrapper.h"
 #include "views/controls/textfield/textfield_controller.h"
@@ -30,7 +31,6 @@
 // ViewHierarchyChanged is removed.
 #include "views/controls/textfield/native_textfield_views.h"
 #include "views/controls/textfield/native_textfield_win.h"
-#include "views/events/event_utils_win.h"
 #endif
 
 namespace views {
@@ -278,6 +278,16 @@ void Textfield::SelectRange(const ui::Range& range) {
   native_wrapper_->SelectRange(range);
 }
 
+void Textfield::GetSelectionModel(gfx::SelectionModel* sel) const {
+  DCHECK(native_wrapper_);
+  native_wrapper_->GetSelectionModel(sel);
+}
+
+void Textfield::SelectSelectionModel(const gfx::SelectionModel& sel) {
+  DCHECK(native_wrapper_);
+  native_wrapper_->SelectSelectionModel(sel);
+}
+
 size_t Textfield::GetCursorPosition() const {
   DCHECK(native_wrapper_);
   return native_wrapper_->GetCursorPosition();
@@ -341,7 +351,8 @@ bool Textfield::SkipDefaultKeyEventProcessing(const KeyEvent& e) {
   // We don't translate accelerators for ALT + NumPad digit on Windows, they are
   // used for entering special characters.  We do translate alt-home.
   if (e.IsAltDown() && (key != ui::VKEY_HOME) &&
-      NativeTextfieldWin::IsNumPadDigit(key, IsExtendedKey(e)))
+      NativeTextfieldWin::IsNumPadDigit(key,
+                                        (e.flags() & ui::EF_EXTENDED) != 0))
     return true;
 #endif
   return false;

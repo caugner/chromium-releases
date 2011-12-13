@@ -13,6 +13,21 @@
 #include "chrome/test/base/testing_profile.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace testing {
+
+class ProfileManager : public ::ProfileManager {
+ public:
+  explicit ProfileManager(const FilePath& user_data_dir)
+      : ::ProfileManager(user_data_dir) {}
+
+ protected:
+  virtual Profile* CreateProfile(const FilePath& file_path) {
+    return new TestingProfile(file_path);
+  }
+};
+
+}  // namespace testing
+
 TestingProfileManager::TestingProfileManager(TestingBrowserProcess* process)
     : called_set_up_(false),
       browser_process_(process),
@@ -64,12 +79,12 @@ void TestingProfileManager::DeleteTestingProfile(const std::string& name) {
   TestingProfilesMap::iterator it = testing_profiles_.find(name);
   DCHECK(it != testing_profiles_.end());
 
-  scoped_ptr<TestingProfile> profile(it->second);
-
-  profile_manager_->profiles_info_.erase(profile->GetPath());
+  TestingProfile* profile = it->second;
 
   ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
   cache.DeleteProfileFromCache(profile->GetPath());
+
+  profile_manager_->profiles_info_.erase(profile->GetPath());
 }
 
 ProfileManager* TestingProfileManager::profile_manager() {
@@ -89,7 +104,7 @@ void TestingProfileManager::SetUpInternal() {
   // Set up the directory for profiles.
   ASSERT_TRUE(profiles_dir_.CreateUniqueTempDir());
 
-  profile_manager_ = new ProfileManager(profiles_dir_.path());
+  profile_manager_ = new testing::ProfileManager(profiles_dir_.path());
   browser_process_->SetProfileManager(profile_manager_);  // Takes ownership.
 
   called_set_up_ = true;

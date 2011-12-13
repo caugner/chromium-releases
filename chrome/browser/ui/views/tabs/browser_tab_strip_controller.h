@@ -35,8 +35,6 @@ class BrowserTabStripController : public TabStripController,
 
   bool IsCommandEnabledForTab(TabStripModel::ContextMenuCommand command_id,
                               BaseTab* tab) const;
-  bool IsCommandCheckedForTab(TabStripModel::ContextMenuCommand command_id,
-                              BaseTab* tab) const;
   void ExecuteCommandForTab(TabStripModel::ContextMenuCommand command_id,
                             BaseTab* tab);
   bool IsTabPinned(BaseTab* tab) const;
@@ -73,6 +71,7 @@ class BrowserTabStripController : public TabStripController,
   virtual void TabDetachedAt(TabContentsWrapper* contents,
                              int model_index) OVERRIDE;
   virtual void TabSelectionChanged(
+      TabStripModel* tab_strip_model,
       const TabStripSelectionModel& old_model) OVERRIDE;
   virtual void TabMoved(TabContentsWrapper* contents,
                         int from_model_index,

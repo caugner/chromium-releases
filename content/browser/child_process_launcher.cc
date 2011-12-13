@@ -7,6 +7,7 @@
 #include <utility>  // For std::pair.
 
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
@@ -14,13 +15,12 @@
 #include "content/browser/browser_thread.h"
 #include "content/browser/content_browser_client.h"
 #include "content/common/chrome_descriptors.h"
-#include "content/common/content_switches.h"
 #include "content/common/process_watcher.h"
 #include "content/common/result_codes.h"
+#include "content/public/common/content_switches.h"
 
 #if defined(OS_WIN)
 #include "base/file_path.h"
-#include "content/browser/handle_enumerator_win.h"
 #include "content/common/sandbox_policy.h"
 #elif defined(OS_MACOSX)
 #include "content/browser/mach_broker_mac.h"
@@ -69,9 +69,10 @@ class ChildProcessLauncher::Context
 
     BrowserThread::PostTask(
         BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-        NewRunnableMethod(
-            this,
+        NewRunnableFunction(
             &Context::LaunchInternal,
+            make_scoped_refptr(this),
+            client_thread_id_,
 #if defined(OS_WIN)
             exposed_dir,
 #elif defined(OS_POSIX)
@@ -101,7 +102,10 @@ class ChildProcessLauncher::Context
     Terminate();
   }
 
-  void LaunchInternal(
+  static void LaunchInternal(
+      // |this_object| is NOT thread safe. Only use it to post a task back.
+      scoped_refptr<Context> this_object,
+      BrowserThread::ID client_thread_id,
 #if defined(OS_WIN)
       const FilePath& exposed_dir,
 #elif defined(OS_POSIX)
@@ -111,17 +115,21 @@ class ChildProcessLauncher::Context
 #endif
       CommandLine* cmd_line) {
     scoped_ptr<CommandLine> cmd_line_deleter(cmd_line);
+
     base::ProcessHandle handle = base::kNullProcessHandle;
 #if defined(OS_WIN)
     handle = sandbox::StartProcessWithAccess(cmd_line, exposed_dir);
 #elif defined(OS_POSIX)
+    // We need to close the client end of the IPC channel
+    // to reliably detect child termination.
+    file_util::ScopedFD ipcfd_closer(&ipcfd);
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     // On Linux, we need to add some extra file descriptors for crash handling.
     std::string process_type =
         cmd_line->GetSwitchValueASCII(switches::kProcessType);
     int crash_signal_fd =
-        content::GetContentClient()->browser()->GetCrashSignalFD(process_type);
+        content::GetContentClient()->browser()->GetCrashSignalFD(*cmd_line);
     if (use_zygote) {
       base::GlobalDescriptors::Mapping mapping;
       mapping.push_back(std::pair<uint32_t, int>(kPrimaryIPCChannel, ipcfd));
@@ -194,10 +202,10 @@ class ChildProcessLauncher::Context
 #endif  // else defined(OS_POSIX)
 
     BrowserThread::PostTask(
-        client_thread_id_, FROM_HERE,
+        client_thread_id, FROM_HERE,
         NewRunnableMethod(
-            this,
-            &ChildProcessLauncher::Context::Notify,
+            this_object.get(),
+            &Context::Notify,
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
             use_zygote,
 #endif
@@ -211,6 +219,9 @@ class ChildProcessLauncher::Context
       base::ProcessHandle handle) {
     starting_ = false;
     process_.set_handle(handle);
+    if (!handle)
+      LOG(ERROR) << "Failed to launch child process";
+
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     zygote_ = zygote;
 #endif
@@ -228,26 +239,12 @@ class ChildProcessLauncher::Context
     if (!terminate_child_on_shutdown_)
       return;
 
-#if defined(OS_WIN)
-    const CommandLine& browser_command_line =
-        *CommandLine::ForCurrentProcess();
-    if (browser_command_line.HasSwitch(switches::kAuditHandles) ||
-        browser_command_line.HasSwitch(switches::kAuditAllHandles)) {
-      scoped_refptr<content::HandleEnumerator> handle_enum(
-          new content::HandleEnumerator(process_.handle(),
-              browser_command_line.HasSwitch(switches::kAuditAllHandles)));
-      handle_enum->RunHandleEnumeration();
-      process_.set_handle(base::kNullProcessHandle);
-      return;
-    }
-#endif
-
     // On Posix, EnsureProcessTerminated can lead to 2 seconds of sleep!  So
     // don't this on the UI/IO threads.
     BrowserThread::PostTask(
         BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
         NewRunnableFunction(
-            &ChildProcessLauncher::Context::TerminateInternal,
+            &Context::TerminateInternal,
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
             zygote_,
 #endif
@@ -255,9 +252,10 @@ class ChildProcessLauncher::Context
     process_.set_handle(base::kNullProcessHandle);
   }
 
-  void SetProcessBackgrounded(bool background) {
-    DCHECK(!starting_);
-    process_.SetProcessBackgrounded(background);
+  static void SetProcessBackgrounded(base::ProcessHandle handle,
+                                     bool background) {
+    base::Process process(handle);
+    process.SetProcessBackgrounded(background);
   }
 
   static void TerminateInternal(
@@ -375,10 +373,9 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
 void ChildProcessLauncher::SetProcessBackgrounded(bool background) {
   BrowserThread::PostTask(
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-      NewRunnableMethod(
-          context_.get(),
+      NewRunnableFunction(
           &ChildProcessLauncher::Context::SetProcessBackgrounded,
-          background));
+          GetHandle(), background));
 }
 
 void ChildProcessLauncher::SetTerminateChildOnShutdown(

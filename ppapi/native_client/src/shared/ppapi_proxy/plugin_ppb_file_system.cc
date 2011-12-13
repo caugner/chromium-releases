@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,8 +57,8 @@ int32_t Open(PP_Resource file_system,
   DebugPrintf("PPB_FileSystem::Open: file_system=%"NACL_PRIu32"\n",
               file_system);
   int32_t callback_id = CompletionCallbackTable::Get()->AddCallback(callback);
-  if (callback_id == 0)
-    return PP_ERROR_BADARGUMENT;
+  if (callback_id == 0)  // Just like Chrome, for now disallow blocking calls.
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
 
   int32_t pp_error;
   NaClSrpcError srpc_result =

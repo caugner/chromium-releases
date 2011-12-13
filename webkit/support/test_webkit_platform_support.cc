@@ -59,7 +59,7 @@
 #include "webkit/tools/test_shell/test_shell_webthemeengine.h"
 #elif defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) && !defined(OS_ANDROID)
 #include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebThemeEngine.h"
 #endif
 
@@ -372,7 +372,8 @@ WebKit::WebGraphicsContext3D*
 TestWebKitPlatformSupport::createGraphicsContext3D() {
   switch (webkit_support::GetGraphicsContext3DImplementation()) {
     case webkit_support::IN_PROCESS:
-      return new webkit::gpu::WebGraphicsContext3DInProcessImpl();
+      return new webkit::gpu::WebGraphicsContext3DInProcessImpl(
+          gfx::kNullPluginWindow, NULL);
     case webkit_support::IN_PROCESS_COMMAND_BUFFER:
       return new webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl();
     default:
@@ -383,6 +384,10 @@ TestWebKitPlatformSupport::createGraphicsContext3D() {
 
 double TestWebKitPlatformSupport::audioHardwareSampleRate() {
   return 44100.0;
+}
+
+size_t TestWebKitPlatformSupport::audioHardwareBufferSize() {
+  return 128;
 }
 
 WebKit::WebAudioDevice* TestWebKitPlatformSupport::createAudioDevice(

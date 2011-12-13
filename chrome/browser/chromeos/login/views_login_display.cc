@@ -9,11 +9,11 @@
 
 #include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/message_bubble.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
 #include "chrome/browser/chromeos/view_ids.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/ui/views/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -21,6 +21,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "views/widget/widget.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 
 namespace {
 
@@ -175,10 +179,12 @@ void ViewsLoginDisplay::OnLoginSuccess(const std::string& username) {
 }
 
 void ViewsLoginDisplay::SetUIEnabled(bool is_enabled) {
+#if defined(TOOLKIT_USES_GTK)
   // Send message to WM to enable/disable click on windows.
   WmIpc::Message message(WM_IPC_MESSAGE_WM_SET_LOGIN_STATE);
   message.set_param(0, is_enabled);
   WmIpc::instance()->SendMessage(message);
+#endif
 
   if (is_enabled)
     controllers_[selected_view_index_]->ClearAndEnablePassword();
@@ -205,6 +211,14 @@ void ViewsLoginDisplay::ShowError(int error_msg_id,
         error_msg_id, delegate()->GetConnectedNetworkName());
   } else {
     error_text = l10n_util::GetStringUTF16(error_msg_id);
+  }
+
+  // Display a warning if Caps Lock is on and error is authentication-related.
+  if (input_method::XKeyboard::CapsLockIsEnabled() &&
+      error_msg_id != IDS_LOGIN_ERROR_WHITELIST) {
+    // TODO(ivankr): use a format string instead of concatenation.
+    error_text += ASCIIToUTF16("\n") +
+        l10n_util::GetStringUTF16(IDS_LOGIN_ERROR_CAPS_LOCK_HINT);
   }
 
   gfx::Rect bounds =
@@ -285,12 +299,14 @@ void ViewsLoginDisplay::RemoveUser(UserController* source) {
 }
 
 void ViewsLoginDisplay::SelectUser(int index) {
+#if defined(TOOLKIT_USES_GTK)
   if (index >= 0 && index < static_cast<int>(controllers_.size()) &&
       index != static_cast<int>(selected_view_index_)) {
     WmIpc::Message message(WM_IPC_MESSAGE_WM_SELECT_LOGIN_USER);
     message.set_param(0, index);
     WmIpc::instance()->SendMessage(message);
   }
+#endif
 }
 
 void ViewsLoginDisplay::StartEnterpriseEnrollment() {

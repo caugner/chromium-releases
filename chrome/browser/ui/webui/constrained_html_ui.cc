@@ -4,12 +4,16 @@
 
 #include "chrome/browser/ui/webui/constrained_html_ui.h"
 
+#include <string>
+#include <vector>
+
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/values.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/bindings_policy.h"
 
 static base::LazyInstance<PropertyAccessor<ConstrainedHtmlUIDelegate*> >
     g_constrained_html_ui_property_accessor(base::LINKER_INITIALIZED);
@@ -21,8 +25,7 @@ ConstrainedHtmlUI::ConstrainedHtmlUI(TabContents* contents)
 ConstrainedHtmlUI::~ConstrainedHtmlUI() {
 }
 
-void ConstrainedHtmlUI::RenderViewCreated(
-    RenderViewHost* render_view_host) {
+void ConstrainedHtmlUI::RenderViewCreated(RenderViewHost* render_view_host) {
   ConstrainedHtmlUIDelegate* delegate = GetConstrainedDelegate();
   if (!delegate)
     return;
@@ -40,7 +43,8 @@ void ConstrainedHtmlUI::RenderViewCreated(
 
   // Add a "DialogClose" callback which matches HTMLDialogUI behavior.
   RegisterMessageCallback("DialogClose",
-      NewCallback(this, &ConstrainedHtmlUI::OnDialogCloseMessage));
+      base::Bind(&ConstrainedHtmlUI::OnDialogCloseMessage,
+                 base::Unretained(this)));
 }
 
 void ConstrainedHtmlUI::OnDialogCloseMessage(const ListValue* args) {
@@ -49,14 +53,13 @@ void ConstrainedHtmlUI::OnDialogCloseMessage(const ListValue* args) {
     return;
 
   std::string json_retval;
-  if (!args->GetString(0, &json_retval))
+  if (!args->empty() && !args->GetString(0, &json_retval))
     NOTREACHED() << "Could not read JSON argument";
   delegate->GetHtmlDialogUIDelegate()->OnDialogClosed(json_retval);
   delegate->OnDialogCloseFromWebUI();
 }
 
-ConstrainedHtmlUIDelegate*
-    ConstrainedHtmlUI::GetConstrainedDelegate() {
+ConstrainedHtmlUIDelegate* ConstrainedHtmlUI::GetConstrainedDelegate() {
   ConstrainedHtmlUIDelegate** property =
       GetPropertyAccessor().GetProperty(tab_contents()->property_bag());
   return property ? *property : NULL;

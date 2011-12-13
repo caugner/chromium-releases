@@ -9,8 +9,9 @@
 #include <SystemConfiguration/SystemConfiguration.h>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/scoped_ptr.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/synchronization/lock.h"
 #include "net/base/network_change_notifier.h"
@@ -24,7 +25,7 @@ class NetworkChangeNotifierMac: public NetworkChangeNotifier {
   virtual ~NetworkChangeNotifierMac();
 
   // NetworkChangeNotifier implementation:
-  virtual bool IsCurrentlyOffline() const;
+  virtual bool IsCurrentlyOffline() const OVERRIDE;
 
  private:
   enum OnlineState {
@@ -41,13 +42,14 @@ class NetworkChangeNotifierMac: public NetworkChangeNotifier {
         : net_config_watcher_(net_config_watcher) {}
 
     // NetworkConfigWatcherMac::Delegate implementation:
-    virtual void Init() {
+    virtual void Init() OVERRIDE {
       net_config_watcher_->SetInitialState();
     }
-    virtual void SetDynamicStoreNotificationKeys(SCDynamicStoreRef store) {
+    virtual void SetDynamicStoreNotificationKeys(
+        SCDynamicStoreRef store) OVERRIDE {
       net_config_watcher_->SetDynamicStoreNotificationKeys(store);
     }
-    virtual void OnNetworkConfigChange(CFArrayRef changed_keys) {
+    virtual void OnNetworkConfigChange(CFArrayRef changed_keys) OVERRIDE {
       net_config_watcher_->OnNetworkConfigChange(changed_keys);
     }
 

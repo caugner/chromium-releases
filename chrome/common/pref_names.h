@@ -16,6 +16,7 @@ namespace prefs {
 
 // Profile prefs. Please add Local State prefs below instead.
 extern const char kAppsPromoCounter[];
+extern const char kDefaultApps[];
 extern const char kDefaultAppsInstalled[];
 extern const char kHomePageIsNewTabPage[];
 extern const char kHomePage[];
@@ -23,7 +24,6 @@ extern const char kHomePageChanged[];
 extern const char kSessionExitedCleanly[];
 extern const char kRestoreOnStartup[];
 extern const char kURLsToRestoreOnStartup[];
-extern const char kSyncPromoExpanded[];
 
 // For OS_CHROMEOS we maintain kApplicationLocale property in both local state
 // and user's profile.  Global property determines locale of login screen,
@@ -129,6 +129,8 @@ extern const char kDnsPrefetchingStartupList[];
 extern const char kDnsHostReferralList[];  // OBSOLETE
 extern const char kDnsPrefetchingHostReferralList[];
 extern const char kDisableSpdy[];
+extern const char kSpdyServers[];
+extern const char kAlternateProtocolServers[];
 extern const char kDisabledSchemes[];
 extern const char kUrlBlacklist[];
 extern const char kUrlWhitelist[];
@@ -207,7 +209,6 @@ extern const char kLabsMediaplayerEnabled[];
 extern const char kEnableScreenLock[];
 extern const char kShowPlanNotifications[];
 extern const char kShow3gPromoNotification[];
-extern const char kLastUsedFileBrowserHandlers[];
 extern const char kUseSharedProxies[];
 extern const char kOAuth1Token[];
 extern const char kOAuth1Secret[];
@@ -222,13 +223,13 @@ extern const char kDeleteCookies[];
 extern const char kDeletePasswords[];
 extern const char kDeleteFormData[];
 extern const char kEnableSpellCheck[];
-extern const char kSpeechInputCensorResults[];
+extern const char kSpeechInputFilterProfanities[];
 extern const char kEnabledLabsExperiments[];
 extern const char kEnableAutoSpellCorrect[];
 extern const char kSavingBrowserHistoryDisabled[];
 extern const char kDeleteTimePeriod[];
 extern const char kPrintingEnabled[];
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
+#if defined(GOOGLE_CHROME_BUILD)
 extern const char kPrintingPrintPreviewEnabledOnce[];
 #endif
 #if defined(TOOLKIT_USES_GTK)
@@ -280,10 +281,7 @@ extern const char kAutofillNegativeUploadRate[];
 extern const char kAutofillPersonalDataManagerFirstRun[];
 extern const char kEditBookmarksEnabled[];
 
-extern const char kUseVerticalTabs[];
-extern const char kUseCompactNavigationBar[];
 extern const char kEnableTranslate[];
-extern const char kEnableBookmarkBar[];
 extern const char kPinnedTabs[];
 extern const char kHttpThrottlingEnabled[];
 extern const char kHttpThrottlingMayExperiment[];
@@ -319,7 +317,6 @@ extern const char kMetricsInitialLogs[];
 extern const char kMetricsOngoingLogs[];
 
 extern const char kProfileLastUsed[];
-extern const char kProfileDirectoryMap[];
 extern const char kProfilesNumCreated[];
 extern const char kProfileInfoCache[];
 
@@ -377,6 +374,7 @@ extern const char kSaveFileDefaultDirectory[];
 extern const char kSaveFileType[];
 
 extern const char kAllowFileSelectionDialogs[];
+extern const char kLastUsedFileBrowserHandlers[];
 
 extern const char kSelectFileLastDirectory[];
 
@@ -431,6 +429,8 @@ extern const char kNextExtensionsUpdateCheck[];
 extern const char kExtensionInstallAllowList[];
 extern const char kExtensionInstallDenyList[];
 
+extern const char kExtensionAlertsInitializedPref[];
+
 extern const char kExtensionInstallForceList[];
 
 extern const char kExtensionBlacklistUpdateVersion[];
@@ -461,7 +461,11 @@ extern const char kNTPPromoClosed[];
 extern const char kNTPPromoGroup[];
 extern const char kNTPPromoGroupTimeSlice[];
 extern const char kNTPPromoGroupMax[];
+extern const char kNTPPromoViews[];
+extern const char kNTPPromoViewsMax[];
 extern const char kNTPPromoBuild[];
+extern const char kNTPSyncPromoGroup[];
+extern const char kNTPSyncPromoGroupMax[];
 extern const char kNTPWebStoreEnabled[];
 extern const char kNTPWebStorePromoLastId[];
 extern const char kNTPWebStorePromoId[];
@@ -469,6 +473,7 @@ extern const char kNTPWebStorePromoHeader[];
 extern const char kNTPWebStorePromoButton[];
 extern const char kNTPWebStorePromoLink[];
 extern const char kNTPWebStorePromoLogo[];
+extern const char kNTPWebStorePromoLogoSource[];
 extern const char kNTPWebStorePromoExpire[];
 extern const char kNTPWebStorePromoUserGroup[];
 extern const char kNTPAppPageNames[];
@@ -483,7 +488,7 @@ extern const char kDevToolsSplitLocation[];
 
 extern const char kSyncLastSyncedTime[];
 extern const char kSyncHasSetupCompleted[];
-extern const char kKeepEverythingSynced[];
+extern const char kSyncKeepEverythingSynced[];
 extern const char kSyncBookmarks[];
 extern const char kSyncPasswords[];
 extern const char kSyncPreferences[];
@@ -493,16 +498,23 @@ extern const char kSyncAutofillProfile[];
 extern const char kSyncThemes[];
 extern const char kSyncTypedUrls[];
 extern const char kSyncExtensions[];
+extern const char kSyncExtensionSettings[];
 extern const char kSyncManaged[];
 extern const char kSyncSearchEngines[];
 extern const char kSyncSessions[];
+extern const char kSyncAppNotifications[];
 extern const char kSyncSuppressStart[];
 extern const char kGoogleServicesUsername[];
 extern const char kSyncUsingOAuth[];
 extern const char kSyncUsingSecondaryPassphrase[];
-extern const char kEncryptionBootstrapToken[];
-extern const char kAutofillProfileMigrated[];
-extern const char kAcknowledgedSyncTypes[];
+extern const char kSyncEncryptionBootstrapToken[];
+extern const char kSyncAcknowledgedSyncTypes[];
+extern const char kSyncMaxInvalidationVersions[];
+
+extern const char kSyncPromoStartupCount[];
+extern const char kSyncPromoViewCount[];
+extern const char kSyncPromoUserSkipped[];
+extern const char kSyncPromoShowOnFirstRunAllowed[];
 
 extern const char kWebAppCreateOnDesktop[];
 extern const char kWebAppCreateInAppsMenu[];
@@ -556,6 +568,8 @@ extern const char kManagedPluginsAllowedForUrls[];
 extern const char kManagedPluginsBlockedForUrls[];
 extern const char kManagedPopupsAllowedForUrls[];
 extern const char kManagedPopupsBlockedForUrls[];
+extern const char kManagedNotificationsAllowedForUrls[];
+extern const char kManagedNotificationsBlockedForUrls[];
 extern const char kManagedAutoSelectCertificateForUrls[];
 
 #if defined(OS_CHROMEOS)
@@ -588,6 +602,9 @@ extern const char kBackgroundModeEnabled[];
 
 extern const char kDevicePolicyRefreshRate[];
 extern const char kUserPolicyRefreshRate[];
+
+extern const char kRecoveryComponentVersion[];
+extern const char kComponentUpdaterState[];
 
 }  // namespace prefs
 

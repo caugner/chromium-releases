@@ -74,9 +74,9 @@ class ProtocolTestConnection
   ProtocolTestClient* client_;
   MessageLoop* message_loop_;
   scoped_ptr<Session> session_;
-  net::CompletionCallbackImpl<ProtocolTestConnection> write_cb_;
+  net::OldCompletionCallbackImpl<ProtocolTestConnection> write_cb_;
   bool pending_write_;
-  net::CompletionCallbackImpl<ProtocolTestConnection> read_cb_;
+  net::OldCompletionCallbackImpl<ProtocolTestConnection> read_cb_;
   scoped_refptr<net::IOBuffer> read_buffer_;
 };
 
@@ -223,7 +223,7 @@ void ProtocolTestClient::Run(const std::string& username,
       new XmppSignalStrategy(&jingle_thread, username, auth_token,
                              auth_service));
   signal_strategy_->Init(this);
-  session_manager_.reset(JingleSessionManager::CreateNotSandboxed(
+  session_manager_.reset(new JingleSessionManager(
       jingle_thread.message_loop_proxy()));
 
   host_jid_ = host_jid;
@@ -296,7 +296,7 @@ void ProtocolTestClient::OnSessionManagerInitialized() {
     connection->Init(session_manager_->Connect(
         host_jid_, "", kDummyAuthToken,
         CandidateSessionConfig::CreateDefault(),
-        NewCallback(connection, &ProtocolTestConnection::OnStateChange)));
+        base::Bind(&ProtocolTestConnection::OnStateChange, connection)));
     connections_.push_back(make_scoped_refptr(connection));
   }
 }
@@ -306,12 +306,12 @@ void ProtocolTestClient::OnIncomingSession(
     SessionManager::IncomingSessionResponse* response) {
   std::cerr << "Accepting connection from " << session->jid() << std::endl;
 
-  session->set_config(SessionConfig::CreateDefault());
+  session->set_config(SessionConfig::GetDefault());
   *response = SessionManager::ACCEPT;
 
   ProtocolTestConnection* test_connection = new ProtocolTestConnection(this);
   session->SetStateChangeCallback(
-      NewCallback(test_connection, &ProtocolTestConnection::OnStateChange));
+      base::Bind(&ProtocolTestConnection::OnStateChange, test_connection));
   test_connection->Init(session);
   base::AutoLock auto_lock(connections_lock_);
   connections_.push_back(make_scoped_refptr(test_connection));

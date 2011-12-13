@@ -4,8 +4,12 @@
 
 #include "chrome/browser/ui/views/download/download_in_progress_dialog_view.h"
 
+#include <algorithm>
+
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "content/browser/download/download_manager.h"
@@ -23,34 +27,35 @@
 DownloadInProgressDialogView::DownloadInProgressDialogView(Browser* browser)
     : browser_(browser),
       product_name_(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)) {
-  int download_count = browser->profile()->GetDownloadManager()->
-      in_progress_count();
+  int download_count =
+      DownloadServiceFactory::GetForProfile(
+          browser->profile())->GetDownloadManager()->in_progress_count();
 
-  std::wstring warning_text;
-  std::wstring explanation_text;
+  string16 warning_text;
+  string16 explanation_text;
   if (download_count == 1) {
-    warning_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+    warning_text = l10n_util::GetStringFUTF16(
         IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING,
-        product_name_));
-    explanation_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+        product_name_);
+    explanation_text = l10n_util::GetStringFUTF16(
         IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION,
-        product_name_));
-    ok_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL));
-    cancel_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL));
+        product_name_);
+    ok_button_text_ = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
+    cancel_button_text_ = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
   } else {
-    warning_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+    warning_text = l10n_util::GetStringFUTF16(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
         product_name_,
-        UTF8ToUTF16(base::IntToString(download_count))));
-    explanation_text = UTF16ToWide(l10n_util::GetStringFUTF16(
+        UTF8ToUTF16(base::IntToString(download_count)));
+    explanation_text = l10n_util::GetStringFUTF16(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION,
-        product_name_));
-    ok_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL));
-    cancel_button_text_ = UTF16ToWide(l10n_util::GetStringUTF16(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL));
+        product_name_);
+    ok_button_text_ = l10n_util::GetStringUTF16(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL);
+    cancel_button_text_ = l10n_util::GetStringUTF16(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_CANCEL_BUTTON_LABEL);
   }
 
   // There are two lines of text: the bold warning label and the text
@@ -95,8 +100,8 @@ gfx::Size DownloadInProgressDialogView::GetPreferredSize() {
   return dialog_dimensions_;
 }
 
-std::wstring DownloadInProgressDialogView::GetDialogButtonLabel(
-    MessageBoxFlags::DialogButton button) const {
+string16 DownloadInProgressDialogView::GetDialogButtonLabel(
+    ui::MessageBoxFlags::DialogButton button) const {
   if (button == MessageBoxFlags::DIALOGBUTTON_OK)
     return ok_button_text_;
 
@@ -122,8 +127,8 @@ bool DownloadInProgressDialogView::IsModal() const {
   return true;
 }
 
-std::wstring DownloadInProgressDialogView::GetWindowTitle() const {
-  return UTF16ToWideHack(product_name_);
+string16 DownloadInProgressDialogView::GetWindowTitle() const {
+  return product_name_;
 }
 
 views::View* DownloadInProgressDialogView::GetContentsView() {

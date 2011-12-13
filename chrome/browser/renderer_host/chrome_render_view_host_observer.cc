@@ -7,25 +7,25 @@
 #include "base/command_line.h"
 #include "chrome/browser/dom_operation_notification_details.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/net/predictor_api.h"
+#include "chrome/browser/net/predictor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/url_constants.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
-#include "content/common/bindings_policy.h"
 #include "content/common/notification_service.h"
-#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
 
 ChromeRenderViewHostObserver::ChromeRenderViewHostObserver(
-    RenderViewHost* render_view_host)
-    : RenderViewHostObserver(render_view_host) {
+    RenderViewHost* render_view_host, chrome_browser_net::Predictor* predictor)
+    : RenderViewHostObserver(render_view_host),
+      predictor_(predictor) {
   InitRenderViewHostForExtensions();
 }
 
@@ -39,9 +39,11 @@ void ChromeRenderViewHostObserver::RenderViewHostInitialized() {
 void ChromeRenderViewHostObserver::Navigate(
     const ViewMsg_Navigate_Params& params) {
   const GURL& url = params.url;
+  if (!predictor_)
+    return;
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame) &&
-      (url.SchemeIs(chrome::kHttpScheme) || url.SchemeIs(chrome::kHttpsScheme)))
-    chrome_browser_net::PreconnectUrlAndSubresources(url);
+     (url.SchemeIs(chrome::kHttpScheme) || url.SchemeIs(chrome::kHttpsScheme)))
+    predictor_->PreconnectUrlAndSubresources(url);
 }
 
 bool ChromeRenderViewHostObserver::OnMessageReceived(
@@ -50,6 +52,8 @@ bool ChromeRenderViewHostObserver::OnMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewHostObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_DomOperationResponse,
                         OnDomOperationResponse)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FocusedEditableNodeTouched,
+                        OnFocusedEditableNodeTouched)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -67,13 +71,11 @@ void ChromeRenderViewHostObserver::InitRenderViewHostForExtensions() {
       profile->GetExtensionProcessManager();
   CHECK(process_manager);
 
-  site_instance->GetProcess()->mark_is_extension_process();
-
   // Register the association between extension and SiteInstance with
   // ExtensionProcessManager.
   // TODO(creis): Use this to replace SetInstalledAppForRenderer.
-  process_manager->RegisterExtensionSiteInstance(site_instance->id(),
-                                                 extension->id());
+  process_manager->RegisterExtensionSiteInstance(site_instance,
+                                                 extension);
 
   if (extension->is_app()) {
     // Record which, if any, installed app is associated with this process.
@@ -81,19 +83,6 @@ void ChromeRenderViewHostObserver::InitRenderViewHostForExtensions() {
     // service. Can we get it from EPM instead?
     profile->GetExtensionService()->SetInstalledAppForRenderer(
         render_view_host()->process()->id(), extension);
-  }
-
-  // Enable extension bindings for the renderer. Currently only extensions,
-  // packaged apps, and hosted component apps use extension bindings.
-  Extension::Type type = extension->GetType();
-  if (type == Extension::TYPE_EXTENSION ||
-      type == Extension::TYPE_USER_SCRIPT ||
-      type == Extension::TYPE_PACKAGED_APP ||
-      (type == Extension::TYPE_HOSTED_APP &&
-       extension->location() == Extension::COMPONENT)) {
-    render_view_host()->AllowBindings(BindingsPolicy::EXTENSION);
-    ChildProcessSecurityPolicy::GetInstance()->GrantExtensionBindings(
-        render_view_host()->process()->id());
   }
 }
 
@@ -161,4 +150,11 @@ void ChromeRenderViewHostObserver::OnDomOperationResponse(
       chrome::NOTIFICATION_DOM_OPERATION_RESPONSE,
       Source<RenderViewHost>(render_view_host()),
       Details<DomOperationNotificationDetails>(&details));
+}
+
+void ChromeRenderViewHostObserver::OnFocusedEditableNodeTouched() {
+  NotificationService::current()->Notify(
+      chrome::NOTIFICATION_FOCUSED_EDITABLE_NODE_TOUCHED,
+      Source<RenderViewHost>(render_view_host()),
+      NotificationService::NoDetails());
 }

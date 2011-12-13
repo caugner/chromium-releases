@@ -18,20 +18,19 @@ class ChromeWebUI : public WebUI {
   // Returns the profile for this WebUI.
   Profile* GetProfile() const;
 
-  // Returns true if the bookmark bar should be forced to being visible,
-  // overriding the user's preference.
-  bool force_bookmark_bar_visible() const {
-    return force_bookmark_bar_visible_;
-  }
+  // Returns true if the bookmark bar can be displayed over this webui,
+  // detached from the location bar.
+  virtual bool CanShowBookmarkBar() const;
 
- protected:
-  void set_force_bookmark_bar_visible(bool value) {
-    force_bookmark_bar_visible_ = value;
-  }
+  // IsMoreWebUI returns a command line flag that tracks whether to use
+  // available WebUI implementations of native dialogs.
+  static bool IsMoreWebUI();
+
+  // Override the argument setting for more WebUI. If true this enables more
+  // WebUI.
+  static void OverrideMoreWebUI(bool use_more_webui);
 
  private:
-  bool force_bookmark_bar_visible_;
-
   DISALLOW_COPY_AND_ASSIGN(ChromeWebUI);
 };
 

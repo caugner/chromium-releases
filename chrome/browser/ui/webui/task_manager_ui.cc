@@ -10,7 +10,6 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/task_manager_handler.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/browser_resources.h"
@@ -36,6 +35,7 @@ ChromeWebUIDataSource* CreateTaskManagerUIHTMLSource() {
   SET_LOCALIZED_STRING(KILL_CHROMEOS);
   SET_LOCALIZED_STRING(PROCESS_ID_COLUMN);
   SET_LOCALIZED_STRING(PAGE_COLUMN);
+  SET_LOCALIZED_STRING(PROFILE_NAME_COLUMN);
   SET_LOCALIZED_STRING(NET_COLUMN);
   SET_LOCALIZED_STRING(CPU_COLUMN);
   SET_LOCALIZED_STRING(PHYSICAL_MEM_COLUMN);
@@ -77,4 +77,3 @@ TaskManagerUI::TaskManagerUI(TabContents* contents) : ChromeWebUI(contents) {
   Profile* profile = Profile::FromBrowserContext(contents->browser_context());
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
-

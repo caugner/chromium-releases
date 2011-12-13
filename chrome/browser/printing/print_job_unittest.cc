@@ -9,7 +9,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
-#include "googleurl/src/gurl.h"
 #include "printing/printed_pages_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -17,11 +16,8 @@ namespace {
 
 class TestSource : public printing::PrintedPagesSource {
  public:
-  virtual string16 RenderSourceName() {
+  virtual string16 RenderSourceName() OVERRIDE {
     return string16();
-  }
-  virtual GURL RenderSourceUrl() {
-    return GURL();
   }
 };
 
@@ -59,6 +55,7 @@ class TestOwner : public printing::PrintJobWorkerOwner {
   virtual int cookie() const {
     return 42;
   }
+
  private:
   printing::PrintSettings settings_;
 };
@@ -88,7 +85,13 @@ class TestPrintNotifObserv : public NotificationObserver {
 
 typedef testing::Test PrintJobTest;
 
-TEST_F(PrintJobTest, SimplePrint) {
+// Crashes under Linux Aura, see http://crbug.com/100340
+#if defined(USE_AURA) && !defined(OS_WIN)
+#define MAYBE_SimplePrint DISABLED_SimplePrint
+#else
+#define MAYBE_SimplePrint SimplePrint
+#endif
+TEST_F(PrintJobTest, MAYBE_SimplePrint) {
   // Test the multi-threaded nature of PrintJob to make sure we can use it with
   // known lifetime.
 

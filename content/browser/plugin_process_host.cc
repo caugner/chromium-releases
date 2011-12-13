@@ -25,9 +25,9 @@
 #include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
-#include "content/common/content_switches.h"
 #include "content/common/plugin_messages.h"
 #include "content/common/resource_messages.h"
+#include "content/public/common/content_switches.h"
 #include "ipc/ipc_switches.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/gfx/native_widget_types.h"
@@ -102,7 +102,9 @@ void PluginProcessHost::OnReparentPluginWindow(HWND window, HWND parent) {
 void PluginProcessHost::OnMapNativeViewId(gfx::NativeViewId id,
                                           gfx::PluginWindowHandle* output) {
   *output = 0;
+#if !defined(USE_AURA)
   GtkNativeViewManager::GetInstance()->GetXIDForId(output, id);
+#endif
 }
 #endif  // defined(TOOLKIT_USES_GTK)
 
@@ -306,6 +308,7 @@ bool PluginProcessHost::OnMessageReceived(const IPC::Message& msg) {
 }
 
 void PluginProcessHost::OnChannelConnected(int32 peer_pid) {
+  BrowserChildProcessHost::OnChannelConnected(peer_pid);
   for (size_t i = 0; i < pending_requests_.size(); ++i) {
     RequestPluginChannel(pending_requests_[i]);
   }
@@ -327,8 +330,10 @@ void PluginProcessHost::CancelRequests() {
   pending_requests_.clear();
 
   while (!sent_requests_.empty()) {
-    sent_requests_.front()->OnError();
-    sent_requests_.pop();
+    Client* client = sent_requests_.front();
+    if (client)
+      client->OnError();
+    sent_requests_.pop_front();
   }
 }
 
@@ -350,7 +355,7 @@ void PluginProcessHost::CancelPendingRequestsForResourceContext(
 }
 
 void PluginProcessHost::OpenChannelToPlugin(Client* client) {
-  InstanceCreated();
+  Notify(content::NOTIFICATION_CHILD_INSTANCE_CREATED);
   client->SetPluginInfo(info_);
   if (opening_channel()) {
     // The channel is already in the process of being opened.  Put
@@ -362,6 +367,30 @@ void PluginProcessHost::OpenChannelToPlugin(Client* client) {
 
   // We already have an open channel, send a request right away to plugin.
   RequestPluginChannel(client);
+}
+
+void PluginProcessHost::CancelPendingRequest(Client* client) {
+  std::vector<Client*>::iterator it = pending_requests_.begin();
+  while (it != pending_requests_.end()) {
+    if (client == *it) {
+      pending_requests_.erase(it);
+      return;
+    }
+    ++it;
+  }
+  DCHECK(it != pending_requests_.end());
+}
+
+void PluginProcessHost::CancelSentRequest(Client* client) {
+  std::list<Client*>::iterator it = sent_requests_.begin();
+  while (it != sent_requests_.end()) {
+    if (client == *it) {
+      *it = NULL;
+      return;
+    }
+    ++it;
+  }
+  DCHECK(it != sent_requests_.end());
 }
 
 void PluginProcessHost::RequestPluginChannel(Client* client) {
@@ -376,7 +405,8 @@ void PluginProcessHost::RequestPluginChannel(Client* client) {
           client->OffTheRecord());
   msg->set_unblock(true);
   if (Send(msg)) {
-    sent_requests_.push(client);
+    sent_requests_.push_back(client);
+    client->OnSentPluginChannelRequest();
   } else {
     client->OnError();
   }
@@ -386,6 +416,7 @@ void PluginProcessHost::OnChannelCreated(
     const IPC::ChannelHandle& channel_handle) {
   Client* client = sent_requests_.front();
 
-  client->OnChannelOpened(channel_handle);
-  sent_requests_.pop();
+  if (client)
+    client->OnChannelOpened(channel_handle);
+  sent_requests_.pop_front();
 }

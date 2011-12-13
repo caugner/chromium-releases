@@ -18,9 +18,9 @@
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
-#include "webkit/plugins/webplugininfo.h"
 
 class PluginPrefs;
+class Profile;
 
 // This class must be created (by calling the |GetInstance| method) on the UI
 // thread, but is safe to use on any thread after that.
@@ -39,11 +39,16 @@ class ChromePluginServiceFilter : public content::PluginServiceFilter,
   void OverridePluginForTab(int render_process_id,
                             int render_view_id,
                             const GURL& url,
-                            const webkit::WebPluginInfo& plugin);
+                            const string16& plugin_name);
 
-  // Restricts the given plugin to the the scheme and host of the given url.
-  // Call with an empty url to reset this.
-  void RestrictPluginToUrl(const FilePath& plugin_path, const GURL& url);
+  // Restricts the given plugin to the given profile and origin of the given
+  // URL.
+  void RestrictPluginToProfileAndOrigin(const FilePath& plugin_path,
+                                        Profile* profile,
+                                        const GURL& url);
+
+  // Lifts a restriction on a plug-in.
+  void UnrestrictPlugin(const FilePath& plugin_path);
 
   // PluginServiceFilter implementation:
   virtual bool ShouldUsePlugin(
@@ -61,7 +66,7 @@ class ChromePluginServiceFilter : public content::PluginServiceFilter,
     int render_process_id;
     int render_view_id;
     GURL url;  // If empty, the override applies to all urls in render_view.
-    webkit::WebPluginInfo plugin;
+    string16 plugin_name;
   };
 
   ChromePluginServiceFilter();
@@ -76,7 +81,8 @@ class ChromePluginServiceFilter : public content::PluginServiceFilter,
 
   base::Lock lock_;  // Guards access to member variables.
   // Map of plugin paths to the origin they are restricted to.
-  typedef base::hash_map<FilePath, GURL> RestrictedPluginMap;
+  typedef std::pair<const void*, GURL> RestrictedPluginPair;
+  typedef base::hash_map<FilePath, RestrictedPluginPair> RestrictedPluginMap;
   RestrictedPluginMap restricted_plugins_;
   typedef std::map<const void*, scoped_refptr<PluginPrefs> > ResourceContextMap;
   ResourceContextMap resource_context_map_;

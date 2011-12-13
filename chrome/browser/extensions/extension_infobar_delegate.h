@@ -15,6 +15,7 @@ class Browser;
 class Extension;
 class ExtensionHost;
 class GURL;
+class Profile;
 
 // The InfobarDelegate for creating and managing state for the ExtensionInfobar
 // plus monitor when the extension goes away.
@@ -31,7 +32,7 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   };
 
   ExtensionInfoBarDelegate(Browser* browser,
-                           TabContents* contents,
+                           InfoBarTabHelper* infobar_helper,
                            const Extension* extension,
                            const GURL& url,
                            int height);
@@ -48,7 +49,7 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   virtual ~ExtensionInfoBarDelegate();
 
   // InfoBarDelegate:
-  virtual InfoBar* CreateInfoBar(TabContentsWrapper* owner) OVERRIDE;
+  virtual InfoBar* CreateInfoBar(InfoBarTabHelper* owner) OVERRIDE;
   virtual bool EqualsDelegate(InfoBarDelegate* delegate) const OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual Type GetInfoBarType() const OVERRIDE;
@@ -58,6 +59,8 @@ class ExtensionInfoBarDelegate : public InfoBarDelegate,
   virtual void Observe(int type,
                        const NotificationSource& source,
                        const NotificationDetails& details) OVERRIDE;
+
+  Browser* browser_;
 
   // The extension host we are showing the InfoBar for. The delegate needs to
   // own this since the InfoBar gets deleted and recreated when you switch tabs

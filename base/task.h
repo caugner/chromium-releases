@@ -2,15 +2,40 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// ============================================================================
+// ****************************************************************************
+// *  THIS HEADER IS DEPRECATED, SEE base/callback.h FOR NEW IMPLEMENTATION   *
+// ****************************************************************************
+// ============================================================================
+// ============================================================================
+// ****************************************************************************
+// *  THIS HEADER IS DEPRECATED, SEE base/callback.h FOR NEW IMPLEMENTATION   *
+// ****************************************************************************
+// ============================================================================
+// ============================================================================
+// ****************************************************************************
+// *  THIS HEADER IS DEPRECATED, SEE base/callback.h FOR NEW IMPLEMENTATION   *
+// ****************************************************************************
+// ============================================================================
+// ============================================================================
+// ****************************************************************************
+// *  THIS HEADER IS DEPRECATED, SEE base/callback.h FOR NEW IMPLEMENTATION   *
+// ****************************************************************************
+// ============================================================================
+// ============================================================================
+// ****************************************************************************
+// *  THIS HEADER IS DEPRECATED, SEE base/callback.h FOR NEW IMPLEMENTATION   *
+// ****************************************************************************
+// ============================================================================
 #ifndef BASE_TASK_H_
 #define BASE_TASK_H_
 #pragma once
 
 #include "base/base_export.h"
+#include "base/callback.h"
 #include "base/debug/alias.h"
 #include "base/memory/raw_scoped_refptr_mismatch_checker.h"
 #include "base/memory/weak_ptr.h"
-#include "base/tracked.h"
 #include "base/tuple.h"
 
 namespace base {
@@ -22,7 +47,7 @@ const size_t kDeadTask = 0xDEAD7A53;
 // A task is a generic runnable thingy, usually used for running code on a
 // different thread or for scheduling future tasks off of the message loop.
 
-class BASE_EXPORT Task : public tracked_objects::Tracked {
+class BASE_EXPORT Task {
  public:
   Task();
   virtual ~Task();
@@ -565,6 +590,19 @@ class BASE_EXPORT ScopedTaskRunner {
   Task* task_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedTaskRunner);
+};
+
+class BASE_EXPORT ScopedClosureRunner {
+ public:
+  explicit ScopedClosureRunner(const Closure& closure);
+  ~ScopedClosureRunner();
+
+  Closure Release();
+
+ private:
+  Closure closure_;
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(ScopedClosureRunner);
 };
 
 namespace subtle {

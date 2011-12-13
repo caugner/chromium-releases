@@ -84,6 +84,7 @@ class TestPrerenderManager : public PrerenderManager {
          it != used_prerender_contents_.end(); ++it) {
       (*it)->set_final_status(FINAL_STATUS_USED);
     }
+    DoShutdown();
   }
 
   void AdvanceTime(base::TimeDelta delta) {
@@ -125,10 +126,6 @@ class TestPrerenderManager : public PrerenderManager {
     return AddPrerenderFromLinkRelPrerender(-1, -1,
                                             url,
                                             GURL());
-  }
-
-  bool IsPendingEntry(const GURL& url) {
-    return (PrerenderManager::FindPendingEntry(url) != NULL);
   }
 
   void set_rate_limit_enabled(bool enabled) {
@@ -209,8 +206,15 @@ class PrerenderManagerTest : public testing::Test {
 };
 
 TEST_F(PrerenderManagerTest, EmptyTest) {
-  GURL url("http://www.google.com/");
-  EXPECT_FALSE(prerender_manager()->MaybeUsePrerenderedPage(NULL, url, false));
+  EXPECT_FALSE(prerender_manager()->MaybeUsePrerenderedPage(
+      NULL,
+      GURL("http://www.google.com/"),
+      GURL()));
+
+  EXPECT_FALSE(prerender_manager()->MaybeUsePrerenderedPage(
+      NULL,
+      GURL("http://www.google.com/search"),
+      GURL("http://www.google.com")));
 }
 
 TEST_F(PrerenderManagerTest, FoundTest) {

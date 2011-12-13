@@ -8,6 +8,8 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -16,7 +18,6 @@
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
@@ -94,7 +95,8 @@ class ConflictsDOMHandler : public WebUIMessageHandler,
 
 void ConflictsDOMHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("requestModuleList",
-      NewCallback(this, &ConflictsDOMHandler::HandleRequestModuleList));
+      base::Bind(&ConflictsDOMHandler::HandleRequestModuleList,
+                 base::Unretained(this)));
 }
 
 void ConflictsDOMHandler::HandleRequestModuleList(const ListValue* args) {

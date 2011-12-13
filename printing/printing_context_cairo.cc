@@ -148,6 +148,9 @@ PrintingContext::Result PrintingContextCairo::UpdatePrinterSettings(
   if (!job_settings.GetBoolean(kSettingLandscape, &landscape))
     return OnError();
 
+  if (settings_.dpi() == 0)
+    UseDefaultSettings();
+
   settings_.SetOrientation(landscape);
   settings_.ranges = ranges;
 
@@ -155,7 +158,12 @@ PrintingContext::Result PrintingContextCairo::UpdatePrinterSettings(
 #else
   DCHECK(!in_print_job_);
 
-  if (!print_dialog_->UpdateSettings(job_settings, ranges))
+  if (!print_dialog_) {
+    print_dialog_ = create_dialog_func_(this);
+    print_dialog_->AddRefToDialog();
+  }
+
+  if (!print_dialog_->UpdateSettings(job_settings, ranges, &settings_))
     return OnError();
 
   return OK;

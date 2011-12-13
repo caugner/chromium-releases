@@ -20,7 +20,7 @@
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/file_manager_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
@@ -56,9 +56,7 @@
 // Error messages.
 const char kFileError[] = "File error %d";
 const char kInvalidFileUrl[] = "Invalid file URL";
-#ifdef OS_CHROMEOS
 const char kVolumeDevicePathNotFound[] = "Device path not found";
-#endif
 
 #ifdef OS_CHROMEOS
 // Volume type strings.
@@ -88,11 +86,20 @@ const int kReadWriteFilePermissions = base::PLATFORM_FILE_OPEN |
                                       base::PLATFORM_FILE_ASYNC |
                                       base::PLATFORM_FILE_WRITE_ATTRIBUTES;
 
-typedef std::pair<int, const FileBrowserHandler* > LastUsedHandler;
+struct LastUsedHandler {
+  LastUsedHandler(int t, const FileBrowserHandler* h, URLPatternSet p)
+      : timestamp(t),
+        handler(h),
+        patterns(p) {
+  }
+
+  int timestamp;
+  const FileBrowserHandler* handler;
+  URLPatternSet patterns;
+};
+
 typedef std::vector<LastUsedHandler> LastUsedHandlerList;
-
-typedef std::vector<const FileBrowserHandler*> ActionList;
-
+typedef std::set<const FileBrowserHandler*> ActionSet;
 
 // Breaks down task_id that is used between getFileTasks() and executeTask() on
 // its building blocks. task_id field the following structure:
@@ -116,8 +123,8 @@ std::string MakeTaskID(const char* extension_id,
 }
 
 bool GetFileBrowserHandlers(Profile* profile,
-                           const GURL& selected_file_url,
-                           ActionList* results) {
+                            const GURL& selected_file_url,
+                            ActionSet* results) {
   ExtensionService* service = profile->GetExtensionService();
   if (!service)
     return false;  // In unit-tests, we may not have an ExtensionService.
@@ -131,13 +138,13 @@ bool GetFileBrowserHandlers(Profile* profile,
 
     for (Extension::FileBrowserHandlerList::const_iterator action_iter =
              extension->file_browser_handlers()->begin();
-        action_iter != extension->file_browser_handlers()->end();
-        ++action_iter) {
+         action_iter != extension->file_browser_handlers()->end();
+         ++action_iter) {
       const FileBrowserHandler* action = action_iter->get();
       if (!action->MatchesURL(selected_file_url))
         continue;
 
-      results->push_back(action_iter->get());
+      results->insert(action_iter->get());
     }
   }
   return true;
@@ -145,85 +152,102 @@ bool GetFileBrowserHandlers(Profile* profile,
 
 bool SortByLastUsedTimestampDesc(const LastUsedHandler& a,
                                  const LastUsedHandler& b) {
-  return a.first > b.first;
+  return a.timestamp > b.timestamp;
 }
 
 // TODO(zelidrag): Wire this with ICU to make this sort I18N happy.
 bool SortByTaskName(const LastUsedHandler& a, const LastUsedHandler& b) {
-  return base::strcasecmp(a.second->title().data(),
-                          b.second->title().data()) > 0;
+  return base::strcasecmp(a.handler->title().data(),
+                          b.handler->title().data()) > 0;
+}
+
+void SortLastUsedHandlerList(LastUsedHandlerList *list) {
+  // Sort by the last used descending.
+  std::sort(list->begin(), list->end(), SortByLastUsedTimestampDesc);
+  if (list->size() > 1) {
+    // Sort the rest by name.
+    std::sort(list->begin() + 1, list->end(), SortByTaskName);
+  }
+}
+
+URLPatternSet GetAllMatchingPatterns(const FileBrowserHandler* handler,
+                                     const std::vector<GURL>& files_list) {
+  URLPatternSet matching_patterns;
+  const URLPatternSet& patterns = handler->file_url_patterns();
+  for (URLPatternSet::const_iterator pattern_it = patterns.begin();
+       pattern_it != patterns.end(); ++pattern_it) {
+    for (std::vector<GURL>::const_iterator file_it = files_list.begin();
+         file_it != files_list.end(); ++file_it) {
+      if (pattern_it->MatchesURL(*file_it)) {
+        matching_patterns.AddPattern(*pattern_it);
+        break;
+      }
+    }
+  }
+
+  return matching_patterns;
 }
 
 // Given the list of selected files, returns array of context menu tasks
 // that are shared
 bool FindCommonTasks(Profile* profile,
-                     ListValue* files_list,
+                     const std::vector<GURL>& files_list,
                      LastUsedHandlerList* named_action_list) {
   named_action_list->clear();
-  ActionList common_tasks;
-  for (size_t i = 0; i < files_list->GetSize(); ++i) {
-    std::string file_url;
-    if (!files_list->GetString(i, &file_url))
-      return false;
-
-    // We need case-insensitive matching, and pattern in handler is already
-    // in lower case.
-    StringToLowerASCII(&file_url);
-
-    ActionList file_actions;
-    if (!GetFileBrowserHandlers(profile, GURL(file_url), &file_actions))
+  ActionSet common_tasks;
+  for (std::vector<GURL>::const_iterator it = files_list.begin();
+       it != files_list.end(); ++it) {
+    ActionSet file_actions;
+    if (!GetFileBrowserHandlers(profile, *it, &file_actions))
       return false;
     // If there is nothing to do for one file, the intersection of tasks for all
     // files will be empty at the end.
-    if (!file_actions.size()) {
-      common_tasks.clear();
+    if (!file_actions.size())
       return true;
-    }
+
     // For the very first file, just copy elements.
-    if (i == 0) {
-      common_tasks.insert(common_tasks.begin(),
-                          file_actions.begin(),
-                          file_actions.end());
-      std::sort(common_tasks.begin(), common_tasks.end());
-    } else if (common_tasks.size()) {
-      // For all additional files, find intersection between the accumulated
-      // and file specific set.
-      std::sort(file_actions.begin(), file_actions.end());
-      ActionList intersection(common_tasks.size());
-      ActionList::iterator intersection_end =
-          std::set_intersection(common_tasks.begin(),
-                                common_tasks.end(),
-                                file_actions.begin(),
-                                file_actions.end(),
-                                intersection.begin());
-      common_tasks.clear();
-      common_tasks.insert(common_tasks.begin(),
-                          intersection.begin(),
-                          intersection_end);
-      std::sort(common_tasks.begin(), common_tasks.end());
+    if (it == files_list.begin()) {
+      common_tasks = file_actions;
+    } else {
+      if (common_tasks.size()) {
+        // For all additional files, find intersection between the accumulated
+        // and file specific set.
+        ActionSet intersection;
+        std::set_intersection(common_tasks.begin(), common_tasks.end(),
+                              file_actions.begin(), file_actions.end(),
+                              std::inserter(intersection,
+                                            intersection.begin()));
+        common_tasks = intersection;
+      }
     }
   }
 
   const DictionaryValue* prefs_tasks =
       profile->GetPrefs()->GetDictionary(prefs::kLastUsedFileBrowserHandlers);
-  for (ActionList::const_iterator iter = common_tasks.begin();
+  for (ActionSet::const_iterator iter = common_tasks.begin();
        iter != common_tasks.end(); ++iter) {
     // Get timestamp of when this task was used last time.
     int last_used_timestamp = 0;
     prefs_tasks->GetInteger(MakeTaskID((*iter)->extension_id().data(),
                                        (*iter)->id().data()),
-                             &last_used_timestamp);
-    named_action_list->push_back(LastUsedHandler(last_used_timestamp, *iter));
+                            &last_used_timestamp);
+    URLPatternSet matching_patterns = GetAllMatchingPatterns(*iter, files_list);
+    named_action_list->push_back(LastUsedHandler(last_used_timestamp, *iter,
+                                                 matching_patterns));
   }
-  // Sort by the last used descending.
-  std::sort(named_action_list->begin(), named_action_list->end(),
-            SortByLastUsedTimestampDesc);
-  if (named_action_list->size() > 1) {
-    // Sort the rest by name.
-    std::sort(named_action_list->begin() + 1, named_action_list->end(),
-              SortByTaskName);
-  }
+
+  SortLastUsedHandlerList(named_action_list);
   return true;
+}
+
+ListValue* URLPatternSetToStringList(const URLPatternSet& patterns) {
+  ListValue* list = new ListValue();
+  for (URLPatternSet::const_iterator it = patterns.begin();
+       it != patterns.end(); ++it) {
+    list->Append(new StringValue(it->GetAsString()));
+  }
+
+  return list;
 }
 
 // Update file handler usage stats.
@@ -517,15 +541,21 @@ void FileWatchBrowserFunctionBase::RunFileWatchOperationOnFileThread(
 bool AddFileWatchBrowserFunction::PerformFileWatchOperation(
     const FilePath& local_path, const FilePath& virtual_path,
     const std::string& extension_id) {
+#if defined(OS_CHROMEOS)
   return profile_->GetExtensionService()->file_browser_event_router()->
       AddFileWatch(local_path, virtual_path, extension_id);
+#else
+  return true;
+#endif  // OS_CHROMEOS
 }
 
 bool RemoveFileWatchBrowserFunction::PerformFileWatchOperation(
     const FilePath& local_path, const FilePath& unused,
     const std::string& extension_id) {
+#if defined(OS_CHROMEOS)
   profile_->GetExtensionService()->file_browser_event_router()->
       RemoveFileWatch(local_path, extension_id);
+#endif
   return true;
 }
 
@@ -534,24 +564,38 @@ bool GetFileTasksFileBrowserFunction::RunImpl() {
   if (!args_->GetList(0, &files_list))
     return false;
 
+  std::vector<GURL> file_urls;
+  for (size_t i = 0; i < files_list->GetSize(); ++i) {
+    std::string file_url;
+    if (!files_list->GetString(i, &file_url))
+      return false;
+
+    // We need case-insensitive matching, and pattern in handler is already
+    // in lower case.
+    StringToLowerASCII(&file_url);
+    file_urls.push_back(GURL(file_url));
+  }
+
   ListValue* result_list = new ListValue();
   result_.reset(result_list);
 
   LastUsedHandlerList common_tasks;
-  if (!FindCommonTasks(profile_, files_list, &common_tasks))
+  if (!FindCommonTasks(profile_, file_urls, &common_tasks))
     return false;
 
   ExtensionService* service = profile_->GetExtensionService();
   for (LastUsedHandlerList::const_iterator iter = common_tasks.begin();
        iter != common_tasks.end();
        ++iter) {
-    const std::string extension_id = iter->second->extension_id();
+    const FileBrowserHandler* handler = iter->handler;
+    const std::string extension_id = handler->extension_id();
     const Extension* extension = service->GetExtensionById(extension_id, false);
     CHECK(extension);
     DictionaryValue* task = new DictionaryValue();
     task->SetString("taskId", MakeTaskID(extension_id.data(),
-                                         iter->second->id().data()));
-    task->SetString("title", iter->second->title());
+                                         handler->id().data()));
+    task->SetString("title", handler->title());
+    task->Set("patterns", URLPatternSetToStringList(iter->patterns));
     // TODO(zelidrag): Figure out how to expose icon URL that task defined in
     // manifest instead of the default extension icon.
     GURL icon =
@@ -1137,6 +1181,7 @@ bool AddMountFunction::RunImpl() {
   UrlList file_paths;
   file_paths.push_back(GURL(file_url));
 
+#if defined(OS_CHROMEOS)
   chromeos::MountPathOptions options;
   if (args_->GetSize() == 3) {
     DictionaryValue *dict;
@@ -1163,6 +1208,7 @@ bool AddMountFunction::RunImpl() {
       NewRunnableMethod(this,
           &AddMountFunction::GetLocalPathsOnFileThread,
           file_paths, reinterpret_cast<void*>(params)));
+#endif  // OS_CHROMEOS
 
   return true;
 }
@@ -1171,19 +1217,19 @@ void AddMountFunction::GetLocalPathsResponseOnUIThread(
     const FilePathList& files, void* context) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(context);
-  scoped_ptr<MountParamaters> params(
-      reinterpret_cast<MountParamaters*>(context));
 
   if (!files.size()) {
     SendResponse(false);
     return;
   }
 
+#ifdef OS_CHROMEOS
+  scoped_ptr<MountParamaters> params(
+      reinterpret_cast<MountParamaters*>(context));
   const std::string& mount_type_str = params->mount_type;
   const chromeos::MountPathOptions& options = params->mount_options;
   FilePath::StringType source_file = files[0].value();
 
-#ifdef OS_CHROMEOS
   chromeos::MountLibrary *mount_lib =
       chromeos::CrosLibrary::Get()->GetMountLibrary();
 
@@ -1275,6 +1321,79 @@ bool GetMountPointsFunction::RunImpl() {
   return true;
 }
 
+GetSizeStatsFunction::GetSizeStatsFunction() {
+}
+
+GetSizeStatsFunction::~GetSizeStatsFunction() {
+}
+
+bool GetSizeStatsFunction::RunImpl() {
+  if (args_->GetSize() != 1) {
+    return false;
+  }
+
+  std::string mount_url;
+  if (!args_->GetString(0, &mount_url))
+    return false;
+
+  UrlList mount_paths;
+  mount_paths.push_back(GURL(mount_url));
+
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      NewRunnableMethod(this,
+          &GetSizeStatsFunction::GetLocalPathsOnFileThread,
+          mount_paths, reinterpret_cast<void*>(NULL)));
+  return true;
+}
+
+void GetSizeStatsFunction::GetLocalPathsResponseOnUIThread(
+    const FilePathList& files, void* context) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (files.size() != 1) {
+    SendResponse(false);
+    return;
+  }
+
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      NewRunnableMethod(this,
+          &GetSizeStatsFunction::CallGetSizeStatsOnFileThread,
+          files[0].value().c_str()));
+}
+
+void GetSizeStatsFunction::CallGetSizeStatsOnFileThread(
+    const char* mount_path) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+
+  size_t total_size_kb = 0;
+  size_t remaining_size_kb = 0;
+#ifdef OS_CHROMEOS
+  chromeos::CrosLibrary::Get()->GetMountLibrary()->GetSizeStatsOnFileThread(
+      mount_path, &total_size_kb, &remaining_size_kb);
+#endif
+
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      NewRunnableMethod(this,
+          &GetSizeStatsFunction::GetSizeStatsCallbackOnUIThread,
+          mount_path, total_size_kb, remaining_size_kb));
+}
+
+void GetSizeStatsFunction::GetSizeStatsCallbackOnUIThread(
+    const char* mount_path, size_t total_size_kb, size_t remaining_size_kb) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  base::DictionaryValue* sizes = new base::DictionaryValue();
+  result_.reset(sizes);
+
+  sizes->SetInteger("totalSizeKB", total_size_kb);
+  sizes->SetInteger("remainingSizeKB", remaining_size_kb);
+
+  SendResponse(true);
+}
+
 FormatDeviceFunction::FormatDeviceFunction() {
 }
 
@@ -1343,7 +1462,8 @@ bool GetVolumeMetadataFunction::RunImpl() {
   chromeos::MountLibrary::DiskMap::const_iterator volume_it =
       mount_lib->disks().find(volume_device_path);
 
-  if (volume_it != mount_lib->disks().end()) {
+  if (volume_it != mount_lib->disks().end() &&
+      !volume_it->second->is_hidden()) {
     chromeos::MountLibrary::Disk* volume = volume_it->second;
     DictionaryValue* volume_info = new DictionaryValue();
     result_.reset(volume_info);
@@ -1409,6 +1529,7 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, REMOVABLE_DIRECTORY_LABEL);
   SET_STRING(IDS_FILE_BROWSER, NAME_COLUMN_LABEL);
   SET_STRING(IDS_FILE_BROWSER, SIZE_COLUMN_LABEL);
+  SET_STRING(IDS_FILE_BROWSER, TYPE_COLUMN_LABEL);
   SET_STRING(IDS_FILE_BROWSER, DATE_COLUMN_LABEL);
   SET_STRING(IDS_FILE_BROWSER, PREVIEW_COLUMN_LABEL);
 
@@ -1436,6 +1557,21 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, MOUNT_ARCHIVE);
   SET_STRING(IDS_FILE_BROWSER, UNMOUNT_ARCHIVE);
   SET_STRING(IDS_FILE_BROWSER, FORMAT_DEVICE);
+
+  SET_STRING(IDS_FILE_BROWSER, GALLERY);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_EDIT);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_SHARE);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_ENTER_WHEN_DONE);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_AUTOFIX);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_FIXED);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_CROP);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_EXPOSURE);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_BRIGHTNESS);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_CONTRAST);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_ROTATE_LEFT);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_ROTATE_RIGHT);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_UNDO);
+  SET_STRING(IDS_FILE_BROWSER, GALLERY_REDO);
 
   SET_STRING(IDS_FILE_BROWSER, CONFIRM_OVERWRITE_FILE);
   SET_STRING(IDS_FILE_BROWSER, FILE_ALREADY_EXISTS);
@@ -1526,6 +1662,17 @@ bool FileDialogStringsFunction::RunImpl() {
   SET_STRING(IDS_FILE_BROWSER, ID3_PUBLISHERS_OFFICIAL_WEBPAGE);  // WPUB
   SET_STRING(IDS_FILE_BROWSER, ID3_USER_DEFINED_URL_LINK_FRAME);  // WXXX
 
+  // File types
+  SET_STRING(IDS_FILE_BROWSER, FOLDER);
+  SET_STRING(IDS_FILE_BROWSER, DEVICE);
+  SET_STRING(IDS_FILE_BROWSER, IMAGE_FILE_TYPE);
+  SET_STRING(IDS_FILE_BROWSER, VIDEO_FILE_TYPE);
+  SET_STRING(IDS_FILE_BROWSER, AUDIO_FILE_TYPE);
+  SET_STRING(IDS_FILE_BROWSER, HTML_DOCUMENT_FILE_TYPE);
+  SET_STRING(IDS_FILE_BROWSER, ZIP_ARCHIVE_FILE_TYPE);
+  SET_STRING(IDS_FILE_BROWSER, PLAIN_TEXT_FILE_TYPE);
+  SET_STRING(IDS_FILE_BROWSER, PDF_DOCUMENT_FILE_TYPE);
+
   SET_STRING(IDS_FILEBROWSER, ENQUEUE);
 #undef SET_STRING
 
@@ -1534,8 +1681,10 @@ bool FileDialogStringsFunction::RunImpl() {
       l10n_util::GetStringUTF16(IDS_CERT_MANAGER_VIEW_CERT_BUTTON));
   dict->SetString("PLAY_MEDIA",
       l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_PLAY));
+#if defined(OS_CHROMEOS)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableArchives))
     dict->SetString("ENABLE_ARCHIVES", "true");
+#endif
 
   return true;
 }

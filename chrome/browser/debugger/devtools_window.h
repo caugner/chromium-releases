@@ -98,7 +98,7 @@ class DevToolsWindow
       const GURL& url,
       const GURL& referrer,
       WindowOpenDisposition disposition,
-      PageTransition::Type transition) OVERRIDE;
+      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
   virtual void AddNewContents(TabContents* source,
@@ -124,7 +124,6 @@ class DevToolsWindow
   virtual void RenderViewHostDestroyed() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  void OnForwardToAgent(const IPC::Message& message);
   void OnActivateWindow();
   void OnCloseWindow();
   void OnRequestDockWindow();

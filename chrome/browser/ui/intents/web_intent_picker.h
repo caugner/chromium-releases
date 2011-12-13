@@ -9,9 +9,10 @@
 #include <stddef.h>
 #include <vector>
 
+class Browser;
 class GURL;
 class SkBitmap;
-class TabContents;
+class TabContentsWrapper;
 class WebIntentPickerDelegate;
 
 // Base class for the web intent picker dialog.
@@ -19,8 +20,10 @@ class WebIntentPicker {
  public:
   class Delegate;
 
-  // Platform specific factory function.
-  static WebIntentPicker* Create(TabContents* tab_contents,
+  // Platform specific factory function. This function will automatically show
+  // the picker.
+  static WebIntentPicker* Create(Browser* browser,
+                                 TabContentsWrapper* wrapper,
                                  WebIntentPickerDelegate* delegate);
 
   // Initalizes this picker with the |urls|.
@@ -31,9 +34,6 @@ class WebIntentPicker {
 
   // Sets the icon for a service at |index| to be the default favicon.
   virtual void SetDefaultServiceIcon(size_t index) = 0;
-
-  // Shows the UI for this picker.
-  virtual void Show() = 0;
 
   // Hides the UI for this picker, and destroys its UI.
   virtual void Close() = 0;

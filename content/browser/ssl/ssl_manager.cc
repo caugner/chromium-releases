@@ -4,6 +4,7 @@
 
 #include "content/browser/ssl/ssl_manager.h"
 
+#include "base/bind.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/load_from_memory_cache_details.h"
@@ -24,10 +25,12 @@
 // static
 void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
                                        net::URLRequest* request,
-                                       int cert_error,
-                                       net::X509Certificate* cert) {
-  DVLOG(1) << "OnSSLCertificateError() cert_error: " << cert_error
-           << " url: " << request->url().spec();
+                                       const net::SSLInfo& ssl_info,
+                                       bool is_hsts_host) {
+  DVLOG(1) << "OnSSLCertificateError() cert_error: "
+           << net::MapCertStatusToNetError(ssl_info.cert_status)
+           << " url: " << request->url().spec()
+           << " cert_status: " << std::hex << ssl_info.cert_status;
 
   ResourceDispatcherHostRequestInfo* info =
       ResourceDispatcherHost::InfoForRequest(request);
@@ -36,12 +39,12 @@ void SSLManager::OnSSLCertificateError(ResourceDispatcherHost* rdh,
   // hand it over to the UI thread for processing.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(new SSLCertErrorHandler(rdh,
-                                                request,
-                                                info->resource_type(),
-                                                cert_error,
-                                                cert),
-                        &SSLCertErrorHandler::Dispatch));
+      base::Bind(&SSLCertErrorHandler::Dispatch,
+                 new SSLCertErrorHandler(rdh,
+                                         request,
+                                         info->resource_type(),
+                                         ssl_info,
+                                         is_hsts_host)));
 }
 
 // static
@@ -55,12 +58,12 @@ void SSLManager::NotifySSLInternalStateChanged(
 
 // static
 std::string SSLManager::SerializeSecurityInfo(int cert_id,
-                                              int cert_status,
+                                              net::CertStatus cert_status,
                                               int security_bits,
                                               int ssl_connection_status) {
   Pickle pickle;
   pickle.WriteInt(cert_id);
-  pickle.WriteInt(cert_status);
+  pickle.WriteUInt32(cert_status);
   pickle.WriteInt(security_bits);
   pickle.WriteInt(ssl_connection_status);
   return std::string(static_cast<const char*>(pickle.data()), pickle.size());
@@ -69,7 +72,7 @@ std::string SSLManager::SerializeSecurityInfo(int cert_id,
 // static
 bool SSLManager::DeserializeSecurityInfo(const std::string& state,
                                          int* cert_id,
-                                         int* cert_status,
+                                         net::CertStatus* cert_status,
                                          int* security_bits,
                                          int* ssl_connection_status) {
   DCHECK(cert_id && cert_status && security_bits && ssl_connection_status);
@@ -86,7 +89,7 @@ bool SSLManager::DeserializeSecurityInfo(const std::string& state,
   Pickle pickle(state.data(), static_cast<int>(state.size()));
   void * iter = NULL;
   return pickle.ReadInt(&iter, cert_id) &&
-         pickle.ReadInt(&iter, cert_status) &&
+         pickle.ReadUInt32(&iter, cert_status) &&
          pickle.ReadInt(&iter, security_bits) &&
          pickle.ReadInt(&iter, ssl_connection_status);
 }
@@ -124,8 +127,10 @@ void SSLManager::DidCommitProvisionalLoad(
   if (details->is_main_frame) {
     if (entry) {
       // Decode the security details.
-      int ssl_cert_id, ssl_cert_status, ssl_security_bits,
-          ssl_connection_status;
+      int ssl_cert_id;
+      net::CertStatus ssl_cert_status;
+      int ssl_security_bits;
+      int ssl_connection_status;
       DeserializeSecurityInfo(details->serialized_security_info,
                               &ssl_cert_id,
                               &ssl_cert_status,

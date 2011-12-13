@@ -20,6 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/user_metrics.h"
+#include "content/public/common/content_switches.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/gl/gl_switches.h"
@@ -43,6 +44,14 @@ const unsigned kOsAll = kOsMac | kOsWin | kOsLinux | kOsCrOS;
 const char kMediaPlayerExperimentName[] = "media-player";
 const char kAdvancedFileSystemExperimentName[] = "advanced-file-system";
 const char kVerticalTabsExperimentName[] = "vertical-tabs";
+
+const Experiment::Choice kPrerenderFromOmniboxChoices[] = {
+  { IDS_FLAGS_PRERENDER_FROM_OMNIBOX_AUTOMATIC, "", "" },
+  { IDS_FLAGS_PRERENDER_FROM_OMNIBOX_ENABLED, switches::kPrerenderFromOmnibox,
+    switches::kPrerenderFromOmniboxSwitchValueEnabled },
+  { IDS_FLAGS_PRERENDER_FROM_OMNIBOX_DISABLED, switches::kPrerenderFromOmnibox,
+    switches::kPrerenderFromOmniboxSwitchValueDisabled }
+};
 
 // RECORDING USER METRICS FOR FLAGS:
 // -----------------------------------------------------------------------------
@@ -87,13 +96,6 @@ const Experiment kExperiments[] = {
 #else
     SINGLE_VALUE_TYPE("")
 #endif
-  },
-  {
-    "vertical-tabs",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_SIDE_TABS_NAME,
-    IDS_FLAGS_SIDE_TABS_DESCRIPTION,
-    kOsWin | kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kEnableVerticalTabs)
   },
   {
     "conflicting-modules-check",  // FLAGS:RECORD_UMA
@@ -167,6 +169,13 @@ const Experiment kExperiments[] = {
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kDisableGpuVsync)
   },
+  {
+    "disable-webgl",
+    IDS_FLAGS_DISABLE_WEBGL_NAME,
+    IDS_FLAGS_DISABLE_WEBGL_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kDisableExperimentalWebGL)
+  },
   // Exposed on all platforms until there is a workaround for easy access to
   // the native print dialog for users that need it. Once that's done, revert
   // back to:
@@ -179,15 +188,6 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_PRINT_PREVIEW_DESCRIPTION,
     kOsAll,
     SINGLE_VALUE_TYPE(switches::kEnablePrintPreview)
-  },
-  {
-    "cloud-print",  // FLAGS:RECORD_UMA
-    IDS_FLAGS_CLOUD_PRINT_NAME,
-    IDS_FLAGS_CLOUD_PRINT_DESCRIPTION,
-    // Define this for all platforms except Chrome OS.
-    // It makes no sense to disable it on Chrome OS.
-    kOsMac | kOsWin | kOsLinux,
-    SINGLE_VALUE_TYPE(switches::kEnableCloudPrint)
   },
   // TODO(dspringer): When NaCl is on by default, remove this flag entry.
   {
@@ -268,20 +268,6 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kPpapiFlashInProcess)
   },
   {
-    "multi-profiles",
-    IDS_FLAGS_MULTI_PROFILES_NAME,
-    IDS_FLAGS_MULTI_PROFILES_DESCRIPTION,
-    kOsWin | kOsMac | kOsLinux,  // This switch is not available in CrOS.
-    SINGLE_VALUE_TYPE(switches::kMultiProfiles)
-  },
-  {
-    "restrict-instant-to-search",
-    IDS_FLAGS_RESTRICT_INSTANT_TO_SEARCH_NAME,
-    IDS_FLAGS_RESTRICT_INSTANT_TO_SEARCH_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kRestrictInstantToSearch)
-  },
-  {
     "preload-instant-search",
     IDS_FLAGS_PRELOAD_INSTANT_SEARCH_NAME,
     IDS_FLAGS_PRELOAD_INSTANT_SEARCH_DESCRIPTION,
@@ -308,18 +294,11 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE(switches::kShowAutofillTypePredictions)
   },
   {
-    "sync-oauth",
-    IDS_FLAGS_SYNC_OAUTH_NAME,
-    IDS_FLAGS_SYNC_OAUTH_DESCRIPTION,
+    "sync-tabs",
+    IDS_FLAGS_SYNC_TABS_NAME,
+    IDS_FLAGS_SYNC_TABS_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableSyncOAuth)
-  },
-  {
-    "sync-sessions",
-    IDS_FLAGS_SYNC_SESSIONS_NAME,
-    IDS_FLAGS_SYNC_SESSIONS_DESCRIPTION,
-    kOsAll,
-    SINGLE_VALUE_TYPE(switches::kEnableSyncSessions)
+    SINGLE_VALUE_TYPE(switches::kEnableSyncTabs)
   },
   {
     "sync-search-engines",
@@ -334,11 +313,7 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_SMOOTH_SCROLLING_DESCRIPTION,
     // Can't expose the switch unless the code is compiled in.
     // On by default for the Mac (different implementation in WebKit).
-#if defined(ENABLE_SMOOTH_SCROLLING)
     kOsWin | kOsLinux | kOsCrOS,
-#else
-    0,
-#endif
     SINGLE_VALUE_TYPE(switches::kEnableSmoothScrolling)
   },
   {
@@ -346,7 +321,7 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_PRERENDER_FROM_OMNIBOX_NAME,
     IDS_FLAGS_PRERENDER_FROM_OMNIBOX_DESCRIPTION,
     kOsAll,
-    SINGLE_VALUE_TYPE(switches::kPrerenderFromOmnibox)
+    MULTI_VALUE_TYPE(kPrerenderFromOmniboxChoices)
   },
   {
     "panels",
@@ -364,18 +339,18 @@ const Experiment kExperiments[] = {
   },
 #if defined(OS_CHROMEOS)
   {
-    "webui-login",
-    IDS_SYNC_SETUP_TITLE,
-    IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADVANCED_BUTTON,
-    kOsCrOS,
-    SINGLE_VALUE_TYPE(switches::kWebUILogin)
-  },
-  {
     "enable-archives",
     IDS_FILE_BROWSER_MOUNT_ARCHIVE,
     IDS_FILE_MANAGER,
     kOsCrOS,
     SINGLE_VALUE_TYPE(switches::kEnableArchives)
+  },
+  {
+    "enable-bluetooth",
+    IDS_FLAGS_ENABLE_BLUETOOTH_NAME,
+    IDS_FLAGS_ENABLE_BLUETOOTH_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE(switches::kEnableBluetooth)
   },
 #endif
   {
@@ -390,6 +365,15 @@ const Experiment kExperiments[] = {
     SINGLE_VALUE_TYPE("")
 #endif
   },
+#if defined(TOUCH_UI)
+  {
+    "touchui-views-desktop",
+    IDS_FLAGS_DISABLE_VIEWS_DESKTOP_NAME,
+    IDS_FLAGS_DISABLE_VIEWS_DESKTOP_DESCRIPTION,
+    kOsCrOS,
+    SINGLE_VALUE_TYPE_AND_VALUE(switches::kViewsDesktop, "disabled")
+  },
+#endif
   {
     "downloads-new-ui",  // FLAGS:RECORD_UMA
     IDS_FLAGS_DOWNLOADS_NEW_UI_NAME,
@@ -403,6 +387,27 @@ const Experiment kExperiments[] = {
     IDS_FLAGS_ENABLE_AUTOLOGIN_DESCRIPTION,
     kOsMac | kOsWin | kOsLinux,
     SINGLE_VALUE_TYPE(switches::kEnableAutologin)
+  },
+  {
+    "use-more-webui",
+    IDS_FLAGS_USE_MORE_WEBUI_NAME,
+    IDS_FLAGS_USE_MORE_WEBUI_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kUseMoreWebUI)
+  },
+  {
+    "enable-ntp-bookmark-features",
+    IDS_FLAGS_ENABLE_NTP_BOOKMARK_FEATURES_NAME,
+    IDS_FLAGS_ENABLE_NTP_BOOKMARK_FEATURES_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableNTPBookmarkFeatures)
+  },
+  {
+    "enable-video-track",
+    IDS_FLAGS_ENABLE_VIDEO_TRACK_NAME,
+    IDS_FLAGS_ENABLE_VIDEO_TRACK_DESCRIPTION,
+    kOsAll,
+    SINGLE_VALUE_TYPE(switches::kEnableVideoTrack)
   },
 };
 

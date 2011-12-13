@@ -199,9 +199,9 @@
                   <li><a href="background_pages.html">Background Pages</a></li>
                   <li><a href="content_scripts.html">Content Scripts</a></li>
                   <li><a href="xhr.html">Cross-Origin XHR</a></li>
-                  <li><a href="idle.html">Idle</a></li>
                   <li><a href="i18n.html">Internationalization</a></li>
                   <li><a href="messaging.html">Message Passing</a></li>
+                  <li><a href="permissions.html">Optional Permissions</a></li>
                   <li><a href="npapi.html">NPAPI Plugins</a></li>
                 </ul>
               </li>
@@ -288,6 +288,8 @@
                     <ol>
                       <li>
                         <a href="#method-create">create</a>
+                      </li><li>
+                        <a href="#method-setOpenResourceHandler">setOpenResourceHandler</a>
                       </li>
                     </ol>
                   </li>
@@ -329,7 +331,7 @@
 <p id="classSummary">
 Use the <code>chrome.experimental.devtools.panels</code> module to integrate
 your extension into Developer Tools window UI: create your own panels, access
-existing panels and add sidebars.
+existing panels, and add sidebars.
 </p><p>
 See <a href="experimental.devtools.html">DevTools APIs summary</a> for
 general introduction to using Developer Tools APIs.
@@ -345,8 +347,15 @@ modules in <code>chrome.experimental.devtools</code> API, as well as to
 available to the pages within Developer Tools window, but you may invoke them
 by sending a request to the background page of your extension, similarly to how
 it's done in the <a href="overview.html#contentScripts">content scripts</a>.
+</p><p>
+You can use the <code><a href="#method-setOpenResourceHandler">setOpenResourceHandler()</a></code> method to install a
+callback function that handles user requests to open a resource (typically,
+a click on a resource link in the Developer Tools window). At most one of the
+installed handlers gets called; users can specify (using the Developer Tools
+Settings dialog) either the default behavior or an extension to handle resource
+open requests. If an extension calls <code>setOpenResourceHandler()</code>
+multiple times, only the last handler is retained.
 </p>
-
 <h2 id="overview-examples">Examples</h2>
 <p>The following code adds a panel contained in <code>Panel.html</code>,
 represented by <code>FontPicker.png</code> on the Developer Tools toolbar
@@ -825,6 +834,200 @@ You can find examples that use this API in
             Undocumented.
           </dd>
           <dd>An ExtensionPanel object representing the created panel.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                    </div>
+                  </dl>
+                  </div>
+                </div>
+
+                <!-- MIN_VERSION -->
+                <p style="display: none; ">
+                  This function was added in version <b><span></span></b>.
+                  If you require this function, the manifest key
+                  <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+                  can ensure that your extension won't be run in an earlier browser version.
+                </p>
+              </div> <!-- /description -->
+
+            </div><div class="apiItem">
+              <a name="method-setOpenResourceHandler"></a> <!-- method-anchor -->
+              <h4>setOpenResourceHandler</h4>
+
+              <div class="summary"><span style="display: none; ">void</span>
+                  <!-- Note: intentionally longer 80 columns -->
+                  <span>chrome.experimental.devtools.panels.setOpenResourceHandler</span>(<span class="optional"><span style="display: none; ">, </span><span>function</span>
+                      <var><span>callback</span></var></span>)</div>
+
+              <div class="description">
+                <p class="todo" style="display: none; ">Undocumented.</p>
+                <p>Specifies the function to be called when the user clicks a resource link in the Developer Tools window. To unset the handler, either call the method with no parameters or pass null as the parameter.</p>
+
+                <!-- PARAMETERS -->
+                <h4>Parameters</h4>
+                <dl>
+                  <div>
+                    <div>
+          <dt>
+            <var>callback</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>function</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>A function that is called when the user clicks on a valid resource link in Developer Tools window. Note that if the user clicks an invalid URL or an XHR, this function is not called.</dd>
+          <dd style="display: none; ">
+            This parameter was added in version
+            <b><span></span></b>.
+            You must omit this parameter in earlier versions,
+            and you may omit it in any version.  If you require this
+            parameter, the manifest key
+            <a href="manifest.html#minimum_chrome_version">minimum_chrome_version</a>
+            can ensure that your extension won't be run in an earlier browser version.
+          </dd>
+
+          <!-- OBJECT PROPERTIES -->
+          <dd style="display: none; ">
+            <dl>
+              <div>
+                <div>
+                </div>
+              </div>
+            </dl>
+          </dd>
+
+          <!-- OBJECT METHODS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- OBJECT EVENT FIELDS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+          <!-- FUNCTION PARAMETERS -->
+          <dd style="display: none; ">
+            <div></div>
+          </dd>
+
+        </div>
+                  </div>
+                </dl>
+
+                <!-- RETURNS -->
+                <h4 style="display: none; ">Returns</h4>
+                <dl>
+                  <div style="display: none; ">
+                    <div>
+                    </div>
+                  </div>
+                </dl>
+
+                <!-- CALLBACK -->
+                <div>
+                  <div>
+                  <h4>Callback function</h4>
+                  <p style="display: none; ">
+                    The callback <em>parameter</em> should specify a function
+                    that looks like this:
+                  </p>
+                  <p>
+                    If you specify the <em>callback</em> parameter, it should
+                    specify a function that looks like this:
+                  </p>
+
+                  <!-- Note: intentionally longer 80 columns -->
+                  <pre>function(<span>object Resource</span>) <span class="subdued">{...}</span>;</pre>
+                  <dl>
+                    <div>
+                      <div>
+          <dt>
+            <var>Resource</var>
+              <em>
+
+                <!-- TYPE -->
+                <div style="display:inline">
+                  (
+                    <span class="optional" style="display: none; ">optional</span>
+                    <span class="enum" style="display: none; ">enumerated</span>
+                    <span id="typeTemplate">
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>object</span>
+                        <span style="display: none; "></span>
+                      </span>
+                    </span>
+                  )
+                </div>
+
+              </em>
+          </dt>
+          <dd class="todo" style="display: none; ">
+            Undocumented.
+          </dd>
+          <dd>A <a href="experimental.devtools.inspectedWindow.html#type-Resource">Resource</a> object for the resource that was clicked.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -2087,22 +2290,22 @@ You can find examples that use this API in
                 <div style="display: none; ">
                   <div>
                   <h4>Callback function</h4>
-                  <p>
+                  <p style="display: none; ">
                     The callback <em>parameter</em> should specify a function
                     that looks like this:
                   </p>
-                  <p style="display: none; ">
+                  <p>
                     If you specify the <em>callback</em> parameter, it should
                     specify a function that looks like this:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>ExtensionPanel panel</span>) <span class="subdued">{...}</span>;</pre>
+                  <pre>function(<span>object Resource</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
           <dt>
-            <var>panel</var>
+            <var>Resource</var>
               <em>
 
                 <!-- TYPE -->
@@ -2111,15 +2314,15 @@ You can find examples that use this API in
                     <span class="optional" style="display: none; ">optional</span>
                     <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
-                      <span>
-                        <a href="experimental.devtools.panels.html#type-ExtensionPanel">ExtensionPanel</a>
-                      </span>
                       <span style="display: none; ">
-                        <span>
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
                           array of <span><span></span></span>
                         </span>
-                        <span>paramType</span>
-                        <span></span>
+                        <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -2130,7 +2333,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>An ExtensionPanel object representing the created panel.</dd>
+          <dd>A <a href="experimental.devtools.inspectedWindow.html#type-Resource">Resource</a> object for the resource that was clicked.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -2188,7 +2391,7 @@ You can find examples that use this API in
               <div class="summary"><span style="display: none; ">void</span>
                   <!-- Note: intentionally longer 80 columns -->
                   <span>extensionSidebarPane.setObject</span>(<span class="null"><span style="display: none; ">, </span><span>string</span>
-                      <var><span>jsonObject</span></var></span><span class="optional"><span>, </span><span>string</span>
+                      <var><span>jsonObject</span></var></span><span class="optional"><span style="">, </span><span>string</span>
                       <var><span>rootTitle</span></var></span>)</div>
 
               <div class="description">
@@ -2275,7 +2478,7 @@ You can find examples that use this API in
                 <!-- TYPE -->
                 <div style="display:inline">
                   (
-                    <span class="optional" style="">optional</span>
+                    <span class="optional">optional</span>
                     <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
                       <span style="display: none; ">
@@ -2350,22 +2553,22 @@ You can find examples that use this API in
                 <div style="display: none; ">
                   <div>
                   <h4>Callback function</h4>
-                  <p>
+                  <p style="display: none; ">
                     The callback <em>parameter</em> should specify a function
                     that looks like this:
                   </p>
-                  <p style="display: none; ">
+                  <p>
                     If you specify the <em>callback</em> parameter, it should
                     specify a function that looks like this:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>ExtensionPanel panel</span>) <span class="subdued">{...}</span>;</pre>
+                  <pre>function(<span>object Resource</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
           <dt>
-            <var>panel</var>
+            <var>Resource</var>
               <em>
 
                 <!-- TYPE -->
@@ -2374,15 +2577,15 @@ You can find examples that use this API in
                     <span class="optional" style="display: none; ">optional</span>
                     <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
-                      <span>
-                        <a href="experimental.devtools.panels.html#type-ExtensionPanel">ExtensionPanel</a>
-                      </span>
                       <span style="display: none; ">
-                        <span>
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
                           array of <span><span></span></span>
                         </span>
-                        <span>paramType</span>
-                        <span></span>
+                        <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -2393,7 +2596,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>An ExtensionPanel object representing the created panel.</dd>
+          <dd>A <a href="experimental.devtools.inspectedWindow.html#type-Resource">Resource</a> object for the resource that was clicked.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.
@@ -2544,22 +2747,22 @@ You can find examples that use this API in
                 <div style="display: none; ">
                   <div>
                   <h4>Callback function</h4>
-                  <p>
+                  <p style="display: none; ">
                     The callback <em>parameter</em> should specify a function
                     that looks like this:
                   </p>
-                  <p style="display: none; ">
+                  <p>
                     If you specify the <em>callback</em> parameter, it should
                     specify a function that looks like this:
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>ExtensionPanel panel</span>) <span class="subdued">{...}</span>;</pre>
+                  <pre>function(<span>object Resource</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
           <dt>
-            <var>panel</var>
+            <var>Resource</var>
               <em>
 
                 <!-- TYPE -->
@@ -2568,15 +2771,15 @@ You can find examples that use this API in
                     <span class="optional" style="display: none; ">optional</span>
                     <span class="enum" style="display: none; ">enumerated</span>
                     <span id="typeTemplate">
-                      <span>
-                        <a href="experimental.devtools.panels.html#type-ExtensionPanel">ExtensionPanel</a>
-                      </span>
                       <span style="display: none; ">
-                        <span>
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
                           array of <span><span></span></span>
                         </span>
-                        <span>paramType</span>
-                        <span></span>
+                        <span>object</span>
+                        <span style="display: none; "></span>
                       </span>
                     </span>
                   )
@@ -2587,7 +2790,7 @@ You can find examples that use this API in
           <dd class="todo" style="display: none; ">
             Undocumented.
           </dd>
-          <dd>An ExtensionPanel object representing the created panel.</dd>
+          <dd>A <a href="experimental.devtools.inspectedWindow.html#type-Resource">Resource</a> object for the resource that was clicked.</dd>
           <dd style="display: none; ">
             This parameter was added in version
             <b><span></span></b>.

@@ -4,25 +4,32 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/hash_tables.h"
+#include "base/logging.h"
 #include "base/stringprintf.h"
 #include "base/task.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_shutdown.h"
-#include "chrome/browser/io_thread.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros/power_library.h"
+#include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/chromeos/user_cros_settings_provider.h"
+#include "chrome/browser/io_thread.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/common/notification_observer.h"
+#include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "net/base/dnsrr_resolver.h"
@@ -52,6 +59,9 @@ const char kKeyOauthTokenStatus[] = "oauthTokenStatus";
 // Max number of users to show.
 const int kMaxUsers = 5;
 
+const char kReasonNetworkChanged[] = "network changed";
+const char kReasonProxyChanged[] = "proxy changed";
+
 // Sanitize emails. Currently, it only ensures all emails have a domain.
 std::string SanitizeEmail(const std::string& email) {
   std::string sanitized(email);
@@ -63,15 +73,26 @@ std::string SanitizeEmail(const std::string& email) {
   return sanitized;
 }
 
+// The Task posted to PostTaskAndReply in StartClearingDnsCache on the IO
+// thread.
+void ClearDnsCache(IOThread* io_thread) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  if (browser_shutdown::IsTryingToQuit())
+    return;
+
+  io_thread->globals()->dnsrr_resolver.get()->OnIPAddressChanged();
+}
+
 }  // namespace
 
 namespace chromeos {
 
-// Class which observes network state changes and calls registerd callbacks.
+// Class which observes network state changes and calls registered callbacks.
 // State is considered changed if connection or the active network has been
 // changed. Also, it answers to the requests about current network state.
 class NetworkStateInformer
-    : public chromeos::NetworkLibrary::NetworkManagerObserver {
+    : public chromeos::NetworkLibrary::NetworkManagerObserver,
+      public NotificationObserver {
  public:
   explicit NetworkStateInformer(WebUI* web_ui);
   virtual ~NetworkStateInformer();
@@ -82,45 +103,29 @@ class NetworkStateInformer
   // Removes observer's callback.
   void RemoveObserver(const std::string& callback);
 
-  // Sends current network state using the callback.
-  void SendState(const std::string& callback);
+  // Sends current network state, network name and reason using the callback.
+  void SendState(const std::string& callback, const std::string& reason);
 
   // NetworkLibrary::NetworkManagerObserver implementation:
   virtual void OnNetworkManagerChanged(chromeos::NetworkLibrary* cros) OVERRIDE;
 
+  // NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details) OVERRIDE;
  private:
   enum State {OFFLINE, ONLINE, CAPTIVE_PORTAL};
 
   bool UpdateState(chromeos::NetworkLibrary* cros);
 
+  void SendStateToObservers(const std::string& reason);
+
+  NotificationRegistrar registrar_;
   base::hash_set<std::string> observers_;
   std::string active_network_;
+  std::string network_name_;
   State state_;
   WebUI* web_ui_;
-};
-
-// Clears DNS cache on IO thread.
-class ClearDnsCacheTaskOnIOThread : public Task {
- public:
-  ClearDnsCacheTaskOnIOThread(Task* callback, IOThread* io_thread)
-      : callback_(callback), io_thread_(io_thread) {
-  }
-  virtual ~ClearDnsCacheTaskOnIOThread() {}
-
-  // Task overrides.
-  virtual void Run() OVERRIDE {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    if (browser_shutdown::IsTryingToQuit())
-     return;
-
-    io_thread_->globals()->dnsrr_resolver.get()->OnIPAddressChanged();
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, callback_);
-  }
-
- private:
-  Task* callback_;
-  IOThread* io_thread_;
-  DISALLOW_COPY_AND_ASSIGN(ClearDnsCacheTaskOnIOThread);
 };
 
 // NetworkStateInformer implementation -----------------------------------------
@@ -129,6 +134,9 @@ NetworkStateInformer::NetworkStateInformer(WebUI* web_ui) : web_ui_(web_ui) {
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   UpdateState(cros);
   cros->AddNetworkManagerObserver(this);
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_LOGIN_PROXY_CHANGED,
+                 NotificationService::AllSources());
 }
 
 NetworkStateInformer::~NetworkStateInformer() {
@@ -144,18 +152,26 @@ void NetworkStateInformer::RemoveObserver(const std::string& callback) {
   observers_.erase(callback);
 }
 
-void NetworkStateInformer::SendState(const std::string& callback) {
+void NetworkStateInformer::SendState(const std::string& callback,
+                                     const std::string& reason) {
   base::FundamentalValue state_value(state_);
-  web_ui_->CallJavascriptFunction(callback, state_value);
+  base::StringValue network_value(network_name_);
+  base::StringValue reason_value(reason);
+  web_ui_->CallJavascriptFunction(callback, state_value,
+                                  network_value, reason_value);
 }
 
 void NetworkStateInformer::OnNetworkManagerChanged(NetworkLibrary* cros) {
   if (UpdateState(cros)) {
-    for (base::hash_set<std::string>::iterator it = observers_.begin();
-         it != observers_.end(); ++it) {
-      SendState(*it);
-    }
+    SendStateToObservers(kReasonNetworkChanged);
   }
+}
+
+void NetworkStateInformer::Observe(int type,
+                                   const NotificationSource& source,
+                                   const NotificationDetails& details) {
+  DCHECK(type == chrome::NOTIFICATION_LOGIN_PROXY_CHANGED);
+  SendStateToObservers(kReasonProxyChanged);
 }
 
 bool NetworkStateInformer::UpdateState(NetworkLibrary* cros) {
@@ -163,13 +179,22 @@ bool NetworkStateInformer::UpdateState(NetworkLibrary* cros) {
   std::string new_active_network;
   if (!cros->Connected()) {
     new_state = OFFLINE;
+    network_name_.clear();
   } else {
     const Network* active_network = cros->active_network();
-    new_active_network = active_network->unique_id();
-    if (active_network && active_network->restricted_pool()) {
-      new_state = CAPTIVE_PORTAL;
+    if (active_network) {
+      new_active_network = active_network->unique_id();
+      network_name_ = active_network->name();
+      if (active_network->restricted_pool()) {
+        new_state = CAPTIVE_PORTAL;
+      } else {
+        new_state = ONLINE;
+      }
     } else {
-      new_state = ONLINE;
+      // Bogus network situation:
+      // Connected() returns true but no active network.
+      new_state = OFFLINE;
+      NOTREACHED();
     }
   }
   bool updated = (new_state != state_) ||
@@ -177,6 +202,13 @@ bool NetworkStateInformer::UpdateState(NetworkLibrary* cros) {
   state_ = new_state;
   active_network_ = new_active_network;
   return updated;
+}
+
+void NetworkStateInformer::SendStateToObservers(const std::string& reason) {
+  for (base::hash_set<std::string>::iterator it = observers_.begin();
+       it != observers_.end(); ++it) {
+    SendState(*it, reason);
+  }
 }
 
 // SigninScreenHandler implementation ------------------------------------------
@@ -192,45 +224,54 @@ SigninScreenHandler::SigninScreenHandler()
           CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kWebUILogin)),
       cookie_remover_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      key_event_listener_(NULL) {
   delegate_->SetWebUIHandler(this);
 }
 
 SigninScreenHandler::~SigninScreenHandler() {
-  method_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
   if (cookie_remover_)
     cookie_remover_->RemoveObserver(this);
+  if (key_event_listener_)
+    key_event_listener_->RemoveCapsLockObserver(this);
 }
 
 void SigninScreenHandler::GetLocalizedStrings(
     DictionaryValue* localized_strings) {
   localized_strings->SetString("signinScreenTitle",
       l10n_util::GetStringUTF16(IDS_SIGNIN_SCREEN_TITLE));
-  localized_strings->SetString("emailHint",
-      l10n_util::GetStringUTF16(IDS_LOGIN_USERNAME));
   localized_strings->SetString("passwordHint",
-      l10n_util::GetStringUTF16(IDS_LOGIN_PASSWORD));
+      l10n_util::GetStringUTF16(IDS_LOGIN_POD_EMPTY_PASSWORD_TEXT));
+  localized_strings->SetString("passwordFieldAccessibleName",
+      l10n_util::GetStringUTF16(IDS_LOGIN_POD_PASSWORD_FIELD_ACCESSIBLE_NAME));
   localized_strings->SetString("signinButton",
       l10n_util::GetStringUTF16(IDS_LOGIN_BUTTON));
   localized_strings->SetString("enterGuestButton",
       l10n_util::GetStringUTF16(IDS_ENTER_GUEST_SESSION_BUTTON));
+  localized_strings->SetString("enterGuestButtonAccessibleName",
+      l10n_util::GetStringUTF16(
+          IDS_ENTER_GUEST_SESSION_BUTTON_ACCESSIBLE_NAME));
   localized_strings->SetString("shutDown",
       l10n_util::GetStringUTF16(IDS_SHUTDOWN_BUTTON));
   localized_strings->SetString("addUser",
       l10n_util::GetStringUTF16(IDS_ADD_USER_BUTTON));
   localized_strings->SetString("cancel",
       l10n_util::GetStringUTF16(IDS_CANCEL));
-  localized_strings->SetString("addUserOfflineMessage",
+  localized_strings->SetString("addUserErrorMessage",
       l10n_util::GetStringUTF16(IDS_LOGIN_ERROR_ADD_USER_OFFLINE));
   localized_strings->SetString("offlineMessageTitle",
       l10n_util::GetStringUTF16(IDS_LOGIN_OFFLINE_TITLE));
-  // TODO(altimofeev): we don't want to change IDS, so we use the closest one.
   localized_strings->SetString("offlineMessageBody",
-      l10n_util::GetStringUTF16(IDS_IMAGEBURN_NO_CONNECTION_WARNING));
+      l10n_util::GetStringUTF16(IDS_LOGIN_OFFLINE_MESSAGE));
+  localized_strings->SetString("captivePortalTitle",
+      l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL_TITLE));
   localized_strings->SetString("captivePortalMessage",
-        l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL));
-  localized_strings->SetString("captivePortalStartGuestSession",
-      l10n_util::GetStringUTF16(IDS_LOGIN_FIX_CAPTIVE_PORTAL));
+      l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL));
+  localized_strings->SetString("captivePortalNetworkSelect",
+      l10n_util::GetStringUTF16(IDS_LOGIN_MAYBE_CAPTIVE_PORTAL_NETWORK_SELECT));
+  localized_strings->SetString("proxyMessageText",
+      l10n_util::GetStringUTF16(IDS_LOGIN_PROXY_ERROR_MESSAGE));
   localized_strings->SetString("createAccount",
       l10n_util::GetStringUTF16(IDS_CREATE_ACCOUNT_HTML));
   localized_strings->SetString("guestSignin",
@@ -259,6 +300,9 @@ void SigninScreenHandler::Show(bool oobe_ui) {
     // figure out how to make it fast enough.
     SendUserList(false);
 
+    // Reset Caps Lock state when login screen is shown.
+    input_method::XKeyboard::SetCapsLockEnabled(false);
+
     ShowScreen(kAccountPickerScreen, NULL);
   }
 }
@@ -266,6 +310,11 @@ void SigninScreenHandler::Show(bool oobe_ui) {
 // SigninScreenHandler, private: -----------------------------------------------
 
 void SigninScreenHandler::Initialize() {
+  // Register for Caps Lock state change notifications;
+  key_event_listener_ = SystemKeyEventListener::GetInstance();
+  if (key_event_listener_)
+    key_event_listener_->AddCapsLockObserver(this);
+
   if (show_on_init_) {
     show_on_init_ = false;
     Show(oobe_ui_);
@@ -276,37 +325,50 @@ void SigninScreenHandler::RegisterMessages() {
   network_state_informer_.reset(new NetworkStateInformer(web_ui_));
 
   web_ui_->RegisterMessageCallback("authenticateUser",
-      NewCallback(this, &SigninScreenHandler::HandleAuthenticateUser));
+      base::Bind(&SigninScreenHandler::HandleAuthenticateUser,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("completeLogin",
-      NewCallback(this, &SigninScreenHandler::HandleCompleteLogin));
+      base::Bind(&SigninScreenHandler::HandleCompleteLogin,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getUsers",
-      NewCallback(this, &SigninScreenHandler::HandleGetUsers));
+      base::Bind(&SigninScreenHandler::HandleGetUsers,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("launchIncognito",
-      NewCallback(this, &SigninScreenHandler::HandleLaunchIncognito));
+      base::Bind(&SigninScreenHandler::HandleLaunchIncognito,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("fixCaptivePortal",
-      NewCallback(this, &SigninScreenHandler::HandleFixCaptivePortal));
+      base::Bind(&SigninScreenHandler::HandleFixCaptivePortal,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("showAddUser",
-      NewCallback(this, &SigninScreenHandler::HandleShowAddUser));
+      base::Bind(&SigninScreenHandler::HandleShowAddUser,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("shutdownSystem",
-      NewCallback(this, &SigninScreenHandler::HandleShutdownSystem));
+      base::Bind(&SigninScreenHandler::HandleShutdownSystem,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("removeUser",
-      NewCallback(this, &SigninScreenHandler::HandleRemoveUser));
+      base::Bind(&SigninScreenHandler::HandleRemoveUser,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("toggleEnrollmentScreen",
-      NewCallback(this, &SigninScreenHandler::HandleToggleEnrollmentScreen));
+      base::Bind(&SigninScreenHandler::HandleToggleEnrollmentScreen,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("launchHelpApp",
-      NewCallback(this, &SigninScreenHandler::HandleLaunchHelpApp));
+      base::Bind(&SigninScreenHandler::HandleLaunchHelpApp,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("createAccount",
-      NewCallback(this, &SigninScreenHandler::HandleCreateAccount));
+      base::Bind(&SigninScreenHandler::HandleCreateAccount,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("loginWebuiReady",
-      NewCallback(this, &SigninScreenHandler::HandleLoginWebuiReady));
+      base::Bind(&SigninScreenHandler::HandleLoginWebuiReady,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("loginRequestNetworkState",
-      NewCallback(this, &SigninScreenHandler::HandleLoginRequestNetworkState));
+      base::Bind(&SigninScreenHandler::HandleLoginRequestNetworkState,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("loginAddNetworkStateObserver",
-      NewCallback(this,
-                  &SigninScreenHandler::HandleLoginAddNetworkStateObserver));
+      base::Bind(&SigninScreenHandler::HandleLoginAddNetworkStateObserver,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("loginRemoveNetworkStateObserver",
-      NewCallback(this,
-                  &SigninScreenHandler::HandleLoginRemoveNetworkStateObserver));
+      base::Bind(&SigninScreenHandler::HandleLoginRemoveNetworkStateObserver,
+                 base::Unretained(this)));
 }
 
 void SigninScreenHandler::HandleGetUsers(const base::ListValue* args) {
@@ -348,6 +410,14 @@ void SigninScreenHandler::OnBrowsingDataRemoverDone() {
   ShowSigninScreenIfReady();
 }
 
+void SigninScreenHandler::OnCapsLockChange(bool enabled) {
+  if (page_is_ready()) {
+    base::FundamentalValue capsLockState(enabled);
+    web_ui_->CallJavascriptFunction(
+        "login.AccountPickerScreen.setCapsLockState", capsLockState);
+  }
+}
+
 void SigninScreenHandler::OnDnsCleared() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   dns_clear_task_running_ = false;
@@ -373,6 +443,7 @@ void SigninScreenHandler::ShowSigninScreenIfReady() {
       UserCrosSettingsProvider::cached_allow_new_user());
   params.SetBoolean("guestSignin",
       UserCrosSettingsProvider::cached_allow_guest());
+  params.SetString("gaiaOrigin", GaiaUrls::GetInstance()->gaia_origin_url());
 
   // Test automation data:
   const CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -560,11 +631,12 @@ void SigninScreenHandler::HandleLoginWebuiReady(const base::ListValue* args) {
 void SigninScreenHandler::HandleLoginRequestNetworkState(
     const base::ListValue* args) {
   std::string callback;
-  if (!args->GetString(0, &callback)) {
+  std::string reason;
+  if (!args->GetString(0, &callback) || !args->GetString(1, &reason)) {
     NOTREACHED();
     return;
   }
-  network_state_informer_->SendState(callback);
+  network_state_informer_->SendState(callback, reason);
 }
 
 void SigninScreenHandler::HandleLoginAddNetworkStateObserver(
@@ -596,10 +668,11 @@ void SigninScreenHandler::StartClearingDnsCache() {
     return;
 
   dns_cleared_ = false;
-  ClearDnsCacheTaskOnIOThread* clear_dns_task = new ClearDnsCacheTaskOnIOThread(
-      method_factory_.NewRunnableMethod(&SigninScreenHandler::OnDnsCleared),
-      g_browser_process->io_thread());
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE, clear_dns_task);
+  BrowserThread::PostTaskAndReply(
+      BrowserThread::IO, FROM_HERE,
+      base::Bind(&ClearDnsCache, g_browser_process->io_thread()),
+      base::Bind(&SigninScreenHandler::OnDnsCleared,
+                 weak_factory_.GetWeakPtr()));
   dns_clear_task_running_ = true;
 }
 

@@ -8,7 +8,6 @@
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
-#include "chrome/browser/extensions/extensions_ui.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -25,6 +24,7 @@
 #include "chrome/browser/ui/webui/history2_ui.h"
 #include "chrome/browser/ui/webui/history_ui.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "chrome/browser/ui/webui/hung_renderer_dialog_ui.h"
 #include "chrome/browser/ui/webui/media/media_internals_ui.h"
 #include "chrome/browser/ui/webui/net_internals_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -36,7 +36,6 @@
 #include "chrome/browser/ui/webui/sessions_ui.h"
 #include "chrome/browser/ui/webui/sync_internals_ui.h"
 #include "chrome/browser/ui/webui/test_chrome_web_ui_factory.h"
-#include "chrome/browser/ui/webui/textfields_ui.h"
 #include "chrome/browser/ui/webui/tracing_ui.h"
 #include "chrome/browser/ui/webui/workers_ui.h"
 #include "chrome/common/chrome_switches.h"
@@ -58,9 +57,11 @@
 #include "chrome/browser/ui/webui/chromeos/sim_unlock_ui.h"
 #include "chrome/browser/ui/webui/chromeos/system_info_ui.h"
 #include "chrome/browser/ui/webui/active_downloads_ui.h"
+#else
+#include "chrome/browser/ui/webui/sync_promo_ui.h"
 #endif
 
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
 #include "chrome/browser/ui/webui/keyboard_ui.h"
 #endif
 
@@ -68,12 +69,8 @@
 #include "chrome/browser/ui/webui/conflicts_ui.h"
 #endif
 
-#if defined(WEBUI_DIALOGS) && defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "chrome/browser/ui/webui/certificate_viewer_ui.h"
-#endif
-
-#if defined(WEBUI_DIALOGS)
-#include "chrome/browser/ui/webui/hung_renderer_dialog_ui.h"
 #endif
 
 namespace {
@@ -150,15 +147,13 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<BookmarksUI>;
   if (url.host() == chrome::kChromeUIBugReportHost)
     return &NewWebUI<BugReportUI>;
-#if defined(WEBUI_DIALOGS) && defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
   if (url.host() == chrome::kChromeUICertificateViewerHost)
     return &NewWebUI<CertificateViewerUI>;
 #endif
-#if defined(WEBUI_DIALOGS)
   if (url.host() == chrome::kChromeUIHungRendererDialogHost) {
     return &NewWebUI<HungRendererDialogUI>;
   }
-#endif
   if (url.host() == chrome::kChromeUICrashesHost)
     return &NewWebUI<CrashesUI>;
   if (url.host() == chrome::kChromeUIDevToolsHost)
@@ -171,10 +166,6 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<DownloadsUI>;
   if (url.host() == chrome::kChromeUITaskManagerHost)
     return &NewWebUI<TaskManagerUI>;
-  if (url.host() == chrome::kChromeUITextfieldsHost)
-    return &NewWebUI<TextfieldsUI>;
-  if (url.host() == chrome::kChromeUIExtensionsHost)
-    return &NewWebUI<ExtensionsUI>;
   if (url.host() == chrome::kChromeUIHistoryHost)
     return &NewWebUI<HistoryUI>;
   if (url.host() == chrome::kChromeUIHistory2Host)
@@ -183,7 +174,7 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<FlagsUI>;
   if (url.host() == chrome::kChromeUIFlashHost)
     return &NewWebUI<FlashUI>;
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
   if (url.host() == chrome::kChromeUIKeyboardHost)
     return &NewWebUI<KeyboardUI>;
 #endif
@@ -215,10 +206,6 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
 #if defined(OS_CHROMEOS)
   if (url.host() == chrome::kChromeUIChooseMobileNetworkHost)
     return &NewWebUI<chromeos::ChooseMobileNetworkUI>;
-  if (url.host() == chrome::kChromeUICollectedCookiesHost ||
-      url.host() == chrome::kChromeUIHttpAuthHost) {
-    return &NewWebUI<ConstrainedHtmlUI>;
-  }
   if (url.host() == chrome::kChromeUIActiveDownloadsHost)
     return &NewWebUI<ActiveDownloadsUI>;
   if (url.host() == chrome::kChromeUIImageBurnerHost)
@@ -241,6 +228,14 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
     return &NewWebUI<chromeos::EnterpriseEnrollmentUI>;
 #endif  // defined(OS_CHROMEOS)
 
+#if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
+  if (url.host() == chrome::kChromeUICollectedCookiesHost ||
+      url.host() == chrome::kChromeUIHttpAuthHost ||
+      url.host() == chrome::kChromeUIRepostFormWarningHost) {
+    return &NewWebUI<ConstrainedHtmlUI>;
+  }
+#endif
+
   if (url.host() == chrome::kChromeUIPrintHost &&
       switches::IsPrintPreviewEnabled()) {
     return &NewWebUI<PrintPreviewUI>;
@@ -249,6 +244,19 @@ static WebUIFactoryFunction GetWebUIFactoryFunction(Profile* profile,
   if (url.spec() == chrome::kChromeUIConstrainedHTMLTestURL)
     return &NewWebUI<ConstrainedHtmlUI>;
 
+#if !defined(OS_CHROMEOS)
+  if (url.host() == chrome::kChromeUISyncPromoHost) {
+    // If the sync promo page is enabled then use the sync promo WebUI otherwise
+    // use the NTP WebUI. We don't want to return NULL if the sync promo page
+    // is disabled because the page can be disabled mid-flight (for example,
+    // if sync login finishes).
+    if (SyncPromoUI::ShouldShowSyncPromo(profile))
+      return &NewWebUI<SyncPromoUI>;
+    else
+      return &NewWebUI<NewTabUI>;
+  }
+#endif
+  DLOG(WARNING) << "Unknown WebUI:" << url;
   return NULL;
 }
 
@@ -283,8 +291,7 @@ bool ChromeWebUIFactory::UseWebUIForURL(
 bool ChromeWebUIFactory::HasWebUIScheme(const GURL& url) const {
   return url.SchemeIs(chrome::kChromeDevToolsScheme) ||
          url.SchemeIs(chrome::kChromeInternalScheme) ||
-         url.SchemeIs(chrome::kChromeUIScheme) ||
-         url.SchemeIs(chrome::kExtensionScheme);
+         url.SchemeIs(chrome::kChromeUIScheme);
 }
 
 bool ChromeWebUIFactory::IsURLAcceptableForWebUI(
@@ -330,9 +337,7 @@ void ChromeWebUIFactory::GetFaviconForURL(
     favicon.known_icon = favicon.image_data.get() != NULL &&
                              favicon.image_data->size() > 0;
     favicon.icon_type = history::FAVICON;
-    request->ForwardResultAsync(
-        FaviconService::FaviconDataCallback::TupleType(request->handle(),
-                                                       favicon));
+    request->ForwardResultAsync(request->handle(), favicon);
   }
 }
 
@@ -374,9 +379,6 @@ RefCountedMemory* ChromeWebUIFactory::GetFaviconResourceBytes(
 
   if (page_url.host() == chrome::kChromeUIDownloadsHost)
     return DownloadsUI::GetFaviconResourceBytes();
-
-  if (page_url.host() == chrome::kChromeUIExtensionsHost)
-    return ExtensionsUI::GetFaviconResourceBytes();
 
   if (page_url.host() == chrome::kChromeUIHistoryHost)
     return HistoryUI::GetFaviconResourceBytes();

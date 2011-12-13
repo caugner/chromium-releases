@@ -6,16 +6,15 @@
 #define CHROME_BROWSER_UI_WEBUI_CONSTRAINED_HTML_UI_H_
 #pragma once
 
-#include <vector>
-
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "content/browser/tab_contents/constrained_window.h"
 #include "content/common/property_bag.h"
 
+class ConstrainedWindow;
 class HtmlDialogUIDelegate;
 class Profile;
 class RenderViewHost;
 class TabContents;
+class TabContentsWrapper;
 
 class ConstrainedHtmlUIDelegate {
  public:
@@ -24,6 +23,20 @@ class ConstrainedHtmlUIDelegate {
   // Called when the dialog is being closed in response to a "DialogClose"
   // message from WebUI.
   virtual void OnDialogCloseFromWebUI() = 0;
+
+  // If called, on dialog closure, the dialog will release its TabContents
+  // instead of destroying it. After which point, the caller will own the
+  // released TabContents.
+  virtual void ReleaseTabContentsOnDialogClose() = 0;
+
+  // Returns the ConstrainedWindow.
+  virtual ConstrainedWindow* window() = 0;
+
+  // Returns the TabContentsWrapper owned by the constrained window.
+  virtual TabContentsWrapper* tab() = 0;
+
+ protected:
+  virtual ~ConstrainedHtmlUIDelegate() {}
 };
 
 // ConstrainedHtmlUI is a facility to show HTML WebUI content
@@ -42,10 +55,10 @@ class ConstrainedHtmlUI : public ChromeWebUI {
   // Create a constrained HTML dialog. The actual object that gets created
   // is a ConstrainedHtmlUIDelegate, which later triggers construction of a
   // ConstrainedHtmlUI object.
-  static ConstrainedWindow* CreateConstrainedHtmlDialog(
+  static ConstrainedHtmlUIDelegate* CreateConstrainedHtmlDialog(
       Profile* profile,
       HtmlDialogUIDelegate* delegate,
-      TabContents* overshadowed);
+      TabContentsWrapper* overshadowed);
 
   // Returns a property accessor that can be used to set the
   // ConstrainedHtmlUIDelegate property on a TabContents.

@@ -6,6 +6,8 @@
 #define UI_GFX_COMPOSITOR_LAYER_DELEGATE_H_
 #pragma once
 
+#include "ui/gfx/compositor/compositor_export.h"
+
 namespace gfx {
 class Canvas;
 }
@@ -13,11 +15,11 @@ class Canvas;
 namespace ui {
 
 // A delegate interface implemented by an object that renders to a Layer.
-class LayerDelegate {
+class COMPOSITOR_EXPORT LayerDelegate {
  public:
   // Paint content for the layer to the specified canvas. It has already been
   // clipped to the Layer's invalid rect.
-  virtual void OnPaint(gfx::Canvas* canvas) = 0;
+  virtual void OnPaintLayer(gfx::Canvas* canvas) = 0;
 
  protected:
   virtual ~LayerDelegate() {}

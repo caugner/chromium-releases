@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -155,7 +156,7 @@ class StatusBubbleViews::StatusView : public views::Label,
   BubbleStage stage_;
   BubbleStyle style_;
 
-  ScopedRunnableMethodFactory<StatusBubbleViews::StatusView> timer_factory_;
+  base::WeakPtrFactory<StatusBubbleViews::StatusView> timer_factory_;
 
   // Manager, owns us.
   StatusBubble* status_bubble_;
@@ -209,11 +210,13 @@ void StatusBubbleViews::StatusView::Hide() {
 }
 
 void StatusBubbleViews::StatusView::StartTimer(int time) {
-  if (!timer_factory_.empty())
-    timer_factory_.RevokeAll();
+  if (timer_factory_.HasWeakPtrs())
+    timer_factory_.InvalidateWeakPtrs();
 
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      timer_factory_.NewRunnableMethod(&StatusBubbleViews::StatusView::OnTimer),
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&StatusBubbleViews::StatusView::OnTimer,
+                timer_factory_.GetWeakPtr()),
       time);
 }
 
@@ -228,8 +231,8 @@ void StatusBubbleViews::StatusView::OnTimer() {
 }
 
 void StatusBubbleViews::StatusView::CancelTimer() {
-  if (!timer_factory_.empty())
-    timer_factory_.RevokeAll();
+  if (timer_factory_.HasWeakPtrs())
+    timer_factory_.InvalidateWeakPtrs();
 }
 
 void StatusBubbleViews::StatusView::RestartTimer(int delay) {
@@ -262,6 +265,7 @@ void StatusBubbleViews::StatusView::StartHiding() {
     StartTimer(kHideDelay);
   } else if (stage_ == BUBBLE_SHOWING_TIMER) {
     stage_ = BUBBLE_HIDDEN;
+    popup_->Hide();
     CancelTimer();
   } else if (stage_ == BUBBLE_SHOWING_FADE) {
     stage_ = BUBBLE_HIDING_FADE;
@@ -412,7 +416,7 @@ void StatusBubbleViews::StatusView::OnPaint(gfx::Canvas* canvas) {
   SkPaint shadow_paint;
   shadow_paint.setFlags(SkPaint::kAntiAlias_Flag);
   shadow_paint.setColor(kShadowColor);
-  canvas->AsCanvasSkia()->drawPath(shadow_path, shadow_paint);
+  canvas->GetSkCanvas()->drawPath(shadow_path, shadow_paint);
 
   // Draw the bubble.
   rect.set(SkIntToScalar(kShadowThickness),
@@ -421,7 +425,7 @@ void StatusBubbleViews::StatusView::OnPaint(gfx::Canvas* canvas) {
            SkIntToScalar(height - kShadowThickness));
   SkPath path;
   path.addRoundRect(rect, rad, SkPath::kCW_Direction);
-  canvas->AsCanvasSkia()->drawPath(path, paint);
+  canvas->GetSkCanvas()->drawPath(path, paint);
 
   // Draw highlight text and then the text body. In order to make sure the text
   // is aligned to the right on RTL UIs, we mirror the text bounds if the
@@ -567,12 +571,11 @@ void StatusBubbleViews::Init() {
     params.transparent = true;
     params.accept_events = false;
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-    params.parent = frame->GetNativeView();
+    params.parent_widget = frame;
     popup_->Init(params);
     popup_->SetOpacity(0x00);
     popup_->SetContentsView(view_);
     Reposition();
-    popup_->Show();
   }
 }
 
@@ -668,9 +671,11 @@ void StatusBubbleViews::SetURL(const GURL& url, const std::string& languages) {
     if (is_expanded_ && !url.is_empty())
       ExpandBubble();
     else if (original_url_text.length() > url_text_.length())
-      MessageLoop::current()->PostDelayedTask(FROM_HERE,
-          expand_timer_factory_.NewRunnableMethod(
-          &StatusBubbleViews::ExpandBubble), kExpandHoverDelay);
+      MessageLoop::current()->PostDelayedTask(
+          FROM_HERE,
+          base::Bind(&StatusBubbleViews::ExpandBubble,
+                     expand_timer_factory_.GetWeakPtr()),
+          kExpandHoverDelay);
   }
 }
 
@@ -830,6 +835,6 @@ void StatusBubbleViews::SetBubbleWidth(int width) {
 }
 
 void StatusBubbleViews::CancelExpandTimer() {
-  if (!expand_timer_factory_.empty())
-    expand_timer_factory_.RevokeAll();
+  if (expand_timer_factory_.HasWeakPtrs())
+    expand_timer_factory_.InvalidateWeakPtrs();
 }

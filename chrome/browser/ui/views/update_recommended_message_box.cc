@@ -44,13 +44,13 @@ int UpdateRecommendedMessageBox::GetDialogButtons() const {
          ui::MessageBoxFlags::DIALOGBUTTON_CANCEL;
 }
 
-std::wstring UpdateRecommendedMessageBox::GetDialogButtonLabel(
+string16 UpdateRecommendedMessageBox::GetDialogButtonLabel(
     ui::MessageBoxFlags::DialogButton button) const {
   DCHECK(button == ui::MessageBoxFlags::DIALOGBUTTON_OK ||
          button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL);
   return button == ui::MessageBoxFlags::DIALOGBUTTON_OK ?
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_RELAUNCH_AND_UPDATE)) :
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_NOT_NOW));
+      l10n_util::GetStringUTF16(IDS_RELAUNCH_AND_UPDATE) :
+      l10n_util::GetStringUTF16(IDS_NOT_NOW);
 }
 
 bool UpdateRecommendedMessageBox::ShouldShowWindowTitle() const {
@@ -61,8 +61,8 @@ bool UpdateRecommendedMessageBox::ShouldShowWindowTitle() const {
 #endif
 }
 
-std::wstring UpdateRecommendedMessageBox::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+string16 UpdateRecommendedMessageBox::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
 }
 
 void UpdateRecommendedMessageBox::DeleteDelegate() {
@@ -101,9 +101,8 @@ UpdateRecommendedMessageBox::UpdateRecommendedMessageBox(
   message_box_view_ = new views::MessageBoxView(
       ui::MessageBoxFlags::kFlagHasMessage |
           ui::MessageBoxFlags::kFlagHasOKButton,
-      UTF16ToWide(l10n_util::GetStringFUTF16(IDS_UPDATE_RECOMMENDED,
-                                             product_name)),
-      std::wstring(),
+      l10n_util::GetStringFUTF16(IDS_UPDATE_RECOMMENDED, product_name),
+      string16(),
       kDialogWidth);
   browser::CreateViewsWindow(parent_window, this)->Show();
 }

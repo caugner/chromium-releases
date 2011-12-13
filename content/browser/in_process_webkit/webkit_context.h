@@ -14,6 +14,7 @@
 #include "base/time.h"
 #include "content/browser/in_process_webkit/dom_storage_context.h"
 #include "content/browser/in_process_webkit/indexed_db_context.h"
+#include "content/common/content_export.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -31,7 +32,8 @@ class SpecialStoragePolicy;
 //
 // This class is created on the UI thread and accessed on the UI, IO, and WebKit
 // threads.
-class WebKitContext : public base::RefCountedThreadSafe<WebKitContext> {
+class CONTENT_EXPORT WebKitContext
+    : public base::RefCountedThreadSafe<WebKitContext> {
  public:
   WebKitContext(bool is_incognito, const FilePath& data_path,
                 quota::SpecialStoragePolicy* special_storage_policy,
@@ -54,13 +56,12 @@ class WebKitContext : public base::RefCountedThreadSafe<WebKitContext> {
     clear_local_state_on_exit_ = clear_local_state;
   }
 
-#ifdef UNIT_TEST
   // For unit tests, allow specifying a DOMStorageContext directly so it can be
   // mocked.
-  void set_dom_storage_context(DOMStorageContext* dom_storage_context) {
+  void set_dom_storage_context_for_testing(
+      DOMStorageContext* dom_storage_context) {
     dom_storage_context_.reset(dom_storage_context);
   }
-#endif
 
   // Tells the DOMStorageContext to purge any memory it does not need.
   void PurgeMemory();

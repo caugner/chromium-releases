@@ -6,10 +6,13 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/constrained_html_ui.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
@@ -55,7 +58,7 @@ class LoginHandlerSource : public ChromeURLDataManager::DataSource {
 
   static void RegisterDataSource(Profile *profile) {
     ChromeURLDataManager* url_manager = profile->GetChromeURLDataManager();
-    LoginHandlerSource *source = new LoginHandlerSource();
+    LoginHandlerSource* source = new LoginHandlerSource();
     url_manager->AddDataSource(source);
   }
 
@@ -120,7 +123,8 @@ class LoginHandlerHtmlDelegate : public HtmlDialogUIDelegate,
   virtual void RegisterMessages() OVERRIDE {
     web_ui_->RegisterMessageCallback(
         "GetAutofill",
-        NewCallback(this, &LoginHandlerHtmlDelegate::GetAutofill));
+        base::Bind(&LoginHandlerHtmlDelegate::GetAutofill,
+                   base::Unretained(this)));
   }
 
   void ShowAutofillData(const std::wstring& username,
@@ -137,7 +141,7 @@ class LoginHandlerHtmlDelegate : public HtmlDialogUIDelegate,
     SendAutofillData();
   }
 
-  LoginHandlerHtml *login_handler_;
+  LoginHandlerHtml* login_handler_;
   std::string explanation_;
   bool closed_;
 
@@ -176,7 +180,7 @@ class LoginHandlerHtml : public LoginHandler {
   virtual ~LoginHandlerHtml() {}
 
  private:
-  LoginHandlerHtmlDelegate *delegate_;
+  LoginHandlerHtmlDelegate* delegate_;
 
   void FreeAndRelease() {
     SetDialog(NULL);
@@ -236,12 +240,14 @@ void LoginHandlerHtml::BuildViewForPasswordManager(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   TabContents* tab_contents = GetTabContentsForLogin();
-  Profile* profile =
-      Profile::FromBrowserContext(tab_contents->browser_context());
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+  Profile* profile = wrapper->profile();
   LoginHandlerSource::RegisterDataSource(profile);
   delegate_ = new LoginHandlerHtmlDelegate(this, explanation);
-  ConstrainedWindow* dialog = ConstrainedHtmlUI::CreateConstrainedHtmlDialog(
-      profile, delegate_, tab_contents);
+  ConstrainedWindow* dialog =
+      ConstrainedHtmlUI::CreateConstrainedHtmlDialog(
+          profile, delegate_, wrapper)->window();
 
   SetModel(manager);
   SetDialog(dialog);

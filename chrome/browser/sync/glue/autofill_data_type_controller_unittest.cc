@@ -10,8 +10,10 @@
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/sync/glue/autofill_data_type_controller.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
+#include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
 #include "chrome/browser/sync/profile_sync_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
@@ -19,8 +21,8 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/test/base/profile_mock.h"
 #include "content/browser/browser_thread.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::WaitableEvent;
@@ -28,6 +30,7 @@ using browser_sync::AutofillDataTypeController;
 using browser_sync::ChangeProcessorMock;
 using browser_sync::DataTypeController;
 using browser_sync::ModelAssociatorMock;
+using browser_sync::StartCallback;
 using testing::_;
 using testing::DoAll;
 using testing::Invoke;
@@ -44,15 +47,22 @@ ACTION_P(SignalEvent, event) {
   event->Signal();
 }
 
-class StartCallback {
- public:
-  MOCK_METHOD2(Run, void(DataTypeController::StartResult result,
-      const tracked_objects::Location& location));
-};
-
+// This class mocks PersonalDataManager and provides a factory method to
+// serve back the mocked object to callers of
+// |PersonalDataManagerFactory::GetForProfile()|.
 class PersonalDataManagerMock : public PersonalDataManager {
  public:
+  PersonalDataManagerMock() : PersonalDataManager() {}
+  virtual ~PersonalDataManagerMock() {}
+
+  static ProfileKeyedService* Build(Profile* profile) {
+    return new PersonalDataManagerMock;
+  }
+
   MOCK_CONST_METHOD0(IsDataLoaded, bool());
+
+private:
+  DISALLOW_COPY_AND_ASSIGN(PersonalDataManagerMock);
 };
 
 class WebDataServiceFake : public WebDataService {
@@ -91,10 +101,11 @@ class AutofillDataTypeControllerTest : public testing::Test {
         Return(&service_));
     db_thread_.Start();
     web_data_service_ = new WebDataServiceFake(true);
-    personal_data_manager_ = new PersonalDataManagerMock();
+    personal_data_manager_ = static_cast<PersonalDataManagerMock*>(
+        PersonalDataManagerFactory::GetInstance()->SetTestingFactoryAndUse(
+            &profile_, PersonalDataManagerMock::Build));
     autofill_dtc_ =
-        new AutofillDataTypeController(&profile_sync_factory_,
-                                       &profile_);
+        new AutofillDataTypeController(&profile_sync_factory_, &profile_);
   }
 
   virtual void TearDown() {
@@ -104,9 +115,7 @@ class AutofillDataTypeControllerTest : public testing::Test {
 
  protected:
   void SetStartExpectations() {
-    EXPECT_CALL(profile_, GetPersonalDataManager()).
-        WillRepeatedly(Return(personal_data_manager_.get()));
-    EXPECT_CALL(*(personal_data_manager_.get()), IsDataLoaded()).
+    EXPECT_CALL(*personal_data_manager_, IsDataLoaded()).
         WillRepeatedly(Return(true));
     EXPECT_CALL(profile_, GetWebDataService(_)).
         WillOnce(Return(web_data_service_.get()));
@@ -116,7 +125,7 @@ class AutofillDataTypeControllerTest : public testing::Test {
     model_associator_ = new ModelAssociatorMock();
     change_processor_ = new ChangeProcessorMock();
     EXPECT_CALL(profile_sync_factory_,
-                CreateAutofillSyncComponents(_, _, _, _)).
+                CreateAutofillSyncComponents(_, _, _)).
         WillOnce(Return(
             ProfileSyncFactory::SyncComponents(model_associator_,
                                                change_processor_)));
@@ -151,7 +160,7 @@ class AutofillDataTypeControllerTest : public testing::Test {
   scoped_refptr<AutofillDataTypeController> autofill_dtc_;
   ProfileSyncFactoryMock profile_sync_factory_;
   ProfileMock profile_;
-  scoped_refptr<PersonalDataManagerMock> personal_data_manager_;
+  PersonalDataManagerMock* personal_data_manager_;
   scoped_refptr<WebDataService> web_data_service_;
   ProfileSyncServiceMock service_;
   ModelAssociatorMock* model_associator_;
@@ -162,6 +171,7 @@ class AutofillDataTypeControllerTest : public testing::Test {
 TEST_F(AutofillDataTypeControllerTest, StartPDMAndWDSReady) {
   SetStartExpectations();
   SetAssociateExpectations();
+
   EXPECT_EQ(DataTypeController::NOT_RUNNING, autofill_dtc_->state());
   EXPECT_CALL(start_callback_, Run(DataTypeController::OK, _)).
       WillOnce(QuitUIMessageLoop());
@@ -174,9 +184,7 @@ TEST_F(AutofillDataTypeControllerTest, StartPDMAndWDSReady) {
 }
 
 TEST_F(AutofillDataTypeControllerTest, AbortWhilePDMStarting) {
-  EXPECT_CALL(profile_, GetPersonalDataManager()).
-      WillRepeatedly(Return(personal_data_manager_.get()));
-  EXPECT_CALL(*(personal_data_manager_.get()), IsDataLoaded()).
+  EXPECT_CALL(*personal_data_manager_, IsDataLoaded()).
       WillRepeatedly(Return(false));
   autofill_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
   EXPECT_EQ(DataTypeController::MODEL_STARTING, autofill_dtc_->state());
@@ -188,9 +196,7 @@ TEST_F(AutofillDataTypeControllerTest, AbortWhilePDMStarting) {
 }
 
 TEST_F(AutofillDataTypeControllerTest, AbortWhileWDSStarting) {
-  EXPECT_CALL(profile_, GetPersonalDataManager()).
-      WillRepeatedly(Return(personal_data_manager_.get()));
-  EXPECT_CALL(*(personal_data_manager_.get()), IsDataLoaded()).
+  EXPECT_CALL(*personal_data_manager_, IsDataLoaded()).
       WillRepeatedly(Return(true));
   scoped_refptr<WebDataServiceFake> web_data_service_not_loaded(
       new WebDataServiceFake(false));
@@ -211,7 +217,7 @@ TEST_F(AutofillDataTypeControllerTest, AbortWhileAssociatingNotActivated) {
   model_associator_ = new ModelAssociatorMock();
   change_processor_ = new ChangeProcessorMock();
   EXPECT_CALL(profile_sync_factory_,
-              CreateAutofillSyncComponents(_, _, _, _)).
+              CreateAutofillSyncComponents(_, _, _)).
       WillOnce(Return(
           ProfileSyncFactory::SyncComponents(model_associator_,
                                              change_processor_)));
@@ -251,7 +257,7 @@ TEST_F(AutofillDataTypeControllerTest, AbortWhileAssociatingActivated) {
   model_associator_ = new ModelAssociatorMock();
   change_processor_ = new ChangeProcessorMock();
   EXPECT_CALL(profile_sync_factory_,
-              CreateAutofillSyncComponents(_, _, _, _)).
+              CreateAutofillSyncComponents(_, _, _)).
       WillOnce(Return(
           ProfileSyncFactory::SyncComponents(model_associator_,
                                              change_processor_)));

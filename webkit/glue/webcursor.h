@@ -16,7 +16,7 @@
 typedef struct HINSTANCE__* HINSTANCE;
 typedef struct HICON__* HICON;
 typedef HICON HCURSOR;
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
 typedef struct _GdkCursor GdkCursor;
 #elif defined(OS_MACOSX)
 #ifdef __OBJC__
@@ -69,7 +69,7 @@ class WebCursor {
   // Returns a native cursor representing the current WebCursor instance.
   gfx::NativeCursor GetNativeCursor();
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Returns a HCURSOR representing the current WebCursor instance.
   // The ownership of the HCURSOR (does not apply to external cursors) remains
   // with the WebCursor instance.
@@ -80,7 +80,7 @@ class WebCursor {
   // APIs on it.
   void InitFromExternalCursor(HCURSOR handle);
 
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
   // Return the stock GdkCursorType for this cursor, or GDK_CURSOR_IS_PIXMAP
   // if it's a custom cursor. Return GDK_LAST_CURSOR to indicate that the cursor
   // should be set to the system default.
@@ -150,9 +150,7 @@ class WebCursor {
   HCURSOR external_cursor_;
   // A custom cursor created from custom bitmap data by Webkit.
   HCURSOR custom_cursor_;
-#endif  // OS_WIN
-
-#if defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
   // A custom cursor created that should be unref'ed from the destructor.
   GdkCursor* unref_;
 #endif

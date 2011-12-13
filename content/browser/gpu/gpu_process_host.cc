@@ -18,11 +18,11 @@
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/result_codes.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
+#include "content/public/common/content_switches.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_switches.h"
 #include "ui/gfx/gl/gl_context.h"
@@ -332,6 +332,7 @@ bool GpuProcessHost::OnMessageReceived(const IPC::Message& message) {
 }
 
 void GpuProcessHost::OnChannelConnected(int32 peer_pid) {
+  BrowserChildProcessHost::OnChannelConnected(peer_pid);
   while (!queued_messages_.empty()) {
     Send(queued_messages_.front());
     queued_messages_.pop();
@@ -493,11 +494,15 @@ void GpuProcessHost::OnChildDied() {
   UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessTerminationStatus",
                             status,
                             base::TERMINATION_STATUS_MAX_ENUM);
-  UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessExitCode",
-                            exit_code,
-                            content::RESULT_CODE_LAST_CODE);
 
-  BrowserChildProcessHost::OnChildDied();
+  if (status == base::TERMINATION_STATUS_NORMAL_TERMINATION ||
+      status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION) {
+    UMA_HISTOGRAM_ENUMERATION("GPU.GPUProcessExitCode",
+                              exit_code,
+                              content::RESULT_CODE_LAST_CODE);
+  }
+
+  ChildProcessHost::OnChildDied();
 }
 
 void GpuProcessHost::OnProcessCrashed(int exit_code) {
@@ -540,6 +545,7 @@ bool GpuProcessHost::LaunchGpuProcess() {
   static const char* const kSwitchNames[] = {
     switches::kDisableBreakpad,
     switches::kDisableGLMultisampling,
+    switches::kDisableGpuDriverBugWorkarounds,
     switches::kDisableGpuSandbox,
     switches::kDisableGpuVsync,
     switches::kDisableGpuWatchdog,
@@ -552,8 +558,7 @@ bool GpuProcessHost::LaunchGpuProcess() {
     switches::kGpuNoContextLost,
     switches::kGpuStartupDialog,
     switches::kLoggingLevel,
-    switches::kNoSandbox,
-    switches::kUseGL,
+    switches::kNoSandbox
   };
   cmd_line->CopySwitchesFrom(browser_command_line, kSwitchNames,
                              arraysize(kSwitchNames));
@@ -564,9 +569,7 @@ bool GpuProcessHost::LaunchGpuProcess() {
       !cmd_line->HasSwitch(switches::kDisableBreakpad))
     cmd_line->AppendSwitch(switches::kDisableBreakpad);
 
-  GpuFeatureFlags flags = GpuDataManager::GetInstance()->GetGpuFeatureFlags();
-  if (flags.flags() & GpuFeatureFlags::kGpuFeatureMultisampling)
-    cmd_line->AppendSwitch(switches::kDisableGLMultisampling);
+  GpuDataManager::GetInstance()->AppendGpuCommandLine(cmd_line);
 
   // If specified, prepend a launcher program to the command line.
   if (!gpu_launcher.empty())

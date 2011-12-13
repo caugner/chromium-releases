@@ -2,11 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/test/base/test_notification_tracker.h"
+#include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/browser_url_handler.h"
-#include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
@@ -14,19 +13,22 @@
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "content/common/page_transition_types.h"
 #include "content/common/test_url_constants.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/page_transition_types.h"
+#include "content/test/test_notification_tracker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/webkit_glue.h"
 
-class RenderViewHostManagerTest : public RenderViewHostTestHarness {
+class RenderViewHostManagerTest : public ChromeRenderViewHostTestHarness {
  public:
   void NavigateActiveAndCommit(const GURL& url) {
     // Note: we navigate the active RenderViewHost because previous navigations
     // won't have committed yet, so NavigateAndCommit does the wrong thing
     // for us.
-    controller().LoadURL(url, GURL(), PageTransition::LINK);
+    controller().LoadURL(
+        url, GURL(), content::PAGE_TRANSITION_LINK, std::string());
     TestRenderViewHost* old_rvh = rvh();
 
     // Simulate the ShouldClose_ACK that is received from the current renderer
@@ -67,23 +69,25 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
   NavigateActiveAndCommit(kDestUrl);
 
   // Make a second tab.
-  TestTabContents contents2(profile_.get(), NULL);
+  TestTabContents contents2(profile(), NULL);
 
   // Load the two URLs in the second tab. Note that the first navigation creates
   // a RVH that's not pending (since there is no cross-site transition), so
   // we use the committed one.
-  contents2.controller().LoadURL(kNtpUrl, GURL(), PageTransition::LINK);
+  contents2.controller().LoadURL(
+      kNtpUrl, GURL(), content::PAGE_TRANSITION_LINK, std::string());
   TestRenderViewHost* ntp_rvh2 = static_cast<TestRenderViewHost*>(
-      contents2.render_manager()->current_host());
+      contents2.render_manager_for_testing()->current_host());
   EXPECT_FALSE(contents2.cross_navigation_pending());
   ntp_rvh2->SendNavigate(100, kNtpUrl);
 
   // The second one is the opposite, creating a cross-site transition and
   // requiring a beforeunload ack.
-  contents2.controller().LoadURL(kDestUrl, GURL(), PageTransition::LINK);
+  contents2.controller().LoadURL(
+      kDestUrl, GURL(), content::PAGE_TRANSITION_LINK, std::string());
   EXPECT_TRUE(contents2.cross_navigation_pending());
   TestRenderViewHost* dest_rvh2 = static_cast<TestRenderViewHost*>(
-      contents2.render_manager()->pending_render_view_host());
+      contents2.render_manager_for_testing()->pending_render_view_host());
   ASSERT_TRUE(dest_rvh2);
   ntp_rvh2->SendShouldCloseACK(true);
   dest_rvh2->SendNavigate(101, kDestUrl);
@@ -99,9 +103,10 @@ TEST_F(RenderViewHostManagerTest, NewTabPageProcesses) {
   // SiteInstance.
   NavigateActiveAndCommit(kNtpUrl);
 
-  contents2.controller().LoadURL(kNtpUrl, GURL(), PageTransition::LINK);
+  contents2.controller().LoadURL(
+      kNtpUrl, GURL(), content::PAGE_TRANSITION_LINK, std::string());
   dest_rvh2->SendShouldCloseACK(true);
-  static_cast<TestRenderViewHost*>(contents2.render_manager()->
+  static_cast<TestRenderViewHost*>(contents2.render_manager_for_testing()->
      pending_render_view_host())->SendNavigate(102, kNtpUrl);
   dest_rvh2->OnSwapOutACK();
 
@@ -127,7 +132,8 @@ TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
   NavigateActiveAndCommit(kNtpUrl);
 
   // Navigate.
-  controller().LoadURL(kUrl, GURL() /* referer */, PageTransition::TYPED);
+  controller().LoadURL(
+      kUrl, GURL(), content::PAGE_TRANSITION_TYPED, std::string());
   // Simulate response from RenderView for FirePageBeforeUnload.
   rvh()->TestOnMessageReceived(
       ViewHostMsg_ShouldClose_ACK(rvh()->routing_id(), true));
@@ -147,7 +153,8 @@ TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
   // Clear queued messages before load.
   process()->sink().ClearMessages();
   // Navigate, again.
-  controller().LoadURL(kUrl, GURL() /* referer */, PageTransition::TYPED);
+  controller().LoadURL(
+      kUrl, GURL(), content::PAGE_TRANSITION_TYPED, std::string());
   // The same RenderViewHost should be reused.
   EXPECT_FALSE(pending_rvh());
   EXPECT_TRUE(last_rvh == rvh());
@@ -162,13 +169,13 @@ TEST_F(RenderViewHostManagerTest, AlwaysSendEnableViewSourceMode) {
 // Tests the Init function by checking the initial RenderViewHost.
 TEST_F(RenderViewHostManagerTest, Init) {
   // Using TestingProfile.
-  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
+  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile());
   EXPECT_FALSE(instance->has_site());
 
-  TestTabContents tab_contents(profile_.get(), instance);
+  TestTabContents tab_contents(profile(), instance);
   RenderViewHostManager manager(&tab_contents, &tab_contents);
 
-  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
+  manager.Init(profile(), instance, MSG_ROUTING_NONE);
 
   RenderViewHost* host = manager.current_host();
   ASSERT_TRUE(host);
@@ -183,16 +190,16 @@ TEST_F(RenderViewHostManagerTest, Init) {
 TEST_F(RenderViewHostManagerTest, Navigate) {
   TestNotificationTracker notifications;
 
-  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
+  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile());
 
-  TestTabContents tab_contents(profile_.get(), instance);
+  TestTabContents tab_contents(profile(), instance);
   notifications.ListenFor(content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
                      Source<NavigationController>(&tab_contents.controller()));
 
   // Create.
   RenderViewHostManager manager(&tab_contents, &tab_contents);
 
-  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
+  manager.Init(profile(), instance, MSG_ROUTING_NONE);
 
   RenderViewHost* host;
 
@@ -200,7 +207,8 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
   const GURL kUrl1("http://www.google.com/");
   NavigationEntry entry1(NULL /* instance */, -1 /* page_id */, kUrl1,
                          GURL() /* referrer */, string16() /* title */,
-                         PageTransition::TYPED);
+                         content::PAGE_TRANSITION_TYPED,
+                         false /* is_renderer_init */);
   host = manager.Navigate(entry1);
 
   // The RenderViewHost created in Init will be reused.
@@ -219,7 +227,8 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
   const GURL kUrl2("http://www.google.com/foo");
   NavigationEntry entry2(NULL /* instance */, -1 /* page_id */, kUrl2,
                          kUrl1 /* referrer */, string16() /* title */,
-                         PageTransition::LINK);
+                         content::PAGE_TRANSITION_LINK,
+                         true /* is_renderer_init */);
   host = manager.Navigate(entry2);
 
   // The RenderViewHost created in Init will be reused.
@@ -236,7 +245,8 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
   const GURL kUrl3("http://webkit.org/");
   NavigationEntry entry3(NULL /* instance */, -1 /* page_id */, kUrl3,
                          kUrl2 /* referrer */, string16() /* title */,
-                         PageTransition::LINK);
+                         content::PAGE_TRANSITION_LINK,
+                         false /* is_renderer_init */);
   host = manager.Navigate(entry3);
 
   // A new RenderViewHost should be created.
@@ -261,17 +271,18 @@ TEST_F(RenderViewHostManagerTest, Navigate) {
 // Tests WebUI creation.
 TEST_F(RenderViewHostManagerTest, WebUI) {
   BrowserThread ui_thread(BrowserThread::UI, MessageLoop::current());
-  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
+  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile());
 
-  TestTabContents tab_contents(profile_.get(), instance);
+  TestTabContents tab_contents(profile(), instance);
   RenderViewHostManager manager(&tab_contents, &tab_contents);
 
-  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
+  manager.Init(profile(), instance, MSG_ROUTING_NONE);
 
   const GURL kUrl(chrome::kTestNewTabURL);
   NavigationEntry entry(NULL /* instance */, -1 /* page_id */, kUrl,
                         GURL() /* referrer */, string16() /* title */,
-                        PageTransition::TYPED);
+                        content::PAGE_TRANSITION_TYPED,
+                        false /* is_renderer_init */);
   RenderViewHost* host = manager.Navigate(entry);
 
   EXPECT_TRUE(host);
@@ -300,26 +311,28 @@ TEST_F(RenderViewHostManagerTest, WebUI) {
 // Regression test for bug 46290.
 TEST_F(RenderViewHostManagerTest, NonWebUIChromeURLs) {
   BrowserThread thread(BrowserThread::UI, &message_loop_);
-  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile_.get());
-  TestTabContents tab_contents(profile_.get(), instance);
+  SiteInstance* instance = SiteInstance::CreateSiteInstance(profile());
+  TestTabContents tab_contents(profile(), instance);
   RenderViewHostManager manager(&tab_contents, &tab_contents);
-  manager.Init(profile_.get(), instance, MSG_ROUTING_NONE);
+  manager.Init(profile(), instance, MSG_ROUTING_NONE);
 
   // NTP is a Web UI page.
   const GURL kNtpUrl(chrome::kTestNewTabURL);
   NavigationEntry ntp_entry(NULL /* instance */, -1 /* page_id */, kNtpUrl,
                             GURL() /* referrer */, string16() /* title */,
-                            PageTransition::TYPED);
+                            content::PAGE_TRANSITION_TYPED,
+                            false /* is_renderer_init */);
 
   // about: URLs are not Web UI pages.
   GURL about_url(chrome::kTestMemoryURL);
   // Rewrite so it looks like chrome://about/memory
   bool reverse_on_redirect = false;
   BrowserURLHandler::GetInstance()->RewriteURLIfNecessary(
-      &about_url, profile_.get(), &reverse_on_redirect);
+      &about_url, profile(), &reverse_on_redirect);
   NavigationEntry about_entry(NULL /* instance */, -1 /* page_id */, about_url,
                               GURL() /* referrer */, string16() /* title */,
-                              PageTransition::TYPED);
+                              content::PAGE_TRANSITION_TYPED,
+                              false /* is_renderer_init */);
 
   EXPECT_TRUE(ShouldSwapProcesses(&manager, &ntp_entry, &about_entry));
 }
@@ -343,13 +356,14 @@ TEST_F(RenderViewHostManagerTest, PageDoesBackAndReload) {
   // We should have a new pending RVH.
   // Note that in this case, the navigation has not committed, so evil_rvh will
   // not be deleted yet.
-  EXPECT_NE(evil_rvh, contents()->render_manager()->pending_render_view_host());
+  EXPECT_NE(evil_rvh, contents()->render_manager_for_testing()->
+      pending_render_view_host());
 
   // Before that RVH has committed, the evil page reloads itself.
   ViewHostMsg_FrameNavigate_Params params;
   params.page_id = 1;
   params.url = kUrl2;
-  params.transition = PageTransition::CLIENT_REDIRECT;
+  params.transition = content::PAGE_TRANSITION_CLIENT_REDIRECT;
   params.should_update_history = false;
   params.gesture = NavigationGestureAuto;
   params.was_within_same_page = false;
@@ -359,8 +373,9 @@ TEST_F(RenderViewHostManagerTest, PageDoesBackAndReload) {
 
   // That should have cancelled the pending RVH, and the evil RVH should be the
   // current one.
-  EXPECT_TRUE(contents()->render_manager()->pending_render_view_host() == NULL);
-  EXPECT_EQ(evil_rvh, contents()->render_manager()->current_host());
+  EXPECT_TRUE(contents()->render_manager_for_testing()->
+      pending_render_view_host() == NULL);
+  EXPECT_EQ(evil_rvh, contents()->render_manager_for_testing()->current_host());
 
   // Also we should not have a pending navigation entry.
   NavigationEntry* entry = contents()->controller().GetActiveEntry();

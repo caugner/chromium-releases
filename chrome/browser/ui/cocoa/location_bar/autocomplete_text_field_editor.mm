@@ -12,6 +12,7 @@
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field.h"
 #import "chrome/browser/ui/cocoa/location_bar/autocomplete_text_field_cell.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
+#import "content/browser/find_pasteboard.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
@@ -108,7 +109,38 @@ BOOL ThePasteboardIsTooDamnBig() {
 - (void)setDelegate:(AutocompleteTextField*)delegate {
   DCHECK(delegate == nil ||
          [delegate isKindOfClass:[AutocompleteTextField class]]);
+
+  // Unregister from any previously registered undo and redo notifications.
+  NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+  [nc removeObserver:self
+                name:NSUndoManagerDidUndoChangeNotification
+              object:nil];
+  [nc removeObserver:self
+                name:NSUndoManagerDidRedoChangeNotification
+              object:nil];
+
+  // Set the delegate.
   [super setDelegate:delegate];
+
+  // Register for undo and redo notifications from the new |delegate|, if it is
+  // non-nil.
+  if ([self delegate]) {
+    NSUndoManager* undo_manager = [self undoManager];
+    [nc addObserver:self
+           selector:@selector(didUndoOrRedo:)
+               name:NSUndoManagerDidUndoChangeNotification
+             object:undo_manager];
+    [nc addObserver:self
+           selector:@selector(didUndoOrRedo:)
+               name:NSUndoManagerDidRedoChangeNotification
+             object:undo_manager];
+  }
+}
+
+- (void)didUndoOrRedo:(NSNotification *)aNotification {
+  AutocompleteTextFieldObserver* observer = [self observer];
+  if (observer)
+    observer->OnDidChange();
 }
 
 // Convenience method for retrieving the observer from the delegate.
@@ -383,10 +415,12 @@ BOOL ThePasteboardIsTooDamnBig() {
 
   AutocompleteTextFieldObserver* observer = [self observer];
   if (observer) {
-    if (!interpretingKeyEvents_)
+    if (!interpretingKeyEvents_ &&
+        ![[self undoManager] isUndoing] && ![[self undoManager] isRedoing]) {
       observer->OnDidChange();
-    else
+    } else if (interpretingKeyEvents_) {
       textChangedByKeyEvents_ = YES;
+    }
   }
 }
 
@@ -437,6 +471,25 @@ BOOL ThePasteboardIsTooDamnBig() {
     observer->ClosePopup();
 
   [super mouseDown:theEvent];
+}
+
+- (BOOL)validateMenuItem:(NSMenuItem*)item {
+  if ([item action] == @selector(copyToFindPboard:))
+    return [self selectedRange].length > 0;
+  return [super validateMenuItem:item];
+}
+
+- (void)copyToFindPboard:(id)sender {
+  NSRange selectedRange = [self selectedRange];
+  if (selectedRange.length == 0)
+    return;
+  NSAttributedString* selection =
+      [self attributedSubstringForProposedRange:selectedRange
+                                    actualRange:NULL];
+  if (!selection)
+    return;
+
+  [[FindPasteboard sharedInstance] setFindText:[selection string]];
 }
 
 @end

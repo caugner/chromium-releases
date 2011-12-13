@@ -6,6 +6,7 @@
 
 #include <ostream>
 
+#include "base/json/json_value_serializer.h"
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/task.h"
@@ -15,7 +16,6 @@
 #include "chrome/browser/prefs/proxy_config_dictionary.h"
 #include "chrome/browser/prefs/proxy_prefs.h"
 #include "content/browser/browser_thread.h"
-#include "content/common/json_value_serializer.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -538,6 +538,14 @@ bool ProxyConfigServiceImpl::UIMakeActiveNetworkCurrent() {
 void ProxyConfigServiceImpl::UISetUseSharedProxies(bool use_shared) {
   // Should be called from UI thread.
   CheckCurrentlyOnUIThread();
+
+  // Reset all UI-related variables so that the next opening of proxy
+  // configuration dialog of any network will trigger javascript reloading of
+  // (possibly) new proxy settings.
+  current_ui_network_.clear();
+  current_ui_network_name_.clear();
+  current_ui_config_ = ProxyConfig();
+
   if (use_shared_proxies_ == use_shared) {
     VLOG(1) << "same use_shared_proxies = " << use_shared_proxies_;
     return;

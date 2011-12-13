@@ -10,8 +10,8 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/platform_file.h"
 #include "ppapi/c/pp_file_info.h"
 #include "ppapi/c/pp_time.h"
@@ -124,7 +124,7 @@ class PPB_FileIO_Impl : public ::ppapi::Resource,
   void WriteCallback(base::PlatformFileError error_code, int bytes_written);
   void WillWriteCallback(base::PlatformFileError error_code, int bytes_written);
 
-  base::ScopedCallbackFactory<PPB_FileIO_Impl> callback_factory_;
+  base::WeakPtrFactory<PPB_FileIO_Impl> weak_factory_;
 
   base::PlatformFile file_;
   PP_FileSystemType file_system_type_;
@@ -142,6 +142,8 @@ class PPB_FileIO_Impl : public ::ppapi::Resource,
   // Pointer to a QuotaFileIO instance, which is valid only while a file
   // of type PP_FILESYSTEMTYPE_LOCAL{PERSISTENT,TEMPORARY} is opened.
   scoped_ptr<QuotaFileIO> quota_file_io_;
+
+  base::WeakPtrFactory<PPB_FileIO_Impl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_FileIO_Impl);
 };

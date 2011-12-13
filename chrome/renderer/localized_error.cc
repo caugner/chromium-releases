@@ -11,6 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "content/public/renderer/render_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -25,6 +26,7 @@
 #endif
 
 using WebKit::WebURLError;
+using content::RenderThread;
 
 namespace {
 
@@ -181,6 +183,27 @@ const LocalizedErrorMap net_error_options[] = {
    IDS_ERRORPAGES_SUMMARY_EMPTY_RESPONSE,
    IDS_ERRORPAGES_DETAILS_EMPTY_RESPONSE,
    SUGGEST_RELOAD,
+  },
+  {net::ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_LENGTH,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_DUPLICATE_HEADERS,
+   IDS_ERRORPAGES_SUMMARY_DUPLICATE_HEADERS,
+   IDS_ERRORPAGES_DETAILS_RESPONSE_HEADERS_MULTIPLE_CONTENT_LENGTH,
+   SUGGEST_NONE,
+  },
+  {net::ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_DUPLICATE_HEADERS,
+   IDS_ERRORPAGES_SUMMARY_DUPLICATE_HEADERS,
+   IDS_ERRORPAGES_DETAILS_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION,
+   SUGGEST_NONE,
+  },
+  {net::ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION,
+   IDS_ERRORPAGES_TITLE_LOAD_FAILED,
+   IDS_ERRORPAGES_HEADING_DUPLICATE_HEADERS,
+   IDS_ERRORPAGES_SUMMARY_DUPLICATE_HEADERS,
+   IDS_ERRORPAGES_DETAILS_RESPONSE_HEADERS_MULTIPLE_LOCATION,
+   SUGGEST_NONE,
   },
   {net::ERR_SSL_PROTOCOL_ERROR,
    IDS_ERRORPAGES_TITLE_LOAD_FAILED,
@@ -592,7 +615,8 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
     if (learn_more_url.is_valid()) {
       // Add the language parameter to the URL.
       std::string query = learn_more_url.query() + "&hl=" +
-          webkit_glue::GetWebKitLocale();
+          RenderThread::Get()->GetLocale();
+
       GURL::Replacements repl;
       repl.SetQueryStr(query);
       learn_more_url = learn_more_url.ReplaceComponents(repl);
@@ -604,6 +628,15 @@ void LocalizedError::GetStrings(const WebKit::WebURLError& error,
       error_strings->Set("suggestionsLearnMore", suggest_learn_more);
     }
   }
+}
+
+string16 LocalizedError::GetErrorDetails(const WebKit::WebURLError& error) {
+  const LocalizedErrorMap* error_map =
+      LookupErrorMap(error.domain.utf8(), error.reason);
+  if (error_map)
+    return l10n_util::GetStringUTF16(error_map->details_resource_id);
+  else
+    return l10n_util::GetStringUTF16(IDS_ERRORPAGES_DETAILS_UNKNOWN);
 }
 
 bool LocalizedError::HasStrings(const std::string& error_domain,

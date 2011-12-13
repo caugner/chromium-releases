@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/views/notifications/balloon_view.h"
 
+#include <algorithm>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/notifications/balloon.h"
@@ -17,9 +19,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -33,7 +35,9 @@
 #include "views/controls/button/button.h"
 #include "views/controls/button/image_button.h"
 #include "views/controls/button/text_button.h"
-#include "views/controls/menu/menu_2.h"
+#include "views/controls/menu/menu_item_view.h"
+#include "views/controls/menu/menu_model_adapter.h"
+#include "views/controls/menu/menu_runner.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/painter.h"
 #include "views/widget/widget.h"
@@ -98,7 +102,6 @@ BalloonViewImpl::BalloonViewImpl(BalloonCollection* collection)
       close_button_(NULL),
       animation_(NULL),
       options_menu_model_(NULL),
-      options_menu_menu_(NULL),
       options_menu_button_(NULL) {
   // This object is not to be deleted by the views hierarchy,
   // as it is owned by the balloon.
@@ -114,8 +117,9 @@ BalloonViewImpl::~BalloonViewImpl() {
 
 void BalloonViewImpl::Close(bool by_user) {
   MessageLoop::current()->PostTask(FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &BalloonViewImpl::DelayedClose, by_user));
+                                   base::Bind(&BalloonViewImpl::DelayedClose,
+                                              method_factory_.GetWeakPtr(),
+                                              by_user));
 }
 
 gfx::Size BalloonViewImpl::GetSize() const {
@@ -132,7 +136,20 @@ BalloonHost* BalloonViewImpl::GetHost() const {
 }
 
 void BalloonViewImpl::RunMenu(views::View* source, const gfx::Point& pt) {
-  RunOptionsMenu(pt);
+  CreateOptionsMenu();
+
+  views::MenuModelAdapter menu_model_adapter(options_menu_model_.get());
+  menu_runner_.reset(new views::MenuRunner(menu_model_adapter.CreateMenu()));
+
+  gfx::Point screen_location;
+  views::View::ConvertPointToScreen(options_menu_button_, &screen_location);
+  if (menu_runner_->RunMenuAt(
+          source->GetWidget()->GetTopLevelWidget(),
+          options_menu_button_,
+          gfx::Rect(screen_location, options_menu_button_->size()),
+          views::MenuItemView::TOPRIGHT,
+          views::MenuRunner::HAS_MNEMONICS) == views::MenuRunner::MENU_DELETED)
+    return;
 }
 
 void BalloonViewImpl::OnDisplayChanged() {
@@ -285,13 +302,13 @@ void BalloonViewImpl::Show(Balloon* balloon) {
       IDS_NOTIFICATION_BALLOON_SOURCE_LABEL,
       balloon->notification().display_source());
 
-  source_label_ = new views::Label(UTF16ToWide(source_label_text));
+  source_label_ = new views::Label(source_label_text);
   AddChildView(source_label_);
-  options_menu_button_ = new views::MenuButton(NULL, L"", this, false);
+  options_menu_button_ = new views::MenuButton(NULL, string16(), this, false);
   AddChildView(options_menu_button_);
   close_button_ = new views::ImageButton(this);
-  close_button_->SetTooltipText(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_NOTIFICATION_BALLOON_DISMISS_LABEL)));
+  close_button_->SetTooltipText(l10n_util::GetStringUTF16(
+      IDS_NOTIFICATION_BALLOON_DISMISS_LABEL));
   AddChildView(close_button_);
 
   // We have to create two windows: one for the contents and one for the
@@ -351,7 +368,8 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   options_menu_button_->SetBoundsRect(GetOptionsButtonBounds());
 
   source_label_->SetFont(rb.GetFont(ResourceBundle::SmallFont));
-  source_label_->SetColor(kControlBarTextColor);
+  source_label_->SetBackgroundColor(kControlBarBackgroundColor);
+  source_label_->SetEnabledColor(kControlBarTextColor);
   source_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   source_label_->SetBoundsRect(GetLabelBounds());
 
@@ -364,17 +382,10 @@ void BalloonViewImpl::Show(Balloon* balloon) {
     Source<Balloon>(balloon));
 }
 
-void BalloonViewImpl::RunOptionsMenu(const gfx::Point& pt) {
-  CreateOptionsMenu();
-  options_menu_menu_->RunMenuAt(pt, views::Menu2::ALIGN_TOPRIGHT);
-}
-
 void BalloonViewImpl::CreateOptionsMenu() {
   if (options_menu_model_.get())
     return;
-
   options_menu_model_.reset(new NotificationOptionsMenuModel(balloon_));
-  options_menu_menu_.reset(new views::Menu2(options_menu_model_.get()));
 }
 
 void BalloonViewImpl::GetContentsMask(const gfx::Rect& rect,
@@ -476,7 +487,7 @@ void BalloonViewImpl::OnPaint(gfx::Canvas* canvas) {
   SkPaint paint;
   paint.setAntiAlias(true);
   paint.setColor(kControlBarBackgroundColor);
-  canvas->AsCanvasSkia()->drawPath(path, paint);
+  canvas->GetSkCanvas()->drawPath(path, paint);
 
   // Draw a 1-pixel gray line between the content and the menu bar.
   int line_width = GetTotalWidth() - kLeftMargin - kRightMargin;

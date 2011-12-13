@@ -379,9 +379,7 @@ bool WriteNode::InitByCreation(syncable::ModelType model_type,
   PutModelType(model_type);
 
   // Now set the predecessor, which sets IS_UNSYNCED as necessary.
-  PutPredecessor(predecessor);
-
-  return true;
+  return PutPredecessor(predecessor);
 }
 
 // Create a new node with default properties and a client defined unique tag,
@@ -394,6 +392,10 @@ bool WriteNode::InitUniqueByCreation(syncable::ModelType model_type,
                                      const BaseNode& parent,
                                      const std::string& tag) {
   DCHECK(!entry_) << "Init called twice";
+  if (tag.empty()) {
+    LOG(WARNING) << "InitUniqueByCreation failed due to empty tag.";
+    return false;
+  }
 
   const std::string hash = GenerateSyncableHash(model_type, tag);
 
@@ -457,9 +459,7 @@ bool WriteNode::InitUniqueByCreation(syncable::ModelType model_type,
   PutModelType(model_type);
 
   // Now set the predecessor, which sets IS_UNSYNCED as necessary.
-  PutPredecessor(NULL);
-
-  return true;
+  return PutPredecessor(NULL);
 }
 
 bool WriteNode::SetPosition(const BaseNode& new_parent,
@@ -487,9 +487,7 @@ bool WriteNode::SetPosition(const BaseNode& new_parent,
     return false;
 
   // Now set the predecessor, which sets IS_UNSYNCED as necessary.
-  PutPredecessor(predecessor);
-
-  return true;
+  return PutPredecessor(predecessor);
 }
 
 const syncable::Entry* WriteNode::GetEntry() const {
@@ -505,12 +503,15 @@ void WriteNode::Remove() {
   MarkForSyncing();
 }
 
-void WriteNode::PutPredecessor(const BaseNode* predecessor) {
+bool WriteNode::PutPredecessor(const BaseNode* predecessor) {
   syncable::Id predecessor_id = predecessor ?
       predecessor->GetEntry()->Get(syncable::ID) : syncable::Id();
-  entry_->PutPredecessor(predecessor_id);
+  if (!entry_->PutPredecessor(predecessor_id))
+    return false;
   // Mark this entry as unsynced, to wake up the syncer.
   MarkForSyncing();
+
+  return true;
 }
 
 void WriteNode::SetFaviconBytes(const vector<unsigned char>& bytes) {

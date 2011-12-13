@@ -11,11 +11,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
+#include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/character_encoding.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/background_contents.h"
 #include "chrome/browser/user_style_sheet_watcher.h"
@@ -102,16 +104,10 @@ RenderViewHostDelegateViewHelper::MaybeCreateBackgroundContents(
   if (!extension)
     return NULL;
 
-  // If the extension manifest specifies a background page, then don't allow one
-  // to be created here.
-  if (extension->background_url().is_valid())
-    return NULL;
-
-  // Only allow a single background contents per app.
+  // No BackgroundContents allowed if BackgroundContentsService doesn't exist.
   BackgroundContentsService* service =
       BackgroundContentsServiceFactory::GetForProfile(profile);
-  if (!service || service->GetAppBackgroundContents(
-          ASCIIToUTF16(extension->id())))
+  if (!service)
     return NULL;
 
   // Ensure that we're trying to open this from the extension's process.
@@ -120,6 +116,15 @@ RenderViewHostDelegateViewHelper::MaybeCreateBackgroundContents(
   if (!site->GetProcess() || !process_manager ||
       site->GetProcess() != process_manager->GetExtensionProcess(opener_url))
     return NULL;
+
+  // Only allow a single background contents per app. If one already exists,
+  // close it (even if it was specified in the manifest).
+  BackgroundContents* existing =
+      service->GetAppBackgroundContents(ASCIIToUTF16(extension->id()));
+  if (existing) {
+    DLOG(INFO) << "Closing existing BackgroundContents for " << opener_url;
+    delete existing;
+  }
 
   // Passed all the checks, so this should be created as a BackgroundContents.
   return service->CreateBackgroundContents(site, route_id, profile, frame_name,
@@ -151,7 +156,7 @@ TabContents* RenderViewHostDelegateViewHelper::CreateNewWindow(
 
   // Do not create the new TabContents if the opener is a prerender TabContents.
   prerender::PrerenderManager* prerender_manager =
-      profile->GetPrerenderManager();
+      prerender::PrerenderManagerFactory::GetForProfile(profile);
   if (prerender_manager &&
       prerender_manager->IsTabContentsPrerendering(base_tab_contents)) {
     return NULL;
@@ -182,7 +187,7 @@ RenderWidgetHostView* RenderViewHostDelegateViewHelper::CreateNewWidget(
   RenderWidgetHost* widget_host =
       new RenderWidgetHost(process, route_id);
   RenderWidgetHostView* widget_view =
-      RenderWidgetHostView::CreateViewForWidget(widget_host);
+      content::GetContentClient()->browser()->CreateViewForWidget(widget_host);
   // Popups should not get activated.
   widget_view->set_popup_type(popup_type);
   // Save the created widget associated with the route so we can show it later.
@@ -196,7 +201,8 @@ RenderViewHostDelegateViewHelper::CreateNewFullscreenWidget(
   RenderWidgetFullscreenHost* fullscreen_widget_host =
       new RenderWidgetFullscreenHost(process, route_id);
   RenderWidgetHostView* widget_view =
-      RenderWidgetHostView::CreateViewForWidget(fullscreen_widget_host);
+      content::GetContentClient()->browser()->CreateViewForWidget(
+          fullscreen_widget_host);
   pending_widget_views_[route_id] = widget_view;
   return widget_view;
 }
@@ -432,6 +438,8 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.accelerated_compositing_enabled =
         GpuProcessHost::gpu_enabled() &&
         !command_line.HasSwitch(switches::kDisableAcceleratedCompositing);
+    web_prefs.threaded_compositing_enabled =
+        command_line.HasSwitch(switches::kEnableThreadedCompositing);
     web_prefs.force_compositing_mode =
         command_line.HasSwitch(switches::kForceCompositingMode);
     web_prefs.allow_webui_compositing =
@@ -461,7 +469,7 @@ WebPreferences RenderViewHostDelegateHelper::GetWebkitPrefs(
     web_prefs.allow_running_insecure_content =
         prefs->GetBoolean(prefs::kWebKitAllowRunningInsecureContent);
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) || defined(TOUCH_UI)
     bool default_enable_scroll_animator = true;
 #else
     // On CrOS, the launcher always passes in the --enable flag.

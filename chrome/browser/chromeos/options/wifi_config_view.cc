@@ -98,17 +98,18 @@ class EAPMethodComboboxModel : public ui::ComboboxModel {
     NOTREACHED();
     return string16();
   }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(EAPMethodComboboxModel);
 };
 
 enum Phase2AuthComboboxIndex {
-  PHASE_2_AUTH_INDEX_AUTO     = 0, // LEAP, EAP-TLS have only this auth.
+  PHASE_2_AUTH_INDEX_AUTO     = 0,  // LEAP, EAP-TLS have only this auth.
   PHASE_2_AUTH_INDEX_MD5      = 1,
-  PHASE_2_AUTH_INDEX_MSCHAPV2 = 2, // PEAP has up to this auth.
+  PHASE_2_AUTH_INDEX_MSCHAPV2 = 2,  // PEAP has up to this auth.
   PHASE_2_AUTH_INDEX_MSCHAP   = 3,
   PHASE_2_AUTH_INDEX_PAP      = 4,
-  PHASE_2_AUTH_INDEX_CHAP     = 5, // EAP-TTLS has up to this auth.
+  PHASE_2_AUTH_INDEX_CHAP     = 5,  // EAP-TTLS has up to this auth.
   PHASE_2_AUTH_INDEX_COUNT    = 6
 };
 
@@ -153,6 +154,7 @@ class Phase2AuthComboboxModel : public ui::ComboboxModel {
     NOTREACHED();
     return string16();
   }
+
  private:
   views::Combobox* eap_method_combobox_;
   DISALLOW_COPY_AND_ASSIGN(Phase2AuthComboboxModel);
@@ -203,6 +205,7 @@ class ServerCACertComboboxModel : public ui::ComboboxModel {
     int cert_index = combo_index - 1;
     return cert_library_->GetCACertificates().GetDisplayStringAt(cert_index);
   }
+
  private:
   CertLibrary* cert_library_;
   DISALLOW_COPY_AND_ASSIGN(ServerCACertComboboxModel);
@@ -232,6 +235,7 @@ class UserCertComboboxModel : public ui::ComboboxModel {
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_USER_CERT_NONE_INSTALLED);
     return cert_library_->GetUserCertificates().GetDisplayStringAt(combo_index);
   }
+
  private:
   CertLibrary* cert_library_;
   DISALLOW_COPY_AND_ASSIGN(UserCertComboboxModel);
@@ -420,12 +424,13 @@ void WifiConfigView::RefreshShareCheckbox() {
     // user certificates are enabled.
     share_network_checkbox_->SetEnabled(false);
     share_network_checkbox_->SetChecked(false);
+  } else if (!UserManager::Get()->user_is_logged_in()) {
+    // If not logged in, networks must be shared.
+    share_network_checkbox_->SetEnabled(false);
+    share_network_checkbox_->SetChecked(true);
   } else {
     share_network_checkbox_->SetEnabled(true);
-    if (UserManager::Get()->user_is_logged_in())
-      share_network_checkbox_->SetChecked(false);  // Default to unshared.
-    else
-      share_network_checkbox_->SetChecked(true);  // Default to shared.
+    share_network_checkbox_->SetChecked(false);  // Default to unshared.
   }
 }
 
@@ -470,7 +475,7 @@ void WifiConfigView::UpdateErrorLabel() {
     }
   }
   if (!error_msg.empty()) {
-    error_label_->SetText(UTF8ToWide(error_msg));
+    error_label_->SetText(UTF8ToUTF16(error_msg));
     error_label_->SetVisible(true);
   } else {
     error_label_->SetVisible(false);
@@ -756,8 +761,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
 
   // SSID input
   layout->StartRow(0, column_view_set_id);
-  layout->AddView(new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_ID))));
+  layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_ID)));
   if (!wifi) {
     ssid_textfield_ = new views::Textfield(views::Textfield::STYLE_DEFAULT);
     ssid_textfield_->SetController(this);
@@ -765,7 +770,7 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
         IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_NETWORK_ID));
     layout->AddView(ssid_textfield_);
   } else {
-    views::Label* label = new views::Label(UTF8ToWide(wifi->name()));
+    views::Label* label = new views::Label(UTF8ToUTF16(wifi->name()));
     label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     layout->AddView(label);
   }
@@ -774,8 +779,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   // Security select
   if (!wifi && !show_8021x) {
     layout->StartRow(0, column_view_set_id);
-    layout->AddView(new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SECURITY))));
+    layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SECURITY)));
     security_combobox_ = new views::Combobox(new SecurityComboboxModel());
     security_combobox_->set_listener(this);
     layout->AddView(security_combobox_);
@@ -791,8 +796,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
 
     // EAP method
     layout->StartRow(0, column_view_set_id);
-    layout->AddView(new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_EAP_METHOD))));
+    layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_EAP_METHOD)));
     eap_method_combobox_ = new views::Combobox(new EAPMethodComboboxModel());
     eap_method_combobox_->set_listener(this);
     layout->AddView(eap_method_combobox_);
@@ -800,9 +805,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
 
     // Phase 2 authentication
     layout->StartRow(0, column_view_set_id);
-    phase_2_auth_label_ =
-        new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PHASE_2_AUTH)));
+    phase_2_auth_label_ = new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PHASE_2_AUTH));
     layout->AddView(phase_2_auth_label_);
     phase_2_auth_combobox_ = new views::Combobox(
         new Phase2AuthComboboxModel(eap_method_combobox_));
@@ -814,9 +818,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
 
     // Server CA certificate
     layout->StartRow(0, column_view_set_id);
-    server_ca_cert_label_ =
-        new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_SERVER_CA)));
+    server_ca_cert_label_ = new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_SERVER_CA));
     layout->AddView(server_ca_cert_label_);
     server_ca_cert_combobox_ = new ComboboxWithWidth(
         new ServerCACertComboboxModel(cert_library_),
@@ -829,9 +832,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
 
     // User certificate
     layout->StartRow(0, column_view_set_id);
-    user_cert_label_ = new views::Label(
-        UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT)));
+    user_cert_label_ = new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT));
     layout->AddView(user_cert_label_);
     user_cert_combobox_ = new views::Combobox(
         new UserCertComboboxModel(cert_library_));
@@ -843,8 +845,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
 
     // Identity
     layout->StartRow(0, column_view_set_id);
-    identity_label_ = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_IDENTITY)));
+    identity_label_ = new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_IDENTITY));
     layout->AddView(identity_label_);
     identity_textfield_ = new views::Textfield(
         views::Textfield::STYLE_DEFAULT);
@@ -859,7 +861,7 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   layout->StartRow(0, column_view_set_id);
   int label_text_id = IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE;
   passphrase_label_ = new views::Label(
-      UTF16ToWide(l10n_util::GetStringUTF16(label_text_id)));
+      l10n_util::GetStringUTF16(label_text_id));
   layout->AddView(passphrase_label_);
   passphrase_textfield_ = new views::Textfield(
       views::Textfield::STYLE_PASSWORD);
@@ -877,11 +879,11 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   // Password visible button.
   passphrase_visible_button_ = new views::ToggleImageButton(this);
   passphrase_visible_button_->SetTooltipText(
-      UTF16ToWide(l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE_SHOW)));
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE_SHOW));
   passphrase_visible_button_->SetToggledTooltipText(
-      UTF16ToWide(l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE_HIDE)));
+      l10n_util::GetStringUTF16(
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_PASSPHRASE_HIDE));
   passphrase_visible_button_->SetImage(
       views::ImageButton::BS_NORMAL,
       ResourceBundle::GetSharedInstance().
@@ -903,8 +905,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
     // Anonymous identity
     layout->StartRow(0, column_view_set_id);
     identity_anonymous_label_ =
-        new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_IDENTITY_ANONYMOUS)));
+        new views::Label(l10n_util::GetStringUTF16(
+            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_IDENTITY_ANONYMOUS));
     layout->AddView(identity_anonymous_label_);
     identity_anonymous_textfield_ = new views::Textfield(
         views::Textfield::STYLE_DEFAULT);
@@ -921,8 +923,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   if (show_8021x) {
     layout->StartRow(0, column_view_set_id);
     save_credentials_checkbox_ = new views::Checkbox(
-        UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SAVE_CREDENTIALS)));
+        l10n_util::GetStringUTF16(
+            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SAVE_CREDENTIALS));
     layout->SkipColumns(1);
     layout->AddView(save_credentials_checkbox_);
   }
@@ -934,8 +936,8 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
        !wifi->RequiresUserProfile())) {
     layout->StartRow(0, column_view_set_id);
     share_network_checkbox_ = new views::Checkbox(
-        UTF16ToWide(l10n_util::GetStringUTF16(
-            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SHARE_NETWORK)));
+        l10n_util::GetStringUTF16(
+            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_SHARE_NETWORK));
     layout->SkipColumns(1);
     layout->AddView(share_network_checkbox_);
   }
@@ -946,7 +948,7 @@ void WifiConfigView::Init(WifiNetwork* wifi, bool show_8021x) {
   layout->SkipColumns(1);
   error_label_ = new views::Label();
   error_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  error_label_->SetColor(SK_ColorRED);
+  error_label_->SetEnabledColor(SK_ColorRED);
   layout->AddView(error_label_);
 
   // Initialize the field and checkbox values.

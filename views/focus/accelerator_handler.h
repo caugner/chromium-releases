@@ -8,7 +8,7 @@
 
 #include "build/build_config.h"
 
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
 #endif
 
@@ -20,14 +20,12 @@
 
 namespace views {
 
-#if defined(TOUCH_UI) && !defined(USE_WAYLAND)
+#if (defined(TOUCH_UI) && !defined(USE_WAYLAND)) \
+    || (!defined(OS_WIN) && defined(USE_AURA))
 // Dispatch an XEvent to the RootView. Return true if the event was dispatched
 // and handled, false otherwise.
 bool VIEWS_EXPORT DispatchXEvent(XEvent* xevent);
 
-// Keep a list of touch devices so that it is possible to determine if a pointer
-// event is a touch-event or a mouse-event.
-void VIEWS_EXPORT SetTouchDeviceList(std::vector<unsigned int>& devices);
 #endif  // TOUCH_UI
 
 // This class delegates the key messages to the associated FocusManager class
@@ -43,7 +41,7 @@ class VIEWS_EXPORT AcceleratorHandler : public MessageLoop::Dispatcher {
 #elif defined(USE_WAYLAND)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
       ui::WaylandEvent* ev);
-#elif defined(TOUCH_UI)
+#elif defined(TOUCH_UI) || defined(USE_AURA)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(XEvent* xev);
 #else
   virtual bool Dispatch(GdkEvent* event);

@@ -6,15 +6,20 @@
 
 #include <algorithm>
 #include <functional>
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "webkit/glue/webpreferences.h"
 
 namespace {
 
@@ -55,6 +60,8 @@ static Value* CreateColumnValue(const TaskManagerModel* tm,
                web_ui_util::GetImageDataUrl(tm->GetResourceIcon(i)));
   if (column_name == "title")
     return Value::CreateStringValue(tm->GetResourceTitle(i));
+  if (column_name == "profileName")
+    return Value::CreateStringValue(tm->GetResourceProfileName(i));
   if (column_name == "networkUsage")
     return Value::CreateStringValue(tm->GetResourceNetworkUsage(i));
   if (column_name == "networkUsageValue")
@@ -169,6 +176,7 @@ static DictionaryValue* CreateTaskGroupValue(const TaskManagerModel* tm,
   // Columns which have some data in each group.
   CreateGroupColumnList(tm, "icon", index, length, val);
   CreateGroupColumnList(tm, "title", index, length, val);
+  CreateGroupColumnList(tm, "profileName", index, length, val);
   CreateGroupColumnList(tm, "networkUsage", index, length, val);
   CreateGroupColumnList(tm, "networkUsageValue", index, length, val);
   CreateGroupColumnList(tm, "fps", index, length, val);
@@ -250,7 +258,7 @@ void TaskManagerHandler::OnItemsAdded(const int start, const int length) {
 
 void TaskManagerHandler::OnItemsRemoved(const int start, const int length) {
   // Returns if this is called before updating |resource_to_group_table_|.
-  if (resource_to_group_table_.size() < static_cast<size_t>(start + length))
+  if (resource_to_group_table_.size() <= static_cast<size_t>(start + length))
     return;
 
   // Converts from an index of resources to an index of groups.
@@ -291,13 +299,17 @@ void TaskManagerHandler::Init() {
 
 void TaskManagerHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("killProcess",
-      NewCallback(this, &TaskManagerHandler::HandleKillProcess));
+      base::Bind(&TaskManagerHandler::HandleKillProcess,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("openAboutMemory",
-      NewCallback(this, &TaskManagerHandler::OpenAboutMemory));
+      base::Bind(&TaskManagerHandler::OpenAboutMemory,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("enableTaskManager",
-      NewCallback(this, &TaskManagerHandler::EnableTaskManager));
+      base::Bind(&TaskManagerHandler::EnableTaskManager,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("disableTaskManager",
-      NewCallback(this, &TaskManagerHandler::DisableTaskManager));
+      base::Bind(&TaskManagerHandler::DisableTaskManager,
+                 base::Unretained(this)));
 }
 
 void TaskManagerHandler::HandleKillProcess(const ListValue* indexes) {
@@ -349,6 +361,15 @@ void TaskManagerHandler::EnableTaskManager(const ListValue* indexes) {
 }
 
 void TaskManagerHandler::OpenAboutMemory(const ListValue* indexes) {
+  RenderViewHost* rvh = web_ui_->tab_contents()->render_view_host();
+  if (rvh && rvh->delegate()) {
+    WebPreferences webkit_prefs = rvh->delegate()->GetWebkitPrefs();
+    webkit_prefs.allow_scripts_to_close_windows = true;
+    rvh->UpdateWebkitPreferences(webkit_prefs);
+  } else {
+    DCHECK(false);
+  }
+
   task_manager_->OpenAboutMemory();
 }
 

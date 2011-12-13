@@ -160,20 +160,6 @@
          }
       },
       {
-        "name": "getToolstrips",
-        "nodoc": true,
-        "type": "function",
-        "description": "Deprecated. Please use getViews({type: 'TOOLSTRIP'}). Returns an array of the JavaScript 'window' objects for each of the toolstrip views running inside the current extension. If windowId is specified, returns only the 'window' objects of toolstrips attached to the specified window.",
-        "parameters": [
-          {"type": "integer", "name": "windowId", "optional": true}
-        ],
-        "returns": {
-          "type": "array",
-          "description": "Array of global window objects",
-          "items": { "type": "object", "isInstanceOf": "DOMWindow", "properties": {}, "additionalProperties": { "type": "any" } }
-        }
-      },
-      {
         "name": "getExtensionTabs",
         "nodoc": true,
         "type": "function",
@@ -260,7 +246,7 @@
         "parameters": [
           {"name": "request", "type": "any", "description": "The request sent by the calling script."},
           {"name": "sender", "$ref": "MessageSender" },
-          {"name": "sendResponse", "type": "function", "description": "Function to call when you have a response. The argument should be any JSON-ifiable object, or undefined if there is no response." }
+          {"name": "sendResponse", "type": "function", "description": "Function to call (at most once) when you have a response. The argument should be any JSON-ifiable object, or undefined if there is no response. If you have more than one <code>onRequest</code> listener in the same document, then only one may send a response." }
         ]
       },
       {
@@ -528,6 +514,166 @@
     ]
   },
   {
+    "namespace": "experimental.speechInput",
+    "types": [
+      {
+        "id": "SpeechInputStartOptions",
+        "type": "object",
+        "description": "Object describing the options used for speech recognition.",
+        "properties": {
+          "language": {
+            "type": "string",
+            "optional": true,
+            "description": "BCP-47 language code of the language to recognize. When set to 'auto' or not defined defaults to user's most preferred content language. Will use 'en-US' if not supported or invalid."
+          },
+          "grammar": {
+            "type": "string",
+            "description": "Name of the grammar to use. Defaults to 'builtin:search'.",
+            "optional": true
+          },
+          "filterProfanities": {
+            "type": "boolean",
+            "optional": true,
+            "description": "Enable or disable profanity filtering. Will use the default Chrome filtering settings if not set."
+          }
+        }
+      },
+      {
+        "id": "SpeechInputError",
+        "type": "object",
+        "description": "Object describing a speech input error.",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": ["noSpeechHeard", "noResults", "captureError", "networkError"],
+            "description": "Code identifying the error case."
+          }
+        }
+      },
+      {
+        "id": "SpeechInputResultHypothesis",
+        "type": "object",
+        "description": "Object describing a speech recognition hypothesis.",
+        "properties": {
+          "utterance": {
+            "type": "string",
+            "description": "Text of this hypothesis."
+          },
+          "confidence": {
+            "type": "number",
+            "description": "Confidence of the hypothesis. Rated from 0 (lowest) to 1 (highest)."
+          }
+        }
+      },
+      {
+        "id": "SpeechInputResultEvent",
+        "type": "object",
+        "description": "Object containing the recognition results.",
+        "properties": {
+          "hypotheses": {
+            "type": "array",
+            "optional": true,
+            "description": "Array of zero or more objects describing the stable candidate hypotheses sorted by decreasing likelihood.",
+            "items": { "$ref": "SpeechInputResultHypothesis" }
+          }
+        }
+      }
+    ],
+    "functions": [
+      {
+        "name": "start",
+        "type": "function",
+        "description": "Request to start recording as a new speech recognition session.",
+        "parameters": [
+          {
+            "name": "options",
+            "$ref": "SpeechInputStartOptions",
+            "optional": true,
+            "description": "Options used for this speech recognition session."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": true,
+            "description": "Called when the speech recognition session has successfully started recording.",
+            "parameters": []
+          }
+        ]
+      },
+      {
+        "name": "stop",
+        "type": "function",
+        "description": "Request to stop an ongoing speech recognition session.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": true,
+            "description": "Called when the audio recording has stopped and any pending recognition results have been completed.",
+            "parameters": []
+          }
+        ]
+      },
+      {
+        "name": "isRecording",
+        "type": "function",
+        "description": "Determine if audio recording is currently in process in Chrome, not limited to this API.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": true,
+            "parameters": [
+              {
+                "name": "result",
+                "type": "boolean",
+                "description": "Flag set to true if recording is in process in Chrome, false otherwise."
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onError",
+        "type": "function",
+        "description": "Called in case of an error in speech recognition.",
+        "parameters": [
+          {
+            "name": "error",
+            "$ref": "SpeechInputError",
+            "description": "Error being reported."
+          }
+        ]
+      },
+      {
+        "name": "onSoundStart",
+        "type": "function",
+        "description": "Called when the system starts detecting sound in the input data.",
+        "parameters": []
+      },
+      {
+        "name": "onSoundEnd",
+        "type": "function",
+        "description": "Called when the system detects enough silence to consider the ongoing speech has ended.",
+        "parameters": []
+      },
+      {
+        "name": "onResult",
+        "type": "function",
+        "description": "Called when speech recognition results are available.",
+        "parameters": [
+          {
+            "name": "event",
+            "$ref": "SpeechInputResultEvent",
+            "description": "Object containing the speech recognition results."
+          }
+        ]
+      }
+    ]
+  },
+  {
     "namespace": "tts",
     "types": [
       {
@@ -617,21 +763,21 @@
             "description": "The speech options.",
             "properties": {
               "enqueue": {
-	        "type": "boolean",
-		"optional": true,
-		"description": "If true, enqueues this utterance if TTS is already in progress. If false (the default), interrupts any current speech and flushes the speech queue before speaking this new utterance."
+                "type": "boolean",
+                "optional": true,
+                "description": "If true, enqueues this utterance if TTS is already in progress. If false (the default), interrupts any current speech and flushes the speech queue before speaking this new utterance."
               },
-	      "voiceName": {
+              "voiceName": {
                 "type": "string",
                 "optional": true,
                 "description": "The name of the voice to use for synthesis. If empty, uses any available voice."
               },
-	      "extensionId": {
+              "extensionId": {
                 "type": "string",
                 "optional": true,
                 "description": "The extension ID of the speech engine to use, if known."
               },
-	      "lang": {
+              "lang": {
                 "type": "string",
                 "optional": true,
                 "description": "The language to be used for synthesis, in the form <em>language</em>-<em>region</em>. Examples: 'en', 'en-US', 'en-GB', 'zh-CN'."
@@ -797,12 +943,12 @@
             "name": "options",
             "description": "Options specified to the tts.speak() method.",
             "properties": {
-	      "voiceName": {
+              "voiceName": {
                 "type": "string",
                 "optional": true,
                 "description": "The name of the voice to use for synthesis."
               },
-	      "lang": {
+              "lang": {
                 "type": "string",
                 "optional": true,
                 "description": "The language to be used for synthesis, in the form <em>language</em>-<em>region</em>. Examples: 'en', 'en-US', 'en-GB', 'zh-CN'."
@@ -835,7 +981,7 @@
                 "description": "Speaking volume between 0 and 1 inclusive, with 0 being lowest and 1 being highest, with a default of 1.0."
               }
             }
-	  },
+          },
           {
             "name": "sendTtsEvent",
             "type": "function",
@@ -976,7 +1122,7 @@
           "incognito": {"type": "boolean", "description": "Whether the window is incognito."},
           "type": {
             "type": "string",
-            "description": "The type of browser window this is. The 'panel' type requires the 'experimental' permission.",
+            "description": "The type of browser window this is.",
             "enum": ["normal", "popup", "panel", "app"]
           }
         }
@@ -1083,16 +1229,16 @@
                 ]
               },
               "tabId": {"type": "integer", "minimum": 0, "optional": true, "description": "The id of the tab for which you want to adopt to the new window."},
-              "left": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the left edge of the screen. If not specified, the new window is offset naturally from the last focusd window."},
-              "top": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the top edge of the screen. If not specified, the new window is offset naturally from the last focusd window."},
+              "left": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the left edge of the screen. If not specified, the new window is offset naturally from the last focusd window. This value is ignored for panels."},
+              "top": {"type": "integer", "optional": true, "description": "The number of pixels to position the new window from the top edge of the screen. If not specified, the new window is offset naturally from the last focusd window. This value is ignored for panels."},
               "width": {"type": "integer", "minimum": 0, "optional": true, "description": "The width in pixels of the new window. If not specified defaults to a natural width."},
               "height": {"type": "integer", "minimum": 0, "optional": true, "description": "The height in pixels of the new window. If not specified defaults to a natural height."},
-	      "focused": {"type": "boolean", "optional": true, "description": "If true, opens an active window. If false, opens an inactive window."},
+              "focused": {"type": "boolean", "optional": true, "description": "If true, opens an active window. If false, opens an inactive window."},
               "incognito": {"type": "boolean", "optional": true, "description": "Whether the new window should be an incognito window."},
               "type": {
                 "type": "string",
                 "optional": true,
-                "description": "Specifies what type of browser window to create. The 'panel' type requires the 'experimental' permission.",
+                "description": "Specifies what type of browser window to create. The 'panel' type creates a popup unless the '--enable-panels' flag is set.",
                 "enum": ["normal", "popup", "panel"]
               }
             },
@@ -1121,10 +1267,10 @@
             "type": "object",
             "name": "updateInfo",
             "properties": {
-              "left": {"type": "integer", "optional": true, "description": "The offset from the left edge of the screen to move the window to in pixels."},
-              "top": {"type": "integer", "optional": true, "description": "The offset from the top edge of the screen to move the window to in pixels."},
-              "width": {"type": "integer", "minimum": 0, "optional": true, "description": "The width to resize the window to in pixels."},
-              "height": {"type": "integer", "minimum": 0, "optional": true, "description": "The height to resize the window to in pixels."},
+              "left": {"type": "integer", "optional": true, "description": "The offset from the left edge of the screen to move the window to in pixels. This value is ignored for panels."},
+              "top": {"type": "integer", "optional": true, "description": "The offset from the top edge of the screen to move the window to in pixels. This value is ignored for panels."},
+              "width": {"type": "integer", "minimum": 0, "optional": true, "description": "The width to resize the window to in pixels. This value is ignored for panels."},
+              "height": {"type": "integer", "minimum": 0, "optional": true, "description": "The height to resize the window to in pixels. This value is ignored for panels."},
               "focused": {"type": "boolean", "optional": true, "description": "If true, brings the window to the front. If false, brings the next window in the z-order to the front."},
               "drawAttention": {"type": "boolean", "optional": true, "description": "If true, causes the window to be displayed in a manner that draws the user's attention to the window, without changing the focused window. The effect lasts until the user changes focus to the window. This option has no effect if set to false or if the window already has focus."}
             }
@@ -1177,13 +1323,13 @@
         "type": "function",
         "description": "Fired when the currently focused window changes. Will be chrome.windows.WINDOW_ID_NONE if all chrome windows have lost focus. Note: On some Linux window managers, WINDOW_ID_NONE will always be sent immediately preceding a switch from one chrome window to another.",
         "parameters": [
-          {"type": "integer", "name": "windowId", "minimum": 0, "description": "ID of the newly focused window."}
+          {"type": "integer", "name": "windowId", "minimum": -1, "description": "ID of the newly focused window."}
         ]
       }
     ]
   },
   {
-    "namespace": "experimental.permissions",
+    "namespace": "permissions",
     "types": [
       {
         "id": "Permissions",
@@ -1279,7 +1425,7 @@
         "name": "request",
         "type": "function",
         "unprivileged": true,
-        "description": "Requests access to the specified permissions. These permissions must be defined in the optional_permissions field of the manifest.",
+        "description": "Requests access to the specified permissions. These permissions must be defined in the optional_permissions field of the manifest. If there are any problems requesting the permissions, <a href='extension.html#property-lastError'>chrome.extension.lastError</a> will be set.",
         "parameters": [
           {
             "name": "permissions",
@@ -1303,7 +1449,7 @@
         "name": "remove",
         "type": "function",
         "unprivileged": true,
-        "description": "Removes access to the specified permissions.",
+        "description": "Removes access to the specified permissions. If there are any problems removing the permissions, <a href='extension.html#property-lastError'>chrome.extension.lastError</a> will be set.",
         "parameters": [
           {
             "name": "permissions",
@@ -1335,7 +1481,9 @@
           "id": {"type": "integer", "minimum": 0, "description": "The ID of the tab. Tab IDs are unique within a browser session."},
           "index": {"type": "integer", "minimum": 0, "description": "The zero-based index of the tab within its window."},
           "windowId": {"type": "integer", "minimum": 0, "description": "The ID of the window the tab is contained within."},
-          "selected": {"type": "boolean", "description": "Whether the tab is selected."},
+          "selected": {"type": "boolean", "description": "Whether the tab is selected.", "nodoc": true},
+          "highlighted": {"type": "boolean", "description": "Whether the tab is highlighted."},
+          "active": {"type": "boolean", "description": "Whether the tab is active in its window."},
           "pinned": {"type": "boolean", "description": "Whether the tab is pinned."},
           "url": {"type": "string", "description": "The URL the tab is displaying."},
           "title": {"type": "string", "optional": true, "description": "The title of the tab. This may not be available if the tab is loading."},
@@ -1437,8 +1585,9 @@
       },
       {
         "name": "getSelected",
+        "nodoc": true,
         "type": "function",
-        "description": "Gets the tab that is selected in the specified window.",
+        "description": "Deprecated. Please use query({'active': true}). Gets the tab that is selected in the specified window.",
         "parameters": [
           {
             "type": "integer",
@@ -1459,7 +1608,8 @@
       {
         "name": "getAllInWindow",
         "type": "function",
-        "description": "Gets details about all tabs in the specified window.",
+        "nodoc": true,
+        "description": "Deprecated. Please use query({'windowId': windowId}). Gets details about all tabs in the specified window.",
         "parameters": [
           {
             "type": "integer",
@@ -1503,7 +1653,13 @@
                 "optional": true,
                 "description": "The URL to navigate the tab to initially. Fully-qualified URLs must include a scheme (i.e. 'http://www.google.com', not 'www.google.com'). Relative URLs will be relative to the current page within the extension. Defaults to the New Tab Page."
               },
+              "active": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether the tab should become the active tab in the window. Defaults to <var>true</var>"
+              },
               "selected": {
+                "nodoc": true,
                 "type": "boolean",
                 "optional": true,
                 "description": "Whether the tab should become the selected tab in the window. Defaults to <var>true</var>"
@@ -1530,11 +1686,120 @@
         ]
       },
       {
+        "name": "query",
+        "type": "function",
+        "description": "Gets all tabs that have the specified properties, or all tabs if no properties are specified.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "queryInfo",
+            "properties": {
+              "active": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether the tabs are active in their windows."
+              },
+              "pinned": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether the tabs are pinned."
+              },
+              "highlighted": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether the tabs are highlighted."
+              },
+              "status": {
+                "type": "string",
+                "optional": true,
+                "enum": ["loading", "complete"],
+                "description": "Whether the tabs have completed loading."
+              },
+              "title": {
+                "type": "string",
+                "optional": true,
+                "description": "Match page titles against a pattern."
+              },
+              "url": {
+                "type": "string",
+                "optional": true,
+                "description": "Match tabs against a URL pattern."
+              },
+              "windowId": {
+                "type": "integer",
+                "optional": true,
+                "minimum": 0,
+                "description": "The ID of the parent window."
+              },
+              "windowType": {
+                "type": "string",
+                "optional": true,
+                "enum": ["normal", "popup", "panel", "app"],
+                "description": "The type of window the tabs are in."
+              }
+            }
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "Tab"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "highlight",
+        "type": "function",
+        "description": "Highlights the given tabs.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "highlightInfo",
+            "properties": {
+               "windowId": {
+                 "type": "integer",
+                 "description": "The window that contains the tabs."
+               },
+               "tabs": {
+                 "description": "One or more tab indices to highlight.",
+                 "choices": [
+                   {"type": "array", "items": {"type": "integer", "minimum": 0}},
+                   {"type": "integer"}
+                 ]
+               }
+             }
+           },
+           {
+             "type": "function",
+             "name": "callback",
+             "parameters": [
+               {
+                 "name": "window",
+                 "$ref": "Window",
+                 "description": "Contains details about the window whose tabs were highlighted."
+               }
+             ]
+           }
+        ]
+      },
+      {
         "name": "update",
         "type": "function",
         "description": "Modifies the properties of a tab. Properties that are not specified in <var>updateProperties</var> are not modified. Note: This function can be used without requesting the 'tabs' permission in the manifest.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "minimum": 0},
+          {
+            "type": "integer",
+            "name": "tabId",
+            "minimum": 0,
+            "optional": true,
+            "description": "Defaults to the selected tab of the <a href='windows.html#current-window'>current window</a>."
+          },
           {
             "type": "object",
             "name": "updateProperties",
@@ -1543,7 +1808,18 @@
                 "optional": true,
                 "description": "A URL to navigate the tab to."
               },
+              "active": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether the tab should be active."
+              },
+              "highlighted": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Adds or removes the tab from the current selection."
+              },
               "selected": {
+                "nodoc": true,
                 "type": "boolean",
                 "optional": true,
                 "description": "Whether the tab should be selected."
@@ -1573,9 +1849,16 @@
       {
         "name": "move",
         "type": "function",
-        "description": "Moves a tab to a new position within its window, or to a new window. Note that tabs can only be moved to and from normal (window.type === \"normal\") windows.",
+        "description": "Moves one or more tabs to a new position within its window, or to a new window. Note that tabs can only be moved to and from normal (window.type === \"normal\") windows.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "minimum": 0},
+          {
+            "name": "tabIds",
+            "description": "The tab or list of tabs to move.",
+            "choices": [
+              {"type": "integer", "minimum": 0},
+              {"type": "array", "items": {"type": "integer", "minimum": 0}}
+            ]
+          },
           {
             "type": "object",
             "name": "moveProperties",
@@ -1599,20 +1882,51 @@
             "optional": true,
             "parameters": [
               {
-                "name": "tab",
-                "$ref": "Tab",
-                "description": "Details about the moved tab."
+                "name": "tabs",
+                "description": "Details about the moved tabs.",
+                "choices": [
+                  {"$ref": "Tab"},
+                  {"type": "array", "items": {"$ref": "Tab"}}
+                ]
               }
             ]
           }
         ]
       },
       {
+        "name": "reload",
+        "type": "function",
+        "description": "Reload a tab.",
+        "parameters": [
+          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab to reload; defaults to the selected tab of the current window."},
+          {
+            "type": "object",
+            "name": "reloadProperties",
+            "optional": true,
+            "properties": {
+              "bypassCache": {
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether using any local cache. Default is false."
+              }
+            }
+          },
+          {"type": "function", "name": "callback", "optional": true, "parameters": []}
+        ]
+      },
+      {
         "name": "remove",
         "type": "function",
-        "description": "Closes a tab. Note: This function can be used without requesting the 'tabs' permission in the manifest.",
+        "description": "Closes one or more tabs. Note: This function can be used without requesting the 'tabs' permission in the manifest.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "minimum": 0},
+          {
+            "name": "tabIds",
+            "description": "The tab or list of tabs to close.",
+            "choices": [
+              {"type": "integer", "minimum": 0},
+              {"type": "array", "items": {"type": "integer", "minimum": 0}}
+            ]
+          },
           {"type": "function", "name": "callback", "optional": true, "parameters": []}
         ]
       },
@@ -1626,7 +1940,7 @@
             "name": "tabId",
             "minimum": 0,
             "optional": true,
-            "description": "Defaults to the selected tab of the <a href='windows.html#current-window'>current window</a>."
+            "description": "Defaults to the active tab of the <a href='windows.html#current-window'>current window</a>."
           },
           {
             "type": "function",
@@ -1644,7 +1958,7 @@
       {
         "name": "captureVisibleTab",
         "type": "function",
-        "description": "Captures the visible area of the currently selected tab in the specified window. You must have <a href='manifest.html#permissions'>host permission</a> for the URL displayed by the tab.",
+        "description": "Captures the visible area of the currently active tab in the specified window. You must have <a href='manifest.html#permissions'>host permission</a> for the URL displayed by the tab.",
         "parameters": [
           {
             "type": "integer",
@@ -1687,7 +2001,7 @@
         "type": "function",
         "description": "Injects JavaScript code into a page. For details, see the <a href='content_scripts.html#pi'>programmatic injection</a> section of the content scripts doc.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab in which to run the script; defaults to the selected tab of the current window."},
+          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab in which to run the script; defaults to the active tab of the current window."},
           {
             "type": "object",
             "name": "details",
@@ -1712,7 +2026,7 @@
         "type": "function",
         "description": "Injects CSS into a page. For details, see the <a href='content_scripts.html#pi'>programmatic injection</a> section of the content scripts doc.",
         "parameters": [
-          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab in which to insert the CSS; defaults to the selected tab of the current window."},
+          {"type": "integer", "name": "tabId", "optional": true, "description": "The ID of the tab in which to insert the CSS; defaults to the active tab of the current window."},
           {
             "type": "object",
             "name": "details",
@@ -1800,14 +2114,15 @@
       },
       {
         "name": "onSelectionChanged",
+        "nodoc": true,
         "type": "function",
-        "description": "Fired when the selected tab in a window changes.",
+        "description": "Deprecated. Please use onActiveChanged.",
         "parameters": [
           {
             "type": "integer",
             "name": "tabId",
             "minimum": 0,
-            "description": "The ID of the tab that has become selected."
+            "description": "The ID of the tab that has become active."
           },
           {
             "type": "object",
@@ -1817,6 +2132,54 @@
                 "type": "integer",
                 "minimum": 0,
                 "description": "The ID of the window the selected tab changed inside of."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "onActiveChanged",
+        "type": "function",
+        "description": "Fires when the selected tab in a window changes.",
+        "parameters": [
+          {
+            "type": "integer",
+            "name": "tabId",
+            "minimum": 0,
+            "description": "The ID of the tab that has become active."
+          },
+          {
+            "type": "object",
+            "name": "selectInfo",
+            "properties": {
+              "windowId": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "The ID of the window the selected tab changed inside of."
+              }
+            }
+          }
+        ]
+      },
+      {
+        "name": "onHighlightChanged",
+        "type": "function",
+        "description": "Fired when the highlighted or selected tabs in a window changes.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "selectInfo",
+            "properties": {
+              "windowId": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "The window whose tabs changed."
+              },
+              "tabIds": {
+                "type": "array",
+                "name": "tabIds",
+                "items": {"type": "integer", "minimum": 0},
+                "description": "All highlighted tabs in the window."
               }
             }
           }
@@ -2803,6 +3166,7 @@
         "description": "See http://www.w3.org/TR/DOM-Level-3-Events/#events-KeyboardEvent",
         "properties": {
           "type": {"type": "string", "description": "One of keyup or keydown.", "enum": ["keyup", "keydown"]},
+          "requestId": {"type": "string", "description": "The ID of the request."},
           "key": {"type": "string", "description": "Value of the key being pressed"},
           "keyCode": {"type": "string", "description": "Value of the key being press, unmodified by control keys."},
           "altKey": {"type": "boolean", "optional": true, "description": "Whether or not the ALT key is pressed."},
@@ -3166,11 +3530,6 @@
                 "description": "ID of the engine to use",
                 "type": "string"
               },
-              "parentId": {
-                "description": "ID of the parent menu item",
-                "optional": true,
-                "type": "string"
-              },
               "items": {
                 "description": "MenuItems to add. They will be added in the order they exist in the array.",
                 "type": "array",
@@ -3195,8 +3554,7 @@
                       "optional": true,
                       "description": "Used to create a shortcut key label.  The IME should handle the shortcut key itself, however.",
                       "properties": {
-                        "key": {"type": "string", "description": "Value of the key being pressed"},
-                        "keyCode": {"type": "string", "description": "Value of the key being press, unmodified by control keys."},
+                        "key": {"type": "string", "description": "Value of the shortcut key"},
                         "altKey": {"type": "boolean", "optional": true, "description": "Whether or not the ALT key is pressed."},
                         "ctrlKey": {"type": "boolean", "optional": true, "description": "Whether or not the CTRL key is pressed."},
                         "shiftKey": {"type": "boolean", "optional": true, "description": "Whether or not the SHIFT key is pressed."}
@@ -3254,7 +3612,6 @@
                       "description": "Used to create a shortcut key label.  The IME should handle the shortcut key itself, however.",
                       "properties": {
                         "key": {"type": "string", "description": "Value of the key being pressed"},
-                        "keyCode": {"type": "string", "description": "Value of the key being press, unmodified by control keys."},
                         "altKey": {"type": "boolean", "optional": true, "description": "Whether or not the ALT key is pressed."},
                         "ctrlKey": {"type": "boolean", "optional": true, "description": "Whether or not the CTRL key is pressed."},
                         "shiftKey": {"type": "boolean", "optional": true, "description": "Whether or not the SHIFT key is pressed."}
@@ -3304,6 +3661,16 @@
             "type": "integer",
             "minimum": 0
           }
+        ]
+      },
+      {
+        "name": "eventHandled",
+        "nodoc": true,
+        "type": "function",
+        "description": "Used internally to send a response for onKeyEvent.",
+        "parameters": [
+          {"type": "string", "name": "requestId"},
+          {"type": "boolean", "name": "response"}
         ]
       }
     ],
@@ -4270,23 +4637,13 @@
             "optional": true
           }
         }
-      },
-      {
-        "id": "DownloadResponse",
-        "type": "object",
-        "nodoc": true,
-        "description": "This object is transformed into two callback parameters for the callback to download().",
-        "properties": {
-          "id": {"type": "integer", "optional": true},
-          "error": {"type": "integer", "optional": true}
-        }
       }
     ],
     "functions": [
       {
         "name": "download",
         "type": "function",
-        "description": "Download a URL. If the URL uses the HTTP[S] protocol, then the request will include all cookies currently set for its hostname. If the download started successfully, |callback| will be called with the new DownloadItem’s |id| and |error|=undefined. If there was an error starting the download, then |callback| will be called with |downloadId|=undefined and an |error| code integer. If the URL’s hostname is not specified in the |permissions| section of the extension’s manifest, then the |error| object will indicate that the extension does not have permission to access that hostname.",
+        "description": "Download a URL. If the URL uses the HTTP[S] protocol, then the request will include all cookies currently set for its hostname. If the download started successfully, |callback| will be called with the new DownloadItem’s |id|. If there was an error starting the download, then |callback| will be called with |downloadId|=undefined and chrome.extension.lastError will be set. If the URL’s hostname is not specified in the |permissions| section of the extension’s manifest, then the |chrome.extensions.lastError| object will indicate that the extension does not have permission to access that hostname.",
         "parameters": [
           {"$ref": "DownloadOptions"},
           {
@@ -4294,7 +4651,7 @@
             "type": "function",
             "optional": true,
             "parameters": [
-              {"$ref": "DownloadResponse"}
+              {"name": "id", "type": "integer"}
             ]
           }
         ]
@@ -5175,13 +5532,13 @@
     "events": []
   },
   {
-    "namespace": "experimental.webNavigation",
+    "namespace": "webNavigation",
     "types": [],
     "functions": [
       {
         "name": "getFrame",
         "type": "function",
-        "description": "Retrieves information about the given frame.",
+        "description": "Retrieves information about the given frame. A frame refers to an &lt;iframe&gt; or a &lt;frame&gt; of a web page and is identified by a tab ID and a frame ID.",
         "parameters": [
           {
             "type": "object",
@@ -5197,6 +5554,8 @@
               {
                 "type": "object",
                 "name": "details",
+                "optional": true,
+                "description": "Information about the requested frame, null if the specified frame ID and/or tab ID are invalid.",
                 "properties": {
                   "errorOccurred": {
                     "type": "boolean",
@@ -5205,6 +5564,47 @@
                   "url": {
                     "type": "string",
                     "description": "The URL currently associated with this frame, if the frame identified by the frameId existed at one point in the given tab. The fact that an URL is associated with a given frameId does not imply that the corresponding frame still exists."
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getAllFrames",
+        "type": "function",
+        "description": "Retrieves information about all frames of a given tab.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "description": "Information about the tab to retrieve all frames from.",
+            "properties": {
+              "tabId": { "type": "integer", "minimum": 0, "description": "The ID of the tab." }
+            }
+          },
+          {
+            "type": "function", "name": "callback", "parameters": [
+              {
+                "type": "array",
+                "description": "A list of frames in the given tab, null if the specified tab ID is invalid.",
+                "optional": true,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "errorOccurred": {
+                      "type": "boolean",
+                      "description": "True if the last navigation in this frame was interrupted by an error, i.e. the onErrorOccurred event fired."
+                    },
+                    "frameId": {
+                      "type": "integer",
+                      "description": "The ID of the frame. 0 indicates that this is the main frame; a positive value indicates the ID of a subframe."
+                    },
+                    "url": {
+                      "type": "string",
+                      "description": "The URL currently associated with this frame, if the frame identified by the frameId existed at one point in the given tab. The fact that an URL is associated with a given frameId does not imply that the corresponding frame still exists."
+                    }
                   }
                 }
               }
@@ -5287,7 +5687,7 @@
       {
         "name": "onErrorOccurred",
         "type": "function",
-        "description": "Fired when an error occurs.",
+        "description": "Fired when an error occurs and the navigation is aborted. This can happen if either a network error occurred, or the user aborted the navigation.",
         "parameters": [
           {
             "type": "object",
@@ -5303,9 +5703,9 @@
         ]
       },
       {
-        "name": "onBeforeRetarget",
+        "name": "onCreatedNavigationTarget",
         "type": "function",
-        "description": "Fired when a new window, or a new tab in an existing window, is about to be created to host a navigation.",
+        "description": "Fired when a new window, or a new tab in an existing window, is created to host a navigation.",
         "parameters": [
           {
             "type": "object",
@@ -5316,6 +5716,25 @@
               "url": {"type": "string", "description": "The URL to be opened in the new window."},
               "tabId": {"type": "integer", "description": "The ID of the tab in which the url is opened"},
               "timeStamp": {"type": "number", "description": "The time when the browser was about to create a new view, in milliseconds since the epoch."}
+            }
+          }
+        ]
+      },
+      {
+        "name": "onReferenceFragmentUpdated",
+        "type": "function",
+        "description": "Fired when the reference fragment of a frame was updated. All future events for that frame will use the updated URL.",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "details",
+            "properties": {
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the navigation occurs."},
+              "url": {"type": "string"},
+              "frameId": {"type": "integer", "description": "0 indicates the navigation happens in the tab content window; a positive value indicates navigation in a subframe. Frame IDs are unique within a tab."},
+              "transitionType": {"type": "string", "enum": ["link", "typed", "auto_bookmark", "auto_subframe", "manual_subframe", "generated", "start_page", "form_submit", "reload", "keyword", "keyword_generated"], "description": "Cause of the navigation. The same transition types as defined in the history API are used."},
+              "transitionQualifiers": {"type": "array", "description": "A list of transition qualifiers.", "items:": {"type": "string", "enum": ["client_redirect", "server_redirect", "forward_back", "from_address_bar"]}},
+              "timeStamp": {"type": "number", "description": "The time when the navigation was committed, in milliseconds since the epoch."}
             }
           }
         ]
@@ -5377,6 +5796,20 @@
             "$ref": "HttpHeaders",
             "optional": true,
             "description": "Only used as a response to the onBeforeSendHeaders event. If set, the request is made with these request headers instead."
+          },
+          "responseHeaders": {
+            "$ref": "HttpHeaders",
+            "optional": true,
+            "description": "Only used as a response to the onHeadersReceived event. If set, the server is assumed to have responsed with these response headers instead. Only return <code>responseHeaders</code> if you really want to modify the headers in order to limit the number of conflicts (only one extension may modify <code>responseHeaders</code> for each request)."
+          },
+          "authCredentials": {
+            "type": "object",
+            "description": "Only used as a response to the onAuthRequired event. If set, the request is made using the supplied credentials.",
+            "optional": true,
+            "properties": {
+              "username": {"type": "string"},
+              "password": {"type": "string"}
+            }
           }
         }
       }
@@ -5402,7 +5835,7 @@
             "description": "Array of extra information that should be passed to the listener function.",
             "items": {
               "type": "string",
-              "enum": ["requestLine", "requestHeaders", "statusLine", "responseHeaders", "blocking"]
+              "enum": ["requestHeaders", "responseHeaders", "blocking"]
             }
           },
           {"type": "string", "name": "eventName"},
@@ -5424,6 +5857,14 @@
             "name": "response"
           }
         ]
+      },
+      {
+        "name": "handlerBehaviorChanged",
+        "type": "function",
+        "description": "Needs to be called when the behavior of the webRequest handlers has changed to prevent incorrect handling due to caching. This function call is expensive. Don't call it often.",
+        "parameters": [
+          {"type": "function", "name": "callback", "optional": true, "parameters": []}
+        ]
       }
     ],
     "events": [
@@ -5442,7 +5883,7 @@
               "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
               "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
               "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
-              "timeStamp": {"type": "number", "description": "The time when the browser was about to make the request, in milliseconds since the epoch."}
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."}
             }
           }
         ],
@@ -5481,7 +5922,11 @@
             "properties": {
               "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
               "url": {"type": "string"},
-              "timeStamp": {"type": "number", "description": "The time when the browser was about to send headers, in milliseconds since the epoch."},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
               "requestHeaders": {"$ref": "HttpHeaders", "optional": true, "description": "The HTTP request headers that are going to be sent out with this request."}
             }
           }
@@ -5500,7 +5945,7 @@
             "description": "Array of extra information that should be passed to the listener function.",
             "items": {
               "type": "string",
-              "enum": ["requestLine", "requestHeaders", "blocking"]
+              "enum": ["requestHeaders", "blocking"]
             }
           }
         ],
@@ -5519,9 +5964,13 @@
             "type": "object",
             "name": "details",
             "properties": {
-              "requestId": {"type": "string", "description": "The ID of the request."},
+              "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
               "url": {"type": "string"},
-              "timeStamp": {"type": "number", "description": "The time when the browser finished sending the request, in milliseconds since the epoch."},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
               "requestHeaders": {"$ref": "HttpHeaders", "optional": true, "description": "The HTTP request headers that have been sent out with this request."}
             }
           }
@@ -5540,26 +5989,76 @@
             "description": "Array of extra information that should be passed to the listener function.",
             "items": {
               "type": "string",
-              "enum": ["requestLine", "requestHeaders"]
+              "enum": ["requestHeaders"]
             }
           }
         ]
       },
       {
+        "name": "onHeadersReceived",
+        "type": "function",
+        "description": "Fired when HTTP response headers of a request have been received",
+        "parameters": [
+          {
+            "type": "object",
+            "name": "deails",
+            "properties": {
+              "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
+              "url": {"type": "string"},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
+              "statusLine": {"type": "string", "optional": true, "description": "HTTP status line of the response"},
+              "responseHeaders": {"$ref": "HttpHeaders", "optional": true, "description": "The HTTP response headers that have been received with this response."}
+             }
+          }
+        ],
+        "extraParameters": [
+          {
+            "$ref": "RequestFilter",
+            "optional": true,
+            "name": "filter",
+            "description": "A set of filters that restricts the events that will be sent to this listener."
+          },
+          {
+            "type": "array",
+            "optional": true,
+            "name": "extraInfoSpec",
+            "description": "Array of extra information that should be passed to the listener function.",
+            "items": {
+              "type": "string",
+              "enum": ["blocking", "responseHeaders"]
+            }
+          }
+        ],
+        "returns": {
+          "$ref": "BlockingResponse",
+          "description": "If \"blocking\" is specified in the \"extraInfoSpec\" parameter, the event listener should return an object of this type.",
+          "optional": true
+        }
+      },
+      {
         "name": "onAuthRequired",
         "type": "function",
-        "description": "Fired when an authentication failure was received. Depending on whether the user provides credentials, the request is either reissued or cancelled.",
+        "description": "Fired when an authentication failure was received. The listener has three options: it can provide authentication credentials, it can cancel the request and display the error page, or it can take no action on the challenge. If bad user credentials are provided, this may be called multiple times for the same request.",
         "parameters": [
           {
             "type": "object",
             "name": "details",
             "properties": {
-              "requestId": {"type": "string", "description": "The ID of the request."},
+              "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
               "url": {"type": "string"},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
               "scheme": {"type": "string", "description": "The authentication scheme, e.g. Basic or Digest."},
               "realm": {"type": "string", "description": "The authentication realm provided by the server, if there is one.", "optional": true},
+              "challenger": {"type": "object", "description": "The server requesting authentication.", "properties": {"host": {"type": "string"}, "port": {"type": "integer"}}},
               "isProxy": {"type": "boolean", "description": "True for Proxy-Authenticate, false for WWW-Authenticate."},
-              "timeStamp": {"type": "number", "description": "The time when the status line and response headers were received, in milliseconds since the epoch."},
               "responseHeaders": {"$ref": "HttpHeaders", "optional": true, "description": "The HTTP response headers that were received along with this response."},
               "statusLine": {"type": "string", "optional": true, "description": "HTTP status line of the response"}
             }
@@ -5579,10 +6078,15 @@
             "description": "Array of extra information that should be passed to the listener function.",
             "items": {
               "type": "string",
-              "enum": ["statusLine", "responseHeaders"]
+              "enum": ["responseHeaders", "blocking"]
             }
           }
-        ]
+        ],
+        "returns": {
+          "$ref": "BlockingResponse",
+          "description": "If \"blocking\" is specified in the \"extraInfoSpec\" parameter, the event listener should return an object of this type.",
+          "optional": true
+        }
       },
       {
         "name": "onResponseStarted",
@@ -5593,12 +6097,16 @@
             "type": "object",
             "name": "details",
             "properties": {
-              "requestId": {"type": "string", "description": "The ID of the request."},
+              "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
               "url": {"type": "string"},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
               "ip": {"type": "string", "optional": true, "description": "The server IP address that the request was actually sent to. Note that it may be a literal IPv6 address."},
               "fromCache": {"type": "boolean", "description": "Indicates if this response was fetched from disk cache."},
               "statusCode": {"type": "integer", "description": "Standard HTTP status code returned by the server."},
-              "timeStamp": {"type": "number", "description": "The time when the status line and response headers were received, in milliseconds since the epoch."},
               "responseHeaders": {"$ref": "HttpHeaders", "optional": true, "description": "The HTTP response headers that were received along with this response."},
               "statusLine": {"type": "string", "optional": true, "description": "HTTP status line of the response"}
             }
@@ -5618,7 +6126,7 @@
             "description": "Array of extra information that should be passed to the listener function.",
             "items": {
               "type": "string",
-              "enum": ["statusLine", "responseHeaders"]
+              "enum": ["responseHeaders"]
             }
           }
         ]
@@ -5632,13 +6140,17 @@
             "type": "object",
             "name": "details",
             "properties": {
-              "requestId": {"type": "string", "description": "The ID of the request."},
-              "url": {"type": "string", "description": "The URL of the current request."},
+              "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
+              "url": {"type": "string"},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
               "ip": {"type": "string", "optional": true, "description": "The server IP address that the request was actually sent to. Note that it may be a literal IPv6 address."},
               "fromCache": {"type": "boolean", "description": "Indicates if this response was fetched from disk cache."},
               "statusCode": {"type": "integer", "description": "Standard HTTP status code returned by the server."},
               "redirectUrl": {"type": "string", "description": "The new URL."},
-              "timeStamp": {"type": "number", "description": "The time when the browser was about to make the redirect, in milliseconds since the epoch."},
               "responseHeaders": {"$ref": "HttpHeaders", "optional": true, "description": "The HTTP response headers that were received along with this redirect."},
               "statusLine": {"type": "string", "optional": true, "description": "HTTP status line of the response"}
             }
@@ -5658,7 +6170,7 @@
             "description": "Array of extra information that should be passed to the listener function.",
             "items": {
               "type": "string",
-              "enum": ["statusLine", "responseHeaders"]
+              "enum": ["responseHeaders"]
             }
           }
         ]
@@ -5672,12 +6184,16 @@
             "type": "object",
             "name": "details",
             "properties": {
-              "requestId": {"type": "string", "description": "The ID of the request."},
-              "url": {"type": "string", "description": "The URL of the current request."},
+              "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
+              "url": {"type": "string"},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
               "ip": {"type": "string", "optional": true, "description": "The server IP address that the request was actually sent to. Note that it may be a literal IPv6 address."},
               "fromCache": {"type": "boolean", "description": "Indicates if this response was fetched from disk cache."},
               "statusCode": {"type": "integer", "description": "Standard HTTP status code returned by the server."},
-              "timeStamp": {"type": "number", "description": "The time when the response was received completely, in milliseconds since the epoch."},
               "responseHeaders": {"$ref": "HttpHeaders", "optional": true, "description": "The HTTP response headers that were received along with this response."},
               "statusLine": {"type": "string", "optional": true, "description": "HTTP status line of the response"}
             }
@@ -5697,7 +6213,7 @@
             "description": "Array of extra information that should be passed to the listener function.",
             "items": {
               "type": "string",
-              "enum": ["statusLine", "responseHeaders"]
+              "enum": ["responseHeaders"]
             }
           }
         ]
@@ -5711,12 +6227,16 @@
             "type": "object",
             "name": "details",
             "properties": {
-              "requestId": {"type": "string", "description": "The ID of the request."},
-              "url": {"type": "string", "description": "The URL of the current request."},
+              "requestId": {"type": "string", "description": "The ID of the request. Request IDs are unique within a browser session. As a result, they could be used to relate different events of the same request."},
+              "url": {"type": "string"},
+              "method": {"type": "string", "description": "Standard HTTP method."},
+              "frameId": {"type": "integer", "description": "0 indicates the request happens in the main frame; a positive value indicates the ID of a subframe in which the request happens. If the document of a (sub-)frame is loaded (<code>type</code> is <code>main_frame</code> or <code>sub_frame</code>), <code>frameId</code> indicates the ID of this frame, not the ID of the outer frame. Frame IDs are unique within a tab."},
+              "tabId": {"type": "integer", "description": "The ID of the tab in which the request takes place. Set to -1 if the request isn't related to a tab."},
+              "type": {"type": "string", "enum": ["main_frame", "sub_frame", "stylesheet", "script", "image", "object", "xmlhttprequest", "other"], "description": "How the requested resource will be used."},
+              "timeStamp": {"type": "number", "description": "The time when this signal is triggered, in milliseconds since the epoch."},
               "ip": {"type": "string", "optional": true, "description": "The server IP address that the request was actually sent to. Note that it may be a literal IPv6 address."},
               "fromCache": {"type": "boolean", "description": "Indicates if this response was fetched from disk cache."},
-              "error": {"type": "string", "description": "The error description. This string is <em>not</em> guaranteed to remain backwards compatible between releases. You must not parse and act based upon its content."},
-              "timeStamp": {"type": "number", "description": "The time when the error occurred, in milliseconds since the epoch."}
+              "error": {"type": "string", "description": "The error description. This string is <em>not</em> guaranteed to remain backwards compatible between releases. You must not parse and act based upon its content."}
             }
           }
         ],
@@ -6334,7 +6854,12 @@
             "optional": true
           },
           "homepageUrl": {
-            "description": "The URL of the homepage of this extension or app",
+            "description": "The URL of the homepage of this extension or app.",
+            "type": "string",
+            "optional": true
+          },
+          "updateUrl": {
+            "description": "The update URL of this extension or app.",
             "type": "string",
             "optional": true
           },
@@ -6600,7 +7125,12 @@
         "properties": {
           "taskId": {"type": "string", "description": "The unique identifier of the task."},
           "title": {"type": "string", "description": "Task title."},
-          "iconUrl": {"type": "string", "description": "Task icon url (from chrome://extension-icon/...)"}
+          "iconUrl": {"type": "string", "description": "Task icon url (from chrome://extension-icon/...)"},
+          "patterns": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "The list of URL patterns supported by the task that matched at least one file."
+          }
         }
       },
       {
@@ -6657,6 +7187,21 @@
           "mountCondition": {
             "type": "string",
             "description": "Additional data about mount, for example, that the filesystem is not supported."
+          }
+        }
+      },
+      {
+        "id": "MountPointSizeStats",
+        "type": "object",
+        "description": "Information about total and remaining size on the mount point.",
+        "properties": {
+          "totalSizeKB": {
+            "type": "integer",
+            "description": "Total available size on the mount point."
+          },
+          "remainingSizeKB": {
+            "type": "integer",
+            "description": "Remaining available size on the mount point."
           }
         }
       },
@@ -6821,7 +7366,7 @@
       },
       {
         "name": "getFileTasks",
-        "description": "Gets the of tasks that can be performed over selected files.",
+        "description": "Gets the list of tasks that can be performed over selected files.",
         "parameters": [
           {
             "name": "fileURLs",
@@ -6838,7 +7383,7 @@
                 "name": "tasks",
                 "type": "array",
                 "items": {"$ref": "FileBrowserTask"},
-                "description": "The list of available tasks that can be performed on all of the passed file paths."
+                "description": "The list of matched file URL patterns for this task."
               }
             ]
           }
@@ -7052,6 +7597,29 @@
         ]
       },
       {
+        "name": "getSizeStats",
+        "description": "Retrieves total and remaining size of a mount point.",
+        "parameters": [
+          {
+            "name": "mountPath",
+            "type": "string",
+            "description": "Mount point path."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": false,
+            "parameters": [
+              {
+                "name" : "sizeStats",
+                "$ref": "MountPointSizeStats",
+                "description": "Name/value pairs of size stats."
+              }
+            ]
+          }
+        ]
+      },
+      {
         "name": "formatDevice",
         "description": "Formats a mounted device",
         "parameters": [
@@ -7228,25 +7796,8 @@
         ]
       },
       {
-        "name": "beginInstall",
-        "description": "Initiates the install process for the given extension id",
-        "parameters": [
-          {
-            "name": "expected_id",
-            "type": "string",
-            "description": "The id of the extension to be installled. Must be called during a user gesture."
-          },
-          {
-            "name": "callback",
-            "type": "function",
-            "optional": "true",
-            "parameters": []
-          }
-        ]
-      },
-      {
-        "name": "beginInstallWithManifest2",
-        "description": "Initiates the install process for the given extension. This must be called during a user gesture.",
+        "name": "beginInstallWithManifest3",
+        "description": "Initiates the install process for the given extension.",
         "parameters": [
           {
             "name": "details",
@@ -7288,7 +7839,8 @@
                 "optional": true,
                 "description": "A flag to change the UI we show when an app is installed - a value of true means to show a bubble pointing at the new tab button (instead of the default behavior of opening the new tab page and animating the app icon)."
               }
-            }
+            },
+            "additionalProperties": { "type": "any" }
           },
           {
             "name": "callback",
@@ -7299,7 +7851,7 @@
               {
                 "name": "result",
                 "type": "string",
-                "description": "A string result code, which will be empty upon success. The possible values in the case of errors include 'unknown_error', 'user_cancelled', 'manifest_error', 'icon_error', 'invalid_id', 'permission_denied', 'no_gesture', and 'invalid_icon_url'."
+                "description": "A string result code, which will be empty upon success. The possible values in the case of errors include 'unknown_error', 'user_cancelled', 'manifest_error', 'icon_error', 'invalid_id', 'permission_denied', and 'invalid_icon_url'."
               }
             ]
           }
@@ -7313,7 +7865,7 @@
           {
             "name": "expected_id",
             "type": "string",
-            "description": "The id of the extension to be installled. This should match a previous call to beginInstall."
+            "description": "The id of the extension to be installled. This should match a previous call to beginInstallWithManifest3."
           },
           {
             "name": "callback",
@@ -7424,6 +7976,44 @@
                 "type": "string",
                 "name": "passport",
                 "description": "Passport for passing to proxy."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getURLForTCP",
+        "description": "requests specific websocket URL that can be used as TCP proxy.",
+        "parameters": [
+          {
+            "type": "string",
+            "name": "hostname",
+            "minLength": 1,
+            "description": "hostname to which TCP connection is requested."
+          },
+          {
+            "type": "integer",
+            "name": "port",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "TCP port number."
+          },
+          {
+            "type": "object",
+            "name": "details",
+            "description": "Dictionary which contains requested parameters of connection",
+            "properties": {
+              "tls": {"type": "boolean", "optional": "true", "description": "whether TLS over TCP is requested"}
+            }
+          },
+          {
+            "type": "function",
+            "name": "callback",
+            "parameters": [
+              {
+                "type": "string",
+                "name": "url",
+                "description": "URL for opening as WebSocket."
               }
             ]
           }
@@ -7578,7 +8168,7 @@
     ]
   },
   {
-    "namespace": "experimental.contentSettings",
+    "namespace": "contentSettings",
     "types": [
       {
         "id": "ResourceIdentifier",
@@ -7594,7 +8184,7 @@
             "description": "A human readable description of the resource."
           }
         },
-        "description": "Currently, no content types use resource identifiers."
+        "description": "The only content type using resource identifiers is <var>plugins</var>. Using a resource identifier allows an extension to specify content settings applying only to a specific plug-in. If no rule for the specific plug-in is found, the rules without resource identifiers are applied."
       },
       {
         "id": "ContentSetting",
@@ -7926,7 +8516,7 @@
           {
             "type": "string",
             "name": "method",
-            "description": "Method name."
+            "description": "Method name. Should be one of the methods defined by the <a href='http://code.google.com/chrome/devtools/docs/remote-debugging.html'>remote debugging protocol</a>."
           },
           {
             "type": "object",
@@ -7934,7 +8524,7 @@
             "optional": true,
             "properties": {},
             "additionalProperties": { "type": "any" },
-            "description": "JSON object matching Developer Tools / Web Inspector Protocol scheme."
+            "description": "JSON object with request parameters. This object must conform to the remote debugging params scheme for given method."
           },
           {
             "type": "function",
@@ -7947,10 +8537,10 @@
                 "optional": true,
                 "properties": {},
                 "additionalProperties": { "type": "any" },
-                "description": "JSON object with the request response."
+                "description": "JSON object with the response. Structure of the response varies depending on the method and is defined by the remote debugging protocol."
               }
             ],
-            "description": "Request response body. If an error occurs while posting the message, the callback will be called with no arguments and <a href='extension.html#property-lastError'>chrome.extension.lastError</a> will be set to the error message."
+            "description": "Response body. If an error occurs while posting the message, the callback will be called with no arguments and <a href='extension.html#property-lastError'>chrome.extension.lastError</a> will be set to the error message."
           }
         ]
       }
@@ -7964,12 +8554,12 @@
           {
             "type": "integer",
             "name": "tabId",
-            "description": "The id of the tab that generated debug evet."
+            "description": "The id of the tab that generated debug event."
           },
           {
             "type": "string",
             "name": "method",
-            "description": "Method name."
+            "description": "Method name. Should be one of the notifications defined by the <a href='http://code.google.com/chrome/devtools/docs/remote-debugging.html'>remote debugging protocol</a>."
           },
           {
             "type": "object",
@@ -7977,14 +8567,14 @@
             "optional": true,
             "properties": {},
             "additionalProperties": { "type": "any" },
-            "description": "JSON object matching Developer Tools / Web Inspector Protocol event data scheme."
+            "description": "JSON object with the response. Structure of the response varies depending on the method and is defined by the remote debugging protocol."
           }
         ]
       },
       {
         "name": "onDetach",
         "type": "function",
-        "description": "Fired when browser terminates debugging session for the tab.",
+        "description": "Fired when browser terminates debugging session for the tab. This happens when either the tab is being closed or Chrome DevTools is being invoked for the attached tab.",
         "parameters": [
           {
             "type": "integer",
@@ -8031,15 +8621,6 @@
                 "type": "string",
                 "optional": true,
                 "description": "If a linkUrl is provided, this is required and will be used as the linkified text. It should be relatively short."
-              },
-              "iconData": {
-                "nodoc": true,
-                "type": "object",
-                "isInstanceOf": "ImageData",
-                "optional": true,
-                "properties": {},
-                "additionalProperties": { "type": "any" },
-                "description": "Pixel data for an image to use as the icon for this notification. Must be an ImageData object (for example, from a canvas element)."
               }
             }
           },
@@ -8352,6 +8933,149 @@
             "description": "Called when the browser's passwords have been cleared.",
             "optional": true,
             "parameters": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "namespace": "experimental.savePage",
+    "functions": [
+      {
+        "name": "saveAsMHTML",
+        "type": "function",
+        "description": "Saves the content of the tab with given id to MHTML.",
+        "parameters": [
+          {
+            "name": "tabId",
+            "type": "integer",
+            "minimum": 0,
+            "description": "The id of the tab to save."
+          },
+          {
+            "name": "callback",
+            "type": "function",
+            "description": "Called when the MHTML has been generated.",
+            "parameters": [
+              {
+                "name": "mhtmlData",
+                "type": "blob",
+                "optional": "true",
+                "description": "The MHTML data as a Blob."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "namespace": "experimental.clipboard",
+    "nodoc": true,
+    "types": [
+      {
+        "id": "mimeTypeEnum",
+        "type": "string",
+        "description": "MIME type of the data on the clipboard.",
+        "enum": ["text/plain", "text/html"]
+      },
+      {
+        "id": "bufferEnum",
+        "type": "string",
+        "description": "Buffers available on the clipboard.",
+        "enum": ["standard", "selection"]
+      }
+    ],
+    "functions": [
+      {
+        "name": "writeData",
+        "description": "Writes some plain text data to web clipboard.",
+        "type": "function",
+        "parameters": [
+          {
+            "name": "mimeType",
+            "$ref": "mimeTypeEnum",
+            "description": "Type of data that will be written to the clipboard."
+          },
+          {
+            "name": "buffer",
+            "$ref": "bufferEnum",
+            "description": "Clipboard to which data will be written. Currently only standard clipboard is supported."
+          },
+          {
+            "name": "data",
+            "type": "string",
+            "description": "Data that will be writen to the clipboard."
+          },
+          {
+            "name": "url",
+            "type": "string",
+            "description": "Type of data that will be written to the clipboard.",
+            "optional": true
+          }
+        ]
+      },
+      {
+        "name": "readData",
+        "description": "Reads data that is currently on clipboard.",
+        "type": "function",
+        "parameters": [
+          {
+            "name": "mimeType",
+            "$ref": "mimeTypeEnum",
+            "description": "Type of data that will be read from the clipboard."
+          },
+          {
+            "name": "buffer",
+            "$ref": "bufferEnum",
+            "description": "Clipboard buffer from which data will be read."
+          },
+          {
+            "name": "callback",
+            "description": "Callback that will be called when data is read from the clipboard.",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "callbackData",
+                "type": "object",
+                "properties": {
+                  "data": {
+                    "type": "string",
+                    "description": "Data read from the clipboard."
+                  },
+                  "url": {
+                    "type": "string",
+                    "description": "Url read from the clipboard.",
+                    "optional": true
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "getAvailableTypes",
+        "description": "Retrieves list of MIME types that support data currently on the clipboard buffer.",
+        "type": "function",
+        "parameters": [
+          {
+            "name": "buffer",
+            "$ref": "bufferEnum",
+            "description": "Clipboard buffer whose available MIME types will be retrieved."
+          },
+          {
+            "name": "callback",
+            "description": "Callback that will be called when the result is determined.",
+            "type": "function",
+            "parameters": [
+              {
+                "name": "avaliableMimeTypes",
+                "description": "List of available MIME types.",
+                "type": "array",
+                "items": { "$ref": "mimeTypeEnum" }
+              }
+            ]
           }
         ]
       }

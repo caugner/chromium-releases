@@ -7,7 +7,7 @@
 #include <GLES2/gl2.h>
 
 #include "ppapi/c/dev/ppb_testing_dev.h"
-#include "ppapi/c/ppb_opengles.h"
+#include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/cpp/graphics_3d.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/tests/test_utils.h"
@@ -33,7 +33,7 @@ std::string TestGraphics3D::TestFrame() {
       PP_GRAPHICS3DATTRIB_HEIGHT, height,
       PP_GRAPHICS3DATTRIB_NONE
   };
-  pp::Graphics3D context(*instance_, pp::Graphics3D(), attribs);
+  pp::Graphics3D context(instance_, attribs);
   ASSERT_FALSE(context.is_null());
 
   // Clear color buffer to opaque red.

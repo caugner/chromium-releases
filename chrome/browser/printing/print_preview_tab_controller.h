@@ -21,6 +21,7 @@
 #include "content/common/notification_registrar.h"
 
 class Browser;
+class GURL;
 class RenderProcessHost;
 class TabContentsWrapper;
 
@@ -65,6 +66,9 @@ class PrintPreviewTabController
   // Returns true if |tab| is a print preview tab.
   static bool IsPrintPreviewTab(TabContentsWrapper* tab);
 
+  // Returns true if |url| is a print preview url.
+  static bool IsPrintPreviewURL(const GURL& url);
+
   // Erase the initiator tab info associated with |preview_tab|.
   void EraseInitiatorTabInfo(TabContentsWrapper* preview_tab);
 
@@ -107,7 +111,7 @@ class PrintPreviewTabController
   NotificationRegistrar registrar_;
 
   // True if the controller is waiting for a new preview tab via
-  // NavigationType::NEW_PAGE.
+  // content::NAVIGATION_TYPE_NEW_PAGE.
   bool waiting_for_new_preview_page_;
 
   DISALLOW_COPY_AND_ASSIGN(PrintPreviewTabController);

@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
@@ -49,10 +50,11 @@ FaviconWebUIHandler::~FaviconWebUIHandler() {
 
 void FaviconWebUIHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("getFaviconDominantColor",
-      NewCallback(this, &FaviconWebUIHandler::HandleGetFaviconDominantColor));
+      base::Bind(&FaviconWebUIHandler::HandleGetFaviconDominantColor,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getAppIconDominantColor",
-      NewCallback(this,
-                  &FaviconWebUIHandler::HandleGetAppIconDominantColor));
+      base::Bind(&FaviconWebUIHandler::HandleGetAppIconDominantColor,
+                 base::Unretained(this)));
 }
 
 void FaviconWebUIHandler::HandleGetFaviconDominantColor(const ListValue* args) {
@@ -75,7 +77,8 @@ void FaviconWebUIHandler::HandleGetFaviconDominantColor(const ListValue* args) {
       GURL(path),
       history::FAVICON,
       &consumer_,
-      NewCallback(this, &FaviconWebUIHandler::OnFaviconDataAvailable));
+      base::Bind(&FaviconWebUIHandler::OnFaviconDataAvailable,
+                 base::Unretained(this)));
   consumer_.SetClientData(favicon_service, handle, id_++);
 }
 
@@ -87,12 +90,10 @@ void FaviconWebUIHandler::OnFaviconDataAvailable(
   int id = consumer_.GetClientData(favicon_service, request_handle);
   scoped_ptr<StringValue> color_value;
 
-  if (favicon.is_valid()) {
-    // TODO(estade): cache the response
+  if (favicon.is_valid())
     color_value.reset(GetDominantColorCssString(favicon.image_data));
-  } else {
+  else
     color_value.reset(new StringValue("#919191"));
-  }
 
   StringValue dom_id(dom_id_map_[id]);
   web_ui_->CallJavascriptFunction("ntp4.setStripeColor", dom_id, *color_value);
@@ -119,15 +120,14 @@ void FaviconWebUIHandler::HandleGetAppIconDominantColor(
       Profile::FromWebUI(web_ui_)->GetExtensionService();
   const Extension* extension = extension_service->GetExtensionById(
       extension_id, false);
-  CHECK(extension);
+  if (!extension)
+    return;
   app_icon_color_manager_->LoadIcon(extension);
 }
 
 void FaviconWebUIHandler::NotifyAppIconReady(const std::string& extension_id) {
   const SkBitmap& bitmap = app_icon_color_manager_->GetIcon(extension_id);
-  // TODO(gbillock): cache this? Probably call into it from the manager and
-  // cache the color there. Then call back to this method with the ext id
-  // and the color.
+  // TODO(estade): would be nice to avoid a round trip through png encoding.
   std::vector<unsigned char> bits;
   if (!gfx::PNGCodec::EncodeBGRASkBitmap(bitmap, true, &bits))
     return;

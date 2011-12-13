@@ -14,6 +14,7 @@
 
 #include "base/threading/thread.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
+#include "content/common/content_export.h"
 #include "content/common/media/media_stream_options.h"
 #include "media/video/capture/video_capture_device.h"
 #include "media/video/capture/video_capture_types.h"
@@ -21,7 +22,7 @@
 namespace media_stream {
 
 // VideoCaptureManager opens/closes and start/stops video capture devices.
-class VideoCaptureManager : public MediaStreamProvider {
+class CONTENT_EXPORT VideoCaptureManager : public MediaStreamProvider {
  public:
   // Calling |Start| of this id will open the first device, even though open has
   // not been called. This is used to be able to use video capture devices
@@ -50,9 +51,10 @@ class VideoCaptureManager : public MediaStreamProvider {
              media::VideoCaptureDevice::EventHandler* video_capture_receiver);
 
   // Stops capture device referenced by |capture_session_id|. No more frames
-  // will be delivered to the frame receiver, and |stopped_task| will be called.
+  // will be delivered to the frame receiver, and |stopped_cb| will be called.
+  // |stopped_cb| can be NULL.
   void Stop(const media::VideoCaptureSessionId& capture_session_id,
-            Task* stopped_task);
+            base::Closure stopped_cb);
 
   // A capture device error has occurred for |capture_session_id|. The device
   // won't stream any more captured frames.
@@ -72,7 +74,7 @@ class VideoCaptureManager : public MediaStreamProvider {
   void OnStart(const media::VideoCaptureParams capture_params,
                media::VideoCaptureDevice::EventHandler* video_capture_receiver);
   void OnStop(const media::VideoCaptureSessionId capture_session_id,
-              Task* stopped_task);
+              base::Closure stopped_cb);
 
   // Executed on Browser::IO thread to call Listener.
   void OnOpened(int capture_session_id);

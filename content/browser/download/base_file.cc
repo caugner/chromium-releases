@@ -10,11 +10,12 @@
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
+#include "content/browser/browser_thread.h"
+#include "content/browser/content_browser_client.h"
+#include "content/browser/download/download_stats.h"
 #include "crypto/secure_hash.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -193,11 +194,13 @@ BaseFile::BaseFile(const FilePath& full_path,
       referrer_url_(referrer_url),
       file_stream_(file_stream),
       bytes_so_far_(received_bytes),
-      power_save_blocker_(true),
+      power_save_blocker_(PowerSaveBlocker::kPowerSaveBlockPreventSystemSleep),
       calculate_hash_(false),
       detached_(false) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   memset(sha256_hash_, 0, sizeof(sha256_hash_));
+  if (file_stream_.get())
+    file_stream_->EnableErrorStatistics();
 }
 
 BaseFile::~BaseFile() {
@@ -242,15 +245,37 @@ net::Error BaseFile::AppendDataToFile(const char* data, size_t data_len) {
   if (data_len == 0)
     return net::OK;
 
-  bytes_so_far_ += data_len;
+  // The Write call below is not guaranteed to write all the data.
+  size_t write_count = 0;
+  size_t len = data_len;
+  const char* current_data = data;
+  while (len > 0) {
+    write_count++;
+    int write_result =
+        file_stream_->Write(current_data, len, net::CompletionCallback());
+    DCHECK_NE(0, write_result);
 
-  int written = file_stream_->Write(data, data_len, NULL);
-  if (static_cast<size_t>(written) != data_len) {
-    // Report errors on file writes.
-    if (written < 0)
-      return LOG_ERROR("Write", written);
-    return LOG_ERROR("Write", net::ERR_FAILED);
+    // Check for errors.
+    if (static_cast<size_t>(write_result) != data_len) {
+      // We should never get ERR_IO_PENDING, as the Write above is synchronous.
+      DCHECK_NE(net::ERR_IO_PENDING, write_result);
+
+      // Report errors on file writes.
+      if (write_result < 0)
+        return LOG_ERROR("Write", write_result);
+    }
+
+    // Update status.
+    size_t write_size = static_cast<size_t>(write_result);
+    DCHECK_LE(write_size, len);
+    len -= write_size;
+    current_data += write_size;
+    bytes_so_far_ += write_size;
   }
+
+  // TODO(ahendrickson) -- Uncomment these when the functions are available.
+   download_stats::RecordDownloadWriteSize(data_len);
+   download_stats::RecordDownloadWriteLoopCount(write_count);
 
   if (calculate_hash_)
     secure_hash_->Update(data, data_len);
@@ -388,6 +413,7 @@ net::Error BaseFile::Open() {
   // Create a new file stream if it is not provided.
   if (!file_stream_.get()) {
     CreateFileStream();
+    file_stream_->EnableErrorStatistics();
     int open_result = file_stream_->Open(
         full_path_,
         base::PLATFORM_FILE_OPEN_ALWAYS | base::PLATFORM_FILE_WRITE);
@@ -427,7 +453,8 @@ void BaseFile::Close() {
 std::string BaseFile::DebugString() const {
   return base::StringPrintf("{ source_url_ = \"%s\""
                             " full_path_ = \"%" PRFilePath "\""
-                            " bytes_so_far_ = %" PRId64 " detached_ = %c }",
+                            " bytes_so_far_ = %" PRId64
+                            " detached_ = %c }",
                             source_url_.spec().c_str(),
                             full_path_.value().c_str(),
                             bytes_so_far_,

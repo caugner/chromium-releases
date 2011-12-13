@@ -2293,7 +2293,7 @@ void BrowserAccessibilityWin::IntAttributeToIA2(
 }
 
 string16 BrowserAccessibilityWin::Escape(const string16& str) {
-  return EscapeQueryParamValueUTF8(str, false);
+  return net::EscapeQueryParamValueUTF8(str, false);
 }
 
 const string16& BrowserAccessibilityWin::TextForIAccessibleText() {
@@ -2472,6 +2472,11 @@ void BrowserAccessibilityWin::InitRoleAndState() {
   if (mixed)
     ia_state_|= STATE_SYSTEM_MIXED;
 
+  bool editable = false;
+  GetBoolAttribute(WebAccessibility::ATTR_CAN_SET_VALUE, &editable);
+  if (editable)
+    ia2_state_ |= IA2_STATE_EDITABLE;
+
   string16 html_tag;
   GetStringAttribute(WebAccessibility::ATTR_HTML_TAG, &html_tag);
   ia_role_ = 0;
@@ -2537,6 +2542,7 @@ void BrowserAccessibilityWin::InitRoleAndState() {
       ia_state_|= STATE_SYSTEM_READONLY;
       break;
     case WebAccessibility::ROLE_DOCUMENT:
+    case WebAccessibility::ROLE_ROOT_WEB_AREA:
     case WebAccessibility::ROLE_WEB_AREA:
       ia_role_ = ROLE_SYSTEM_DOCUMENT;
       ia_state_|= STATE_SYSTEM_READONLY;

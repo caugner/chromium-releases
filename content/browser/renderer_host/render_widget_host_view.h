@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "base/process_util.h"
+#include "base/callback.h"
+#include "content/common/content_export.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
@@ -64,19 +66,7 @@ struct WebScreenInfo;
 // changes.
 class RenderWidgetHostView {
  public:
-  virtual ~RenderWidgetHostView();
-
-  // Platform-specific creator. Use this to construct new RenderWidgetHostViews
-  // rather than using RenderWidgetHostViewWin & friends.
-  //
-  // This function must NOT size it, because the RenderView in the renderer
-  // wounldn't have been created yet. The widget would set its "waiting for
-  // resize ack" flag, and the ack would never come becasue no RenderView
-  // received it.
-  //
-  // The RenderWidgetHost must already be created (because we can't know if it's
-  // going to be a regular RenderWidgetHost or a RenderViewHost (a subclass).
-  static RenderWidgetHostView* CreateViewForWidget(RenderWidgetHost* widget);
+  CONTENT_EXPORT virtual ~RenderWidgetHostView();
 
   // Perform all the initialization steps necessary for this object to represent
   // a popup (such as a <select> dropdown), then shows the popup at |pos|.
@@ -139,9 +129,8 @@ class RenderWidgetHostView {
   virtual void SetIsLoading(bool is_loading) = 0;
 
   // Updates the state of the input method attached to the view.
-  virtual void ImeUpdateTextInputState(ui::TextInputType type,
-                                       bool can_compose_inline,
-                                       const gfx::Rect& caret_rect) = 0;
+  virtual void TextInputStateChanged(ui::TextInputType type,
+                                     bool can_compose_inline) = 0;
 
   // Cancel the ongoing composition of the input method attached to the view.
   virtual void ImeCancelComposition() = 0;
@@ -180,15 +169,18 @@ class RenderWidgetHostView {
 
   // Tells the View that the tooltip text for the current mouse position over
   // the page has changed.
-  virtual void SetTooltipText(const std::wstring& tooltip_text) = 0;
+  virtual void SetTooltipText(const string16& tooltip_text) = 0;
 
-  // Notifies the View that the renderer text selection has changed. |start|
-  // and |end| are the visual end points of the selection in the coordinate
-  // system of the render view.
-  virtual void SelectionChanged(const std::string& text,
-                                const ui::Range& range,
-                                const gfx::Point& start,
-                                const gfx::Point& end) {}
+  // Notifies the View that the renderer text selection has changed.
+  virtual void SelectionChanged(const string16& text,
+                                size_t offset,
+                                const ui::Range& range) {}
+
+  // Notifies the View that the renderer selection bounds has changed.
+  // |start_rect| and |end_rect| are the bounds end of the selection in the
+  // coordinate system of the render view.
+  virtual void SelectionBoundsChanged(const gfx::Rect& start_rect,
+                                      const gfx::Rect& end_rect) {}
 
   // Tells the View whether the context menu is showing. This is used on Linux
   // to suppress updates to webkit focus for the duration of the show.
@@ -253,25 +245,29 @@ class RenderWidgetHostView {
       int32 height,
       TransportDIB::Handle transport_dib) = 0;
   // |window| and |surface_id| indicate which accelerated surface's
-  // buffers swapped. |renderer_id|, |route_id| and
-  // |swap_buffers_count| are used to formulate a reply to the GPU
-  // process to prevent it from getting too far ahead. They may all be
-  // zero, in which case no flow control is enforced; this case is
-  // currently used for accelerated plugins.
+  // buffers swapped. |renderer_id| and |route_id| are used to formulate
+  // a reply to the GPU process to prevent it from getting too far ahead.
+  // They may all be zero, in which case no flow control is enforced;
+  // this case is currently used for accelerated plugins.
   virtual void AcceleratedSurfaceBuffersSwapped(
       gfx::PluginWindowHandle window,
       uint64 surface_id,
       int renderer_id,
       int32 route_id,
-      int gpu_host_id,
-      uint64 swap_buffers_count) = 0;
+      int gpu_host_id) = 0;
   virtual void GpuRenderingStateDidChange() = 0;
 #endif
 
-#if defined(TOUCH_UI)
-  virtual void AcceleratedSurfaceSetIOSurface(
-      int32 width, int32 height, uint64 surface_id) = 0;
-  virtual void AcceleratedSurfaceBuffersSwapped(uint64 surface_id) = 0;
+#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  virtual void AcceleratedSurfaceNew(
+      int32 width,
+      int32 height,
+      uint64* surface_id,
+      TransportDIB::Handle* surface_handle) = 0;
+  virtual void AcceleratedSurfaceBuffersSwapped(
+      uint64 surface_id,
+      int32 route_id,
+      int gpu_host_id) = 0;
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) = 0;
 #endif
 
@@ -308,6 +304,10 @@ class RenderWidgetHostView {
   virtual void SetScrollOffsetPinning(
       bool is_pinned_to_left, bool is_pinned_to_right) = 0;
 
+  // Return value indicates whether the mouse is locked successfully or not.
+  virtual bool LockMouse() = 0;
+  virtual void UnlockMouse() = 0;
+
   void set_popup_type(WebKit::WebPopupType popup_type) {
     popup_type_ = popup_type;
   }
@@ -315,7 +315,7 @@ class RenderWidgetHostView {
 
   // Subclasses should override this method to do what is appropriate to set
   // the custom background for their platform.
-  virtual void SetBackground(const SkBitmap& background);
+  CONTENT_EXPORT virtual void SetBackground(const SkBitmap& background);
   const SkBitmap& background() const { return background_; }
 
   virtual void OnAccessibilityNotifications(
@@ -329,9 +329,11 @@ class RenderWidgetHostView {
     reserved_rect_ = reserved_rect;
   }
 
+  bool mouse_locked() const { return mouse_locked_; }
+
  protected:
   // Interface class only, do not construct.
-  RenderWidgetHostView() : popup_type_(WebKit::WebPopupTypeNone) {}
+  CONTENT_EXPORT RenderWidgetHostView();
 
   // Whether this view is a popup and what kind of popup it is (select,
   // autofill...).
@@ -344,6 +346,13 @@ class RenderWidgetHostView {
   // The current reserved area in view coordinates where contents should not be
   // rendered to draw the resize corner, sidebar mini tabs etc.
   gfx::Rect reserved_rect_;
+
+  // While the mouse is locked, the cursor is hidden from the user. Mouse events
+  // are still generated. However, the position they report is the last known
+  // mouse position just as mouse lock was entered; the movement they report
+  // indicates what the change in position of the mouse would be had it not been
+  // locked.
+  bool mouse_locked_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostView);

@@ -1,19 +1,24 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/policy/configuration_policy_provider_mac.h"
 
+#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/path_service.h"
+#include "base/platform_file.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/preferences_mac.h"
 #include "chrome/common/chrome_paths.h"
+#include "policy/policy_constants.h"
 
 namespace policy {
 
-static FilePath GetManagedPolicyPath() {
+namespace {
+
+FilePath GetManagedPolicyPath() {
   // This constructs the path to the plist file in which Mac OS X stores the
   // managed preference for the application. This is undocumented and therefore
   // fragile, but if it doesn't work out, FileBasedPolicyLoader has a task that
@@ -34,9 +39,11 @@ static FilePath GetManagedPolicyPath() {
   return path.Append(base::SysCFStringRefToUTF8(bundle_id) + ".plist");
 }
 
+}  // namespace
+
 MacPreferencesPolicyProviderDelegate::MacPreferencesPolicyProviderDelegate(
     MacPreferences* preferences,
-    const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list)
+    const PolicyDefinitionList* policy_list)
     : FileBasedPolicyProvider::ProviderDelegate(GetManagedPolicyPath()),
       policy_list_(policy_list),
       preferences_(preferences) {
@@ -48,7 +55,7 @@ DictionaryValue* MacPreferencesPolicyProviderDelegate::Load() {
   preferences_->AppSynchronize(kCFPreferencesCurrentApplication);
   DictionaryValue* policy = new DictionaryValue;
 
-  const ConfigurationPolicyProvider::PolicyDefinitionList::Entry* current;
+  const PolicyDefinitionList::Entry* current;
   for (current = policy_list_->begin; current != policy_list_->end; ++current) {
     base::mac::ScopedCFTypeRef<CFStringRef> name(
         base::SysUTF8ToCFStringRef(current->name));
@@ -123,14 +130,14 @@ base::Time MacPreferencesPolicyProviderDelegate::GetLastModification() {
 }
 
 ConfigurationPolicyProviderMac::ConfigurationPolicyProviderMac(
-    const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list)
+    const PolicyDefinitionList* policy_list)
     : FileBasedPolicyProvider(policy_list,
           new MacPreferencesPolicyProviderDelegate(new MacPreferences,
                                                    policy_list)) {
 }
 
 ConfigurationPolicyProviderMac::ConfigurationPolicyProviderMac(
-    const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list,
+    const PolicyDefinitionList* policy_list,
     MacPreferences* preferences)
     : FileBasedPolicyProvider(policy_list,
           new MacPreferencesPolicyProviderDelegate(preferences,

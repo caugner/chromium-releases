@@ -25,44 +25,20 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
-#include "webkit/plugins/npapi/plugin_group.h"
-#include "webkit/plugins/npapi/plugin_list.h"
+#include "content/public/browser/notification_types.h"
 #include "webkit/plugins/webplugininfo.h"
-
-using webkit::npapi::PluginGroup;
-using webkit::npapi::PluginList;
-using webkit::WebPluginInfo;
 
 namespace {
 
 void EnableInternalPDFPluginForTab(TabContentsWrapper* preview_tab) {
   // Always enable the internal PDF plugin for the print preview page.
-  string16 internal_pdf_group_name(
-      ASCIIToUTF16(chrome::ChromeContentClient::kPDFPluginName));
-  PluginGroup* internal_pdf_group = NULL;
-  std::vector<PluginGroup> plugin_groups;
-  PluginList::Singleton()->GetPluginGroups(false, &plugin_groups);
-  for (size_t i = 0; i < plugin_groups.size(); ++i) {
-    if (plugin_groups[i].GetGroupName() == internal_pdf_group_name) {
-      internal_pdf_group = &plugin_groups[i];
-      break;
-    }
-  }
-  if (internal_pdf_group) {
-    std::vector<WebPluginInfo> plugins = internal_pdf_group->web_plugin_infos();
-    DCHECK_EQ(plugins.size(), 1U);
-
-    webkit::WebPluginInfo plugin = plugins[0];
-    plugin.enabled = WebPluginInfo::USER_ENABLED;
-    ChromePluginServiceFilter::GetInstance()->OverridePluginForTab(
+  ChromePluginServiceFilter::GetInstance()->OverridePluginForTab(
         preview_tab->render_view_host()->process()->id(),
         preview_tab->render_view_host()->routing_id(),
         GURL(),
-        plugin);
-  }
+        ASCIIToUTF16(chrome::ChromeContentClient::kPDFPluginName));
 }
 
 void ResetPreviewTabOverrideTitle(TabContentsWrapper* preview_tab) {
@@ -91,8 +67,7 @@ void PrintPreviewTabController::PrintPreview(TabContentsWrapper* tab) {
   if (tab->tab_contents()->showing_interstitial_page())
     return;
 
-  PrintPreviewTabController* tab_controller =
-      PrintPreviewTabController::GetInstance();
+  PrintPreviewTabController* tab_controller = GetInstance();
   if (!tab_controller)
     return;
   tab_controller->GetOrCreatePreviewTab(tab);
@@ -167,9 +142,10 @@ void PrintPreviewTabController::OnRendererProcessClosed(
     RenderProcessHost* rph) {
   for (PrintPreviewTabMap::iterator iter = preview_tab_map_.begin();
        iter != preview_tab_map_.end(); ++iter) {
-    if (iter->second != NULL &&
-        iter->second->render_view_host()->process() == rph) {
-      TabContentsWrapper* preview_tab = GetPrintPreviewForTab(iter->second);
+    TabContentsWrapper* initiator_tab = iter->second;
+    if (initiator_tab &&
+        initiator_tab->render_view_host()->process() == rph) {
+      TabContentsWrapper* preview_tab = iter->first;
       PrintPreviewUI* print_preview_ui =
           static_cast<PrintPreviewUI*>(preview_tab->web_ui());
       print_preview_ui->OnInitiatorTabCrashed();
@@ -220,12 +196,12 @@ void PrintPreviewTabController::OnNavEntryCommitted(
   TabContentsWrapper* preview_tab = GetPrintPreviewForTab(tab);
   bool source_tab_is_preview_tab = (tab == preview_tab);
   if (details) {
-    PageTransition::Type transition_type = details->entry->transition_type();
-    NavigationType::Type nav_type = details->type;
+    content::PageTransition transition_type = details->entry->transition_type();
+    content::NavigationType nav_type = details->type;
 
     // Don't update/erase the map entry if the page has not changed.
-    if (transition_type == PageTransition::RELOAD ||
-        nav_type == NavigationType::SAME_PAGE) {
+    if (transition_type == content::PAGE_TRANSITION_RELOAD ||
+        nav_type == content::NAVIGATION_TYPE_SAME_PAGE) {
       if (source_tab_is_preview_tab)
         SetInitiatorTabURLAndTitle(preview_tab);
       return;
@@ -233,8 +209,8 @@ void PrintPreviewTabController::OnNavEntryCommitted(
 
     // New |preview_tab| is created. Don't update/erase map entry.
     if (waiting_for_new_preview_page_ &&
-        transition_type == PageTransition::LINK &&
-        nav_type == NavigationType::NEW_PAGE &&
+        transition_type == content::PAGE_TRANSITION_LINK &&
+        nav_type == content::NAVIGATION_TYPE_NEW_PAGE &&
         source_tab_is_preview_tab) {
       waiting_for_new_preview_page_ = false;
       SetInitiatorTabURLAndTitle(preview_tab);
@@ -243,8 +219,8 @@ void PrintPreviewTabController::OnNavEntryCommitted(
 
     // User navigated to a preview tab using forward/back button.
     if (source_tab_is_preview_tab &&
-        transition_type == PageTransition::FORWARD_BACK &&
-        nav_type == NavigationType::EXISTING_PAGE) {
+        transition_type == content::PAGE_TRANSITION_FORWARD_BACK &&
+        nav_type == content::NAVIGATION_TYPE_EXISTING_PAGE) {
       return;
     }
   }
@@ -271,7 +247,11 @@ void PrintPreviewTabController::OnNavEntryCommitted(
 
 // static
 bool PrintPreviewTabController::IsPrintPreviewTab(TabContentsWrapper* tab) {
-  const GURL& url = tab->tab_contents()->GetURL();
+  return IsPrintPreviewURL(tab->tab_contents()->GetURL());
+}
+
+// static
+bool PrintPreviewTabController::IsPrintPreviewURL(const GURL& url) {
   return (url.SchemeIs(chrome::kChromeUIScheme) &&
           url.host() == chrome::kChromeUIPrintHost);
 }
@@ -316,12 +296,18 @@ TabContentsWrapper* PrintPreviewTabController::CreatePrintPreviewTab(
   // Add a new tab next to initiator tab.
   browser::NavigateParams params(current_browser,
                                  GURL(chrome::kChromeUIPrintURL),
-                                 PageTransition::LINK);
+                                 content::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kChromeFrame))
     params.disposition = NEW_POPUP;
-  params.tabstrip_index = current_browser->tabstrip_model()->
-      GetIndexOfTabContents(initiator_tab) + 1;
+
+  // For normal tabs, set the position as immediately to the right,
+  // otherwise let the tab strip decide.
+  if (current_browser->is_type_tabbed()) {
+    params.tabstrip_index = current_browser->tabstrip_model()->
+        GetIndexOfTabContents(initiator_tab) + 1;
+  }
+
   browser::Navigate(&params);
   TabContentsWrapper* preview_tab = params.target_contents;
   EnableInternalPDFPluginForTab(preview_tab);

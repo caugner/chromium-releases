@@ -19,13 +19,16 @@
 #include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/chromeos/input_method/ibus_controller.h"
+#include "chrome/browser/chromeos/input_method/input_method_util.h"
 
 class GURL;
 
 namespace chromeos {
 namespace input_method {
 
+class HotkeyManager;
 class VirtualKeyboard;
+class XKeyboard;
 
 // This class manages input methodshandles.  Classes can add themselves as
 // observers. Clients can get an instance of this library class by:
@@ -39,25 +42,30 @@ class InputMethodManager {
     // Called when the current input method is changed.
     virtual void InputMethodChanged(
         InputMethodManager* manager,
-        const input_method::InputMethodDescriptor& current_input_method,
+        const InputMethodDescriptor& current_input_method,
         size_t num_active_input_methods) = 0;
 
     // Called when the active input methods are changed.
     virtual void ActiveInputMethodsChanged(
         InputMethodManager* manager,
-        const input_method::InputMethodDescriptor& current_input_method,
+        const InputMethodDescriptor& current_input_method,
         size_t num_active_input_methods) = 0;
-
-    // Called when the preferences have to be updated.
-    virtual void PreferenceUpdateNeeded(
-        InputMethodManager* manager,
-        const input_method::InputMethodDescriptor& previous_input_method,
-        const input_method::InputMethodDescriptor& current_input_method) = 0;
 
     // Called when the list of properties is changed.
     virtual void PropertyListChanged(
         InputMethodManager* manager,
-        const input_method::ImePropertyList& current_ime_properties) = 0;
+        const ImePropertyList& current_ime_properties) = 0;
+  };
+
+  class PreferenceObserver {
+   public:
+    virtual ~PreferenceObserver() {}
+
+    // Called when the preferences have to be updated.
+    virtual void PreferenceUpdateNeeded(
+        InputMethodManager* manager,
+        const InputMethodDescriptor& previous_input_method,
+        const InputMethodDescriptor& current_input_method) = 0;
 
     // Called by AddObserver() when the first observer is added.
     virtual void FirstObserverIsAdded(InputMethodManager* obj) = 0;
@@ -69,7 +77,7 @@ class InputMethodManager {
     // Called when the current virtual keyboard is changed.
     virtual void VirtualKeyboardChanged(
         InputMethodManager* manager,
-        const input_method::VirtualKeyboard& virtual_keyboard,
+        const VirtualKeyboard& virtual_keyboard,
         const std::string& virtual_keyboard_layout) = 0;
   };
 
@@ -80,22 +88,52 @@ class InputMethodManager {
   // Adds an observer to receive notifications of input method related
   // changes as desribed in the Observer class above.
   virtual void AddObserver(Observer* observer) = 0;
+  virtual void AddPreLoginPreferenceObserver(PreferenceObserver* observer) = 0;
+  virtual void AddPostLoginPreferenceObserver(PreferenceObserver* observer) = 0;
   virtual void AddVirtualKeyboardObserver(
       VirtualKeyboardObserver* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
+  virtual void RemovePreLoginPreferenceObserver(
+      PreferenceObserver* observer) = 0;
+  virtual void RemovePostLoginPreferenceObserver(
+      PreferenceObserver* observer) = 0;
   virtual void RemoveVirtualKeyboardObserver(
       VirtualKeyboardObserver* observer) = 0;
+
+  // Returns all input methods that are supported, including ones not active.
+  // Caller has to delete the returned list. This function never returns NULL.
+  virtual InputMethodDescriptors* GetSupportedInputMethods() = 0;
 
   // Returns the list of input methods we can select (i.e. active). If the cros
   // library is not found or IBus/DBus daemon is not alive, this function
   // returns a fallback input method list (and never returns NULL).
-  virtual input_method::InputMethodDescriptors* GetActiveInputMethods() = 0;
+  virtual InputMethodDescriptors* GetActiveInputMethods() = 0;
 
   // Returns the number of active input methods.
   virtual size_t GetNumActiveInputMethods() = 0;
 
   // Changes the current input method to |input_method_id|.
   virtual void ChangeInputMethod(const std::string& input_method_id) = 0;
+
+  // Enables input methods (e.g. Chinese, Japanese) and keyboard layouts (e.g.
+  // US qwerty, US dvorak, French azerty) that are necessary for the language
+  // code and then switches to |initial_input_method_id| if the string is not
+  // empty. For example, if |language_code| is "en-US", US qwerty and US dvorak
+  // layouts would be enabled. Likewise, for Germany locale, US qwerty layout
+  // and several keyboard layouts for Germany would be enabled.
+  // If |type| is kAllInputMethods, all keyboard layouts and all input methods
+  // are enabled. If it's kKeyboardLayoutsOnly, only keyboard layouts are
+  // enabled. For example, for Japanese, xkb:jp::jpn is enabled when
+  // kKeyboardLayoutsOnly, and xkb:jp::jpn, mozc, mozc-jp, mozc-dv are enabled
+  // when kAllInputMethods.
+  //
+  // Note that this function does not save the input methods in the user's
+  // preferences, as this function is designed for the login screen and the
+  // screen locker, where we shouldn't change the user's preferences.
+  virtual void EnableInputMethods(
+      const std::string& language_code,
+      InputMethodType type,
+      const std::string& initial_input_method_id) = 0;
 
   // Sets whether the input method property specified by |key| is activated. If
   // |activated| is true, activates the property. If |activate| is false,
@@ -121,7 +159,7 @@ class InputMethodManager {
   // function. See also http://crosbug.com/5217.
   virtual bool SetImeConfig(const std::string& section,
                             const std::string& config_name,
-                            const input_method::ImeConfigValue& value) = 0;
+                            const ImeConfigValue& value) = 0;
 
   // Add an input method to insert into the language menu.
   virtual void AddActiveIme(const std::string& id,
@@ -132,9 +170,8 @@ class InputMethodManager {
   // Remove an input method from the language menu.
   virtual void RemoveActiveIme(const std::string& id) = 0;
 
-  virtual bool GetExtraDescriptor(
-      const std::string& id,
-      input_method::InputMethodDescriptor* descriptor) = 0;
+  virtual bool GetExtraDescriptor(const std::string& id,
+                                  InputMethodDescriptor* descriptor) = 0;
 
   // Sets the IME state to enabled, and launches input method daemon if needed.
   // Returns true if the daemon is started. Otherwise, e.g. the daemon is
@@ -142,7 +179,9 @@ class InputMethodManager {
   virtual bool StartInputMethodDaemon() = 0;
 
   // Disables the IME, and kills the daemon process if they are running.
-  virtual void StopInputMethodDaemon() = 0;
+  // Returns true if the daemon is stopped. Otherwise, e.g. the daemon is
+  // already stopped, returns false.
+  virtual bool StopInputMethodDaemon() = 0;
 
   // Controls whether the IME process is started when preload engines are
   // specificed, or defered until a non-default method is activated.
@@ -155,7 +194,7 @@ class InputMethodManager {
   // Sends a handwriting stroke to libcros. See chromeos::SendHandwritingStroke
   // for details.
   virtual void SendHandwritingStroke(
-      const input_method::HandwritingStroke& stroke) = 0;
+      const HandwritingStroke& stroke) = 0;
 
   // Clears last N handwriting strokes in libcros. See
   // chromeos::CancelHandwriting for details.
@@ -188,11 +227,28 @@ class InputMethodManager {
   virtual const std::multimap<std::string, const VirtualKeyboard*>&
   GetLayoutNameToKeyboardMapping() const = 0;
 
-  virtual input_method::InputMethodDescriptor previous_input_method() const = 0;
-  virtual input_method::InputMethodDescriptor current_input_method() const = 0;
+  // Returns an X keyboard object which could be used to change the current XKB
+  // layout, change the caps lock status, and set the auto repeat rate/interval.
+  virtual XKeyboard* GetXKeyboard() = 0;
 
-  virtual const input_method::ImePropertyList& current_ime_properties()
-      const = 0;
+  // Returns a InputMethodUtil object.
+  virtual InputMethodUtil* GetInputMethodUtil() = 0;
+
+  // Returns a hotkey manager object which could be used to detect Control+space
+  // and Shift+Alt key presses.
+  virtual HotkeyManager* GetHotkeyManager() = 0;
+  // Register all global input method hotkeys: Control+space and Shift+Alt.
+  virtual void AddHotkeys() = 0;
+  // Removes all global input method hotkeys.
+  virtual void RemoveHotkeys() = 0;
+
+  // Switches the current input method (or keyboard layout) to the next one.
+  virtual void SwitchToNextInputMethod() = 0;
+
+  virtual InputMethodDescriptor previous_input_method() const = 0;
+  virtual InputMethodDescriptor current_input_method() const = 0;
+
+  virtual const ImePropertyList& current_ime_properties() const = 0;
 };
 
 }  // namespace input_method

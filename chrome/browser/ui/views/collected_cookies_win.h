@@ -8,7 +8,6 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/common/content_settings.h"
-#include "content/browser/tab_contents/constrained_window.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "views/controls/tabbed_pane/tabbed_pane_listener.h"
@@ -45,10 +44,10 @@ class CollectedCookiesWin : public views::DialogDelegate,
                       TabContentsWrapper* wrapper);
 
   // views::DialogDelegate:
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;

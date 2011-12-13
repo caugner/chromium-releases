@@ -17,12 +17,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/gfx/compositor/layer_delegate.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "views/accelerator.h"
 #include "views/background.h"
 #include "views/border.h"
-#include "views/layer_helper.h"
 
 using ui::OSExchangeData;
 
@@ -91,7 +91,8 @@ class RootView;
 //   accessed from the main thread.
 //
 /////////////////////////////////////////////////////////////////////////////
-class VIEWS_EXPORT View : public AcceleratorTarget {
+class VIEWS_EXPORT View : public ui::LayerDelegate,
+                          public AcceleratorTarget {
  public:
   typedef std::vector<View*> Views;
 
@@ -254,9 +255,10 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
   virtual bool IsEnabled() const;
 
   // This indicates that the view completely fills its bounds in an opaque
-  // color.
-  // This doesn't affect compositing but is a hint to the compositor to optimize
-  // painting.
+  // color. This doesn't affect compositing but is a hint to the compositor to
+  // optimize painting.
+  // Note that this method does not implicitly create a layer if one does not
+  // already exist for the View, but is a no-op in that case.
   void SetFillsBoundsOpaquely(bool fills_bounds_opaquely);
 
   // Transformations -----------------------------------------------------------
@@ -282,18 +284,15 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
   // . SetPaintToLayer(true) has been invoked.
   // View creates the Layer only when it exists in a Widget with a non-NULL
   // Compositor.
-  void SetPaintToLayer(bool value);
+  void SetPaintToLayer(bool paint_to_layer);
 
   // Sets the LayerPropertySetter for this view. A value of NULL resets the
-  // LayerPropertySetter to the default (immediate).
+  // LayerPropertySetter to the default (immediate). Can only be called on a
+  // View that has a layer().
   void SetLayerPropertySetter(LayerPropertySetter* setter);
 
-  const ui::Layer* layer() const {
-    return layer_helper_.get() ? layer_helper_->layer() : NULL;
-  }
-  ui::Layer* layer() {
-    return layer_helper_.get() ? layer_helper_->layer() : NULL;
-  }
+  const ui::Layer* layer() const { return layer_.get(); }
+  ui::Layer* layer() { return layer_.get(); }
 
   // RTL positioning -----------------------------------------------------------
 
@@ -734,7 +733,7 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
   // Any time the tooltip text that a View is displaying changes, it must
   // invoke TooltipTextChanged.
   // |p| provides the coordinates of the mouse (relative to this view).
-  virtual bool GetTooltipText(const gfx::Point& p, std::wstring* tooltip);
+  virtual bool GetTooltipText(const gfx::Point& p, string16* tooltip);
 
   // Returns the location (relative to this View) for the text on the tooltip
   // to display. If false is returned (the default), the tooltip is placed at
@@ -961,52 +960,20 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
 
   // Accelerated painting ------------------------------------------------------
 
-  // Invoked from SchedulePaintInRect. Invokes SchedulePaintInternal on the
-  // parent. This does not mark the layer as dirty. It's assumed the caller has
-  // done this. You should not need to invoke this, use SchedulePaint or
-  // SchedulePaintInRect instead.
-  virtual void SchedulePaintInternal(const gfx::Rect& r);
-
-  // If our layer is out of date invokes Paint() with a canvas that is then
-  // copied to the layer. If the layer is not out of date recursively descends
-  // in case any children needed their layers updated.
-  //
-  // This is invoked internally by Widget and painting code.
-  virtual void PaintToLayer(const gfx::Rect& dirty_rect);
-
-  // Instructs the compositor to show our layer and all children layers.
-  // Invokes OnWillCompositeLayer() for any views that have layers.
-  //
-  // This is invoked internally by Widget and painting code.
-  virtual void PaintComposite();
-
-  // Invoked from |PaintComposite| if this view has a layer and before the
-  // layer is rendered by the compositor.
-  virtual void OnWillCompositeLayer();
-
   // This creates a layer for the view, if one does not exist. It then
   // passes the texture to a layer associated with the view. While an external
   // texture is set, the view will not update the layer contents.
   //
-  // Passing NULL resets to default behavior.
+  // |texture| cannot be NULL.
   //
   // Returns false if it cannot create a layer to which to assign the texture.
   bool SetExternalTexture(ui::Texture* texture);
 
-  // Returns the Compositor.
-  virtual const ui::Compositor* GetCompositor() const;
-  virtual ui::Compositor* GetCompositor();
-
-  // Marks the layer this view draws into as dirty.
-  virtual void MarkLayerDirty();
-
-  // Returns the offset from this view to the neareset ancestor with a layer.
-  // If |ancestor| is non-NULL it is set to the nearset ancestor with a layer.
-  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor);
-
-  // Creates a layer for this and recurses through all descendants.
-  virtual void CreateLayerIfNecessary();
+  // Returns the offset from this view to the nearest ancestor with a layer.
+  // If |ancestor| is non-NULL it is set to the nearest ancestor with a layer.
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
+      ui::Layer** layer_parent);
 
   // If this view has a layer, the layer is reparented to |parent_layer| and its
   // bounds is set based on |point|. If this view does not have a layer, then
@@ -1016,13 +983,21 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
   virtual void MoveLayerToParent(ui::Layer* parent_layer,
                                  const gfx::Point& point);
 
-  // Destroys the layer on this view and all descendants. Intended for when a
-  // view is being removed or made invisible.
-  virtual void DestroyLayerRecurse();
+  // Called to update the bounds of any child layers within this View's
+  // hierarchy when something happens to the hierarchy.
+  virtual void UpdateChildLayerBounds(const gfx::Point& offset);
 
-  // Resets the bounds of the layer associated with this view and all
-  // descendants.
-  virtual void UpdateLayerBounds(const gfx::Point& offset);
+  // Overridden from ui::LayerDelegate:
+  virtual void OnPaintLayer(gfx::Canvas* canvas) OVERRIDE;
+
+  // Finds the layer that this view paints to (it may belong to an ancestor
+  // view), then reorders the immediate children of that layer to match the
+  // order of the view tree.
+  virtual void ReorderLayers();
+
+  // This reorders the immediate children of |*parent_layer| to match the
+  // order of the view tree.
+  virtual void ReorderChildLayers(ui::Layer* parent_layer);
 
   // Input ---------------------------------------------------------------------
 
@@ -1098,12 +1073,29 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
   static int GetHorizontalDragThreshold();
   static int GetVerticalDragThreshold();
 
+  // Debugging -----------------------------------------------------------------
+
+#if !defined(NDEBUG)
+  // Returns string containing a graph of the views hierarchy in graphViz DOT
+  // language (http://graphviz.org/). Can be called within debugger and save
+  // to a file to compile/view.
+  // Note: Assumes initial call made with first = true.
+  virtual std::string PrintViewGraph(bool first);
+
+  // Some classes may own an object which contains the children to displayed in
+  // the views hierarchy. The above function gives the class the flexibility to
+  // decide which object should be used to obtain the children, but this
+  // function makes the decision explicit.
+  std::string DoPrintViewGraph(bool first, View* view_with_children);
+#endif
+
  private:
   friend class internal::NativeWidgetView;
   friend class internal::RootView;
   friend class FocusManager;
   friend class ViewStorage;
   friend class Widget;
+  friend class PaintLock;
 
   // Used to track a drag. RootView passes this into
   // ProcessMousePressed/Dragged.
@@ -1137,6 +1129,10 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
   // Invoked before and after the bounds change to schedule painting the old and
   // new bounds.
   void SchedulePaintBoundsChanged(SchedulePaintType type);
+
+  // Common Paint() code shared by accelerated and non-accelerated code paths to
+  // invoke OnPaint() on the View.
+  void PaintCommon(gfx::Canvas* canvas);
 
   // Tree operations -----------------------------------------------------------
 
@@ -1229,27 +1225,41 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
 
   // Accelerated painting ------------------------------------------------------
 
-  // Returns true if this view should paint to layer.
-  bool ShouldPaintToLayer() const;
+  // Disables painting during time critical operations. Used by PaintLock.
+  // TODO(vollick) Ideally, the widget would not dispatch paints into the
+  // hierarchy during time critical operations and this would not be needed.
+  void set_painting_enabled(bool enabled) { painting_enabled_ = enabled; }
 
   // Creates the layer and related fields for this view.
   void CreateLayer();
 
-  // Reparents any descendant layer to our current layer parent and destroys
-  // this views layer.
-  void DestroyLayerAndReparent();
+  // Parents all un-parented layers within this view's hierarchy to this view's
+  // layer.
+  void UpdateParentLayers();
 
-  // Destroys the layer and related fields of this view. This is intended for
-  // use from one of the other destroy methods, normally you shouldn't invoke
-  // this directly.
+  // Updates the view's layer's parent. Called when a view is added to a view
+  // hierarchy, responsible for parenting the view's layer to the enclosing
+  // layer in the hierarchy.
+  void UpdateParentLayer();
+
+  // Parents this view's layer to |parent_layer|, and sets its bounds and other
+  // properties in accordance to |offset|, the view's offset from the
+  // |parent_layer|.
+  void ReparentLayer(const gfx::Point& offset, ui::Layer* parent_layer);
+
+  // Called to update the layer visibility. The layer will be visible if the
+  // View itself, and all its parent Views are visible. This also updates
+  // visibility of the child layers.
+  void UpdateLayerVisibility();
+  void UpdateChildLayerVisibility(bool visible);
+
+  // Orphans the layers in this subtree that are parented to layers outside of
+  // this subtree.
+  void OrphanLayers();
+
+  // Destroys the layer associated with this view, and reparents any descendants
+  // to the destroyed layer's parent.
   void DestroyLayer();
-
-  // Returns the transform, or NULL if no transform has been set or the identity
-  // transform was set. Be careful in using this as it may return NULL. Use
-  // GetTransform() if you always want a non-NULL transform.
-  const ui::Transform* transform() const {
-    return layer_helper_.get() ? layer_helper_->transform() : NULL;
-  }
 
   // Input ---------------------------------------------------------------------
 
@@ -1306,16 +1316,6 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
   // supported drag operations. When done, OnDragDone is invoked.
   void DoDrag(const MouseEvent& event, const gfx::Point& press_pt);
 
-  // Debugging -----------------------------------------------------------------
-
-#if defined(TOUCH_DEBUG)
-  // Returns string containing a graph of the views hierarchy in graphViz DOT
-  // language (http://graphviz.org/). Can be called within debugger and save
-  // to a file to compile/view.
-  // Note: Assumes initial call made with first = true.
-  std::string PrintViewGraph(bool first);
-#endif
-
   //////////////////////////////////////////////////////////////////////////////
 
   // Creation and lifetime -----------------------------------------------------
@@ -1352,6 +1352,9 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
 
   // Whether this view is enabled.
   bool enabled_;
+
+  // Whether this view is painting.
+  bool painting_enabled_;
 
   // Whether or not RegisterViewForVisibleBoundsNotification on the RootView
   // has been invoked.
@@ -1393,7 +1396,9 @@ class VIEWS_EXPORT View : public AcceleratorTarget {
 
   // Accelerated painting ------------------------------------------------------
 
-  scoped_ptr<internal::LayerHelper> layer_helper_;
+  bool paint_to_layer_;
+  scoped_ptr<ui::Layer> layer_;
+  scoped_ptr<LayerPropertySetter> layer_property_setter_;
 
   // Accelerators --------------------------------------------------------------
 

@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/ref_counted.h"
@@ -11,14 +13,18 @@
 #include "base/test/test_file_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/history/history.h"
+#include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -40,7 +46,7 @@
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/net/url_request_slow_download_job.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -172,10 +178,8 @@ class DownloadsObserver : public DownloadManager::Observer,
           // real UI would.
           BrowserThread::PostTask(
               BrowserThread::UI, FROM_HERE,
-              NewRunnableFunction(
-                  &AcceptDangerousDownload,
-                  download_manager_,
-                  download->id()));
+              base::Bind(&AcceptDangerousDownload, download_manager_,
+                         download->id()));
           break;
 
         case ON_DANGEROUS_DOWNLOAD_DENY:
@@ -183,10 +187,8 @@ class DownloadsObserver : public DownloadManager::Observer,
           // real UI would.
           BrowserThread::PostTask(
               BrowserThread::UI, FROM_HERE,
-              NewRunnableFunction(
-                  &DenyDangerousDownload,
-                  download_manager_,
-                  download->id()));
+              base::Bind(&DenyDangerousDownload, download_manager_,
+                         download->id()));
           break;
 
         case ON_DANGEROUS_DOWNLOAD_FAIL:
@@ -198,9 +200,8 @@ class DownloadsObserver : public DownloadManager::Observer,
       }
     }
 
-    if (download->state() == download_finished_state_) {
+    if (download->state() == download_finished_state_)
       DownloadInFinalState(download);
-    }
   }
 
   virtual void OnDownloadOpened(DownloadItem* download) {}
@@ -405,8 +406,7 @@ class DownloadsFlushObserver
         // there's a self-task posting in the IO thread cancel path.
         BrowserThread::PostTask(
             BrowserThread::FILE, FROM_HERE,
-            NewRunnableMethod(this,
-                              &DownloadsFlushObserver::PingFileThread, 2));
+            base::Bind(&DownloadsFlushObserver::PingFileThread, this, 2));
       }
     }
   }
@@ -414,16 +414,14 @@ class DownloadsFlushObserver
   void PingFileThread(int cycle) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &DownloadsFlushObserver::PingIOThread,
-                          cycle));
+        base::Bind(&DownloadsFlushObserver::PingIOThread, this, cycle));
   }
 
   void PingIOThread(int cycle) {
     if (--cycle) {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &DownloadsFlushObserver::PingFileThread,
-                            cycle));
+          base::Bind(&DownloadsFlushObserver::PingFileThread, this, cycle));
     } else {
       BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask());
@@ -454,7 +452,7 @@ class CancelTestDataCollector
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &CancelTestDataCollector::IOInfoCollector));
+        base::Bind(&CancelTestDataCollector::IOInfoCollector, this));
     ui_test_utils::RunMessageLoop();
   }
 
@@ -473,7 +471,7 @@ class CancelTestDataCollector
     rdh_pending_requests_ = resource_dispatcher_host_->pending_requests();
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(this, &CancelTestDataCollector::FileInfoCollector));
+        base::Bind(&CancelTestDataCollector::FileInfoCollector, this));
   }
 
   void FileInfoCollector() {
@@ -490,6 +488,144 @@ class CancelTestDataCollector
   DISALLOW_COPY_AND_ASSIGN(CancelTestDataCollector);
 };
 
+class PickSuggestedFileDelegate : public ChromeDownloadManagerDelegate {
+ public:
+  explicit PickSuggestedFileDelegate(Profile* profile)
+      : ChromeDownloadManagerDelegate(profile) {
+    SetDownloadManager(
+        DownloadServiceFactory::GetForProfile(profile)->GetDownloadManager());
+  }
+
+  virtual void ChooseDownloadPath(TabContents* tab_contents,
+                                  const FilePath& suggested_path,
+                                  void* data) OVERRIDE {
+    if (download_manager_)
+      download_manager_->FileSelected(suggested_path, data);
+  }
+};
+
+// Get History Information.
+class DownloadsHistoryDataCollector {
+ public:
+  DownloadsHistoryDataCollector(int64 download_db_handle,
+                                DownloadManager* manager)
+      : result_valid_(false),
+        download_db_handle_(download_db_handle) {
+    HistoryService* hs =
+        Profile::FromBrowserContext(manager->browser_context())->
+            GetHistoryService(Profile::EXPLICIT_ACCESS);
+    DCHECK(hs);
+    hs->QueryDownloads(
+        &callback_consumer_,
+        base::Bind(&DownloadsHistoryDataCollector::OnQueryDownloadsComplete,
+                   base::Unretained(this)));
+
+    // TODO(rdsmith): Move message loop out of constructor.
+    // Cannot complete immediately because the history backend runs on a
+    // separate thread, so we can assume that the RunMessageLoop below will
+    // be exited by the Quit in OnQueryDownloadsComplete.
+    ui_test_utils::RunMessageLoop();
+  }
+
+  bool GetDownloadsHistoryEntry(DownloadPersistentStoreInfo* result) {
+    DCHECK(result);
+    *result = result_;
+    return result_valid_;
+  }
+
+ private:
+  void OnQueryDownloadsComplete(
+      std::vector<DownloadPersistentStoreInfo>* entries) {
+    result_valid_ = false;
+    for (std::vector<DownloadPersistentStoreInfo>::const_iterator it =
+             entries->begin();
+         it != entries->end(); ++it) {
+      if (it->db_handle == download_db_handle_) {
+        result_ = *it;
+        result_valid_ = true;
+      }
+    }
+    MessageLoopForUI::current()->Quit();
+  }
+
+  DownloadPersistentStoreInfo result_;
+  bool result_valid_;
+  int64 download_db_handle_;
+  CancelableRequestConsumer callback_consumer_;
+
+  DISALLOW_COPY_AND_ASSIGN(DownloadsHistoryDataCollector);
+};
+
+// Mock that simulates a permissions dialog where the user denies
+// permission to install.  TODO(skerner): This could be shared with
+// extensions tests.  Find a common place for this class.
+class MockAbortExtensionInstallUI : public ExtensionInstallUI {
+ public:
+  MockAbortExtensionInstallUI() : ExtensionInstallUI(NULL) {}
+
+  // Simulate a user abort on an extension installation.
+  virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
+    delegate->InstallUIAbort(true);
+    MessageLoopForUI::current()->Quit();
+  }
+
+  virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
+  virtual void OnInstallFailure(const std::string& error) {}
+};
+
+// Mock that simulates a permissions dialog where the user allows
+// installation.
+class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
+ public:
+  explicit MockAutoConfirmExtensionInstallUI(Profile* profile)
+      : ExtensionInstallUI(profile) {}
+
+  // Proceed without confirmation prompt.
+  virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
+    delegate->InstallUIProceed();
+  }
+
+  virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
+  virtual void OnInstallFailure(const std::string& error) {}
+};
+
+static DownloadManager* DownloadManagerForBrowser(Browser* browser) {
+  return DownloadServiceFactory::GetForProfile(browser->profile())
+      ->GetDownloadManager();
+}
+
+}  // namespace
+
+// While an object of this class exists, it will mock out download
+// opening for all downloads created on the specified download manager.
+class MockDownloadOpeningObserver : public DownloadManager::Observer {
+ public:
+  explicit MockDownloadOpeningObserver(DownloadManager* manager)
+      : download_manager_(manager) {
+    download_manager_->AddObserver(this);
+  }
+
+  ~MockDownloadOpeningObserver() {
+    download_manager_->RemoveObserver(this);
+  }
+
+  // DownloadManager::Observer
+  virtual void ModelChanged() {
+    std::vector<DownloadItem*> downloads;
+    download_manager_->SearchDownloads(string16(), &downloads);
+
+    for (std::vector<DownloadItem*>::iterator it = downloads.begin();
+         it != downloads.end(); ++it) {
+      (*it)->MockDownloadOpenForTesting();
+    }
+  }
+
+ private:
+  DownloadManager* download_manager_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockDownloadOpeningObserver);
+};
+
 class DownloadTest : public InProcessBrowserTest {
  public:
   enum SelectExpectation {
@@ -500,6 +636,12 @@ class DownloadTest : public InProcessBrowserTest {
 
   DownloadTest() {
     EnableDOMAutomation();
+  }
+
+  void SetUpOnMainThread() OVERRIDE {
+    BrowserThread::PostTask(
+        BrowserThread::IO, FROM_HERE,
+        base::Bind(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
   }
 
   // Returning false indicates a failure of the setup, and should be asserted
@@ -524,7 +666,7 @@ class DownloadTest : public InProcessBrowserTest {
     browser()->profile()->GetPrefs()->SetBoolean(prefs::kPromptForDownload,
                                                  prompt_for_download);
 
-    DownloadManager* manager = browser()->profile()->GetDownloadManager();
+    DownloadManager* manager = DownloadManagerForBrowser(browser());
     DownloadPrefs::FromDownloadManager(manager)->ResetAutoOpen();
     manager->RemoveAllDownloads();
 
@@ -568,7 +710,7 @@ class DownloadTest : public InProcessBrowserTest {
 
   DownloadPrefs* GetDownloadPrefs(Browser* browser) {
     return DownloadPrefs::FromDownloadManager(
-        browser->profile()->GetDownloadManager());
+        DownloadManagerForBrowser(browser));
   }
 
   FilePath GetDownloadDirectory(Browser* browser) {
@@ -578,8 +720,7 @@ class DownloadTest : public InProcessBrowserTest {
   // Create a DownloadsObserver that will wait for the
   // specified number of downloads to finish.
   DownloadsObserver* CreateWaiter(Browser* browser, int num_downloads) {
-    DownloadManager* download_manager =
-        browser->profile()->GetDownloadManager();
+    DownloadManager* download_manager = DownloadManagerForBrowser(browser);
     return new DownloadsObserver(
         download_manager, num_downloads,
         DownloadItem::COMPLETE,  // Really done
@@ -591,8 +732,7 @@ class DownloadTest : public InProcessBrowserTest {
   // specified number of downloads to start.
   DownloadsObserver* CreateInProgressWaiter(Browser* browser,
                                             int num_downloads) {
-    DownloadManager* download_manager =
-        browser->profile()->GetDownloadManager();
+    DownloadManager* download_manager = DownloadManagerForBrowser(browser);
     return new DownloadsObserver(
         download_manager, num_downloads,
         DownloadItem::IN_PROGRESS,      // Has started
@@ -608,8 +748,7 @@ class DownloadTest : public InProcessBrowserTest {
       int num_downloads,
       DownloadItem::DownloadState final_state,
       DangerousDownloadAction dangerous_download_action) {
-    DownloadManager* download_manager =
-        browser->profile()->GetDownloadManager();
+    DownloadManager* download_manager = DownloadManagerForBrowser(browser);
     return new DownloadsObserver(
         download_manager, num_downloads,
         final_state,
@@ -769,7 +908,7 @@ class DownloadTest : public InProcessBrowserTest {
 
   void GetDownloads(Browser* browser, std::vector<DownloadItem*>* downloads) {
     DCHECK(downloads);
-    DownloadManager* manager = browser->profile()->GetDownloadManager();
+    DownloadManager* manager = DownloadManagerForBrowser(browser);
     manager->SearchDownloads(string16(), downloads);
   }
 
@@ -779,6 +918,15 @@ class DownloadTest : public InProcessBrowserTest {
   void CheckDownloadUI(Browser* browser, bool expected_non_cros,
       bool expected_cros, const FilePath& filename) {
 #if defined(OS_CHROMEOS)
+#if defined(TOUCH_UI)
+    TabContents* download_contents = ActiveDownloadsUI::GetPopup(NULL);
+    EXPECT_EQ(expected_cros, download_contents != NULL);
+    if (!download_contents || filename.empty())
+      return;
+
+    ActiveDownloadsUI* downloads_ui = static_cast<ActiveDownloadsUI*>(
+        download_contents->web_ui());
+#else
     Browser* popup = ActiveDownloadsUI::GetPopup();
     EXPECT_EQ(expected_cros, popup != NULL);
     if (!popup || filename.empty())
@@ -786,6 +934,8 @@ class DownloadTest : public InProcessBrowserTest {
 
     ActiveDownloadsUI* downloads_ui = static_cast<ActiveDownloadsUI*>(
         popup->GetSelectedTabContents()->web_ui());
+#endif  // defined(TOUCH_UI)
+
     ASSERT_TRUE(downloads_ui);
     const ActiveDownloadsUI::DownloadList& downloads =
         downloads_ui->GetDownloads();
@@ -814,128 +964,23 @@ class DownloadTest : public InProcessBrowserTest {
     EXPECT_EQ(expected, BrowserList::size());
   }
 
+  // Arrange for select file calls on the given browser from the
+  // download manager to always choose the suggested file.
+  void NullSelectFile(Browser* browser) {
+    PickSuggestedFileDelegate* new_delegate =
+        new PickSuggestedFileDelegate(browser->profile());
+
+    // Gives ownership to DownloadService.
+    DownloadServiceFactory::GetForProfile(
+        browser->profile())->SetDownloadManagerDelegateForTesting(new_delegate);
+  }
+
  private:
   // Location of the test data.
   FilePath test_dir_;
 
   // Location of the downloads directory for these tests
   ScopedTempDir downloads_directory_;
-};
-
-// Get History Information.
-class DownloadsHistoryDataCollector {
- public:
-  DownloadsHistoryDataCollector(int64 download_db_handle,
-                                DownloadManager* manager)
-      : result_valid_(false),
-        download_db_handle_(download_db_handle) {
-    HistoryService* hs =
-        Profile::FromBrowserContext(manager->browser_context())->
-            GetHistoryService(Profile::EXPLICIT_ACCESS);
-    DCHECK(hs);
-    hs->QueryDownloads(
-        &callback_consumer_,
-        NewCallback(this,
-                    &DownloadsHistoryDataCollector::OnQueryDownloadsComplete));
-
-    // Cannot complete immediately because the history backend runs on a
-    // separate thread, so we can assume that the RunMessageLoop below will
-    // be exited by the Quit in OnQueryDownloadsComplete.
-    ui_test_utils::RunMessageLoop();
-  }
-
-  bool GetDownloadsHistoryEntry(DownloadPersistentStoreInfo* result) {
-    DCHECK(result);
-    *result = result_;
-    return result_valid_;
-  }
-
- private:
-  void OnQueryDownloadsComplete(
-      std::vector<DownloadPersistentStoreInfo>* entries) {
-    result_valid_ = false;
-    for (std::vector<DownloadPersistentStoreInfo>::const_iterator it =
-             entries->begin();
-         it != entries->end(); ++it) {
-      if (it->db_handle == download_db_handle_) {
-        result_ = *it;
-        result_valid_ = true;
-      }
-    }
-    MessageLoopForUI::current()->Quit();
-  }
-
-  DownloadPersistentStoreInfo result_;
-  bool result_valid_;
-  int64 download_db_handle_;
-  CancelableRequestConsumer callback_consumer_;
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadsHistoryDataCollector);
-};
-
-// Mock that simulates a permissions dialog where the user denies
-// permission to install.  TODO(skerner): This could be shared with
-// extensions tests.  Find a common place for this class.
-class MockAbortExtensionInstallUI : public ExtensionInstallUI {
- public:
-  MockAbortExtensionInstallUI() : ExtensionInstallUI(NULL) {}
-
-  // Simulate a user abort on an extension installation.
-  virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
-    delegate->InstallUIAbort(true);
-    MessageLoopForUI::current()->Quit();
-  }
-
-  virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
-  virtual void OnInstallFailure(const std::string& error) {}
-};
-
-// Mock that simulates a permissions dialog where the user allows
-// installation.
-class MockAutoConfirmExtensionInstallUI : public ExtensionInstallUI {
- public:
-  explicit MockAutoConfirmExtensionInstallUI(Profile* profile)
-      : ExtensionInstallUI(profile) {}
-
-  // Proceed without confirmation prompt.
-  virtual void ConfirmInstall(Delegate* delegate, const Extension* extension) {
-    delegate->InstallUIProceed();
-  }
-
-  virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon) {}
-  virtual void OnInstallFailure(const std::string& error) {}
-};
-
-}  // namespace
-
-// While an object of this class exists, it will mock out download
-// opening for all downloads created on the specified download manager.
-class MockDownloadOpeningObserver : public DownloadManager::Observer {
- public:
-  explicit MockDownloadOpeningObserver(DownloadManager* manager)
-      : download_manager_(manager) {
-    download_manager_->AddObserver(this);
-  }
-
-  ~MockDownloadOpeningObserver() {
-    download_manager_->RemoveObserver(this);
-  }
-
-  // DownloadManager::Observer
-  virtual void ModelChanged() {
-    std::vector<DownloadItem*> downloads;
-    download_manager_->SearchDownloads(string16(), &downloads);
-
-    for (std::vector<DownloadItem*>::iterator it = downloads.begin();
-         it != downloads.end(); ++it) {
-      (*it)->TestMockDownloadOpen();
-    }
-  }
-
- private:
-  DownloadManager* download_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockDownloadOpeningObserver);
 };
 
 // NOTES:
@@ -981,27 +1026,34 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, CheckInternetZone) {
 }
 #endif
 
-// Put up a Select File dialog when the file is downloaded, due to its MIME
-// type.
-//
-// This test runs correctly, but leaves behind turds in the test user's
-// download directory because of http://crbug.com/62099.  No big loss; it
-// was primarily confirming DownloadsObserver wait on select file dialog
-// functionality anyway.
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_DownloadMimeTypeSelect) {
+// Put up a Select File dialog when the file is downloaded, due to
+// downloads preferences settings.
+IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadMimeTypeSelect) {
   ASSERT_TRUE(InitialSetup(true));
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   GURL url(URLRequestMockHTTPJob::GetMockUrl(file));
 
+  NullSelectFile(browser());
+
   // Download the file and wait.  We expect the Select File dialog to appear
-  // due to the MIME type.
-  DownloadAndWait(browser(), url, EXPECT_SELECT_DIALOG);
+  // due to the MIME type, but we still wait until the download completes.
+  scoped_ptr<DownloadsObserver> observer(
+      new DownloadsObserver(
+          DownloadManagerForBrowser(browser()),
+          1,
+          DownloadItem::COMPLETE,  // Really done
+          false,                   // Continue on select file.
+          ON_DANGEROUS_DOWNLOAD_FAIL));
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  observer->WaitForFinished();
+  EXPECT_TRUE(observer->select_file_dialog_seen());
 
   // Check state.
   EXPECT_EQ(1, browser()->tab_count());
-  // Since we exited while the Select File dialog was visible, there should not
-  // be anything in the download shelf and so it should not be visible.
-  CheckDownloadUI(browser(), false, false, FilePath());
+  CheckDownload(browser(), file, file);
+  CheckDownloadUI(browser(), true, true, file);
 }
 
 // Access a file with a viewable mime-type, verify that a download
@@ -1064,7 +1116,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, PerWindowShelf) {
 
   // Open a second tab and wait.
   EXPECT_NE(static_cast<TabContentsWrapper*>(NULL),
-            browser()->AddSelectedTabWithURL(GURL(), PageTransition::TYPED));
+            browser()->AddSelectedTabWithURL(
+                GURL(), content::PAGE_TRANSITION_TYPED));
   EXPECT_EQ(2, browser()->tab_count());
   CheckDownloadUI(browser(), true, true, download_file);
 
@@ -1432,7 +1485,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadCancelled) {
   observer->WaitForFinished();
 
   std::vector<DownloadItem*> downloads;
-  browser()->profile()->GetDownloadManager()->SearchDownloads(
+  DownloadManagerForBrowser(browser())->SearchDownloads(
       string16(), &downloads);
   ASSERT_EQ(1u, downloads.size());
   ASSERT_EQ(DownloadItem::IN_PROGRESS, downloads[0]->state());
@@ -1441,7 +1494,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadCancelled) {
   // Cancel the download and wait for download system quiesce.
   downloads[0]->Delete(DownloadItem::DELETE_DUE_TO_USER_DISCARD);
   scoped_refptr<DownloadsFlushObserver> flush_observer(
-      new DownloadsFlushObserver(browser()->profile()->GetDownloadManager()));
+      new DownloadsFlushObserver(DownloadManagerForBrowser(browser())));
   flush_observer->WaitForFlush();
 
   // Get the important info from other threads and check it.
@@ -1482,7 +1535,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
   // Check history results.
   DownloadsHistoryDataCollector history_collector(
       db_handle,
-      browser()->profile()->GetDownloadManager());
+      DownloadManagerForBrowser(browser()));
   DownloadPersistentStoreInfo info;
   EXPECT_TRUE(history_collector.GetDownloadsHistoryEntry(&info)) << db_handle;
   EXPECT_EQ(file, info.path.BaseName());
@@ -1520,11 +1573,8 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, ChromeURLAfterDownload) {
 // Test for crbug.com/12745. This tests that if a download is initiated from
 // a chrome:// page that has registered and onunload handler, the browser
 // will be able to close.
-// After several correct executions, this test starts failing on the build
-// bots and then continues to fail consistently.
-// As of 2011/05/22, it's crashing, so it is getting disabled.
-// http://crbug.com/82278
-IN_PROC_BROWSER_TEST_F(DownloadTest, DISABLED_BrowserCloseAfterDownload) {
+IN_PROC_BROWSER_TEST_F(DownloadTest, BrowserCloseAfterDownload) {
+  ASSERT_TRUE(InitialSetup(false));
   GURL downloads_url(chrome::kChromeUIFlagsURL);
   FilePath file(FILE_PATH_LITERAL("download-test1.lib"));
   GURL download_url(URLRequestMockHTTPJob::GetMockUrl(file));
@@ -1579,13 +1629,13 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, AutoOpen) {
 
   // Mock out external opening on all downloads until end of test.
   MockDownloadOpeningObserver observer(
-      browser()->profile()->GetDownloadManager());
+      DownloadManagerForBrowser(browser()));
 
   DownloadAndWait(browser(), url, EXPECT_NO_SELECT_DIALOG);
 
   // Find the download and confirm it was opened.
   std::vector<DownloadItem*> downloads;
-  browser()->profile()->GetDownloadManager()->SearchDownloads(
+  DownloadManagerForBrowser(browser())->SearchDownloads(
       string16(), &downloads);
   ASSERT_EQ(1u, downloads.size());
   EXPECT_EQ(DownloadItem::COMPLETE, downloads[0]->state());

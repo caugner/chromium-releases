@@ -14,14 +14,14 @@
 #include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/automation/automation_resource_message_filter.h"
+#include "chrome/browser/infobars/infobar_container.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "chrome/browser/tab_contents/infobar_container.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
 #include "chrome/browser/ui/views/frame/browser_bubble_host.h"
 #include "chrome/browser/ui/views/unhandled_keyboard_event_handler.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/navigation_types.h"
+#include "content/public/browser/navigation_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "views/accelerator.h"
@@ -119,11 +119,12 @@ class ExternalTabContainer : public TabContentsDelegate,
 
   // Deprecated. Please used two-arguments variant.
   // TODO(adriansc): Remove method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const GURL& url,
-                                      const GURL& referrer,
-                                      WindowOpenDisposition disposition,
-                                      PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(
+      TabContents* source,
+      const GURL& url,
+      const GURL& referrer,
+      WindowOpenDisposition disposition,
+      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
   virtual void NavigationStateChanged(const TabContents* source,
@@ -170,13 +171,11 @@ class ExternalTabContainer : public TabContentsDelegate,
                                      const string16& action,
                                      const string16& type,
                                      const string16& href,
-                                     const string16& title);
+                                     const string16& title) OVERRIDE;
   virtual void WebIntentDispatch(TabContents* tab,
                                  int routing_id,
-                                 const string16& action,
-                                 const string16& type,
-                                 const string16& data,
-                                 int intent_id);
+                                 const webkit_glue::WebIntentData& intent,
+                                 int intent_id) OVERRIDE;
   virtual void FindReply(TabContents* tab,
                          int request_id,
                          int number_of_matches,
@@ -244,7 +243,7 @@ class ExternalTabContainer : public TabContentsDelegate,
   virtual void OnFinalMessage(HWND window);
 
   bool InitNavigationInfo(NavigationInfo* nav_info,
-                          NavigationType::Type nav_type,
+                          content::NavigationType nav_type,
                           int relative_offset);
   void Navigate(const GURL& url, const GURL& referrer);
 
@@ -375,10 +374,11 @@ class TemporaryPopupExternalTabContainer : public ExternalTabContainer {
 
   // Deprecated. Please use the two-argument variant.
   // TODO(adriansc): Remove method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(TabContents* source, const GURL& url,
-                                      const GURL& referrer,
-                                      WindowOpenDisposition disposition,
-                                      PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(
+      TabContents* source, const GURL& url,
+      const GURL& referrer,
+      WindowOpenDisposition disposition,
+      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
 

@@ -6,17 +6,28 @@
 #define VIEWS_WIDGET_NATIVE_WIDGET_AURA_H_
 #pragma once
 
-#include "aura/window_delegate.h"
+#include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
+#include "ui/aura/window_delegate.h"
+#include "ui/base/events.h"
+#include "views/views_export.h"
 #include "views/widget/native_widget_private.h"
 
+namespace aura {
+class Window;
+}
 namespace gfx {
 class Font;
 }
 
+namespace ui {
+class ViewProp;
+}
+
 namespace views {
 
-class NativeWidgetAura : public internal::NativeWidgetPrivate,
-                         public aura::WindowDelegate {
+class VIEWS_EXPORT NativeWidgetAura : public internal::NativeWidgetPrivate,
+                                      public aura::WindowDelegate {
  public:
   explicit NativeWidgetAura(internal::NativeWidgetDelegate* delegate);
   virtual ~NativeWidgetAura();
@@ -38,9 +49,10 @@ class NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual void MarkLayerDirty() OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor) OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
+      ui::Layer** layer_parent) OVERRIDE;
+  virtual void ReorderLayers() OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
@@ -57,10 +69,10 @@ class NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void GetWindowPlacement(
       gfx::Rect* bounds,
       ui::WindowShowState* maximized) const OVERRIDE;
-  virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetWindowTitle(const string16& title) OVERRIDE;
   virtual void SetWindowIcons(const SkBitmap& window_icon,
                               const SkBitmap& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const std::wstring& name) OVERRIDE;
+  virtual void SetAccessibleName(const string16& name) OVERRIDE;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void BecomeModal() OVERRIDE;
@@ -106,21 +118,49 @@ class NativeWidgetAura : public internal::NativeWidgetPrivate,
   virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
   virtual bool ConvertPointFromAncestor(
       const Widget* ancestor, gfx::Point* point) const OVERRIDE;
+  virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
+
+  // Overridden from views::InputMethodDelegate:
   virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;
 
   // Overridden from aura::WindowDelegate:
+  virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
+                               const gfx::Rect& new_bounds) OVERRIDE;
   virtual void OnFocus() OVERRIDE;
   virtual void OnBlur() OVERRIDE;
   virtual bool OnKeyEvent(aura::KeyEvent* event) OVERRIDE;
+  virtual gfx::NativeCursor GetCursor(const gfx::Point& point) OVERRIDE;
   virtual int GetNonClientComponent(const gfx::Point& point) const OVERRIDE;
   virtual bool OnMouseEvent(aura::MouseEvent* event) OVERRIDE;
+  virtual ui::TouchStatus OnTouchEvent(aura::TouchEvent* event) OVERRIDE;
+  virtual bool ShouldActivate(aura::Event* event) OVERRIDE;
+  virtual void OnActivated() OVERRIDE;
+  virtual void OnLostActive() OVERRIDE;
+  virtual void OnCaptureLost() OVERRIDE;
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
+  virtual void OnWindowDestroying() OVERRIDE;
   virtual void OnWindowDestroyed() OVERRIDE;
+  virtual void OnWindowVisibilityChanged(bool visible) OVERRIDE;
 
  private:
+  typedef ScopedVector<ui::ViewProp> ViewProps;
+
   internal::NativeWidgetDelegate* delegate_;
 
   aura::Window* window_;
+
+  // See class documentation for Widget in widget.h for a note about ownership.
+  Widget::InitParams::Ownership ownership_;
+
+  // The following factory is used for calls to close the NativeWidgetAura
+  // instance.
+  base::WeakPtrFactory<NativeWidgetAura> close_widget_factory_;
+
+  bool can_activate_;
+
+  gfx::NativeCursor cursor_;
+
+  ViewProps props_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetAura);
 };

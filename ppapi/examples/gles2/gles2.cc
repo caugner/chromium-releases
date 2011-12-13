@@ -13,7 +13,7 @@
 
 #include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/c/ppb_opengles.h"
+#include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/cpp/dev/context_3d_dev.h"
 #include "ppapi/cpp/dev/surface_3d_dev.h"
 #include "ppapi/cpp/dev/video_decoder_client_dev.h"
@@ -63,7 +63,7 @@ class GLES2DemoInstance : public pp::Instance,
   // pp::VideoDecoderClient_Dev implementation.
   virtual void ProvidePictureBuffers(PP_Resource decoder,
                                      uint32_t req_num_of_bufs,
-                                     PP_Size dimensions);
+                                     const PP_Size& dimensions);
   virtual void DismissPictureBuffer(PP_Resource decoder,
                                     int32_t picture_buffer_id);
   virtual void PictureReady(PP_Resource decoder, const PP_Picture_Dev& picture);
@@ -324,7 +324,7 @@ void GLES2DemoInstance::DecoderClient::DecodeNextNALU() {
 }
 
 void GLES2DemoInstance::ProvidePictureBuffers(
-    PP_Resource decoder, uint32_t req_num_of_bufs, PP_Size dimensions) {
+    PP_Resource decoder, uint32_t req_num_of_bufs, const PP_Size& dimensions) {
   DecoderClient* client = video_decoders_[decoder];
   assert(client);
   client->ProvidePictureBuffers(req_num_of_bufs, dimensions);

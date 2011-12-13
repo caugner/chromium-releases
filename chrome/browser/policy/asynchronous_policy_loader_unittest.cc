@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
+#include "base/callback.h"
 #include "chrome/browser/policy/asynchronous_policy_loader.h"
 #include "chrome/browser/policy/asynchronous_policy_provider.h"
 #include "chrome/browser/policy/asynchronous_policy_test_base.h"
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
-#include "chrome/browser/policy/mock_configuration_policy_store.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using ::testing::_;
@@ -14,6 +15,13 @@ using ::testing::InSequence;
 using ::testing::Return;
 
 namespace policy {
+
+namespace {
+
+void IgnoreCallback() {
+}
+
+}  // namespace
 
 class MockConfigurationPolicyObserver
     : public ConfigurationPolicyProvider::Observer {
@@ -30,9 +38,11 @@ class AsynchronousPolicyLoaderTest : public AsynchronousPolicyTestBase {
   virtual void SetUp() {
     AsynchronousPolicyTestBase::SetUp();
     mock_provider_.reset(new MockConfigurationPolicyProvider());
+    ignore_callback_ = base::Bind(&IgnoreCallback);
   }
 
  protected:
+  base::Closure ignore_callback_;
   scoped_ptr<MockConfigurationPolicyProvider> mock_provider_;
 
  private:
@@ -59,7 +69,7 @@ TEST_F(AsynchronousPolicyLoaderTest, InitialLoad) {
   EXPECT_CALL(*delegate_, Load()).WillOnce(Return(template_dict));
   scoped_refptr<AsynchronousPolicyLoader> loader =
       new AsynchronousPolicyLoader(delegate_.release(), 10);
-  loader->Init();
+  loader->Init(ignore_callback_);
   const DictionaryValue* loaded_dict(loader->policy());
   EXPECT_TRUE(loaded_dict->Equals(template_dict));
 }
@@ -74,7 +84,7 @@ TEST_F(AsynchronousPolicyLoaderTest, InitialLoadWithFallback) {
       CreateSequencedTestDictionary(&dictionary_number));
   scoped_refptr<AsynchronousPolicyLoader> loader =
       new AsynchronousPolicyLoader(delegate_.release(), 10);
-  loader->Init();
+  loader->Init(ignore_callback_);
   loop_.RunAllPending();
   loader->Reload();
   loop_.RunAllPending();
@@ -92,7 +102,7 @@ TEST_F(AsynchronousPolicyLoaderTest, Stop) {
   EXPECT_CALL(*delegate_, Load()).Times(1);
   scoped_refptr<AsynchronousPolicyLoader> loader =
       new AsynchronousPolicyLoader(delegate_.release(), 10);
-  loader->Init();
+  loader->Init(ignore_callback_);
   loop_.RunAllPending();
   loader->Stop();
   loop_.RunAllPending();
@@ -100,8 +110,7 @@ TEST_F(AsynchronousPolicyLoaderTest, Stop) {
   loop_.RunAllPending();
 }
 
-// Verifies that the provider is notified upon policy reload, but only
-// if the policy changed.
+// Verifies that the provider is notified upon policy reload.
 TEST_F(AsynchronousPolicyLoaderTest, ProviderNotificationOnPolicyChange) {
   InSequence s;
   MockConfigurationPolicyObserver observer;
@@ -111,12 +120,13 @@ TEST_F(AsynchronousPolicyLoaderTest, ProviderNotificationOnPolicyChange) {
       CreateSequencedTestDictionary(&dictionary_number_1));
   EXPECT_CALL(*delegate_, Load()).WillOnce(
       CreateSequencedTestDictionary(&dictionary_number_2));
-  EXPECT_CALL(observer, OnUpdatePolicy()).Times(0);
+  EXPECT_CALL(observer, OnUpdatePolicy()).Times(1);
   EXPECT_CALL(*delegate_, Load()).WillOnce(
       CreateSequencedTestDictionary(&dictionary_number_2));
   EXPECT_CALL(observer, OnUpdatePolicy()).Times(1);
   EXPECT_CALL(*delegate_, Load()).WillOnce(
       CreateSequencedTestDictionary(&dictionary_number_1));
+  EXPECT_CALL(observer, OnUpdatePolicy()).Times(1);
   scoped_refptr<AsynchronousPolicyLoader> loader =
       new AsynchronousPolicyLoader(delegate_.release(), 10);
   AsynchronousPolicyProvider provider(NULL, loader);

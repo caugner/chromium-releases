@@ -33,7 +33,9 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/update_library.h"
+#if defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 #endif
 
 namespace {
@@ -217,6 +219,7 @@ bool FastShutdown() {
 }
 
 void NotifyWindowManagerAboutSignout() {
+#if defined(TOOLKIT_USES_GTK)
   static bool notified = false;
   if (!notified) {
     // Let the window manager know that we're going away before we start closing
@@ -224,6 +227,7 @@ void NotifyWindowManagerAboutSignout() {
     chromeos::WmIpc::instance()->NotifyAboutSignout();
     notified = true;
   }
+#endif
 }
 
 #endif
@@ -429,8 +433,10 @@ void BrowserList::CloseAllBrowsersWithProfile(Profile* profile) {
   BrowserVector browsers_to_close;
   for (BrowserList::const_iterator i = BrowserList::begin();
        i != BrowserList::end(); ++i) {
-    if ((*i)->profile() == profile)
+    if (BrowserMatches(*i, profile, Browser::FEATURE_NONE,
+        kMatchOriginalProfile)) {
       browsers_to_close.push_back(*i);
+    }
   }
 
   for (BrowserVector::const_iterator i = browsers_to_close.begin();
@@ -679,6 +685,16 @@ Browser* BrowserList::FindBrowserWithWindow(gfx::NativeWindow window) {
     Browser* browser = *it;
     if (browser->window() && browser->window()->GetNativeHandle() == window)
       return browser;
+  }
+  return NULL;
+}
+
+// static
+Browser* BrowserList::FindBrowserWithTabContents(TabContents* tab_contents) {
+  DCHECK(tab_contents);
+  for (TabContentsIterator it; !it.done(); ++it) {
+    if (it->tab_contents() == tab_contents)
+      return it.browser();
   }
   return NULL;
 }

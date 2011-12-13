@@ -14,6 +14,9 @@
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/shared_impl/var.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
@@ -52,6 +55,14 @@ int MapNetError(int result) {
   }
 }
 
+WebKit::WebFrame* GetFrameForResource(const ::ppapi::Resource* resource) {
+  PluginInstance* plugin_instance =
+      ResourceHelper::GetPluginInstance(resource);
+  if (!plugin_instance)
+    return NULL;
+  return plugin_instance->container()->element().document().frame();
+}
+
 }  // namespace
 
 PPB_Transport_Impl::PPB_Transport_Impl(PP_Instance instance)
@@ -70,9 +81,9 @@ PPB_Transport_Impl::~PPB_Transport_Impl() {
 // static
 PP_Resource PPB_Transport_Impl::Create(PP_Instance instance,
                                        const char* name,
-                                       const char* proto) {
+                                       PP_TransportType type) {
   scoped_refptr<PPB_Transport_Impl> t(new PPB_Transport_Impl(instance));
-  if (!t->Init(name, proto))
+  if (!t->Init(name, type))
     return 0;
   return t->GetReference();
 }
@@ -81,17 +92,14 @@ PPB_Transport_API* PPB_Transport_Impl::AsPPB_Transport_API() {
   return this;
 }
 
-bool PPB_Transport_Impl::Init(const char* name, const char* proto) {
+bool PPB_Transport_Impl::Init(const char* name, PP_TransportType type) {
   name_ = name;
 
-  if (base::strcasecmp(proto, kUdpProtocolName) == 0) {
-    use_tcp_ = false;
-  } else if (base::strcasecmp(proto, kTcpProtocolName) == 0) {
-    use_tcp_ = true;
-  } else {
-    LOG(WARNING) << "Unknown protocol: " << proto;
+  if (type != PP_TRANSPORTTYPE_DATAGRAM && type != PP_TRANSPORTTYPE_STREAM) {
+    LOG(WARNING) << "Unknown transport type: " << type;
     return false;
   }
+  type_ = type;
 
   PluginDelegate* plugin_delegate = ResourceHelper::GetPluginDelegate(this);
   if (!plugin_delegate)
@@ -118,7 +126,6 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
       StringVar* value_str = StringVar::FromPPVar(value);
       if (!value_str)
         return PP_ERROR_BADARGUMENT;
-
       if (!net::ParseHostAndPort(value_str->value(), &config_.stun_server,
                                  &config_.stun_server_port)) {
         return PP_ERROR_BADARGUMENT;
@@ -130,7 +137,6 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
       StringVar* value_str = StringVar::FromPPVar(value);
       if (!value_str)
         return PP_ERROR_BADARGUMENT;
-
       if (!net::ParseHostAndPort(value_str->value(), &config_.relay_server,
                                  &config_.relay_server_port)) {
         return PP_ERROR_BADARGUMENT;
@@ -138,16 +144,38 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
       break;
     }
 
-    case PP_TRANSPORTPROPERTY_RELAY_TOKEN: {
+    case PP_TRANSPORTPROPERTY_RELAY_USERNAME: {
       StringVar* value_str = StringVar::FromPPVar(value);
       if (!value_str)
         return PP_ERROR_BADARGUMENT;
-      config_.relay_token = value_str->value();
+      config_.relay_username = value_str->value();
+      break;
+    }
+
+    case PP_TRANSPORTPROPERTY_RELAY_PASSWORD: {
+      StringVar* value_str = StringVar::FromPPVar(value);
+      if (!value_str)
+        return PP_ERROR_BADARGUMENT;
+      config_.relay_password = value_str->value();
+      break;
+    }
+
+    case PP_TRANSPORTPROPERTY_RELAY_MODE: {
+      switch (value.value.as_int) {
+        case PP_TRANSPORTRELAYMODE_TURN:
+          config_.legacy_relay = false;
+          break;
+        case PP_TRANSPORTRELAYMODE_GOOGLE:
+          config_.legacy_relay = true;
+          break;
+        default:
+          return PP_ERROR_BADARGUMENT;
+      }
       break;
     }
 
     case PP_TRANSPORTPROPERTY_TCP_RECEIVE_WINDOW: {
-      if (!use_tcp_)
+      if (type_ != PP_TRANSPORTTYPE_STREAM)
         return PP_ERROR_BADARGUMENT;
 
       int32_t int_value = value.value.as_int;
@@ -160,7 +188,7 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
     }
 
     case PP_TRANSPORTPROPERTY_TCP_SEND_WINDOW: {
-      if (!use_tcp_)
+      if (type_ != PP_TRANSPORTTYPE_STREAM)
         return PP_ERROR_BADARGUMENT;
 
       int32_t int_value = value.value.as_int;
@@ -173,7 +201,7 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
     }
 
     case PP_TRANSPORTPROPERTY_TCP_NO_DELAY: {
-      if (!use_tcp_)
+      if (type_ != PP_TRANSPORTTYPE_STREAM)
         return PP_ERROR_BADARGUMENT;
 
       if (value.type != PP_VARTYPE_BOOL)
@@ -183,7 +211,7 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
     }
 
     case PP_TRANSPORTPROPERTY_TCP_ACK_DELAY: {
-      if (!use_tcp_)
+      if (type_ != PP_TRANSPORTTYPE_STREAM)
         return PP_ERROR_BADARGUMENT;
 
       int32_t int_value = value.value.as_int;
@@ -195,6 +223,13 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
       break;
     }
 
+    case PP_TRANSPORTPROPERTY_DISABLE_TCP_TRANSPORT: {
+      if (value.type != PP_VARTYPE_BOOL)
+        return PP_ERROR_BADARGUMENT;
+      config_.disable_tcp_transport = PP_ToBool(value.value.as_bool);
+      break;
+    }
+
     default:
       return PP_ERROR_BADARGUMENT;
   }
@@ -203,6 +238,8 @@ int32_t PPB_Transport_Impl::SetProperty(PP_TransportProperty property,
 }
 
 int32_t PPB_Transport_Impl::Connect(PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   if (!p2p_transport_.get())
     return PP_ERROR_FAILED;
 
@@ -210,11 +247,13 @@ int32_t PPB_Transport_Impl::Connect(PP_CompletionCallback callback) {
   if (started_)
     return PP_ERROR_INPROGRESS;
 
-  P2PTransport::Protocol protocol = use_tcp_ ?
+  P2PTransport::Protocol protocol = (type_ == PP_TRANSPORTTYPE_STREAM) ?
       P2PTransport::PROTOCOL_TCP : P2PTransport::PROTOCOL_UDP;
 
-  if (!p2p_transport_->Init(name_, protocol, config_, this))
+  if (!p2p_transport_->Init(
+          GetFrameForResource(this), name_, protocol, config_, this)) {
     return PP_ERROR_FAILED;
+  }
 
   started_ = true;
 
@@ -229,6 +268,8 @@ int32_t PPB_Transport_Impl::Connect(PP_CompletionCallback callback) {
 
 int32_t PPB_Transport_Impl::GetNextAddress(PP_Var* address,
                                            PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   if (!p2p_transport_.get())
     return PP_ERROR_FAILED;
 
@@ -265,6 +306,8 @@ int32_t PPB_Transport_Impl::ReceiveRemoteAddress(PP_Var address) {
 
 int32_t PPB_Transport_Impl::Recv(void* data, uint32_t len,
                                  PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   if (!p2p_transport_.get())
     return PP_ERROR_FAILED;
 
@@ -292,6 +335,8 @@ int32_t PPB_Transport_Impl::Recv(void* data, uint32_t len,
 
 int32_t PPB_Transport_Impl::Send(const void* data, uint32_t len,
                                  PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
   if (!p2p_transport_.get())
     return PP_ERROR_FAILED;
 

@@ -7,12 +7,6 @@
  */
 
 /**
- * The keyboard layout name currently in use.
- * @type {string}
- */
-var currentKeyboardLayout = 'us';
-
-/**
  * The ratio of the row height to the font size.
  * @type {number}
  */
@@ -48,25 +42,15 @@ function getKeyboardHeight() {
 }
 
 /**
- * Set the keyboard mode.
- * @param {string} mode The new mode.
- * @return {void}
- */
-function setMode(mode) {
-  var rows = KEYBOARDS[currentKeyboardLayout]['rows'];
-  for (var i = 0; i < rows.length; ++i) {
-    rows[i].showMode(mode);
-  }
-}
-
-/**
  * Create a DOM of the keyboard rows for the given keyboard layout.
  * Do nothing if the DOM is already created.
  * @param {string} layout The keyboard layout for which rows are created.
- * @param {Element} The DOM Element to which rows are appended.
+ * @param {Element} element The DOM Element to which rows are appended.
+ * @param {boolean} autoPadding True if padding needs to be added to both side
+ *     of the rows that have less keys.
  * @return {void}
  */
-function initRows(layout, element) {
+function initRows(layout, element, autoPadding) {
   var keyboard = KEYBOARDS[layout];
   if ('rows' in keyboard) {
     return;
@@ -78,11 +62,24 @@ function initRows(layout, element) {
   }
   keyboard['rows'] = rows;
 
+  var maxRowLength = -1;
+  for (var i = 0; i < rows.length; ++i) {
+    if (rows[i].length > maxRowLength) {
+      maxRowLength = rows[i].length;
+    }
+  }
+
   // A div element which holds rows for the layout.
   var rowsDiv = document.createElement('div');
   rowsDiv.className = 'rows';
   for (var i = 0; i < rows.length; ++i) {
-    rowsDiv.appendChild(rows[i].makeDOM());
+    var rowDiv = rows[i].makeDOM();
+    if (autoPadding && rows[i].length < maxRowLength) {
+      var padding = 50 * (maxRowLength - rows[i].length) / maxRowLength;
+      rowDiv.style.paddingLeft = padding + '%';
+      rowDiv.style.paddingRight = padding + '%';
+    }
+    rowsDiv.appendChild(rowDiv);
     rows[i].showMode(currentMode);
   }
   keyboard['rowsDiv'] = rowsDiv;
@@ -134,6 +131,22 @@ function initKeyboard(layout, element) {
 }
 
 /**
+ * Create a DOM of the popup keyboard.
+ * @param {Element} The DOM Element to which the popup keyboard is appended.
+ * @return {void}
+ */
+function initPopupKeyboard(element) {
+  var popupDiv = document.createElement('div');
+  popupDiv.id = 'popup';
+  popupDiv.className = 'keyboard popup';
+  popupDiv.style.visibility = 'hidden';
+  element.appendChild(popupDiv);
+  element.addEventListener('mouseup', function(evt) {
+      hidePopupKeyboard(evt);
+    });
+}
+
+/**
  * Resize the keyboard according to the new window size.
  * @return {void}
  */
@@ -155,6 +168,15 @@ window.onresize = function() {
 window.onload = function() {
   var body = document.getElementById('b');
 
+  // Catch all unhandled touch events and prevent default, to prevent the
+  // keyboard from responding to gestures like double tap.
+  function disableGestures(evt) {
+    evt.preventDefault();
+  }
+  body.addEventListener('touchstart', disableGestures);
+  body.addEventListener('touchmove', disableGestures);
+  body.addEventListener('touchend', disableGestures);
+
   var mainDiv = document.createElement('div');
   mainDiv.className = 'main';
   mainDiv.id = 'main';
@@ -162,29 +184,31 @@ window.onload = function() {
 
   initIme(mainDiv);
   initKeyboard(currentKeyboardLayout, mainDiv);
+  initPopupKeyboard(body);
 
   window.onhashchange();
 
   chrome.experimental.input.onTextInputTypeChanged.addListener(function(type) {
+    var newMode = SHIFT_MODE;
     switch(type) {
       case "text":
-        currentMode = SHIFT_MODE;
+        newMode = SHIFT_MODE;
         break;
       case "email":
       case "password":
       case "search":
       case "url":
-        currentMode = KEY_MODE;
+        newMode = KEY_MODE;
         break;
       case "number":
       case "tel":
-        currentMode = NUMBER_MODE;
+        newMode = NUMBER_MODE;
         break;
       default:
-        currentMode = KEY_MODE;
+        newMode = KEY_MODE;
         break;
     }
-    setMode(currentMode);
+    setMode(newMode);
   });
 }
 // TODO(bryeung): would be nice to leave less gutter (without causing

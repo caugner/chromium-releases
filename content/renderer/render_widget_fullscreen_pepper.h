@@ -5,7 +5,8 @@
 #ifndef CONTENT_RENDERER_RENDER_WIDGET_FULLSCREEN_PEPPER_H_
 #define CONTENT_RENDERER_RENDER_WIDGET_FULLSCREEN_PEPPER_H_
 
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
+#include "content/renderer/pepper_parent_context_provider.h"
 #include "content/renderer/render_widget_fullscreen.h"
 #include "content/renderer/gpu/renderer_gl_context.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
@@ -23,11 +24,11 @@ class PluginInstance;
 // FullscreenContainer that the plugin instance can callback into to e.g.
 // invalidate rects.
 class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
-                                     public webkit::ppapi::FullscreenContainer {
+                                     public webkit::ppapi::FullscreenContainer,
+                                     public PepperParentContextProvider {
  public:
   static RenderWidgetFullscreenPepper* Create(
       int32 opener_id,
-      RenderThreadBase* render_thread,
       webkit::ppapi::PluginInstance* plugin,
       const GURL& active_url);
 
@@ -42,9 +43,11 @@ class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
   RendererGLContext* context() const { return context_; }
   void SwapBuffers();
 
+  // Could be NULL when this widget is closing.
+  webkit::ppapi::PluginInstance* plugin() const { return plugin_; }
+
  protected:
-  RenderWidgetFullscreenPepper(RenderThreadBase* render_thread,
-                               webkit::ppapi::PluginInstance* plugin,
+  RenderWidgetFullscreenPepper(webkit::ppapi::PluginInstance* plugin,
                                const GURL& active_url);
   virtual ~RenderWidgetFullscreenPepper();
 
@@ -58,7 +61,8 @@ class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
       gfx::Rect* location,
       gfx::Rect* clip);
   virtual void OnResize(const gfx::Size& new_size,
-                        const gfx::Rect& resizer_rect);
+                        const gfx::Rect& resizer_rect,
+                        bool is_fullscreen);
 
   // RenderWidgetFullscreen API.
   virtual WebKit::WebWidget* CreateWebWidget();
@@ -84,6 +88,9 @@ class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
   // RenderWidget::OnSwapBuffersCompleted.
   void OnSwapBuffersCompleteByRendererGLContext();
 
+  // Implementation of PepperParentContextProvider.
+  virtual RendererGLContext* GetParentContextForPlatformContext3D();
+
   // URL that is responsible for this widget, passed to ggl::CreateViewContext.
   GURL active_url_;
 
@@ -95,7 +102,7 @@ class RenderWidgetFullscreenPepper : public RenderWidgetFullscreen,
   unsigned int buffer_;
   unsigned int program_;
 
-  ScopedRunnableMethodFactory<RenderWidgetFullscreenPepper> method_factory_;
+  base::WeakPtrFactory<RenderWidgetFullscreenPepper> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetFullscreenPepper);
 };

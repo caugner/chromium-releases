@@ -1,40 +1,35 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+ // Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #if defined(ENABLE_GPU)
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/debug/trace_event.h"
-#include "base/process_util.h"
 #include "base/shared_memory.h"
 #include "build/build_config.h"
-#include "content/common/child_thread.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/gpu/gpu_watchdog.h"
 #include "gpu/command_buffer/common/constants.h"
-#include "ui/gfx/gl/gl_context.h"
-#include "ui/gfx/gl/gl_surface.h"
+#include "ui/gfx/gl/gl_switches.h"
 
-#if defined(OS_WIN)
-#include "base/win/wrapped_window_proc.h"
-#elif defined(TOUCH_UI)
-#include "content/common/gpu/image_transport_surface_linux.h"
+#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+#include "content/common/gpu/image_transport_surface.h"
 #endif
-
-using gpu::Buffer;
 
 GpuCommandBufferStub::GpuCommandBufferStub(
     GpuChannel* channel,
     GpuCommandBufferStub* share_group,
     gfx::PluginWindowHandle handle,
     const gfx::Size& size,
-    const gpu::gles2::DisallowedExtensions& disallowed_extensions,
+    const gpu::gles2::DisallowedFeatures& disallowed_features,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
+    gfx::GpuPreference gpu_preference,
     int32 route_id,
     int32 renderer_id,
     int32 render_view_id,
@@ -43,9 +38,10 @@ GpuCommandBufferStub::GpuCommandBufferStub(
     : channel_(channel),
       handle_(handle),
       initial_size_(size),
-      disallowed_extensions_(disallowed_extensions),
+      disallowed_features_(disallowed_features),
       allowed_extensions_(allowed_extensions),
       requested_attribs_(attribs),
+      gpu_preference_(gpu_preference),
       route_id_(route_id),
       software_(software),
       last_flush_count_(0),
@@ -65,9 +61,7 @@ GpuCommandBufferStub::GpuCommandBufferStub(
 }
 
 GpuCommandBufferStub::~GpuCommandBufferStub() {
-  if (scheduler_.get()) {
-    scheduler_->Destroy();
-  }
+  Destroy();
 
   GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
   gpu_channel_manager->Send(new GpuHostMsg_DestroyCommandBuffer(
@@ -75,6 +69,20 @@ GpuCommandBufferStub::~GpuCommandBufferStub() {
 }
 
 bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
+  // Ensure the appropriate GL context is current before handling any IPC
+  // messages directed at the command buffer. This ensures that the message
+  // handler can assume that the context is current.
+  if (decoder_.get()) {
+    if (!decoder_->MakeCurrent()) {
+      LOG(ERROR) << "Context lost because MakeCurrent failed.";
+      command_buffer_->SetContextLostReason(decoder_->GetContextLostReason());
+      command_buffer_->SetParseError(gpu::error::kLostContext);
+      if (gfx::GLContext::LosesAllContextsOnContextLost())
+        channel_->LoseAllContexts();
+      return false;
+    }
+  }
+
   // Always use IPC_MESSAGE_HANDLER_DELAY_REPLY for synchronous message handlers
   // here. This is so the reply can be delayed if the scheduler is unscheduled.
   bool handled = true;
@@ -84,7 +92,8 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuCommandBufferMsg_SetParent,
                                     OnSetParent);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuCommandBufferMsg_GetState, OnGetState);
-    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuCommandBufferMsg_Flush, OnFlush);
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuCommandBufferMsg_GetStateFast,
+                                    OnGetStateFast);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_AsyncFlush, OnAsyncFlush);
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_Rescheduled, OnRescheduled);
     IPC_MESSAGE_HANDLER_DELAY_REPLY(GpuCommandBufferMsg_CreateTransferBuffer,
@@ -99,6 +108,8 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
                                     OnCreateVideoDecoder)
     IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_DestroyVideoDecoder,
                         OnDestroyVideoDecoder)
+    IPC_MESSAGE_HANDLER(GpuCommandBufferMsg_SetSurfaceVisible,
+                        OnSetSurfaceVisible)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -114,9 +125,24 @@ bool GpuCommandBufferStub::IsScheduled() {
   return !scheduler_.get() || scheduler_->IsScheduled();
 }
 
-void GpuCommandBufferStub::OnInitializeFailed(IPC::Message* reply_message) {
+void GpuCommandBufferStub::Destroy() {
+  // The scheduler has raw references to the decoder and the command buffer so
+  // destroy it before those.
   scheduler_.reset();
+
+  if (decoder_.get()) {
+    decoder_->Destroy();
+    decoder_.reset();
+  }
+
   command_buffer_.reset();
+
+  context_ = NULL;
+  surface_ = NULL;
+}
+
+void GpuCommandBufferStub::OnInitializeFailed(IPC::Message* reply_message) {
+  Destroy();
   GpuCommandBufferMsg_Initialize::WriteReplyParams(reply_message, false);
   Send(reply_message);
 }
@@ -141,91 +167,113 @@ void GpuCommandBufferStub::OnInitialize(
   base::SharedMemory shared_memory(ring_buffer, false);
 #endif
 
-  // Initialize the CommandBufferService and GpuScheduler.
-  if (command_buffer_->Initialize(&shared_memory, size)) {
-    scheduler_.reset(gpu::GpuScheduler::Create(command_buffer_.get(),
-                                               context_group_.get()));
-#if defined(TOUCH_UI)
+  if (!command_buffer_->Initialize(&shared_memory, size)) {
+    OnInitializeFailed(reply_message);
+    return;
+  }
+
+  decoder_.reset(::gpu::gles2::GLES2Decoder::Create(context_group_.get()));
+
+  scheduler_.reset(new gpu::GpuScheduler(command_buffer_.get(),
+                                         decoder_.get(),
+                                         NULL));
+
+  decoder_->set_engine(scheduler_.get());
+
+  if (handle_) {
+#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
     if (software_) {
       OnInitializeFailed(reply_message);
       return;
     }
 
-    scoped_refptr<gfx::GLSurface> surface;
-    if (handle_)
-      surface = ImageTransportSurface::CreateSurface(this);
-    else
-      surface = gfx::GLSurface::CreateOffscreenGLSurface(software_,
-                                                         gfx::Size(1, 1));
-    if (!surface.get()) {
-      LOG(ERROR) << "GpuCommandBufferStub: failed to create surface.";
-      OnInitializeFailed(reply_message);
-      return;
-    }
-
-    scoped_refptr<gfx::GLContext> context(
-        gfx::GLContext::CreateGLContext(channel_->share_group(),
-                                        surface.get()));
-    if (!context.get()) {
-      LOG(ERROR) << "GpuCommandBufferStub: failed to create context.";
-      OnInitializeFailed(reply_message);
-      return;
-    }
-
-    if (scheduler_->InitializeCommon(
-        surface,
-        context,
-        initial_size_,
-        disallowed_extensions_,
-        allowed_extensions_.c_str(),
-        requested_attribs_)) {
-#else
-    if (scheduler_->Initialize(
-        handle_,
-        initial_size_,
-        software_,
-        disallowed_extensions_,
-        allowed_extensions_.c_str(),
-        requested_attribs_,
-        channel_->share_group())) {
+    surface_ = ImageTransportSurface::CreateSurface(
+        channel_->gpu_channel_manager(),
+        render_view_id_,
+        renderer_id_,
+        route_id_,
+        handle_);
+#elif defined(OS_WIN) || defined(OS_LINUX)
+    surface_ = gfx::GLSurface::CreateViewGLSurface(software_, handle_);
 #endif
-      command_buffer_->SetPutOffsetChangeCallback(
-          NewCallback(scheduler_.get(),
-                      &gpu::GpuScheduler::PutChanged));
-      command_buffer_->SetParseErrorCallback(
-          NewCallback(this, &GpuCommandBufferStub::OnParseError));
-      scheduler_->SetScheduledCallback(
-          NewCallback(channel_, &GpuChannel::OnScheduled));
+  } else {
+    surface_ = gfx::GLSurface::CreateOffscreenGLSurface(software_,
+                                                        gfx::Size(1, 1));
+  }
 
-#if defined(OS_MACOSX)
-      scheduler_->SetSwapBuffersCallback(
-          NewCallback(this, &GpuCommandBufferStub::OnSwapBuffers));
+  if (!surface_.get()) {
+    // Ensure the decoder is not destroyed if it is not initialized.
+    decoder_.reset();
+
+    LOG(ERROR) << "Failed to create surface.\n";
+    OnInitializeFailed(reply_message);
+    return;
+  }
+
+  gfx::GpuPreference gpu_preference =
+      channel_->ShouldPreferDiscreteGpu() ?
+          gfx::PreferDiscreteGpu : gpu_preference_;
+
+  context_ = gfx::GLContext::CreateGLContext(
+      channel_->share_group(),
+      surface_.get(),
+      gpu_preference);
+  if (!context_.get()) {
+    // Ensure the decoder is not destroyed if it is not initialized.
+    decoder_.reset();
+
+    LOG(ERROR) << "Failed to create context.\n";
+    OnInitializeFailed(reply_message);
+    return;
+  }
+
+  // Initialize the decoder with either the view or pbuffer GLContext.
+  if (!decoder_->Initialize(surface_.get(),
+                            context_.get(),
+                            initial_size_,
+                            disallowed_features_,
+                            allowed_extensions_.c_str(),
+                            requested_attribs_)) {
+    LOG(ERROR) << "Failed to initialize decoder.";
+    OnInitializeFailed(reply_message);
+    return;
+  }
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableGPUServiceLogging)) {
+    decoder_->set_debug(true);
+  }
+
+  SetSwapInterval();
+
+  command_buffer_->SetPutOffsetChangeCallback(
+      NewCallback(scheduler_.get(),
+                  &gpu::GpuScheduler::PutChanged));
+  command_buffer_->SetParseErrorCallback(
+      NewCallback(this, &GpuCommandBufferStub::OnParseError));
+  scheduler_->SetScheduledCallback(
+      NewCallback(channel_, &GpuChannel::OnScheduled));
+
+  // On platforms that use an ImageTransportSurface, the surface
+  // handles co-ordinating the resize with the browser process. The
+  // surface sets it's own resize callback, so we shouldn't do it here.
+#if !defined(OS_MACOSX) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  if (handle_ != gfx::kNullPluginWindow) {
+    decoder_->SetResizeCallback(
+        NewCallback(this, &GpuCommandBufferStub::OnResize));
+  }
 #endif
 
-      // On TOUCH_UI, the ImageTransportSurface handles co-ordinating the
-      // resize with the browser process. The ImageTransportSurface sets it's
-      // own resize callback, so we shouldn't do it here.
-#if !defined(TOUCH_UI)
-      if (handle_ != gfx::kNullPluginWindow) {
-        scheduler_->SetResizeCallback(
-            NewCallback(this, &GpuCommandBufferStub::OnResize));
-      }
-#endif
-      if (watchdog_)
-        scheduler_->SetCommandProcessedCallback(
-            NewCallback(this, &GpuCommandBufferStub::OnCommandProcessed));
+  if (watchdog_) {
+    scheduler_->SetCommandProcessedCallback(
+        NewCallback(this, &GpuCommandBufferStub::OnCommandProcessed));
+  }
 
-      if (parent_stub_for_initialization_) {
-        scheduler_->SetParent(parent_stub_for_initialization_->scheduler_.get(),
-                              parent_texture_for_initialization_);
-        parent_stub_for_initialization_.reset();
-        parent_texture_for_initialization_ = 0;
-      }
-
-    } else {
-      OnInitializeFailed(reply_message);
-      return;
-    }
+  if (parent_stub_for_initialization_) {
+    decoder_->SetParent(parent_stub_for_initialization_->decoder_.get(),
+                        parent_texture_for_initialization_);
+    parent_stub_for_initialization_.reset();
+    parent_texture_for_initialization_ = 0;
   }
 
   GpuCommandBufferMsg_Initialize::WriteReplyParams(reply_message, true);
@@ -243,9 +291,9 @@ void GpuCommandBufferStub::OnSetParent(int32 parent_route_id,
 
   bool result = true;
   if (scheduler_.get()) {
-    gpu::GpuScheduler* parent_scheduler =
-        parent_stub ? parent_stub->scheduler_.get() : NULL;
-    result = scheduler_->SetParent(parent_scheduler, parent_texture_id);
+    gpu::gles2::GLES2Decoder* parent_decoder =
+        parent_stub ? parent_stub->decoder_.get() : NULL;
+    result = decoder_->SetParent(parent_decoder, parent_texture_id);
   } else {
     // If we don't have a scheduler, it means that Initialize hasn't been called
     // yet. Keep around the requested parent stub and texture so that we can set
@@ -277,54 +325,21 @@ void GpuCommandBufferStub::OnParseError() {
   Send(msg);
 }
 
-void GpuCommandBufferStub::OnFlush(int32 put_offset,
-                                   int32 last_known_get,
-                                   uint32 flush_count,
-                                   IPC::Message* reply_message) {
-  TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnFlush");
+void GpuCommandBufferStub::OnGetStateFast(IPC::Message* reply_message) {
+  TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnGetStateFast");
   gpu::CommandBuffer::State state = command_buffer_->GetState();
-  if (flush_count - last_flush_count_ >= 0x8000000U) {
-    // We received this message out-of-order. This should not happen but is here
-    // to catch regressions. Ignore the message.
-    NOTREACHED() << "Received an AsyncFlush message out-of-order";
-    GpuCommandBufferMsg_Flush::WriteReplyParams(reply_message, state);
-    Send(reply_message);
-  } else {
-    last_flush_count_ = flush_count;
+  if (state.error == gpu::error::kLostContext &&
+      gfx::GLContext::LosesAllContextsOnContextLost())
+    channel_->LoseAllContexts();
 
-    // Reply immediately if the client was out of date with the current get
-    // offset.
-    bool reply_immediately = state.get_offset != last_known_get;
-    if (reply_immediately) {
-      GpuCommandBufferMsg_Flush::WriteReplyParams(reply_message, state);
-      Send(reply_message);
-    }
-
-    // Process everything up to the put offset.
-    state = command_buffer_->FlushSync(put_offset, last_known_get);
-
-    // Lose all contexts if the context was lost.
-    if (state.error == gpu::error::kLostContext &&
-        gfx::GLContext::LosesAllContextsOnContextLost()) {
-      channel_->LoseAllContexts();
-    }
-
-    // Then if the client was up-to-date with the get offset, reply to the
-    // synchronpous IPC only after processing all commands are processed. This
-    // prevents the client from "spinning" when it fills up the command buffer.
-    // Otherwise, since the state has changed since the immediate reply, send
-    // an asyncronous state update back to the client.
-    if (!reply_immediately) {
-      GpuCommandBufferMsg_Flush::WriteReplyParams(reply_message, state);
-      Send(reply_message);
-    } else {
-      ReportState();
-    }
-  }
+  GpuCommandBufferMsg_GetStateFast::WriteReplyParams(reply_message, state);
+  Send(reply_message);
 }
 
-void GpuCommandBufferStub::OnAsyncFlush(int32 put_offset, uint32 flush_count) {
-  TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnAsyncFlush");
+void GpuCommandBufferStub::OnAsyncFlush(int32 put_offset,
+                                        uint32 flush_count) {
+  TRACE_EVENT1("gpu", "GpuCommandBufferStub::OnAsyncFlush",
+               "put_offset", put_offset);
   if (flush_count - last_flush_count_ < 0x8000000U) {
     last_flush_count_ = flush_count;
     command_buffer_->Flush(put_offset);
@@ -395,7 +410,7 @@ void GpuCommandBufferStub::OnGetTransferBuffer(
   if (!channel_->renderer_process())
     return;
 
-  Buffer buffer = command_buffer_->GetTransferBuffer(id);
+  gpu::Buffer buffer = command_buffer_->GetTransferBuffer(id);
   if (buffer.shared_memory) {
     // Assume service is responsible for duplicating the handle to the calling
     // process.
@@ -410,84 +425,17 @@ void GpuCommandBufferStub::OnGetTransferBuffer(
   Send(reply_message);
 }
 
-#if defined(OS_MACOSX)
-void GpuCommandBufferStub::OnSwapBuffers() {
-  TRACE_EVENT0("gpu", "GpuCommandBufferStub::OnSwapBuffers");
-  if (handle_) {
-    // To swap on OSX, we have to send a message to the browser to get the
-    // context put onscreen.
-    GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
-    GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
-    params.renderer_id = renderer_id_;
-    params.render_view_id = render_view_id_;
-    params.window = handle_;
-    params.surface_id = scheduler_->GetSurfaceId();
-    params.route_id = route_id();
-    params.swap_buffers_count = scheduler_->swap_buffers_count();
-    gpu_channel_manager->Send(
-        new GpuHostMsg_AcceleratedSurfaceBuffersSwapped(params));
-    scheduler_->SetScheduled(false);
-  }
-}
-#endif
-
 void GpuCommandBufferStub::OnCommandProcessed() {
   if (watchdog_)
     watchdog_->CheckArmed();
 }
 
-#if defined(OS_MACOSX)
-void GpuCommandBufferStub::AcceleratedSurfaceBuffersSwapped(
-    uint64 swap_buffers_count) {
-  TRACE_EVENT1("gpu",
-               "GpuCommandBufferStub::AcceleratedSurfaceBuffersSwapped",
-               "frame", swap_buffers_count);
-  DCHECK(handle_ != gfx::kNullPluginWindow);
-
-  // Multiple swapbuffers may get consolidated together into a single
-  // AcceleratedSurfaceBuffersSwapped call. Upstream code listening to the
-  // GpuCommandBufferMsg_SwapBuffers expects to be called one time for every
-  // swap. So, send one SwapBuffers message for every outstanding swap.
-  uint64 delta = swap_buffers_count -
-      scheduler_->acknowledged_swap_buffers_count();
-  scheduler_->set_acknowledged_swap_buffers_count(swap_buffers_count);
-
-  for(uint64 i = 0; i < delta; i++) {
-    // Wake up the GpuScheduler to start doing work again. When the scheduler
-    // wakes up, it will send any deferred echo acknowledgements, triggering
-    // associated swapbuffer callbacks.
-    scheduler_->SetScheduled(true);
-  }
-}
-#endif  // defined(OS_MACOSX)
-
 void GpuCommandBufferStub::OnResize(gfx::Size size) {
   if (handle_ == gfx::kNullPluginWindow)
     return;
 
-#if defined(OS_MACOSX)
-  GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
-
-  // On Mac, we need to tell the browser about the new IOSurface handle,
-  // asynchronously.
-  uint64 new_backing_store = scheduler_->SetWindowSizeForIOSurface(size);
-  if (new_backing_store) {
-    GpuHostMsg_AcceleratedSurfaceSetIOSurface_Params params;
-    params.renderer_id = renderer_id_;
-    params.render_view_id = render_view_id_;
-    params.window = handle_;
-    params.width = size.width();
-    params.height = size.height();
-    params.identifier = new_backing_store;
-    gpu_channel_manager->Send(
-        new GpuHostMsg_AcceleratedSurfaceSetIOSurface(params));
-  } else {
-    // TODO(kbr): figure out what to do here. It wouldn't be difficult
-    // to support the compositor on 10.5, but the performance would be
-    // questionable.
-    NOTREACHED();
-  }
-#elif defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
+#if defined(TOOLKIT_USES_GTK) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT) || \
+    defined(OS_WIN)
   GpuChannelManager* gpu_channel_manager = channel_->gpu_channel_manager();
 
   // On Windows, Linux, we need to coordinate resizing of onscreen
@@ -502,23 +450,24 @@ void GpuCommandBufferStub::OnResize(gfx::Size size) {
                                 size));
 
   scheduler_->SetScheduled(false);
-#endif // defined(OS_MACOSX)
+#endif
 }
 
-
 void GpuCommandBufferStub::ViewResized() {
-#if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
+#if defined(TOOLKIT_USES_GTK) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT) || \
+    defined(OS_WIN)
   DCHECK(handle_ != gfx::kNullPluginWindow);
   scheduler_->SetScheduled(true);
+#endif
 
-  // Recreate the view surface to match the window size. TODO(apatrick): this is
-  // likely not necessary on all platforms.
-  gfx::GLContext* context = scheduler_->decoder()->GetGLContext();
-  gfx::GLSurface* surface = scheduler_->decoder()->GetGLSurface();
-  context->ReleaseCurrent(surface);
-  if (surface) {
-    surface->Destroy();
-    surface->Initialize();
+#if defined(OS_WIN)
+  // Recreate the view surface to match the window size. Swap chains do not
+  // automatically resize with window size with D3D.
+  context_->ReleaseCurrent(surface_.get());
+  if (surface_.get()) {
+    surface_->Destroy();
+    surface_->Initialize();
+    SetSwapInterval();
   }
 #endif
 }
@@ -533,6 +482,19 @@ void GpuCommandBufferStub::ReportState() {
     msg->set_unblock(true);
     Send(msg);
   }
+}
+
+void GpuCommandBufferStub::SetSwapInterval() {
+#if !defined(OS_MACOSX) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  // Set up swap interval for onscreen contexts.
+  if (!surface_->IsOffscreen()) {
+    decoder_->MakeCurrent();
+    if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableGpuVsync))
+      context_->SetSwapInterval(0);
+    else
+      context_->SetSwapInterval(1);
+  }
+#endif
 }
 
 void GpuCommandBufferStub::OnCreateVideoDecoder(
@@ -551,6 +513,10 @@ void GpuCommandBufferStub::OnCreateVideoDecoder(
 void GpuCommandBufferStub::OnDestroyVideoDecoder(int decoder_route_id) {
   channel_->RemoveRoute(decoder_route_id);
   video_decoders_.Remove(decoder_route_id);
+}
+
+void GpuCommandBufferStub::OnSetSurfaceVisible(bool visible) {
+  surface_->SetVisible(visible);
 }
 
 #endif  // defined(ENABLE_GPU)

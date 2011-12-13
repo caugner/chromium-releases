@@ -1,10 +1,11 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/utf_string_conversions.h"
-#include "chrome/test/base/render_view_test.h"
 #include "content/common/view_messages.h"
+#include "content/renderer/render_view_impl.h"
+#include "content/test/render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -18,12 +19,16 @@ const char* const kEmptySelectID = "myEmptySelect";
 
 }  // namespace
 
-class ExternalPopupMenuTest : public RenderViewTest {
+class ExternalPopupMenuTest : public content::RenderViewTest {
  public:
   ExternalPopupMenuTest() {}
 
+  RenderViewImpl* view() {
+    return static_cast<RenderViewImpl*>(view_);
+  }
+
   virtual void SetUp() {
-    RenderViewTest::SetUp();
+    content::RenderViewTest::SetUp();
     // We need to set this explictly as RenderMain is not run.
     WebKit::WebView::setUseExternalPopupMenus(true);
 
@@ -46,8 +51,8 @@ class ExternalPopupMenuTest : public RenderViewTest {
     LoadHTML(html.c_str());
 
     // Set a minimum size and give focus so simulated events work.
-    view_->webwidget()->resize(WebKit::WebSize(500, 500));
-    view_->webwidget()->setFocus(true);
+    view()->webwidget()->resize(WebKit::WebSize(500, 500));
+    view()->webwidget()->setFocus(true);
   }
 
   int GetSelectedIndex() {
@@ -66,7 +71,7 @@ class ExternalPopupMenuTest : public RenderViewTest {
 
 // Normal case: test showing a select popup, canceling/selecting an item.
 TEST_F(ExternalPopupMenuTest, NormalCase) {
-  IPC::TestSink& sink = render_thread_.sink();
+  IPC::TestSink& sink = render_thread_->sink();
 
   // Click the text field once.
   EXPECT_TRUE(SimulateElementClick(kSelectID));
@@ -81,12 +86,12 @@ TEST_F(ExternalPopupMenuTest, NormalCase) {
   EXPECT_EQ(1, param.a.selected_item);
 
   // Simulate the user canceling the popup, the index should not have changed.
-  view_->OnSelectPopupMenuItem(-1);
+  view()->OnSelectPopupMenuItem(-1);
   EXPECT_EQ(1, GetSelectedIndex());
 
   // Show the pop-up again and this time make a selection.
   EXPECT_TRUE(SimulateElementClick(kSelectID));
-  view_->OnSelectPopupMenuItem(0);
+  view()->OnSelectPopupMenuItem(0);
   EXPECT_EQ(0, GetSelectedIndex());
 
   // Show the pop-up again and make another selection.
@@ -108,7 +113,7 @@ TEST_F(ExternalPopupMenuTest, ShowPopupThenNavigate) {
   LoadHTML("<blink>Awesome page!</blink>");
 
   // Now the user selects something, we should not crash.
-  view_->OnSelectPopupMenuItem(-1);
+  view()->OnSelectPopupMenuItem(-1);
 }
 
 // An empty select should not cause a crash when clicked.
@@ -132,7 +137,7 @@ TEST_F(ExternalPopupMenuRemoveTest, RemoveOnChange) {
   EXPECT_TRUE(SimulateElementClick(kSelectID));
 
   // Select something, it causes the select to be removed from the page.
-  view_->OnSelectPopupMenuItem(0);
+  view()->OnSelectPopupMenuItem(0);
 
   // Just to check the soundness of the test, call SimulateElementClick again.
   // It should return false as the select has been removed.

@@ -6,8 +6,9 @@
 #define CHROME_BROWSER_UI_VIEWS_FIRST_RUN_BUBBLE_H_
 #pragma once
 
+#include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/ui/views/bubble/bubble.h"
 
@@ -17,11 +18,11 @@ class Profile;
 class FirstRunBubble : public Bubble,
                        public BubbleDelegate {
  public:
-  static FirstRunBubble* Show(
-      Profile* profile, views::Widget* parent,
-      const gfx::Rect& position_relative_to,
-      views::BubbleBorder::ArrowLocation arrow_location,
-      FirstRun::BubbleType bubble_type);
+  static FirstRunBubble* Show(Profile* profile,
+                              views::Widget* parent,
+                              const gfx::Rect& position_relative_to,
+                              views::BubbleBorder::ArrowLocation arrow_location,
+                              FirstRun::BubbleType bubble_type);
 
  private:
   FirstRunBubble();
@@ -32,20 +33,20 @@ class FirstRunBubble : public Bubble,
   // Re-enable the parent window.
   void EnableParent();
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Overridden from Bubble:
-  virtual void OnActivate(UINT action, BOOL minimized, HWND window);
+  virtual void OnActivate(UINT action, BOOL minimized, HWND window) OVERRIDE;
 #endif
 
   // BubbleDelegate.
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape);
-  virtual bool CloseOnEscape() { return true; }
-  virtual bool FadeInOnShow() { return true; }
+  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
+  virtual bool CloseOnEscape() OVERRIDE { return true; }
+  virtual bool FadeInOnShow() OVERRIDE { return true; }
 
   // Whether we have already been activated.
   bool has_been_activated_;
 
-  ScopedRunnableMethodFactory<FirstRunBubble> enable_window_method_factory_;
+  base::WeakPtrFactory<FirstRunBubble> enable_window_method_factory_;
 
   // The view inside the FirstRunBubble.
   FirstRunBubbleViewBase* view_;

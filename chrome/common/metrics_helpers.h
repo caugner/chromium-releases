@@ -16,7 +16,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/time.h"
-#include "content/common/page_transition_types.h"
+#include "chrome/common/metrics_log_manager.h"
+#include "content/public/common/page_transition_types.h"
 
 class GURL;
 class MetricsLog;
@@ -50,7 +51,7 @@ class MetricsLogBase {
   // load_time - how long it took to load the page
   void RecordLoadEvent(int window_id,
                        const GURL& url,
-                       PageTransition::Type origin,
+                       content::PageTransition origin,
                        int session_index,
                        base::TimeDelta load_time);
 
@@ -232,33 +233,12 @@ class MetricsServiceBase : public HistogramSender {
   MetricsServiceBase();
   virtual ~MetricsServiceBase();
 
-  // Check to see if there is a log that needs to be, or is being, transmitted.
-  bool pending_log() const {
-    return pending_log_ || !compressed_log_.empty();
-  }
-
-  // Compress the report log in |input| using bzip2, store the result in
-  // |output|.
-  bool Bzip2Compress(const std::string& input, std::string* output);
-
-  // Discard |pending_log_|, and clear |compressed_log_|. Called after
-  // processing of this log is complete.
-  void DiscardPendingLog();
-
   // Record complete list of histograms into the current log.
   // Called when we close a log.
   void RecordCurrentHistograms();
 
-  // A log that we are currently transmiting, or about to try to transmit.
-  MetricsLogBase* pending_log_;
-
-  // An alternate form of |pending_log_|.  We persistently save this version
-  // into prefs if we can't transmit it.  As a result, sometimes all we have is
-  // the compressed text version.
-  std::string compressed_log_;
-
-  // The log that we are still appending to.
-  MetricsLogBase* current_log_;
+  // Manager for the various in-flight logs.
+  MetricsLogManager log_manager_;
 
  private:
   // HistogramSender interface (override) methods.

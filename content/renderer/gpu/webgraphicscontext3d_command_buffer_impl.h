@@ -11,11 +11,13 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "content/renderer/gpu/renderer_gl_context.h"
+#include "googleurl/src/gurl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if !defined(OS_MACOSX)
@@ -58,6 +60,9 @@ class WebGraphicsContext3DCommandBufferImpl
                           WebKit::WebView*,
                           bool renderDirectlyToWebView);
 
+  // Must be called after initialize() and before any of the following methods.
+  // Permanently binds to the first calling thread. Returns false if the
+  // graphics context fails to create. Do not call from more than one thread.
   virtual bool makeContextCurrent();
 
   virtual int width();
@@ -68,6 +73,8 @@ class WebGraphicsContext3DCommandBufferImpl
   virtual bool setParentContext(WebGraphicsContext3D* parent_context);
 
   virtual void reshape(int width, int height);
+
+  virtual void setVisibility(bool visible);
 
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size);
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size,
@@ -421,6 +428,8 @@ class WebGraphicsContext3DCommandBufferImpl
       WGC3Denum target, WGC3Dsizei samples, WGC3Denum internalformat,
       WGC3Dsizei width, WGC3Dsizei height);
 
+  virtual WebKit::WebString getTranslatedShaderSourceANGLE(WebGLId shader);
+
   RendererGLContext* context() { return context_; }
 
   virtual void setContextLostCallback(
@@ -437,20 +446,32 @@ class WebGraphicsContext3DCommandBufferImpl
 #endif
 
  private:
+  // Initialize the underlying GL context. May be called multiple times; second
+  // and subsequent calls are ignored. Must be called from the thread that is
+  // going to use this object to issue GL commands (which might not be the main
+  // thread).
+  bool MaybeInitializeGL();
+
   // SwapBuffers callback.
   void OnSwapBuffersComplete();
   virtual void OnContextLost(RendererGLContext::ContextLostReason reason);
+
+  bool initialize_failed_;
 
   // The context we use for OpenGL rendering.
   RendererGLContext* context_;
   // The GLES2Implementation we use for OpenGL rendering.
   gpu::gles2::GLES2Implementation* gl_;
 
+  // State needed by MaybeInitializeGL.
+  GpuChannelHost* host_;
+  GURL active_url_;
+  int32 render_view_routing_id_;
+
   bool render_directly_to_web_view_;
-#ifndef WTF_USE_THREADED_COMPOSITING
   // If rendering directly to WebView, weak pointer to it.
   WebKit::WebView* web_view_;
-#endif
+
 #if defined(OS_MACOSX)
   // "Fake" plugin window handle in browser process for the compositor's output.
   gfx::PluginWindowHandle plugin_handle_;
@@ -462,6 +483,7 @@ class WebGraphicsContext3DCommandBufferImpl
       swapbuffers_complete_callback_;
 
   WebKit::WebGraphicsContext3D::Attributes attributes_;
+  gfx::GpuPreference gpu_preference_;
   int cached_width_, cached_height_;
 
   // For tracking which FBO is bound.
@@ -470,8 +492,7 @@ class WebGraphicsContext3DCommandBufferImpl
   // Errors raised by synthesizeGLError().
   std::vector<WGC3Denum> synthetic_errors_;
 
-  ScopedRunnableMethodFactory<WebGraphicsContext3DCommandBufferImpl>
-      method_factory_;
+  base::WeakPtrFactory<WebGraphicsContext3DCommandBufferImpl> weak_ptr_factory_;
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   scoped_array<uint8> scanline_;

@@ -7,7 +7,8 @@
 #pragma once
 
 #include <string>
-#include "content/common/navigation_types.h"
+#include "content/common/content_export.h"
+#include "content/public/browser/navigation_types.h"
 #include "googleurl/src/gurl.h"
 
 class NavigationEntry;
@@ -18,7 +19,7 @@ namespace content {
 // Provides the details for a NOTIFY_NAV_ENTRY_COMMITTED notification.
 // TODO(brettw) this mostly duplicates ProvisionalLoadDetails, it would be
 // nice to unify these somehow.
-struct LoadCommittedDetails {
+struct CONTENT_EXPORT LoadCommittedDetails {
   // By default, the entry will be filled according to a new main frame
   // navigation.
   LoadCommittedDetails();
@@ -29,7 +30,7 @@ struct LoadCommittedDetails {
   // The type of navigation that just occurred. Note that not all types of
   // navigations in the enum are valid here, since some of them don't actually
   // cause a "commit" and won't generate this notification.
-  NavigationType::Type type;
+  content::NavigationType type;
 
   // The index of the previously committed navigation entry. This will be -1
   // if there are no previous entries.

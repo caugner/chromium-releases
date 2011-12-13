@@ -4,6 +4,7 @@
 
 #include "views/controls/button/button_dropdown.h"
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
@@ -22,8 +23,8 @@ namespace views {
 const char ButtonDropDown::kViewClassName[] =
     "views/controls/button/ButtonDropDown";
 
-// How long to wait before showing the menu
-static const int kMenuTimerDelay = 500;
+// How long to wait before showing the menu.
+const int kMenuTimerDelay = 500;
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -31,8 +32,7 @@ static const int kMenuTimerDelay = 500;
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-ButtonDropDown::ButtonDropDown(ButtonListener* listener,
-                               ui::MenuModel* model)
+ButtonDropDown::ButtonDropDown(ButtonListener* listener, ui::MenuModel* model)
     : ImageButton(listener),
       model_(model),
       y_position_on_lbuttondown_(0),
@@ -56,9 +56,11 @@ bool ButtonDropDown::OnMousePressed(const MouseEvent& event) {
     y_position_on_lbuttondown_ = event.y();
 
     // Schedule a task that will show the menu.
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
-        show_menu_factory_.NewRunnableMethod(&ButtonDropDown::ShowDropDownMenu,
-                                             GetWidget()->GetNativeView()),
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&ButtonDropDown::ShowDropDownMenu,
+                   show_menu_factory_.GetWeakPtr(),
+                   GetWidget()->GetNativeView()),
         kMenuTimerDelay);
   }
   return ImageButton::OnMousePressed(event);
@@ -67,12 +69,12 @@ bool ButtonDropDown::OnMousePressed(const MouseEvent& event) {
 bool ButtonDropDown::OnMouseDragged(const MouseEvent& event) {
   bool result = ImageButton::OnMouseDragged(event);
 
-  if (!show_menu_factory_.empty()) {
+  if (show_menu_factory_.HasWeakPtrs()) {
     // If the mouse is dragged to a y position lower than where it was when
     // clicked then we should not wait for the menu to appear but show
     // it immediately.
     if (event.y() > y_position_on_lbuttondown_ + GetHorizontalDragThreshold()) {
-      show_menu_factory_.RevokeAll();
+      show_menu_factory_.InvalidateWeakPtrs();
       ShowDropDownMenu(GetWidget()->GetNativeView());
     }
   }
@@ -87,10 +89,10 @@ void ButtonDropDown::OnMouseReleased(const MouseEvent& event) {
   }
 
   if (IsTriggerableEvent(event))
-    show_menu_factory_.RevokeAll();
+    show_menu_factory_.InvalidateWeakPtrs();
 
   if (IsEnabled() && event.IsRightMouseButton() && HitTest(event.location())) {
-    show_menu_factory_.RevokeAll();
+    show_menu_factory_.InvalidateWeakPtrs();
     ShowDropDownMenu(GetWidget()->GetNativeView());
   }
 }
@@ -109,7 +111,7 @@ void ButtonDropDown::OnMouseExited(const MouseEvent& event) {
 
 void ButtonDropDown::ShowContextMenu(const gfx::Point& p,
                                      bool is_mouse_gesture) {
-  show_menu_factory_.RevokeAll();
+  show_menu_factory_.InvalidateWeakPtrs();
   ShowDropDownMenu(GetWidget()->GetNativeView());
   SetState(BS_HOT);
 }

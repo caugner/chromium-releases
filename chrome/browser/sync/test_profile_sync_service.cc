@@ -48,10 +48,12 @@ namespace browser_sync {
 
 SyncBackendHostForProfileSyncTest::SyncBackendHostForProfileSyncTest(
     Profile* profile,
+    const base::WeakPtr<SyncPrefs>& sync_prefs,
     bool set_initial_sync_ended_on_init,
     bool synchronous_init,
     bool fail_initial_download)
-    : browser_sync::SyncBackendHost(profile->GetDebugName(), profile),
+    : browser_sync::SyncBackendHost(
+        profile->GetDebugName(), profile, sync_prefs),
       synchronous_init_(synchronous_init),
       fail_initial_download_(fail_initial_download) {}
 
@@ -93,8 +95,7 @@ void SyncBackendHostForProfileSyncTest::InitCore(
 }
 
 void SyncBackendHostForProfileSyncTest::StartConfiguration(
-    Callback0::Type* callback) {
-  scoped_ptr<Callback0::Type> scoped_callback(callback);
+    const base::Closure& callback) {
   SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop();
   if (initialization_state_ == DOWNLOADING_NIGORI) {
     syncable::ModelTypeBitSet sync_ended;
@@ -146,7 +147,6 @@ TestProfileSyncService::TestProfileSyncService(
       initial_condition_setup_task_(initial_condition_setup_task),
       set_initial_sync_ended_on_init_(true),
       fail_initial_download_(false) {
-  RegisterPreferences();
   SetSyncSetupCompleted();
 }
 
@@ -238,6 +238,7 @@ void TestProfileSyncService::fail_initial_download() {
 void TestProfileSyncService::CreateBackend() {
   backend_.reset(new browser_sync::SyncBackendHostForProfileSyncTest(
       profile(),
+      sync_prefs_.AsWeakPtr(),
       set_initial_sync_ended_on_init_,
       synchronous_backend_initialization_,
       fail_initial_download_));

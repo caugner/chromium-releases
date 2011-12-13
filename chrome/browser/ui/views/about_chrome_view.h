@@ -16,7 +16,7 @@
 #include "views/view.h"
 #include "views/window/dialog_delegate.h"
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/google/google_update.h"
 #endif
 
@@ -36,7 +36,7 @@ class Profile;
 ////////////////////////////////////////////////////////////////////////////////
 class AboutChromeView : public views::DialogDelegateView,
                         public views::LinkListener
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
                         , public GoogleUpdateStatusListener
 #endif
                         {
@@ -48,42 +48,40 @@ class AboutChromeView : public views::DialogDelegateView,
   void Init();
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize();
-  virtual void Layout();
-  virtual void OnPaint(gfx::Canvas* canvas);
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
+  virtual void Layout() OVERRIDE;
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
-                                    views::View* child);
+                                    views::View* child) OVERRIDE;
 
   // Overridden from views::DialogDelegate:
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(
-      MessageBoxFlags::DialogButton button) const;
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonVisible(
-      MessageBoxFlags::DialogButton button) const;
-  virtual int GetDefaultDialogButton() const;
-  virtual bool CanResize() const;
-  virtual bool CanMaximize() const;
-  virtual bool IsAlwaysOnTop() const;
-  virtual bool HasAlwaysOnTopMenu() const;
-  virtual bool IsModal() const;
-  virtual std::wstring GetWindowTitle() const;
-  virtual bool Accept();
-  virtual views::View* GetContentsView();
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual int GetDefaultDialogButton() const OVERRIDE;
+  virtual bool CanResize() const OVERRIDE;
+  virtual bool CanMaximize() const OVERRIDE;
+  virtual bool IsModal() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual bool Accept() OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
 
   // Overridden from views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Overridden from GoogleUpdateStatusListener:
   virtual void OnReportResults(GoogleUpdateUpgradeResult result,
                                GoogleUpdateErrorCode error_code,
-                               const std::wstring& version);
+                               const std::wstring& version) OVERRIDE;
 #endif
 
  private:
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Update the UI to show the status of the upgrade.
   void UpdateStatus(GoogleUpdateUpgradeResult result,
                     GoogleUpdateErrorCode error_code);
@@ -120,15 +118,15 @@ class AboutChromeView : public views::DialogDelegateView,
   // The text to display as the main label of the About box. We draw this text
   // word for word with the help of the WordIterator, and make room for URLs
   // which are drawn using views::Link. See also |url_offsets_|.
-  std::wstring main_label_chunk1_;
-  std::wstring main_label_chunk2_;
-  std::wstring main_label_chunk3_;
-  std::wstring main_label_chunk4_;
-  std::wstring main_label_chunk5_;
+  string16 main_label_chunk1_;
+  string16 main_label_chunk2_;
+  string16 main_label_chunk3_;
+  string16 main_label_chunk4_;
+  string16 main_label_chunk5_;
   // Determines the order of the two links we draw in the main label.
   bool chromium_url_appears_first_;
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // The class that communicates with Google Update to find out if an update is
   // available and asks it to start an upgrade.
   scoped_refptr<GoogleUpdate> google_updater_;

@@ -18,12 +18,12 @@
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "content/common/content_counters.h"
-#include "content/common/content_switches.h"
 #include "content/common/main_function_params.h"
 #include "content/common/hi_res_timer_manager.h"
 #include "content/common/pepper_plugin_registry.h"
+#include "content/public/common/content_switches.h"
 #include "content/renderer/render_process_impl.h"
-#include "content/renderer/render_thread.h"
+#include "content/renderer/render_thread_impl.h"
 #include "content/renderer/renderer_main_platform_delegate.h"
 #include "ui/base/ui_base_switches.h"
 
@@ -204,7 +204,7 @@ int RendererMain(const MainFunctionParams& parameters) {
     // TODO(markus): Check if it is OK to unconditionally move this
     // instruction down.
     RenderProcessImpl render_process;
-    render_process.set_main_thread(new RenderThread());
+    render_process.set_main_thread(new RenderThreadImpl());
 #endif
     bool run_loop = true;
     if (!no_sandbox) {
@@ -214,7 +214,7 @@ int RendererMain(const MainFunctionParams& parameters) {
     }
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     RenderProcessImpl render_process;
-    render_process.set_main_thread(new RenderThread());
+    render_process.set_main_thread(new RenderThreadImpl());
 #endif
 
     platform.RunSandboxTests();

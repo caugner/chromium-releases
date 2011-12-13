@@ -20,10 +20,6 @@ namespace base {
 class Time;
 }
 
-namespace chrome {
-class ChromeContentBrowserClient;
-}
-
 namespace chromeos {
 class LibCrosServiceLibraryImpl;
 class ResetDefaultProxyConfigServiceTask;
@@ -40,16 +36,15 @@ class ShortcutsBackend;
 }
 
 namespace net {
-class TransportSecurityState;
 class SSLConfigService;
-}
-
-namespace prerender {
-class PrerenderManager;
 }
 
 namespace speech_input {
 class SpeechRecognizer;
+}
+
+namespace chrome_browser_net {
+class Predictor;
 }
 
 class AutocompleteClassifier;
@@ -71,7 +66,6 @@ class HistoryService;
 class HostContentSettingsMap;
 class NavigationController;
 class PasswordStore;
-class PersonalDataManager;
 class PrefProxyConfigTracker;
 class PrefService;
 class ProfileSyncFactory;
@@ -81,10 +75,11 @@ class PromoResourceService;
 class ProtocolHandlerRegistry;
 class SQLitePersistentCookieStore;
 class SSLConfigServiceManager;
+class SpeechInputPreferences;
 class SpellCheckHost;
 class TemplateURLFetcher;
+class TestingProfile;
 class TokenService;
-class TransportSecurityPersister;
 class UserScriptMaster;
 class UserStyleSheetWatcher;
 class VisitedLinkEventListener;
@@ -151,7 +146,6 @@ class Profile : public content::BrowserContext {
     friend class SyncTest;
     friend class Toolbar5Importer;
     friend class TranslateManager;
-    friend class chrome::ChromeContentBrowserClient;
     friend class chromeos::LibCrosServiceLibraryImpl;
     friend class chromeos::ResetDefaultProxyConfigServiceTask;
 
@@ -193,7 +187,6 @@ class Profile : public content::BrowserContext {
   virtual FilePath GetPath() = 0;
   virtual SSLHostState* GetSSLHostState() = 0;
   virtual DownloadManager* GetDownloadManager() = 0;
-  virtual bool HasCreatedDownloadManager() const = 0;
   virtual net::URLRequestContextGetter* GetRequestContext() = 0;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) = 0;
@@ -201,6 +194,7 @@ class Profile : public content::BrowserContext {
   virtual const content::ResourceContext& GetResourceContext() = 0;
   virtual HostZoomMap* GetHostZoomMap() = 0;
   virtual GeolocationPermissionContext* GetGeolocationPermissionContext() = 0;
+  virtual SpeechInputPreferences* GetSpeechInputPreferences() = 0;
   virtual quota::QuotaManager* GetQuotaManager() = 0;
   virtual webkit_database::DatabaseTracker* GetDatabaseTracker() = 0;
   virtual WebKitContext* GetWebKitContext() = 0;
@@ -209,6 +203,9 @@ class Profile : public content::BrowserContext {
   virtual fileapi::FileSystemContext* GetFileSystemContext() = 0;
 
   // content::BrowserContext implementation ------------------------------------
+
+  // Typesafe upcast.
+  virtual TestingProfile* AsTestingProfile();
 
   // Returns the name associated with this profile. This name is displayed in
   // the browser frame.
@@ -271,11 +268,6 @@ class Profile : public content::BrowserContext {
   // Accessor. The instance is created upon first access.
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() = 0;
-
-  // Retrieves a pointer to the TransportSecurityState associated with
-  // this profile.  The TransportSecurityState is lazily created the
-  // first time that this method is called.
-  virtual net::TransportSecurityState* GetTransportSecurityState() = 0;
 
   // Retrieves a pointer to the FaviconService associated with this
   // profile.  The FaviconService is lazily created the first time
@@ -347,9 +339,6 @@ class Profile : public content::BrowserContext {
   // Returns the TemplateURLFetcher for this profile. This is owned by the
   // profile.
   virtual TemplateURLFetcher* GetTemplateURLFetcher() = 0;
-
-  // Returns the PersonalDataManager associated with this profile.
-  virtual PersonalDataManager* GetPersonalDataManager() = 0;
 
   // Returns the request context used for extension-related requests.  This
   // is only used for a separate cookie store currently.
@@ -492,9 +481,14 @@ class Profile : public content::BrowserContext {
   // access to the the proxy configuration possibly defined by preferences.
   virtual PrefProxyConfigTracker* GetProxyConfigTracker() = 0;
 
-  // Returns the PrerenderManager used to prerender entire webpages for this
-  // profile.
-  virtual prerender::PrerenderManager* GetPrerenderManager() = 0;
+  // Returns the Predictor object used for dns prefetch.
+  virtual chrome_browser_net::Predictor* GetNetworkPredictor() = 0;
+
+  // Deletes all network related data since |time|. It deletes transport
+  // security state since |time| and it also delete HttpServerProperties data.
+  // The implementation is free to run this on a background thread, so when this
+  // method returns data is not guaranteed to be deleted.
+  virtual void ClearNetworkingHistorySince(base::Time time) = 0;
 
   std::string GetDebugName();
 
@@ -514,10 +508,6 @@ class Profile : public content::BrowserContext {
   }
   bool restored_last_session() const {
     return restored_last_session_;
-  }
-
-  bool first_launched() const {
-    return first_launched_;
   }
 
   // Stop sending accessibility events until ResumeAccessibilityEvents().
@@ -559,9 +549,6 @@ class Profile : public content::BrowserContext {
   static net::URLRequestContextGetter* GetDefaultRequestContext();
 
   bool restored_last_session_;
-
-  // True only for the very first profile launched in a Chrome session.
-  bool first_launched_;
 
   // Accessibility events will only be propagated when the pause
   // level is zero.  PauseAccessibilityEvents and ResumeAccessibilityEvents

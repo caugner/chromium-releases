@@ -4,6 +4,8 @@
 
 #include "chrome/browser/extensions/extension_history_api.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/json/json_writer.h"
 #include "base/message_loop.h"
@@ -51,7 +53,8 @@ void GetVisitInfoDictionary(const history::VisitRow& row,
   value->SetString(keys::kReferringVisitId,
                    base::Int64ToString(row.referring_visit));
 
-  const char* trans = PageTransition::CoreTransitionString(row.transition);
+  const char* trans =
+      content::PageTransitionGetCoreTransitionString(row.transition);
   DCHECK(trans) << "Invalid transition.";
   value->SetString(keys::kTransition, trans);
 }
@@ -69,8 +72,8 @@ ExtensionHistoryEventRouter::ExtensionHistoryEventRouter() {}
 ExtensionHistoryEventRouter::~ExtensionHistoryEventRouter() {}
 
 void ExtensionHistoryEventRouter::ObserveProfile(Profile* profile) {
-  NotificationSource source = Source<Profile>(profile);
   CHECK(registrar_.IsEmpty());
+  const Source<Profile> source = Source<Profile>(profile);
   registrar_.Add(this,
                  chrome::NOTIFICATION_HISTORY_URL_VISITED,
                  source);
@@ -218,7 +221,8 @@ bool GetVisitsHistoryFunction::RunAsyncImpl() {
   hs->QueryURL(url,
                true,  // Retrieve full history of a URL.
                &cancelable_consumer_,
-               NewCallback(this, &GetVisitsHistoryFunction::QueryComplete));
+               base::Bind(&GetVisitsHistoryFunction::QueryComplete,
+                          base::Unretained(this)));
 
   return true;
 }
@@ -269,7 +273,8 @@ bool SearchHistoryFunction::RunAsyncImpl() {
 
   HistoryService* hs = profile()->GetHistoryService(Profile::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text, options, &cancelable_consumer_,
-                   NewCallback(this, &SearchHistoryFunction::SearchComplete));
+                   base::Bind(&SearchHistoryFunction::SearchComplete,
+                              base::Unretained(this)));
 
   return true;
 }
@@ -346,7 +351,8 @@ bool DeleteRangeHistoryFunction::RunAsyncImpl() {
       begin_time,
       end_time,
       &cancelable_consumer_,
-      NewCallback(this, &DeleteRangeHistoryFunction::DeleteComplete));
+      base::Bind(&DeleteRangeHistoryFunction::DeleteComplete,
+                 base::Unretained(this)));
 
   return true;
 }
@@ -363,7 +369,8 @@ bool DeleteAllHistoryFunction::RunAsyncImpl() {
       base::Time::UnixEpoch(),     // From the beginning of the epoch.
       base::Time::Now(),           // To the current time.
       &cancelable_consumer_,
-      NewCallback(this, &DeleteAllHistoryFunction::DeleteComplete));
+      base::Bind(&DeleteAllHistoryFunction::DeleteComplete,
+                 base::Unretained(this)));
 
   return true;
 }

@@ -8,7 +8,7 @@
 
 #include <vector>
 
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/task.h"
@@ -24,10 +24,11 @@ class Profile;
 //
 // This service is thread safe. Each request callback is invoked in the
 // thread that made the request.
-class FaviconService : public CancelableRequestProvider,
-                       public base::RefCountedThreadSafe<FaviconService> {
+class FaviconService : public CancelableRequestProvider {
  public:
   explicit FaviconService(Profile* profile);
+
+  virtual ~FaviconService();
 
   // Callback for GetFavicon. If we have previously inquired about the favicon
   // for this URL, |know_favicon| will be true, and the rest of the fields will
@@ -39,9 +40,10 @@ class FaviconService : public CancelableRequestProvider,
   // opposed to not knowing anything). |expired| will be set to true if we
   // refreshed the favicon "too long" ago and should be updated if the page
   // is visited again.
-  typedef Callback2<Handle,                             // handle
-                    history::FaviconData>::Type  // the type of favicon
-                    FaviconDataCallback;
+  typedef base::Callback<
+      void(Handle,  // handle
+           history::FaviconData)>  // the type of favicon
+      FaviconDataCallback;
 
   typedef CancelableRequest<FaviconDataCallback> GetFaviconRequest;
 
@@ -51,7 +53,7 @@ class FaviconService : public CancelableRequestProvider,
   Handle GetFavicon(const GURL& icon_url,
                     history::IconType icon_type,
                     CancelableRequestConsumerBase* consumer,
-                    FaviconDataCallback* callback);
+                    const FaviconDataCallback& callback);
 
   // Fetches the |icon_type| of favicon at |icon_url|, sending the results to
   // the given |callback|. If the favicon has previously been set via
@@ -62,7 +64,7 @@ class FaviconService : public CancelableRequestProvider,
                                       const GURL& icon_url,
                                       history::IconType icon_type,
                                       CancelableRequestConsumerBase* consumer,
-                                      FaviconDataCallback* callback);
+                                      const FaviconDataCallback& callback);
 
   // Requests any |icon_types| of favicon for a web page URL. |consumer| is
   // notified when the bits have been fetched. |icon_types| can be any
@@ -75,7 +77,7 @@ class FaviconService : public CancelableRequestProvider,
   Handle GetFaviconForURL(const GURL& page_url,
                           int icon_types,
                           CancelableRequestConsumerBase* consumer,
-                          FaviconDataCallback* callback);
+                          const FaviconDataCallback& callback);
 
   // Marks all types of favicon for the page as being out of date.
   void SetFaviconOutOfDateForPage(const GURL& page_url);
@@ -93,9 +95,7 @@ class FaviconService : public CancelableRequestProvider,
                   history::IconType icon_type);
 
  private:
-  friend class base::RefCountedThreadSafe<FaviconService>;
 
-  virtual ~FaviconService();
 
   Profile* profile_;
 

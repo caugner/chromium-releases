@@ -16,6 +16,7 @@
 class Profile;
 class ProfileSyncService;
 class ProfileSyncFactory;
+class SyncError;
 
 namespace base { class TimeDelta; }
 namespace browser_sync {
@@ -84,19 +85,18 @@ class NonFrontendDataTypeController : public DataTypeController {
   // Start failed, make sure we record it, clean up state, and invoke the
   // callback on the frontend thread.
   // Note: this is performed on the datatype's thread.
-  virtual void StartFailed(StartResult result,
-                           const tracked_objects::Location& location);
+  virtual void StartFailed(StartResult result, const SyncError& error);
 
   // Start up complete, update the state and invoke the callback.
   // Note: this is performed on the datatype's thread.
   virtual void StartDone(DataTypeController::StartResult result,
                          DataTypeController::State new_state,
-                         const tracked_objects::Location& location);
+                         const SyncError& error);
 
   // UI thread implementation of StartDone.
   virtual void StartDoneImpl(DataTypeController::StartResult result,
                              DataTypeController::State new_state,
-                             const tracked_objects::Location& location);
+                             const SyncError& error);
 
   // Perform any DataType controller specific state cleanup before stopping
   // the datatype controller. The default implementation is a no-op.
@@ -133,9 +133,13 @@ class NonFrontendDataTypeController : public DataTypeController {
   ProfileSyncFactory* profile_sync_factory() const;
   Profile* profile() const;
   ProfileSyncService* profile_sync_service() const;
+  void set_start_callback(StartCallback* callback);
   void set_state(State state);
-  void set_model_associator(AssociatorInterface* associator);
-  void set_change_processor(ChangeProcessor* change_processor);
+
+  virtual AssociatorInterface* associator() const;
+  virtual void set_model_associator(AssociatorInterface* associator);
+  virtual ChangeProcessor* change_processor() const;
+  virtual void set_change_processor(ChangeProcessor* change_processor);
 
  private:
   ProfileSyncFactory* const profile_sync_factory_;

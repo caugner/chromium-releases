@@ -18,12 +18,13 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "grit/theme_resources.h"
+#include "ui/base/gtk/gtk_signal_registrar.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 
-ExtensionInfoBarGtk::ExtensionInfoBarGtk(TabContentsWrapper* owner,
+ExtensionInfoBarGtk::ExtensionInfoBarGtk(InfoBarTabHelper* owner,
                                          ExtensionInfoBarDelegate* delegate)
     : InfoBarGtk(owner, delegate),
       tracker_(this),
@@ -132,12 +133,12 @@ void ExtensionInfoBarGtk::BuildWidgets() {
     gtk_container_add(GTK_CONTAINER(alignment_), view_->native_view());
   }
 
-  signals_.Connect(button_, "button-press-event",
-                   G_CALLBACK(&OnButtonPressThunk), this);
-  signals_.Connect(view_->native_view(), "expose-event",
-                   G_CALLBACK(&OnExposeThunk), this);
-  signals_.Connect(view_->native_view(), "size_allocate",
-                   G_CALLBACK(&OnSizeAllocateThunk), this);
+  Signals()->Connect(button_, "button-press-event",
+                     G_CALLBACK(&OnButtonPressThunk), this);
+  Signals()->Connect(view_->native_view(), "expose-event",
+                     G_CALLBACK(&OnExposeThunk), this);
+  Signals()->Connect(view_->native_view(), "size_allocate",
+                     G_CALLBACK(&OnSizeAllocateThunk), this);
 }
 
 void ExtensionInfoBarGtk::StoppedShowing() {
@@ -153,7 +154,7 @@ Browser* ExtensionInfoBarGtk::GetBrowser() {
   return BrowserWindowGtk::GetBrowserWindowForNativeWindow(parent)->browser();
 }
 
-MenuGtk* ExtensionInfoBarGtk::BuildMenu() {
+ui::MenuModel* ExtensionInfoBarGtk::BuildMenuModel() {
   const Extension* extension = delegate_->extension();
   if (!extension->ShowConfigureContextMenus())
     return NULL;
@@ -162,9 +163,7 @@ MenuGtk* ExtensionInfoBarGtk::BuildMenu() {
   if (!browser)
     return NULL;
 
-  menu_model_ = new ExtensionContextMenuModel(extension, browser, NULL);
-  menu_.reset(new MenuGtk(this, menu_model_.get()));
-  return menu_.get();
+  return new ExtensionContextMenuModel(extension, browser, NULL);
 }
 
 void ExtensionInfoBarGtk::OnSizeAllocate(GtkWidget* widget,
@@ -180,13 +179,13 @@ gboolean ExtensionInfoBarGtk::OnButtonPress(GtkWidget* widget,
   if (event->button != 1)
     return FALSE;
 
-  MenuGtk* menu = BuildMenu();
-  if (!menu)
+  ui::MenuModel* model = BuildMenuModel();
+  if (!model)
     return FALSE;
 
   gtk_chrome_button_set_paint_state(GTK_CHROME_BUTTON(widget),
                                     GTK_STATE_ACTIVE);
-  menu->PopupForWidget(widget, event->button, event->time);
+  ShowMenuWithModel(widget, this, model);
 
   return TRUE;
 }
@@ -200,6 +199,6 @@ gboolean ExtensionInfoBarGtk::OnExpose(GtkWidget* sender,
   return FALSE;
 }
 
-InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
+InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   return new ExtensionInfoBarGtk(owner, this);
 }

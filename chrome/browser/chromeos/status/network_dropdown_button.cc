@@ -22,11 +22,11 @@ namespace chromeos {
 NetworkDropdownButton::NetworkDropdownButton(bool is_browser_mode,
                                              gfx::NativeWindow parent_window,
                                              bool should_show_options)
-    : DropDownButton(NULL,
-                     UTF16ToWide(l10n_util::GetStringUTF16(
-                         IDS_STATUSBAR_NO_NETWORKS_MESSAGE)),
-                     this,
-                     true),
+    : DropDownButton(
+          NULL,
+          l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_NETWORKS_MESSAGE),
+          this,
+          true),
       parent_window_(parent_window),
       should_show_options_(should_show_options) {
   network_menu_.reset(new NetworkMenu(this, is_browser_mode));
@@ -111,8 +111,8 @@ void NetworkDropdownButton::OnNetworkManagerChanged(NetworkLibrary* cros) {
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkDropdownButton, NetworkMenuIcon::Delegate implementation:
 void NetworkDropdownButton::NetworkMenuIconChanged() {
-  const SkBitmap* bitmap = network_icon_->GetIconAndText(NULL);
-  SetIcon(*bitmap);
+  const SkBitmap bitmap = network_icon_->GetIconAndText(NULL);
+  SetIcon(bitmap);
   SchedulePaint();
 }
 
@@ -121,9 +121,9 @@ void NetworkDropdownButton::NetworkMenuIconChanged() {
 
 void NetworkDropdownButton::SetNetworkIconAndText() {
   string16 text;
-  const SkBitmap* bitmap = network_icon_->GetIconAndText(&text);
-  SetIcon(*bitmap);
-  SetText(UTF16ToWide(text));
+  const SkBitmap bitmap = network_icon_->GetIconAndText(&text);
+  SetIcon(bitmap);
+  SetText(text);
 }
 
 }  // namespace chromeos

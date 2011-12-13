@@ -16,10 +16,10 @@
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
-#include "chrome/browser/ui/cocoa/base_view.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "ui/base/cocoa/base_view.h"
 #include "ui/gfx/size.h"
 
 @class FocusTracker;
@@ -65,7 +65,7 @@ class TabContentsViewMac : public TabContentsView,
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
   virtual void GetContainerBounds(gfx::Rect* out) const OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* host) OVERRIDE;
-  virtual void SetPageTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void OnTabCrashed(base::TerminationStatus status,
                             int error_code) OVERRIDE;
   virtual void SizeContents(const gfx::Size& size) OVERRIDE;

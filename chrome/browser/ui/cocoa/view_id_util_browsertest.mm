@@ -73,10 +73,7 @@ class ViewIDTest : public InProcessBrowserTest {
           i == VIEW_ID_AUTOCOMPLETE ||
           i == VIEW_ID_CONTENTS_SPLIT ||
           i == VIEW_ID_SIDE_BAR_SPLIT ||
-          i == VIEW_ID_FEEDBACK_BUTTON ||
-          i == VIEW_ID_COMPACT_NAV_BAR ||
-          i == VIEW_ID_COMPACT_OPT_BAR ||
-          i == VIEW_ID_COMPACT_NAV_BAR_SPACER) {
+          i == VIEW_ID_FEEDBACK_BUTTON) {
         continue;
       }
 
@@ -98,7 +95,8 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Basic) {
 
 // Flaky on Mac: http://crbug.com/90557.
 IN_PROC_BROWSER_TEST_F(ViewIDTest, FLAKY_Fullscreen) {
-  browser()->window()->SetFullscreen(true);
+  browser()->window()->EnterFullscreen(
+      GURL(), FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION);
   ASSERT_NO_FATAL_FAILURE(DoTest());
 }
 
@@ -110,7 +108,7 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Tab) {
   for (int i = 1; i <= 9; ++i) {
     CheckViewID(static_cast<ViewID>(VIEW_ID_TAB_0 + i), false);
     browser()->OpenURL(GURL(chrome::kAboutBlankURL), GURL(),
-                       NEW_BACKGROUND_TAB, PageTransition::TYPED);
+                       NEW_BACKGROUND_TAB, content::PAGE_TRANSITION_TYPED);
     CheckViewID(static_cast<ViewID>(VIEW_ID_TAB_0 + i), true);
     // VIEW_ID_TAB_LAST should always be available.
     CheckViewID(VIEW_ID_TAB_LAST, true);
@@ -118,6 +116,6 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Tab) {
 
   // Open the 11th tab.
   browser()->OpenURL(GURL(chrome::kAboutBlankURL), GURL(),
-                     NEW_BACKGROUND_TAB, PageTransition::TYPED);
+                     NEW_BACKGROUND_TAB, content::PAGE_TRANSITION_TYPED);
   CheckViewID(VIEW_ID_TAB_LAST, true);
 }

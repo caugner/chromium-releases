@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/string_util.h"
@@ -20,6 +21,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "net/base/load_flags.h"
@@ -30,14 +32,12 @@
 
 namespace {
 
-InfoBarDelegate* CreateInfobar(TabContents* tab_contents,
+InfoBarDelegate* CreateInfobar(InfoBarTabHelper* infobar_helper,
                                GoogleURLTracker* google_url_tracker,
                                const GURL& new_google_url) {
-  InfoBarDelegate* infobar = new GoogleURLTrackerInfoBarDelegate(tab_contents,
+  InfoBarDelegate* infobar = new GoogleURLTrackerInfoBarDelegate(infobar_helper,
       google_url_tracker, new_google_url);
-  TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
-  wrapper->infobar_tab_helper()->AddInfoBar(infobar);
+  infobar_helper->AddInfoBar(infobar);
   return infobar;
 }
 
@@ -46,13 +46,12 @@ InfoBarDelegate* CreateInfobar(TabContents* tab_contents,
 // GoogleURLTrackerInfoBarDelegate --------------------------------------------
 
 GoogleURLTrackerInfoBarDelegate::GoogleURLTrackerInfoBarDelegate(
-    TabContents* tab_contents,
+    InfoBarTabHelper* infobar_helper,
     GoogleURLTracker* google_url_tracker,
     const GURL& new_google_url)
-    : ConfirmInfoBarDelegate(tab_contents),
+    : ConfirmInfoBarDelegate(infobar_helper),
       google_url_tracker_(google_url_tracker),
-      new_google_url_(new_google_url),
-      tab_contents_(tab_contents) {
+      new_google_url_(new_google_url) {
 }
 
 bool GoogleURLTrackerInfoBarDelegate::Accept() {
@@ -72,10 +71,10 @@ string16 GoogleURLTrackerInfoBarDelegate::GetLinkText() const {
 
 bool GoogleURLTrackerInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  tab_contents_->OpenURL(google_util::AppendGoogleLocaleParam(GURL(
+  owner()->tab_contents()->OpenURL(google_util::AppendGoogleLocaleParam(GURL(
       "https://www.google.com/support/chrome/bin/answer.py?answer=1618699")),
       GURL(), (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      PageTransition::LINK);
+      content::PAGE_TRANSITION_LINK);
   return false;
 }
 
@@ -113,7 +112,7 @@ GoogleURLTracker::GoogleURLTracker()
     : infobar_creator_(&CreateInfobar),
       google_url_(g_browser_process->local_state()->GetString(
           prefs::kLastKnownGoogleURL)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(runnable_method_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
       fetcher_id_(0),
       queue_wakeup_task_(true),
       in_startup_sleep_(true),
@@ -125,12 +124,11 @@ GoogleURLTracker::GoogleURLTracker()
   net::NetworkChangeNotifier::AddIPAddressObserver(this);
 
   MessageLoop::current()->PostTask(FROM_HERE,
-                                   runnable_method_factory_.NewRunnableMethod(
-                                   &GoogleURLTracker::QueueWakeupTask));
+      base::Bind(&GoogleURLTracker::QueueWakeupTask,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 GoogleURLTracker::~GoogleURLTracker() {
-  runnable_method_factory_.RevokeAll();
   net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
 }
 
@@ -181,8 +179,8 @@ void GoogleURLTracker::QueueWakeupTask() {
   // no function to do this.
   static const int kStartFetchDelayMS = 5000;
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      runnable_method_factory_.NewRunnableMethod(
-          &GoogleURLTracker::FinishSleep),
+      base::Bind(&GoogleURLTracker::FinishSleep,
+                 weak_ptr_factory_.GetWeakPtr()),
       kStartFetchDelayMS);
 }
 
@@ -309,7 +307,7 @@ void GoogleURLTracker::RedoSearch() {
   GURL new_search_url(search_url_.ReplaceComponents(replacements));
   if (new_search_url.is_valid())
     controller_->tab_contents()->OpenURL(new_search_url, GURL(), CURRENT_TAB,
-                                         PageTransition::GENERATED);
+                                         content::PAGE_TRANSITION_GENERATED);
 }
 
 void GoogleURLTracker::Observe(int type,
@@ -382,5 +380,12 @@ void GoogleURLTracker::ShowGoogleURLInfoBarIfNecessary(
     return;
   DCHECK(!fetched_google_url_.is_empty());
 
-  infobar_ = (*infobar_creator_)(tab_contents, this, fetched_google_url_);
+  // |tab_contents| can be NULL during tests.
+  InfoBarTabHelper* infobar_helper = NULL;
+  if (tab_contents) {
+    TabContentsWrapper* wrapper =
+        TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+    infobar_helper = wrapper->infobar_tab_helper();
+  }
+  infobar_ = (*infobar_creator_)(infobar_helper, this, fetched_google_url_);
 }

@@ -121,6 +121,8 @@ void PCMWaveInAudioInputStream::Start(AudioInputCallback* callback) {
   if (result != MMSYSERR_NOERROR) {
     HandleError(result);
     state_ = kStateReady;
+  } else {
+    manager_->IncreaseActiveInputStreamCount();
   }
 }
 
@@ -138,6 +140,10 @@ void PCMWaveInAudioInputStream::Stop() {
     HandleError(::GetLastError());
     return;
   }
+  // Stop is always called before Close. In case of error, this will be
+  // also called when closing the input controller.
+  manager_->DecreaseActiveInputStreamCount();
+
   state_ = kStateStopped;
   MMRESULT res = ::waveInReset(wavein_);
   if (res != MMSYSERR_NOERROR) {
@@ -190,8 +196,11 @@ void PCMWaveInAudioInputStream::WaveCallback(HWAVEIN hwi, UINT msg,
   if (msg == WIM_DATA) {
     // WIM_DONE indicates that the driver is done with our buffer. We pass it
     // to the callback and check if we need to stop playing.
+    // It should be OK to assume the data in the buffer is what has been
+    // recorded in the soundcard.
     WAVEHDR* buffer = reinterpret_cast<WAVEHDR*>(param1);
     obj->callback_->OnData(obj, reinterpret_cast<const uint8*>(buffer->lpData),
+                           buffer->dwBytesRecorded,
                            buffer->dwBytesRecorded);
 
     if (obj->state_ == kStateStopping) {

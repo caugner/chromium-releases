@@ -4,7 +4,6 @@
 
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
-#include "base/values.h"
 #include "chrome/browser/policy/policy_map.h"
 
 namespace policy {
@@ -16,37 +15,47 @@ ConfigurationPolicyProvider::ConfigurationPolicyProvider(
     : policy_definition_list_(policy_list) {
 }
 
-ConfigurationPolicyProvider::~ConfigurationPolicyProvider() {}
+ConfigurationPolicyProvider::~ConfigurationPolicyProvider() {
+  FOR_EACH_OBSERVER(ConfigurationPolicyProvider::Observer,
+                    observer_list_,
+                    OnProviderGoingAway());
+}
+
+bool ConfigurationPolicyProvider::Provide(PolicyMap* result) {
+#if !defined(OFFICIAL_BUILD)
+  if (override_policies_.get()) {
+    result->CopyFrom(*override_policies_);
+    return true;
+  }
+#endif
+  return ProvideInternal(result);
+}
 
 bool ConfigurationPolicyProvider::IsInitializationComplete() const {
   return true;
 }
 
-void ConfigurationPolicyProvider::ApplyPolicyValueTree(
-    const DictionaryValue* policies,
-    ConfigurationPolicyStoreInterface* store) {
-  const PolicyDefinitionList* policy_list(policy_definition_list());
-  for (const PolicyDefinitionList::Entry* i = policy_list->begin;
-       i != policy_list->end; ++i) {
-    Value* value;
-    if (policies->Get(i->name, &value) && value->IsType(i->value_type))
-      store->Apply(i->policy_type, value->DeepCopy());
-  }
+#if !defined(OFFICIAL_BUILD)
 
-  // TODO(mnissler): Handle preference overrides once |ConfigurationPolicyStore|
-  // supports it.
+void ConfigurationPolicyProvider::OverridePolicies(PolicyMap* policies) {
+  override_policies_.reset(policies);
+  NotifyPolicyUpdated();
 }
 
-void ConfigurationPolicyProvider::ApplyPolicyMap(
-    const PolicyMap* policies,
-    ConfigurationPolicyStoreInterface* store) {
-  const PolicyDefinitionList* policy_list(policy_definition_list());
-  for (const PolicyDefinitionList::Entry* i = policy_list->begin;
-       i != policy_list->end; ++i) {
-    const Value* value = policies->Get(i->policy_type);
-    if (value && value->IsType(i->value_type))
-      store->Apply(i->policy_type, value->DeepCopy());
-  }
+#endif
+
+void ConfigurationPolicyProvider::NotifyPolicyUpdated() {
+  FOR_EACH_OBSERVER(ConfigurationPolicyProvider::Observer,
+                    observer_list_,
+                    OnUpdatePolicy());
+}
+
+void ConfigurationPolicyProvider::AddObserver(Observer* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void ConfigurationPolicyProvider::RemoveObserver(Observer* observer) {
+  observer_list_.RemoveObserver(observer);
 }
 
 // Class ConfigurationPolicyObserverRegistrar.

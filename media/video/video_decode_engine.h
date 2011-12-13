@@ -10,6 +10,7 @@
 #include "media/base/media_export.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
+#include "ui/gfx/size.h"
 
 class MessageLoop;
 
@@ -20,23 +21,12 @@ class VideoDecodeContext;
 
 struct PipelineStatistics;
 
-struct VideoCodecInfo {
-  // Other parameter is only meaningful when this is true.
-  bool success;
-
-  // Can be different with container's value.
-  uint32 surface_width;
-
-  // Can be different with container's value.
-  uint32 surface_height;
-};
-
 class MEDIA_EXPORT VideoDecodeEngine {
  public:
   struct MEDIA_EXPORT EventHandler {
    public:
     virtual ~EventHandler() {}
-    virtual void OnInitializeComplete(const VideoCodecInfo& info) = 0;
+    virtual void OnInitializeComplete(bool success) = 0;
     virtual void OnUninitializeComplete() = 0;
     virtual void OnFlushComplete() = 0;
     virtual void OnSeekComplete() = 0;

@@ -10,6 +10,8 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
@@ -27,7 +29,6 @@ class CannedBrowsingDataLocalStorageHelper;
 class CookiesTreeModel;
 class TabContents;
 class Profile;
-struct ContentSettings;
 
 namespace net {
 class CookieList;
@@ -158,7 +159,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
   }
 
   // TabContentsObserver overrides.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidNavigateMainFramePostCommit(
       const content::LoadCommittedDetails& details,
       const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
@@ -169,11 +170,12 @@ class TabSpecificContentSettings : public TabContentsObserver,
       const GURL& validated_url,
       bool is_error_page,
       RenderViewHost* render_view_host) OVERRIDE;
+  virtual void AppCacheAccessed(const GURL& manifest_url,
+                                bool blocked_by_policy) OVERRIDE;
 
   // Message handlers. Public for testing.
   void OnContentBlocked(ContentSettingsType type,
                         const std::string& resource_identifier);
-  void OnAppCacheAccessed(const GURL& manifest_url, bool blocked_by_policy);
 
   // These methods are invoked on the UI thread by the static functions above.
   // Public for testing.
@@ -254,7 +256,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
   // NotificationObserver implementation.
   virtual void Observe(int type,
                        const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const NotificationDetails& details) OVERRIDE;
 
   // Stores which content setting types actually have blocked content.
   bool content_blocked_[CONTENT_SETTINGS_NUM_TYPES];

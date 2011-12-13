@@ -10,10 +10,10 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 
-#define PPB_GRAPHICS_3D_TRUSTED_INTERFACE_0_1 \
-    "PPB_Graphics3DTrusted;0.1"
+#define PPB_GRAPHICS_3D_TRUSTED_INTERFACE_1_0 \
+    "PPB_Graphics3DTrusted;1.0"
 #define PPB_GRAPHICS_3D_TRUSTED_INTERFACE \
-    PPB_GRAPHICS_3D_TRUSTED_INTERFACE_0_1
+    PPB_GRAPHICS_3D_TRUSTED_INTERFACE_1_0
 
 typedef enum {
   PPB_GRAPHICS3D_TRUSTED_ERROR_OK,

@@ -7,8 +7,9 @@
 #pragma once
 
 #include "base/memory/scoped_nsobject.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
+#include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "content/common/notification_registrar.h"
 #include "ui/base/ui_base_types.h"
@@ -54,7 +55,12 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual gfx::Rect GetBounds() const;
   virtual bool IsMaximized() const;
   virtual bool IsMinimized() const;
-  virtual void SetFullscreen(bool fullscreen);
+  virtual void EnterFullscreen(
+      const GURL& url, FullscreenExitBubbleType type) OVERRIDE;
+  virtual void ExitFullscreen() OVERRIDE;
+  virtual void UpdateFullscreenExitBubbleContent(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) OVERRIDE;
   virtual bool IsFullscreen() const;
   virtual bool IsFullscreenBubbleVisible() const;
   virtual LocationBar* GetLocationBar() const;
@@ -85,8 +91,6 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper);
   virtual void ShowThemeInstallBubble();
   virtual void ConfirmBrowserCloseWithPendingDownloads();
-  virtual gfx::NativeWindow ShowHTMLDialog(HtmlDialogUIDelegate* delegate,
-                                           gfx::NativeWindow parent_window);
   virtual void UserChangedTheme();
   virtual int GetExtraRenderViewHeight() const;
   virtual void TabContentsFocused(TabContents* tab_contents);
@@ -105,18 +109,20 @@ class BrowserWindowCocoa : public BrowserWindow,
   virtual void Cut();
   virtual void Copy();
   virtual void Paste();
-  virtual void ToggleTabStripMode();
-  virtual void ToggleUseCompactNavigationBar() {}
   virtual void OpenTabpose();
-  virtual void SetPresentationMode(bool presentation_mode);
+  virtual void EnterPresentationMode(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) OVERRIDE;
+  virtual void ExitPresentationMode() OVERRIDE;
   virtual bool InPresentationMode();
-  virtual void PrepareForInstant();
   virtual void ShowInstant(TabContentsWrapper* preview);
-  virtual void HideInstant(bool instant_is_active);
+  virtual void HideInstant();
   virtual gfx::Rect GetInstantBounds();
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds);
   virtual FindBar* CreateFindBar() OVERRIDE;
+  virtual void ShowAvatarBubble(TabContents* tab_contents,
+                                const gfx::Rect& rect) OVERRIDE;
 
   // Overridden from NotificationObserver
   virtual void Observe(int type,
@@ -137,9 +143,10 @@ class BrowserWindowCocoa : public BrowserWindow,
   void UpdateSidebarForContents(TabContents* tab_contents);
 
   NotificationRegistrar registrar_;
+  PrefChangeRegistrar pref_change_registrar_;
   Browser* browser_;  // weak, owned by controller
   BrowserWindowController* controller_;  // weak, owns us
-  ScopedRunnableMethodFactory<Browser> confirm_close_factory_;
+  base::WeakPtrFactory<Browser> confirm_close_factory_;
   scoped_nsobject<NSString> pending_window_title_;
   ui::WindowShowState initial_show_state_;
 };

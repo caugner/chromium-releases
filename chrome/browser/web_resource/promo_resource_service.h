@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/browser/web_resource/web_resource_service.h"
 #include "chrome/common/chrome_version_info.h"
 
@@ -16,9 +17,8 @@ namespace base {
 }
 
 class AppsPromoLogoFetcher;
-class Profile;
 class PrefService;
-
+class Profile;
 // A PromoResourceService fetches data from a web resource server to be used to
 // dynamically change the appearance of the New Tab Page. For example, it has
 // been used to fetch "tips" to be displayed on the NTP, or to display
@@ -28,28 +28,9 @@ class PrefService;
 // messages, which have until now been piggybacked onto the old tips server
 // structure. (see http://crbug.com/70634 for details.)
 class PromoResourceService
-    : public WebResourceService {
+    : public WebResourceService,
+      public NotificationPromo::Delegate {
  public:
-  // Checks for conditions to show promo: start/end times, channel, etc.
-  static bool CanShowNotificationPromo(Profile* profile);
-
-  static void RegisterPrefs(PrefService* local_state);
-
-  static void RegisterUserPrefs(PrefService* prefs);
-
-  explicit PromoResourceService(Profile* profile);
-
-  // Default server of dynamically loaded NTP HTML elements.
-  static const char* kDefaultPromoResourceServer;
-
- private:
-  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, IsBuildTargeted);
-  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, UnpackLogoSignal);
-  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, UnpackNotificationSignal);
-  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, UnpackWebStoreSignal);
-  FRIEND_TEST_ALL_PREFIXES(
-      PromoResourceServiceTest, UnpackPartialWebStoreSignal);
-
   // Identifies types of Chrome builds for promo targeting.
   enum BuildType {
     NO_BUILD = 0,
@@ -59,6 +40,38 @@ class PromoResourceService
     CANARY_BUILD = 1 << 3,
     ALL_BUILDS = (1 << 4) - 1,
   };
+
+  // Checks for conditions to show promo: start/end times, channel, etc.
+  static bool CanShowNotificationPromo(Profile* profile);
+
+  // Checks if this user is in a group for sync promo roll-out.
+  static bool CanShowSyncPromo(Profile* profile);
+
+  static void RegisterPrefs(PrefService* local_state);
+
+  static void RegisterUserPrefs(PrefService* prefs);
+
+  explicit PromoResourceService(Profile* profile);
+
+  static chrome::VersionInfo::Channel GetChannel();
+  static bool IsBuildTargeted(chrome::VersionInfo::Channel, int builds_allowed);
+
+  // Default server of dynamically loaded NTP HTML elements.
+  static const char* kDefaultPromoResourceServer;
+
+ private:
+  friend class SyncPromoTest;
+  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, IsBuildTargetedTest);
+  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, UnpackLogoSignal);
+  FRIEND_TEST_ALL_PREFIXES(PromoResourceServiceTest, UnpackWebStoreSignal);
+  FRIEND_TEST_ALL_PREFIXES(
+      PromoResourceServiceTest, UnpackPartialWebStoreSignal);
+  FRIEND_TEST_ALL_PREFIXES(
+      PromoResourceServiceTest, UnpackWebStoreSignalHttpsLogo);
+  FRIEND_TEST_ALL_PREFIXES(
+      PromoResourceServiceTest, UnpackWebStoreSignalHttpsLogoError);
+  FRIEND_TEST_ALL_PREFIXES(
+      PromoResourceServiceTest, UnpackWebStoreSignalHttpLogo);
 
   virtual ~PromoResourceService();
 
@@ -70,17 +83,14 @@ class PromoResourceService
 
   void Init();
 
-  static bool IsBuildTargeted(chrome::VersionInfo::Channel channel,
-                              int builds_targeted);
-
   // Returns true if |builds_targeted| includes the release channel Chrome
   // belongs to. For testing purposes, you can override the current channel
   // with set_channel.
-  bool IsThisBuildTargeted(int builds_targeted);
+  bool IsBuildTargeted(int builds_targeted);
 
   // Schedule a notification that a web resource is either going to become
   // available or be no longer valid.
-  void ScheduleNotification(double ms_start_time, double ms_end_time);
+  void ScheduleNotification(double start, double end);
 
   // Schedules the initial notification for when the web resource is going
   // to become available or no longer valid. This performs a few additional
@@ -91,18 +101,19 @@ class PromoResourceService
   // Overrides the current Chrome release channel for testing purposes.
   void set_channel(chrome::VersionInfo::Channel channel) { channel_ = channel; }
 
-  virtual void Unpack(const base::DictionaryValue& parsed_json);
+  // WebResourceService override.
+  virtual void Unpack(const base::DictionaryValue& parsed_json) OVERRIDE;
 
-  // Unpack the web resource as a custom promo signal. Expects a start and end
-  // signal, with the promo to be shown in the tooltip of the start signal
-  // field. Delivery will be in json in the form of:
+  // Unpack the web resource as a custom notification signal. Expects a start
+  // and end signal, with the promo to be shown in the tooltip of the start
+  // signal field. Delivery will be in json in the form of:
   // {
   //   "topic": {
   //     "answers": [
   //       {
   //         "answer_id": "1067976",
   //         "name": "promo_start",
-  //         "question": "1:24:10",
+  //         "question": "1:24:10:10",
   //         "tooltip":
   //       "Click \u003ca href=http://www.google.com\u003ehere\u003c/a\u003e!",
   //         "inproduct": "10/8/09 12:00",
@@ -131,9 +142,10 @@ class PromoResourceService
   // this promo (see the BuildType enum in web_resource_service.cc), the
   // number of hours that each promo group should see it, and the maximum promo
   // group that should see it, separated by ":".
-  // For example, "7:24:5" would indicate that all groups with ids less than 5,
-  // and with dev, beta and stable builds, should see the promo. The groups
-  // ramp up so 1 additional group sees the promo every 24 hours.
+  // For example, "7:24:5:10" would indicate that all groups with ids less than
+  // 5, and with dev, beta and stable builds, should see the promo a maximum of
+  // 10 times. The groups ramp up so 1 additional group sees the promo every
+  // 24 hours.
   //
   void UnpackNotificationSignal(const base::DictionaryValue& parsed_json);
 
@@ -171,7 +183,7 @@ class PromoResourceService
   //     "answers": [
   //       {
   //         "answer_id": "1143011",
-  //         "name": "webstore_promo:15:",
+  //         "name": "webstore_promo:15:1:https://www.google.com/logo.png",
   //         "question": "Browse thousands of apps and games for Chrome.",
   //         "inproduct_target": "Visit the Chrome Web Store",
   //         "inproduct": "https://chrome.google.com/webstore?hl=en",
@@ -187,57 +199,44 @@ class PromoResourceService
   //   inproduct_target: the promo button text
   //   inproduct: the promo button link
   //   tooltip: the text for the "hide this" link on the promo
-  //   name: starts with "webstore_promo" to identify the signal. the second
+  //   name: starts with "webstore_promo" to identify the signal. The second
   //         part contains the release channels targeted (bitwise or of
-  //         BuildTypes). The third part is optional and specifies the URL of
-  //         the logo image. In the example above, the URL is empty so the
-  //         default webstore logo will be used.
+  //         BuildTypes). The third part specifies what users should maximize
+  //         the apps section of the NTP when first loading the promo (bitwise
+  //         or of AppsPromo::UserGroup). The forth part is optional and
+  //         specifies the URL of the logo image. If left out, the default
+  //         webstore logo will be used. The logo can be an HTTPS or DATA URL.
   //   answer_id: the promo's id
   void UnpackWebStoreSignal(const base::DictionaryValue& parsed_json);
 
-  // Parse the answers array element.
-  void ParseNotification(base::DictionaryValue* a_dic,
-                         std::string* promo_start_string,
-                         std::string* promo_end_string);
+  // Unpack the sync promo. Expects JSON delivery in the following format:
+  // {
+  //   "topic": {
+  //     "answers": [
+  //       ...
+  //       {
+  //         "answer_id": "XXXXXXX",
+  //         "name": "sync_promo",
+  //         "question": "1:5"
+  //       }
+  //     ]
+  //   }
+  // }
+  //
+  // The question is in the form of "<build>:<group_max>".
+  void UnpackSyncPromoSignal(const base::DictionaryValue& parsed_json);
 
-  // Set notification promo params from a question string, which is of the form
-  // <build_type>:<time_slice>:<max_group>.
-  void SetNotificationParams(base::DictionaryValue* a_dic);
-
-  // Extract the notification promo text from the tooltip string.
-  void SetNotificationLine(base::DictionaryValue* a_dic);
-
-  // Check if this notification promo is new based on start/end times,
-  // and trigger events accordingly.
-  void CheckForNewNotification(const std::string& promo_start_string,
-                               const std::string& promo_end_string);
-
-  // Calculate the notification promo times, taking into account our group, and
-  // the group time slice.
-  void ParseNewNotificationTimes(const std::string& promo_start_string,
-                                 const std::string& promo_end_string,
-                                 double* promo_start,
-                                 double* promo_end);
-
-  // Calculates notification promo start time with group-based time slice
-  // offset.
-  static double GetNotificationStartTime(PrefService* prefs);
-
-  // Create a new notification promo group.
-  int ResetNotificationGroup();
-
-  // Get saved notification promo times.
-  void GetCurrentNotificationTimes(double* old_promo_start,
-                                   double* old_promo_end);
-
-  // Actions on receiving a new notification promo.
-  void OnNewNotification(double promo_start, double promo_end);
+  // NotificationPromo::Delegate override.
+  virtual void OnNewNotification(double start, double end) OVERRIDE;
 
   // The profile this service belongs to.
   Profile* profile_;
 
   // Overrides the current Chrome release channel for testing purposes.
   chrome::VersionInfo::Channel channel_;
+
+  // A helper that downloads the promo logo.
+  scoped_ptr<AppsPromoLogoFetcher> apps_promo_logo_fetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(PromoResourceService);
 };

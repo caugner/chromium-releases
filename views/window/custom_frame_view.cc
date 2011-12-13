@@ -4,6 +4,8 @@
 
 #include "views/window/custom_frame_view.h"
 
+#include <algorithm>
+
 #include "base/utf_string_conversions.h"
 #include "grit/ui_resources.h"
 #include "grit/ui_strings.h"
@@ -14,6 +16,7 @@
 #include "ui/gfx/path.h"
 #include "views/widget/widget_delegate.h"
 #include "views/window/client_view.h"
+#include "views/window/window_resources.h"
 #include "views/window/window_shape.h"
 
 #if defined(OS_LINUX)
@@ -413,7 +416,7 @@ void CustomFrameView::PaintTitleBar(gfx::Canvas* canvas) {
   if (!d)
     return;
 
-  canvas->DrawStringInt(WideToUTF16Hack(d->GetWindowTitle()), *title_font_,
+  canvas->DrawStringInt(d->GetWindowTitle(), *title_font_,
                         SK_ColorWHITE, GetMirroredXForRect(title_bounds_),
                         title_bounds_.y(), title_bounds_.width(),
                         title_bounds_.height());

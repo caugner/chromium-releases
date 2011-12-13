@@ -10,6 +10,7 @@
 #include "base/string_util.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_network_transaction.h"
+#include "net/http/http_server_properties_impl.h"
 #include "net/spdy/spdy_framer.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
@@ -41,6 +42,7 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
   static const char kOff[] = "off";
   static const char kSSL[] = "ssl";
   static const char kDisableSSL[] = "no-ssl";
+  static const char kDisablePing[] = "no-ping";
   static const char kExclude[] = "exclude";  // Hosts to exclude
   static const char kDisableCompression[] = "no-compress";
   static const char kDisableAltProtocols[] = "no-alt-protocols";
@@ -76,6 +78,8 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
   // No spdy specified.
   static const char kNpnProtosHttpOnly[] = "\x08http/1.1\x07http1.1";
 
+  static const char kInitialMaxConcurrentStreams[] = "init-max-streams";
+
   std::vector<std::string> spdy_options;
   base::SplitString(mode, ',', &spdy_options);
 
@@ -98,6 +102,8 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
     } else if (option == kSSL) {
       HttpStreamFactory::set_force_spdy_over_ssl(true);
       HttpStreamFactory::set_force_spdy_always(true);
+    } else if (option == kDisablePing) {
+      SpdySession::set_enable_ping_based_connection_checking(false);
     } else if (option == kExclude) {
       HttpStreamFactory::add_forced_spdy_exclusion(value);
     } else if (option == kDisableCompression) {
@@ -119,13 +125,17 @@ void HttpNetworkLayer::EnableSpdy(const std::string& mode) {
     } else if (option == kEnableFlowControl) {
       SpdySession::set_flow_control(true);
     } else if (option == kForceAltProtocols) {
-      HttpAlternateProtocols::PortProtocolPair pair;
+      PortAlternateProtocolPair pair;
       pair.port = 443;
-      pair.protocol = HttpAlternateProtocols::NPN_SPDY_2;
-      HttpAlternateProtocols::ForceAlternateProtocol(pair);
+      pair.protocol = NPN_SPDY_2;
+      HttpServerPropertiesImpl::ForceAlternateProtocol(pair);
     } else if (option == kSingleDomain) {
       SpdySessionPool::ForceSingleDomain();
       LOG(ERROR) << "FORCING SINGLE DOMAIN";
+    } else if (option == kInitialMaxConcurrentStreams) {
+      int streams;
+      if (base::StringToInt(value, &streams) && streams > 0)
+        SpdySession::set_init_max_concurrent_streams(streams);
     } else if (option.empty() && it == spdy_options.begin()) {
       continue;
     } else {

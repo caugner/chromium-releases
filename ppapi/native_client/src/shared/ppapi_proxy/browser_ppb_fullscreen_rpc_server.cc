@@ -2,12 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
-// SRPC-abstraction wrappers around PPB_Fullscreen_Dev functions.
+// SRPC-abstraction wrappers around PPB_Fullscreen functions.
 
 #include "native_client/src/shared/ppapi_proxy/browser_globals.h"
 #include "native_client/src/shared/ppapi_proxy/utility.h"
-#include "ppapi/c/dev/ppb_fullscreen_dev.h"
 #include "ppapi/c/pp_size.h"
+#include "ppapi/c/ppb_fullscreen.h"
 #include "srpcgen/ppb_rpc.h"
 
 using ppapi_proxy::DebugPrintf;
@@ -69,7 +69,7 @@ void PpbFullscreenRpcServer::PPB_Fullscreen_GetScreenSize(
   PP_Bool pp_success = PPBFullscreenInterface()->GetScreenSize(
       instance,
       reinterpret_cast<struct PP_Size*>(size));
-  DebugPrintf("PPB_Fullscreen::SetFullscreen: pp_success=%d\n", pp_success);
+  DebugPrintf("PPB_Fullscreen::GetScreenSize: pp_success=%d\n", pp_success);
 
   *success = (pp_success == PP_TRUE);
   rpc->result = NACL_SRPC_RESULT_OK;

@@ -6,8 +6,10 @@
 #define CONTENT_RENDERER_RENDERER_WEBKITPLATFORMSUPPORT_IMPL_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
+#include "content/common/content_export.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
 
 class WebSharedWorkerRepositoryImpl;
@@ -21,8 +23,8 @@ namespace webkit_glue {
 class WebClipboardImpl;
 }
 
-class RendererWebKitPlatformSupportImpl
-    : public webkit_glue::WebKitPlatformSupportImpl {
+class CONTENT_EXPORT RendererWebKitPlatformSupportImpl
+    : NON_EXPORTED_BASE(public webkit_glue::WebKitPlatformSupportImpl) {
  public:
   RendererWebKitPlatformSupportImpl();
   virtual ~RendererWebKitPlatformSupportImpl();
@@ -78,6 +80,7 @@ class RendererWebKitPlatformSupportImpl
   virtual WebKit::WebSharedWorkerRepository* sharedWorkerRepository();
   virtual WebKit::WebGraphicsContext3D* createGraphicsContext3D();
   virtual double audioHardwareSampleRate();
+  virtual size_t audioHardwareBufferSize();
   virtual WebKit::WebAudioDevice* createAudioDevice(
       size_t buffer_size, unsigned channels, double sample_rate,
       WebKit::WebAudioDevice::RenderCallback* callback);

@@ -8,7 +8,9 @@
 
 #include <map>
 
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/transform.h"
 #include "views/widget/native_widget_private.h"
 #include "views/widget/widget.h"
@@ -47,7 +49,12 @@ class VIEWS_EXPORT NativeWidgetViews : public internal::NativeWidgetPrivate {
   internal::NativeWidgetDelegate* delegate() const { return delegate_; }
 
  protected:
-  friend class NativeWidgetView;
+  friend class internal::NativeWidgetView;
+
+  // Event handlers that subclass can implmenet custom behavior.
+  virtual void OnBoundsChanged(const gfx::Rect& new_bounds,
+                               const gfx::Rect& old_bounds);
+  virtual bool OnMouseEvent(const MouseEvent& event);
 
   // Overridden from internal::NativeWidgetPrivate:
   virtual void InitNativeWidget(const Widget::InitParams& params) OVERRIDE;
@@ -62,9 +69,10 @@ class VIEWS_EXPORT NativeWidgetViews : public internal::NativeWidgetPrivate {
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual void MarkLayerDirty() OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor) OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
+      ui::Layer** layer_parent) OVERRIDE;
+  virtual void ReorderLayers() OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
@@ -81,10 +89,10 @@ class VIEWS_EXPORT NativeWidgetViews : public internal::NativeWidgetPrivate {
   virtual void GetWindowPlacement(
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const OVERRIDE;
-  virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetWindowTitle(const string16& title) OVERRIDE;
   virtual void SetWindowIcons(const SkBitmap& window_icon,
                               const SkBitmap& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const std::wstring& name) OVERRIDE;
+  virtual void SetAccessibleName(const string16& name) OVERRIDE;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void BecomeModal() OVERRIDE;
@@ -130,6 +138,7 @@ class VIEWS_EXPORT NativeWidgetViews : public internal::NativeWidgetPrivate {
   virtual void FocusNativeView(gfx::NativeView native_view) OVERRIDE;
   virtual bool ConvertPointFromAncestor(
       const Widget* ancestor, gfx::Point* point) const OVERRIDE;
+  virtual gfx::Rect GetWorkAreaBoundsInScreen() const OVERRIDE;
 
   // Overridden from internal::InputMethodDelegate
   virtual void DispatchKeyEventPostIME(const KeyEvent& key) OVERRIDE;
@@ -137,33 +146,42 @@ class VIEWS_EXPORT NativeWidgetViews : public internal::NativeWidgetPrivate {
  private:
   friend class desktop::DesktopWindowView;
 
+  typedef std::map<const char*, void*> PropsMap;
+
   // These functions may return NULL during Widget destruction.
   internal::NativeWidgetPrivate* GetParentNativeWidget();
   const internal::NativeWidgetPrivate* GetParentNativeWidget() const;
 
+  bool HandleWindowOperation(const MouseEvent& event);
+
   internal::NativeWidgetDelegate* delegate_;
+
+  // Parent Widget (can be NULL).
+  Widget* parent_;
 
   internal::NativeWidgetView* view_;
 
   bool active_;
 
-  bool minimized_;
+  ui::WindowShowState window_state_;
+
+  // Set when SetAlwaysOnTop is called, or keep_on_top is set during creation.
+  bool always_on_top_;
 
   // The following factory is used for calls to close the NativeWidgetViews
   // instance.
-  ScopedRunnableMethodFactory<NativeWidgetViews> close_widget_factory_;
+  base::WeakPtrFactory<NativeWidgetViews> close_widget_factory_;
 
   gfx::Rect restored_bounds_;
   ui::Transform restored_transform_;
-
-  Widget* hosting_widget_;
 
   // See class documentation for Widget in widget.h for a note about ownership.
   Widget::InitParams::Ownership ownership_;
 
   bool delete_native_view_;
 
-  std::map<const char*, void*> window_properties_;
+  // Map used by Set/GetNativeWindowProperty.
+  PropsMap props_map_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeWidgetViews);
 };

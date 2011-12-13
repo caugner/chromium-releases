@@ -25,8 +25,8 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/bindings_policy.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
+#include "content/public/common/bindings_policy.h"
 #include "net/base/file_stream.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -77,7 +77,7 @@ class ExtensionWebUIImageLoadingTracker : public ImageLoadingTracker::Observer {
                                       ExtensionIconSet::MATCH_EXACTLY);
 
       tracker_.LoadImage(extension_, icon_resource,
-                         gfx::Size(kFaviconSize, kFaviconSize),
+                         gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize),
                          ImageLoadingTracker::DONT_CACHE);
     } else {
       ForwardResult(NULL);
@@ -108,9 +108,7 @@ class ExtensionWebUIImageLoadingTracker : public ImageLoadingTracker::Observer {
     favicon.known_icon = icon_data.get() != NULL && icon_data->size() > 0;
     favicon.image_data = icon_data;
     favicon.icon_type = history::FAVICON;
-    request_->ForwardResultAsync(
-        FaviconService::FaviconDataCallback::TupleType(request_->handle(),
-                                                       favicon));
+    request_->ForwardResultAsync(request_->handle(), favicon);
     delete this;
   }
 
@@ -147,7 +145,7 @@ ExtensionWebUI::ExtensionWebUI(TabContents* tab_contents, const GURL& url)
   // Bind externalHost to Extension WebUI loaded in Chrome Frame.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   if (browser_command_line.HasSwitch(switches::kChromeFrame))
-    bindings_ |= BindingsPolicy::EXTERNAL_HOST;
+    bindings_ |= content::BINDINGS_POLICY_EXTERNAL_HOST;
   // For chrome:// overrides, some of the defaults are a little different.
   GURL effective_url = tab_contents->GetURL();
   if (effective_url.SchemeIs(chrome::kChromeUIScheme)) {
@@ -167,7 +165,7 @@ ExtensionWebUI::ExtensionWebUI(TabContents* tab_contents, const GURL& url)
     extension_bookmark_manager_event_router_.reset(
         new ExtensionBookmarkManagerEventRouter(profile, tab));
 
-    link_transition_type_ = PageTransition::AUTO_BOOKMARK;
+    link_transition_type_ = content::PAGE_TRANSITION_AUTO_BOOKMARK;
   }
 }
 
@@ -353,7 +351,8 @@ void ExtensionWebUI::UnregisterAndReplaceOverride(const std::string& page,
 
       // Don't use Reload() since |url| isn't the same as the internal URL
       // that NavigationController has.
-      tab->controller().LoadURL(url, url, PageTransition::RELOAD);
+      tab->controller().LoadURL(url, url, content::PAGE_TRANSITION_RELOAD,
+                                std::string());
     }
   }
 }

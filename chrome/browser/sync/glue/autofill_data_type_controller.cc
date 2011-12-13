@@ -7,7 +7,9 @@
 #include "base/metrics/histogram.h"
 #include "base/task.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
+#include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/profile_sync_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
@@ -35,18 +37,19 @@ bool AutofillDataTypeController::StartModels() {
   // Waiting for the personal data is subtle:  we do this as the PDM resets
   // its cache of unique IDs once it gets loaded. If we were to proceed with
   // association, the local ids in the mappings would wind up colliding.
-  personal_data_ = profile()->GetPersonalDataManager();
+  personal_data_ = PersonalDataManagerFactory::GetForProfile(profile());
   if (!personal_data_->IsDataLoaded()) {
     personal_data_->SetObserver(this);
     return false;
   }
 
   web_data_service_ = profile()->GetWebDataService(Profile::IMPLICIT_ACCESS);
-  if (web_data_service_.get() && web_data_service_->IsDatabaseLoaded()) {
+  if (web_data_service_->IsDatabaseLoaded()) {
     return true;
   } else {
-    notification_registrar_.Add(this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
-                                NotificationService::AllSources());
+    notification_registrar_.Add(
+        this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
+        Source<WebDataService>(web_data_service_.get()));
     return false;
   }
 }
@@ -56,18 +59,22 @@ void AutofillDataTypeController::OnPersonalDataChanged() {
   DCHECK_EQ(state(), MODEL_STARTING);
   personal_data_->RemoveObserver(this);
   web_data_service_ = profile()->GetWebDataService(Profile::IMPLICIT_ACCESS);
-  if (web_data_service_.get() && web_data_service_->IsDatabaseLoaded()) {
+  if (web_data_service_->IsDatabaseLoaded()) {
     set_state(ASSOCIATING);
     if (!StartAssociationAsync()) {
-      StartDoneImpl(ASSOCIATION_FAILED, NOT_RUNNING, FROM_HERE);
+      SyncError error(FROM_HERE,
+                      "Failed to post association task.",
+                      type());
+      StartDoneImpl(ASSOCIATION_FAILED, NOT_RUNNING, error);
     }
   } else {
-    notification_registrar_.Add(this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
-                                NotificationService::AllSources());
+    notification_registrar_.Add(
+        this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
+        Source<WebDataService>(web_data_service_.get()));
   }
 }
 
-void AutofillDataTypeController::Observe(int type,
+void AutofillDataTypeController::Observe(int notification_type,
                                          const NotificationSource& source,
                                          const NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -75,7 +82,10 @@ void AutofillDataTypeController::Observe(int type,
   notification_registrar_.RemoveAll();
   set_state(ASSOCIATING);
   if (!StartAssociationAsync()) {
-    StartDoneImpl(ASSOCIATION_FAILED, NOT_RUNNING, FROM_HERE);
+    SyncError error(FROM_HERE,
+                    "Failed to post association task.",
+                    type());
+    StartDoneImpl(ASSOCIATION_FAILED, NOT_RUNNING, error);
   }
 }
 
@@ -92,11 +102,9 @@ void AutofillDataTypeController::CreateSyncComponents() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   DCHECK_EQ(state(), ASSOCIATING);
   ProfileSyncFactory::SyncComponents sync_components =
-      profile_sync_factory()->
-          CreateAutofillSyncComponents(
+      profile_sync_factory()->CreateAutofillSyncComponents(
           profile_sync_service(),
           web_data_service_->GetDatabase(),
-          personal_data_,
           this);
   set_model_associator(sync_components.model_associator);
   set_change_processor(sync_components.change_processor);
@@ -104,7 +112,8 @@ void AutofillDataTypeController::CreateSyncComponents() {
 
 void AutofillDataTypeController::StopModels() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(state() == STOPPING || state() == NOT_RUNNING);
+  DCHECK(state() == STOPPING || state() == NOT_RUNNING || state() == DISABLED);
+  VLOG(1) << "AutofillDataTypeController::StopModels() : State = " << state();
   notification_registrar_.RemoveAll();
   personal_data_->RemoveObserver(this);
 }

@@ -63,6 +63,8 @@ class GpuChannelManager : public IPC::Channel::Listener,
   void AddRoute(int32 routing_id, IPC::Channel::Listener* listener);
   void RemoveRoute(int32 routing_id);
 
+  GpuChannel* LookupChannel(int32 renderer_id);
+
  private:
   // Message handlers.
   void OnEstablishChannel(int renderer_id);
@@ -75,12 +77,6 @@ class GpuChannelManager : public IPC::Channel::Listener,
       int32 renderer_id,
       const GPUCreateCommandBufferConfig& init_params);
   void OnResizeViewACK(int32 renderer_id, int32 command_buffer_route_id);
-
-#if defined(OS_MACOSX)
-  void OnAcceleratedSurfaceBuffersSwappedACK(
-      int renderer_id, int32 route_id, uint64 swap_buffers_count);
-  void OnDestroyCommandBuffer(int renderer_id, int32 renderer_view_id);
-#endif
 
   void OnLoseAllContexts();
 

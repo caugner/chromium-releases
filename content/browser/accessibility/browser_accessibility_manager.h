@@ -11,6 +11,7 @@
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
+#include "content/common/content_export.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/webaccessibility.h"
 
@@ -24,7 +25,7 @@ using webkit_glue::WebAccessibility;
 struct ViewHostMsg_AccessibilityNotification_Params;
 
 // Class that can perform actions on behalf of the BrowserAccessibilityManager.
-class BrowserAccessibilityDelegate {
+class CONTENT_EXPORT BrowserAccessibilityDelegate {
  public:
   virtual ~BrowserAccessibilityDelegate() {}
   virtual void SetAccessibilityFocus(int acc_obj_id) = 0;
@@ -33,7 +34,7 @@ class BrowserAccessibilityDelegate {
   virtual gfx::Rect GetViewBounds() const = 0;
 };
 
-class BrowserAccessibilityFactory {
+class CONTENT_EXPORT BrowserAccessibilityFactory {
  public:
   virtual ~BrowserAccessibilityFactory() {}
 
@@ -43,7 +44,7 @@ class BrowserAccessibilityFactory {
 };
 
 // Manages a tree of BrowserAccessibility objects.
-class BrowserAccessibilityManager {
+class CONTENT_EXPORT BrowserAccessibilityManager {
  public:
   // Creates the platform specific BrowserAccessibilityManager. Ownership passes
   // to the caller.
@@ -125,27 +126,11 @@ class BrowserAccessibilityManager {
       BrowserAccessibilityFactory* factory);
 
  private:
-  // Type is a ViewHostMsg_AccessibilityNotification_Type::int.
-  // We pass it as int so that we don't include the render message declaration
-  // header here.
-  void OnSimpleAccessibilityNotification(
-      const WebAccessibility& acc_obj,
-      int type,
-      bool include_children);
-
-  void OnAccessibilityObjectFocusChange(
-      const WebAccessibility& acc_obj);
-  void OnAccessibilityObjectLoadComplete(
-      const WebAccessibility& acc_obj);
-
   // Update an accessibility node with an updated WebAccessibility node
   // received from the renderer process. When |include_children| is true
   // the node's children will also be updated, otherwise only the node
-  // itself is updated. Returns the updated node or NULL if no node was
-  // updated.
-  BrowserAccessibility* UpdateNode(
-      const WebAccessibility& src,
-      bool include_children);
+  // itself is updated.
+  void UpdateNode(const WebAccessibility& src, bool include_children);
 
   // Recursively build a tree of BrowserAccessibility objects from
   // the WebAccessibility tree received from the renderer process.

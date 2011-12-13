@@ -4,14 +4,19 @@
 
 #include "ui/gfx/gl/gl_surface.h"
 
+#include "base/threading/thread_local.h"
 #include "ui/gfx/gl/gl_context.h"
 
 namespace gfx {
+
+static base::ThreadLocalPointer<GLSurface> current_surface_;
 
 GLSurface::GLSurface() {
 }
 
 GLSurface::~GLSurface() {
+  if (GetCurrent() == this)
+    SetCurrent(NULL);
 }
 
 bool GLSurface::Initialize()
@@ -23,7 +28,19 @@ unsigned int GLSurface::GetBackingFrameBufferObject() {
   return 0;
 }
 
-void GLSurface::OnMakeCurrent(GLContext* context) {
+bool GLSurface::OnMakeCurrent(GLContext* context) {
+  return true;
+}
+
+void GLSurface::SetVisible(bool visible) {
+}
+
+GLSurface* GLSurface::GetCurrent() {
+  return current_surface_.Get();
+}
+
+void GLSurface::SetCurrent(GLSurface* surface) {
+  current_surface_.Set(surface);
 }
 
 }  // namespace gfx

@@ -32,7 +32,7 @@ class VideoRendererImpl : public WebVideoRenderer {
  protected:
   // VideoRendererBase implementation.
   virtual bool OnInitialize(media::VideoDecoder* decoder) OVERRIDE;
-  virtual void OnStop(media::FilterCallback* callback) OVERRIDE;
+  virtual void OnStop(const base::Closure& callback) OVERRIDE;
   virtual void OnFrameAvailable() OVERRIDE;
 
  private:
@@ -68,8 +68,8 @@ class VideoRendererImpl : public WebVideoRenderer {
   media::VideoFrame* last_converted_frame_;
   base::TimeDelta last_converted_timestamp_;
 
-  // The size of the video.
-  gfx::Size video_size_;
+  // The natural size of the video.
+  gfx::Size natural_size_;
 
   // Whether we're logging video presentation timestamps (PTS).
   bool pts_logging_;

@@ -32,6 +32,11 @@ bool ProtocolHandler::IsValidDict(const DictionaryValue* value) {
     value->HasKey("title");
 }
 
+bool ProtocolHandler::IsSameOrigin(
+    const ProtocolHandler& handler) const {
+  return handler.url().GetOrigin() == url_.GetOrigin();
+}
+
 const ProtocolHandler& ProtocolHandler::EmptyProtocolHandler() {
   static const ProtocolHandler* const kEmpty = new ProtocolHandler();
   return *kEmpty;
@@ -53,7 +58,7 @@ ProtocolHandler ProtocolHandler::CreateProtocolHandler(
 GURL ProtocolHandler::TranslateUrl(const GURL& url) const {
   std::string translatedUrlSpec(url_.spec());
   ReplaceSubstringsAfterOffset(&translatedUrlSpec, 0, "%s",
-      EscapeQueryParamValue(url.spec(), true));
+      net::EscapeQueryParamValue(url.spec(), true));
   return GURL(translatedUrlSpec);
 }
 
@@ -69,6 +74,10 @@ bool ProtocolHandler::operator==(const ProtocolHandler& other) const {
   return protocol_ == other.protocol_ &&
     url_ == other.url_ &&
     title_ == other.title_;
+}
+
+bool ProtocolHandler::IsEquivalent(const ProtocolHandler& other) const {
+  return protocol_ == other.protocol_ && url_ == other.url_;
 }
 
 bool ProtocolHandler::operator<(const ProtocolHandler& other) const {

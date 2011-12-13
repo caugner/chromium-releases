@@ -7,7 +7,6 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/extension_app_api.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/favicon/favicon_service.h"
@@ -19,6 +18,7 @@
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
+class AppNotification;
 class ExtensionPrefs;
 class ExtensionService;
 class PrefChangeRegistrar;
@@ -141,8 +141,8 @@ class AppLauncherHandler : public WebUIMessageHandler,
   void PromptToEnableApp(const std::string& extension_id);
 
   // ExtensionUninstallDialog::Delegate:
-  virtual void ExtensionDialogAccepted() OVERRIDE;
-  virtual void ExtensionDialogCanceled() OVERRIDE;
+  virtual void ExtensionUninstallAccepted() OVERRIDE;
+  virtual void ExtensionUninstallCanceled() OVERRIDE;
 
   // ExtensionInstallUI::Delegate:
   virtual void InstallUIProceed() OVERRIDE;

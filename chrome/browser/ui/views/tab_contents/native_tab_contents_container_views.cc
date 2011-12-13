@@ -13,6 +13,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "views/focus/focus_manager.h"
+#include "views/focus/widget_focus_manager.h"
 #include "views/layout/fill_layout.h"
 #include "views/widget/native_widget_views.h"
 
@@ -66,12 +67,9 @@ views::View* NativeTabContentsContainerViews::GetView() {
 
 void NativeTabContentsContainerViews::TabContentsFocused(
     TabContents* tab_contents) {
-  views::FocusManager* focus_manager = GetFocusManager();
-  if (!focus_manager) {
-    NOTREACHED();
-    return;
-  }
-  focus_manager->SetFocusedView(this);
+  // This is called from RWHVViews::OnFocus, which means
+  // the focus manager already set focus to RWHVViews, so don't
+  // Update focus manager.
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -131,3 +129,4 @@ gfx::NativeViewAccessible
     NativeTabContentsContainerViews::GetNativeViewAccessible() {
   return View::GetNativeViewAccessible();
 }
+

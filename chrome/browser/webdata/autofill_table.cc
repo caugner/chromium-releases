@@ -33,12 +33,6 @@ using webkit_glue::FormField;
 
 namespace {
 
-// Constants for the |autofill_profile_phones| |type| column.
-enum AutofillPhoneType {
-  kAutofillPhoneNumber = 0,
-  kAutofillFaxNumber = 1
-};
-
 typedef std::vector<Tuple3<int64, string16, string16> > AutofillElementList;
 
 // TODO(dhollowa): Find a common place for this.  It is duplicated in
@@ -48,12 +42,9 @@ T* address_of(T& v) {
   return &v;
 }
 
-// The maximum length allowed for form data.
-const size_t kMaxDataLength = 1024;
-
 string16 LimitDataSize(const string16& data) {
-  if (data.size() > kMaxDataLength)
-    return data.substr(0, kMaxDataLength);
+  if (data.size() > AutofillTable::kMaxDataLength)
+    return data.substr(0, AutofillTable::kMaxDataLength);
 
   return data;
 }
@@ -201,7 +192,8 @@ bool AddAutofillProfilePhonesToProfile(sql::Connection* db,
     return false;
   }
   s.BindString(0, profile->guid());
-  s.BindInt(1, kAutofillPhoneNumber);
+  // Value used to be either [(0, phone), (1, fax)] but fax has been removed.
+  s.BindInt(1, 0);
 
   std::vector<string16> numbers;
   while (s.Step()) {
@@ -211,29 +203,6 @@ bool AddAutofillProfilePhonesToProfile(sql::Connection* db,
   profile->SetMultiInfo(PHONE_HOME_WHOLE_NUMBER, numbers);
   return true;
 }
-
-bool AddAutofillProfileFaxesToProfile(sql::Connection* db,
-                                      AutofillProfile* profile) {
-  sql::Statement s(db->GetUniqueStatement(
-      "SELECT guid, type, number "
-      "FROM autofill_profile_phones "
-      "WHERE guid=? AND type=?"));
-  if (!s) {
-    NOTREACHED() << "Statement prepare failed";
-    return false;
-  }
-  s.BindString(0, profile->guid());
-  s.BindInt(1, kAutofillFaxNumber);
-
-  std::vector<string16> numbers;
-  while (s.Step()) {
-    DCHECK_EQ(profile->guid(), s.ColumnString(0));
-    numbers.push_back(s.ColumnString16(2));
-  }
-  profile->SetMultiInfo(PHONE_FAX_WHOLE_NUMBER, numbers);
-  return true;
-}
-
 
 bool AddAutofillProfileNames(const AutofillProfile& profile,
                              sql::Connection* db) {
@@ -296,20 +265,9 @@ bool AddAutofillProfileEmails(const AutofillProfile& profile,
 }
 
 bool AddAutofillProfilePhones(const AutofillProfile& profile,
-                              AutofillPhoneType phone_type,
                               sql::Connection* db) {
-  AutofillFieldType field_type;
-  if (phone_type == kAutofillPhoneNumber) {
-    field_type = PHONE_HOME_WHOLE_NUMBER;
-  } else if (phone_type == kAutofillFaxNumber) {
-    field_type = PHONE_FAX_WHOLE_NUMBER;
-  } else {
-    NOTREACHED();
-    return false;
-  }
-
   std::vector<string16> numbers;
-  profile.GetMultiInfo(field_type, &numbers);
+  profile.GetMultiInfo(PHONE_HOME_WHOLE_NUMBER, &numbers);
 
   for (size_t i = 0; i < numbers.size(); ++i) {
     // Add the new number.
@@ -322,7 +280,8 @@ bool AddAutofillProfilePhones(const AutofillProfile& profile,
       return false;
     }
     s.BindString(0, profile.guid());
-    s.BindInt(1, phone_type);
+    // Value used to be either [(0, phone), (1, fax)] but fax has been removed.
+    s.BindInt(1, 0);
     s.BindString16(2, numbers[i]);
 
     if (!s.Run()) {
@@ -330,6 +289,7 @@ bool AddAutofillProfilePhones(const AutofillProfile& profile,
       return false;
     }
   }
+
   return true;
 }
 
@@ -341,10 +301,7 @@ bool AddAutofillProfilePieces(const AutofillProfile& profile,
   if (!AddAutofillProfileEmails(profile, db))
     return false;
 
-  if (!AddAutofillProfilePhones(profile, kAutofillPhoneNumber, db))
-    return false;
-
-  if (!AddAutofillProfilePhones(profile, kAutofillFaxNumber, db))
+  if (!AddAutofillProfilePhones(profile, db))
     return false;
 
   return true;
@@ -385,6 +342,16 @@ bool RemoveAutofillProfilePieces(const std::string& guid, sql::Connection* db) {
 }
 
 }  // namespace
+
+// The maximum length allowed for form data.
+const size_t AutofillTable::kMaxDataLength = 1024;
+
+AutofillTable::AutofillTable(sql::Connection* db, sql::MetaTable* meta_table)
+    : WebDatabaseTable(db, meta_table) {
+}
+
+AutofillTable::~AutofillTable() {
+}
 
 bool AutofillTable::Init() {
  return (InitMainTable() && InitCreditCardsTable() && InitDatesTable() &&
@@ -773,9 +740,8 @@ bool AutofillTable::GetAutofillTimestamps(const string16& name,
 
   s.BindString16(0, name);
   s.BindString16(1, value);
-  while (s.Step()) {
+  while (s.Step())
     timestamps->push_back(Time::FromTimeT(s.ColumnInt64(0)));
-  }
 
   return s.Succeeded();
 }
@@ -943,9 +909,6 @@ bool AutofillTable::GetAutofillProfile(const std::string& guid,
   // Get associated phone info.
   AddAutofillProfilePhonesToProfile(db_, p.get());
 
-  // Get associated fax info.
-  AddAutofillProfileFaxesToProfile(db_, p.get());
-
   *profile = p.release();
   return true;
 }
@@ -1006,10 +969,6 @@ bool AutofillTable::UpdateAutofillProfile(const AutofillProfile& profile) {
   values[0] = new_profile.GetInfo(PHONE_HOME_WHOLE_NUMBER);
   new_profile.SetMultiInfo(PHONE_HOME_WHOLE_NUMBER, values);
 
-  old_profile->GetMultiInfo(PHONE_FAX_WHOLE_NUMBER, &values);
-  values[0] = new_profile.GetInfo(PHONE_FAX_WHOLE_NUMBER);
-  new_profile.SetMultiInfo(PHONE_FAX_WHOLE_NUMBER, values);
-
   return UpdateAutofillProfileMulti(new_profile);
 }
 
@@ -1048,7 +1007,7 @@ bool AutofillTable::UpdateAutofillProfileMulti(const AutofillProfile& profile) {
   if (!result)
     return result;
 
-  // Remove the old names, emails, and phone/fax numbers.
+  // Remove the old names, emails, and phone numbers.
   if (!RemoveAutofillProfilePieces(profile.guid(), db_))
     return false;
 
@@ -1617,8 +1576,7 @@ bool AutofillTable::MigrateToVersion24CleanupOversizedStringFields() {
       "    length(middle_name), length(last_name), length(email), "
       "    length(company_name), length(address_line_1), "
       "    length(address_line_2), length(city), length(state), "
-      "    length(zipcode), length(country), length(phone), "
-      "    length(fax)) > 500";
+      "    length(zipcode), length(country), length(phone)) > 500";
 
   std::string query = "DELETE FROM autofill_dates WHERE pair_id IN ("
       "SELECT pair_id FROM autofill WHERE " + autofill_is_too_big + ")";
@@ -1869,7 +1827,6 @@ bool AutofillTable::MigrateToVersion32UpdateProfilesAndCreditCards() {
                       "zipcode VARCHAR, "
                       "country VARCHAR, "
                       "phone VARCHAR, "
-                      "fax VARCHAR, "
                       "date_modified INTEGER NOT NULL DEFAULT 0)")) {
       return false;
     }
@@ -1878,7 +1835,7 @@ bool AutofillTable::MigrateToVersion32UpdateProfilesAndCreditCards() {
         "INSERT INTO autofill_profiles_temp "
         "SELECT guid, label, first_name, middle_name, last_name, email, "
         "company_name, address_line_1, address_line_2, city, state, "
-        "zipcode, country, phone, fax, date_modified "
+        "zipcode, country, phone, date_modified "
         "FROM autofill_profiles")) {
       return false;
     }
@@ -1947,7 +1904,7 @@ bool AutofillTable::MigrateToVersion33ProfilesBasedOnFirstName() {
     sql::Statement s(db_->GetUniqueStatement(
         "SELECT guid, first_name, middle_name, last_name, email, "
         "company_name, address_line_1, address_line_2, city, state, "
-        "zipcode, country, phone, fax, date_modified "
+        "zipcode, country, phone, date_modified "
         "FROM autofill_profiles"));
     while (s.Step()) {
       AutofillProfile profile;
@@ -1966,8 +1923,7 @@ bool AutofillTable::MigrateToVersion33ProfilesBasedOnFirstName() {
       profile.SetInfo(ADDRESS_HOME_ZIP, s.ColumnString16(10));
       profile.SetInfo(ADDRESS_HOME_COUNTRY, s.ColumnString16(11));
       profile.SetInfo(PHONE_HOME_WHOLE_NUMBER, s.ColumnString16(12));
-      profile.SetInfo(PHONE_FAX_WHOLE_NUMBER, s.ColumnString16(13));
-      int64 date_modified = s.ColumnInt64(14);
+      int64 date_modified = s.ColumnInt64(13);
 
       sql::Statement s_insert(db_->GetUniqueStatement(
           "INSERT INTO autofill_profiles_temp"
@@ -1990,7 +1946,7 @@ bool AutofillTable::MigrateToVersion33ProfilesBasedOnFirstName() {
       if (!s_insert.Run())
         return false;
 
-      // Add the other bits: names, emails, and phone/fax.
+      // Add the other bits: names, emails, and phone numbers.
       if (!AddAutofillProfilePieces(profile, db_))
         return false;
     }

@@ -45,6 +45,7 @@
 #include "ui/base/dragdrop/drop_target.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider_win.h"
+#include "ui/base/events.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
@@ -53,7 +54,6 @@
 #include "ui/gfx/canvas_skia.h"
 #include "views/controls/textfield/native_textfield_win.h"
 #include "views/drag_utils.h"
-#include "views/events/event_utils_win.h"
 #include "views/widget/widget.h"
 
 #pragma comment(lib, "oleacc.lib")  // Needed for accessibility support.
@@ -723,10 +723,6 @@ void OmniboxViewWin::ClosePopup() {
 
 void OmniboxViewWin::SetFocus() {
   ::SetFocus(m_hWnd);
-  parent_view_->GetWidget()->NotifyAccessibilityEvent(
-      parent_view_,
-      ui::AccessibilityTypes::EVENT_FOCUS,
-      false);
 }
 
 IAccessible* OmniboxViewWin::GetIAccessible() {
@@ -907,6 +903,23 @@ gfx::NativeView OmniboxViewWin::GetNativeView() const {
   return m_hWnd;
 }
 
+// static
+gfx::NativeView OmniboxViewWin::GetRelativeWindowForNativeView(
+    gfx::NativeView edit_native_view) {
+  // When an IME is attached to the rich-edit control, retrieve its window
+  // handle, and the popup window of AutocompletePopupView will be shown
+  // under the IME windows.
+  // Otherwise, the popup window will be shown under top-most windows.
+  // TODO(hbono): http://b/1111369 if we exclude this popup window from the
+  // display area of IME windows, this workaround becomes unnecessary.
+  HWND ime_window = ImmGetDefaultIMEWnd(edit_native_view);
+  return ime_window ? ime_window : HWND_NOTOPMOST;
+}
+
+gfx::NativeView OmniboxViewWin::GetRelativeWindowForPopup() const {
+  return GetRelativeWindowForNativeView(GetNativeView());
+}
+
 CommandUpdater* OmniboxViewWin::GetCommandUpdater() {
   return command_updater_;
 }
@@ -994,7 +1007,7 @@ bool OmniboxViewWin::SkipDefaultKeyEventProcessing(
   // entering special characters.  We do translate alt-home.
   if (event.IsAltDown() && (key != ui::VKEY_HOME) &&
       views::NativeTextfieldWin::IsNumPadDigit(key,
-                                               views::IsExtendedKey(event)))
+          (event.flags() & ui::EF_EXTENDED) != 0))
     return true;
 
   // Skip accelerators for key combinations omnibox wants to crack. This list
@@ -1306,7 +1319,7 @@ void OmniboxViewWin::OnCopy() {
   scw.WriteText(text);
   if (write_url) {
     scw.WriteBookmark(text, url.spec());
-    scw.WriteHyperlink(EscapeForHTML(text), url.spec());
+    scw.WriteHyperlink(net::EscapeForHTML(text), url.spec());
   }
 }
 
@@ -2275,7 +2288,8 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
   gfx::CanvasSkia canvas(scheme_rect.Width(), scheme_rect.Height(), false);
-  canvas.getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
+  SkCanvas* sk_canvas = canvas.sk_canvas();
+  sk_canvas->getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
 
   // Calculate the start and end of the stroke, which are just the lower left
   // and upper right corners of the canvas, inset by the radius of the endcap
@@ -2299,26 +2313,26 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
       SkIntToScalar(scheme_rect.Height()) };
 
   // Draw the unselected portion of the stroke.
-  canvas.save();
+  sk_canvas->save();
   if (selection_rect.isEmpty() ||
-      canvas.clipRect(selection_rect, SkRegion::kDifference_Op)) {
+      sk_canvas->clipRect(selection_rect, SkRegion::kDifference_Op)) {
     paint.setColor(LocationBarView::GetColor(security_level_,
                                              LocationBarView::SECURITY_TEXT));
-    canvas.drawLine(start_point.fX, start_point.fY,
-                    end_point.fX, end_point.fY, paint);
+    sk_canvas->drawLine(start_point.fX, start_point.fY,
+                        end_point.fX, end_point.fY, paint);
   }
-  canvas.restore();
+  sk_canvas->restore();
 
   // Draw the selected portion of the stroke.
-  if (!selection_rect.isEmpty() && canvas.clipRect(selection_rect)) {
+  if (!selection_rect.isEmpty() && sk_canvas->clipRect(selection_rect)) {
     paint.setColor(LocationBarView::GetColor(security_level_,
                                              LocationBarView::SELECTED_TEXT));
-    canvas.drawLine(start_point.fX, start_point.fY,
-                    end_point.fX, end_point.fY, paint);
+    sk_canvas->drawLine(start_point.fX, start_point.fY,
+                        end_point.fX, end_point.fY, paint);
   }
 
   // Now copy what we drew to the target HDC.
-  skia::DrawToNativeContext(&canvas, hdc,
+  skia::DrawToNativeContext(sk_canvas, hdc,
       scheme_rect.left + canvas_paint_clip_rect.left - canvas_clip_rect.left,
       std::max(scheme_rect.top, client_rect.top) + canvas_paint_clip_rect.top -
           canvas_clip_rect.top, &canvas_paint_clip_rect);

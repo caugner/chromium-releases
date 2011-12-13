@@ -4,6 +4,7 @@
 
 #include "content/browser/ssl/ssl_policy.h"
 
+#include "base/bind.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/memory/singleton.h"
@@ -17,7 +18,7 @@
 #include "content/browser/ssl/ssl_request_info.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/ssl_info.h"
 #include "webkit/glue/resource_type.h"
@@ -58,7 +59,7 @@ void SSLPolicy::OnCertError(SSLCertErrorHandler* handler) {
     case net::ERR_CERT_DATE_INVALID:
     case net::ERR_CERT_AUTHORITY_INVALID:
     case net::ERR_CERT_WEAK_SIGNATURE_ALGORITHM:
-      OnCertErrorInternal(handler, true);
+      OnCertErrorInternal(handler, !handler->is_hsts_host());
       break;
     case net::ERR_CERT_NO_REVOCATION_MECHANISM:
       // Ignore this error.
@@ -129,11 +130,10 @@ void SSLPolicy::UpdateEntry(NavigationEntry* entry, TabContents* tab_contents) {
     }
   }
 
-  // If CERT_STATUS_UNABLE_TO_CHECK_REVOCATION is the only certificate error,
-  // don't lower the security style to SECURITY_STYLE_AUTHENTICATION_BROKEN.
-  int cert_errors = entry->ssl().cert_status() & net::CERT_STATUS_ALL_ERRORS;
-  if (cert_errors) {
-    if (cert_errors != net::CERT_STATUS_UNABLE_TO_CHECK_REVOCATION)
+  if (net::IsCertStatusError(entry->ssl().cert_status())) {
+    // Minor errors don't lower the security style to
+    // SECURITY_STYLE_AUTHENTICATION_BROKEN.
+    if (!net::IsCertStatusMinorError(entry->ssl().cert_status()))
       entry->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATION_BROKEN);
     return;
   }
@@ -195,10 +195,10 @@ void SSLPolicy::OnCertErrorInternal(SSLCertErrorHandler* handler,
     return;
   }
 
-  Callback2<SSLCertErrorHandler*, bool>::Type* callback =
-      NewCallback(this, &SSLPolicy::OnAllowCertificate);
   content::GetContentClient()->browser()->AllowCertificateError(
-      handler, overridable, callback);
+      handler,
+      overridable,
+      base::Bind(&SSLPolicy::OnAllowCertificate, base::Unretained(this)));
 }
 
 void SSLPolicy::InitializeEntryIfNeeded(NavigationEntry* entry) {

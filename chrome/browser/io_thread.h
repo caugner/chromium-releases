@@ -11,10 +11,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
-#include "chrome/browser/browser_process_sub_thread.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "chrome/common/net/predictor_common.h"
+#include "content/browser/browser_process_sub_thread.h"
 #include "net/base/network_change_notifier.h"
 
 class ChromeNetLog;
@@ -29,11 +28,6 @@ namespace base {
 class ListValue;
 }
 
-namespace chrome_browser_net {
-class ConnectInterceptor;
-class Predictor;
-}  // namespace chrome_browser_net
-
 namespace net {
 class CertVerifier;
 class CookieStore;
@@ -41,11 +35,13 @@ class DnsRRResolver;
 class FtpTransactionFactory;
 class HostResolver;
 class HttpAuthHandlerFactory;
+class HttpServerProperties;
 class HttpTransactionFactory;
 class NetworkDelegate;
 class OriginBoundCertService;
 class ProxyConfigService;
 class ProxyService;
+class SdchManager;
 class SSLConfigService;
 class URLRequestContext;
 class URLRequestContextGetter;
@@ -72,6 +68,7 @@ class IOThread : public BrowserProcessSubThread {
     scoped_ptr<net::DnsRRResolver> dnsrr_resolver;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory;
+    scoped_ptr<net::HttpServerProperties> http_server_properties;
     scoped_ptr<net::ProxyService> proxy_script_fetcher_proxy_service;
     scoped_ptr<net::HttpTransactionFactory>
         proxy_script_fetcher_http_transaction_factory;
@@ -109,28 +106,13 @@ class IOThread : public BrowserProcessSubThread {
 
   ChromeNetLog* net_log();
 
-  // Initializes the network predictor, which induces DNS pre-resolution and/or
-  // TCP/IP preconnections.  |prefetching_enabled| indicates whether or not DNS
-  // prefetching should be enabled, and |preconnect_enabled| controls whether
-  // TCP/IP preconnection is enabled.  This should be called by the UI thread.
-  // It will post a task to the IO thread to perform the actual initialization.
-  void InitNetworkPredictor(bool prefetching_enabled,
-                            base::TimeDelta max_dns_queue_delay,
-                            size_t max_speculative_parallel_resolves,
-                            const chrome_common_net::UrlList& startup_urls,
-                            base::ListValue* referral_list,
-                            bool preconnect_enabled);
-
-  // Handles changing to On The Record mode, discarding confidential data.
-  void ChangedToOnTheRecord();
-
   // Returns a getter for the URLRequestContext.  Only called on the UI thread.
   net::URLRequestContextGetter* system_url_request_context_getter();
 
-  // Clear all network stack history, including the host cache, as well as
-  // speculative data about subresources of visited sites, and startup-time
-  // navigations.
-  void ClearNetworkingHistory();
+  // Clears the host cache.  Intended to be used to prevent exposing recently
+  // visited sites on about:net-internals/#dns and about:dns pages.  Must be
+  // called on the IO thread.
+  void ClearHostCache();
 
  protected:
   virtual void Init();
@@ -151,21 +133,6 @@ class IOThread : public BrowserProcessSubThread {
   // Lazy initialization of system request context for
   // SystemURLRequestContextGetter. To be called on IO thread.
   void InitSystemRequestContextOnIOThread();
-
-  void InitNetworkPredictorOnIOThread(
-      bool prefetching_enabled,
-      base::TimeDelta max_dns_queue_delay,
-      size_t max_speculative_parallel_resolves,
-      const chrome_common_net::UrlList& startup_urls,
-      base::ListValue* referral_list,
-      bool preconnect_enabled);
-
-  void ChangedToOnTheRecordOnIOThread();
-
-  // Clears the host cache.  Intended to be used to prevent exposing recently
-  // visited sites on about:net-internals/#dns and about:dns pages.  Must be
-  // called on the IO thread.
-  void ClearHostCache();
 
   // Returns an SSLConfigService instance.
   net::SSLConfigService* GetSSLConfigService();
@@ -208,20 +175,14 @@ class IOThread : public BrowserProcessSubThread {
 
   // These member variables are initialized by a task posted to the IO thread,
   // which gets posted by calling certain member functions of IOThread.
-
-  // Note: we user explicit pointers rather than smart pointers to be more
-  // explicit about destruction order, and ensure that there is no chance that
-  // these observers would be used accidentally after we have begun to tear
-  // down.
-  chrome_browser_net::ConnectInterceptor* speculative_interceptor_;
-  chrome_browser_net::Predictor* predictor_;
-
   scoped_ptr<net::ProxyConfigService> system_proxy_config_service_;
 
   scoped_refptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   scoped_refptr<net::URLRequestContextGetter>
       system_url_request_context_getter_;
+
+  net::SdchManager* sdch_manager_;
 
   ScopedRunnableMethodFactory<IOThread> method_factory_;
 

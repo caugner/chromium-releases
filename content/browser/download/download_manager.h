@@ -34,6 +34,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
@@ -41,11 +42,14 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/synchronization/lock.h"
 #include "base/time.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_status_updater_delegate.h"
+#include "content/browser/download/interrupt_reasons.h"
+#include "content/common/content_export.h"
 #include "net/base/net_errors.h"
 
 class DownloadFileManager;
@@ -62,7 +66,7 @@ class BrowserContext;
 }
 
 // Browser's download manager: manages all downloads and destination view.
-class DownloadManager
+class CONTENT_EXPORT DownloadManager
     : public base::RefCountedThreadSafe<DownloadManager,
                                         BrowserThread::DeleteOnUIThread>,
       public DownloadStatusUpdaterDelegate {
@@ -75,7 +79,7 @@ class DownloadManager
 
   // Interface to implement for observers that wish to be informed of changes
   // to the DownloadManager's collection of downloads.
-  class Observer {
+  class CONTENT_EXPORT Observer {
    public:
     // New or deleted download, observers should query us for the current set
     // of downloads.
@@ -107,6 +111,24 @@ class DownloadManager
   // everything.
   void SearchDownloads(const string16& query, DownloadVector* result);
 
+  // Returns the next download id in a DownloadId and increments the counter.
+  // May be called on any thread. The incremented counter is not persisted, but
+  // the base counter for this accessor is initialized from the largest id
+  // actually saved to the download history database.
+  DownloadId GetNextId();
+
+  // Instead of passing a DownloadManager* between threads and hoping users only
+  // call GetNextId(), you can pass this thunk around instead. Pass the thunk
+  // around by const ref and store it by copy per the base::Callback interface.
+  // The thunk may be copied, including between threads.  If you change
+  // GetNextIdThunkType from base::Callback, then you should think about how
+  // you're changing the ref-count of DownloadManager. Use it like:
+  //   const DownloadManager::GetNextIdThunkType& next_id_thunk =
+  //       download_manager->GetNextIdThunk();
+  //   id = next_id_thunk.Run();
+  typedef base::Callback<DownloadId(void)> GetNextIdThunkType;
+  GetNextIdThunkType GetNextIdThunk();
+
   // Returns true if initialized properly.
   bool Init(content::BrowserContext* browser_context);
 
@@ -128,8 +150,9 @@ class DownloadManager
   // Called when there is an error in the download.
   // |download_id| is the ID of the download.
   // |size| is the number of bytes that are currently downloaded.
-  // |error| is a download error code.  Indicates what caused the interruption.
-  void OnDownloadError(int32 download_id, int64 size, net::Error error);
+  // |reason| is a download interrupt reason code.
+  void OnDownloadInterrupted(int32 download_id, int64 size,
+                             InterruptReason reason);
 
   // Called from DownloadItem to handle the DownloadManager portion of a
   // Cancel; should not be called from other locations.
@@ -196,6 +219,11 @@ class DownloadManager
   // Remove a download observer from ourself.
   void RemoveObserver(Observer* observer);
 
+  // Called by the embedder after creating the download manager to inform it of
+  // the next available download id.
+  // TODO(benjhayden): Separate this functionality out into a separate object.
+  void OnPersistentStoreGetNextId(int next_id);
+
   // Called by the embedder, after creating the download manager, to let it know
   // about downloads from previous runs of the browser.
   void OnPersistentStoreQueryComplete(
@@ -237,6 +265,9 @@ class DownloadManager
   // DownloadManagerDelegate::ShouldStartDownload and now is ready.
   void RestartDownload(int32 download_id);
 
+  // Mark the download opened in the persistent store.
+  void MarkDownloadOpened(DownloadItem* download);
+
   // Checks whether downloaded files still exist. Updates state of downloads
   // that refer to removed files. The check runs in the background and may
   // finish asynchronously after this method returns.
@@ -268,14 +299,21 @@ class DownloadManager
 
   DownloadManagerDelegate* delegate() const { return delegate_; }
 
+  // For testing only.  May be called from tests indirectly (through
+  // other for testing only methods).
+  void SetDownloadManagerDelegate(DownloadManagerDelegate* delegate);
+
  private:
   typedef std::set<DownloadItem*> DownloadSet;
   typedef base::hash_map<int64, DownloadItem*> DownloadMap;
 
   // For testing.
   friend class DownloadManagerTest;
+  friend class DownloadTest;
   friend class MockDownloadManager;
 
+  friend class base::RefCountedThreadSafe<DownloadManager,
+                                          BrowserThread::DeleteOnUIThread>;
   friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
   friend class DeleteTask<DownloadManager>;
 
@@ -379,6 +417,9 @@ class DownloadManager
   // The current active browser context.
   content::BrowserContext* browser_context_;
 
+  base::Lock next_id_lock_;
+  int next_id_;
+
   // Non-owning pointer for handling file writing on the download_thread_.
   DownloadFileManager* file_manager_;
 
@@ -392,7 +433,7 @@ class DownloadManager
   // Allows an embedder to control behavior. Guaranteed to outlive this object.
   DownloadManagerDelegate* delegate_;
 
-  // TODO(rdsmith): Remove when http://crbug.com/84508 is fixed.
+  // TODO(rdsmith): Remove when http://crbug.com/85408 is fixed.
   // For debugging only.
   int64 largest_db_handle_in_history_;
 

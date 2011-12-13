@@ -7,7 +7,7 @@
 #include "chrome/common/autofill_messages.h"
 #include "chrome/renderer/autofill/autofill_agent.h"
 #include "chrome/renderer/autofill/password_autofill_manager.h"
-#include "chrome/test/base/render_view_test.h"
+#include "chrome/test/base/chrome_render_view_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
@@ -55,7 +55,7 @@ const char* const kFormHTML =
 
 namespace autofill {
 
-class PasswordAutofillManagerTest : public RenderViewTest {
+class PasswordAutofillManagerTest : public ChromeRenderViewTest {
  public:
   PasswordAutofillManagerTest() {
   }
@@ -70,7 +70,7 @@ class PasswordAutofillManagerTest : public RenderViewTest {
   }
 
   virtual void SetUp() {
-    RenderViewTest::SetUp();
+    ChromeRenderViewTest::SetUp();
 
     // Add a preferred login and an additional login to the FillData.
     username1_ = ASCIIToUTF16(kAliceUsername);
@@ -169,10 +169,6 @@ class PasswordAutofillManagerTest : public RenderViewTest {
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordAutofillManagerTest);
 };
-
-}
-
-using autofill::PasswordAutofillManagerTest;
 
 // Tests that the password login is autocompleted as expected when the browser
 // sends back the password info.
@@ -422,3 +418,5 @@ TEST_F(PasswordAutofillManagerTest, SuggestionSelect) {
   // Autocomplete should not have kicked in.
   CheckTextFieldsState("", false, "", false);
 }
+
+}  // namespace autofill

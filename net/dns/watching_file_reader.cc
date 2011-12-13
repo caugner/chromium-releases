@@ -5,7 +5,8 @@
 #include "net/dns/watching_file_reader.h"
 
 #include "base/bind.h"
-#include "base/message_loop_proxy.h"
+#include "base/location.h"
+#include "base/message_loop.h"
 #include "base/threading/worker_pool.h"
 
 namespace net {
@@ -27,54 +28,69 @@ FilePathWatcherFactory::CreateFilePathWatcher() {
   return new FilePathWatcherShim();
 }
 
-WatchingFileReader::WatchingFileReader()
-  : message_loop_(base::MessageLoopProxy::current()),
-    factory_(new FilePathWatcherFactory()),
-    reading_(false),
-    read_pending_(false),
-    cancelled_(false) {}
+// A FilePathWatcher::Delegate that forwards calls to the WatchingFileReader.
+// This is separated out to keep WatchingFileReader strictly single-threaded.
+class WatchingFileReader::WatcherDelegate
+  : public base::files::FilePathWatcher::Delegate {
+ public:
+  explicit WatcherDelegate(base::WeakPtr<WatchingFileReader> reader)
+    : reader_(reader) {}
+  void OnFilePathChanged(const FilePath& path) OVERRIDE {
+    if (reader_) reader_->OnFilePathChanged(path);
+  }
+  void OnFilePathError(const FilePath& path) OVERRIDE {
+    if (reader_) reader_->OnFilePathError(path);
+  }
+ private:
+  virtual ~WatcherDelegate() {}
+  base::WeakPtr<WatchingFileReader> reader_;
+};
 
-void WatchingFileReader::StartWatch(const FilePath& path) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
-  DCHECK(!watcher_.get());
-  DCHECK(path_.empty());
-  path_ = path;
-  RestartWatch();
+WatchingFileReader::WatchingFileReader()
+  : watcher_factory_(new FilePathWatcherFactory()) {}
+
+WatchingFileReader::~WatchingFileReader() {
+  if (reader_)
+    reader_->Cancel();
 }
 
-void WatchingFileReader::Cancel() {
-  DCHECK(message_loop_->BelongsToCurrentThread());
-  cancelled_ = true;
-  // Let go of the watcher to break the reference cycle.
-  watcher_.reset();
+void WatchingFileReader::StartWatch(const FilePath& path,
+                                    SerialWorker* reader) {
+  DCHECK(CalledOnValidThread());
+  DCHECK(!watcher_.get());
+  DCHECK(!watcher_delegate_.get());
+  DCHECK(path_.empty());
+  path_ = path;
+  watcher_delegate_ = new WatcherDelegate(AsWeakPtr());
+  reader_ = reader;
+  RestartWatch();
 }
 
 void WatchingFileReader::OnFilePathChanged(const FilePath& path) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
-  ReadNow();
+  DCHECK(CalledOnValidThread());
+  reader_->WorkNow();
 }
 
 void WatchingFileReader::OnFilePathError(const FilePath& path) {
-  DCHECK(message_loop_->BelongsToCurrentThread());
+  DCHECK(CalledOnValidThread());
   RestartWatch();
 }
 
-WatchingFileReader::~WatchingFileReader() {}
-
 void WatchingFileReader::RescheduleWatch() {
-  DCHECK(message_loop_->BelongsToCurrentThread());
-  message_loop_->PostDelayedTask(
+  DCHECK(CalledOnValidThread());
+  MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&WatchingFileReader::RestartWatch, this),
+      base::Bind(&WatchingFileReader::RestartWatch, AsWeakPtr()),
       kWatchRetryDelayMs);
 }
 
 void WatchingFileReader::RestartWatch() {
-  if (cancelled_)
+  DCHECK(CalledOnValidThread());
+  if (reader_->IsCancelled())
     return;
-  watcher_.reset(factory_->CreateFilePathWatcher());
-  if (watcher_->Watch(path_, this)) {
-    ReadNow();
+  watcher_.reset(watcher_factory_->CreateFilePathWatcher());
+  if (watcher_->Watch(path_, watcher_delegate_)) {
+    reader_->WorkNow();
   } else {
     LOG(WARNING) << "Watch on " <<
                     path_.LossyDisplayName() <<
@@ -83,51 +99,4 @@ void WatchingFileReader::RestartWatch() {
   }
 }
 
-void WatchingFileReader::ReadNow() {
-  if (cancelled_)
-    return;
-  if (reading_) {
-    // Remember to re-read after DoRead posts results.
-    read_pending_ = true;
-  } else {
-    if (!base::WorkerPool::PostTask(FROM_HERE, base::Bind(
-        &WatchingFileReader::DoReadJob, this), false)) {
-#if defined(OS_POSIX)
-      // See worker_pool_posix.cc.
-      NOTREACHED() << "WorkerPool::PostTask is not expected to fail on posix";
-#else
-      LOG(WARNING) << "Failed to WorkerPool::PostTask, will retry later";
-      message_loop_->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&WatchingFileReader::ReadNow, this),
-          kWorkerPoolRetryDelayMs);
-      return;
-#endif
-    }
-    reading_ = true;
-    read_pending_ = false;
-  }
-}
-
-void WatchingFileReader::DoReadJob() {
-  this->DoRead();
-  // If this fails, the loop is gone, so there is no point retrying.
-  message_loop_->PostTask(FROM_HERE, base::Bind(
-      &WatchingFileReader::OnReadJobFinished, this));
-}
-
-void WatchingFileReader::OnReadJobFinished() {
-  DCHECK(message_loop_->BelongsToCurrentThread());
-  if (cancelled_)
-    return;
-  reading_ = false;
-  if (read_pending_) {
-    // Discard this result and re-read.
-    ReadNow();
-    return;
-  }
-  this->OnReadFinished();
-}
-
 }  // namespace net
-

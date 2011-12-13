@@ -8,11 +8,14 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "media/base/media_export.h"
+#include "media/base/video_frame.h"
+#include "ui/gfx/rect.h"
+#include "ui/gfx/size.h"
 
 namespace media {
 
 enum VideoCodec {
-  kUnknown,
+  kUnknownVideoCodec,
   kCodecH264,
   kCodecVC1,
   kCodecMPEG2,
@@ -28,43 +31,70 @@ enum VideoCodec {
 
 class MEDIA_EXPORT VideoDecoderConfig {
  public:
-  VideoDecoderConfig(VideoCodec codec, int width, int height,
-                     int surface_width, int surface_height,
+  // Constructs an uninitialized object. Clients should call Initialize() with
+  // appropriate values before using.
+  VideoDecoderConfig();
+
+  // Constructs an initialized object. It is acceptable to pass in NULL for
+  // |extra_data|, otherwise the memory is copied.
+  VideoDecoderConfig(VideoCodec codec,
+                     VideoFrame::Format format,
+                     const gfx::Size& coded_size,
+                     const gfx::Rect& visible_rect,
                      int frame_rate_numerator, int frame_rate_denominator,
                      const uint8* extra_data, size_t extra_data_size);
+
   ~VideoDecoderConfig();
 
+  // Resets the internal state of this object.
+  void Initialize(VideoCodec codec,
+                  VideoFrame::Format format,
+                  const gfx::Size& coded_size,
+                  const gfx::Rect& visible_rect,
+                  int frame_rate_numerator, int frame_rate_denominator,
+                  const uint8* extra_data, size_t extra_data_size);
+
+  // Returns true if this object has appropriate configuration values, false
+  // otherwise.
+  bool IsValidConfig() const;
+
   VideoCodec codec() const;
-  int width() const;
-  int height() const;
-  int surface_width() const;
-  int surface_height() const;
+
+  // Video format used to determine YUV buffer sizes.
+  VideoFrame::Format format() const;
+
+  // Width and height of video frame immediately post-decode. Not all pixels
+  // in this region are valid.
+  gfx::Size coded_size() const;
+
+  // Region of |coded_size_| that is visible.
+  gfx::Rect visible_rect() const;
+
+  // Frame rate in seconds expressed as a fraction.
+  // TODO(scherkus): fairly certain decoders don't require frame rates.
   int frame_rate_numerator() const;
   int frame_rate_denominator() const;
+
+  // Optional byte data required to initialize video decoders, such as H.264
+  // AAVC data.
   uint8* extra_data() const;
   size_t extra_data_size() const;
 
  private:
   VideoCodec codec_;
 
-  // Container's concept of width and height of this video.
-  int width_;
-  int height_;
+  VideoFrame::Format format_;
 
-  // Width and height of the display surface for this video.
-  int surface_width_;
-  int surface_height_;
+  gfx::Size coded_size_;
+  gfx::Rect visible_rect_;
 
-  // Frame rate in seconds expressed as a fraction.
-  // TODO(scherkus): fairly certain decoders don't require frame rates.
   int frame_rate_numerator_;
   int frame_rate_denominator_;
 
-  // Optional byte data required to initialize video decoders.
   scoped_array<uint8> extra_data_;
   size_t extra_data_size_;
 
-  DISALLOW_IMPLICIT_CONSTRUCTORS(VideoDecoderConfig);
+  DISALLOW_COPY_AND_ASSIGN(VideoDecoderConfig);
 };
 
 }  // namespace media

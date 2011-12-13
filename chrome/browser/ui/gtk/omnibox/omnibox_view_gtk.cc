@@ -180,8 +180,8 @@ OmniboxViewGtk::OmniboxViewGtk(
       popup_window_mode_(popup_window_mode),
       security_level_(ToolbarModel::NONE),
       mark_set_handler_id_(0),
-#if defined(OS_CHROMEOS)
       button_1_pressed_(false),
+#if defined(OS_CHROMEOS)
       text_selected_during_click_(false),
       text_view_focused_before_button_press_(false),
 #endif
@@ -326,6 +326,10 @@ void OmniboxViewGtk::Init() {
   // version after the normal call has happened.
   g_signal_connect_after(text_view_, "drag-data-get",
                    G_CALLBACK(&HandleDragDataGetThunk), this);
+  g_signal_connect_after(text_view_, "drag-begin",
+                   G_CALLBACK(&HandleDragBeginThunk), this);
+  g_signal_connect_after(text_view_, "drag-end",
+                   G_CALLBACK(&HandleDragEndThunk), this);
   g_signal_connect(text_view_, "backspace",
                    G_CALLBACK(&HandleBackSpaceThunk), this);
   g_signal_connect(text_view_, "copy-clipboard",
@@ -754,6 +758,12 @@ gfx::NativeView OmniboxViewGtk::GetNativeView() const {
   return alignment_.get();
 }
 
+gfx::NativeView OmniboxViewGtk::GetRelativeWindowForPopup() const {
+  GtkWidget* toplevel = gtk_widget_get_toplevel(GetNativeView());
+  DCHECK(GTK_WIDGET_TOPLEVEL(toplevel));
+  return toplevel;
+}
+
 CommandUpdater* OmniboxViewGtk::GetCommandUpdater() {
   return command_updater_;
 }
@@ -968,8 +978,8 @@ void OmniboxViewGtk::SetBaseColor() {
 #else
     background_color_ptr = &LocationBarViewGtk::kBackgroundColor;
 #endif
-    gtk_widget_modify_cursor(
-        text_view_, &ui::kGdkBlack, &ui::kGdkGray);
+    GdkColor gray = GDK_COLOR_RGB(0x7f, 0x7f, 0x7f);
+    gtk_widget_modify_cursor(text_view_, &ui::kGdkBlack, &gray);
     gtk_widget_modify_base(text_view_, GTK_STATE_NORMAL, background_color_ptr);
 
 #if !defined(TOOLKIT_VIEWS)
@@ -1250,11 +1260,11 @@ gboolean OmniboxViewGtk::HandleViewButtonPress(GtkWidget* sender,
   DCHECK(text_view_);
 
   if (event->button == 1) {
+    button_1_pressed_ = true;
 #if defined(OS_CHROMEOS)
     // When the first button is pressed, track some stuff that will help us
     // determine whether we should select all of the text when the button is
     // released.
-    button_1_pressed_ = true;
     text_view_focused_before_button_press_ = gtk_widget_has_focus(text_view_);
     text_selected_during_click_ = false;
 #endif
@@ -1276,11 +1286,10 @@ gboolean OmniboxViewGtk::HandleViewButtonRelease(GtkWidget* sender,
   if (event->button != 1)
     return FALSE;
 
-  DCHECK(text_view_);
-
-#if defined(OS_CHROMEOS)
+  bool button_1_was_pressed = button_1_pressed_;
   button_1_pressed_ = false;
-#endif
+
+  DCHECK(text_view_);
 
   // Call the GtkTextView default handler, ignoring the fact that it will
   // likely have told us to stop propagating.  We want to handle selection.
@@ -1303,8 +1312,11 @@ gboolean OmniboxViewGtk::HandleViewButtonRelease(GtkWidget* sender,
   }
 #endif
 
-  // Inform |model_| about possible text selection change.
-  OnAfterPossibleChange();
+  // Inform |model_| about possible text selection change. We may get a button
+  // release with no press (e.g. if the user clicks in the omnibox to dismiss a
+  // bubble).
+  if (button_1_was_pressed)
+    OnAfterPossibleChange();
 
   return TRUE;  // Don't continue, we called the default handler already.
 }
@@ -1597,9 +1609,19 @@ void OmniboxViewGtk::HandleDragDataGet(GtkWidget* widget,
   // statement (no set of casts fixes this).
   switch (target_type) {
     case GTK_TEXT_BUFFER_TARGET_INFO_TEXT: {
-      gtk_selection_data_set_text(selection_data, selected_text_.c_str(), -1);
+      gtk_selection_data_set_text(selection_data, dragged_text_.c_str(), -1);
     }
   }
+}
+
+void OmniboxViewGtk::HandleDragBegin(GtkWidget* widget,
+                                       GdkDragContext* context) {
+  dragged_text_ = selected_text_;
+}
+
+void OmniboxViewGtk::HandleDragEnd(GtkWidget* widget,
+                                       GdkDragContext* context) {
+  dragged_text_.clear();
 }
 
 void OmniboxViewGtk::HandleInsertText(GtkTextBuffer* buffer,

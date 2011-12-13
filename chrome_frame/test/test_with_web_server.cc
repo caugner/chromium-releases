@@ -223,7 +223,6 @@ void ChromeFrameTestWithWebServer::VersionTest(BrowserKind browser,
     const wchar_t* page) {
   FilePath plugin_path;
   PathService::Get(base::DIR_MODULE, &plugin_path);
-  plugin_path = plugin_path.AppendASCII("servers");
   plugin_path = plugin_path.Append(kChromeFrameDllName);
 
   static FileVersionInfo* version_info =
@@ -419,7 +418,7 @@ TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_iframeBasic) {
 
 const wchar_t kSrcPropertyTestPage[] = L"src_property_host.html";
 
-TEST_F(ChromeFrameTestWithWebServer, WidgetModeIE_SrcProperty) {
+TEST_F(ChromeFrameTestWithWebServer, FLAKY_WidgetModeIE_SrcProperty) {
   SimpleBrowserTest(IE, kSrcPropertyTestPage);
 }
 

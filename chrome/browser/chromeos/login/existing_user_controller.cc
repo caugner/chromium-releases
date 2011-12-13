@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -33,8 +35,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/widget/widget.h"
@@ -79,7 +81,7 @@ ExistingUserController::ExistingUserController(LoginDisplayHost* host)
       host_(host),
       num_login_attempts_(0),
       user_settings_(new UserCrosSettingsProvider),
-      method_factory_(this),
+      weak_factory_(this),
       is_owner_login_(false) {
   DCHECK(current_controller_ == NULL);
   current_controller_ = this;
@@ -114,7 +116,6 @@ void ExistingUserController::Init(const UserVector& users) {
   LoginUtils::Get()->PrewarmAuthentication();
   if (CrosLibrary::Get()->EnsureLoaded())
     CrosLibrary::Get()->GetLoginLibrary()->EmitLoginPromptReady();
-  StartAutomaticFreeDiskSpaceControl();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -168,6 +169,8 @@ void ExistingUserController::FixCaptivePortal() {
 
 void ExistingUserController::CompleteLogin(const std::string& username,
                                            const std::string& password) {
+  SetOwnerUserInCryptohome();
+
   GaiaAuthConsumer::ClientLoginResult credentials;
   if (!login_performer_.get()) {
     LoginPerformer::Delegate* delegate = this;
@@ -227,12 +230,13 @@ void ExistingUserController::LoginAsGuest() {
   SetStatusAreaEnabled(false);
   // Disable clicking on other windows.
   login_display_->SetUIEnabled(false);
+  SetOwnerUserInCryptohome();
 
   // Check allow_guest in case this call is fired from key accelerator.
   // Must not proceed without signature verification.
   bool trusted_setting_available = user_settings_->RequestTrustedAllowGuest(
-      method_factory_.NewRunnableMethod(
-          &ExistingUserController::LoginAsGuest));
+      base::Bind(&ExistingUserController::LoginAsGuest,
+                 weak_factory_.GetWeakPtr()));
   if (!trusted_setting_available) {
     // Value of AllowGuest setting is still not verified.
     // Another attempt will be invoked again after verification completion.
@@ -260,8 +264,10 @@ void ExistingUserController::OnUserSelected(const std::string& username) {
 void ExistingUserController::OnStartEnterpriseEnrollment() {
   CommandLine* command_line = CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kEnableDevicePolicy)) {
-    ownership_checker_.reset(new OwnershipStatusChecker(NewCallback(
-        this, &ExistingUserController::OnEnrollmentOwnershipCheckCompleted)));
+    ownership_checker_.reset(new OwnershipStatusChecker(
+        base::Bind(
+            &ExistingUserController::OnEnrollmentOwnershipCheckCompleted,
+            base::Unretained(this))));
   }
 }
 
@@ -390,6 +396,8 @@ void ExistingUserController::OnLoginSuccess(
 void ExistingUserController::OnProfilePrepared(Profile* profile) {
   // TODO(nkostylev): May add login UI implementation callback call.
   if (!ready_for_browser_launch_) {
+    // Add the appropriate first-login URL.
+#if !defined(TOUCH_UI)
     PrefService* prefs = g_browser_process->local_state();
     const std::string current_locale =
         StringToLowerASCII(prefs->GetString(prefs::kApplicationLocale));
@@ -404,6 +412,7 @@ void ExistingUserController::OnProfilePrepared(Profile* profile) {
       start_url = base::StringPrintf(url, current_locale.c_str());
     }
     CommandLine::ForCurrentProcess()->AppendArg(start_url);
+#endif
 
     ServicesCustomizationDocument* customization =
       ServicesCustomizationDocument::GetInstance();
@@ -466,9 +475,8 @@ void ExistingUserController::OnPasswordChangeDetected(
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
   // Must not proceed without signature verification.
   bool trusted_setting_available = user_settings_->RequestTrustedOwner(
-      method_factory_.NewRunnableMethod(
-          &ExistingUserController::OnPasswordChangeDetected,
-          credentials));
+      base::Bind(&ExistingUserController::OnPasswordChangeDetected,
+                 weak_factory_.GetWeakPtr(), credentials));
   if (!trusted_setting_available) {
     // Value of owner email is still not verified.
     // Another attempt will be invoked after verification completion.
@@ -570,10 +578,10 @@ void ExistingUserController::ShowError(int error_id,
   login_display_->ShowError(error_id, num_login_attempts_, help_topic_id);
 }
 
-void ExistingUserController::StartAutomaticFreeDiskSpaceControl() {
+void ExistingUserController::SetOwnerUserInCryptohome() {
   bool trusted_owner_available = user_settings_->RequestTrustedOwner(
-      method_factory_.NewRunnableMethod(
-          &ExistingUserController::StartAutomaticFreeDiskSpaceControl));
+      base::Bind(&ExistingUserController::SetOwnerUserInCryptohome,
+                 weak_factory_.GetWeakPtr()));
   if (!trusted_owner_available) {
     // Value of owner email is still not verified.
     // Another attempt will be invoked after verification completion.
@@ -583,7 +591,10 @@ void ExistingUserController::StartAutomaticFreeDiskSpaceControl() {
     CryptohomeLibrary* cryptohomed = CrosLibrary::Get()->GetCryptohomeLibrary();
     cryptohomed->AsyncSetOwnerUser(
         UserCrosSettingsProvider::cached_owner(), NULL);
-    cryptohomed->AsyncDoAutomaticFreeDiskSpaceControl(NULL);
+
+    // Do not invoke AsyncDoAutomaticFreeDiskSpaceControl(NULL) here
+    // so it does not delay the following mount. Cleanup will be
+    // started in Cryptohomed by timer.
   }
 }
 

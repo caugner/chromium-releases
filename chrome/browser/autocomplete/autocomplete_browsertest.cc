@@ -24,7 +24,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
+#include "content/public/browser/notification_types.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 // Autocomplete test is flaky on ChromeOS.
@@ -149,10 +149,11 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, TabAwayRevertSelect) {
   EXPECT_EQ(UTF8ToUTF16(chrome::kAboutBlankURL),
             location_bar->location_entry()->GetText());
   location_bar->location_entry()->SetUserText(string16());
+  ui_test_utils::WindowedNotificationObserver observer(
+      content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
   browser()->AddSelectedTabWithURL(GURL(chrome::kAboutBlankURL),
-                                   PageTransition::START_PAGE);
-  ui_test_utils::WaitForNavigation(
-      &browser()->GetSelectedTabContents()->controller());
+                                   content::PAGE_TRANSITION_START_PAGE);
+  observer.Wait();
   EXPECT_EQ(UTF8ToUTF16(chrome::kAboutBlankURL),
             location_bar->location_entry()->GetText());
   browser()->CloseTab();

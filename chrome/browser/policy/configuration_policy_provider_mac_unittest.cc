@@ -9,7 +9,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/configuration_policy_provider_mac.h"
-#include "chrome/browser/policy/mock_configuration_policy_store.h"
+#include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/preferences_mock_mac.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -132,19 +132,18 @@ class ConfigurationPolicyProviderMacTest
  public:
   virtual void SetUp() {
     prefs_ = new MockPreferences;
-    store_.reset(new MockConfigurationPolicyStore);
   }
 
  protected:
   MockPreferences* prefs_;
-  scoped_ptr<MockConfigurationPolicyStore> store_;
 };
 
 TEST_P(ConfigurationPolicyProviderMacTest, Default) {
   ConfigurationPolicyProviderMac provider(
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(), prefs_);
-  EXPECT_TRUE(provider.Provide(store_.get()));
-  EXPECT_TRUE(store_->policy_map().empty());
+      GetChromePolicyDefinitionList(), prefs_);
+  PolicyMap policy_map;
+  EXPECT_TRUE(provider.Provide(&policy_map));
+  EXPECT_TRUE(policy_map.empty());
 }
 
 TEST_P(ConfigurationPolicyProviderMacTest, Invalid) {
@@ -156,9 +155,10 @@ TEST_P(ConfigurationPolicyProviderMacTest, Invalid) {
 
   // Create the provider and have it read |prefs_|.
   ConfigurationPolicyProviderMac provider(
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(), prefs_);
-  EXPECT_TRUE(provider.Provide(store_.get()));
-  EXPECT_TRUE(store_->policy_map().empty());
+      GetChromePolicyDefinitionList(), prefs_);
+  PolicyMap policy_map;
+  EXPECT_TRUE(provider.Provide(&policy_map));
+  EXPECT_TRUE(policy_map.empty());
 }
 
 TEST_P(ConfigurationPolicyProviderMacTest, TestNonForcedValue) {
@@ -171,9 +171,10 @@ TEST_P(ConfigurationPolicyProviderMacTest, TestNonForcedValue) {
 
   // Create the provider and have it read |prefs_|.
   ConfigurationPolicyProviderMac provider(
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(), prefs_);
-  EXPECT_TRUE(provider.Provide(store_.get()));
-  EXPECT_TRUE(store_->policy_map().empty());
+      GetChromePolicyDefinitionList(), prefs_);
+  PolicyMap policy_map;
+  EXPECT_TRUE(provider.Provide(&policy_map));
+  EXPECT_TRUE(policy_map.empty());
 }
 
 TEST_P(ConfigurationPolicyProviderMacTest, TestValue) {
@@ -186,15 +187,18 @@ TEST_P(ConfigurationPolicyProviderMacTest, TestValue) {
 
   // Create the provider and have it read |prefs_|.
   ConfigurationPolicyProviderMac provider(
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList(), prefs_);
-  EXPECT_TRUE(provider.Provide(store_.get()));
-  ASSERT_EQ(1U, store_->policy_map().size());
-  const Value* value = store_->Get(GetParam().type());
+      GetChromePolicyDefinitionList(), prefs_);
+  PolicyMap policy_map;
+  EXPECT_TRUE(provider.Provide(&policy_map));
+  ASSERT_EQ(1U, policy_map.size());
+  const Value* value = policy_map.Get(GetParam().type());
   ASSERT_TRUE(value);
   EXPECT_TRUE(GetParam().test_value()->Equals(value));
 }
 
-// Instantiate the test case for all policies.
+// Test parameters for all supported policies. testing::Values() has a limit of
+// 50 parameters which is reached in this instantiation; new policies should go
+// in the next instantiation after this one.
 INSTANTIATE_TEST_CASE_P(
     ConfigurationPolicyProviderMacTestInstance,
     ConfigurationPolicyProviderMacTest,
@@ -304,9 +308,6 @@ INSTANTIATE_TEST_CASE_P(
         PolicyTestParams::ForBooleanPolicy(
             kPolicyInstantEnabled,
             key::kInstantEnabled),
-        PolicyTestParams::ForIntegerPolicy(
-            kPolicyPolicyRefreshRate,
-            key::kPolicyRefreshRate),
         PolicyTestParams::ForBooleanPolicy(
             kPolicyDisablePluginFinder,
             key::kDisablePluginFinder),
@@ -348,7 +349,10 @@ INSTANTIATE_TEST_CASE_P(
             key::kDiskCacheDir),
         PolicyTestParams::ForIntegerPolicy(
             kPolicyMaxConnectionsPerProxy,
-            key::kMaxConnectionsPerProxy)));
+            key::kMaxConnectionsPerProxy),
+        PolicyTestParams::ForListPolicy(
+            kPolicyURLBlacklist,
+            key::kURLBlacklist)));
 
 // testing::Values has a limit of 50 test templates, which is reached by the
 // instantiations above. Add tests for new policies here:
@@ -356,9 +360,6 @@ INSTANTIATE_TEST_CASE_P(
     ConfigurationPolicyProviderMacTestInstance2,
     ConfigurationPolicyProviderMacTest,
     testing::Values(
-        PolicyTestParams::ForListPolicy(
-            kPolicyURLBlacklist,
-            key::kURLBlacklist),
         PolicyTestParams::ForListPolicy(
             kPolicyURLWhitelist,
             key::kURLWhitelist)));

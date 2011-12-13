@@ -121,10 +121,10 @@ class JingleSessionTest : public testing::Test {
     DCHECK(session);
     host_session_.reset(session);
     host_session_->SetStateChangeCallback(
-        NewCallback(&host_connection_callback_,
-                    &MockSessionCallback::OnStateChange));
+        base::Bind(&MockSessionCallback::OnStateChange,
+                   base::Unretained(&host_connection_callback_)));
 
-    session->set_config(SessionConfig::CreateDefault());
+    session->set_config(SessionConfig::GetDefault());
     session->set_shared_secret(kTestSharedSecret);
   }
 
@@ -177,7 +177,7 @@ class JingleSessionTest : public testing::Test {
 
     EXPECT_CALL(host_server_listener_, OnSessionManagerInitialized())
         .Times(1);
-    host_server_.reset(JingleSessionManager::CreateNotSandboxed(
+    host_server_.reset(new JingleSessionManager(
         base::MessageLoopProxy::current()));
     host_server_->set_allow_local_ips(true);
     host_server_->Init(
@@ -186,7 +186,7 @@ class JingleSessionTest : public testing::Test {
 
     EXPECT_CALL(client_server_listener_, OnSessionManagerInitialized())
         .Times(1);
-    client_server_.reset(JingleSessionManager::CreateNotSandboxed(
+    client_server_.reset(new JingleSessionManager(
         base::MessageLoopProxy::current()));
     client_server_->set_allow_local_ips(true);
     client_server_->Init(
@@ -278,8 +278,8 @@ class JingleSessionTest : public testing::Test {
     client_session_.reset(client_server_->Connect(
         kHostJid, kTestHostPublicKey, kTestToken,
         CandidateSessionConfig::CreateDefault(),
-        NewCallback(&client_connection_callback_,
-                    &MockSessionCallback::OnStateChange)));
+        base::Bind(&MockSessionCallback::OnStateChange,
+                   base::Unretained(&client_connection_callback_))));
 
     client_session_->set_shared_secret(shared_secret);
 
@@ -478,8 +478,8 @@ class TCPChannelTester : public ChannelTesterBase {
   scoped_refptr<net::DrainableIOBuffer> output_buffer_;
   scoped_refptr<net::GrowableIOBuffer> input_buffer_;
 
-  net::CompletionCallbackImpl<TCPChannelTester> write_cb_;
-  net::CompletionCallbackImpl<TCPChannelTester> read_cb_;
+  net::OldCompletionCallbackImpl<TCPChannelTester> write_cb_;
+  net::OldCompletionCallbackImpl<TCPChannelTester> read_cb_;
   int write_errors_;
   int read_errors_;
   int message_size_;
@@ -660,8 +660,8 @@ class UDPChannelTester : public ChannelTesterBase {
   scoped_refptr<net::IOBuffer> sent_packets_[kMessages];
   scoped_refptr<net::IOBuffer> read_buffer_;
 
-  net::CompletionCallbackImpl<UDPChannelTester> write_cb_;
-  net::CompletionCallbackImpl<UDPChannelTester> read_cb_;
+  net::OldCompletionCallbackImpl<UDPChannelTester> write_cb_;
+  net::OldCompletionCallbackImpl<UDPChannelTester> read_cb_;
   int write_errors_;
   int read_errors_;
   int packets_sent_;
@@ -698,8 +698,8 @@ TEST_F(JingleSessionTest, RejectConnection) {
   client_session_.reset(client_server_->Connect(
       kHostJid, kTestHostPublicKey, kTestToken,
       CandidateSessionConfig::CreateDefault(),
-      NewCallback(&client_connection_callback_,
-                  &MockSessionCallback::OnStateChange)));
+      base::Bind(&MockSessionCallback::OnStateChange,
+                 base::Unretained(&client_connection_callback_))));
 
   ASSERT_TRUE(RunMessageLoopWithTimeout(TestTimeouts::action_max_timeout_ms()));
 }
@@ -747,7 +747,7 @@ TEST_F(JingleSessionTest, TestUdpChannel) {
 
 // Send packets of different size to get the latency for sending data
 // using sockets from JingleSession.
-TEST_F(JingleSessionTest, TestSpeed) {
+TEST_F(JingleSessionTest, FLAKY_TestSpeed) {
   CreateServerPair();
   ASSERT_TRUE(InitiateConnection(kTestSharedSecret));
   scoped_refptr<ChannelSpeedTester> tester;

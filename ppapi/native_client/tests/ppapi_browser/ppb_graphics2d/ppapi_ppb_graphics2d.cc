@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -486,7 +486,7 @@ void TestFlush() {
   // Invalid args -> PP_ERROR_BAD..., no callback.
   EXPECT(PP_ERROR_BADRESOURCE == PPBGraphics2D()->Flush(kInvalidResource, cc));
   EXPECT(PP_ERROR_BADRESOURCE == PPBGraphics2D()->Flush(kNotAResource, cc));
-  EXPECT(PP_ERROR_BADARGUMENT ==
+  EXPECT(PP_ERROR_BLOCKS_MAIN_THREAD ==
          PPBGraphics2D()->Flush(graphics2d, PP_BlockUntilComplete()));
 
   // Valid args -> PP_OK_COMPLETIONPENDING, expect callback.

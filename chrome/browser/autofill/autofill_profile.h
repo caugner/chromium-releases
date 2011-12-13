@@ -7,8 +7,9 @@
 #pragma once
 
 #include <stddef.h>
+
+#include <iosfwd>
 #include <list>
-#include <ostream>
 #include <string>
 #include <vector>
 
@@ -16,10 +17,9 @@
 #include "chrome/browser/autofill/address.h"
 #include "chrome/browser/autofill/autofill_type.h"
 #include "chrome/browser/autofill/contact_info.h"
-#include "chrome/browser/autofill/fax_number.h"
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/browser/autofill/form_group.h"
-#include "chrome/browser/autofill/home_phone_number.h"
+#include "chrome/browser/autofill/phone_number.h"
 
 // A collection of FormGroups stored in a profile.  AutofillProfile also
 // implements the FormGroup interface so that owners of this object can request
@@ -59,7 +59,7 @@ class AutofillProfile : public FormGroup {
   // The user-visible label of the profile, generated in relation to other
   // profiles. Shows at least 2 fields that differentiate profile from other
   // profiles. See AdjustInferredLabels() further down for more description.
-  virtual const string16 Label() const;
+  const string16 Label() const;
 
   // This guid is the primary identifier for |AutofillProfile| objects.
   const std::string guid() const { return guid_; }
@@ -75,8 +75,7 @@ class AutofillProfile : public FormGroup {
   // 2. Address.
   // 3. E-mail.
   // 4. Phone.
-  // 5. Fax.
-  // 6. Company name.
+  // 5. Company name.
   // Profile labels are changed accordingly to these rules.
   // Returns true if any of the profiles were updated.
   // This function is useful if you want to adjust unique labels for all
@@ -123,6 +122,10 @@ class AutofillProfile : public FormGroup {
   // aid with correct aggregation of new data.
   const string16 PrimaryValue() const;
 
+  // Returns true if the data in this AutofillProfile is a subset of the data in
+  // |profile|.
+  bool IsSubsetOf(const AutofillProfile& profile) const;
+
   // Overwrites the single-valued field data in |profile| with this
   // Profile.  Or, for multi-valued fields append the new values.
   void OverwriteWithOrAddTo(const AutofillProfile& profile);
@@ -130,7 +133,7 @@ class AutofillProfile : public FormGroup {
  private:
   typedef std::vector<const FormGroup*> FormGroupList;
 
-  // FormGroup:
+  // FormGroup implementation.
   virtual void GetSupportedTypes(FieldTypeSet* supported_types) const OVERRIDE;
 
   // Shared implementation for GetMultiInfo() and GetCanonicalizedMultiInfo().
@@ -181,7 +184,6 @@ class AutofillProfile : public FormGroup {
   std::vector<EmailInfo> email_;
   CompanyInfo company_;
   std::vector<PhoneNumber> home_number_;
-  std::vector<PhoneNumber> fax_number_;
   Address address_;
 };
 

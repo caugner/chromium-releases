@@ -15,6 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/timer.h"
+#include "ui/base/events.h"
 #include "views/controls/menu/menu_delegate.h"
 #include "views/controls/menu/menu_item_view.h"
 
@@ -222,7 +223,7 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
 #elif defined(USE_WAYLAND)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
       ui::WaylandEvent* event);
-#elif defined(TOUCH_UI)
+#elif defined(TOUCH_UI) || defined(USE_AURA)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(XEvent* xevent);
 #else
   virtual bool Dispatch(GdkEvent* event);
@@ -231,11 +232,7 @@ class VIEWS_EXPORT MenuController : public MessageLoop::Dispatcher {
   // Key processing. The return value of this is returned from Dispatch.
   // In other words, if this returns false (which happens if escape was
   // pressed, or a matching mnemonic was found) the message loop returns.
-#if defined(OS_WIN)
-  bool OnKeyDown(int key_code, const MSG& msg);
-#else
-  bool OnKeyDown(int key_code);
-#endif
+  bool OnKeyDown(ui::KeyboardCode key_code);
 
   // Creates a MenuController. If |blocking| is true a nested message loop is
   // started in |Run|.

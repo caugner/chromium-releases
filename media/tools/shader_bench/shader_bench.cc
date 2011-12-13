@@ -8,11 +8,11 @@
 #include <stdlib.h>
 
 #include "base/at_exit.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
-#include "media/base/callback.h"
 #include "media/base/video_frame.h"
 #include "media/tools/shader_bench/cpu_color_painter.h"
 #include "media/tools/shader_bench/gpu_color_painter.h"
@@ -82,7 +82,7 @@ void TestFinished() {
 
 void RunTest(media::Window* window, Painter* painter) {
   g_start_ = base::TimeTicks::HighResNow();
-  window->Start(kNumFramesToPaint, NewRunnableFunction(&TestFinished), painter);
+  window->Start(kNumFramesToPaint, base::Bind(&TestFinished), painter);
 }
 
 int main(int argc, char** argv) {
@@ -133,7 +133,10 @@ int main(int argc, char** argv) {
   scoped_ptr<media::Window> window(new media::Window(width, height));
   gfx::GLSurface* surface =
       gfx::GLSurface::CreateViewGLSurface(false, window->PluginWindow());
-  gfx::GLContext* context = gfx::GLContext::CreateGLContext(NULL, surface);
+  gfx::GLContext* context = gfx::GLContext::CreateGLContext(
+      NULL,
+      surface,
+      gfx::PreferDiscreteGpu);
   context->MakeCurrent(surface);
   // This sets D3DPRESENT_INTERVAL_IMMEDIATE on Windows.
   context->SetSwapInterval(0);

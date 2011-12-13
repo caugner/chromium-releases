@@ -13,6 +13,7 @@
 #include "base/task.h"
 #include "chrome/browser/ui/panels/auto_hiding_desktop_bar.h"
 #include "chrome/browser/ui/panels/panel.h"
+#include "chrome/browser/ui/panels/panel_mouse_watcher.h"
 #include "ui/gfx/rect.h"
 
 class Browser;
@@ -20,7 +21,8 @@ class Panel;
 
 // This class manages a set of panels.
 // Note that the ref count is needed by using PostTask in the implementation.
-class PanelManager : public AutoHidingDesktopBar::Observer,
+class PanelManager : public PanelMouseWatcher::Observer,
+                     public AutoHidingDesktopBar::Observer,
                      public base::RefCounted<PanelManager> {
  public:
   typedef std::vector<Panel*> Panels;
@@ -45,6 +47,10 @@ class PanelManager : public AutoHidingDesktopBar::Observer,
   void Drag(int delta_x);
   void EndDragging(bool cancelled);
 
+  // Invoked when a panel's expansion state changes.
+  void OnPanelExpansionStateChanged(Panel::ExpansionState old_state,
+                                    Panel::ExpansionState new_state);
+
   // Invoked when the preferred window size of the given panel might need to
   // get changed.
   void OnPreferredWindowSizeChanged(
@@ -63,8 +69,16 @@ class PanelManager : public AutoHidingDesktopBar::Observer,
   int GetBottomPositionForExpansionState(
       Panel::ExpansionState expansion_state) const;
 
+  // Returns the next browser window which could be either panel window or
+  // tabbed window, to switch to if the given panel is going to be deactivated.
+  // Returns NULL if such window cannot be found.
+  BrowserWindow* GetNextBrowserWindowToActivate(Panel* panel) const;
+
   int num_panels() const { return panels_.size(); }
   bool is_dragging_panel() const;
+
+  // Overridden from PanelMouseWatcher::Observer:
+  virtual void OnMouseMove(const gfx::Point& mouse_position) OVERRIDE;
 
 #ifdef UNIT_TEST
   const Panels& panels() const { return panels_; }
@@ -85,6 +99,15 @@ class PanelManager : public AutoHidingDesktopBar::Observer,
 
   void SetWorkAreaForTesting(const gfx::Rect& work_area) {
     SetWorkArea(work_area);
+  }
+
+  int minimized_panel_count() {
+    return minimized_panel_count_;
+  }
+
+  // Tests should disable mouse watching if mouse movements will be simulated.
+  void disable_mouse_watching() {
+    mouse_watching_disabled_ = true;
   }
 #endif
 
@@ -109,6 +132,10 @@ class PanelManager : public AutoHidingDesktopBar::Observer,
 
   // Adjusts the work area to exclude the influence of auto-hiding desktop bars.
   void AdjustWorkAreaForAutoHidingDesktopBars();
+
+  // Keep track of the minimized panels to control mouse watching.
+  void IncrementMinimizedPanels();
+  void DecrementMinimizedPanels();
 
   // Handles all the panels that're delayed to be removed.
   void DelayedRemove();
@@ -139,7 +166,7 @@ class PanelManager : public AutoHidingDesktopBar::Observer,
 
   int GetMaxPanelWidth() const;
   int GetMaxPanelHeight() const;
-  int GetRightMostAvaialblePosition() const;
+  int GetRightMostAvailablePosition() const;
 
   // Updates the maximum size of each panel as the result of adding, removing,
   // or sizing panels.
@@ -150,6 +177,13 @@ class PanelManager : public AutoHidingDesktopBar::Observer,
   // Stores the panels that are pending to remove. We want to delay the removal
   // when we're in the process of the dragging.
   Panels panels_pending_to_remove_;
+
+  // Use a mouse watcher to know when to bring up titlebars to "peek" at
+  // minimized panels. Mouse movement is only tracked when there is a minimized
+  // panel.
+  scoped_ptr<PanelMouseWatcher> panel_mouse_watcher_;
+  int minimized_panel_count_;
+  bool are_titlebars_up_;
 
   // The maximum work area avaialble. This area does not include the area taken
   // by the always-visible (non-auto-hiding) desktop bars.
@@ -184,7 +218,15 @@ class PanelManager : public AutoHidingDesktopBar::Observer,
   // will not be affected.
   bool auto_sizing_enabled_;
 
+  bool mouse_watching_disabled_;  // For tests to simulate mouse movements.
+
   static const int kPanelsHorizontalSpacing = 4;
+
+  // Minimum width and height of a panel.
+  // Note: The minimum size of a widget (see widget.cc) is fixed to 100x100.
+  // TODO(jianli): Need to fix this to support smaller panel.
+  static const int kPanelMinWidth = 100;
+  static const int kPanelMinHeight = 100;
 
   DISALLOW_COPY_AND_ASSIGN(PanelManager);
 };

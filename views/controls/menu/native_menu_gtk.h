@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,11 @@
 
 #include <gtk/gtk.h>
 
-#include <vector>
-
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/observer_list.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "views/controls/menu/menu_wrapper.h"
 
@@ -38,18 +40,18 @@ class NativeMenuGtk : public MenuWrapper,
   virtual ~NativeMenuGtk();
 
   // Overridden from MenuWrapper:
-  virtual void RunMenuAt(const gfx::Point& point, int alignment);
-  virtual void CancelMenu();
-  virtual void Rebuild();
-  virtual void UpdateStates();
-  virtual gfx::NativeMenu GetNativeMenu() const;
-  virtual MenuAction GetMenuAction() const;
-  virtual void AddMenuListener(MenuListener* listener);
-  virtual void RemoveMenuListener(MenuListener* listener);
-  virtual void SetMinimumWidth(int width);
+  virtual void RunMenuAt(const gfx::Point& point, int alignment) OVERRIDE;
+  virtual void CancelMenu() OVERRIDE;
+  virtual void Rebuild() OVERRIDE;
+  virtual void UpdateStates() OVERRIDE;
+  virtual gfx::NativeMenu GetNativeMenu() const OVERRIDE;
+  virtual MenuAction GetMenuAction() const OVERRIDE;
+  virtual void AddMenuListener(MenuListener* listener) OVERRIDE;
+  virtual void RemoveMenuListener(MenuListener* listener) OVERRIDE;
+  virtual void SetMinimumWidth(int width) OVERRIDE;
 
   // Overriden from MessageLoopForUI::Dispatcher:
-  virtual bool Dispatch(GdkEvent* event);
+  virtual bool Dispatch(GdkEvent* event) OVERRIDE;
 
  private:
   CHROMEGTK_CALLBACK_0(NativeMenuGtk, void, OnMenuHidden);
@@ -129,7 +131,7 @@ class NativeMenuGtk : public MenuWrapper,
 
   // Used when a menu item is selected. See description above class as to why
   // we do this.
-  ScopedRunnableMethodFactory<NativeMenuGtk> activate_factory_;
+  base::WeakPtrFactory<NativeMenuGtk> activate_factory_;
 
   // A eference to the hosting menu2 object and signal handler id
   // used to delete the menu2 when its native menu gtk is destroyed first.
@@ -140,8 +142,8 @@ class NativeMenuGtk : public MenuWrapper,
   // The action that took place during the call to RunMenuAt.
   MenuAction menu_action_;
 
-  // Vector of listeners to receive callbacks when the menu opens.
-  std::vector<MenuListener*> listeners_;
+  // A list of listeners to call when the menu opens.
+  ObserverList<MenuListener> listeners_;
 
   // Nested dispatcher object that can outlive this object.
   // This is to deal with the menu being deleted while the nested

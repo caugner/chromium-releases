@@ -5,11 +5,14 @@
 #include "views/widget/tooltip_manager_win.h"
 
 #include <windowsx.h>
+
 #include <limits>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/string_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/win/hwnd_util.h"
 #include "ui/gfx/font.h"
@@ -50,14 +53,6 @@ gfx::Font TooltipManager::GetDefaultFont() {
   if (!font)
     font = new gfx::Font(DetermineDefaultFont());
   return *font;
-}
-
-// static
-const std::wstring& TooltipManager::GetLineSeparator() {
-  static const std::wstring* separator = NULL;
-  if (!separator)
-    separator = new std::wstring(L"\r\n");
-  return *separator;
 }
 
 // static
@@ -287,7 +282,7 @@ void TooltipManagerWin::UpdateTooltip(const gfx::Point& mouse_pos) {
     // text has changed.
     gfx::Point view_point = mouse_pos;
     View::ConvertPointToView(root_view, last_tooltip_view_, &view_point);
-    std::wstring new_tooltip_text;
+    string16 new_tooltip_text;
     bool has_tooltip_text =
         last_tooltip_view_->GetTooltipText(view_point, &new_tooltip_text);
     if (!has_tooltip_text || (new_tooltip_text != tooltip_text_)) {
@@ -331,7 +326,7 @@ void TooltipManagerWin::ShowKeyboardTooltip(View* focused_view) {
     tooltip_text_.clear();
   }
   HideKeyboardTooltip();
-  std::wstring tooltip_text;
+  string16 tooltip_text;
   if (!focused_view->GetTooltipText(gfx::Point(), &tooltip_text))
     return;
   gfx::Rect focused_bounds = focused_view->bounds();
@@ -349,6 +344,7 @@ void TooltipManagerWin::ShowKeyboardTooltip(View* focused_view) {
   int line_count;
   TrimTooltipToFit(&tooltip_text, &tooltip_width, &line_count,
                    screen_point.x(), screen_point.y());
+  ReplaceSubstringsAfterOffset(&tooltip_text, 0, L"\n", L"\r\n");
   TOOLINFO keyboard_toolinfo;
   memset(&keyboard_toolinfo, 0, sizeof(keyboard_toolinfo));
   keyboard_toolinfo.cbSize = sizeof(keyboard_toolinfo);
@@ -372,10 +368,11 @@ void TooltipManagerWin::ShowKeyboardTooltip(View* focused_view) {
   ::SetWindowPos(keyboard_tooltip_hwnd_, NULL, rect_bounds.left,
                  rect_bounds.top, 0, 0,
                  SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOSIZE);
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      keyboard_tooltip_factory_.NewRunnableMethod(
-      &TooltipManagerWin::DestroyKeyboardTooltipWindow,
-      keyboard_tooltip_hwnd_),
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&TooltipManagerWin::DestroyKeyboardTooltipWindow,
+                 keyboard_tooltip_factory_.GetWeakPtr(),
+                 keyboard_tooltip_hwnd_),
       kDefaultTimeout);
 }
 

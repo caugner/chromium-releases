@@ -135,14 +135,14 @@ int UDPSocketLibevent::GetLocalAddress(IPEndPoint* address) const {
 
 int UDPSocketLibevent::Read(IOBuffer* buf,
                             int buf_len,
-                            CompletionCallback* callback) {
+                            OldCompletionCallback* callback) {
   return RecvFrom(buf, buf_len, NULL, callback);
 }
 
 int UDPSocketLibevent::RecvFrom(IOBuffer* buf,
                                 int buf_len,
                                 IPEndPoint* address,
-                                CompletionCallback* callback) {
+                                OldCompletionCallback* callback) {
   DCHECK(CalledOnValidThread());
   DCHECK_NE(kInvalidSocket, socket_);
   DCHECK(!read_callback_);
@@ -170,21 +170,21 @@ int UDPSocketLibevent::RecvFrom(IOBuffer* buf,
 
 int UDPSocketLibevent::Write(IOBuffer* buf,
                              int buf_len,
-                             CompletionCallback* callback) {
+                             OldCompletionCallback* callback) {
   return SendToOrWrite(buf, buf_len, NULL, callback);
 }
 
 int UDPSocketLibevent::SendTo(IOBuffer* buf,
                               int buf_len,
                               const IPEndPoint& address,
-                              CompletionCallback* callback) {
+                              OldCompletionCallback* callback) {
   return SendToOrWrite(buf, buf_len, &address, callback);
 }
 
 int UDPSocketLibevent::SendToOrWrite(IOBuffer* buf,
                                      int buf_len,
                                      const IPEndPoint* address,
-                                     CompletionCallback* callback) {
+                                     OldCompletionCallback* callback) {
   DCHECK(CalledOnValidThread());
   DCHECK_NE(kInvalidSocket, socket_);
   DCHECK(!write_callback_);
@@ -218,6 +218,7 @@ int UDPSocketLibevent::SendToOrWrite(IOBuffer* buf,
 }
 
 int UDPSocketLibevent::Connect(const IPEndPoint& address) {
+  DCHECK(CalledOnValidThread());
   DCHECK(!is_connected());
   DCHECK(!remote_address_.get());
   int rv = CreateSocket(address);
@@ -246,6 +247,7 @@ int UDPSocketLibevent::Connect(const IPEndPoint& address) {
 }
 
 int UDPSocketLibevent::Bind(const IPEndPoint& address) {
+  DCHECK(CalledOnValidThread());
   DCHECK(!is_connected());
   int rv = CreateSocket(address);
   if (rv < 0)
@@ -257,12 +259,28 @@ int UDPSocketLibevent::Bind(const IPEndPoint& address) {
   return rv;
 }
 
+bool UDPSocketLibevent::SetReceiveBufferSize(int32 size) {
+  DCHECK(CalledOnValidThread());
+  int rv = setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
+                      reinterpret_cast<const char*>(&size), sizeof(size));
+  DCHECK(!rv) << "Could not set socket receive buffer size: " << errno;
+  return rv == 0;
+}
+
+bool UDPSocketLibevent::SetSendBufferSize(int32 size) {
+  DCHECK(CalledOnValidThread());
+  int rv = setsockopt(socket_, SOL_SOCKET, SO_SNDBUF,
+                      reinterpret_cast<const char*>(&size), sizeof(size));
+  DCHECK(!rv) << "Could not set socket send buffer size: " << errno;
+  return rv == 0;
+}
+
 void UDPSocketLibevent::DoReadCallback(int rv) {
   DCHECK_NE(rv, ERR_IO_PENDING);
   DCHECK(read_callback_);
 
   // since Run may result in Read being called, clear read_callback_ up front.
-  CompletionCallback* c = read_callback_;
+  OldCompletionCallback* c = read_callback_;
   read_callback_ = NULL;
   c->Run(rv);
 }
@@ -272,7 +290,7 @@ void UDPSocketLibevent::DoWriteCallback(int rv) {
   DCHECK(write_callback_);
 
   // since Run may result in Write being called, clear write_callback_ up front.
-  CompletionCallback* c = write_callback_;
+  OldCompletionCallback* c = write_callback_;
   write_callback_ = NULL;
   c->Run(rv);
 }

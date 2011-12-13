@@ -266,7 +266,6 @@ BookmarkButton* gDraggedButton = nil; // Weak
   BOOL keepGoing = YES;
   [[self target] performSelector:[self action] withObject:self];
   self.draggableButton.actionHasFired = YES;
-  return kDraggableButtonMixinDidWork;
 
   DraggableButton* insideBtn = nil;
 
@@ -326,6 +325,7 @@ BookmarkButton* gDraggedButton = nil; // Weak
         break;
     }
   }
+  return kDraggableButtonMixinDidWork;
 }
 
 

@@ -23,8 +23,7 @@
 using views::FocusManager;
 
 AccessibilityEventRouterViews::AccessibilityEventRouterViews()
-    : most_recent_profile_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+    : most_recent_profile_(NULL) {
 }
 
 AccessibilityEventRouterViews::~AccessibilityEventRouterViews() {
@@ -77,8 +76,8 @@ void AccessibilityEventRouterViews::HandleAccessibilityEvent(
 }
 
 void AccessibilityEventRouterViews::HandleMenuItemFocused(
-    const std::wstring& menu_name,
-    const std::wstring& menu_item_name,
+    const string16& menu_name,
+    const string16& menu_item_name,
     int item_index,
     int item_count,
     bool has_submenu) {
@@ -90,12 +89,11 @@ void AccessibilityEventRouterViews::HandleMenuItemFocused(
   if (!most_recent_profile_)
     return;
 
-  AccessibilityMenuItemInfo info(
-      most_recent_profile_,
-      WideToUTF8(menu_item_name),
-      has_submenu,
-      item_index,
-      item_count);
+  AccessibilityMenuItemInfo info(most_recent_profile_,
+                                 UTF16ToUTF8(menu_item_name),
+                                 has_submenu,
+                                 item_index,
+                                 item_count);
   SendAccessibilityNotification(
       chrome::NOTIFICATION_ACCESSIBILITY_CONTROL_FOCUSED, &info);
 }

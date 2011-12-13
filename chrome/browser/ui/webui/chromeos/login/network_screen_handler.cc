@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/network_screen_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -14,7 +16,6 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/status/input_method_menu.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/options/chromeos/cros_language_options_handler.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -25,6 +26,10 @@
 #include "ui/gfx/rect.h"
 #include "views/layout/fill_layout.h"
 #include "views/widget/widget.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 
 namespace {
 
@@ -138,11 +143,13 @@ void NetworkScreenHandler::Initialize() {
 
 void NetworkScreenHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(kJsApiNetworkOnExit,
-      NewCallback(this, &NetworkScreenHandler::HandleOnExit));
+      base::Bind(&NetworkScreenHandler::HandleOnExit,base::Unretained(this)));
   web_ui_->RegisterMessageCallback(kJsApiNetworkOnLanguageChanged,
-      NewCallback(this, &NetworkScreenHandler::HandleOnLanguageChanged));
+      base::Bind(&NetworkScreenHandler::HandleOnLanguageChanged,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(kJsApiNetworkOnInputMethodChanged,
-      NewCallback(this, &NetworkScreenHandler::HandleOnInputMethodChanged));
+      base::Bind(&NetworkScreenHandler::HandleOnInputMethodChanged,
+                 base::Unretained(this)));
 }
 
 // NetworkScreenHandler, private: ----------------------------------------------
@@ -177,9 +184,11 @@ void NetworkScreenHandler::HandleOnInputMethodChanged(const ListValue* args) {
 
 ListValue* NetworkScreenHandler::GetLanguageList() {
   const std::string app_locale = g_browser_process->GetApplicationLocale();
+  input_method::InputMethodManager* manager =
+      input_method::InputMethodManager::GetInstance();
   // GetSupportedInputMethods() never returns NULL.
   scoped_ptr<input_method::InputMethodDescriptors> descriptors(
-      input_method::GetSupportedInputMethods());
+      manager->GetSupportedInputMethods());
   ListValue* languages_list =
       CrosLanguageOptionsHandler::GetLanguageList(*descriptors);
   for (size_t i = 0; i < languages_list->GetSize(); ++i) {
@@ -216,8 +225,8 @@ ListValue* NetworkScreenHandler::GetInputMethods() {
   for (size_t i = 0; i < input_methods->size(); ++i) {
     DictionaryValue* input_method = new DictionaryValue;
     input_method->SetString("value", input_methods->at(i).id());
-    input_method->SetString("title",
-      WideToUTF16(InputMethodMenu::GetTextForMenu(input_methods->at(i))));
+    input_method->SetString(
+        "title", InputMethodMenu::GetTextForMenu(input_methods->at(i)));
     input_method->SetBoolean("selected",
         input_methods->at(i).id() == current_input_method_id);
     input_methods_list->Append(input_method);

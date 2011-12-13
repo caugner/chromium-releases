@@ -157,6 +157,8 @@ TEST_F(HostContentSettingsMapTest, IndividualSettings) {
       CONTENT_SETTING_ASK;
   desired_settings.settings[CONTENT_SETTINGS_TYPE_INTENTS] =
       CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_FULLSCREEN] =
+      CONTENT_SETTING_ASK;
   ContentSettings settings =
       host_content_settings_map->GetContentSettings(host, host);
   EXPECT_TRUE(SettingsEqual(desired_settings, settings));
@@ -368,6 +370,10 @@ TEST_F(HostContentSettingsMapTest, ObserveExceptionPref) {
   ContentSettingsPattern pattern =
        ContentSettingsPattern::FromString("[*.]example.com");
   GURL host("http://example.com");
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            host_content_settings_map->GetCookieContentSetting(
+                host, host, true));
 
   host_content_settings_map->SetContentSetting(
       pattern,
@@ -605,6 +611,8 @@ TEST_F(HostContentSettingsMapTest, NestedSettings) {
       CONTENT_SETTING_ASK;
   desired_settings.settings[CONTENT_SETTINGS_TYPE_INTENTS] =
       CONTENT_SETTING_ASK;
+  desired_settings.settings[CONTENT_SETTINGS_TYPE_FULLSCREEN] =
+      CONTENT_SETTING_ASK;
   ContentSettings settings =
       host_content_settings_map->GetContentSettings(host, host);
   EXPECT_TRUE(SettingsEqual(desired_settings, settings));
@@ -622,6 +630,8 @@ TEST_F(HostContentSettingsMapTest, NestedSettings) {
             settings.settings[CONTENT_SETTINGS_TYPE_COOKIES]);
   EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_INTENTS],
             settings.settings[CONTENT_SETTINGS_TYPE_INTENTS]);
+  EXPECT_EQ(desired_settings.settings[CONTENT_SETTINGS_TYPE_FULLSCREEN],
+            settings.settings[CONTENT_SETTINGS_TYPE_FULLSCREEN]);
 }
 
 TEST_F(HostContentSettingsMapTest, OffTheRecord) {
@@ -676,11 +686,6 @@ TEST_F(HostContentSettingsMapTest, OffTheRecord) {
 }
 
 TEST_F(HostContentSettingsMapTest, MigrateObsoletePrefs) {
-  // This feature is currently behind a flag.
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
-  AutoReset<CommandLine> auto_reset(cmd, *cmd);
-  cmd->AppendSwitch(switches::kEnableResourceContentSettings);
-
   TestingProfile profile;
   PrefService* prefs = profile.GetPrefs();
 
@@ -760,20 +765,15 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeOnly) {
 // If both Unicode and its punycode pattern exist, make sure we don't touch the
 // settings for the punycode, and that Unicode pattern gets deleted.
 TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeAndPunycode) {
-  // This feature is currently behind a flag.
-  CommandLine* cmd = CommandLine::ForCurrentProcess();
-  AutoReset<CommandLine> auto_reset(cmd, *cmd);
-  cmd->AppendSwitch(switches::kEnableResourceContentSettings);
-
   TestingProfile profile;
 
   scoped_ptr<Value> value(base::JSONReader::Read(
-      "{\"[*.]\\xC4\\x87ira.com,*\":{\"per_plugin\":{\"pluginx\":2}}}", false));
+      "{\"[*.]\\xC4\\x87ira.com,*\":{\"images\":1}}", false));
   profile.GetPrefs()->Set(prefs::kContentSettingsPatternPairs, *value);
 
   // Set punycode equivalent, with different setting.
   scoped_ptr<Value> puny_value(base::JSONReader::Read(
-      "{\"[*.]xn--ira-ppa.com,*\":{\"per_plugin\":{\"pluginy\":2}}}", false));
+      "{\"[*.]xn--ira-ppa.com,*\":{\"images\":2}}", false));
   profile.GetPrefs()->Set(prefs::kContentSettingsPatternPairs, *puny_value);
 
   // Initialize the content map.
@@ -783,35 +783,8 @@ TEST_F(HostContentSettingsMapTest, CanonicalizeExceptionsUnicodeAndPunycode) {
       profile.GetPrefs()->GetDictionary(prefs::kContentSettingsPatternPairs);
   std::string prefs_as_json;
   base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
-  EXPECT_STREQ("{\"[*.]xn--ira-ppa.com,*\":{\"per_plugin\":{\"pluginy\":2}}}",
+  EXPECT_STREQ("{\"[*.]xn--ira-ppa.com,*\":{\"images\":2}}",
                prefs_as_json.c_str());
-}
-
-TEST_F(HostContentSettingsMapTest, NonDefaultSettings) {
-  TestingProfile profile;
-  HostContentSettingsMap* host_content_settings_map =
-      profile.GetHostContentSettingsMap();
-
-  GURL host("http://example.com/");
-  ContentSettingsPattern pattern =
-       ContentSettingsPattern::FromString("[*.]example.com");
-
-  ContentSettings desired_settings(CONTENT_SETTING_DEFAULT);
-  ContentSettings settings =
-    host_content_settings_map->GetNonDefaultContentSettings(host, host);
-  EXPECT_TRUE(SettingsEqual(desired_settings, settings));
-
-  host_content_settings_map->SetContentSetting(
-      pattern,
-      ContentSettingsPattern::Wildcard(),
-      CONTENT_SETTINGS_TYPE_IMAGES,
-      "",
-      CONTENT_SETTING_BLOCK);
-  desired_settings.settings[CONTENT_SETTINGS_TYPE_IMAGES] =
-      CONTENT_SETTING_BLOCK;
-  settings =
-    host_content_settings_map->GetNonDefaultContentSettings(host, host);
-  EXPECT_TRUE(SettingsEqual(desired_settings, settings));
 }
 
 TEST_F(HostContentSettingsMapTest, ResourceIdentifier) {
@@ -830,7 +803,19 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifier) {
   std::string resource1("someplugin");
   std::string resource2("otherplugin");
 
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+  // If resource content settings are enabled, GetContentSettings should return
+  // the default values for all plugins
+  ContentSetting default_plugin_setting =
+      host_content_settings_map->GetDefaultContentSetting(
+          CONTENT_SETTINGS_TYPE_PLUGINS);
+  ContentSettings settings =
+      host_content_settings_map->GetContentSettings(host, host);
+  EXPECT_EQ(default_plugin_setting,
+            settings.settings[CONTENT_SETTINGS_TYPE_PLUGINS]);
+
+  // If no resource-specific content settings are defined, the setting should be
+  // DEFAULT.
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_PLUGINS, resource1));
 
@@ -843,17 +828,9 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifier) {
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_PLUGINS, resource1));
-  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
             host_content_settings_map->GetContentSetting(
                 host, host, CONTENT_SETTINGS_TYPE_PLUGINS, resource2));
-
-  // If resource content settings are enabled GetContentSettings should return
-  // CONTENT_SETTING_DEFAULT for content types that require resource
-  // identifiers.
-  ContentSettings settings =
-      host_content_settings_map->GetContentSettings(host, host);
-  EXPECT_EQ(CONTENT_SETTING_DEFAULT,
-            settings.settings[CONTENT_SETTINGS_TYPE_PLUGINS]);
 }
 
 TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {
@@ -892,7 +869,7 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {
       profile.GetPrefs()->GetDictionary(prefs::kContentSettingsPatternPairs);
   std::string prefs_as_json;
   base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
-  EXPECT_STREQ("{}", prefs_as_json.c_str());
+  EXPECT_EQ("{}", prefs_as_json);
 
   host_content_settings_map->SetContentSetting(
       item_pattern,
@@ -904,8 +881,8 @@ TEST_F(HostContentSettingsMapTest, ResourceIdentifierPrefs) {
   content_setting_prefs =
       profile.GetPrefs()->GetDictionary(prefs::kContentSettingsPatternPairs);
   base::JSONWriter::Write(content_setting_prefs, false, &prefs_as_json);
-  EXPECT_STREQ("{\"[*.]example.com,*\":{\"per_plugin\":{\"otherplugin\":2}}}",
-               prefs_as_json.c_str());
+  EXPECT_EQ("{\"[*.]example.com,*\":{\"per_plugin\":{\"otherplugin\":2}}}",
+            prefs_as_json);
 }
 
 // If a default-content-setting is managed, the managed value should be used

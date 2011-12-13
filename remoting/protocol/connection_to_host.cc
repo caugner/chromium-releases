@@ -6,10 +6,9 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/location.h"
 #include "base/message_loop_proxy.h"
 #include "remoting/base/constants.h"
-#include "remoting/jingle_glue/host_resolver.h"
-#include "remoting/jingle_glue/http_port_allocator.h"
 #include "remoting/jingle_glue/javascript_signal_strategy.h"
 #include "remoting/jingle_glue/xmpp_signal_strategy.h"
 #include "remoting/protocol/auth_token_utils.h"
@@ -18,6 +17,7 @@
 #include "remoting/protocol/host_control_sender.h"
 #include "remoting/protocol/input_sender.h"
 #include "remoting/protocol/jingle_session_manager.h"
+#include "remoting/protocol/pepper_session_manager.h"
 #include "remoting/protocol/video_reader.h"
 #include "remoting/protocol/video_stub.h"
 #include "remoting/protocol/util.h"
@@ -27,21 +27,16 @@ namespace protocol {
 
 ConnectionToHost::ConnectionToHost(
     base::MessageLoopProxy* message_loop,
-    talk_base::NetworkManager* network_manager,
-    talk_base::PacketSocketFactory* socket_factory,
-    HostResolverFactory* host_resolver_factory,
-    PortAllocatorSessionFactory* session_factory,
+    pp::Instance* pp_instance,
     bool allow_nat_traversal)
     : message_loop_(message_loop),
-      network_manager_(network_manager),
-      socket_factory_(socket_factory),
-      host_resolver_factory_(host_resolver_factory),
-      port_allocator_session_factory_(session_factory),
+      pp_instance_(pp_instance),
       allow_nat_traversal_(allow_nat_traversal),
       event_callback_(NULL),
       client_stub_(NULL),
       video_stub_(NULL),
-      state_(STATE_EMPTY),
+      state_(CONNECTING),
+      error_(OK),
       control_connected_(false),
       input_connected_(false),
       video_connected_(false) {
@@ -76,7 +71,6 @@ void ConnectionToHost::Connect(scoped_refptr<XmppProxy> xmpp_proxy,
   host_jid_ = host_jid;
   host_public_key_ = host_public_key;
 
-  // Initialize |signal_strategy_|.
   JavascriptSignalStrategy* strategy = new JavascriptSignalStrategy(your_jid);
   strategy->AttachXmppProxy(xmpp_proxy);
   signal_strategy_.reset(strategy);
@@ -108,22 +102,12 @@ void ConnectionToHost::Disconnect(const base::Closure& shutdown_task) {
 void ConnectionToHost::InitSession() {
   DCHECK(message_loop_->BelongsToCurrentThread());
 
-  // Initialize chromotocol |session_manager_|.
-  JingleSessionManager* session_manager =
-      JingleSessionManager::CreateSandboxed(
-          message_loop_, network_manager_.release(), socket_factory_.release(),
-          host_resolver_factory_.release(),
-          port_allocator_session_factory_.release());
-
-  // TODO(ajwong): Make this a command switch when we're more stable.
-  session_manager->set_allow_local_ips(true);
-
-  session_manager_.reset(session_manager);
+  session_manager_.reset(new PepperSessionManager(pp_instance_));
   session_manager_->Init(
       local_jid_, signal_strategy_.get(), this, NULL, "", allow_nat_traversal_);
 }
 
-const SessionConfig* ConnectionToHost::config() {
+const SessionConfig& ConnectionToHost::config() {
   return session_->config();
 }
 
@@ -137,7 +121,7 @@ void ConnectionToHost::OnStateChange(
     InitSession();
   } else if (state == SignalStrategy::StatusObserver::CLOSED) {
     VLOG(1) << "Connection closed.";
-    event_callback_->OnConnectionClosed(this);
+    CloseOnError(NETWORK_FAILURE);
   }
 }
 
@@ -156,7 +140,8 @@ void ConnectionToHost::OnSessionManagerInitialized() {
       protocol::GenerateSupportAuthToken(local_jid_, access_code_);
   session_.reset(session_manager_->Connect(
       host_jid_, host_public_key_, client_token, candidate_config,
-      NewCallback(this, &ConnectionToHost::OnSessionStateChange)));
+      base::Bind(&ConnectionToHost::OnSessionStateChange,
+                 base::Unretained(this))));
 
   // Set the shared-secret for securing SSL channels.
   session_->set_shared_secret(access_code_);
@@ -170,6 +155,20 @@ void ConnectionToHost::OnIncomingSession(
   *response = SessionManager::DECLINE;
 }
 
+void ConnectionToHost::OnClientAuthenticated() {
+  // TODO(hclam): Don't send anything except authentication request if it is
+  // not authenticated.
+  SetState(AUTHENTICATED, OK);
+
+  // Create and enable the input stub now that we're authenticated.
+  input_sender_.reset(
+      new InputSender(message_loop_, session_->event_channel()));
+}
+
+ConnectionToHost::State ConnectionToHost::state() const {
+  return state_;
+}
+
 void ConnectionToHost::OnSessionStateChange(
     Session::State state) {
   DCHECK(message_loop_->BelongsToCurrentThread());
@@ -177,17 +176,31 @@ void ConnectionToHost::OnSessionStateChange(
 
   switch (state) {
     case Session::FAILED:
-      CloseOnError();
+      switch (session_->error()) {
+        case Session::PEER_IS_OFFLINE:
+          CloseOnError(HOST_IS_OFFLINE);
+          break;
+        case Session::SESSION_REJECTED:
+          CloseOnError(SESSION_REJECTED);
+          break;
+        case Session::INCOMPATIBLE_PROTOCOL:
+          CloseOnError(INCOMPATIBLE_PROTOCOL);
+          break;
+        case Session::CHANNEL_CONNECTION_ERROR:
+          CloseOnError(NETWORK_FAILURE);
+          break;
+        case Session::OK:
+          DLOG(FATAL) << "Error code isn't set";
+          CloseOnError(NETWORK_FAILURE);
+      }
       break;
 
     case Session::CLOSED:
-      state_ = STATE_CLOSED;
       CloseChannels();
-      event_callback_->OnConnectionClosed(this);
+      SetState(CLOSED, OK);
       break;
 
     case Session::CONNECTED:
-      // Initialize reader and writer.
       video_reader_.reset(
           VideoReader::Create(message_loop_, session_->config()));
       video_reader_->Init(
@@ -197,7 +210,6 @@ void ConnectionToHost::OnSessionStateChange(
       break;
 
     case Session::CONNECTED_CHANNELS:
-      state_ = STATE_CONNECTED;
       host_control_sender_.reset(
           new HostControlSender(message_loop_, session_->control_channel()));
       dispatcher_.reset(new ClientMessageDispatcher());
@@ -217,7 +229,7 @@ void ConnectionToHost::OnSessionStateChange(
 void ConnectionToHost::OnVideoChannelInitialized(bool successful) {
   if (!successful) {
     LOG(ERROR) << "Failed to connect video channel";
-    CloseOnError();
+    CloseOnError(NETWORK_FAILURE);
     return;
   }
 
@@ -226,14 +238,15 @@ void ConnectionToHost::OnVideoChannelInitialized(bool successful) {
 }
 
 void ConnectionToHost::NotifyIfChannelsReady() {
-  if (control_connected_ && input_connected_ && video_connected_)
-    event_callback_->OnConnectionOpened(this);
+  if (control_connected_ && input_connected_ && video_connected_ &&
+      state_ == CONNECTING) {
+    SetState(CONNECTED, OK);
+  }
 }
 
-void ConnectionToHost::CloseOnError() {
-  state_ = STATE_FAILED;
+void ConnectionToHost::CloseOnError(Error error) {
   CloseChannels();
-  event_callback_->OnConnectionFailed(this);
+  SetState(FAILED, error);
 }
 
 void ConnectionToHost::CloseChannels() {
@@ -246,18 +259,16 @@ void ConnectionToHost::CloseChannels() {
   video_reader_.reset();
 }
 
-void ConnectionToHost::OnClientAuthenticated() {
-  // TODO(hclam): Don't send anything except authentication request if it is
-  // not authenticated.
-  state_ = STATE_AUTHENTICATED;
+void ConnectionToHost::SetState(State state, Error error) {
+  DCHECK(message_loop_->BelongsToCurrentThread());
+  // |error| should be specified only when |state| is set to FAILED.
+  DCHECK(state == FAILED || error == OK);
 
-  // Create and enable the input stub now that we're authenticated.
-  input_sender_.reset(
-      new InputSender(message_loop_, session_->event_channel()));
-}
-
-ConnectionToHost::State ConnectionToHost::state() const {
-  return state_;
+  if (state != state_) {
+    state_ = state;
+    error_ = error;
+    event_callback_->OnConnectionState(state_, error_);
+  }
 }
 
 }  // namespace protocol

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/string_util.h"
@@ -22,7 +23,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_tabs_module.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/instant/instant_controller.h"
 #include "chrome/browser/profiles/profile.h"
@@ -54,7 +55,6 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
-#include "content/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -166,7 +166,9 @@ LocationBarViewGtk::LocationBarViewGtk(Browser* browser)
       toolbar_model_(browser->toolbar_model()),
       browser_(browser),
       disposition_(CURRENT_TAB),
-      transition_(PageTransition::TYPED | PageTransition::FROM_ADDRESS_BAR),
+      transition_(content::PageTransitionFromInt(
+          content::PAGE_TRANSITION_TYPED |
+          content::PAGE_TRANSITION_FROM_ADDRESS_BAR)),
       first_run_bubble_(this),
       popup_window_mode_(false),
       theme_service_(NULL),
@@ -462,12 +464,13 @@ void LocationBarViewGtk::Update(const TabContents* contents) {
 
 void LocationBarViewGtk::OnAutocompleteAccept(const GURL& url,
     WindowOpenDisposition disposition,
-    PageTransition::Type transition,
+    content::PageTransition transition,
     const GURL& alternate_nav_url) {
   if (url.is_valid()) {
     location_input_ = UTF8ToUTF16(url.spec());
     disposition_ = disposition;
-    transition_ = transition | PageTransition::FROM_ADDRESS_BAR;
+    transition_ = content::PageTransitionFromInt(
+        transition | content::PAGE_TRANSITION_FROM_ADDRESS_BAR);
 
     if (command_updater_) {
       if (!alternate_nav_url.is_valid()) {
@@ -577,9 +580,11 @@ TabContentsWrapper* LocationBarViewGtk::GetTabContentsWrapper() const {
 void LocationBarViewGtk::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
   // We need the browser window to be shown before we can show the bubble, but
   // we get called before that's happened.
-  Task* task = first_run_bubble_.NewRunnableMethod(
-      &LocationBarViewGtk::ShowFirstRunBubbleInternal, bubble_type);
-  MessageLoop::current()->PostTask(FROM_HERE, task);
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&LocationBarViewGtk::ShowFirstRunBubbleInternal,
+                 first_run_bubble_.GetWeakPtr(),
+                 bubble_type));
 }
 
 void LocationBarViewGtk::SetSuggestedText(const string16& text,
@@ -595,7 +600,7 @@ WindowOpenDisposition LocationBarViewGtk::GetWindowOpenDisposition() const {
   return disposition_;
 }
 
-PageTransition::Type LocationBarViewGtk::GetPageTransition() const {
+content::PageTransition LocationBarViewGtk::GetPageTransition() const {
   return transition_;
 }
 
@@ -1050,7 +1055,7 @@ gboolean LocationBarViewGtk::OnIconReleased(GtkWidget* sender,
       return FALSE;
 
     tab->OpenURL(OpenURLParams(
-        url, GURL(), CURRENT_TAB, PageTransition::TYPED));
+        url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
     return TRUE;
   }
 
@@ -1226,7 +1231,7 @@ LocationBarViewGtk::ContentSettingImageViewGtk::ContentSettingImageViewGtk(
       parent_(parent),
       content_setting_bubble_(NULL),
       animation_(this),
-      method_factory_(this) {
+      weak_factory_(this) {
   gtk_alignment_set_padding(GTK_ALIGNMENT(alignment_.get()), 1, 1, 0, 0);
   gtk_container_add(GTK_CONTAINER(alignment_.get()), event_box_.get());
 
@@ -1338,9 +1343,10 @@ void LocationBarViewGtk::ContentSettingImageViewGtk::AnimationProgressed(
 void LocationBarViewGtk::ContentSettingImageViewGtk::AnimationEnded(
     const ui::Animation* animation) {
   if (animation_.IsShowing()) {
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &ContentSettingImageViewGtk::CloseAnimation),
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&ContentSettingImageViewGtk::CloseAnimation,
+                   weak_factory_.GetWeakPtr()),
         kContentSettingImageDisplayTime);
   } else {
     gtk_widget_hide(label_.get());

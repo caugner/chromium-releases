@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/status/memory_menu_button.h"
 
+#include "base/utf_string_conversions.h"
 #include "base/file_util.h"
 #include "base/process_util.h"  // GetSystemMemoryInfo
 #include "base/stringprintf.h"
@@ -13,6 +14,7 @@
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/controls/menu/menu_runner.h"
@@ -77,46 +79,52 @@ void MemoryMenuButton::UpdateText() {
   // represents memory that has been dynamically allocated to a process.
   // It thus approximates heap memory usage across all processes.
   int anon_kb = meminfo_->active_anon + meminfo_->inactive_anon;
-  std::wstring label = base::StringPrintf(L"%d MB (%d)",
-                                          anon_kb / 1024,
-                                          renderer_kills_);
-  SetText(label);
-  std::wstring tooltip = base::StringPrintf(
-      L"%d MB allocated (anonymous)\n"
-      L"%d renderer kill(s)",
-      anon_kb / 1024,
-      renderer_kills_);
-  SetTooltipText(tooltip);
+  std::string label = base::StringPrintf("%d MB (%d)",
+                                         anon_kb / 1024,
+                                         renderer_kills_);
+  SetText(ASCIIToUTF16(label));
+  std::string tooltip = base::StringPrintf("%d MB allocated (anonymous)\n"
+                                           "%d renderer kill(s)",
+                                           anon_kb / 1024,
+                                           renderer_kills_);
+  SetTooltipText(ASCIIToUTF16(tooltip));
   SchedulePaint();
 }
 
 // MemoryMenuButton, views::MenuDelegate implementation:
-std::wstring MemoryMenuButton::GetLabel(int id) const {
+string16 MemoryMenuButton::GetLabel(int id) const {
+  std::string label;
   switch (id) {
     case MEM_TOTAL_ITEM:
-      return StringPrintf(L"%d MB total", meminfo_->total / 1024);
+      label = base::StringPrintf("%d MB total", meminfo_->total / 1024);
+      break;
     case MEM_FREE_ITEM:
-      return StringPrintf(L"%d MB free", meminfo_->free / 1024);
+      label = base::StringPrintf("%d MB free", meminfo_->free / 1024);
+      break;
     case MEM_BUFFERS_ITEM:
-      return StringPrintf(L"%d MB buffers", meminfo_->buffers / 1024);
+      label = base::StringPrintf("%d MB buffers", meminfo_->buffers / 1024);
+      break;
     case MEM_CACHE_ITEM:
-      return StringPrintf(L"%d MB cache", meminfo_->cached / 1024);
+      label = base::StringPrintf("%d MB cache", meminfo_->cached / 1024);
+      break;
     case SHMEM_ITEM:
-      return StringPrintf(L"%d MB shmem", meminfo_->shmem / 1024);
+      label = base::StringPrintf("%d MB shmem", meminfo_->shmem / 1024);
+      break;
     case PURGE_MEMORY_ITEM:
-      return L"Purge memory";
+      return ASCIIToUTF16("Purge memory");
 #if defined(USE_TCMALLOC)
     case TOGGLE_PROFILING_ITEM:
       if (!IsHeapProfilerRunning())
-        return L"Start profiling";
+        return ASCIIToUTF16("Start profiling");
       else
-        return L"Stop profiling";
+        return ASCIIToUTF16("Stop profiling");
     case DUMP_PROFILING_ITEM:
-        return L"Dump profile";
+        return ASCIIToUTF16("Dump profile");
 #endif
     default:
-      return std::wstring();
+      return string16();
   }
+  return UTF8ToUTF16(label);
 }
 
 bool MemoryMenuButton::IsCommandEnabled(int id) const {

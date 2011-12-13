@@ -39,6 +39,11 @@ namespace extension_manifest_keys {
   extern const char* kIncognito;
   extern const char* kIncludeGlobs;
   extern const char* kInputComponents;
+  extern const char* kIntents;
+  extern const char* kIntentType;
+  extern const char* kIntentPath;
+  extern const char* kIntentTitle;
+  extern const char* kIntentDisposition;
   extern const char* kIsolation;
   extern const char* kJs;
   extern const char* kKeycode;
@@ -90,8 +95,6 @@ namespace extension_manifest_keys {
   extern const char* kThemeDisplayProperties;
   extern const char* kThemeImages;
   extern const char* kThemeTints;
-  extern const char* kToolstripPath;
-  extern const char* kToolstrips;
   extern const char* kTtsEngine;
   extern const char* kTtsGenderFemale;
   extern const char* kTtsGenderMale;
@@ -116,6 +119,8 @@ namespace extension_manifest_keys {
 namespace extension_manifest_values {
   extern const char* kIncognitoSplit;
   extern const char* kIncognitoSpanning;
+  extern const char* kIntentDispositionWindow;
+  extern const char* kIntentDispositionInline;
   extern const char* kIsolatedStorage;
   extern const char* kLaunchContainerPanel;
   extern const char* kLaunchContainerTab;
@@ -132,6 +137,7 @@ namespace extension_manifest_errors {
   extern const char* kAppsNotEnabled;
   extern const char* kBackgroundPermissionNeeded;
   extern const char* kCannotAccessPage;
+  extern const char* kCannotChangeExtensionID;
   extern const char* kCannotClaimAllHostsInExtent;
   extern const char* kCannotClaimAllURLsInExtent;
   extern const char* kCannotScriptGallery;
@@ -140,7 +146,6 @@ namespace extension_manifest_errors {
   extern const char* kDevToolsExperimental;
   extern const char* kDisabledByPolicy;
   extern const char* kExperimentalFlagRequired;
-  extern const char* kExperimentalFeature;
   extern const char* kExpectString;
   extern const char* kHostedAppsCannotIncludeExtensionFeatures;
   extern const char* kInvalidAllFrames;
@@ -177,6 +182,12 @@ namespace extension_manifest_errors {
   extern const char* kInvalidInputComponentShortcutKey;
   extern const char* kInvalidInputComponentShortcutKeycode;
   extern const char* kInvalidInputComponentType;
+  extern const char* kInvalidIntent;
+  extern const char* kInvalidIntentDisposition;
+  extern const char* kInvalidIntentPath;
+  extern const char* kInvalidIntents;
+  extern const char* kInvalidIntentType;
+  extern const char* kInvalidIntentTitle;
   extern const char* kInvalidIsolation;
   extern const char* kInvalidIsolationValue;
   extern const char* kInvalidJs;
@@ -234,8 +245,6 @@ namespace extension_manifest_errors {
   extern const char* kInvalidThemeImages;
   extern const char* kInvalidThemeImagesMissing;
   extern const char* kInvalidThemeTints;
-  extern const char* kInvalidToolstrip;
-  extern const char* kInvalidToolstrips;
   extern const char* kInvalidTts;
   extern const char* kInvalidTtsVoices;
   extern const char* kInvalidTtsVoicesEventTypes;
@@ -261,6 +270,7 @@ namespace extension_manifest_errors {
   extern const char* kMissingFile;
   extern const char* kMultipleOverrides;
   extern const char* kNoWildCardsInPaths;
+  extern const char* kPermissionNotAllowed;
   extern const char* kOneUISurfaceOnly;
   extern const char* kReservedMessageFound;
   extern const char* kSidebarExperimental;
@@ -292,11 +302,6 @@ namespace extension_urls {
   // |secure| parameter will be ignored if the update URL is overriden with
   // --apps-gallery-update-url.
   GURL GetWebstoreUpdateUrl(bool secure);
-
-  // Return the URL for an extension/app's .crx file that is hosted by the
-  // webstore.
-  GURL GetWebstoreInstallUrl(const std::string& extension_id,
-                             const std::string& locale);
 
   // The greatest common prefixes of the main extensions gallery's browse and
   // download URLs.
@@ -449,6 +454,26 @@ namespace extension_misc {
     UNLOAD_REASON_DISABLE,    // Extension is being disabled.
     UNLOAD_REASON_UPDATE,     // Extension is being updated to a newer version.
     UNLOAD_REASON_UNINSTALL,  // Extension is being uninstalled.
+  };
+
+  // User actions on the sync promo (aka "Sign in to Chrome").
+  enum SyncPromoBuckets {
+    SYNC_PROMO_VIEWED,
+    SYNC_PROMO_LEARN_MORE_CLICKED,
+    SYNC_PROMO_ACCOUNT_HELP_CLICKED,
+    SYNC_PROMO_CREATE_ACCOUNT_CLICKED,
+    SYNC_PROMO_SKIP_CLICKED,
+    SYNC_PROMO_SIGN_IN_ATTEMPTED,
+    SYNC_PROMO_SIGNED_IN_SUCCESSFULLY,
+    SYNC_PROMO_ADVANCED_CLICKED,
+    SYNC_PROMO_ENCRYPTION_HELP_CLICKED,
+    SYNC_PROMO_CANCELLED_AFTER_SIGN_IN,
+    SYNC_PROMO_CONFIRMED_AFTER_SIGN_IN,
+    SYNC_PROMO_CLOSED_TAB,
+    SYNC_PROMO_CLOSED_WINDOW,
+    SYNC_PROMO_BUCKET_BOUNDARY,
+    SYNC_PROMO_FIRST_VALID_JS_ACTION = SYNC_PROMO_LEARN_MORE_CLICKED,
+    SYNC_PROMO_LAST_VALID_JS_ACTION = SYNC_PROMO_CONFIRMED_AFTER_SIGN_IN,
   };
 } // extension_misc
 

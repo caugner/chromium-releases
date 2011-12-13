@@ -6,12 +6,12 @@
 
 #include "base/platform_file.h"
 #include "content/common/view_messages.h"
-#include "content/renderer/render_view.h"
+#include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPageSerializer.h"
 
-MHTMLGenerator::MHTMLGenerator(RenderView* render_view)
-    : RenderViewObserver(render_view),
+MHTMLGenerator::MHTMLGenerator(RenderViewImpl* render_view)
+    : content::RenderViewObserver(render_view),
       file_(base::kInvalidPlatformFileValue) {
 }
 
@@ -33,20 +33,20 @@ void MHTMLGenerator::OnSavePageAsMHTML(
   base::PlatformFile file =
       IPC::PlatformFileForTransitToPlatformFile(file_for_transit);
   file_ = file;
-  bool success = GenerateMHTML();
-  NotifyBrowser(job_id, success);
+  int64 size = GenerateMHTML();
+  NotifyBrowser(job_id, size);
 }
 
-void MHTMLGenerator::NotifyBrowser(int job_id, bool success) {
-  render_view()->Send(new ViewHostMsg_SavedPageAsMHTML(job_id, success));
+void MHTMLGenerator::NotifyBrowser(int job_id, int64 data_size) {
+  render_view()->Send(new ViewHostMsg_SavedPageAsMHTML(job_id, data_size));
   file_ = base::kInvalidPlatformFileValue;
 }
 
 // TODO(jcivelli): write the chunks in deferred tasks to give a chance to the
 //                 message loop to process other events.
-bool MHTMLGenerator::GenerateMHTML() {
+int64 MHTMLGenerator::GenerateMHTML() {
   WebKit::WebCString mhtml =
-      WebKit::WebPageSerializer::serializeToMHTML(render_view()->webview());
+      WebKit::WebPageSerializer::serializeToMHTML(render_view()->GetWebView());
   const size_t chunk_size = 1024;
   const char* data = mhtml.data();
   size_t total_bytes_written = 0;
@@ -57,8 +57,8 @@ bool MHTMLGenerator::GenerateMHTML() {
                                                 data + total_bytes_written,
                                                 copy_size);
     if (bytes_written == -1)
-      return false;
+      return -1;
     total_bytes_written += bytes_written;
   }
-  return true;
+  return total_bytes_written;
 }

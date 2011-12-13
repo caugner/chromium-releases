@@ -5,12 +5,11 @@
 #include "chrome/browser/sync/sessions/sync_session.h"
 
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
-#include "base/tracked.h"
 #include "chrome/browser/sync/engine/conflict_resolver.h"
 #include "chrome/browser/sync/engine/mock_model_safe_workers.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
-#include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
@@ -38,7 +37,7 @@ class SyncSessionTest : public testing::Test,
 
   virtual void SetUp() {
     context_.reset(new SyncSessionContext(NULL, NULL, this,
-        std::vector<SyncEngineEventListener*>()));
+        std::vector<SyncEngineEventListener*>(), NULL));
     routes_.clear();
     routes_[syncable::BOOKMARKS] = GROUP_UI;
     routes_[syncable::AUTOFILL] = GROUP_UI;
@@ -123,7 +122,7 @@ TEST_F(SyncSessionTest, SetWriteTransaction) {
   db.SetUp();
   session_.reset();
   context_.reset(new SyncSessionContext(NULL, db.manager(), this,
-      std::vector<SyncEngineEventListener*>()));
+      std::vector<SyncEngineEventListener*>(), NULL));
   session_.reset(MakeSession());
   context_->set_account_name(db.name());
   syncable::ScopedDirLookup dir(context_->directory_manager(),

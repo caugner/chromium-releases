@@ -4,10 +4,16 @@
 
 #include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
+#include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/browser/web_resource/notification_promo.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/common/notification_service.h"
@@ -21,24 +27,57 @@ static const int kIntroDisplayMax = 10;
 static const char kNTP4IntroURL[] =
   "http://www.google.com/support/chrome/bin/answer.py?answer=95451";
 
-void NewTabPageHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("closePromo", NewCallback(
-      this, &NewTabPageHandler::HandleClosePromo));
-  web_ui_->RegisterMessageCallback("pageSelected", NewCallback(
-      this, &NewTabPageHandler::HandlePageSelected));
-  web_ui_->RegisterMessageCallback("introMessageDismissed", NewCallback(
-      this, &NewTabPageHandler::HandleIntroMessageDismissed));
-  web_ui_->RegisterMessageCallback("introMessageSeen", NewCallback(
-      this, &NewTabPageHandler::HandleIntroMessageSeen));
+WebUIMessageHandler* NewTabPageHandler::Attach(WebUI* web_ui) {
+  // Record an open of the NTP with its default page type.
+  PrefService* prefs = Profile::FromWebUI(web_ui)->GetPrefs();
+  int shown_page_type = prefs->GetInteger(prefs::kNTPShownPage) >>
+      kPageIdOffset;
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.DefaultPageType",
+                            shown_page_type, 4);
+
+  static bool default_apps_trial_exists =
+      base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name);
+  if (default_apps_trial_exists) {
+    UMA_HISTOGRAM_ENUMERATION(
+        base::FieldTrial::MakeName("NewTabPage.DefaultPageType",
+                                   kDefaultAppsTrial_Name),
+        shown_page_type, 4);
+  }
+
+  return WebUIMessageHandler::Attach(web_ui);
 }
 
-void NewTabPageHandler::HandleClosePromo(const ListValue* args) {
-  Profile::FromWebUI(web_ui_)->GetPrefs()->SetBoolean(prefs::kNTPPromoClosed,
-                                                      true);
-  NotificationService* service = NotificationService::current();
-  service->Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
-                  Source<NewTabPageHandler>(this),
-                  NotificationService::NoDetails());
+void NewTabPageHandler::RegisterMessages() {
+  web_ui()->RegisterMessageCallback("closeNotificationPromo",
+      base::Bind(&NewTabPageHandler::HandleCloseNotificationPromo,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("notificationPromoViewed",
+      base::Bind(&NewTabPageHandler::HandleNotificationPromoViewed,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("pageSelected",
+      base::Bind(&NewTabPageHandler::HandlePageSelected,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("introMessageDismissed",
+      base::Bind(&NewTabPageHandler::HandleIntroMessageDismissed,
+                 base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("introMessageSeen",
+      base::Bind(&NewTabPageHandler::HandleIntroMessageSeen,
+                 base::Unretained(this)));
+}
+
+void NewTabPageHandler::HandleCloseNotificationPromo(const ListValue* args) {
+  NotificationPromo notification_promo(
+      Profile::FromWebUI(web_ui())->GetPrefs(), NULL);
+  notification_promo.HandleClosed();
+  NotifyPromoResourceChanged();
+}
+
+void NewTabPageHandler::HandleNotificationPromoViewed(const ListValue* args) {
+  NotificationPromo notification_promo(
+      Profile::FromWebUI(web_ui_)->GetPrefs(), NULL);
+  if (notification_promo.HandleViewed()) {
+    NotifyPromoResourceChanged();
+  }
 }
 
 void NewTabPageHandler::HandlePageSelected(const ListValue* args) {
@@ -50,17 +89,30 @@ void NewTabPageHandler::HandlePageSelected(const ListValue* args) {
   CHECK(args->GetDouble(1, &index_double));
   int index = static_cast<int>(index_double);
 
-  PrefService* prefs = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   prefs->SetInteger(prefs::kNTPShownPage, page_id | index);
+
+  int shown_page_type = page_id >> kPageIdOffset;
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.SelectedPageType",
+                            shown_page_type, 4);
+
+  static bool default_apps_trial_exists =
+      base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name);
+  if (default_apps_trial_exists) {
+    UMA_HISTOGRAM_ENUMERATION(
+        base::FieldTrial::MakeName("NewTabPage.SelectedPageType",
+                                   kDefaultAppsTrial_Name),
+        shown_page_type, 4);
+  }
 }
 
 void NewTabPageHandler::HandleIntroMessageDismissed(const ListValue* args) {
-  PrefService* prefs = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   prefs->SetInteger(prefs::kNTP4IntroDisplayCount, kIntroDisplayMax + 1);
 }
 
 void NewTabPageHandler::HandleIntroMessageSeen(const ListValue* args) {
-  PrefService* prefs = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
   int intro_displays = prefs->GetInteger(prefs::kNTP4IntroDisplayCount);
   prefs->SetInteger(prefs::kNTP4IntroDisplayCount, intro_displays + 1);
 }
@@ -102,4 +154,11 @@ void NewTabPageHandler::GetLocalizedValues(Profile* profile,
 // static
 void NewTabPageHandler::DismissIntroMessage(PrefService* prefs) {
   prefs->SetInteger(prefs::kNTP4IntroDisplayCount, kIntroDisplayMax + 1);
+}
+
+void NewTabPageHandler::NotifyPromoResourceChanged() {
+  NotificationService* service = NotificationService::current();
+  service->Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
+                  Source<NewTabPageHandler>(this),
+                  NotificationService::NoDetails());
 }

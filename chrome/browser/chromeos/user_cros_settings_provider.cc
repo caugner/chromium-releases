@@ -7,15 +7,16 @@
 #include <map>
 #include <set>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback.h"
 #include "base/hash_tables.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/string_util.h"
-#include "base/task.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/login_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
@@ -80,8 +81,8 @@ class MigrationHelper : public NotificationObserver {
   }
 
   void MigrateValues(void) {
-    ownership_checker_.reset(new OwnershipStatusChecker(NewCallback(
-        this, &MigrationHelper::DoMigrateValues)));
+    ownership_checker_.reset(new OwnershipStatusChecker(
+        base::Bind(&MigrationHelper::DoMigrateValues, base::Unretained(this))));
   }
 
   // NotificationObserver overrides:
@@ -269,12 +270,12 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
     return false;
   }
 
-  bool RequestTrustedEntity(const std::string& name, Task* callback) {
+  bool RequestTrustedEntity(const std::string& name,
+                            const base::Closure& callback) {
     if (RequestTrustedEntity(name)) {
-      delete callback;
       return true;
     } else {
-      if (callback)
+      if (!callback.is_null())
         callbacks_[name].push_back(callback);
       return false;
     }
@@ -491,7 +492,7 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
     }
     prefs->SetBoolean((name + kTrustedSuffix).c_str(), true);
     {
-      std::vector<Task*>& callbacks_vector = callbacks_[name];
+      std::vector<base::Closure>& callbacks_vector = callbacks_[name];
       for (size_t i = 0; i < callbacks_vector.size(); ++i)
         MessageLoop::current()->PostTask(FROM_HERE, callbacks_vector[i]);
       callbacks_vector.clear();
@@ -533,7 +534,7 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
   }
 
   // Pending callbacks that need to be invoked after settings verification.
-  base::hash_map< std::string, std::vector< Task* > > callbacks_;
+  base::hash_map<std::string, std::vector<base::Closure> > callbacks_;
 
   OwnershipService* ownership_service_;
   MigrationHelper migration_helper_;
@@ -552,10 +553,6 @@ class UserCrosSettingsTrust : public SignedSettingsHelper::Callback {
 
 }  // namespace chromeos
 
-// We want to use NewRunnableMethod with this class but need to disable
-// reference counting since it is singleton.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::UserCrosSettingsTrust);
-
 namespace chromeos {
 
 UserCrosSettingsProvider::UserCrosSettingsProvider() {
@@ -573,33 +570,38 @@ void UserCrosSettingsProvider::RegisterPrefs(PrefService* local_state) {
     RegisterSetting(local_state, kListSettings[i]);
 }
 
-bool UserCrosSettingsProvider::RequestTrustedAllowGuest(Task* callback) {
+bool UserCrosSettingsProvider::RequestTrustedAllowGuest(
+    const base::Closure& callback) {
   return UserCrosSettingsTrust::GetInstance()->RequestTrustedEntity(
       kAccountsPrefAllowGuest, callback);
 }
 
-bool UserCrosSettingsProvider::RequestTrustedAllowNewUser(Task* callback) {
+bool UserCrosSettingsProvider::RequestTrustedAllowNewUser(
+    const base::Closure& callback) {
   return UserCrosSettingsTrust::GetInstance()->RequestTrustedEntity(
       kAccountsPrefAllowNewUser, callback);
 }
 
-bool UserCrosSettingsProvider::RequestTrustedShowUsersOnSignin(Task* callback) {
+bool UserCrosSettingsProvider::RequestTrustedShowUsersOnSignin(
+    const base::Closure& callback) {
   return UserCrosSettingsTrust::GetInstance()->RequestTrustedEntity(
       kAccountsPrefShowUserNamesOnSignIn, callback);
 }
 
 bool UserCrosSettingsProvider::RequestTrustedDataRoamingEnabled(
-    Task* callback) {
+    const base::Closure& callback) {
   return UserCrosSettingsTrust::GetInstance()->RequestTrustedEntity(
       kSignedDataRoamingEnabled, callback);
 }
 
-bool UserCrosSettingsProvider::RequestTrustedOwner(Task* callback) {
+bool UserCrosSettingsProvider::RequestTrustedOwner(
+    const base::Closure& callback) {
   return UserCrosSettingsTrust::GetInstance()->RequestTrustedEntity(
       kDeviceOwner, callback);
 }
 
-bool UserCrosSettingsProvider::RequestTrustedReportingEnabled(Task* callback) {
+bool UserCrosSettingsProvider::RequestTrustedReportingEnabled(
+    const base::Closure& callback) {
   return UserCrosSettingsTrust::GetInstance()->RequestTrustedEntity(
       kStatsReportingPref, callback);
 }
@@ -718,7 +720,7 @@ bool UserCrosSettingsProvider::Get(const std::string& path,
   return false;
 }
 
-bool UserCrosSettingsProvider::HandlesSetting(const std::string& path) {
+bool UserCrosSettingsProvider::HandlesSetting(const std::string& path) const {
   return ::StartsWithASCII(path, "cros.accounts.", true) ||
       ::StartsWithASCII(path, "cros.signed.", true) ||
       ::StartsWithASCII(path, "cros.metrics.", true) ||

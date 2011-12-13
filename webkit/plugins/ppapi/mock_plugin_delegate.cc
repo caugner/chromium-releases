@@ -7,6 +7,7 @@
 #include "base/message_loop_proxy.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
+#include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 namespace webkit {
 namespace ppapi {
@@ -17,7 +18,15 @@ MockPluginDelegate::MockPluginDelegate() {
 MockPluginDelegate::~MockPluginDelegate() {
 }
 
-void MockPluginDelegate::PluginFocusChanged(bool focused) {
+void MockPluginDelegate::PluginFocusChanged(PluginInstance* instance,
+                                            bool focused) {
+}
+
+void MockPluginDelegate::PluginTextInputTypeChanged(PluginInstance* instance) {
+}
+
+void MockPluginDelegate::PluginRequestedCancelComposition(
+    PluginInstance* instance) {
 }
 
 void MockPluginDelegate::PluginCrashed(PluginInstance* instance) {
@@ -84,12 +93,12 @@ bool MockPluginDelegate::RunFileChooser(
 
 bool MockPluginDelegate::AsyncOpenFile(const FilePath& path,
                                        int flags,
-                                       AsyncOpenFileCallback* callback) {
+                                       const AsyncOpenFileCallback& callback) {
   return false;
 }
 
 bool MockPluginDelegate::AsyncOpenFileSystemURL(
-    const GURL& path, int flags, AsyncOpenFileCallback* callback) {
+    const GURL& path, int flags, const AsyncOpenFileCallback& callback) {
   return false;
 }
 
@@ -143,7 +152,7 @@ bool MockPluginDelegate::ReadDirectory(
 
 void MockPluginDelegate::QueryAvailableSpace(
     const GURL& origin, quota::StorageType type,
-    AvailableSpaceCallback* callback) {
+    const AvailableSpaceCallback& callback) {
 }
 
 void MockPluginDelegate::WillUpdateFile(const GURL& file_path) {
@@ -259,10 +268,6 @@ void MockPluginDelegate::SetContentRestriction(int restrictions) {
 void MockPluginDelegate::SaveURLAs(const GURL& url) {
 }
 
-content::P2PSocketDispatcher* MockPluginDelegate::GetP2PSocketDispatcher() {
-  return NULL;
-}
-
 webkit_glue::P2PTransport* MockPluginDelegate::CreateP2PTransport() {
   return NULL;
 }
@@ -282,6 +287,24 @@ base::SharedMemory* MockPluginDelegate::CreateAnonymousSharedMemory(
 
 ::ppapi::Preferences MockPluginDelegate::GetPreferences() {
   return ::ppapi::Preferences();
+}
+
+void MockPluginDelegate::LockMouse(PluginInstance* instance) {
+  instance->OnLockMouseACK(PP_ERROR_FAILED);
+}
+
+void MockPluginDelegate::UnlockMouse(PluginInstance* instance) {
+}
+
+void MockPluginDelegate::DidChangeCursor(PluginInstance* instance,
+                                         const WebKit::WebCursorInfo& cursor) {
+}
+
+void MockPluginDelegate::DidReceiveMouseEvent(PluginInstance* instance) {
+}
+
+bool MockPluginDelegate::IsInFullscreenMode() {
+  return false;
 }
 
 }  // namespace ppapi

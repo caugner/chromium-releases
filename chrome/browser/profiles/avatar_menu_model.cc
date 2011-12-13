@@ -5,17 +5,21 @@
 #include "chrome/browser/profiles/avatar_menu_model.h"
 
 #include "base/stl_util.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu_model_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_init.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
 #include "content/common/notification_service.h"
+#include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image.h"
 
 namespace {
@@ -26,12 +30,9 @@ class ProfileSwitchObserver : public ProfileManagerObserver {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     if (status == STATUS_INITIALIZED) {
-      DCHECK(profile);
-      Browser* browser = BrowserList::FindTabbedBrowser(profile, false);
-      if (browser)
-        browser->window()->Activate();
-      else
-        Browser::NewWindowWithProfile(profile);
+      ProfileManager::NewWindowWithProfile(profile,
+                                           BrowserInit::IS_NOT_PROCESS_STARTUP,
+                                           BrowserInit::IS_NOT_FIRST_RUN);
     }
   }
 
@@ -64,6 +65,7 @@ AvatarMenuModel::~AvatarMenuModel() {
 
 AvatarMenuModel::Item::Item(size_t model_index, const gfx::Image& icon)
     : icon(icon),
+      active(false),
       model_index(model_index) {
 }
 
@@ -81,8 +83,16 @@ void AvatarMenuModel::SwitchToProfile(size_t index) {
 }
 
 void AvatarMenuModel::EditProfile(size_t index) {
-  DCHECK(browser_);
-  browser_->ShowOptionsTab(chrome::kPersonalOptionsSubPage);
+  Browser* browser = browser_;
+  if (!browser) {
+    Profile* profile = g_browser_process->profile_manager()->GetProfileByPath(
+        profile_info_->GetPathOfProfileAtIndex(GetItemAt(index).model_index));
+    browser = Browser::Create(profile);
+  }
+  std::string page = chrome::kManageProfileSubPage;
+  page += "#";
+  page += base::IntToString(static_cast<int>(index));
+  browser->ShowOptionsTab(page);
 }
 
 void AvatarMenuModel::AddNewProfile() {
@@ -106,6 +116,12 @@ void AvatarMenuModel::Observe(int type,
   observer_->OnAvatarMenuModelChanged(this);
 }
 
+// static
+bool AvatarMenuModel::ShouldShowAvatarMenu() {
+  return ProfileManager::IsMultipleProfilesEnabled() &&
+      g_browser_process->profile_manager()->GetNumberOfProfiles() > 1;
+}
+
 void AvatarMenuModel::RebuildMenu() {
   ClearMenu();
 
@@ -113,6 +129,11 @@ void AvatarMenuModel::RebuildMenu() {
   for (size_t i = 0; i < count; ++i) {
     Item* item = new Item(i, profile_info_->GetAvatarIconOfProfileAtIndex(i));
     item->name = profile_info_->GetNameOfProfileAtIndex(i);
+    item->sync_state = profile_info_->GetUserNameOfProfileAtIndex(i);
+    if (item->sync_state.empty()) {
+      item->sync_state = l10n_util::GetStringUTF16(
+          IDS_PROFILES_LOCAL_PROFILE_STATE);
+    }
     if (browser_) {
       FilePath path = profile_info_->GetPathOfProfileAtIndex(i);
       item->active = browser_->profile()->GetPath() == path;

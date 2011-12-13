@@ -4,8 +4,10 @@
 
 #include "views/controls/label.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
@@ -23,24 +25,20 @@
 
 namespace views {
 
-// The colors to use for enabled and disabled labels.
-static SkColor kEnabledColor;
-static SkColor kDisabledColor;
-
 // static
 const char Label::kViewClassName[] = "views/Label";
 
 const int Label::kFocusBorderPadding = 1;
 
 Label::Label() {
-  Init(std::wstring(), GetDefaultFont());
+  Init(string16(), GetDefaultFont());
 }
 
-Label::Label(const std::wstring& text) {
+Label::Label(const string16& text) {
   Init(text, GetDefaultFont());
 }
 
-Label::Label(const std::wstring& text, const gfx::Font& font) {
+Label::Label(const string16& text, const gfx::Font& font) {
   Init(text, font);
 }
 
@@ -54,16 +52,16 @@ void Label::SetFont(const gfx::Font& font) {
   SchedulePaint();
 }
 
-void Label::SetText(const std::wstring& text) {
-  text_ = WideToUTF16Hack(text);
+void Label::SetText(const string16& text) {
+  text_ = text;
   url_set_ = false;
   text_size_valid_ = false;
   PreferredSizeChanged();
   SchedulePaint();
 }
 
-const std::wstring Label::GetText() const {
-  return url_set_ ? UTF8ToWide(url_.spec()) : UTF16ToWideHack(text_);
+const string16 Label::GetText() const {
+  return url_set_ ? UTF8ToUTF16(url_.spec()) : text_;
 }
 
 void Label::SetURL(const GURL& url) {
@@ -79,12 +77,24 @@ const GURL Label::GetURL() const {
   return url_set_ ? url_ : GURL(UTF16ToUTF8(text_));
 }
 
-void Label::SetColor(const SkColor& color) {
-  color_ = color;
+void Label::SetAutoColorReadabilityEnabled(bool enabled) {
+  auto_color_readability_ = enabled;
+  RecalculateColors();
 }
 
-SkColor Label::GetColor() const {
-  return color_;
+void Label::SetEnabledColor(const SkColor& color) {
+  requested_enabled_color_ = color;
+  RecalculateColors();
+}
+
+void Label::SetDisabledColor(const SkColor& color) {
+  requested_disabled_color_ = color;
+  RecalculateColors();
+}
+
+void Label::SetBackgroundColor(const SkColor& color) {
+  background_color_ = color;
+  RecalculateColors();
 }
 
 void Label::SetHorizontalAlignment(Alignment alignment) {
@@ -129,8 +139,8 @@ void Label::SetElideInMiddle(bool elide_in_middle) {
   }
 }
 
-void Label::SetTooltipText(const std::wstring& tooltip_text) {
-  tooltip_text_ = WideToUTF16Hack(tooltip_text);
+void Label::SetTooltipText(const string16& tooltip_text) {
+  tooltip_text_ = tooltip_text;
 }
 
 void Label::SetMouseOverBackground(Background* background) {
@@ -209,11 +219,6 @@ int Label::GetHeightForWidth(int w) {
   return h + GetInsets().height();
 }
 
-void Label::OnEnabledChanged() {
-  View::OnEnabledChanged();
-  SetColor(IsEnabled() ? kEnabledColor : kDisabledColor);
-}
-
 std::string Label::GetClassName() const {
   return kViewClassName;
 }
@@ -234,19 +239,19 @@ void Label::OnMouseExited(const MouseEvent& event) {
   SetContainsMouse(false);
 }
 
-bool Label::GetTooltipText(const gfx::Point& p, std::wstring* tooltip) {
+bool Label::GetTooltipText(const gfx::Point& p, string16* tooltip) {
   DCHECK(tooltip);
 
   // If a tooltip has been explicitly set, use it.
   if (!tooltip_text_.empty()) {
-    tooltip->assign(UTF16ToWideHack(tooltip_text_));
+    tooltip->assign(tooltip_text_);
     return true;
   }
 
   // Show the full text if the text does not fit.
   if (!is_multi_line_ &&
       (font_.GetStringWidth(text_) > GetAvailableRect().width())) {
-    *tooltip = UTF16ToWideHack(text_);
+    *tooltip = text_;
     return true;
   }
   return false;
@@ -259,12 +264,13 @@ void Label::GetAccessibleState(ui::AccessibleViewState* state) {
 }
 
 void Label::PaintText(gfx::Canvas* canvas,
-                      const std::wstring& text,
+                      const string16& text,
                       const gfx::Rect& text_bounds,
                       int flags) {
-  canvas->DrawStringInt(WideToUTF16Hack(text), font_, color_,
-                        text_bounds.x(), text_bounds.y(),
-                        text_bounds.width(), text_bounds.height(), flags);
+  canvas->DrawStringInt(text, font_,
+      IsEnabled() ? actual_enabled_color_ : actual_disabled_color_,
+      text_bounds.x(), text_bounds.y(), text_bounds.width(),
+      text_bounds.height(), flags);
 
   if (HasFocus() || paint_as_focused_) {
     gfx::Rect focus_bounds = text_bounds;
@@ -303,7 +309,7 @@ void Label::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 void Label::OnPaint(gfx::Canvas* canvas) {
   OnPaintBackground(canvas);
 
-  std::wstring paint_text;
+  string16 paint_text;
   gfx::Rect text_bounds;
   int flags = 0;
   CalculateDrawStringParams(&paint_text, &text_bounds, &flags);
@@ -323,16 +329,21 @@ gfx::Font Label::GetDefaultFont() {
   return ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
 }
 
-void Label::Init(const std::wstring& text, const gfx::Font& font) {
+void Label::Init(const string16& text, const gfx::Font& font) {
   static bool initialized = false;
+  static SkColor kDefaultEnabledColor;
+  static SkColor kDefaultDisabledColor;
+  static SkColor kDefaultBackgroundColor;
   if (!initialized) {
 #if defined(OS_WIN)
-    kEnabledColor = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
-    kDisabledColor = color_utils::GetSysSkColor(COLOR_GRAYTEXT);
+    kDefaultEnabledColor = color_utils::GetSysSkColor(COLOR_WINDOWTEXT);
+    kDefaultDisabledColor = color_utils::GetSysSkColor(COLOR_GRAYTEXT);
+    kDefaultBackgroundColor = color_utils::GetSysSkColor(COLOR_WINDOW);
 #else
     // TODO(beng): source from theme provider.
-    kEnabledColor = SK_ColorBLACK;
-    kDisabledColor = SK_ColorGRAY;
+    kDefaultEnabledColor = SK_ColorBLACK;
+    kDefaultDisabledColor = SK_ColorGRAY;
+    kDefaultBackgroundColor = SK_ColorWHITE;
 #endif
 
     initialized = true;
@@ -341,9 +352,12 @@ void Label::Init(const std::wstring& text, const gfx::Font& font) {
   contains_mouse_ = false;
   font_ = font;
   text_size_valid_ = false;
-  SetText(text);
   url_set_ = false;
-  color_ = kEnabledColor;
+  requested_enabled_color_ = kDefaultEnabledColor;
+  requested_disabled_color_ = kDefaultDisabledColor;
+  background_color_ = kDefaultBackgroundColor;
+  auto_color_readability_ = true;
+  RecalculateColors();
   horiz_alignment_ = ALIGN_CENTER;
   is_multi_line_ = false;
   allow_character_break_ = false;
@@ -352,6 +366,19 @@ void Label::Init(const std::wstring& text, const gfx::Font& font) {
   rtl_alignment_mode_ = USE_UI_ALIGNMENT;
   paint_as_focused_ = false;
   has_focus_border_ = false;
+
+  SetText(text);
+}
+
+void Label::RecalculateColors() {
+  actual_enabled_color_ = auto_color_readability_ ?
+      color_utils::GetReadableColor(requested_enabled_color_,
+                                    background_color_) :
+      requested_enabled_color_;
+  actual_disabled_color_ = auto_color_readability_ ?
+      color_utils::GetReadableColor(requested_disabled_color_,
+                                    background_color_) :
+      requested_disabled_color_;
 }
 
 void Label::UpdateContainsMouse(const MouseEvent& event) {
@@ -432,7 +459,7 @@ gfx::Rect Label::GetAvailableRect() const {
   return bounds;
 }
 
-void Label::CalculateDrawStringParams(std::wstring* paint_text,
+void Label::CalculateDrawStringParams(string16* paint_text,
                                       gfx::Rect* text_bounds,
                                       int* flags) const {
   DCHECK(paint_text && text_bounds && flags);
@@ -440,8 +467,8 @@ void Label::CalculateDrawStringParams(std::wstring* paint_text,
   if (url_set_) {
     // TODO(jungshik) : Figure out how to get 'intl.accept_languages'
     // preference and use it when calling ElideUrl.
-    *paint_text = UTF16ToWideHack(
-        ui::ElideUrl(url_, font_, GetAvailableRect().width(), std::string()));
+    *paint_text =
+        ui::ElideUrl(url_, font_, GetAvailableRect().width(), std::string());
 
     // An URLs is always treated as an LTR text and therefore we should
     // explicitly mark it as such if the locale is RTL so that URLs containing
@@ -452,13 +479,13 @@ void Label::CalculateDrawStringParams(std::wstring* paint_text,
     // characters. We use the locale settings because an URL is always treated
     // as an LTR string, even if its containing view does not use an RTL UI
     // layout.
-    *paint_text = UTF16ToWide(base::i18n::GetDisplayStringInLTRDirectionality(
-        WideToUTF16(*paint_text)));
+    *paint_text = base::i18n::GetDisplayStringInLTRDirectionality(
+        *paint_text);
   } else if (elide_in_middle_) {
-    *paint_text = UTF16ToWideHack(ui::ElideText(text_,
-        font_, GetAvailableRect().width(), true));
+    *paint_text = ui::ElideText(text_,
+        font_, GetAvailableRect().width(), true);
   } else {
-    *paint_text = UTF16ToWideHack(text_);
+    *paint_text = text_;
   }
 
   *text_bounds = GetTextBounds();

@@ -1,10 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/extension_idle_api.h"
 
+#include <algorithm>
 #include <string>
+#include <map>
 
 #include "base/bind.h"
 #include "base/callback.h"
@@ -24,22 +26,26 @@
 namespace keys = extension_idle_api_constants;
 
 namespace {
+
 const int kIdlePollInterval = 1;  // Number of seconds between status checks
                                   // when polling for active.
 const int kThrottleInterval = 1;  // Number of seconds to throttle idle checks
                                   // for. Return the previously checked idle
                                   // state if the next check is faster than this
 const int kMinThreshold = 15;  // In seconds.  Set >1 sec for security concerns.
-const int kMaxThreshold = 60*60;  // One hours, in seconds.  Not set arbitrarily
-                                  // high for security concerns.
+const int kMaxThreshold = 4*60*60;  // Four hours, in seconds. Not set
+                                    // arbitrarily high for security concerns.
+const unsigned int kMaxCacheSize = 100;  // Number of state queries to cache.
 
-struct ExtensionIdlePollingData {
-  IdleState state;
-  double timestamp;
-};
-
-// Used to throttle excessive calls to query for idle state
-ExtensionIdlePollingData polling_data = {IDLE_STATE_UNKNOWN, 0};
+// Calculates the error query interval has in respect to idle interval.
+// The error is defined as amount of the query interval that is not part of the
+// idle interval.
+double QueryErrorFromIdle(double idle_start,
+                          double idle_end,
+                          double query_start,
+                          double query_end) {
+  return query_end - idle_end + std::max(0., idle_start - query_start);
+}
 
 // Internal class which is used to poll for changes in the system idle state.
 class ExtensionIdlePollingTask {
@@ -76,6 +82,8 @@ void ExtensionIdlePollingTask::IdleStateCallback(IdleState current_state) {
     ExtensionIdleEventRouter::OnIdleStateChange(profile_, current_state);
 
   ExtensionIdlePollingTask::poll_task_running_ = false;
+
+  ExtensionIdleCache::UpdateCache(threshold_, current_state);
 
   // Startup another polling task as we exit.
   if (current_state != IDLE_STATE_ACTIVE)
@@ -126,16 +134,6 @@ int CheckThresholdBounds(int timeout) {
   if (timeout > kMaxThreshold) return kMaxThreshold;
   return timeout;
 }
-
-bool ShouldThrottle() {
-  double now = base::Time::Now().ToDoubleT();
-  double delta = now - polling_data.timestamp;
-  polling_data.timestamp = now;
-  if (delta < kThrottleInterval)
-    return false;
-  else
-    return true;
-}
 };  // namespace
 
 void ExtensionIdleQueryStateFunction::IdleStateCallback(int threshold,
@@ -147,7 +145,9 @@ void ExtensionIdleQueryStateFunction::IdleStateCallback(int threshold,
   }
 
   result_.reset(CreateIdleValue(state));
-  polling_data.state = state;
+
+  ExtensionIdleCache::UpdateCache(threshold, state);
+
   SendResponse(true);
 }
 
@@ -156,21 +156,16 @@ bool ExtensionIdleQueryStateFunction::RunImpl() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &threshold));
   threshold = CheckThresholdBounds(threshold);
 
-  if (ShouldThrottle()) {
-    if (polling_data.state != IDLE_STATE_UNKNOWN) {
-      result_.reset(CreateIdleValue(polling_data.state));
-      SendResponse(true);
-      return true;
-    }
-    // We cannot get the idle state right now, we're already checking for idle
-    // from a previous call, so continue with normal idle check instead.
+  IdleState state = ExtensionIdleCache::CalculateIdleState(threshold);
+  if (state != IDLE_STATE_UNKNOWN) {
+    result_.reset(CreateIdleValue(state));
+    SendResponse(true);
+    return true;
   }
 
-  polling_data.state = IDLE_STATE_UNKNOWN;
   CalculateIdleState(threshold,
       base::Bind(&ExtensionIdleQueryStateFunction::IdleStateCallback,
-                 base::Unretained(this), threshold));
-
+                 this, threshold));
   // Don't send the response, it'll be sent by our callback
   return true;
 }
@@ -185,4 +180,92 @@ void ExtensionIdleEventRouter::OnIdleStateChange(Profile* profile,
 
   profile->GetExtensionEventRouter()->DispatchEventToRenderers(
       keys::kOnStateChanged, json_args, profile, GURL());
+}
+
+ExtensionIdleCache::CacheData ExtensionIdleCache::cached_data =
+    {-1, -1, -1, -1};
+
+IdleState ExtensionIdleCache::CalculateIdleState(int threshold) {
+  return CalculateState(threshold, base::Time::Now().ToDoubleT());
+}
+
+IdleState ExtensionIdleCache::CalculateState(int threshold, double now) {
+  if (threshold < kMinThreshold)
+    return IDLE_STATE_UNKNOWN;
+  double threshold_moment = now - static_cast<double>(threshold);
+  double throttle_interval = static_cast<double>(kThrottleInterval);
+
+  // We test for IDEL_STATE_LOCKED first, because the result should be
+  // independent of the data for idle and active state. If last state was
+  // LOCKED and test for LOCKED is satisfied we should always return LOCKED.
+  if (cached_data.latest_locked > 0 &&
+      now - cached_data.latest_locked < throttle_interval)
+    return IDLE_STATE_LOCKED;
+
+  // If thershold moment is beyond the moment after whih we are certain we have
+  // been active, return active state. We allow kThrottleInterval error.
+  if (cached_data.latest_known_active > 0 &&
+      threshold_moment - cached_data.latest_known_active < throttle_interval)
+    return IDLE_STATE_ACTIVE;
+
+  // If total error that query interval has in respect to last recorded idle
+  // interval is less than kThrottleInterval, return IDLE state.
+  // query interval is the interval [now, now - threshold] and the error is
+  // defined as amount of query interval that is outside of idle interval.
+  double error_from_idle =
+      QueryErrorFromIdle(cached_data.idle_interval_start,
+          cached_data.idle_interval_end, threshold_moment, now);
+  if (cached_data.idle_interval_end > 0 &&
+      error_from_idle < throttle_interval)
+    return IDLE_STATE_IDLE;
+
+  return IDLE_STATE_UNKNOWN;
+}
+
+void ExtensionIdleCache::UpdateCache(int threshold, IdleState state) {
+  Update(threshold, state, base::Time::Now().ToDoubleT());
+}
+
+void ExtensionIdleCache::Update(int threshold, IdleState state, double now) {
+  if (threshold < kMinThreshold)
+    return;
+  double threshold_moment = now - static_cast<double>(threshold);
+  switch (state) {
+    case IDLE_STATE_IDLE:
+      if (threshold_moment > cached_data.idle_interval_end) {
+        // Cached and new interval don't overlap. We disregard the cached one.
+        cached_data.idle_interval_start = threshold_moment;
+      } else {
+        // Cached and new interval overlap, so we can combine them. We set
+        // the cached interval begining to less recent one.
+        cached_data.idle_interval_start =
+            std::min(cached_data.idle_interval_start, threshold_moment);
+      }
+      cached_data.idle_interval_end = now;
+      // Reset data for LOCKED state, since the last query result is not
+      // LOCKED.
+      cached_data.latest_locked = -1;
+      break;
+    case IDLE_STATE_ACTIVE:
+      if (threshold_moment > cached_data.latest_known_active)
+        cached_data.latest_known_active = threshold_moment;
+      // Reset data for LOCKED state, since the last query result is not
+      // LOCKED.
+      cached_data.latest_locked = -1;
+      break;
+    case IDLE_STATE_LOCKED:
+      if (threshold_moment > cached_data.latest_locked)
+        cached_data.latest_locked = now;
+      break;
+    default:
+      return;
+  }
+}
+
+int ExtensionIdleCache::get_min_threshold() {
+  return kMinThreshold;
+}
+
+double ExtensionIdleCache::get_throttle_interval() {
+  return static_cast<double>(kThrottleInterval);
 }

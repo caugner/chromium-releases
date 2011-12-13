@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/stl_util.h"
+#include "policy/policy_constants.h"
 
 namespace policy {
 
@@ -37,6 +38,24 @@ void PolicyMap::Erase(ConfigurationPolicyType policy) {
 
 void PolicyMap::Swap(PolicyMap* other) {
   map_.swap(other->map_);
+}
+
+void PolicyMap::CopyFrom(const PolicyMap& other) {
+  Clear();
+  for (const_iterator i = other.begin(); i != other.end(); ++i) {
+    Set(i->first, i->second->DeepCopy());
+  }
+}
+
+void PolicyMap::LoadFrom(
+    const DictionaryValue* policies,
+    const PolicyDefinitionList* list) {
+  const PolicyDefinitionList::Entry* entry;
+  for (entry = list->begin; entry != list->end; ++entry) {
+    Value* value;
+    if (policies->Get(entry->name, &value) && value->IsType(entry->value_type))
+      Set(entry->policy_type, value->DeepCopy());
+  }
 }
 
 bool PolicyMap::Equals(const PolicyMap& other) const {

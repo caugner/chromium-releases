@@ -12,8 +12,10 @@
 #pragma once
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task.h"
 #include "content/browser/geolocation/location_provider.h"
+#include "content/common/content_export.h"
 #include "content/common/geoposition.h"
 
 class LibGps;
@@ -23,7 +25,7 @@ class LibGps;
 // IO thread). As the older libgps API is not designed to support polling,
 // there's a chance it could block, so better move this into its own worker
 // thread.
-class GpsLocationProviderLinux : public LocationProviderBase {
+class CONTENT_EXPORT GpsLocationProviderLinux : public LocationProviderBase {
  public:
   typedef LibGps* (*LibGpsFactory)();
   // |factory| will be used to create the gpsd client library wrapper. (Note
@@ -50,7 +52,7 @@ class GpsLocationProviderLinux : public LocationProviderBase {
   Geoposition position_;
 
   // Holder for the tasks which run on the thread; takes care of cleanup.
-  ScopedRunnableMethodFactory<GpsLocationProviderLinux> task_factory_;
+  base::WeakPtrFactory<GpsLocationProviderLinux> weak_factory_;
 };
 
 #endif  // CONTENT_BROWSER_GEOLOCATION_GPS_LOCATION_PROVIDER_LINUX_H_

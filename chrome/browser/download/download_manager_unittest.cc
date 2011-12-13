@@ -5,13 +5,14 @@
 #include <string>
 #include <set>
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
-#include "base/string_util.h"
 #include "base/string16.h"
+#include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -28,6 +29,7 @@
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_status_updater.h"
+#include "content/browser/download/interrupt_reasons.h"
 #include "content/browser/download/mock_download_manager.h"
 #include "grit/generated_resources.h"
 #include "net/base/io_buffer.h"
@@ -66,7 +68,8 @@ class DownloadManagerTest : public testing::Test {
   }
 
   void AddDownloadToFileManager(int id, DownloadFile* download_file) {
-    file_manager()->downloads_[id] = download_file;
+    file_manager()->downloads_[DownloadId(download_manager_.get(), id)] =
+      download_file;
   }
 
   void OnResponseCompleted(int32 download_id, int64 size,
@@ -98,16 +101,15 @@ class DownloadManagerTest : public testing::Test {
 
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(file_manager_.get(),
-                          &DownloadFileManager::UpdateDownload,
-                          id,
-                          &download_buffer_));
+        base::Bind(&DownloadFileManager::UpdateDownload, file_manager_.get(),
+                   DownloadId(download_manager_.get(), id), &download_buffer_));
 
     message_loop_.RunAllPending();
   }
 
-  void OnDownloadError(int32 download_id, int64 size, net::Error os_error) {
-    download_manager_->OnDownloadError(download_id, size, os_error);
+  void OnDownloadInterrupted(int32 download_id, int64 size,
+                             InterruptReason reason) {
+    download_manager_->OnDownloadInterrupted(download_id, size, reason);
   }
 
   // Get the download item with ID |id|.
@@ -511,7 +513,8 @@ TEST_F(DownloadManagerTest, DownloadInterruptTest) {
   EXPECT_TRUE(GetActiveDownloadItem(0) != NULL);
 
   int64 error_size = 3;
-  OnDownloadError(0, error_size, net::ERR_FILE_NOT_FOUND);
+  OnDownloadInterrupted(0, error_size,
+                        DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED);
   message_loop_.RunAllPending();
 
   EXPECT_TRUE(GetActiveDownloadItem(0) == NULL);
@@ -618,12 +621,13 @@ TEST_F(DownloadManagerTest, DownloadFileErrorTest) {
   EXPECT_EQ(DownloadItem::INTERRUPTED, download->state());
 
   // Check the download shelf's information.
-  size_t error_size = kTestDataLen * 3;
+  size_t error_size = kTestDataLen * 2;
+  size_t total_size = kTestDataLen * 3;
   ui::DataUnits amount_units = ui::GetByteDisplayUnits(kTestDataLen);
   string16 simple_size =
       ui::FormatBytesWithUnits(error_size, amount_units, false);
   string16 simple_total = base::i18n::GetDisplayStringInLTRDirectionality(
-      ui::FormatBytesWithUnits(error_size, amount_units, true));
+      ui::FormatBytesWithUnits(total_size, amount_units, true));
   EXPECT_EQ(l10n_util::GetStringFUTF16(IDS_DOWNLOAD_STATUS_INTERRUPTED,
                                        simple_size,
                                        simple_total),

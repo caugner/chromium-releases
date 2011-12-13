@@ -10,6 +10,7 @@
 
 #include "base/basictypes.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
+#include "content/common/content_export.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
@@ -23,7 +24,7 @@ class TabContents;
 // dependent web contents views. The TabContents uses this interface to talk to
 // them. View-related messages will also get forwarded directly to this class
 // from RenderViewHost via RenderViewHostDelegate::View.
-class TabContentsView : public RenderViewHostDelegate::View {
+class CONTENT_EXPORT TabContentsView : public RenderViewHostDelegate::View {
  public:
   virtual ~TabContentsView();
 
@@ -63,7 +64,7 @@ class TabContentsView : public RenderViewHostDelegate::View {
   // is not strictly necessary and isn't expected to be displayed anywhere, but
   // can aid certain debugging tools such as Spy++ on Windows where you are
   // trying to find a specific window.
-  virtual void SetPageTitle(const std::wstring& title) = 0;
+  virtual void SetPageTitle(const string16& title) = 0;
 
   // Used to notify the view that a tab has crashed so each platform can
   // prepare the sad tab.

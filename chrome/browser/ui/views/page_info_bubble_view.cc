@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/page_info_bubble_view.h"
 
+#include <algorithm>
+
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/google/google_util.h"
@@ -222,7 +224,7 @@ void PageInfoBubbleView::LayoutSections() {
   if (!only_internal_section) {
     layout->StartRow(0, 1);
     help_center_link_ = new views::Link(
-        UTF16ToWide(l10n_util::GetStringUTF16(IDS_PAGE_INFO_HELP_CENTER_LINK)));
+        l10n_util::GetStringUTF16(IDS_PAGE_INFO_HELP_CENTER_LINK));
     help_center_link_->set_listener(this);
     layout->AddView(help_center_link_);
   }
@@ -306,8 +308,8 @@ bool PageInfoBubbleView::FadeInOnShow() {
   return false;
 }
 
-std::wstring PageInfoBubbleView::accessible_name() {
-  return L"PageInfoBubble";
+string16 PageInfoBubbleView::GetAccessibleName() {
+  return ASCIIToUTF16("PageInfoBubble");
 }
 
 void PageInfoBubbleView::LinkClicked(views::Link* source, int event_flags) {
@@ -319,7 +321,8 @@ void PageInfoBubbleView::LinkClicked(views::Link* source, int event_flags) {
   GURL url = google_util::AppendGoogleLocaleParam(
       GURL(chrome::kPageInfoHelpCenterURL));
   Browser* browser = BrowserList::GetLastActive();
-  browser->OpenURL(url, GURL(), NEW_FOREGROUND_TAB, PageTransition::LINK);
+  browser->OpenURL(
+      url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
 }
 
 void PageInfoBubbleView::AnimationEnded(const ui::Animation* animation) {
@@ -362,7 +365,7 @@ Section::Section(PageInfoBubbleView* owner,
 
   // Can't make this a text field to enable copying until multiline support is
   // added to text fields.
-  description_label_ = new views::Label(UTF16ToWideHack(info_.description));
+  description_label_ = new views::Label(info_.description);
   description_label_->set_background(
       views::Background::CreateSolidBackground(SK_ColorWHITE));
   description_label_->SetMultiLine(true);
@@ -374,7 +377,7 @@ Section::Section(PageInfoBubbleView* owner,
 
   if (info_.type == PageInfoModel::SECTION_INFO_IDENTITY && show_cert) {
     link_ = new views::Link(
-        UTF16ToWide(l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON)));
+        l10n_util::GetStringUTF16(IDS_PAGEINFO_CERT_INFO_BUTTON));
     link_->set_listener(this);
     AddChildView(link_);
   }
@@ -474,14 +477,12 @@ gfx::Size Section::LayoutItems(bool compute_bounds_only, int width) {
 
 namespace browser {
 
-void ShowPageInfoBubble(gfx::NativeWindow parent,
+void ShowPageInfoBubble(BrowserView* browser_view,
                         Profile* profile,
                         const GURL& url,
                         const NavigationEntry::SSLStatus& ssl,
                         bool show_history) {
   // Find where to point the bubble at.
-  BrowserView* browser_view =
-      BrowserView::GetBrowserViewForNativeWindow(parent);
   gfx::Point point;
   if (base::i18n::IsRTL()) {
     int width = browser_view->toolbar()->location_bar()->width();
@@ -496,12 +497,12 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
 
   // Show the bubble. If the bubble already exist - it will be closed first.
   PageInfoBubbleView* page_info_bubble =
-      new PageInfoBubbleView(parent, profile, url, ssl, show_history);
+      new PageInfoBubbleView(browser_view->GetNativeHandle(),
+                             profile, url, ssl, show_history);
   Bubble* bubble =
       Bubble::Show(browser_view->GetWidget(), bounds,
                    views::BubbleBorder::TOP_LEFT,
                    page_info_bubble, page_info_bubble);
   page_info_bubble->set_bubble(bubble);
 }
-
 }

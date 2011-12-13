@@ -34,6 +34,8 @@
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "gpu/command_buffer/service/shader_manager.h"
 #include "gpu/command_buffer/service/shader_translator.h"
+#include "gpu/command_buffer/service/stream_texture.h"
+#include "gpu/command_buffer/service/stream_texture_manager.h"
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "gpu/command_buffer/service/vertex_attrib_manager.h"
 #include "ui/gfx/gl/gl_context.h"
@@ -46,6 +48,10 @@
 
 namespace gpu {
 namespace gles2 {
+
+namespace {
+static const char kOESDerivativeExtension[] = "GL_OES_standard_derivatives";
+}
 
 class GLES2DecoderImpl;
 
@@ -461,7 +467,7 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   virtual bool Initialize(const scoped_refptr<gfx::GLSurface>& surface,
                           const scoped_refptr<gfx::GLContext>& context,
                           const gfx::Size& size,
-                          const DisallowedExtensions& disallowed_extensions,
+                          const DisallowedFeatures& disallowed_features,
                           const char* allowed_extensions,
                           const std::vector<int32>& attribs);
   virtual void Destroy();
@@ -481,6 +487,7 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   virtual void SetSwapBuffersCallback(Callback0::Type* callback);
 #endif
 
+  virtual void SetStreamTextureManager(StreamTextureManager* manager);
   virtual bool GetServiceTextureId(uint32 client_texture_id,
                                    uint32* service_texture_id);
 
@@ -1288,6 +1295,8 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   scoped_ptr<Callback0::Type> swap_buffers_callback_;
 #endif
 
+  StreamTextureManager* stream_texture_manager_;
+
   // The format of the back buffer_
   GLenum back_buffer_color_format_;
   bool back_buffer_has_depth_;
@@ -1306,7 +1315,7 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   scoped_ptr<ShaderTranslator> vertex_translator_;
   scoped_ptr<ShaderTranslator> fragment_translator_;
 
-  DisallowedExtensions disallowed_extensions_;
+  DisallowedFeatures disallowed_features_;
 
   // Cached from ContextGroup
   const Validators* validators_;
@@ -1322,6 +1331,15 @@ class GLES2DecoderImpl : public base::SupportsWeakPtr<GLES2DecoderImpl>,
   GLenum reset_status_;
 
   bool needs_mac_nvidia_driver_workaround_;
+  bool needs_glsl_built_in_function_emulation_;
+
+  // These flags are used to override the state of the shared feature_info_
+  // member.  Because the same FeatureInfo instance may be shared among many
+  // contexts, the assumptions on the availablity of extensions in WebGL
+  // contexts may be broken.  These flags override the shared state to preserve
+  // WebGL semantics.
+  bool force_webgl_glsl_validation_;
+  bool derivatives_explicitly_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(GLES2DecoderImpl);
 };
@@ -1460,6 +1478,15 @@ void Texture::Create() {
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  // TODO(apatrick): Attempt to diagnose crbug.com/97775. If SwapBuffers is
+  // never called on an offscreen context, no data will ever be uploaded to the
+  // saved offscreen color texture (it is deferred until to when SwapBuffers
+  // is called). My idea is that some nvidia drivers might have a bug where
+  // deleting a texture that has never been populated might cause a
+  // crash.
+  glTexImage2D(
+      GL_TEXTURE_2D, 0, GL_RGBA, 16, 16, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 }
 
 bool Texture::AllocateStorage(const gfx::Size& size, GLenum format) {
@@ -1669,6 +1696,7 @@ GLES2DecoderImpl::GLES2DecoderImpl(ContextGroup* group)
       offscreen_target_stencil_format_(0),
       offscreen_target_samples_(0),
       offscreen_saved_color_format_(0),
+      stream_texture_manager_(NULL),
       back_buffer_color_format_(0),
       back_buffer_has_depth_(false),
       back_buffer_has_stencil_(false),
@@ -1682,7 +1710,10 @@ GLES2DecoderImpl::GLES2DecoderImpl(ContextGroup* group)
       frame_number_(0),
       has_arb_robustness_(false),
       reset_status_(GL_NO_ERROR),
-      needs_mac_nvidia_driver_workaround_(false) {
+      needs_mac_nvidia_driver_workaround_(false),
+      needs_glsl_built_in_function_emulation_(false),
+      force_webgl_glsl_validation_(false),
+      derivatives_explicitly_enabled_(false) {
   DCHECK(group);
 
   attrib_0_value_.v[0] = 0.0f;
@@ -1698,7 +1729,8 @@ GLES2DecoderImpl::GLES2DecoderImpl(ContextGroup* group)
   // empty string to CompileShader and this is not a valid shader.
   // TODO(apatrick): fix this test.
   if ((gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
-       !feature_info_->feature_flags().chromium_webglsl) ||
+       !feature_info_->feature_flags().chromium_webglsl &&
+       !force_webgl_glsl_validation_) ||
       gfx::GetGLImplementation() == gfx::kGLImplementationMockGL) {
     use_shader_translator_ = false;
   }
@@ -1714,7 +1746,7 @@ bool GLES2DecoderImpl::Initialize(
     const scoped_refptr<gfx::GLSurface>& surface,
     const scoped_refptr<gfx::GLContext>& context,
     const gfx::Size& size,
-    const DisallowedExtensions& disallowed_extensions,
+    const DisallowedFeatures& disallowed_features,
     const char* allowed_extensions,
     const std::vector<int32>& attribs) {
   DCHECK(context);
@@ -1733,19 +1765,21 @@ bool GLES2DecoderImpl::Initialize(
   if (!MakeCurrent()) {
     LOG(ERROR) << "GLES2DecoderImpl::Initialize failed because "
                << "MakeCurrent failed.";
+    group_ = NULL;  // Must not destroy ContextGroup if it is not initialized.
     Destroy();
     return false;
   }
 
-  if (!group_->Initialize(disallowed_extensions, allowed_extensions)) {
+  if (!group_->Initialize(disallowed_features, allowed_extensions)) {
     LOG(ERROR) << "GpuScheduler::InitializeCommon failed because group "
                << "failed to initialize.";
+    group_ = NULL;  // Must not destroy ContextGroup if it is not initialized.
     Destroy();
     return false;
   }
 
   CHECK_GL_ERROR();
-  disallowed_extensions_ = disallowed_extensions;
+  disallowed_features_ = disallowed_features;
 
   vertex_attrib_manager_.Initialize(group_->max_vertex_attribs());
 
@@ -1936,12 +1970,19 @@ bool GLES2DecoderImpl::Initialize(
 
   has_arb_robustness_ = context->HasExtension("GL_ARB_robustness");
 
+  if (!disallowed_features_.driver_bug_workarounds) {
 #if defined(OS_MACOSX)
-  const char* vendor_str = reinterpret_cast<const char*>(
-      glGetString(GL_VENDOR));
-  needs_mac_nvidia_driver_workaround_ =
-      vendor_str && strstr(vendor_str, "NVIDIA");
+    const char* vendor_str = reinterpret_cast<const char*>(
+        glGetString(GL_VENDOR));
+    needs_mac_nvidia_driver_workaround_ =
+        vendor_str && strstr(vendor_str, "NVIDIA");
+    needs_glsl_built_in_function_emulation_ =
+        vendor_str && (strstr(vendor_str, "ATI") || strstr(vendor_str, "AMD"));
+#elif defined(OS_WIN)
+    if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2)
+      needs_glsl_built_in_function_emulation_ = true;
 #endif
+  }
 
   if (!InitializeShaderTranslator()) {
     return false;
@@ -1960,7 +2001,8 @@ void GLES2DecoderImpl::UpdateCapabilities() {
 bool GLES2DecoderImpl::InitializeShaderTranslator() {
   // Re-check the state of use_shader_translator_ each time this is called.
   if (gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 &&
-      feature_info_->feature_flags().chromium_webglsl &&
+      (feature_info_->feature_flags().chromium_webglsl ||
+       force_webgl_glsl_validation_) &&
       !use_shader_translator_) {
     use_shader_translator_ = true;
   }
@@ -1980,22 +2022,36 @@ bool GLES2DecoderImpl::InitializeShaderTranslator() {
   resources.MaxFragmentUniformVectors =
       group_->max_fragment_uniform_vectors();
   resources.MaxDrawBuffers = 1;
-  resources.OES_standard_derivatives =
-      feature_info_->feature_flags().oes_standard_derivatives ? 1 : 0;
+
+  if (force_webgl_glsl_validation_) {
+    resources.OES_standard_derivatives = derivatives_explicitly_enabled_;
+  } else {
+    resources.OES_standard_derivatives =
+        feature_info_->feature_flags().oes_standard_derivatives ? 1 : 0;
+  }
+
   vertex_translator_.reset(new ShaderTranslator);
-  ShShaderSpec shader_spec = feature_info_->feature_flags().chromium_webglsl ?
-      SH_WEBGL_SPEC : SH_GLES2_SPEC;
-  bool is_glsl_es =
-      gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2;
+  ShShaderSpec shader_spec = force_webgl_glsl_validation_ ||
+      feature_info_->feature_flags().chromium_webglsl ?
+          SH_WEBGL_SPEC : SH_GLES2_SPEC;
+  ShaderTranslatorInterface::GlslImplementationType implementation_type =
+      gfx::GetGLImplementation() == gfx::kGLImplementationEGLGLES2 ?
+          ShaderTranslatorInterface::kGlslES : ShaderTranslatorInterface::kGlsl;
+  ShaderTranslatorInterface::GlslBuiltInFunctionBehavior function_behavior =
+      needs_glsl_built_in_function_emulation_ ?
+          ShaderTranslatorInterface::kGlslBuiltInFunctionEmulated :
+          ShaderTranslatorInterface::kGlslBuiltInFunctionOriginal;
   if (!vertex_translator_->Init(
-          SH_VERTEX_SHADER, shader_spec, &resources, is_glsl_es)) {
+          SH_VERTEX_SHADER, shader_spec, &resources,
+          implementation_type, function_behavior)) {
     LOG(ERROR) << "Could not initialize vertex shader translator.";
     Destroy();
     return false;
   }
   fragment_translator_.reset(new ShaderTranslator);
   if (!fragment_translator_->Init(
-          SH_FRAGMENT_SHADER, shader_spec, &resources, is_glsl_es)) {
+          SH_FRAGMENT_SHADER, shader_spec, &resources,
+          implementation_type, function_behavior)) {
     LOG(ERROR) << "Could not initialize fragment shader translator.";
     Destroy();
     return false;
@@ -2113,6 +2169,9 @@ void GLES2DecoderImpl::DeleteTexturesHelper(
         state_dirty_ = true;
       }
       GLuint service_id = info->service_id();
+      if (info->IsStreamTexture() && stream_texture_manager_) {
+        stream_texture_manager_->DestroyStreamTexture(service_id);
+      }
       glDeleteTextures(1, &service_id);
       RemoveTextureInfo(client_ids[ii]);
     }
@@ -2285,6 +2344,10 @@ void GLES2DecoderImpl::SetSwapBuffersCallback(Callback0::Type* callback) {
 }
 #endif
 
+void GLES2DecoderImpl::SetStreamTextureManager(StreamTextureManager* manager) {
+  stream_texture_manager_ = manager;
+}
+
 bool GLES2DecoderImpl::GetServiceTextureId(uint32 client_texture_id,
                                            uint32* service_texture_id) {
   TextureManager::TextureInfo* texture =
@@ -2298,9 +2361,6 @@ bool GLES2DecoderImpl::GetServiceTextureId(uint32 client_texture_id,
 
 void GLES2DecoderImpl::Destroy() {
   bool have_context = context_.get() && MakeCurrent();
-
-  if (group_.get())
-    group_->set_have_context(have_context);
 
   SetParent(NULL, 0);
 
@@ -2335,10 +2395,6 @@ void GLES2DecoderImpl::Destroy() {
       offscreen_resolved_frame_buffer_->Destroy();
     if (offscreen_resolved_color_texture_.get())
       offscreen_resolved_color_texture_->Destroy();
-
-    // must release the ContextGroup before destroying the context as its
-    // destructor uses GL.
-    group_ = NULL;
   } else {
     if (offscreen_target_frame_buffer_.get())
       offscreen_target_frame_buffer_->Invalidate();
@@ -2360,11 +2416,15 @@ void GLES2DecoderImpl::Destroy() {
       offscreen_resolved_color_texture_->Invalidate();
   }
 
+  if (group_) {
+    group_->Destroy(have_context);
+    group_ = NULL;
+  }
+
   if (context_.get()) {
     context_->ReleaseCurrent(NULL);
-    context_->Destroy();
+    context_ = NULL;
   }
-  context_ = NULL;
 
   offscreen_target_frame_buffer_.reset();
   offscreen_target_color_texture_.reset();
@@ -2411,7 +2471,8 @@ bool GLES2DecoderImpl::SetParent(GLES2Decoder* new_parent,
     TextureManager::TextureInfo* info =
         new_parent_impl->CreateTextureInfo(new_parent_texture_id, service_id);
     info->SetNotOwned();
-    new_parent_impl->texture_manager()->SetInfoTarget(info, GL_TEXTURE_2D);
+    new_parent_impl->texture_manager()->SetInfoTarget(feature_info_,
+                                                      info, GL_TEXTURE_2D);
 
     parent_ = new_parent_impl->AsWeakPtr();
 
@@ -2555,13 +2616,9 @@ error::Error GLES2DecoderImpl::HandleResizeCHROMIUM(
 
   if (resize_callback_.get()) {
     resize_callback_->Run(gfx::Size(width, height));
-#if defined(OS_MACOSX)
-    // On OSX, the resize callback clobbers the currently-active GL context.
-    // TODO(kbr): remove this MakeCurrent once the AcceleratedSurface code
-    // becomes able to restore its context.
-    if (!context_->MakeCurrent(surface_.get()))
+    DCHECK(context_->IsCurrent(surface_.get()));
+    if (!context_->IsCurrent(surface_.get()))
       return error::kLostContext;
-#endif
   }
 
   return error::kNoError;
@@ -2854,8 +2911,13 @@ void GLES2DecoderImpl::DoBindTexture(GLenum target, GLuint client_id) {
                "glBindTexture: texture bound to more than 1 target.");
     return;
   }
+  if (info->IsStreamTexture() && target != GL_TEXTURE_EXTERNAL_OES) {
+    SetGLError(GL_INVALID_OPERATION,
+               "glBindTexture: illegal target for stream texture.");
+    return;
+  }
   if (info->target() == 0) {
-    texture_manager()->SetInfoTarget(info, target);
+    texture_manager()->SetInfoTarget(feature_info_, info, target);
   }
   glBindTexture(target, info->service_id());
   TextureUnit& unit = texture_units_[active_texture_unit_];
@@ -2869,6 +2931,13 @@ void GLES2DecoderImpl::DoBindTexture(GLenum target, GLuint client_id) {
       break;
     case GL_TEXTURE_EXTERNAL_OES:
       unit.bound_texture_external_oes = info;
+      if (info->IsStreamTexture()) {
+        DCHECK(stream_texture_manager_);
+        StreamTexture* stream_tex =
+            stream_texture_manager_->LookupStreamTexture(info->service_id());
+        if (stream_tex)
+          stream_tex->Update();
+      }
       break;
     default:
       NOTREACHED();  // Validation should prevent us getting here.
@@ -4618,7 +4687,7 @@ error::Error GLES2DecoderImpl::ShaderSourceHelper(
   }
   // Note: We don't actually call glShaderSource here. We wait until
   // the call to glCompileShader.
-  info->Update(std::string(data, data + data_size).c_str());
+  info->UpdateSource(std::string(data, data + data_size).c_str());
   return error::kNoError;
 }
 
@@ -4675,10 +4744,26 @@ void GLES2DecoderImpl::DoCompileShader(GLuint client_id) {
       return;
     }
     shader_src = translator->translated_shader();
+    if (!IsAngle())
+      info->UpdateTranslatedSource(shader_src);
   }
 
   glShaderSource(info->service_id(), 1, &shader_src, NULL);
   glCompileShader(info->service_id());
+  if (IsAngle()) {
+    GLint max_len = 0;
+    glGetShaderiv(info->service_id(),
+                  GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE,
+                  &max_len);
+    scoped_array<char> temp(new char[max_len]);
+    GLint len = 0;
+    glGetTranslatedShaderSourceANGLE(
+        info->service_id(), max_len, &len, temp.get());
+    DCHECK(max_len == 0 || len < max_len);
+    DCHECK(len == 0 || temp[len] == '\0');
+    info->UpdateTranslatedSource(temp.get());
+  }
+
   GLint status = GL_FALSE;
   glGetShaderiv(info->service_id(),  GL_COMPILE_STATUS, &status);
   if (status) {
@@ -4695,7 +4780,7 @@ void GLES2DecoderImpl::DoCompileShader(GLuint client_id) {
     GLint len = 0;
     glGetShaderInfoLog(info->service_id(), max_len, &len, temp.get());
     DCHECK(max_len == 0 || len < max_len);
-    DCHECK(len ==0 || temp[len] == '\0');
+    DCHECK(len == 0 || temp[len] == '\0');
     info->SetStatus(false, std::string(temp.get(), len).c_str(), NULL);
   }
 };
@@ -4717,6 +4802,10 @@ void GLES2DecoderImpl::DoGetShaderiv(
     case GL_INFO_LOG_LENGTH:
       *params = info->log_info() ? info->log_info()->size() + 1 : 0;
       return;
+    case GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE:
+      *params = info->translated_source() ?
+          info->translated_source()->size() + 1 : 0;
+      return;
     default:
       break;
   }
@@ -4735,6 +4824,25 @@ error::Error GLES2DecoderImpl::HandleGetShaderSource(
     return error::kNoError;
   }
   bucket->SetFromString(info->source()->c_str());
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleGetTranslatedShaderSourceANGLE(
+    uint32 immediate_data_size,
+    const gles2::GetTranslatedShaderSourceANGLE& c) {
+  GLuint shader = c.shader;
+
+  uint32 bucket_id = static_cast<uint32>(c.bucket_id);
+  Bucket* bucket = CreateBucket(bucket_id);
+  ShaderManager::ShaderInfo* info = GetShaderInfoNotProgram(
+      shader, "glTranslatedGetShaderSourceANGLE");
+  if (!info) {
+    bucket->SetSize(0);
+    return error::kNoError;
+  }
+
+  bucket->SetFromString(info->translated_source() ?
+      info->translated_source()->c_str() : NULL);
   return error::kNoError;
 }
 
@@ -5471,6 +5579,7 @@ error::Error GLES2DecoderImpl::HandleGetString(
   }
   const char* gl_str = reinterpret_cast<const char*>(glGetString(name));
   const char* str = NULL;
+  std::string extensions;
   switch (name) {
     case GL_VERSION:
       str = "OpenGL ES 2.0 Chromium";
@@ -5479,7 +5588,24 @@ error::Error GLES2DecoderImpl::HandleGetString(
       str = "OpenGL ES GLSL ES 1.0 Chromium";
       break;
     case GL_EXTENSIONS:
-      str = feature_info_->extensions().c_str();
+      {
+        // For WebGL contexts, strip out the OES derivatives extension if it has
+        // not been enabled.
+        if (force_webgl_glsl_validation_ &&
+            !derivatives_explicitly_enabled_) {
+          extensions = feature_info_->extensions();
+          size_t offset = extensions.find(kOESDerivativeExtension);
+          if (std::string::npos != offset) {
+            extensions.replace(offset,
+                               offset + arraysize(kOESDerivativeExtension),
+                               std::string());
+          }
+          str = extensions.c_str();
+        } else {
+          str = feature_info_->extensions().c_str();
+        }
+
+      }
       break;
     default:
       str = gl_str;
@@ -5686,9 +5812,18 @@ error::Error GLES2DecoderImpl::HandleCompressedTexImage2DBucket(
   GLsizei height = static_cast<GLsizei>(c.height);
   GLint border = static_cast<GLint>(c.border);
   Bucket* bucket = GetBucket(c.bucket_id);
+  if (!bucket) {
+    return error::kInvalidArguments;
+  }
+  uint32 data_size = bucket->size();
+  GLsizei imageSize = data_size;
+  const void* data = bucket->GetData(0, data_size);
+  if (!data) {
+    return error::kInvalidArguments;
+  }
   return DoCompressedTexImage2D(
       target, level, internal_format, width, height, border,
-      bucket->size(), bucket->GetData(0, bucket->size()));
+      imageSize, data);
 }
 
 error::Error GLES2DecoderImpl::HandleCompressedTexSubImage2DBucket(
@@ -5702,9 +5837,15 @@ error::Error GLES2DecoderImpl::HandleCompressedTexSubImage2DBucket(
   GLsizei height = static_cast<GLsizei>(c.height);
   GLenum format = static_cast<GLenum>(c.format);
   Bucket* bucket = GetBucket(c.bucket_id);
+  if (!bucket) {
+    return error::kInvalidArguments;
+  }
   uint32 data_size = bucket->size();
   GLsizei imageSize = data_size;
   const void* data = bucket->GetData(0, data_size);
+  if (!data) {
+    return error::kInvalidArguments;
+  }
   if (!validators_->texture_target.IsValid(target)) {
     SetGLError(
         GL_INVALID_ENUM, "glCompressedTexSubImage2D: target GL_INVALID_ENUM");
@@ -6685,6 +6826,9 @@ error::Error GLES2DecoderImpl::HandleSwapBuffers(
 error::Error GLES2DecoderImpl::HandleEnableFeatureCHROMIUM(
     uint32 immediate_data_size, const gles2::EnableFeatureCHROMIUM& c) {
   Bucket* bucket = GetBucket(c.bucket_id);
+  if (!bucket || bucket->size() == 0) {
+    return error::kInvalidArguments;
+  }
   typedef gles2::EnableFeatureCHROMIUM::Result Result;
   Result* result = GetSharedMemoryAs<Result*>(
       c.result_shm_id, c.result_shm_offset, sizeof(*result));
@@ -6715,6 +6859,9 @@ error::Error GLES2DecoderImpl::HandleEnableFeatureCHROMIUM(
     // needs to be done it seems like refactoring for one to one of those
     // methods is a very low priority.
     const_cast<Validators*>(validators_)->vertex_attrib_type.AddValue(GL_FIXED);
+  } else if (feature_str.compare("webgl_enable_glsl_webgl_validation") == 0) {
+    force_webgl_glsl_validation_ = true;
+    InitializeShaderTranslator();
   } else {
     return error::kNoError;
   }
@@ -6728,7 +6875,7 @@ error::Error GLES2DecoderImpl::HandleGetRequestableExtensionsCHROMIUM(
     const gles2::GetRequestableExtensionsCHROMIUM& c) {
   Bucket* bucket = CreateBucket(c.bucket_id);
   scoped_ptr<FeatureInfo> info(new FeatureInfo());
-  info->Initialize(disallowed_extensions_, NULL);
+  info->Initialize(disallowed_features_, NULL);
   bucket->SetFromString(info->extensions().c_str());
   return error::kNoError;
 }
@@ -6736,6 +6883,9 @@ error::Error GLES2DecoderImpl::HandleGetRequestableExtensionsCHROMIUM(
 error::Error GLES2DecoderImpl::HandleRequestExtensionCHROMIUM(
     uint32 immediate_data_size, const gles2::RequestExtensionCHROMIUM& c) {
   Bucket* bucket = GetBucket(c.bucket_id);
+  if (!bucket || bucket->size() == 0) {
+    return error::kInvalidArguments;
+  }
   std::string feature_str;
   if (!bucket->GetAsString(&feature_str)) {
     return error::kInvalidArguments;
@@ -6748,12 +6898,22 @@ error::Error GLES2DecoderImpl::HandleRequestExtensionCHROMIUM(
 
   feature_info_->AddFeatures(feature_str.c_str());
 
+  bool initialization_required = false;
+  if (force_webgl_glsl_validation_ && !derivatives_explicitly_enabled_) {
+    size_t derivatives_offset = feature_str.find(kOESDerivativeExtension);
+    if (std::string::npos != derivatives_offset) {
+      derivatives_explicitly_enabled_ = true;
+      initialization_required = true;
+    }
+  }
+
   // If we just enabled a feature which affects the shader translator,
   // we may need to re-initialize it.
   if (std_derivatives_enabled !=
           feature_info_->feature_flags().oes_standard_derivatives ||
       webglsl_enabled !=
-          feature_info_->feature_flags().chromium_webglsl) {
+          feature_info_->feature_flags().chromium_webglsl ||
+      initialization_required) {
     InitializeShaderTranslator();
   }
 
@@ -6885,6 +7045,84 @@ bool GLES2DecoderImpl::WasContextLost() {
     }
   }
   return false;
+}
+
+error::Error GLES2DecoderImpl::HandleCreateStreamTextureCHROMIUM(
+    uint32 immediate_data_size,
+    const gles2::CreateStreamTextureCHROMIUM& c) {
+  if (!feature_info_->feature_flags().chromium_stream_texture) {
+    SetGLError(GL_INVALID_OPERATION,
+               "glOpenStreamTextureCHROMIUM: "
+               "not supported.");
+    return error::kNoError;
+  }
+
+  uint32 client_id = c.client_id;
+  typedef gles2::CreateStreamTextureCHROMIUM::Result Result;
+  Result* result = GetSharedMemoryAs<Result*>(
+      c.result_shm_id, c.result_shm_offset, sizeof(*result));
+
+  *result = GL_ZERO;
+  TextureManager::TextureInfo* info =
+      texture_manager()->GetTextureInfo(client_id);
+  if (!info) {
+    SetGLError(GL_INVALID_VALUE,
+               "glCreateStreamTextureCHROMIUM: "
+               "bad texture id.");
+    return error::kNoError;
+  }
+
+  if (info->IsStreamTexture()) {
+    SetGLError(GL_INVALID_OPERATION,
+               "glCreateStreamTextureCHROMIUM: "
+               "is already a stream texture.");
+    return error::kNoError;
+  }
+
+  if (info->target() && info->target() != GL_TEXTURE_EXTERNAL_OES) {
+    SetGLError(GL_INVALID_OPERATION,
+               "glCreateStreamTextureCHROMIUM: "
+               "is already bound to incompatible target.");
+    return error::kNoError;
+  }
+
+  if (!stream_texture_manager_)
+    return error::kInvalidArguments;
+
+  GLuint object_id = stream_texture_manager_->CreateStreamTexture(
+      info->service_id(), client_id);
+
+  if (object_id) {
+    info->SetStreamTexture(true);
+  } else {
+    SetGLError(GL_OUT_OF_MEMORY,
+               "glCreateStreamTextureCHROMIUM: "
+               "failed to create platform texture.");
+  }
+
+  *result = object_id;
+  return error::kNoError;
+}
+
+error::Error GLES2DecoderImpl::HandleDestroyStreamTextureCHROMIUM(
+    uint32 immediate_data_size,
+    const gles2::DestroyStreamTextureCHROMIUM& c) {
+  GLuint client_id = c.texture;
+  TextureManager::TextureInfo* info =
+      texture_manager()->GetTextureInfo(client_id);
+  if (info && info->IsStreamTexture()) {
+    if (!stream_texture_manager_)
+      return error::kInvalidArguments;
+
+    stream_texture_manager_->DestroyStreamTexture(info->service_id());
+    info->SetStreamTexture(false);
+    texture_manager()->SetInfoTarget(feature_info_, info, 0);
+  } else {
+    SetGLError(GL_INVALID_VALUE,
+               "glDestroyStreamTextureCHROMIUM: bad texture id.");
+  }
+
+  return error::kNoError;
 }
 
 // Include the auto-generated part of this file. We split this because it means

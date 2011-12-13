@@ -5,17 +5,14 @@
 #include "chrome/browser/ui/webui/chromeos/login/enterprise_oauth_enrollment_screen_handler.h"
 
 #include "base/bind.h"
-#include "base/command_line.h"
-#include "base/utf_string_conversions.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/values.h"
 #include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
+#include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -93,19 +90,16 @@ EnterpriseOAuthEnrollmentScreenHandler::
 void EnterpriseOAuthEnrollmentScreenHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(
       "oauthEnrollClose",
-      NewCallback(
-          this,
-          &EnterpriseOAuthEnrollmentScreenHandler::HandleClose));
+      base::Bind(&EnterpriseOAuthEnrollmentScreenHandler::HandleClose,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "oauthEnrollCompleteLogin",
-      NewCallback(
-          this,
-          &EnterpriseOAuthEnrollmentScreenHandler::HandleCompleteLogin));
+      base::Bind(&EnterpriseOAuthEnrollmentScreenHandler::HandleCompleteLogin,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(
       "oauthEnrollRetry",
-      NewCallback(
-          this,
-          &EnterpriseOAuthEnrollmentScreenHandler::HandleRetry));
+      base::Bind(&EnterpriseOAuthEnrollmentScreenHandler::HandleRetry,
+                 base::Unretained(this)));
 }
 
 // EnterpriseOAuthEnrollmentScreenHandler
@@ -383,6 +377,8 @@ void EnterpriseOAuthEnrollmentScreenHandler::RevokeTokens() {
 void EnterpriseOAuthEnrollmentScreenHandler::DoShow() {
   DictionaryValue screen_data;
   screen_data.SetString("signin_url", kGaiaExtStartPage);
+  screen_data.SetString("gaiaOrigin",
+                        GaiaUrls::GetInstance()->gaia_origin_url());
   ShowScreen("oauth-enrollment", &screen_data);
 }
 

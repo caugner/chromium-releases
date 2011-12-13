@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
@@ -15,6 +16,7 @@
 #include "chrome/browser/ui/views/download/download_item_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/browser/download/download_item.h"
+#include "content/browser/download/download_stats.h"
 #include "content/browser/download/download_manager.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "grit/generated_resources.h"
@@ -87,47 +89,17 @@ int CenterPosition(int size, int target_size) {
 DownloadShelfView::DownloadShelfView(Browser* browser, BrowserView* parent)
     : browser_(browser),
       parent_(parent),
+      auto_closed_(true),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           mouse_watcher_(this, this, gfx::Insets())) {
   mouse_watcher_.set_notify_on_exit_time_ms(kNotifyOnExitTimeMS);
   set_id(VIEW_ID_DOWNLOAD_SHELF);
   parent->AddChildView(this);
-  Init();
+  Show();
 }
 
 DownloadShelfView::~DownloadShelfView() {
   parent_->RemoveChildView(this);
-}
-
-void DownloadShelfView::Init() {
-  ResourceBundle &rb = ResourceBundle::GetSharedInstance();
-  arrow_image_ = new views::ImageView();
-  arrow_image_->SetImage(rb.GetBitmapNamed(IDR_DOWNLOADS_FAVICON));
-  AddChildView(arrow_image_);
-
-  show_all_view_ = new views::Link(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_SHOW_ALL_DOWNLOADS)));
-  show_all_view_->set_listener(this);
-  AddChildView(show_all_view_);
-
-  close_button_ = new views::ImageButton(this);
-  close_button_->SetImage(views::CustomButton::BS_NORMAL,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR));
-  close_button_->SetImage(views::CustomButton::BS_HOT,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
-  close_button_->SetImage(views::CustomButton::BS_PUSHED,
-                          rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
-  close_button_->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
-  UpdateButtonColors();
-  AddChildView(close_button_);
-
-  new_item_animation_.reset(new ui::SlideAnimation(this));
-  new_item_animation_->SetSlideDuration(kNewItemAnimationDurationMs);
-
-  shelf_animation_.reset(new ui::SlideAnimation(this));
-  shelf_animation_->SetSlideDuration(kShelfAnimationDurationMs);
-  Show();
 }
 
 void DownloadShelfView::AddDownloadView(DownloadItemView* view) {
@@ -179,10 +151,8 @@ void DownloadShelfView::RemoveDownloadView(View* view) {
 }
 
 views::View* DownloadShelfView::GetDefaultFocusableChild() {
-  if (!download_views_.empty())
-    return download_views_[0];
-  else
-    return show_all_view_;
+  return download_views_.empty() ?
+      static_cast<View*>(show_all_view_) : download_views_[0];
 }
 
 void DownloadShelfView::OnPaint(gfx::Canvas* canvas) {
@@ -250,12 +220,6 @@ void DownloadShelfView::AnimationEnded(const ui::Animation *animation) {
 }
 
 void DownloadShelfView::Layout() {
-  // Now that we know we have a parent, we can safely set our theme colors.
-  show_all_view_->SetColor(
-      GetThemeProvider()->GetColor(ThemeService::COLOR_BOOKMARK_TEXT));
-  set_background(views::Background::CreateSolidBackground(
-      GetThemeProvider()->GetColor(ThemeService::COLOR_TOOLBAR)));
-
   // Let our base class layout our child views
   views::View::Layout();
 
@@ -326,6 +290,48 @@ void DownloadShelfView::Layout() {
   }
 }
 
+void DownloadShelfView::ViewHierarchyChanged(bool is_add,
+                                             View* parent,
+                                             View* child) {
+  View::ViewHierarchyChanged(is_add, parent, child);
+
+  if (is_add && (child == this)) {
+    set_background(views::Background::CreateSolidBackground(
+        GetThemeProvider()->GetColor(ThemeService::COLOR_TOOLBAR)));
+
+    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    arrow_image_ = new views::ImageView();
+    arrow_image_->SetImage(rb.GetBitmapNamed(IDR_DOWNLOADS_FAVICON));
+    AddChildView(arrow_image_);
+
+    show_all_view_ = new views::Link(
+        l10n_util::GetStringUTF16(IDS_SHOW_ALL_DOWNLOADS));
+    show_all_view_->set_listener(this);
+    show_all_view_->SetBackgroundColor(background()->get_color());
+    show_all_view_->SetEnabledColor(
+        GetThemeProvider()->GetColor(ThemeService::COLOR_BOOKMARK_TEXT));
+    AddChildView(show_all_view_);
+
+    close_button_ = new views::ImageButton(this);
+    close_button_->SetImage(views::CustomButton::BS_NORMAL,
+                            rb.GetBitmapNamed(IDR_CLOSE_BAR));
+    close_button_->SetImage(views::CustomButton::BS_HOT,
+                            rb.GetBitmapNamed(IDR_CLOSE_BAR_H));
+    close_button_->SetImage(views::CustomButton::BS_PUSHED,
+                            rb.GetBitmapNamed(IDR_CLOSE_BAR_P));
+    close_button_->SetAccessibleName(
+        l10n_util::GetStringUTF16(IDS_ACCNAME_CLOSE));
+    UpdateButtonColors();
+    AddChildView(close_button_);
+
+    new_item_animation_.reset(new ui::SlideAnimation(this));
+    new_item_animation_->SetSlideDuration(kNewItemAnimationDurationMs);
+
+    shelf_animation_.reset(new ui::SlideAnimation(this));
+    shelf_animation_->SetSlideDuration(kShelfAnimationDurationMs);
+  }
+}
+
 bool DownloadShelfView::CanFitFirstDownloadItem() {
   if (download_views_.empty())
     return true;
@@ -367,6 +373,7 @@ void DownloadShelfView::LinkClicked(views::Link* source, int event_flags) {
 
 void DownloadShelfView::ButtonPressed(
     views::Button* button, const views::Event& event) {
+  auto_closed_ = false;
   Close();
 }
 
@@ -383,8 +390,16 @@ void DownloadShelfView::Show() {
 }
 
 void DownloadShelfView::Close() {
+  int num_in_progress = 0;
+  for (size_t i = 0; i < download_views_.size(); ++i) {
+    if (download_views_[i]->download()->IsInProgress())
+      ++num_in_progress;
+  }
+  download_stats::RecordShelfClose(
+      download_views_.size(), num_in_progress, auto_closed_);
   parent_->SetDownloadShelfVisible(false);
   shelf_animation_->Hide();
+  auto_closed_ = true;
 }
 
 Browser* DownloadShelfView::browser() const {

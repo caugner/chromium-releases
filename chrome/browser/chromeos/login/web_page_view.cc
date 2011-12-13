@@ -15,7 +15,7 @@
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/bindings_policy.h"
+#include "content/public/common/bindings_policy.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ipc/ipc_message.h"
@@ -117,11 +117,11 @@ void WebPageView::Init() {
 
   connecting_label_ = new views::Label();
   connecting_label_->SetText(
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_LOAD_STATE_CONNECTING)));
+      l10n_util::GetStringUTF16(IDS_LOAD_STATE_CONNECTING));
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   connecting_label_->SetFont(rb.GetFont(ResourceBundle::MediumFont));
   connecting_label_->SetVisible(false);
-  AddChildView(connecting_label_ );
+  AddChildView(connecting_label_);
 
   start_timer_.Start(FROM_HERE,
                      TimeDelta::FromMilliseconds(kStartDelayMs),

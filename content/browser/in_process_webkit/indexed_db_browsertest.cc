@@ -16,8 +16,9 @@
 #include "content/browser/in_process_webkit/indexed_db_context.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_switches.h"
+#include "content/public/common/content_switches.h"
 #include "webkit/database/database_util.h"
+#include "webkit/quota/mock_special_storage_policy.h"
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/special_storage_policy.h"
 
@@ -145,7 +146,7 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ClearLocalState) {
     // With the levelDB backend, these are directories.
     WebKitContext *webkit_context = profile.GetWebKitContext();
     IndexedDBContext* idb_context = webkit_context->indexed_db_context();
-    idb_context->set_data_path(temp_dir.path());
+    idb_context->set_data_path_for_testing(temp_dir.path());
     protected_path = idb_context->GetIndexedDBFilePath(
         DatabaseUtil::GetOriginIdentifier(kProtectedOrigin));
     unprotected_path = idb_context->GetIndexedDBFilePath(
@@ -167,6 +168,53 @@ IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ClearLocalState) {
   ASSERT_FALSE(file_util::DirectoryExists(unprotected_path));
 }
 
+// In proc browser test is needed here because ClearLocalState indirectly calls
+// WebKit's isMainThread through WebSecurityOrigin->SecurityOrigin.
+IN_PROC_BROWSER_TEST_F(IndexedDBBrowserTest, ClearSessionOnlyDatabases) {
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+
+  FilePath normal_path;
+  FilePath session_only_path;
+
+  // Create the scope which will ensure we run the destructor of the webkit
+  // context which should trigger the clean up.
+  {
+    TestingProfile profile;
+
+    const GURL kNormalOrigin("http://normal/");
+    const GURL kSessionOnlyOrigin("http://session-only/");
+    scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+        new quota::MockSpecialStoragePolicy;
+    special_storage_policy->AddSessionOnly(kSessionOnlyOrigin);
+
+    // Create some indexedDB paths.
+    // With the levelDB backend, these are directories.
+    WebKitContext *webkit_context = profile.GetWebKitContext();
+    IndexedDBContext* idb_context = webkit_context->indexed_db_context();
+
+    // Override the storage policy with our own.
+    idb_context->special_storage_policy_ = special_storage_policy;
+    idb_context->set_data_path_for_testing(temp_dir.path());
+
+    normal_path = idb_context->GetIndexedDBFilePath(
+        DatabaseUtil::GetOriginIdentifier(kNormalOrigin));
+    session_only_path = idb_context->GetIndexedDBFilePath(
+        DatabaseUtil::GetOriginIdentifier(kSessionOnlyOrigin));
+    ASSERT_TRUE(file_util::CreateDirectory(normal_path));
+    ASSERT_TRUE(file_util::CreateDirectory(session_only_path));
+  }
+
+  // Make sure we wait until the destructor has run.
+  scoped_refptr<base::ThreadTestHelper> helper(
+      new base::ThreadTestHelper(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::WEBKIT)));
+  ASSERT_TRUE(helper->Run());
+
+  EXPECT_TRUE(file_util::DirectoryExists(normal_path));
+  EXPECT_FALSE(file_util::DirectoryExists(session_only_path));
+}
+
 class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
  public:
   virtual void SetUpOnMainThread() {
@@ -177,18 +225,6 @@ class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
         kTemporaryStorageQuotaMaxSize, browser()->profile()->GetQuotaManager());
   }
 
-  class SetTempQuotaCallback : public quota::QuotaCallback {
-   public:
-    void Run(quota::QuotaStatusCode, quota::StorageType, int64) {
-      DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    }
-
-    void RunWithParams(const Tuple3<quota::QuotaStatusCode,
-                       quota::StorageType, int64>& params) {
-      Run(params.a, params.b, params.c);
-    }
-  };
-
   static void SetTempQuota(int64 bytes, scoped_refptr<QuotaManager> qm) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
       BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
@@ -197,7 +233,7 @@ class IndexedDBBrowserTestWithLowQuota : public IndexedDBBrowserTest {
       return;
     }
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    qm->SetTemporaryGlobalQuota(bytes, new SetTempQuotaCallback);
+    qm->SetTemporaryGlobalOverrideQuota(bytes, NULL);
     // Don't return until the quota has been set.
     scoped_refptr<base::ThreadTestHelper> helper(
         new base::ThreadTestHelper(

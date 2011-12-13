@@ -8,10 +8,11 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -434,14 +435,14 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     } else {
       NOTREACHED();
     }
-    tab()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::LINK);
+    tab()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_LINK);
     return;
   }
 
   if (command == kShowPrivacyCommand) {
     // User pressed "Safe Browsing privacy policy".
     GURL url(kSbPrivacyPolicyUrl);
-    tab()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::LINK);
+    tab()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_LINK);
     return;
   }
 
@@ -489,7 +490,8 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
             kSbReportPhishingErrorUrl,
             bad_url_spec,
             threat_type == SafeBrowsingService::CLIENT_SIDE_PHISHING_URL);
-    tab()->OpenURL(report_url, GURL(), CURRENT_TAB, PageTransition::LINK);
+    tab()->OpenURL(
+        report_url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_LINK);
     return;
   }
 
@@ -497,12 +499,13 @@ void SafeBrowsingBlockingPage::CommandReceived(const std::string& cmd) {
     // We're going to take the user to Google's SafeBrowsing diagnostic page.
     std::string diagnostic =
         base::StringPrintf(kSbDiagnosticUrl,
-                           EscapeQueryParamValue(bad_url_spec, true).c_str());
+            net::EscapeQueryParamValue(bad_url_spec, true).c_str());
     GURL diagnostic_url(diagnostic);
     diagnostic_url = google_util::AppendGoogleLocaleParam(diagnostic_url);
     DCHECK(unsafe_resources_[element_index].threat_type ==
            SafeBrowsingService::URL_MALWARE);
-    tab()->OpenURL(diagnostic_url, GURL(), CURRENT_TAB, PageTransition::LINK);
+    tab()->OpenURL(
+        diagnostic_url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_LINK);
     return;
   }
 
@@ -637,8 +640,7 @@ void SafeBrowsingBlockingPage::FinishMalwareDetails(int64 delay_ms) {
     // Finish the malware details collection, send it over.
     BrowserThread::PostDelayedTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            malware_details_.get(), &MalwareDetails::FinishCollection),
+        base::Bind(&MalwareDetails::FinishCollection, malware_details_.get()),
         delay_ms);
   }
 }
@@ -650,9 +652,8 @@ void SafeBrowsingBlockingPage::NotifySafeBrowsingService(
     bool proceed) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(
-          sb_service, &SafeBrowsingService::OnBlockingPageDone,
-          unsafe_resources, proceed));
+      base::Bind(&SafeBrowsingService::OnBlockingPageDone,
+                 sb_service, unsafe_resources, proceed));
 }
 
 // static

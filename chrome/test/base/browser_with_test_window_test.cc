@@ -16,7 +16,7 @@
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 
 BrowserWithTestWindowTest::BrowserWithTestWindowTest()
     : ui_thread_(BrowserThread::UI, message_loop()),
@@ -58,7 +58,7 @@ TestRenderViewHost* BrowserWithTestWindowTest::TestRenderViewHostForTab(
 }
 
 void BrowserWithTestWindowTest::AddTab(Browser* browser, const GURL& url) {
-  browser::NavigateParams params(browser, url, PageTransition::TYPED);
+  browser::NavigateParams params(browser, url, content::PAGE_TRANSITION_TYPED);
   params.tabstrip_index = 0;
   params.disposition = NEW_FOREGROUND_TAB;
   browser::Navigate(&params);
@@ -70,28 +70,51 @@ void BrowserWithTestWindowTest::CommitPendingLoad(
   if (!controller->pending_entry())
     return;  // Nothing to commit.
 
-  TestRenderViewHost* test_rvh =
+  TestRenderViewHost* old_rvh =
       TestRenderViewHostForTab(controller->tab_contents());
   MockRenderProcessHost* mock_rph = static_cast<MockRenderProcessHost*>(
-    test_rvh->process());
+    old_rvh->process());
+
+  TestRenderViewHost* pending_rvh = static_cast<TestRenderViewHost*>(
+      controller->tab_contents()->render_manager_for_testing()->
+      pending_render_view_host());
+  if (pending_rvh) {
+    // Simulate the ShouldClose_ACK that is received from the current renderer
+    // for a cross-site navigation.
+    DCHECK_NE(old_rvh, pending_rvh);
+    old_rvh->SendShouldCloseACK(true);
+  }
+  // Commit on the pending_rvh, if one exists.
+  TestRenderViewHost* test_rvh = pending_rvh ? pending_rvh : old_rvh;
 
   // For new navigations, we need to send a larger page ID. For renavigations,
   // we need to send the preexisting page ID. We can tell these apart because
   // renavigations will have a pending_entry_index while new ones won't (they'll
   // just have a standalong pending_entry that isn't in the list already).
   if (controller->pending_entry_index() >= 0) {
-    test_rvh->SendNavigate(controller->pending_entry()->page_id(),
-                           controller->pending_entry()->url());
+    test_rvh->SendNavigateWithTransition(
+        controller->pending_entry()->page_id(),
+        controller->pending_entry()->url(),
+        controller->pending_entry()->transition_type());
   } else {
-    test_rvh->SendNavigate(mock_rph->max_page_id() + 1,
-                           controller->pending_entry()->url());
+    test_rvh->SendNavigateWithTransition(
+        mock_rph->max_page_id() + 1,
+        controller->pending_entry()->url(),
+        controller->pending_entry()->transition_type());
+    mock_rph->UpdateMaxPageID(mock_rph->max_page_id() + 1);
   }
+
+  // Simulate the SwapOut_ACK that fires if you commit a cross-site navigation
+  // without making any network requests.
+  if (pending_rvh)
+    old_rvh->OnSwapOutACK();
 }
 
 void BrowserWithTestWindowTest::NavigateAndCommit(
     NavigationController* controller,
     const GURL& url) {
-  controller->LoadURL(url, GURL(), PageTransition::LINK);
+  controller->LoadURL(
+      url, GURL(), content::PAGE_TRANSITION_LINK, std::string());
   CommitPendingLoad(controller);
 }
 

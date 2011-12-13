@@ -19,7 +19,7 @@
 #include "views/views_delegate.h"
 #include "views/widget/widget.h"
 
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
 #include "content/common/notification_service.h"
 #endif
 
@@ -94,8 +94,7 @@ views::Widget* GetTopLevelWidget(Browser* browser) {
   if (!window)
     return NULL;
 
-  BrowserView* browser_view = BrowserView::GetBrowserViewForNativeWindow(
-      window->GetNativeHandle());
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   return browser_view ? browser_view->GetWidget() : NULL;
 }
 
@@ -165,7 +164,7 @@ bool SendKeyboardEventInputFunction::RunImpl() {
   return true;
 }
 
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
 bool HideKeyboardFunction::RunImpl() {
   NotificationService::current()->Notify(
       chrome::NOTIFICATION_HIDE_KEYBOARD_INVOKED,

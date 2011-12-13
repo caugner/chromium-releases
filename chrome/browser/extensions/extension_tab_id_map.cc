@@ -13,6 +13,7 @@
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 
 // ExtensionTabIdMap is a Singleton, so it doesn't need refcounting.
 DISABLE_RUNNABLE_METHOD_REFCOUNT(ExtensionTabIdMap);
@@ -41,11 +42,11 @@ class ExtensionTabIdMap::TabObserver : public NotificationObserver {
 ExtensionTabIdMap::TabObserver::TabObserver() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_DELETED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
-                 NotificationService::AllSources());
+                 NotificationService::AllBrowserContextsAndSources());
 }
 
 ExtensionTabIdMap::TabObserver::~TabObserver() {

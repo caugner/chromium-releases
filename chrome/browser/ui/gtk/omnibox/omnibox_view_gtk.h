@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/page_transition_types.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
@@ -139,6 +138,7 @@ class OmniboxViewGtk : public OmniboxView,
   virtual void OnBeforePossibleChange() OVERRIDE;
   virtual bool OnAfterPossibleChange() OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
+  virtual gfx::NativeView GetRelativeWindowForPopup() const OVERRIDE;
   virtual CommandUpdater* GetCommandUpdater() OVERRIDE;
   virtual void SetInstantSuggestion(const string16& suggestion,
                                     bool animate_to_complete) OVERRIDE;
@@ -229,6 +229,10 @@ class OmniboxViewGtk : public OmniboxView,
                        guint, guint);
   CHROMEGTK_CALLBACK_4(OmniboxViewGtk, void, HandleDragDataGet,
                        GdkDragContext*, GtkSelectionData*, guint, guint);
+  CHROMEGTK_CALLBACK_1(OmniboxViewGtk, void, HandleDragBegin,
+                       GdkDragContext*);
+  CHROMEGTK_CALLBACK_1(OmniboxViewGtk, void, HandleDragEnd,
+                       GdkDragContext*);
   CHROMEGTK_CALLBACK_0(OmniboxViewGtk, void, HandleBackSpace);
   CHROMEGTK_CALLBACK_0(OmniboxViewGtk, void, HandleCopyClipboard);
   CHROMEGTK_CALLBACK_0(OmniboxViewGtk, void, HandleCutClipboard);
@@ -430,6 +434,7 @@ class OmniboxViewGtk : public OmniboxView,
   // pass this string to SavePrimarySelection()).
   std::string selected_text_;
 
+  std::string dragged_text_;
   // When we own the X clipboard, this is the text for it.
   std::string primary_selection_text_;
 
@@ -437,15 +442,15 @@ class OmniboxViewGtk : public OmniboxView,
   gulong mark_set_handler_id_;
   gulong mark_set_handler_id2_;
 
-#if defined(OS_CHROMEOS)
-  // The following variables are used to implement select-all-on-mouse-up, which
-  // is disabled in the standard Linux build due to poor interaction with the
-  // PRIMARY X selection.
-
   // Is the first mouse button currently down?  When selection marks get moved,
   // we use this to determine if the user was highlighting text with the mouse
   // -- if so, we avoid selecting all the text on mouse-up.
   bool button_1_pressed_;
+
+#if defined(OS_CHROMEOS)
+  // The following variables are used to implement select-all-on-mouse-up, which
+  // is disabled in the standard Linux build due to poor interaction with the
+  // PRIMARY X selection.
 
   // Did the user change the selected text in the middle of the current click?
   // If so, we don't select all of the text when the button is released -- we

@@ -173,7 +173,7 @@ HttpAuthController::~HttpAuthController() {
 }
 
 int HttpAuthController::MaybeGenerateAuthToken(const HttpRequestInfo* request,
-                                               CompletionCallback* callback,
+                                               OldCompletionCallback* callback,
                                                const BoundNetLog& net_log) {
   DCHECK(CalledOnValidThread());
   bool needs_auth = HaveAuth() || SelectPreemptiveAuth(net_log);
@@ -511,12 +511,10 @@ void HttpAuthController::PopulateAuthChallenge() {
   // This info is consumed by URLRequestHttpJob::GetAuthChallengeInfo().
 
   auth_info_ = new AuthChallengeInfo;
-  auth_info_->is_proxy = target_ == HttpAuth::AUTH_PROXY;
-  auth_info_->host_and_port = ASCIIToWide(GetHostAndPort(auth_origin_));
-  auth_info_->scheme = ASCIIToWide(
-      HttpAuth::SchemeToString(handler_->auth_scheme()));
-  // TODO(eroman): decode realm according to RFC 2047.
-  auth_info_->realm = ASCIIToWide(handler_->realm());
+  auth_info_->is_proxy = (target_ == HttpAuth::AUTH_PROXY);
+  auth_info_->challenger = HostPortPair::FromURL(auth_origin_);
+  auth_info_->scheme = HttpAuth::SchemeToString(handler_->auth_scheme());
+  auth_info_->realm = handler_->realm();
 }
 
 bool HttpAuthController::DisableOnAuthHandlerResult(int result) {
@@ -554,7 +552,7 @@ void HttpAuthController::OnIOComplete(int result) {
   if (DisableOnAuthHandlerResult(result))
     result = OK;
   if (user_callback_) {
-    CompletionCallback* c = user_callback_;
+    OldCompletionCallback* c = user_callback_;
     user_callback_ = NULL;
     c->Run(result);
   }

@@ -34,9 +34,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/native_web_keyboard_event.h"
 #include "content/common/notification_service.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -49,11 +48,11 @@ namespace {
 
 // Used as the color of the text in the entry box and the text for the results
 // label for failure searches.
-const GdkColor kEntryTextColor = ui::kGdkBlack;
+const GdkColor& kEntryTextColor = ui::kGdkBlack;
 
 // Used as the color of the background of the entry box and the background of
 // the find label for successful searches.
-const GdkColor kEntryBackgroundColor = ui::kGdkWhite;
+const GdkColor& kEntryBackgroundColor = ui::kGdkWhite;
 const GdkColor kFindFailureBackgroundColor = GDK_COLOR_RGB(255, 102, 102);
 const GdkColor kFindSuccessTextColor = GDK_COLOR_RGB(178, 178, 178);
 
@@ -135,7 +134,6 @@ void SetDialogShape(GtkWidget* widget) {
       IDR_FIND_DLG_MIDDLE_BACKGROUND,
       IDR_FIND_DLG_RIGHT_BACKGROUND,
       0, 0, 0, 0, 0, 0);
-    dialog_shape->ChangeWhiteToTransparent();
   }
 
   dialog_shape->ContourWidget(widget);
@@ -501,12 +499,11 @@ void FindBarGtk::Observe(int type,
 
     gtk_misc_set_alignment(GTK_MISC(match_count_label_), 0.5, 0.5);
   } else {
-    gtk_widget_modify_cursor(
-        text_entry_, &ui::kGdkBlack, &ui::kGdkGray);
+    GdkColor gray = GDK_COLOR_RGB(0x7f, 0x7f, 0x7f);
+    gtk_widget_modify_cursor(text_entry_, &ui::kGdkBlack, &gray);
     gtk_widget_modify_base(text_entry_, GTK_STATE_NORMAL,
                            &kEntryBackgroundColor);
-    gtk_widget_modify_text(text_entry_, GTK_STATE_NORMAL,
-                           &kEntryTextColor);
+    gtk_widget_modify_text(text_entry_, GTK_STATE_NORMAL, &kEntryTextColor);
 
     // Until we switch to vector graphics, force the font size.
     gtk_util::ForceFontSizePixels(text_entry_, 13.4);  // 13.4px == 10pt @ 96dpi
@@ -671,8 +668,7 @@ bool FindBarGtk::MaybeForwardKeyEventToRenderer(GdkEventKey* event) {
 
   // Make sure we don't have a text field element interfering with keyboard
   // input. Otherwise Up and Down arrow key strokes get eaten. "Nom Nom Nom".
-  render_view_host->Send(
-      new ViewMsg_ClearFocusedNode(render_view_host->routing_id()));
+  render_view_host->ClearFocusedNode();
 
   NativeWebKeyboardEvent wke(event);
   render_view_host->ForwardKeyboardEvent(wke);

@@ -10,12 +10,12 @@
 #include "base/message_loop.h"
 #include "base/process.h"
 #include "base/string_number_conversions.h"
-#include "content/common/content_switches.h"
-#include "content/renderer/devtools_agent_filter.h"
-#include "content/renderer/devtools_client.h"
 #include "content/common/devtools_messages.h"
 #include "content/common/view_messages.h"
-#include "content/renderer/render_view.h"
+#include "content/public/common/content_switches.h"
+#include "content/renderer/devtools_agent_filter.h"
+#include "content/renderer/devtools_client.h"
+#include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
@@ -56,8 +56,8 @@ class WebKitClientMessageLoopImpl
 // static
 std::map<int, DevToolsAgent*> DevToolsAgent::agent_for_routing_id_;
 
-DevToolsAgent::DevToolsAgent(RenderView* render_view)
-    : RenderViewObserver(render_view),
+DevToolsAgent::DevToolsAgent(RenderViewImpl* render_view)
+    : content::RenderViewObserver(render_view),
       is_attached_(false) {
   agent_for_routing_id_[routing_id()] = this;
 
@@ -78,6 +78,7 @@ bool DevToolsAgent::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(DevToolsAgent, message)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Attach, OnAttach)
+    IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Reattach, OnReattach)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_Detach, OnDetach)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_FrontendLoaded, OnFrontendLoaded)
     IPC_MESSAGE_HANDLER(DevToolsAgentMsg_DispatchOnInspectorBackend,
@@ -111,22 +112,9 @@ int DevToolsAgent::hostIdentifier() {
   return routing_id();
 }
 
-void DevToolsAgent::runtimeFeatureStateChanged(
-    const WebKit::WebString& feature,
-    bool enabled) {
-  Send(new DevToolsHostMsg_RuntimePropertyChanged(
-      routing_id(),
-      feature.utf8(),
-      enabled ? "true" : "false"));
-}
-
-void DevToolsAgent::runtimePropertyChanged(
-    const WebKit::WebString& name,
-    const WebKit::WebString& value) {
-  Send(new DevToolsHostMsg_RuntimePropertyChanged(
-      routing_id(),
-      name.utf8(),
-      value.utf8()));
+void DevToolsAgent::saveAgentRuntimeState(
+    const WebKit::WebString& state) {
+  Send(new DevToolsHostMsg_SaveAgentRuntimeState(routing_id(), state.utf8()));
 }
 
 WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
@@ -156,18 +144,19 @@ DevToolsAgent* DevToolsAgent::FromHostId(int host_id) {
   return NULL;
 }
 
-void DevToolsAgent::OnAttach(
-    const DevToolsRuntimeProperties& runtime_properties) {
+void DevToolsAgent::OnAttach() {
   WebDevToolsAgent* web_agent = GetWebAgent();
   if (web_agent) {
     web_agent->attach();
     is_attached_ = true;
-    for (DevToolsRuntimeProperties::const_iterator it =
-             runtime_properties.begin();
-         it != runtime_properties.end(); ++it) {
-      web_agent->setRuntimeProperty(WebString::fromUTF8(it->first),
-                                    WebString::fromUTF8(it->second));
-    }
+  }
+}
+
+void DevToolsAgent::OnReattach(const std::string& agent_state) {
+  WebDevToolsAgent* web_agent = GetWebAgent();
+  if (web_agent) {
+    web_agent->reattach(WebString::fromUTF8(agent_state));
+    is_attached_ = true;
   }
 }
 
@@ -207,11 +196,11 @@ void DevToolsAgent::OnNavigate() {
 }
 
 void DevToolsAgent::OnSetupDevToolsClient() {
-  new DevToolsClient(render_view());
+  new DevToolsClient(static_cast<RenderViewImpl*>(render_view()));
 }
 
 WebDevToolsAgent* DevToolsAgent::GetWebAgent() {
-  WebView* web_view = render_view()->webview();
+  WebView* web_view = render_view()->GetWebView();
   if (!web_view)
     return NULL;
   return web_view->devToolsAgent();

@@ -2,9 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/views/handle_web_keyboard_event_gtk.h"
+#include "chrome/browser/ui/views/handle_web_keyboard_event.h"
 
-#include "content/common/native_web_keyboard_event.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "views/widget/native_widget_gtk.h"
 
 void HandleWebKeyboardEvent(views::Widget* widget,

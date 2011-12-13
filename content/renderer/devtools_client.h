@@ -10,10 +10,11 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsFrontendClient.h"
 
 class MessageLoop;
+class RenderViewImpl;
 
 namespace WebKit {
 class WebDevToolsFrontend;
@@ -28,10 +29,10 @@ struct DevToolsMessageData;
 // corresponding DevToolsAgent object.
 // TODO(yurys): now the client is almost empty later it will delegate calls to
 // code in glue
-class DevToolsClient : public RenderViewObserver,
+class DevToolsClient : public content::RenderViewObserver,
                        public WebKit::WebDevToolsFrontendClient {
  public:
-  explicit DevToolsClient(RenderView* render_view);
+  explicit DevToolsClient(RenderViewImpl* render_view);
   virtual ~DevToolsClient();
 
  private:

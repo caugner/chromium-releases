@@ -39,20 +39,22 @@
 #include "content/browser/tab_contents/title_updated_details.h"
 #include "content/browser/user_metrics.h"
 #include "content/browser/webui/web_ui_factory.h"
-#include "content/common/bindings_policy.h"
 #include "content/common/content_client.h"
 #include "content/common/content_constants.h"
 #include "content/common/content_restriction.h"
-#include "content/common/navigation_types.h"
+#include "content/common/intents_messages.h"
 #include "content/common/notification_service.h"
-#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/navigation_types.h"
+#include "content/public/common/bindings_policy.h"
+#include "content/public/common/url_constants.h"
+#include "content/public/common/view_types.h"
 #include "net/base/net_util.h"
-#include "net/base/registry_controlled_domain.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "webkit/glue/password_form.h"
+#include "webkit/glue/web_intent_data.h"
 #include "webkit/glue/webpreferences.h"
 
 #if defined(OS_MACOSX)
@@ -220,12 +222,6 @@ TabContents::~TabContents() {
 
   NotifyDisconnected();
 
-  // First cleanly close all child windows.
-  // TODO(mpcomplete): handle case if MaybeCloseChildWindows() already asked
-  // some of these to close.  CloseWindows is async, so it might get called
-  // twice before it runs.
-  CloseConstrainedWindows();
-
   // Notify any observer that have a reference on this tab contents.
   NotificationService::current()->Notify(
       content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
@@ -278,6 +274,8 @@ bool TabContents::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   bool message_is_ok = true;
   IPC_BEGIN_MESSAGE_MAP_EX(TabContents, message, message_is_ok)
+    IPC_MESSAGE_HANDLER(IntentsHostMsg_WebIntentDispatch,
+                        OnWebIntentDispatch)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidStartProvisionalLoadForFrame,
                         OnDidStartProvisionalLoadForFrame)
     IPC_MESSAGE_HANDLER(ViewHostMsg_DidRedirectProvisionalLoad,
@@ -305,10 +303,9 @@ bool TabContents::OnMessageReceived(const IPC::Message& message) {
                         OnRegisterProtocolHandler)
     IPC_MESSAGE_HANDLER(ViewHostMsg_RegisterIntentHandler,
                         OnRegisterIntentHandler)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_WebIntentDispatch,
-                        OnWebIntentDispatch)
     IPC_MESSAGE_HANDLER(ViewHostMsg_Find_Reply, OnFindReply)
     IPC_MESSAGE_HANDLER(ViewHostMsg_CrashedPlugin, OnCrashedPlugin)
+    IPC_MESSAGE_HANDLER(ViewHostMsg_AppCacheAccessed, OnAppCacheAccessed)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
 
@@ -400,24 +397,6 @@ SiteInstance* TabContents::GetPendingSiteInstance() const {
       render_manager_.pending_render_view_host() :
       render_manager_.current_host();
   return dest_rvh->site_instance();
-}
-
-bool TabContents::ShouldDisplayURL() {
-  // Don't hide the url in view source mode and with interstitials.
-  NavigationEntry* entry = controller_.GetActiveEntry();
-  if (entry && (entry->IsViewSourceMode() ||
-                entry->page_type() == INTERSTITIAL_PAGE)) {
-    return true;
-  }
-
-  // We always display the URL for non-WebUI URLs to prevent spoofing.
-  if (entry && !content::WebUIFactory::Get()->HasWebUIScheme(entry->url()))
-    return true;
-
-  WebUI* web_ui = GetWebUIForCurrentState();
-  if (web_ui)
-    return !web_ui->should_hide_url();
-  return true;
 }
 
 bool TabContents::IsLoading() const {
@@ -520,6 +499,23 @@ void TabContents::ToggleFullscreenMode(bool enter_fullscreen) {
     delegate_->ToggleFullscreenModeForTab(this, enter_fullscreen);
 }
 
+bool TabContents::IsFullscreenForCurrentTab() const {
+  return delegate_ ? delegate_->IsFullscreenForTab(this) : false;
+}
+
+void TabContents::RequestToLockMouse() {
+  if (delegate_) {
+    delegate_->RequestToLockMouse(this);
+  } else {
+    GotResponseToLockMouseRequest(false);
+  }
+}
+
+void TabContents::LostMouseLock() {
+  if (delegate_)
+    delegate_->LostMouseLock();
+}
+
 void TabContents::UpdatePreferredSize(const gfx::Size& pref_size) {
   if (delegate_)
     delegate_->UpdatePreferredSize(this, pref_size);
@@ -552,8 +548,9 @@ bool TabContents::NeedToFireBeforeUnload() {
 TabContents* TabContents::OpenURL(const GURL& url,
                                   const GURL& referrer,
                                   WindowOpenDisposition disposition,
-                                  PageTransition::Type transition) {
-  return OpenURL(OpenURLParams(url, referrer, disposition, transition));
+                                  content::PageTransition transition) {
+  return OpenURL(OpenURLParams(url, referrer, disposition, transition,
+                               false));
 }
 
 TabContents* TabContents::OpenURL(const OpenURLParams& params) {
@@ -591,7 +588,7 @@ bool TabContents::NavigateToEntry(
   bool is_allowed_in_web_ui_renderer = content::GetContentClient()->
       browser()->GetWebUIFactory()->IsURLAcceptableForWebUI(browser_context(),
                                                             entry.url());
-  CHECK(!BindingsPolicy::is_web_ui_enabled(enabled_bindings) ||
+  CHECK(!(enabled_bindings & content::BINDINGS_POLICY_WEB_UI) ||
         is_allowed_in_web_ui_renderer);
 
   // Tell DevTools agent that it is attached prior to the navigation.
@@ -681,28 +678,6 @@ void TabContents::ShowPageInfo(const GURL& url,
   delegate_->ShowPageInfo(browser_context(), url, ssl, show_history);
 }
 
-void TabContents::AddConstrainedDialog(ConstrainedWindow* window) {
-  child_windows_.push_back(window);
-
-  if (child_windows_.size() == 1) {
-    window->ShowConstrainedWindow();
-    BlockTabContent(true);
-  }
-}
-
-void TabContents::BlockTabContent(bool blocked) {
-  RenderWidgetHostView* rwhv = GetRenderWidgetHostView();
-  // 70% opaque grey.
-  SkColor greyish = SkColorSetARGB(178, 0, 0, 0);
-  if (rwhv)
-    rwhv->SetVisuallyDeemphasized(blocked ? &greyish : NULL, false);
-  // RenderViewHost may be NULL during shutdown.
-  if (render_view_host())
-    render_view_host()->set_ignore_input_events(blocked);
-  if (delegate_)
-    delegate_->SetTabContentBlocked(this, blocked);
-}
-
 void TabContents::AddNewContents(TabContents* new_contents,
                                  WindowOpenDisposition disposition,
                                  const gfx::Rect& initial_pos,
@@ -764,21 +739,6 @@ void TabContents::OnStartDownload(DownloadItem* download) {
   TabContentsDelegate* d = delegate();
   if (d)
     d->OnStartDownload(this, download);
-}
-
-void TabContents::WillClose(ConstrainedWindow* window) {
-  ConstrainedWindowList::iterator i(
-      std::find(child_windows_.begin(), child_windows_.end(), window));
-  bool removed_topmost_window = i == child_windows_.begin();
-  if (i != child_windows_.end())
-    child_windows_.erase(i);
-  if (child_windows_.empty()) {
-    BlockTabContent(false);
-  } else {
-    if (removed_topmost_window)
-      child_windows_[0]->ShowConstrainedWindow();
-    BlockTabContent(true);
-  }
 }
 
 void TabContents::OnSavePage() {
@@ -873,7 +833,12 @@ double TabContents::GetZoomLevel() const {
     zoom_level = zoom_map->GetTemporaryZoomLevel(
         GetRenderProcessHost()->id(), render_view_host()->routing_id());
   } else {
-    zoom_level = zoom_map->GetZoomLevel(net::GetHostOrSpecFromURL(GetURL()));
+    GURL url;
+    NavigationEntry* active_entry = controller().GetActiveEntry();
+    // Since zoom map is updated using rewritten URL, use rewritten URL
+    // to get the zoom level.
+    url = active_entry ? active_entry->url() : GURL::EmptyGURL();
+    zoom_level = zoom_map->GetZoomLevel(net::GetHostOrSpecFromURL(url));
   }
   return zoom_level;
 }
@@ -914,7 +879,7 @@ void TabContents::SetContentRestrictions(int restrictions) {
 
 void TabContents::OnDidStartProvisionalLoadForFrame(int64 frame_id,
                                                     bool is_main_frame,
-                                                    bool has_opener_set,
+                                                    const GURL& opener_url,
                                                     const GURL& url) {
   bool is_error_page = (url.spec() == chrome::kUnreachableWebDataURL);
   GURL validated_url(url);
@@ -932,12 +897,12 @@ void TabContents::OnDidStartProvisionalLoadForFrame(int64 frame_id,
   if (is_main_frame) {
     // Notify observers about the provisional change in the main frame URL.
     FOR_EACH_OBSERVER(TabContentsObserver, observers_,
-                      ProvisionalChangeToMainFrameUrl(url, has_opener_set));
+                      ProvisionalChangeToMainFrameUrl(url, opener_url));
   }
 }
 
 void TabContents::OnDidRedirectProvisionalLoad(int32 page_id,
-                                               bool has_opener_set,
+                                               const GURL& opener_url,
                                                const GURL& source_url,
                                                const GURL& target_url) {
   // TODO(creis): Remove this method and have the pre-rendering code listen to
@@ -954,25 +919,23 @@ void TabContents::OnDidRedirectProvisionalLoad(int32 page_id,
   // Notify observers about the provisional change in the main frame URL.
   FOR_EACH_OBSERVER(TabContentsObserver, observers_,
                     ProvisionalChangeToMainFrameUrl(target_url,
-                                                    has_opener_set));
+                                                    opener_url));
 }
 
 void TabContents::OnDidFailProvisionalLoadWithError(
-    int64 frame_id,
-    bool is_main_frame,
-    int error_code,
-    const GURL& url,
-    bool showing_repost_interstitial) {
-  VLOG(1) << "Failed Provisional Load: " << url.possibly_invalid_spec()
-          << ", error_code: " << error_code
-          << " is_main_frame: " << is_main_frame
-          << " showing_repost_interstitial: " << showing_repost_interstitial
-          << " frame_id: " << frame_id;
-  GURL validated_url(url);
+    const ViewHostMsg_DidFailProvisionalLoadWithError_Params& params) {
+  VLOG(1) << "Failed Provisional Load: " << params.url.possibly_invalid_spec()
+          << ", error_code: " << params.error_code
+          << ", error_description: " << params.error_description
+          << ", is_main_frame: " << params.is_main_frame
+          << ", showing_repost_interstitial: " <<
+            params.showing_repost_interstitial
+          << ", frame_id: " << params.frame_id;
+  GURL validated_url(params.url);
   render_view_host()->FilterURL(ChildProcessSecurityPolicy::GetInstance(),
       GetRenderProcessHost()->id(), &validated_url);
 
-  if (net::ERR_ABORTED == error_code) {
+  if (net::ERR_ABORTED == params.error_code) {
     // EVIL HACK ALERT! Ignore failed loads when we're showing interstitials.
     // This means that the interstitial won't be torn down properly, which is
     // bad. But if we have an interstitial, go back to another tab type, and
@@ -1013,18 +976,26 @@ void TabContents::OnDidFailProvisionalLoadWithError(
 
   // Send out a notification that we failed a provisional load with an error.
   ProvisionalLoadDetails details(
-      is_main_frame, controller_.IsURLInPageNavigation(validated_url),
-      validated_url, std::string(), false, frame_id);
-  details.set_error_code(error_code);
+      params.is_main_frame,
+      controller_.IsURLInPageNavigation(validated_url),
+      validated_url,
+      std::string(),
+      false,
+      params.frame_id);
+  details.set_error_code(params.error_code);
 
   NotificationService::current()->Notify(
       content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
       Source<NavigationController>(&controller_),
       Details<ProvisionalLoadDetails>(&details));
 
-  FOR_EACH_OBSERVER(TabContentsObserver, observers_,
-                    DidFailProvisionalLoad(frame_id, is_main_frame,
-                    validated_url, error_code));
+  FOR_EACH_OBSERVER(TabContentsObserver,
+                    observers_,
+                    DidFailProvisionalLoad(params.frame_id,
+                                           params.is_main_frame,
+                                           validated_url,
+                                           params.error_code,
+                                           params.error_description));
 }
 
 void TabContents::OnDidLoadResourceFromMemoryCache(
@@ -1036,7 +1007,10 @@ void TabContents::OnDidLoadResourceFromMemoryCache(
   cache.Increment();
 
   // Send out a notification that we loaded a resource from our memory cache.
-  int cert_id = 0, cert_status = 0, security_bits = -1, connection_status = 0;
+  int cert_id = 0;
+  net::CertStatus cert_status = 0;
+  int security_bits = -1;
+  int connection_status = 0;
   SSLManager::DeserializeSecurityInfo(security_info,
                                       &cert_id, &cert_status,
                                       &security_bits,
@@ -1093,8 +1067,10 @@ void TabContents::OnGoToEntryAtOffset(int offset) {
     // Note that we don't call NavigationController::GotToOffset() as we don't
     // want to create a pending navigation entry (it might end up lingering
     // http://crbug.com/51680).
-    entry->set_transition_type(entry->transition_type() |
-                               PageTransition::FORWARD_BACK);
+    entry->set_transition_type(
+        content::PageTransitionFromInt(
+            entry->transition_type() |
+            content::PAGE_TRANSITION_FORWARD_BACK));
     NavigateToEntry(*entry, NavigationController::NO_RELOAD);
 
     // If the entry is being restored and doesn't have a SiteInstance yet, fill
@@ -1144,12 +1120,9 @@ void TabContents::OnRegisterIntentHandler(const string16& action,
 }
 
 void TabContents::OnWebIntentDispatch(const IPC::Message& message,
-                                      const string16& action,
-                                      const string16& type,
-                                      const string16& data,
+                                      const webkit_glue::WebIntentData& intent,
                                       int intent_id) {
-  delegate()->WebIntentDispatch(this, message.routing_id(), action, type,
-                                data, intent_id);
+  delegate()->WebIntentDispatch(this, message.routing_id(), intent, intent_id);
 }
 
 void TabContents::OnFindReply(int request_id,
@@ -1159,10 +1132,25 @@ void TabContents::OnFindReply(int request_id,
                               bool final_update) {
   delegate()->FindReply(this, request_id, number_of_matches, selection_rect,
                         active_match_ordinal, final_update);
+  // Send a notification to the renderer that we are ready to receive more
+  // results from the scoping effort of the Find operation. The FindInPage
+  // scoping is asynchronous and periodically sends results back up to the
+  // browser using IPC. In an effort to not spam the browser we have the
+  // browser send an ACK for each FindReply message and have the renderer
+  // queue up the latest status message while waiting for this ACK.
+  render_view_host()->Send(
+      new ViewMsg_FindReplyACK(render_view_host()->routing_id()));
 }
 
 void TabContents::OnCrashedPlugin(const FilePath& plugin_path) {
   delegate()->CrashedPlugin(this, plugin_path);
+}
+
+void TabContents::OnAppCacheAccessed(const GURL& manifest_url,
+                                     bool blocked_by_policy) {
+  // Notify observers about navigation.
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                    AppCacheAccessed(manifest_url, blocked_by_policy));
 }
 
 // Notifies the RenderWidgetHost instance about the fact that the page is
@@ -1278,11 +1266,6 @@ void TabContents::DidNavigateMainFramePostCommit(
     displayed_insecure_content_ = false;
   }
 
-  // Close constrained windows if necessary.
-  if (!net::RegistryControlledDomainService::SameDomainOrHost(
-      details.previous_url, details.entry->url()))
-    CloseConstrainedWindows();
-
   // Notify observers about navigation.
   FOR_EACH_OBSERVER(TabContentsObserver, observers_,
                     DidNavigateMainFramePostCommit(details, params));
@@ -1303,23 +1286,6 @@ void TabContents::DidNavigateAnyFramePostCommit(
   // Notify observers about navigation.
   FOR_EACH_OBSERVER(TabContentsObserver, observers_,
                     DidNavigateAnyFramePostCommit(details, params));
-}
-
-void TabContents::CloseConstrainedWindows() {
-  // Clear out any constrained windows since we are leaving this page entirely.
-  // To ensure that we iterate over every element in child_windows_ we
-  // need to use a copy of child_windows_. Otherwise if
-  // window->CloseConstrainedWindow() modifies child_windows_ we could end up
-  // skipping some elements.
-  ConstrainedWindowList child_windows_copy(child_windows_);
-  for (ConstrainedWindowList::iterator it = child_windows_copy.begin();
-       it != child_windows_copy.end(); ++it) {
-    ConstrainedWindow* window = *it;
-    if (window) {
-      window->CloseConstrainedWindow();
-      BlockTabContent(false);
-    }
-  }
 }
 
 void TabContents::UpdateMaxPageIDIfNecessary(SiteInstance* site_instance,
@@ -1379,7 +1345,7 @@ bool TabContents::UpdateTitleForEntry(NavigationEntry* entry,
   }
 
   // Lastly, set the title for the view.
-  view_->SetPageTitle(UTF16ToWideHack(final_title));
+  view_->SetPageTitle(final_title);
 
   TitleUpdatedDetails details(entry, explicit_set);
 
@@ -1439,8 +1405,8 @@ TabContents* TabContents::GetAsTabContents() {
   return this;
 }
 
-ViewType::Type TabContents::GetRenderViewType() const {
-  return ViewType::TAB_CONTENTS;
+content::ViewType TabContents::GetRenderViewType() const {
+  return content::VIEW_TYPE_TAB_CONTENTS;
 }
 
 void TabContents::RenderViewCreated(RenderViewHost* render_view_host) {
@@ -1499,6 +1465,7 @@ void TabContents::RenderViewGone(RenderViewHost* rvh,
   SetIsLoading(false, NULL);
   NotifyDisconnected();
   SetIsCrashed(status, error_code);
+  view()->OnTabCrashed(crashed_status(), crashed_error_code());
 
   FOR_EACH_OBSERVER(TabContentsObserver, observers_, RenderViewGone());
 }
@@ -1509,7 +1476,7 @@ void TabContents::RenderViewDeleted(RenderViewHost* rvh) {
 
 void TabContents::DidNavigate(RenderViewHost* rvh,
                               const ViewHostMsg_FrameNavigate_Params& params) {
-  if (PageTransition::IsMainFrame(params.transition))
+  if (content::PageTransitionIsMainFrame(params.transition))
     render_manager_.DidNavigateMainFrame(rvh);
 
   // Update the site of the SiteInstance if it doesn't have one yet.
@@ -1524,7 +1491,7 @@ void TabContents::DidNavigate(RenderViewHost* rvh,
   // (see http://code.google.com/p/chromium/issues/detail?id=2929 )
   // TODO(jungshik): Add a test for the encoding menu to avoid
   // regressing it again.
-  if (PageTransition::IsMainFrame(params.transition))
+  if (content::PageTransitionIsMainFrame(params.transition))
     contents_mime_type_ = params.contents_mime_type;
 
   content::LoadCommittedDetails details;
@@ -1533,20 +1500,21 @@ void TabContents::DidNavigate(RenderViewHost* rvh,
   // Send notification about committed provisional loads. This notification is
   // different from the NAV_ENTRY_COMMITTED notification which doesn't include
   // the actual URL navigated to and isn't sent for AUTO_SUBFRAME navigations.
-  if (details.type != NavigationType::NAV_IGNORE) {
+  if (details.type != content::NAVIGATION_TYPE_NAV_IGNORE) {
     // For AUTO_SUBFRAME navigations, an event for the main frame is generated
     // that is not recorded in the navigation history. For the purpose of
     // tracking navigation events, we treat this event as a sub frame navigation
     // event.
     bool is_main_frame = did_navigate ? details.is_main_frame : false;
-    PageTransition::Type transition_type = params.transition;
+    content::PageTransition transition_type = params.transition;
     // Whether or not a page transition was triggered by going backward or
     // forward in the history is only stored in the navigation controller's
     // entry list.
     if (did_navigate &&
         (controller_.GetActiveEntry()->transition_type() &
-            PageTransition::FORWARD_BACK)) {
-      transition_type = params.transition | PageTransition::FORWARD_BACK;
+            content::PAGE_TRANSITION_FORWARD_BACK)) {
+      transition_type = content::PageTransitionFromInt(
+          params.transition | content::PAGE_TRANSITION_FORWARD_BACK);
     }
     // Notify observers about the commit of the provisional load.
     FOR_EACH_OBSERVER(TabContentsObserver, observers_,
@@ -1717,8 +1685,12 @@ void TabContents::DocumentOnLoadCompletedInMainFrame(
       Details<int>(&page_id));
 }
 
-void TabContents::RequestOpenURL(const GURL& url, const GURL& referrer,
-                                 WindowOpenDisposition disposition) {
+void TabContents::RequestOpenURL(const GURL& url,
+                                 const GURL& referrer,
+                                 WindowOpenDisposition disposition,
+                                 int64 source_frame_id) {
+  TabContents* new_contents = NULL;
+  content::PageTransition transition_type = content::PAGE_TRANSITION_LINK;
   if (render_manager_.web_ui()) {
     // When we're a Web UI, it will provide a page transition type for us (this
     // is so the new tab page can specify AUTO_BOOKMARK for automatically
@@ -1728,10 +1700,23 @@ void TabContents::RequestOpenURL(const GURL& url, const GURL& referrer,
     // want web sites to see a referrer of "chrome://blah" (and some
     // chrome: URLs might have search terms or other stuff we don't want to
     // send to the site), so we send no referrer.
-    OpenURL(url, GURL(), disposition,
+    new_contents = OpenURL(url, GURL(), disposition,
             render_manager_.web_ui()->link_transition_type());
+    transition_type = render_manager_.web_ui()->link_transition_type();
   } else {
-    OpenURL(url, referrer, disposition, PageTransition::LINK);
+    new_contents = OpenURL(OpenURLParams(
+        url, referrer, disposition, content::PAGE_TRANSITION_LINK,
+        true /* is_renderer_initiated */));
+  }
+  if (new_contents) {
+    // Notify observers.
+    FOR_EACH_OBSERVER(TabContentsObserver, observers_,
+                      DidOpenRequestedURL(new_contents,
+                                          url,
+                                          referrer,
+                                          disposition,
+                                          transition_type,
+                                          source_frame_id));
   }
 }
 
@@ -1815,19 +1800,16 @@ WebPreferences TabContents::GetWebkitPrefs() {
   // Force accelerated compositing and 2d canvas off for chrome:, about: and
   // chrome-devtools: pages (unless it's specifically allowed).
   if ((GetURL().SchemeIs(chrome::kChromeDevToolsScheme) ||
+#if !defined(TOUCH_UI)
+      // Allow accelerated compositing for keyboard and log in screen.
       GetURL().SchemeIs(chrome::kChromeUIScheme) ||
-      GetURL().SchemeIs(chrome::kAboutScheme)) &&
+#endif
+      (GetURL().SchemeIs(chrome::kAboutScheme) &&
+       GetURL().spec() != chrome::kAboutBlankURL)) &&
       !web_prefs.allow_webui_compositing) {
     web_prefs.accelerated_compositing_enabled = false;
     web_prefs.accelerated_2d_canvas_enabled = false;
   }
-
-#if defined(OS_MACOSX)
-  // Disable accelerated compositing if IOSurface's are not supported,
-  // as is the case in 10.5.
-  if (!IOSurfaceSupport::Initialize())
-      web_prefs.accelerated_compositing_enabled = false;
-#endif
 
 #if defined(TOUCH_UI)
   web_prefs.force_compositing_mode = true;
@@ -1847,10 +1829,8 @@ void TabContents::OnUserGesture() {
 }
 
 void TabContents::OnIgnoredUIEvent() {
-  if (constrained_window_count()) {
-    ConstrainedWindow* window = *constrained_window_begin();
-    window->FocusConstrainedWindow();
-  }
+  // Notify observers.
+  FOR_EACH_OBSERVER(TabContentsObserver, observers_, DidGetIgnoredUIEvent());
 }
 
 void TabContents::RendererUnresponsive(RenderViewHost* rvh,
@@ -2012,11 +1992,13 @@ void TabContents::set_encoding(const std::string& encoding) {
       GetCanonicalEncodingNameByAliasName(encoding);
 }
 
-void TabContents::SwapInRenderViewHost(RenderViewHost* rvh) {
-  render_manager_.SwapInRenderViewHost(rvh);
-}
-
 void TabContents::CreateViewAndSetSizeForRVH(RenderViewHost* rvh) {
   RenderWidgetHostView* rwh_view = view()->CreateViewForWidget(rvh);
   rwh_view->SetSize(view()->GetContainerSize());
 }
+
+bool TabContents::GotResponseToLockMouseRequest(bool allowed) {
+  return render_view_host() ?
+      render_view_host()->GotResponseToLockMouseRequest(allowed) : false;
+}
+

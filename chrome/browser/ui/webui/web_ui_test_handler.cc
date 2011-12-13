@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/web_ui_test_handler.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/common/render_messages.h"
@@ -12,6 +14,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_types.h"
 
 WebUITestHandler::WebUITestHandler()
     : test_done_(false),
@@ -47,8 +50,8 @@ bool WebUITestHandler::RunJavaScriptTestWithResult(const string16& js_text) {
 }
 
 void WebUITestHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("testResult", NewCallback(
-      this, &WebUITestHandler::HandleTestResult));
+  web_ui_->RegisterMessageCallback("testResult",
+      base::Bind(&WebUITestHandler::HandleTestResult, base::Unretained(this)));
 }
 
 void WebUITestHandler::HandleTestResult(const ListValue* test_result) {

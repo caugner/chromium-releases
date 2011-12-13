@@ -20,11 +20,9 @@ class PluginsTest(pyauto.PyUITest):
 
     This method will not run automatically.
     """
-    import pprint
-    pp = pprint.PrettyPrinter(indent=2)
     while True:
       raw_input('Interact with the browser and hit <enter> to list plugins...')
-      pp.pprint(self.GetPluginsInfo().Plugins())
+      self.pprint(self.GetPluginsInfo().Plugins())
 
   def setUp(self):
     pyauto.PyUITest.setUp(self)
@@ -136,6 +134,12 @@ class PluginsTest(pyauto.PyUITest):
     This is equivalent to testing the enable/disable functionality in
     chrome://plugins
     """
+    # Flash files loaded too quickly after firing browser end up getting
+    # downloaded, which seems to indicate that the plugin hasn't been
+    # registered yet.
+    # Hack to register Flash plugin on all platforms.  crbug.com/94123
+    self.GetPluginsInfo()
+
     for fname, plugin_name in self._ObtainPluginsList():
       # Verify initial state
       self.assertTrue(self._IsEnabled(plugin_name),

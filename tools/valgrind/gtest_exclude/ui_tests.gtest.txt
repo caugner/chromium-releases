@@ -87,18 +87,15 @@ AppCacheUITest.AppCacheLayoutTests_NoPHP
 # Flakily times out, http://crbug.com/85866
 MetricsServiceTest.CloseRenderersNormally
 
-# Flakily times out, http://crbug.com/85867
-LoginPromptTest.TestTwoAuths
-
-# Flakily times out, http://crbug.com/85868
-SessionHistoryTest.FragmentBackForward
-
 # Fails flakily, http://crbug.com/46783
 SessionHistoryTest.FrameBackForward
 SessionHistoryTest.JavascriptHistory
 
 # Fails flakily, http://crbug.com/86783
 ResourceDispatcherTest.CrossSiteImmediateLoadOnunloadCookie
+
+# http://crbug.com/88244
+NoStartupWindowTest.NoStartupWindowBasicTest
 
 # http://crbug.com/89173
 FastShutdown.SlowTermination
@@ -111,18 +108,23 @@ OutOfProcessPPAPITest.PostMessage
 # Flakily times out, http://crbug.com/92527
 NamedInterfaceTest.BasicNamedInterface
 
-# Consistently timing out. http://crbug.com/92630
-AutomationProxyTest.Cookies
-AutomationProxyTest.GetActiveTabIndex
-AutomationProxyTest.GetBrowserWindow
-AutomationProxyTest.GetBrowserWindowCount
-AutomationProxyTest.GetTab
-AutomationProxyTest.GetTabCount
-BookmarksUITest.TwoCommandsOneTab
+# These tests fail due to timeouts and hang the UI test runner,
+# http://crbug.com/61579
+LocaleTestsDa.TestStart
+LocaleTestsHe.TestStart
+LocaleTestsZhTw.TestStart
 
-# OptionsUITest.NavBarCheck fails, see http://crbug.com/83209
-OptionsUITest.NavBarCheck
+# Times out flakily, http://crbug.com/96312
+AutomatedUITestBase.CloseBrowserWindow
+AutomatedUITestBase.CloseTab
+AutomatedUITestBase.OpenCloseBrowserWindowWithAccelerator
 
-# These tests fail due to timeouts, see http://crbug.com/64619 and
-# http://crbug.com/51387
+# Times out flakily, http://crbug.com/96313
+AutomatedUITestBase.DuplicateTab
+
+# Flaky failure on Linux/ChromeOS, http://crbug.com/96553
+GuestModeOptionsUITest.LoadOptionsByURL
 OptionsUITest.LoadOptionsByURL
+
+# Flaky failure on Linux/ChromeOS, http://crbug.com/100031
+IFrameTest.InEmptyFrame

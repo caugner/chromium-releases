@@ -6,7 +6,7 @@
 
 #include "base/utf_string_conversions.h"
 #include "content/common/speech_input_messages.h"
-#include "content/renderer/render_view.h"
+#include "content/renderer/render_view_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -26,9 +26,9 @@ using WebKit::WebNode;
 using WebKit::WebView;
 
 SpeechInputDispatcher::SpeechInputDispatcher(
-    RenderView* render_view,
+    RenderViewImpl* render_view,
     WebKit::WebSpeechInputListener* listener)
-    : RenderViewObserver(render_view),
+    : content::RenderViewObserver(render_view),
       listener_(listener) {
 }
 
@@ -62,7 +62,7 @@ bool SpeechInputDispatcher::startRecognition(
   params.origin_url = UTF16ToUTF8(origin.toString());
   params.render_view_id = routing_id();
   params.request_id = request_id;
-  gfx::Size scroll = render_view()->webview()->mainFrame()->scrollOffset();
+  gfx::Size scroll = render_view()->GetWebView()->mainFrame()->scrollOffset();
   params.element_rect = element_rect;
   params.element_rect.Offset(-scroll.width(), -scroll.height());
 
@@ -84,11 +84,14 @@ void SpeechInputDispatcher::stopRecording(int request_id) {
 }
 
 void SpeechInputDispatcher::OnSpeechRecognitionResult(
-    int request_id, const speech_input::SpeechInputResultArray& result) {
+    int request_id,
+    const speech_input::SpeechInputResult& result) {
   VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionResult enter";
-  WebKit::WebSpeechInputResultArray webkit_result(result.size());
-  for (size_t i = 0; i < result.size(); ++i)
-    webkit_result[i].set(result[i].utterance, result[i].confidence);
+  WebKit::WebSpeechInputResultArray webkit_result(result.hypotheses.size());
+  for (size_t i = 0; i < result.hypotheses.size(); ++i) {
+    webkit_result[i].set(result.hypotheses[i].utterance,
+        result.hypotheses[i].confidence);
+  }
   listener_->setRecognitionResult(request_id, webkit_result);
   VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionResult exit";
 }
@@ -108,7 +111,7 @@ void SpeechInputDispatcher::OnSpeechRecognitionComplete(int request_id) {
 void SpeechInputDispatcher::OnSpeechRecognitionToggleSpeechInput() {
   VLOG(1) << "SpeechInputDispatcher::OnSpeechRecognitionToggleSpeechInput";
 
-  WebView* web_view = render_view()->webview();
+  WebView* web_view = render_view()->GetWebView();
 
   WebFrame* frame = web_view->mainFrame();
   if (!frame)

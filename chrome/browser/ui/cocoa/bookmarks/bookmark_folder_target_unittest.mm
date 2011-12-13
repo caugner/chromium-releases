@@ -7,8 +7,7 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_folder_controller.h"
 #include "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_folder_target.h"
-#include "chrome/browser/ui/cocoa/browser_test_helper.h"
-#include "chrome/browser/ui/cocoa/cocoa_test_helper.h"
+#include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
@@ -30,15 +29,16 @@
 @end
 
 
-class BookmarkFolderTargetTest : public CocoaTest {
+class BookmarkFolderTargetTest : public CocoaProfileTest {
  public:
   virtual void SetUp() {
-    CocoaTest::SetUp();
-    BookmarkModel* model = helper_.profile()->GetBookmarkModel();
+    CocoaProfileTest::SetUp();
+    ASSERT_TRUE(profile());
+
+    BookmarkModel* model = profile()->GetBookmarkModel();
     bmbNode_ = model->bookmark_bar_node();
   }
 
-  BrowserTestHelper helper_;
   const BookmarkNode* bmbNode_;
 };
 

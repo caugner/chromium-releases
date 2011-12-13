@@ -8,7 +8,8 @@
 #include <functional>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
 #include "base/string_piece.h"
@@ -19,20 +20,24 @@
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_prefs.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/fileicon_source.h"
 #include "chrome/browser/ui/webui/fileicon_source_chromeos.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "ui/gfx/image/image.h"
+
+#if !defined(OS_MACOSX)
+#include "content/browser/browser_thread.h"
+#endif
 
 namespace {
 
@@ -80,7 +85,9 @@ class DownloadsDOMHandler::OriginalDownloadManagerObserver
       DownloadManager::Observer* observer,
       Profile* original_profile)
       : observer_(observer) {
-    original_profile_download_manager_ = original_profile->GetDownloadManager();
+    original_profile_download_manager_ =
+        DownloadServiceFactory::GetForProfile(
+            original_profile)->GetDownloadManager();
     original_profile_download_manager_->AddObserver(this);
   }
 
@@ -141,31 +148,41 @@ void DownloadsDOMHandler::Init() {
 
 void DownloadsDOMHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("getDownloads",
-      NewCallback(this, &DownloadsDOMHandler::HandleGetDownloads));
+      base::Bind(&DownloadsDOMHandler::HandleGetDownloads,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("openFile",
-      NewCallback(this, &DownloadsDOMHandler::HandleOpenFile));
-
+      base::Bind(&DownloadsDOMHandler::HandleOpenFile,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("drag",
-      NewCallback(this, &DownloadsDOMHandler::HandleDrag));
-
+      base::Bind(&DownloadsDOMHandler::HandleDrag,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("saveDangerous",
-      NewCallback(this, &DownloadsDOMHandler::HandleSaveDangerous));
+      base::Bind(&DownloadsDOMHandler::HandleSaveDangerous,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("discardDangerous",
-      NewCallback(this, &DownloadsDOMHandler::HandleDiscardDangerous));
+      base::Bind(&DownloadsDOMHandler::HandleDiscardDangerous,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("show",
-      NewCallback(this, &DownloadsDOMHandler::HandleShow));
+      base::Bind(&DownloadsDOMHandler::HandleShow,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("togglepause",
-      NewCallback(this, &DownloadsDOMHandler::HandlePause));
+      base::Bind(&DownloadsDOMHandler::HandlePause,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("resume",
-      NewCallback(this, &DownloadsDOMHandler::HandlePause));
+      base::Bind(&DownloadsDOMHandler::HandlePause,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("remove",
-      NewCallback(this, &DownloadsDOMHandler::HandleRemove));
+      base::Bind(&DownloadsDOMHandler::HandleRemove,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("cancel",
-      NewCallback(this, &DownloadsDOMHandler::HandleCancel));
+      base::Bind(&DownloadsDOMHandler::HandleCancel,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("clearAll",
-      NewCallback(this, &DownloadsDOMHandler::HandleClearAll));
+      base::Bind(&DownloadsDOMHandler::HandleClearAll,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("openDownloadsFolder",
-      NewCallback(this, &DownloadsDOMHandler::HandleOpenDownloadsFolder));
+      base::Bind(&DownloadsDOMHandler::HandleOpenDownloadsFolder,
+                 base::Unretained(this)));
 }
 
 void DownloadsDOMHandler::OnDownloadUpdated(DownloadItem* download) {
@@ -204,8 +221,9 @@ void DownloadsDOMHandler::ModelChanged() {
   Profile* profile =
       Profile::FromBrowserContext(download_manager_->browser_context());
   if (profile->GetOriginalProfile() != profile) {
-    profile->GetOriginalProfile()->GetDownloadManager()->SearchDownloads(
-        WideToUTF16(search_text_), &download_items_);
+    DownloadServiceFactory::GetForProfile(
+        profile->GetOriginalProfile())->GetDownloadManager()->SearchDownloads(
+            WideToUTF16(search_text_), &download_items_);
   }
 
   sort(download_items_.begin(), download_items_.end(), DownloadItemSorter());
@@ -224,7 +242,7 @@ void DownloadsDOMHandler::ModelChanged() {
     if (static_cast<int>(it - download_items_.begin()) > kMaxDownloads)
       break;
 
-    // TODO(rdsmith): Convert to DCHECK()s when http://crbug.com/84508 is
+    // TODO(rdsmith): Convert to DCHECK()s when http://crbug.com/85408 is
     // fixed.
     // We should never see anything that isn't already in the history.
     CHECK(*it);
@@ -304,7 +322,7 @@ void DownloadsDOMHandler::HandleRemove(const ListValue* args) {
   CountDownloadsDOMEvents(DOWNLOADS_DOM_EVENT_REMOVE);
   DownloadItem* file = GetDownloadByValue(args);
   if (file) {
-    // TODO(rdsmith): Change to DCHECK when http://crbug.com/84508 is fixed.
+    // TODO(rdsmith): Change to DCHECK when http://crbug.com/85408 is fixed.
     CHECK_NE(DownloadItem::kUninitializedHandle, file->db_handle());
     file->Remove();
   }
@@ -326,7 +344,9 @@ void DownloadsDOMHandler::HandleClearAll(const ListValue* args) {
   // If this is an incognito downloader, clear All should clear main download
   // manager as well.
   if (profile->GetOriginalProfile() != profile)
-    profile->GetOriginalProfile()->GetDownloadManager()->RemoveAllDownloads();
+    DownloadServiceFactory::GetForProfile(
+        profile->GetOriginalProfile())->
+            GetDownloadManager()->RemoveAllDownloads();
 }
 
 void DownloadsDOMHandler::HandleOpenDownloadsFolder(const ListValue* args) {
@@ -340,7 +360,7 @@ void DownloadsDOMHandler::HandleOpenDownloadsFolder(const ListValue* args) {
 #else
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableFunction(&platform_util::OpenItem, path));
+      base::Bind(&platform_util::OpenItem, path));
 #endif
 }
 

@@ -1,4 +1,4 @@
-#!/usr/bin/python2.4
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -23,7 +23,6 @@ import os
 import random
 import re
 import select
-import simplejson
 import SocketServer
 import socket
 import sys
@@ -47,6 +46,11 @@ try:
 except ImportError:
   import md5
   _new_md5 = md5.new
+
+try:
+  import json
+except ImportError:
+  import simplejson as json
 
 if sys.platform == 'win32':
   import msvcrt
@@ -132,6 +136,7 @@ class SyncHTTPServer(StoppableHTTPServer):
     self._xmpp_server = xmppserver.XmppServer(
       self._xmpp_socket_map, ('localhost', 0))
     self.xmpp_port = self._xmpp_server.getsockname()[1]
+    self.authenticated = True
 
   def GetXmppServer(self):
     return self._xmpp_server
@@ -154,6 +159,12 @@ class SyncHTTPServer(StoppableHTTPServer):
       except:
         self.handle_error(request, client_address)
         self.close_request(request)
+
+  def SetAuthenticated(self, auth_valid):
+    self.authenticated = auth_valid
+
+  def GetAuthenticated(self):
+    return self.authenticated
 
   def serve_forever(self):
     """This is a merge of asyncore.loop() and SocketServer.serve_forever().
@@ -336,6 +347,7 @@ class TestPageHandler(BasePageHandler):
       self.ServerRedirectHandler,
       self.ClientRedirectHandler,
       self.MultipartHandler,
+      self.MultipartSlowHandler,
       self.DefaultResponseHandler]
     post_handlers = [
       self.EchoTitleHandler,
@@ -1283,7 +1295,7 @@ class TestPageHandler(BasePageHandler):
 
   def MultipartHandler(self):
     """Send a multipart response (10 text/html pages)."""
-    test_name = "/multipart"
+    test_name = '/multipart'
     if not self._ShouldHandleRequest(test_name):
       return False
 
@@ -1299,6 +1311,34 @@ class TestPageHandler(BasePageHandler):
       self.wfile.write('Content-type: text/html\r\n\r\n')
       self.wfile.write('<title>page ' + str(i) + '</title>')
       self.wfile.write('page ' + str(i))
+
+    self.wfile.write('--' + bound + '--')
+    return True
+
+  def MultipartSlowHandler(self):
+    """Send a multipart response (3 text/html pages) with a slight delay
+    between each page.  This is similar to how some pages show status using
+    multipart."""
+    test_name = '/multipart-slow'
+    if not self._ShouldHandleRequest(test_name):
+      return False
+
+    num_frames = 3
+    bound = '12345'
+    self.send_response(200)
+    self.send_header('Content-type',
+                     'multipart/x-mixed-replace;boundary=' + bound)
+    self.end_headers()
+
+    for i in xrange(num_frames):
+      self.wfile.write('--' + bound + '\r\n')
+      self.wfile.write('Content-type: text/html\r\n\r\n')
+      time.sleep(0.25)
+      if i == 2:
+        self.wfile.write('<title>PASS</title>')
+      else:
+        self.wfile.write('<title>page ' + str(i) + '</title>')
+      self.wfile.write('page ' + str(i) + '<!-- ' + ('x' * 2048) + '-->')
 
     self.wfile.write('--' + bound + '--')
     return True
@@ -1382,6 +1422,8 @@ class TestPageHandler(BasePageHandler):
                                                              self.headers,
                                                              raw_request))
     self.send_response(http_response)
+    if (http_response == 200):
+      self.send_header('Content-type', 'application/x-protobuffer')
     self.end_headers()
     self.wfile.write(raw_reply)
     return True
@@ -1414,13 +1456,16 @@ class SyncPageHandler(BasePageHandler):
                     self.ChromiumSyncSendNotificationOpHandler,
                     self.ChromiumSyncBirthdayErrorOpHandler,
                     self.ChromiumSyncTransientErrorOpHandler,
-                    self.ChromiumSyncSyncTabsOpHandler]
+                    self.ChromiumSyncSyncTabsOpHandler,
+                    self.ChromiumSyncErrorOpHandler,
+                    self.ChromiumSyncCredHandler]
 
     post_handlers = [self.ChromiumSyncCommandHandler,
                      self.ChromiumSyncTimeHandler]
     BasePageHandler.__init__(self, request, client_address,
                              sync_http_server, [], get_handlers,
                              post_handlers, [])
+
 
   def ChromiumSyncTimeHandler(self):
     """Handle Chromium sync .../time requests.
@@ -1454,10 +1499,19 @@ class SyncPageHandler(BasePageHandler):
 
     length = int(self.headers.getheader('content-length'))
     raw_request = self.rfile.read(length)
+    http_response = 200
+    raw_reply = None
+    if not self.server.GetAuthenticated():
+      http_response = 401
+      challenge = 'GoogleLogin realm="http://127.0.0.1", service="chromiumsync"'
+    else:
+      http_response, raw_reply = self.server.HandleCommand(
+          self.path, raw_request)
 
-    http_response, raw_reply = self.server.HandleCommand(
-        self.path, raw_request)
+    ### Now send the response to the client. ###
     self.send_response(http_response)
+    if http_response == 401:
+      self.send_header('www-Authenticate', challenge)
     self.end_headers()
     self.wfile.write(raw_reply)
     return True
@@ -1469,6 +1523,29 @@ class SyncPageHandler(BasePageHandler):
 
     http_response, raw_reply = self.server._sync_handler.HandleMigrate(
         self.path)
+    self.send_response(http_response)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True
+
+  def ChromiumSyncCredHandler(self):
+    test_name = "/chromiumsync/cred"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    try:
+      query = urlparse.urlparse(self.path)[4]
+      cred_valid = urlparse.parse_qs(query)['valid']
+      if cred_valid[0] == 'True':
+        self.server.SetAuthenticated(True)
+      else:
+        self.server.SetAuthenticated(False)
+    except:
+      self.server.SetAuthenticated(False)
+
+    http_response = 200
+    raw_reply = 'Authenticated: %s ' % self.server.GetAuthenticated()
     self.send_response(http_response)
     self.send_header('Content-Type', 'text/html')
     self.send_header('Content-Length', len(raw_reply))
@@ -1548,6 +1625,19 @@ class SyncPageHandler(BasePageHandler):
     if not self._ShouldHandleRequest(test_name):
       return False
     result, raw_reply = self.server._sync_handler.HandleSetTransientError()
+    self.send_response(result)
+    self.send_header('Content-Type', 'text/html')
+    self.send_header('Content-Length', len(raw_reply))
+    self.end_headers()
+    self.wfile.write(raw_reply)
+    return True;
+
+  def ChromiumSyncErrorOpHandler(self):
+    test_name = "/chromiumsync/error"
+    if not self._ShouldHandleRequest(test_name):
+      return False
+    result, raw_reply = self.server._sync_handler.HandleSetInducedError(
+        self.path)
     self.send_response(result)
     self.send_header('Content-Type', 'text/html')
     self.send_header('Content-Length', len(raw_reply))
@@ -1739,7 +1829,7 @@ def main(options, args):
   # Notify the parent that we've started. (BaseServer subclasses
   # bind their sockets on construction.)
   if options.startup_pipe is not None:
-    server_data_json = simplejson.dumps(server_data)
+    server_data_json = json.dumps(server_data)
     server_data_len = len(server_data_json)
     print 'sending server_data: %s (%d bytes)' % (
       server_data_json, server_data_len)

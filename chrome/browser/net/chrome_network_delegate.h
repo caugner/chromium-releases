@@ -47,13 +47,19 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
  private:
   // NetworkDelegate methods:
   virtual int OnBeforeURLRequest(net::URLRequest* request,
-                                 net::CompletionCallback* callback,
+                                 net::OldCompletionCallback* callback,
                                  GURL* new_url) OVERRIDE;
   virtual int OnBeforeSendHeaders(net::URLRequest* request,
-                                  net::CompletionCallback* callback,
+                                  net::OldCompletionCallback* callback,
                                   net::HttpRequestHeaders* headers) OVERRIDE;
   virtual void OnSendHeaders(net::URLRequest* request,
                              const net::HttpRequestHeaders& headers) OVERRIDE;
+  virtual int OnHeadersReceived(
+      net::URLRequest* request,
+      net::OldCompletionCallback* callback,
+      net::HttpResponseHeaders* original_response_headers,
+      scoped_refptr<net::HttpResponseHeaders>* override_response_headers)
+      OVERRIDE;
   virtual void OnBeforeRedirect(net::URLRequest* request,
                                 const GURL& new_location) OVERRIDE;
   virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
@@ -63,8 +69,11 @@ class ChromeNetworkDelegate : public net::NetworkDelegate {
   virtual void OnURLRequestDestroyed(net::URLRequest* request) OVERRIDE;
   virtual void OnPACScriptError(int line_number,
                                 const string16& error) OVERRIDE;
-  virtual void OnAuthRequired(net::URLRequest* request,
-                              const net::AuthChallengeInfo& auth_info) OVERRIDE;
+  virtual net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
+      net::URLRequest* request,
+      const net::AuthChallengeInfo& auth_info,
+      const AuthCallback& callback,
+      net::AuthCredentials* credentials) OVERRIDE;
 
   scoped_refptr<ExtensionEventRouterForwarder> event_router_;
   void* profile_;

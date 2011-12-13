@@ -54,10 +54,8 @@
 #define IDC_EXIT                        34031
 #define IDC_MOVE_TAB_NEXT               34032
 #define IDC_MOVE_TAB_PREVIOUS           34033
-#define IDC_TOGGLE_VERTICAL_TABS        34034
 #define IDC_SEARCH                      34035
 #define IDC_TABPOSE                     34036
-#define IDC_COMPACT_NAVBAR              34037
 #define IDC_DEBUG_FRAME_TOGGLE          34038
 #define IDC_PRESENTATION_MODE           34039
 
@@ -172,6 +170,9 @@
 #define IDC_FILE_MANAGER                40028
 #define IDC_BOOKMARKS_MENU              40029
 #define IDC_SHOW_SYNC_SETUP             40030
+#define IDC_EXTENSION_ERRORS            40031
+#define IDC_SHOW_SYNC_ERROR             40032
+#define IDC_SHOW_SETTINGS_CHANGES       40033
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -258,6 +259,7 @@
 #define IDC_CONTENT_CONTEXT_UNDO 50144
 #define IDC_CONTENT_CONTEXT_REDO 50145
 #define IDC_CONTENT_CONTEXT_SELECTALL 50146
+#define IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE 50147
 // Other items.
 #define IDC_CONTENT_CONTEXT_TRANSLATE 50150
 #define IDC_CONTENT_CONTEXT_INSPECTELEMENT 50151
@@ -293,7 +295,7 @@
 
 // Context menu items for speech recognition
 #define IDC_SPEECH_INPUT_MENU 51200
-#define IDC_CONTENT_CONTEXT_SPEECH_INPUT_CENSOR_RESULTS 51201
+#define IDC_CONTENT_CONTEXT_SPEECH_INPUT_FILTER_PROFANITIES 51201
 #define IDC_CONTENT_CONTEXT_SPEECH_INPUT_ABOUT 51202
 
 // Protocol handler menu entries

@@ -8,15 +8,16 @@
 
 #include <string>
 
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/task.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_status.h"
 
 namespace chromeos {
 
-// Simulates a URL fetch by posting a delayed task.  This fetch expects to be
+// Simulates a URL fetch by posting a delayed task. This fetch expects to be
 // canceled, and fails the test if it is not
 class ExpectCanceledFetcher : public URLFetcher {
  public:
@@ -32,7 +33,7 @@ class ExpectCanceledFetcher : public URLFetcher {
   void CompleteFetch();
 
  private:
-  ScopedRunnableMethodFactory<ExpectCanceledFetcher> complete_fetch_factory_;
+  base::WeakPtrFactory<ExpectCanceledFetcher> weak_factory_;
   DISALLOW_COPY_AND_ASSIGN(ExpectCanceledFetcher);
 };
 

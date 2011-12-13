@@ -222,9 +222,7 @@ class AutomationProxy : public IPC::Channel::Listener,
                             const std::string& password) WARN_UNUSED_RESULT;
 #endif
 
-#if defined(OS_POSIX)
-  base::file_handle_mapping_vector fds_to_map() const;
-#endif
+  IPC::SyncChannel* channel();
 
   // AutomationMessageSender implementation.
   virtual bool Send(IPC::Message* message) WARN_UNUSED_RESULT;
@@ -291,9 +289,6 @@ class AutomationProxy : public IPC::Channel::Listener,
 
   // The version of the automation provider we are communicating with.
   std::string server_version_;
-
-  // Used to guard against multiple hello messages being received.
-  int app_launch_signaled_;
 
   // Whether to perform a version check between the automation proxy and
   // the automation provider at connection time. Defaults to false, you can

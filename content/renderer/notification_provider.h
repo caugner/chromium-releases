@@ -6,10 +6,12 @@
 #define CONTENT_RENDERER_NOTIFICATION_PROVIDER_H_
 #pragma once
 
+#include "content/public/renderer/render_view_observer.h"
 #include "content/renderer/active_notification_tracker.h"
-#include "content/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotification.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
+
+class RenderViewImpl;
 
 namespace WebKit {
 class WebNotificationPermissionCallback;
@@ -17,10 +19,10 @@ class WebNotificationPermissionCallback;
 
 // NotificationProvider class is owned by the RenderView.  Only
 // to be used on the main thread.
-class NotificationProvider : public RenderViewObserver,
+class NotificationProvider : public content::RenderViewObserver,
                              public WebKit::WebNotificationPresenter {
  public:
-  explicit NotificationProvider(RenderView* render_view);
+  explicit NotificationProvider(RenderViewImpl* render_view);
   virtual ~NotificationProvider();
 
  private:

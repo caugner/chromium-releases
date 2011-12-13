@@ -60,7 +60,7 @@ TabContentsWrapper* DefaultTabHandler::CreateTabContentsForURL(
     const GURL& url,
     const GURL& referrer,
     Profile* profile,
-    PageTransition::Type transition,
+    content::PageTransition transition,
     bool defer_load,
     SiteInstance* instance) const {
   return delegate_->AsBrowser()->CreateTabContentsForURL(url,
@@ -108,14 +108,6 @@ bool DefaultTabHandler::CanCloseTab() const {
   return delegate_->AsBrowser()->CanCloseTab();
 }
 
-void DefaultTabHandler::ToggleUseVerticalTabs() {
-  delegate_->AsBrowser()->ToggleUseVerticalTabs();
-}
-
-void DefaultTabHandler::ToggleUseCompactNavigationBar() {
-  delegate_->AsBrowser()->ToggleUseCompactNavigationBar();
-}
-
 bool DefaultTabHandler::CanRestoreTab() {
   return delegate_->AsBrowser()->CanRestoreTab();
 }
@@ -126,14 +118,6 @@ void DefaultTabHandler::RestoreTab() {
 
 bool DefaultTabHandler::LargeIconsPermitted() const {
   return delegate_->AsBrowser()->LargeIconsPermitted();
-}
-
-bool DefaultTabHandler::UseVerticalTabs() const {
-  return delegate_->AsBrowser()->UseVerticalTabs();
-}
-
-bool DefaultTabHandler::UseCompactNavigationBar() const {
-  return delegate_->AsBrowser()->UseCompactNavigationBar();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

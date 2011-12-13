@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/login/helper.h"
 
+#include "base/utf_string_conversions.h"
 #include "base/file_util.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/google/google_util.h"
@@ -62,7 +63,7 @@ class BackgroundPainter : public views::Painter {
         NULL);
     paint.setShader(s);
     s->unref();
-    canvas->AsCanvasSkia()->drawRect(rect, paint);
+    canvas->GetSkCanvas()->drawRect(rect, paint);
   }
 
  private:
@@ -81,6 +82,7 @@ ThrobberHostView::~ThrobberHostView() {
 }
 
 void ThrobberHostView::StartThrobber() {
+#if defined(TOOLKIT_USES_GTK)
   StopThrobber();
 
   views::Widget* host_widget = host_view_->GetWidget();
@@ -117,6 +119,10 @@ void ThrobberHostView::StartThrobber() {
   // WM can ignore bounds before widget is shown.
   throbber_widget_->SetBounds(throbber_bounds);
   throbber->Start();
+#else
+  // TODO(saintlou): Do we need a throbber for Aura?
+  NOTIMPLEMENTED();
+#endif
 }
 
 void ThrobberHostView::StopThrobber() {

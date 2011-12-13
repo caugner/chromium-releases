@@ -9,6 +9,7 @@
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/system_monitor/system_monitor.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -48,8 +50,8 @@ class ProfileManagerTest : public testing::Test {
         ui_thread_(BrowserThread::UI, &message_loop_),
         db_thread_(BrowserThread::DB, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_),
-        io_thread_(local_state_.Get(), NULL, extension_event_router_forwarder_),
-        profile_manager_(new ProfileManagerWithoutInit(temp_dir_.path())) {
+        io_thread_(local_state_.Get(), NULL,
+                   extension_event_router_forwarder_) {
 #if defined(OS_MACOSX)
     base::SystemMonitor::AllocateSystemIOPorts();
 #endif
@@ -61,6 +63,7 @@ class ProfileManagerTest : public testing::Test {
   virtual void SetUp() {
     // Create a new temporary directory, and store the path
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+    profile_manager_.reset(new ProfileManagerWithoutInit(temp_dir_.path()));
   }
 
   virtual void TearDown() {
@@ -146,29 +149,6 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
 }
 
 #endif
-
-TEST_F(ProfileManagerTest, RegisterProfileName) {
-  // Create a test profile.
-  FilePath dest_path1 = temp_dir_.path();
-  std::string dir_base("New Profile 1");
-  dest_path1 = dest_path1.Append(FILE_PATH_LITERAL("New Profile 1"));
-  Profile* profile1;
-  profile1 = profile_manager_->GetProfile(dest_path1);
-  ASSERT_TRUE(profile1);
-
-  // Simulate registration of the profile name (normally triggered by the
-  // change of the kGoogleServicesUsername preference):
-  std::string testname("testname");
-  profile1->GetPrefs()->SetString(prefs::kGoogleServicesUsername, testname);
-  profile_manager_->RegisterProfileName(profile1);
-
-  // Profile name should be associated with the directory in Local State.
-  std::string stored_profile_name;
-  const DictionaryValue* path_map = static_cast<const DictionaryValue*>(
-      local_state_.Get()->GetUserPref(prefs::kProfileDirectoryMap));
-  path_map->GetString(dir_base, &stored_profile_name);
-  ASSERT_STREQ(testname.c_str(), stored_profile_name.c_str());
-}
 
 TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
   FilePath dest_path1 = temp_dir_.path();
@@ -264,4 +244,23 @@ TEST_F(ProfileManagerTest, CreateProfilesAsync) {
   profile_manager_->CreateProfileAsync(dest_path2, &mock_observer);
 
   message_loop_.RunAllPending();
+}
+
+TEST_F(ProfileManagerTest, AutoloadProfilesWithBackgroundApps) {
+  ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
+
+  EXPECT_EQ(0u, cache.GetNumberOfProfiles());
+  cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_1"),
+                          ASCIIToUTF16("name_1"), string16(), 0);
+  cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_2"),
+                          ASCIIToUTF16("name_2"), string16(), 0);
+  cache.AddProfileToCache(cache.GetUserDataDir().AppendASCII("path_3"),
+                          ASCIIToUTF16("name_3"), string16(), 0);
+  cache.SetBackgroundStatusOfProfileAtIndex(0, true);
+  cache.SetBackgroundStatusOfProfileAtIndex(2, true);
+  EXPECT_EQ(3u, cache.GetNumberOfProfiles());
+
+  profile_manager_->AutoloadProfiles();
+
+  EXPECT_EQ(2u, profile_manager_->GetLoadedProfiles().size());
 }

@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -43,7 +43,7 @@ namespace browser {
 struct NavigateParams {
   NavigateParams(Browser* browser,
                  const GURL& a_url,
-                 PageTransition::Type a_transition);
+                 content::PageTransition a_transition);
   NavigateParams(Browser* browser, TabContentsWrapper* a_target_contents);
   ~NavigateParams();
 
@@ -92,7 +92,10 @@ struct NavigateParams {
 
   // The transition type of the navigation. Default is PageTransition::LINK
   // when target_contents is specified in the constructor.
-  PageTransition::Type transition;
+  content::PageTransition transition;
+
+  // Whether this navigation was initiated by the renderer process.
+  bool is_renderer_initiated;
 
   // The index the caller would like the tab to be positioned at in the
   // TabStrip. The actual index will be determined by the TabHandler in
@@ -187,6 +190,11 @@ void Navigate(NavigateParams* params);
 // If the given navigational URL is a Singleton, return the tab index for it.
 // Otherwise, returns -1.
 int GetIndexOfSingletonTab(NavigateParams* params);
+
+// Returns true if the url is not allowed to open in incognito window.
+// Currently, chrome://settings, the bookmark manager, and chrome://extensions
+// are part this list.
+bool IsURLAllowedInIncognito(const GURL& url);
 
 }  // namespace browser
 

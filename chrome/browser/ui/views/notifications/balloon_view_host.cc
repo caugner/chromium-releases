@@ -5,13 +5,14 @@
 #include "chrome/browser/ui/views/notifications/balloon_view_host.h"
 
 #include "chrome/browser/notifications/balloon.h"
+#include "content/browser/content_browser_client.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #if defined(OS_WIN)
 #include "content/browser/renderer_host/render_widget_host_view_win.h"
 #endif
 #if defined(TOOLKIT_USES_GTK)
-#if defined(TOUCH_UI)
+#if defined(TOUCH_UI) || defined(USE_AURA)
 #include "chrome/browser/renderer_host/render_widget_host_view_views.h"
 #else
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
@@ -61,7 +62,8 @@ void BalloonViewHost::InitRenderWidgetHostView() {
   DCHECK(render_view_host_);
 
   render_widget_host_view_ =
-      RenderWidgetHostView::CreateViewForWidget(render_view_host_);
+      content::GetContentClient()->browser()->CreateViewForWidget(
+      render_view_host_);
 
   // TODO(johnnyg): http://crbug.com/23954.  Need a cross-platform solution.
 #if defined(USE_AURA)

@@ -12,7 +12,7 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
-#include "base/memory/ref_counted.h"
+#include "base/threading/non_thread_safe.h"
 #include "base/time.h"
 #include "net/base/net_export.h"
 #include "net/base/x509_cert_types.h"
@@ -24,13 +24,14 @@ namespace net {
 // Tracks which hosts have enabled *-Transport-Security. This object manages
 // the in-memory store. A separate object must register itself with this object
 // in order to persist the state to disk.
-class NET_EXPORT TransportSecurityState :
-    public base::RefCountedThreadSafe<TransportSecurityState> {
+class NET_EXPORT TransportSecurityState
+    : NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
   // If non-empty, |hsts_hosts| is a JSON-formatted string to treat as if it
   // were a built-in entry (same format as persisted metadata in the
   // TransportSecurityState file).
   explicit TransportSecurityState(const std::string& hsts_hosts);
+  ~TransportSecurityState();
 
   // A DomainState is the information that we persist about a given domain.
   struct NET_EXPORT DomainState {
@@ -39,10 +40,8 @@ class NET_EXPORT TransportSecurityState :
       //   * We generate internal redirects from HTTP -> HTTPS.
       //   * Certificate issues are fatal.
       MODE_STRICT = 0,
-      // Opportunistic mode implies:
-      //   * We'll request HTTP URLs over HTTPS
-      //   * Certificate issues are ignored.
-      MODE_OPPORTUNISTIC = 1,
+      // This used to be opportunistic HTTPS, but we removed support.
+      MODE_OPPORTUNISTIC_REMOVED = 1,
       // SPDY_ONLY (aka X-Bodge-Transport-Security) is a hopefully temporary
       // measure. It implies:
       //   * We'll request HTTP URLs over HTTPS iff we have SPDY support.
@@ -73,6 +72,18 @@ class NET_EXPORT TransportSecurityState :
     std::string domain;  // the domain which matched
   };
 
+  class Delegate {
+   public:
+    // This function may not block and may be called with internal locks held.
+    // Thus it must not reenter the TransportSecurityState object.
+    virtual void StateIsDirty(TransportSecurityState* state) = 0;
+
+   protected:
+    virtual ~Delegate() {}
+  };
+
+  void SetDelegate(Delegate*);
+
   // Enable TransportSecurity for |host|.
   void EnableHost(const std::string& host, const DomainState& state);
 
@@ -102,6 +113,21 @@ class NET_EXPORT TransportSecurityState :
                    const std::string& host,
                    bool sni_available);
 
+  // Returns true if we have a preloaded certificate pin for the |host| and if
+  // its set of required certificates is the set we expect for Google
+  // properties. If |sni_available| is true, searches the preloads defined for
+  // SNI-using hosts as well as the usual preload list.
+  //
+  // Note that like HasMetadata, if |host| matches both an exact entry and is a
+  // subdomain of another entry, the exact match determines the return value.
+  //
+  // This function is used by ChromeFraudulentCertificateReporter to determine
+  // whether or not we can automatically post fraudulent certificate reports to
+  // Google; we only do so automatically in cases when the user was trying to
+  // connect to Google in the first place.
+  static bool IsGooglePinnedProperty(const std::string& host,
+                                     bool sni_available);
+
   // Deletes all records created since a given time.
   void DeleteSince(const base::Time& time);
 
@@ -113,17 +139,14 @@ class NET_EXPORT TransportSecurityState :
                           int* max_age,
                           bool* include_subdomains);
 
-  class Delegate {
-   public:
-    // This function may not block and may be called with internal locks held.
-    // Thus it must not reenter the TransportSecurityState object.
-    virtual void StateIsDirty(TransportSecurityState* state) = 0;
-
-   protected:
-    virtual ~Delegate() {}
-  };
-
-  void SetDelegate(Delegate*);
+  // ParseSidePin attempts to parse a side pin from |side_info| which signs the
+  // SubjectPublicKeyInfo in |leaf_spki|. A side pin is a way for a site to
+  // sign their public key with a key that is offline but still controlled by
+  // them. If successful, the hash of the public key used to sign |leaf_spki|
+  // is put into |out_pub_key_hash|.
+  static bool ParseSidePin(const base::StringPiece& leaf_spki,
+                           const base::StringPiece& side_info,
+                           std::vector<SHA1Fingerprint> *out_pub_key_hash);
 
   bool Serialise(std::string* output);
   // Existing non-preloaded entries are cleared and repopulated from the
@@ -134,10 +157,7 @@ class NET_EXPORT TransportSecurityState :
   static const long int kMaxHSTSAgeSecs;
 
  private:
-  friend class base::RefCountedThreadSafe<TransportSecurityState>;
   FRIEND_TEST_ALL_PREFIXES(TransportSecurityStateTest, IsPreloaded);
-
-  ~TransportSecurityState();
 
   // If we have a callback configured, call it to let our serialiser know that
   // our state is dirty.

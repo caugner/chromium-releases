@@ -5,11 +5,14 @@
 #include "media/audio/linux/alsa_input.h"
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/time.h"
+#include "media/audio/audio_manager.h"
 #include "media/audio/linux/alsa_util.h"
 #include "media/audio/linux/alsa_wrapper.h"
+#include "media/audio/linux/audio_manager_linux.h"
 
 static const int kNumPacketsInRingBuffer = 3;
 
@@ -34,7 +37,8 @@ AlsaPcmInputStream::AlsaPcmInputStream(const std::string& device_name,
           params.sample_rate),
       callback_(NULL),
       device_handle_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      read_callback_behind_schedule_(false) {
 }
 
 AlsaPcmInputStream::~AlsaPcmInputStream() {}
@@ -101,8 +105,11 @@ void AlsaPcmInputStream::Start(AudioInputCallback* callback) {
         delay_ms);
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
-        task_factory_.NewRunnableMethod(&AlsaPcmInputStream::ReadAudio),
+        base::Bind(&AlsaPcmInputStream::ReadAudio, weak_factory_.GetWeakPtr()),
         delay_ms);
+
+    static_cast<AudioManagerLinux*>(AudioManager::GetAudioManager())->
+        IncreaseActiveInputStreamCount();
   }
 }
 
@@ -131,6 +138,21 @@ bool AlsaPcmInputStream::Recover(int original_error) {
   return true;
 }
 
+snd_pcm_sframes_t AlsaPcmInputStream::GetCurrentDelay() {
+  snd_pcm_sframes_t delay = -1;
+
+  int error = wrapper_->PcmDelay(device_handle_, &delay);
+  if (error < 0)
+    Recover(error);
+
+  // snd_pcm_delay() may not work in the beginning of the stream. In this case
+  // return delay of data we know currently is in the ALSA's buffer.
+  if (delay < 0)
+    delay = wrapper_->PcmAvailUpdate(device_handle_);
+
+  return delay;
+}
+
 void AlsaPcmInputStream::ReadAudio() {
   DCHECK(callback_);
 
@@ -143,19 +165,30 @@ void AlsaPcmInputStream::ReadAudio() {
   if (frames < params_.samples_per_packet) {
     // Not enough data yet or error happened. In both cases wait for a very
     // small duration before checking again.
+    // Even Though read callback was behind schedule, there is no data, so
+    // reset the next_read_time_.
+    if (read_callback_behind_schedule_) {
+      next_read_time_ = base::Time::Now();
+      read_callback_behind_schedule_ = false;
+    }
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
-        task_factory_.NewRunnableMethod(&AlsaPcmInputStream::ReadAudio),
+        base::Bind(&AlsaPcmInputStream::ReadAudio, weak_factory_.GetWeakPtr()),
         kNoAudioReadAgainTimeoutMs);
     return;
   }
 
   int num_packets = frames / params_.samples_per_packet;
+  int num_packets_read = num_packets;
+  int bytes_per_frame = params_.channels * params_.bits_per_sample / 8;
+  uint32 hardware_delay_bytes =
+      static_cast<uint32>(GetCurrentDelay() * bytes_per_frame);
   while (num_packets--) {
     int frames_read = wrapper_->PcmReadi(device_handle_, audio_packet_.get(),
                                          params_.samples_per_packet);
     if (frames_read == params_.samples_per_packet) {
-      callback_->OnData(this, audio_packet_.get(), bytes_per_packet_);
+      callback_->OnData(this, audio_packet_.get(), bytes_per_packet_,
+                        hardware_delay_bytes);
     } else {
       LOG(WARNING) << "PcmReadi returning less than expected frames: "
                    << frames_read << " vs. " << params_.samples_per_packet
@@ -163,17 +196,21 @@ void AlsaPcmInputStream::ReadAudio() {
     }
   }
 
-  next_read_time_ += base::TimeDelta::FromMilliseconds(packet_duration_ms_);
+  next_read_time_ += base::TimeDelta::FromMilliseconds(
+      packet_duration_ms_ * num_packets_read);
   int64 delay_ms = (next_read_time_ - base::Time::Now()).InMilliseconds();
   if (delay_ms < 0) {
     LOG(WARNING) << "Audio read callback behind schedule by "
                  << (packet_duration_ms_ - delay_ms) << " (ms).";
+    // Read callback is behind schedule. Assuming there is data pending in
+    // the soundcard, invoke the read callback immediate in order to catch up.
+    read_callback_behind_schedule_ = true;
     delay_ms = 0;
   }
 
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      task_factory_.NewRunnableMethod(&AlsaPcmInputStream::ReadAudio),
+      base::Bind(&AlsaPcmInputStream::ReadAudio, weak_factory_.GetWeakPtr()),
       delay_ms);
 }
 
@@ -181,7 +218,12 @@ void AlsaPcmInputStream::Stop() {
   if (!device_handle_ || !callback_)
     return;
 
-  task_factory_.RevokeAll();  // Cancel the next scheduled read.
+  // Stop is always called before Close. In case of error, this will be
+  // also called when closing the input controller.
+  static_cast<AudioManagerLinux*>(AudioManager::GetAudioManager())->
+      DecreaseActiveInputStreamCount();
+
+  weak_factory_.InvalidateWeakPtrs();  // Cancel the next scheduled read.
   int error = wrapper_->PcmDrop(device_handle_);
   if (error < 0)
     HandleError("PcmDrop", error);
@@ -194,7 +236,7 @@ void AlsaPcmInputStream::Close() {
   if (!device_handle_ || !callback_)
     return;
 
-  task_factory_.RevokeAll();  // Cancel the next scheduled read.
+  weak_factory_.InvalidateWeakPtrs();  // Cancel the next scheduled read.
   int error = alsa_util::CloseDevice(wrapper_, device_handle_);
   if (error < 0)
     HandleError("PcmClose", error);

@@ -107,10 +107,9 @@ html[dir=rtl] .bookmark .close-button {
 /* Bookmark Titles ************************************************************/
 
 #bookmarks-title-wrapper {
-  background: #fff;
-  background-position: left;
-  background-repeat: no-repeat;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  /* this color matches the gradiant end color for the #footer element. */
+  background-color: rgba(242, 242, 242, 0.9);
+  border-bottom: 1px solid;
   color: #777;
   display: -webkit-box;
   font-size: 16px;
@@ -129,8 +128,8 @@ html[dir=rtl] .bookmark .close-button {
   color: #7f7f7f;
   cursor: default;
   font-weight: bold;
-  margin-right: 0;
-  padding-right: 10px;
+  -webkit-margin-end: 0;
+  -webkit-padding-end: 10px;
 }
 
 .section-title {
@@ -138,17 +137,10 @@ html[dir=rtl] .bookmark .close-button {
   left: 0;
   overflow: hidden;
   position: absolute;
+  right: 0;
   top: 0;
   -webkit-box-flex: 1;
   -webkit-box-orient: horizontal;
-}
-
-.section-title-mask {
-  background: #fff;
-  height: 100%;
-  overflow: hidden;
-  position: relative;
-  -webkit-box-flex: 1;
 }
 
 .bookmark-separator {
@@ -157,6 +149,10 @@ html[dir=rtl] .bookmark .close-button {
   height: 44px;
   margin: 2px 0;
   width: 10px;
+}
+
+html[dir="rtl"] .bookmark-separator {
+  -webkit-transform: scale(-1, 1);
 }
 
 #bookmarks-top-link-wrapper {
@@ -172,4 +168,11 @@ html[dir=rtl] .bookmark .close-button {
   /* Matches .tile-page-content padding-right - 10px */
   margin: 0px -70px;
   text-align: end;
+}
+
+.bookmarks-import-data-link-wrapper {
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 33%;
 }

@@ -54,6 +54,7 @@ extern const FilePath::CharType kExtensionKeyFileExtension[];
 // filenames
 extern const FilePath::CharType kArchivedHistoryFilename[];
 extern const FilePath::CharType kCacheDirname[];
+extern const FilePath::CharType kCRLSetFilename[];
 extern const FilePath::CharType kMediaCacheDirname[];
 extern const FilePath::CharType kOffTheRecordMediaCacheDirname[];
 extern const FilePath::CharType kAppCacheDirname[];
@@ -110,6 +111,11 @@ extern const bool kEnableTouchIcon;
 // (oom_score_adj) used by the OomPriority Manager.
 extern const int kLowestRendererOomScore;
 extern const int kHighestRendererOomScore;
+#endif
+
+#if defined(OS_WIN)
+// This is used by the PreRead experiment.
+extern const char kPreReadEnvironmentVariable[];
 #endif
 
 }  // namespace chrome

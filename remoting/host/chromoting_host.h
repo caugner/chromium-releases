@@ -125,6 +125,11 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
       protocol::Session* session,
       protocol::SessionManager::IncomingSessionResponse* response) OVERRIDE;
 
+  void AddAuthenticatedClient(
+      scoped_refptr<protocol::ConnectionToClient> connection,
+      const protocol::SessionConfig& config,
+      const std::string& jid);
+
   // Sets desired configuration for the protocol. Ownership of the
   // |config| is transferred to the object. Must be called before Start().
   void set_protocol_config(protocol::CandidateSessionConfig* config);
@@ -139,7 +144,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
 
   // Notify all active client sessions that local input has been detected, and
   // that remote input should be ignored for a short time.
-  void LocalMouseMoved(const gfx::Point& new_pos);
+  void LocalMouseMoved(const SkIPoint& new_pos);
 
   // Pause or unpause the session. While the session is paused, remote input
   // is ignored.
@@ -177,7 +182,7 @@ class ChromotingHost : public base::RefCountedThreadSafe<ChromotingHost>,
   void OnClientDisconnected(protocol::ConnectionToClient* client);
 
   // Creates encoder for the specified configuration.
-  Encoder* CreateEncoder(const protocol::SessionConfig* config);
+  Encoder* CreateEncoder(const protocol::SessionConfig& config);
 
   std::string GenerateHostAuthToken(const std::string& encoded_client_token);
 

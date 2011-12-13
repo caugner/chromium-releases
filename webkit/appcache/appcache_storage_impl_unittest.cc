@@ -13,11 +13,9 @@
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_entry.h"
 #include "webkit/appcache/appcache_group.h"
-#include "webkit/appcache/appcache_policy.h"
 #include "webkit/appcache/appcache_service.h"
 #include "webkit/appcache/appcache_storage_impl.h"
 #include "webkit/quota/quota_manager.h"
-#include "webkit/tools/test_shell/simple_appcache_system.h"
 
 namespace appcache {
 
@@ -46,38 +44,8 @@ const int kDefaultEntryIdOffset = 12345;
 
 const int kMockQuota = 5000;
 
-// For the duration of this test case, we hijack the AppCacheThread API
-// calls and implement them in terms of the io and db threads created here.
-
 scoped_ptr<base::Thread> io_thread;
 scoped_ptr<base::Thread> db_thread;
-
-class TestThreadProvider : public SimpleAppCacheSystem::ThreadProvider {
- public:
-  virtual bool PostTask(
-      int id,
-      const tracked_objects::Location& from_here,
-      Task* task) {
-    GetMessageLoop(id)->PostTask(from_here, task);
-    return true;
-  }
-
-  virtual bool CurrentlyOn(int id) {
-    return MessageLoop::current() == GetMessageLoop(id);
-  }
-
-  MessageLoop* GetMessageLoop(int id) {
-    DCHECK(io_thread.get() && db_thread.get());
-    if (id == SimpleAppCacheSystem::IO_THREAD_ID)
-      return io_thread->message_loop();
-    if (id == SimpleAppCacheSystem::DB_THREAD_ID)
-      return db_thread->message_loop();
-    NOTREACHED() << "Invalid AppCacheThreadID value";
-    return NULL;
-  }
-};
-
-TestThreadProvider thread_provider;
 
 }  // namespace
 
@@ -88,8 +56,7 @@ class AppCacheStorageImplTest : public testing::Test {
     explicit MockStorageDelegate(AppCacheStorageImplTest* test)
         : loaded_cache_id_(0), stored_group_success_(false),
           would_exceed_quota_(false), obsoleted_success_(false),
-          found_cache_id_(kNoCacheId), found_blocked_by_policy_(false),
-          test_(test) {
+          found_cache_id_(kNoCacheId), test_(test) {
     }
 
     void OnCacheLoaded(AppCache* cache, int64 cache_id) {
@@ -124,15 +91,13 @@ class AppCacheStorageImplTest : public testing::Test {
     void OnMainResponseFound(const GURL& url, const AppCacheEntry& entry,
                              const GURL& fallback_url,
                              const AppCacheEntry& fallback_entry,
-                             int64 cache_id, const GURL& manifest_url,
-                             bool was_blocked_by_policy) {
+                             int64 cache_id, const GURL& manifest_url) {
       found_url_ = url;
       found_entry_ = entry;
       found_fallback_url_ = fallback_url;
       found_fallback_entry_ = fallback_entry;
       found_cache_id_ = cache_id;
       found_manifest_url_ = manifest_url;
-      found_blocked_by_policy_ = was_blocked_by_policy;
       test_->ScheduleNextTask();
     }
 
@@ -152,35 +117,6 @@ class AppCacheStorageImplTest : public testing::Test {
     AppCacheEntry found_fallback_entry_;
     int64 found_cache_id_;
     GURL found_manifest_url_;
-    bool found_blocked_by_policy_;
-    AppCacheStorageImplTest* test_;
-  };
-
-  class MockAppCachePolicy : public AppCachePolicy {
-   public:
-    explicit MockAppCachePolicy(AppCacheStorageImplTest* test)
-        : can_load_return_value_(true), can_create_return_value_(0),
-          callback_(NULL), test_(test) {
-    }
-
-    virtual bool CanLoadAppCache(const GURL& manifest_url) {
-      requested_manifest_url_ = manifest_url;
-      return can_load_return_value_;
-    }
-
-    virtual int CanCreateAppCache(const GURL& manifest_url,
-                                  net::CompletionCallback* callback) {
-      requested_manifest_url_ = manifest_url;
-      callback_ = callback;
-      if (can_create_return_value_ == net::ERR_IO_PENDING)
-        test_->ScheduleNextTask();
-      return can_create_return_value_;
-    }
-
-    bool can_load_return_value_;
-    int can_create_return_value_;
-    GURL requested_manifest_url_;
-    net::CompletionCallback* callback_;
     AppCacheStorageImplTest* test_;
   };
 
@@ -297,20 +233,16 @@ class AppCacheStorageImplTest : public testing::Test {
 
     db_thread.reset(new base::Thread("AppCacheTest::DBThread"));
     ASSERT_TRUE(db_thread->Start());
-
-    SimpleAppCacheSystem::set_thread_provider(&thread_provider);
   }
 
   static void TearDownTestCase() {
-    SimpleAppCacheSystem::set_thread_provider(NULL);
     io_thread.reset(NULL);
     db_thread.reset(NULL);
   }
 
   // Test harness --------------------------------------------------
 
-  AppCacheStorageImplTest()
-      : ALLOW_THIS_IN_INITIALIZER_LIST(policy_(this)) {
+  AppCacheStorageImplTest() {
   }
 
   template <class Method>
@@ -324,7 +256,7 @@ class AppCacheStorageImplTest : public testing::Test {
   void SetUpTest() {
     DCHECK(MessageLoop::current() == io_thread->message_loop());
     service_.reset(new AppCacheService(NULL));
-    service_->Initialize(FilePath(), NULL);
+    service_->Initialize(FilePath(), db_thread->message_loop_proxy(), NULL);
     mock_quota_manager_proxy_ = new MockQuotaManagerProxy();
     service_->quota_manager_proxy_ = mock_quota_manager_proxy_;
     delegate_.reset(new MockStorageDelegate(this));
@@ -870,9 +802,7 @@ class AppCacheStorageImplTest : public testing::Test {
 
   void Verify_FindNoMainResponse() {
     EXPECT_EQ(kEntryUrl, delegate()->found_url_);
-    // If the request was blocked by a policy, the manifest url is still valid.
-    EXPECT_TRUE(delegate()->found_manifest_url_.is_empty() ||
-                delegate()->found_blocked_by_policy_);
+    EXPECT_TRUE(delegate()->found_manifest_url_.is_empty());
     EXPECT_EQ(kNoCacheId, delegate()->found_cache_id_);
     EXPECT_EQ(kNoResponseId, delegate()->found_entry_.response_id());
     EXPECT_EQ(kNoResponseId, delegate()->found_fallback_entry_.response_id());
@@ -885,24 +815,16 @@ class AppCacheStorageImplTest : public testing::Test {
   // BasicFindMainResponse  -------------------------------
 
   void BasicFindMainResponseInDatabase() {
-    BasicFindMainResponse(true, false);
+    BasicFindMainResponse(true);
   }
 
   void BasicFindMainResponseInWorkingSet() {
-    BasicFindMainResponse(false, false);
+    BasicFindMainResponse(false);
   }
 
-  void BlockFindMainResponseWithPolicyCheck() {
-    BasicFindMainResponse(true, true);
-  }
-
-  void BasicFindMainResponse(bool drop_from_working_set,
-                             bool block_with_policy_check) {
+  void BasicFindMainResponse(bool drop_from_working_set) {
     PushNextTask(NewRunnableMethod(
        this, &AppCacheStorageImplTest::Verify_BasicFindMainResponse));
-
-    policy_.can_load_return_value_ = !block_with_policy_check;
-    service()->set_appcache_policy(&policy_);
 
     // Setup some preconditions. Create a complete cache with an entry
     // in storage.
@@ -929,19 +851,13 @@ class AppCacheStorageImplTest : public testing::Test {
   }
 
   void Verify_BasicFindMainResponse() {
-    EXPECT_EQ(kManifestUrl, policy_.requested_manifest_url_);
-    if (policy_.can_load_return_value_) {
-      EXPECT_EQ(kEntryUrl, delegate()->found_url_);
-      EXPECT_EQ(kManifestUrl, delegate()->found_manifest_url_);
-      EXPECT_FALSE(delegate()->found_blocked_by_policy_);
-      EXPECT_EQ(1, delegate()->found_cache_id_);
-      EXPECT_EQ(1, delegate()->found_entry_.response_id());
-      EXPECT_TRUE(delegate()->found_entry_.IsExplicit());
-      EXPECT_FALSE(delegate()->found_fallback_entry_.has_response_id());
-      TestFinished();
-    } else {
-      Verify_FindNoMainResponse();
-    }
+    EXPECT_EQ(kEntryUrl, delegate()->found_url_);
+    EXPECT_EQ(kManifestUrl, delegate()->found_manifest_url_);
+    EXPECT_EQ(1, delegate()->found_cache_id_);
+    EXPECT_EQ(1, delegate()->found_entry_.response_id());
+    EXPECT_TRUE(delegate()->found_entry_.IsExplicit());
+    EXPECT_FALSE(delegate()->found_fallback_entry_.has_response_id());
+    TestFinished();
   }
 
   // BasicFindMainFallbackResponse  -------------------------------
@@ -1001,7 +917,6 @@ class AppCacheStorageImplTest : public testing::Test {
   void Verify_BasicFindMainFallbackResponse() {
     EXPECT_EQ(kFallbackTestUrl, delegate()->found_url_);
     EXPECT_EQ(kManifestUrl, delegate()->found_manifest_url_);
-    EXPECT_FALSE(delegate()->found_blocked_by_policy_);
     EXPECT_EQ(1, delegate()->found_cache_id_);
     EXPECT_FALSE(delegate()->found_entry_.has_response_id());
     EXPECT_EQ(2, delegate()->found_fallback_entry_.response_id());
@@ -1076,7 +991,6 @@ class AppCacheStorageImplTest : public testing::Test {
   void Verify_FindMainResponseWithMultipleHits() {
     EXPECT_EQ(kEntryUrl, delegate()->found_url_);
     EXPECT_EQ(kManifestUrl3, delegate()->found_manifest_url_);
-    EXPECT_FALSE(delegate()->found_blocked_by_policy_);
     EXPECT_EQ(3, delegate()->found_cache_id_);
     EXPECT_EQ(3, delegate()->found_entry_.response_id());
     EXPECT_TRUE(delegate()->found_entry_.IsExplicit());
@@ -1093,7 +1007,6 @@ class AppCacheStorageImplTest : public testing::Test {
   void Verify_FindMainResponseWithMultipleHits2() {
     EXPECT_EQ(kEntryUrl, delegate()->found_url_);
     EXPECT_EQ(kManifestUrl, delegate()->found_manifest_url_);
-    EXPECT_FALSE(delegate()->found_blocked_by_policy_);
     EXPECT_EQ(1, delegate()->found_cache_id_);
     EXPECT_EQ(1, delegate()->found_entry_.response_id());
     EXPECT_TRUE(delegate()->found_entry_.IsExplicit());
@@ -1110,7 +1023,6 @@ class AppCacheStorageImplTest : public testing::Test {
   void Verify_FindMainResponseWithMultipleHits3() {
     EXPECT_EQ(kEntryUrl, delegate()->found_url_);
     EXPECT_EQ(kManifestUrl2, delegate()->found_manifest_url_);
-    EXPECT_FALSE(delegate()->found_blocked_by_policy_);
     EXPECT_EQ(2, delegate()->found_cache_id_);
     EXPECT_EQ(2, delegate()->found_entry_.response_id());
     EXPECT_TRUE(delegate()->found_entry_.IsExplicit());
@@ -1128,7 +1040,6 @@ class AppCacheStorageImplTest : public testing::Test {
   void Verify_FindMainResponseWithMultipleHits4() {
     EXPECT_EQ(kFallbackTestUrl, delegate()->found_url_);
     EXPECT_EQ(kManifestUrl3, delegate()->found_manifest_url_);
-    EXPECT_FALSE(delegate()->found_blocked_by_policy_);
     EXPECT_EQ(3, delegate()->found_cache_id_);
     EXPECT_FALSE(delegate()->found_entry_.has_response_id());
     EXPECT_EQ(3 + kFallbackEntryIdOffset,
@@ -1148,7 +1059,6 @@ class AppCacheStorageImplTest : public testing::Test {
   void Verify_FindMainResponseWithMultipleHits5() {
     EXPECT_EQ(kFallbackTestUrl, delegate()->found_url_);
     EXPECT_EQ(kManifestUrl2, delegate()->found_manifest_url_);
-    EXPECT_FALSE(delegate()->found_blocked_by_policy_);
     EXPECT_EQ(2, delegate()->found_cache_id_);
     EXPECT_FALSE(delegate()->found_entry_.has_response_id());
     EXPECT_EQ(2 + kFallbackEntryIdOffset,
@@ -1219,7 +1129,6 @@ class AppCacheStorageImplTest : public testing::Test {
   void Verify_ExclusionNotFound(GURL expected_url, int phase) {
     EXPECT_EQ(expected_url, delegate()->found_url_);
     EXPECT_TRUE(delegate()->found_manifest_url_.is_empty());
-    EXPECT_FALSE(delegate()->found_blocked_by_policy_);
     EXPECT_EQ(kNoCacheId, delegate()->found_cache_id_);
     EXPECT_EQ(kNoResponseId, delegate()->found_entry_.response_id());
     EXPECT_EQ(kNoResponseId, delegate()->found_fallback_entry_.response_id());
@@ -1309,7 +1218,6 @@ class AppCacheStorageImplTest : public testing::Test {
 
   scoped_ptr<base::WaitableEvent> test_finished_event_;
   std::stack<Task*> task_stack_;
-  MockAppCachePolicy policy_;
   scoped_ptr<AppCacheService> service_;
   scoped_ptr<MockStorageDelegate> delegate_;
   scoped_refptr<MockQuotaManagerProxy> mock_quota_manager_proxy_;
@@ -1380,11 +1288,6 @@ TEST_F(AppCacheStorageImplTest, BasicFindMainResponseInDatabase) {
 TEST_F(AppCacheStorageImplTest, BasicFindMainResponseInWorkingSet) {
   RunTestOnIOThread(
       &AppCacheStorageImplTest::BasicFindMainResponseInWorkingSet);
-}
-
-TEST_F(AppCacheStorageImplTest, BlockFindMainResponseWithPolicyCheck) {
-  RunTestOnIOThread(
-      &AppCacheStorageImplTest::BlockFindMainResponseWithPolicyCheck);
 }
 
 TEST_F(AppCacheStorageImplTest, BasicFindMainFallbackResponseInDatabase) {

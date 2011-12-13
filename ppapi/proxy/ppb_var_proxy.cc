@@ -8,6 +8,7 @@
 #include "ppapi/c/ppb_var.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/var.h"
 
 namespace ppapi {
@@ -18,18 +19,22 @@ namespace {
 // PPP_Var plugin --------------------------------------------------------------
 
 void AddRefVar(PP_Var var) {
+  ppapi::ProxyAutoLock lock;
   PluginResourceTracker::GetInstance()->var_tracker().AddRefVar(var);
 }
 
 void ReleaseVar(PP_Var var) {
+  ppapi::ProxyAutoLock lock;
   PluginResourceTracker::GetInstance()->var_tracker().ReleaseVar(var);
 }
 
 PP_Var VarFromUtf8(PP_Module module, const char* data, uint32_t len) {
+  ppapi::ProxyAutoLock lock;
   return StringVar::StringToPPVar(module, data, len);
 }
 
 const char* VarToUtf8(PP_Var var, uint32_t* len) {
+  ppapi::ProxyAutoLock lock;
   StringVar* str = StringVar::FromPPVar(var);
   if (str) {
     *len = static_cast<uint32_t>(str->value().size());
@@ -46,37 +51,10 @@ const PPB_Var var_interface = {
   &VarToUtf8
 };
 
-InterfaceProxy* CreateVarProxy(Dispatcher* dispatcher,
-                               const void* target_interface) {
-  return new PPB_Var_Proxy(dispatcher, target_interface);
-}
-
 }  // namespace
 
-PPB_Var_Proxy::PPB_Var_Proxy(Dispatcher* dispatcher,
-                             const void* target_interface)
-    : InterfaceProxy(dispatcher, target_interface) {
-}
-
-PPB_Var_Proxy::~PPB_Var_Proxy() {
-}
-
-// static
-const InterfaceProxy::Info* PPB_Var_Proxy::GetInfo() {
-  static const Info info = {
-    &var_interface,
-    PPB_VAR_INTERFACE,
-    INTERFACE_ID_PPB_VAR,
-    false,
-    &CreateVarProxy,
-  };
-  return &info;
-}
-
-bool PPB_Var_Proxy::OnMessageReceived(const IPC::Message& msg) {
-  // All PPB_Var calls are handled locally; there is no need to send or receive
-  // messages here.
-  return false;
+const PPB_Var* GetPPB_Var_Interface() {
+  return &var_interface;
 }
 
 }  // namespace proxy

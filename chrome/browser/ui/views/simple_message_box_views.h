@@ -50,12 +50,12 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
  protected:
   // Overridden from views::DialogDelegate:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
 
-  // Overridden from views::WindowDelegate:
+  // Overridden from views::WidgetDelegate:
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
@@ -74,7 +74,7 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
   // Dispatcher method. This returns true if the menu was canceled, or
   // if the message is such that the menu should be closed.
   virtual bool Dispatch(const MSG& msg) OVERRIDE;
-#elif defined(TOUCH_UI)
+#elif defined(TOUCH_UI) || defined(USE_AURA)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
       XEvent* xevent) OVERRIDE;
 #else
@@ -82,7 +82,7 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
 #endif
 
   int dialog_flags_;
-  std::wstring message_box_title_;
+  string16 message_box_title_;
   views::MessageBoxView* message_box_view_;
   DispositionType disposition_;
 

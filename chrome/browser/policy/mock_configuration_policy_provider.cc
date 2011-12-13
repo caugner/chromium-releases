@@ -1,17 +1,16 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/policy/mock_configuration_policy_provider.h"
 
-#include "base/stl_util.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
+#include "policy/policy_constants.h"
 
 namespace policy {
 
 MockConfigurationPolicyProvider::MockConfigurationPolicyProvider()
-    : ConfigurationPolicyProvider(
-          ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList()),
+    : ConfigurationPolicyProvider(GetChromePolicyDefinitionList()),
       initialization_complete_(false) {
 }
 
@@ -32,12 +31,8 @@ void MockConfigurationPolicyProvider::SetInitializationComplete(
   initialization_complete_ = initialization_complete;
 }
 
-bool MockConfigurationPolicyProvider::Provide(
-    ConfigurationPolicyStoreInterface* store) {
-  for (PolicyMap::const_iterator current = policy_map_.begin();
-       current != policy_map_.end(); ++current) {
-    store->Apply(current->first, current->second->DeepCopy());
-  }
+bool MockConfigurationPolicyProvider::ProvideInternal(PolicyMap* policies) {
+  policies->CopyFrom(policy_map_);
   return true;
 }
 

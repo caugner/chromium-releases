@@ -9,7 +9,7 @@
 #include "base/platform_file.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/common/test_url_constants.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_test_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -45,7 +45,6 @@ TEST_F(ChildProcessSecurityPolicyTest, IsWebSafeSchemeTest) {
   EXPECT_TRUE(p->IsWebSafeScheme(chrome::kFtpScheme));
   EXPECT_TRUE(p->IsWebSafeScheme(chrome::kDataScheme));
   EXPECT_TRUE(p->IsWebSafeScheme("feed"));
-  EXPECT_TRUE(p->IsWebSafeScheme(chrome::kExtensionScheme));
   EXPECT_TRUE(p->IsWebSafeScheme(chrome::kBlobScheme));
   EXPECT_TRUE(p->IsWebSafeScheme(chrome::kFileSystemScheme));
 
@@ -98,7 +97,6 @@ TEST_F(ChildProcessSecurityPolicyTest, StandardSchemesTest) {
   EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("data:text/html,<b>Hi</b>")));
   EXPECT_TRUE(p->CanRequestURL(kRendererID,
                                GURL("view-source:http://www.google.com/")));
-  EXPECT_TRUE(p->CanRequestURL(kRendererID, GURL("chrome-extension://xy/z")));
   EXPECT_TRUE(p->CanRequestURL(
       kRendererID, GURL("filesystem:http://localhost/temporary/a.gif")));
 

@@ -14,7 +14,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_layout_test.h"
 #include "content/browser/worker_host/worker_service.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "net/test/test_server.h"
 
 namespace {
@@ -181,7 +181,13 @@ TEST_F(WorkerTest, SingleSharedWorker) {
   RunTest(FilePath(FILE_PATH_LITERAL("single_worker.html")), "shared=true");
 }
 
-TEST_F(WorkerTest, MultipleSharedWorkers) {
+// Flaky on Win XP only.  http://crbug.com/96435
+#if defined(OS_WIN)
+#define MAYBE_MultipleSharedWorkers FLAKY_MultipleSharedWorkers
+#else
+#define MAYBE_MultipleSharedWorkers MultipleSharedWorkers
+#endif
+TEST_F(WorkerTest, MAYBE_MultipleSharedWorkers) {
   RunTest(FilePath(FILE_PATH_LITERAL("multi_worker.html")), "shared=true");
 }
 
@@ -341,7 +347,7 @@ TEST_F(WorkerTest, WorkerReplaceSelf) {
 #define WorkerScriptError FLAKY_WorkerScriptError
 #endif
 
-TEST_F(WorkerTest, DISABLED_WorkerScriptError) {
+TEST_F(WorkerTest, WorkerScriptError) {
   RunWorkerFastLayoutTest("worker-script-error.html");
 }
 

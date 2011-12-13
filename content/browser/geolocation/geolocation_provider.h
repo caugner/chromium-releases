@@ -10,6 +10,7 @@
 
 #include "base/threading/thread.h"
 #include "content/browser/geolocation/geolocation_observer.h"
+#include "content/common/content_export.h"
 #include "content/common/geoposition.h"
 #include "googleurl/src/gurl.h"
 
@@ -23,7 +24,8 @@ struct DefaultSingletonTraits;
 // observers which will be notified of location updates. Underlying location
 // arbitrator will only be enabled whilst there is at least one observer
 // registered.
-class GeolocationProvider : public base::Thread, public GeolocationObserver {
+class CONTENT_EXPORT GeolocationProvider
+    : public base::Thread, public GeolocationObserver {
  public:
   GeolocationProvider();
 

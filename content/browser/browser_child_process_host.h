@@ -8,20 +8,31 @@
 
 #include <list>
 
+#include "base/synchronization/waitable_event_watcher.h"
 #include "content/browser/child_process_launcher.h"
 #include "content/common/child_process_host.h"
 #include "content/common/child_process_info.h"
+#include "content/common/content_export.h"
+
+namespace base {
+class WaitableEvent;
+}
 
 // Plugins/workers and other child processes that live on the IO thread should
 // derive from this class.
 //
 // [Browser]RenderProcessHost is the main exception that doesn't derive from
 // this class. That project lives on the UI thread.
-class BrowserChildProcessHost : public ChildProcessHost,
-                                public ChildProcessInfo,
-                                public ChildProcessLauncher::Client {
+class CONTENT_EXPORT BrowserChildProcessHost :
+    public ChildProcessHost,
+    public ChildProcessInfo,
+    public ChildProcessLauncher::Client,
+    public base::WaitableEventWatcher::Delegate {
  public:
   virtual ~BrowserChildProcessHost();
+
+  virtual void OnWaitableEventSignaled(
+      base::WaitableEvent* waitable_event) OVERRIDE;
 
   // Terminates all child processes and deletes each ChildProcessHost instance.
   static void TerminateAll();
@@ -31,7 +42,7 @@ class BrowserChildProcessHost : public ChildProcessHost,
   // this should be done from the IO thread and that the iterator should not be
   // kept around as it may be invalidated on subsequent event processing in the
   // event loop.
-  class Iterator {
+  class CONTENT_EXPORT Iterator {
    public:
     Iterator();
     explicit Iterator(ChildProcessInfo::ProcessType type);
@@ -85,16 +96,19 @@ class BrowserChildProcessHost : public ChildProcessHost,
   virtual base::TerminationStatus GetChildTerminationStatus(int* exit_code);
 
   // Overrides from ChildProcessHost
-  virtual void OnChildDied();
-  virtual void ShutdownStarted();
-  virtual void Notify(int type);
+  virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
+  virtual void OnChildDisconnected() OVERRIDE;
+  virtual void ShutdownStarted() OVERRIDE;
   // Extends the base class implementation and removes this host from
   // the host list. Calls ChildProcessHost::ForceShutdown
-  virtual void ForceShutdown();
+  virtual void ForceShutdown() OVERRIDE;
 
   // Controls whether the child process should be terminated on browser
   // shutdown. Default is to always terminate.
   void SetTerminateChildOnShutdown(bool terminate_on_shutdown);
+
+  // Sends the given notification on the UI thread.
+  void Notify(int type);
 
  private:
   // By using an internal class as the ChildProcessLauncher::Client, we can
@@ -107,8 +121,13 @@ class BrowserChildProcessHost : public ChildProcessHost,
    private:
     BrowserChildProcessHost* host_;
   };
+
   ClientHook client_;
   scoped_ptr<ChildProcessLauncher> child_process_;
+#if defined(OS_WIN)
+  base::WaitableEventWatcher child_watcher_;
+#endif
+  bool disconnect_was_alive_;
 };
 
 #endif  // CONTENT_BROWSER_BROWSER_CHILD_PROCESS_HOST_H_

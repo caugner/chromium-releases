@@ -37,14 +37,24 @@ enum MessageType {
 
 // Create status and link labels for the current status labels and link text
 // by querying |service|.
+// |status_label| may contain an HTML-formatted link.
 MessageType GetStatusLabels(ProfileSyncService* service,
                             string16* status_label,
                             string16* link_label);
 
 // Same as above but for use specifically on the New Tab Page.
+// |status_label| may contain an HTML-formatted link.
 MessageType GetStatusLabelsForNewTabPage(ProfileSyncService* service,
                                          string16* status_label,
                                          string16* link_label);
+
+// Gets various labels for the sync global error based on the sync error state.
+// |menu_item_label|, |bubble_message|, and |bubble_accept_label| must not be
+// NULL.
+void GetStatusLabelsForSyncGlobalError(ProfileSyncService* service,
+                                       string16* menu_item_label,
+                                       string16* bubble_message,
+                                       string16* bubble_accept_label);
 
 MessageType GetStatus(ProfileSyncService* service);
 
@@ -75,5 +85,6 @@ void AddIntSyncDetail(base::ListValue* details,
 
 void AddStringSyncDetails(ListValue* details, const std::string& stat_name,
                           const std::string& stat_value);
+
 }  // namespace sync_ui_util
 #endif  // CHROME_BROWSER_SYNC_SYNC_UI_UTIL_H_

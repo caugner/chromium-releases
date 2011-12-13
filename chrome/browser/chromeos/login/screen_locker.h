@@ -61,28 +61,33 @@ class ScreenLocker : public LoginStatusConsumer,
 
   // Returns the default instance if it has been created.
   static ScreenLocker* default_screen_locker() {
+#if defined(TOOLKIT_USES_GTK)
     return screen_locker_;
+#else
+    NOTIMPLEMENTED();
+    return NULL;
+#endif
   }
 
   // Initialize and show the screen locker.
   void Init();
 
   // LoginStatusConsumer implements:
-  virtual void OnLoginFailure(const chromeos::LoginFailure& error);
+  virtual void OnLoginFailure(const chromeos::LoginFailure& error) OVERRIDE;
   virtual void OnLoginSuccess(const std::string& username,
                               const std::string& password,
                               const GaiaAuthConsumer::ClientLoginResult& result,
                               bool pending_requests,
-                              bool using_oauth);
+                              bool using_oauth) OVERRIDE;
 
   // Overridden from views::BubbleDelegate.
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape);
-  virtual bool CloseOnEscape();
-  virtual bool FadeInOnShow();
-  virtual void OnLinkActivated(size_t index);
+  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
+  virtual bool CloseOnEscape() OVERRIDE;
+  virtual bool FadeInOnShow() OVERRIDE;
+  virtual void OnLinkActivated(size_t index) OVERRIDE;
 
   // CaptchaView::Delegate implementation:
-  virtual void OnCaptchaEntered(const std::string& captcha);
+  virtual void OnCaptchaEntered(const std::string& captcha) OVERRIDE;
 
   // Authenticates the user with given |password| and authenticator.
   void Authenticate(const string16& password);
@@ -109,10 +114,12 @@ class ScreenLocker : public LoginStatusConsumer,
   // Called when the all inputs are grabbed.
   void OnGrabInputs();
 
+#if defined(TOOLKIT_USES_GTK)
   // Returns the user to authenticate.
   const UserManager::User& user() const {
     return user_;
   }
+#endif
 
   // Returns a view that has given view |id|, or null if it doesn't exist.
   views::View* GetViewByID(int id);
@@ -135,6 +142,7 @@ class ScreenLocker : public LoginStatusConsumer,
   // Notifies that PowerManager rejected UnlockScreen request.
   static void UnlockScreenFailed();
 
+#if defined(TOOLKIT_USES_GTK)
   // Returns the tester
   static test::ScreenLockerTester* GetTester();
 
@@ -250,6 +258,8 @@ class ScreenLocker : public LoginStatusConsumer,
   // Delegate to forward all login status events to.
   // Tests can use this to receive login status events.
   LoginStatusConsumer* login_status_consumer_;
+
+#endif // TOOLKIT_USES_GTK
 
   DISALLOW_COPY_AND_ASSIGN(ScreenLocker);
 };

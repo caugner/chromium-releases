@@ -4,6 +4,7 @@
 
 #include "chrome/browser/chromeos/status/accessibility_menu_button.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/accessibility_util.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -23,7 +24,7 @@ enum MenuItemID {
   MENU_ITEM_DISABLE_SPOKEN_FEEDBACK,
 };
 
-}
+}  // namespace
 
 namespace chromeos {
 
@@ -86,7 +87,7 @@ void AccessibilityMenuButton::Update() {
   // Update tooltip and accessibile name.
   string16 message =
       l10n_util::GetStringUTF16(IDS_STATUSBAR_ACCESSIBILITY_ENABLED);
-  SetTooltipText(UTF16ToWide(message));
+  SetTooltipText(message);
   SetAccessibleName(message);
   // Update visibility.
   SetVisible(accessibility_enabled_.GetValue());

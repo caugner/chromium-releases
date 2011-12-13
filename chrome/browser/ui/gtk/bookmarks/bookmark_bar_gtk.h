@@ -12,6 +12,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_context_menu_controller.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
 #include "chrome/browser/prefs/pref_member.h"
@@ -110,6 +111,9 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
             BookmarkBar::AnimateChangeType animate_type);
   void Hide(BookmarkBar::State old_state,
             BookmarkBar::AnimateChangeType animate_type);
+
+  // Calculate maximum height of bookmark bar.
+  void CalculateMaxHeight();
 
   // Helper function which generates GtkToolItems for |bookmark_toolbar_|.
   void CreateAllBookmarkButtons();
@@ -347,6 +351,9 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
   // The other bookmarks button.
   GtkWidget* other_bookmarks_button_;
 
+  // Padding for the other bookmarks button.
+  GtkWidget* other_padding_;
+
   // The sync error button.
   GtkWidget* sync_error_button_;
 
@@ -405,9 +412,12 @@ class BookmarkBarGtk : public ui::AnimationDelegate,
   // Tracks whether bookmarks can be modified.
   BooleanPrefMember edit_bookmarks_enabled_;
 
-  ScopedRunnableMethodFactory<BookmarkBarGtk> method_factory_;
+  base::WeakPtrFactory<BookmarkBarGtk> weak_factory_;
 
   BookmarkBar::State bookmark_bar_state_;
+
+  // Maximum height of the bookmark bar.
+  int max_height_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkBarGtk);
 };

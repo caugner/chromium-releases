@@ -19,6 +19,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/page_type.h"
+#include "net/base/cert_status_flags.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
 class ImporterList;
@@ -26,6 +27,10 @@ class TemplateURLService;
 
 namespace base {
 class DictionaryValue;
+}
+
+namespace webkit {
+struct WebPluginInfo;
 }
 
 // This is an automation provider containing testing calls.
@@ -196,8 +201,10 @@ class TestingAutomationProvider : public AutomationProvider,
   void WaitForTabToBeRestored(int tab_handle, IPC::Message* reply_message);
 
   // Gets the security state for the tab associated to the specified |handle|.
-  void GetSecurityState(int handle, bool* success,
-                        SecurityStyle* security_style, int* ssl_cert_status,
+  void GetSecurityState(int handle,
+                        bool* success,
+                        SecurityStyle* security_style,
+                        net::CertStatus* ssl_cert_status,
                         int* insecure_content_status);
 
   // Gets the page type for the tab associated to the specified |handle|.
@@ -383,10 +390,26 @@ class TestingAutomationProvider : public AutomationProvider,
                               base::DictionaryValue* args,
                               IPC::Message* reply_message);
 
+  // Create a new profile and open a new browser window with this profile. Uses
+  // the JSON interface for input/output.
+  void OpenNewBrowserWindowWithNewProfile(
+      base::DictionaryValue* args,
+      IPC::Message* reply_message);
+
+  // Get info about multi-profile users.
+  // Uses the JSON interface for input/output.
+  void GetMultiProfileInfo(
+      base::DictionaryValue* args,
+      IPC::Message* reply_message);
+
   // Get info about the chromium/chrome in use.
   // This includes things like version, executable name, executable path.
   // Uses the JSON interface for input/output.
   void GetBrowserInfo(base::DictionaryValue* args,
+                      IPC::Message* reply_message);
+
+  // Get info about browser-related processes that currently exist.
+  void GetProcessInfo(base::DictionaryValue* args,
                       IPC::Message* reply_message);
 
   // Get info about the state of navigation in a given tab.
@@ -492,6 +515,10 @@ class TestingAutomationProvider : public AutomationProvider,
   void GetPluginsInfo(Browser* browser,
                       base::DictionaryValue* args,
                       IPC::Message* reply_message);
+  void GetPluginsInfoCallback(Browser* browser,
+      base::DictionaryValue* args,
+      IPC::Message* reply_message,
+      const std::vector<webkit::WebPluginInfo>& plugins);
 
   // Enable a plugin.
   // Uses the JSON interface for input/output.
@@ -690,9 +717,9 @@ class TestingAutomationProvider : public AutomationProvider,
 
   // Waits for the ongoing sync cycle to complete.
   // Uses the JSON interface for input/output.
-  void AwaitSyncCycleCompletion(Browser* browser,
-                                base::DictionaryValue* args,
-                                IPC::Message* reply_message);
+  void AwaitFullSyncCompletion(Browser* browser,
+                               base::DictionaryValue* args,
+                               IPC::Message* reply_message);
 
   // Waits for sync to reinitialize (for example, after a browser restart).
   // Uses the JSON interface for input/output.
@@ -1180,6 +1207,38 @@ class TestingAutomationProvider : public AutomationProvider,
   void CreateNewAutomationProvider(base::DictionaryValue* args,
                                    IPC::Message* reply_message);
 
+  // Enforces the policies in |args|. The policies are provided as a dictionary
+  // of policy names to their values. The top-level dictionary maps the policy
+  // provider level to its dictionary.
+  // Example:
+  //   input: { "managed_platform": {
+  //                                  "ShowHomeButton": true,
+  //                                  "SafeBrowsingEnabled": false,
+  //                                },
+  //            "recommended_platform": {
+  //                                      ...
+  //                                    },
+  //            "managed_cloud": {
+  //                               ...
+  //                             },
+  //            "recommended_cloud": {
+  //                                   ...
+  //                                 }
+  //          }
+  //  output: none
+  void SetPolicies(base::DictionaryValue* args,
+                   IPC::Message* reply_message);
+
+  // Gets a list of supported policies. The output is a map of policy name to
+  // its value type.
+  // Example:
+  //   input: none
+  //   output: { "ShowHomeButton": "bool",
+  //             "DefaultSearchProviderSearchURL": "str"
+  //           }
+  void GetPolicyDefinitionList(base::DictionaryValue* args,
+                               IPC::Message* reply_message);
+
 #if defined(OS_CHROMEOS)
   // Login.
   void GetLoginInfo(base::DictionaryValue* args, IPC::Message* reply_message);
@@ -1215,6 +1274,12 @@ class TestingAutomationProvider : public AutomationProvider,
 
   void SetProxySettings(base::DictionaryValue* args,
                         IPC::Message* reply_message);
+
+  void ConnectToCellularNetwork(base::DictionaryValue* args,
+                            IPC::Message* reply_message);
+
+  void DisconnectFromCellularNetwork(base::DictionaryValue* args,
+                                 IPC::Message* reply_message);
 
   void ConnectToWifiNetwork(base::DictionaryValue* args,
                             IPC::Message* reply_message);

@@ -205,11 +205,12 @@
   OP(ResizeCHROMIUM)                                           /* 448 */ \
   OP(GetRequestableExtensionsCHROMIUM)                         /* 449 */ \
   OP(RequestExtensionCHROMIUM)                                 /* 450 */ \
-  OP(Placeholder451CHROMIUM)                                   /* 451 */ \
-  OP(Placeholder452CHROMIUM)                                   /* 452 */ \
+  OP(CreateStreamTextureCHROMIUM)                              /* 451 */ \
+  OP(DestroyStreamTextureCHROMIUM)                             /* 452 */ \
   OP(Placeholder453CHROMIUM)                                   /* 453 */ \
   OP(GetMultipleIntegervCHROMIUM)                              /* 454 */ \
   OP(GetProgramInfoCHROMIUM)                                   /* 455 */ \
+  OP(GetTranslatedShaderSourceANGLE)                           /* 456 */ \
 
 enum CommandId {
   kStartPoint = cmd::kLastCommonId,  // All GLES2 commands start after this.

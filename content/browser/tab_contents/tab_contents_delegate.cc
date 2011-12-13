@@ -9,8 +9,9 @@
 #include "base/memory/singleton.h"
 #include "content/browser/javascript_dialogs.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "ui/gfx/rect.h"
+#include "webkit/glue/web_intent_data.h"
 
 TabContentsDelegate::TabContentsDelegate() {
 }
@@ -20,9 +21,10 @@ TabContents* TabContentsDelegate::OpenURLFromTab(
     const GURL& url,
     const GURL& referrer,
     WindowOpenDisposition disposition,
-    PageTransition::Type transition) {
+    content::PageTransition transition) {
   return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition));
+                        OpenURLParams(url, referrer, disposition, transition,
+                                      false));
 }
 
 TabContents* TabContentsDelegate::OpenURLFromTab(TabContents* source,
@@ -69,13 +71,6 @@ void TabContentsDelegate::DetachContents(TabContents* source) {
 
 bool TabContentsDelegate::IsPopupOrPanel(const TabContents* source) const {
   return false;
-}
-
-bool TabContentsDelegate::ShouldFocusConstrainedWindow() {
-  return true;
-}
-
-void TabContentsDelegate::WillShowConstrainedWindow(TabContents* source) {
 }
 
 void TabContentsDelegate::UpdateTargetURL(TabContents* source,
@@ -125,10 +120,6 @@ bool TabContentsDelegate::TakeFocus(bool reverse) {
 void TabContentsDelegate::LostCapture() {
 }
 
-void TabContentsDelegate::SetTabContentBlocked(
-    TabContents* contents, bool blocked) {
-}
-
 void TabContentsDelegate::TabContentsFocused(TabContents* tab_content) {
 }
 
@@ -169,7 +160,7 @@ void TabContentsDelegate::ViewSourceForTab(TabContents* source,
                  url,
                  GURL(),
                  NEW_FOREGROUND_TAB,
-                 PageTransition::LINK);
+                 content::PAGE_TRANSITION_LINK);
 }
 
 void TabContentsDelegate::ViewSourceForFrame(TabContents* source,
@@ -182,7 +173,7 @@ void TabContentsDelegate::ViewSourceForFrame(TabContents* source,
                  url,
                  GURL(),
                  NEW_FOREGROUND_TAB,
-                 PageTransition::LINK);
+                 content::PAGE_TRANSITION_LINK);
 }
 
 bool TabContentsDelegate::PreHandleKeyboardEvent(
@@ -214,7 +205,7 @@ bool TabContentsDelegate::OnGoToEntryOffset(int offset) {
 
 bool TabContentsDelegate::ShouldAddNavigationToHistory(
     const history::HistoryAddPageArgs& add_page_args,
-    NavigationType::Type navigation_type) {
+    content::NavigationType navigation_type) {
   return true;
 }
 
@@ -293,6 +284,10 @@ void TabContentsDelegate::ToggleFullscreenModeForTab(TabContents* tab,
                                                      bool enter_fullscreen) {
 }
 
+bool TabContentsDelegate::IsFullscreenForTab(const TabContents* tab) const {
+  return false;
+}
+
 void TabContentsDelegate::JSOutOfMemory(TabContents* tab) {
 }
 
@@ -309,12 +304,11 @@ void TabContentsDelegate::RegisterIntentHandler(TabContents* tab,
                                                 const string16& title) {
 }
 
-void TabContentsDelegate::WebIntentDispatch(TabContents* tab,
-                                            int routing_id,
-                                            const string16& action,
-                                            const string16& type,
-                                            const string16& data,
-                                            int intent_id) {
+void TabContentsDelegate::WebIntentDispatch(
+    TabContents* tab,
+    int routing_id,
+    const webkit_glue::WebIntentData& intent,
+    int intent_id) {
 }
 
 void TabContentsDelegate::FindReply(TabContents* tab,
@@ -333,6 +327,9 @@ void TabContentsDelegate::UpdatePreferredSize(TabContents* source,
                                               const gfx::Size& pref_size) {
 }
 
+void TabContentsDelegate::RequestToLockMouse(TabContents* tab) {
+}
+
 TabContentsDelegate::~TabContentsDelegate() {
   while (!attached_contents_.empty()) {
     TabContents* tab_contents = *attached_contents_.begin();
@@ -349,4 +346,7 @@ void TabContentsDelegate::Attach(TabContents* tab_contents) {
 void TabContentsDelegate::Detach(TabContents* tab_contents) {
   DCHECK(attached_contents_.find(tab_contents) != attached_contents_.end());
   attached_contents_.erase(tab_contents);
+}
+
+void TabContentsDelegate::LostMouseLock() {
 }

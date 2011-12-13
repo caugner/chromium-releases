@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -62,9 +63,10 @@ MessageBubble::MessageBubble(views::Widget::InitParams::Type type,
   icon_->SetImage(*image);
   layout->AddView(icon_);
 
-  text_ = new views::Label(text);
+  text_ = new views::Label(WideToUTF16Hack(text));
   text_->SetMultiLine(true);
   text_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
+  text_->SetBackgroundColor(Bubble::kBackgroundColor);
   text_->SizeToFit(kMaxLabelWidth);
   layout->AddView(text_);
 
@@ -79,11 +81,12 @@ MessageBubble::MessageBubble(views::Widget::InitParams::Type type,
 
   for (size_t i = 0; i < links.size(); ++i) {
     layout->StartRowWithPadding(0, 1, 0, kBorderSize);
-    views::Link* help_link_ = new views::Link(links[i]);
+    views::Link* help_link_ = new views::Link(WideToUTF16Hack(links[i]));
     help_links_.push_back(help_link_);
     help_link_->set_listener(this);
-    help_link_->SetNormalColor(login::kLinkColor);
-    help_link_->SetHighlightedColor(login::kLinkColor);
+    help_link_->SetBackgroundColor(Bubble::kBackgroundColor);
+    help_link_->SetEnabledColor(login::kLinkColor);
+    help_link_->SetPressedColor(login::kLinkColor);
     layout->AddView(help_link_);
   }
 }
@@ -172,6 +175,8 @@ MessageBubble* MessageBubble::ShowNoGrab(
   return bubble;
 }
 
+#if !defined(TOUCH_UI) && defined(TOOLKIT_USES_GTK)
+// TODO(saintlou): Unclear if we need this for the !gtk case.
 void MessageBubble::OnActiveChanged() {
   if (parent_ && IsActive()) {
     // Show the parent.
@@ -184,17 +189,20 @@ void MessageBubble::SetMouseCapture() {
   if (grab_enabled_)
     NativeWidgetGtk::SetMouseCapture();
 }
+#endif
 
 void MessageBubble::Close() {
   parent_ = NULL;
   Bubble::Close();
 }
 
+#if !defined(TOUCH_UI) && defined(TOOLKIT_USES_GTK)
 gboolean MessageBubble::OnButtonPress(GtkWidget* widget,
                                       GdkEventButton* event) {
   NativeWidgetGtk::OnButtonPress(widget, event);
   // Never propagate event to parent.
   return true;
 }
+#endif
 
 }  // namespace chromeos

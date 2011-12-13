@@ -87,7 +87,8 @@ class MountLibrary {
          bool is_parent,
          bool is_read_only,
          bool has_media,
-         bool on_boot_device);
+         bool on_boot_device,
+         bool is_hidden);
     ~Disk();
 
     // The path of the device, used by devicekit-disks.
@@ -120,6 +121,8 @@ class MountLibrary {
     bool has_media() const { return has_media_; }
     // Is the device on the boot device.
     bool on_boot_device() const { return on_boot_device_; }
+    // Shoud the device be shown in the UI, or automounted.
+    bool is_hidden() const { return is_hidden_; }
 
     void set_mount_path(const char* mount_path) { mount_path_ = mount_path; }
     void clear_mount_path() { mount_path_.clear(); }
@@ -139,6 +142,7 @@ class MountLibrary {
     bool is_read_only_;
     bool has_media_;
     bool on_boot_device_;
+    bool is_hidden_;
   };
   typedef std::map<std::string, Disk*> DiskMap;
   typedef std::map<std::string, std::string> PathMap;
@@ -177,6 +181,7 @@ class MountLibrary {
   };
 
   virtual ~MountLibrary() {}
+  virtual void Init() = 0;
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
   virtual const DiskMap& disks() const = 0;
@@ -188,6 +193,11 @@ class MountLibrary {
                          const MountPathOptions& options) = 0;
   // |path| is device's mount path.
   virtual void UnmountPath(const char* path) = 0;
+
+  // Retrieves total and remaining available size on |mount_path|.
+  virtual void GetSizeStatsOnFileThread(const char* mount_path,
+                                        size_t* total_size_kb,
+                                        size_t* remaining_size_kb) = 0;
 
   // Formats device given its file path.
   // Example: file_path: /dev/sdb1

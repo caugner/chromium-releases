@@ -6,7 +6,8 @@
 #define CONTENT_BROWSER_TAB_CONTENTS_TAB_CONTENTS_OBSERVER_H_
 
 #include "content/browser/tab_contents/navigation_controller.h"
-#include "content/common/page_transition_types.h"
+#include "content/common/content_export.h"
+#include "content/public/common/page_transition_types.h"
 #include "ipc/ipc_channel.h"
 #include "webkit/glue/window_open_disposition.h"
 
@@ -15,8 +16,8 @@ struct ViewHostMsg_FrameNavigate_Params;
 
 // An observer API implemented by classes which are interested in various page
 // load events from TabContents.  They also get a chance to filter IPC messages.
-class TabContentsObserver : public IPC::Channel::Listener,
-                            public IPC::Message::Sender {
+class CONTENT_EXPORT TabContentsObserver : public IPC::Channel::Listener,
+                                           public IPC::Message::Sender {
  public:
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
   virtual void NavigateToPendingEntry(
@@ -37,19 +38,21 @@ class TabContentsObserver : public IPC::Channel::Listener,
       bool is_error_page,
       RenderViewHost* render_view_host);
   virtual void ProvisionalChangeToMainFrameUrl(const GURL& url,
-                                               bool has_opener_set);
+                                               const GURL& opener_url);
   virtual void DidCommitProvisionalLoadForFrame(
       int64 frame_id,
       bool is_main_frame,
       const GURL& url,
-      PageTransition::Type transition_type);
+      content::PageTransition transition_type);
   virtual void DidFailProvisionalLoad(int64 frame_id,
                                       bool is_main_frame,
                                       const GURL& validated_url,
-                                      int error_code);
+                                      int error_code,
+                                      const string16& error_description);
   virtual void DocumentLoadedInFrame(int64 frame_id);
   virtual void DidFinishLoad(int64 frame_id);
   virtual void DidGetUserGesture();
+  virtual void DidGetIgnoredUIEvent();
   virtual void DidBecomeSelected();
 
   virtual void DidStartLoading();
@@ -60,8 +63,17 @@ class TabContentsObserver : public IPC::Channel::Listener,
   virtual void DidOpenURL(const GURL& url,
                           const GURL& referrer,
                           WindowOpenDisposition disposition,
-                          PageTransition::Type transition);
+                          content::PageTransition transition);
 
+  virtual void DidOpenRequestedURL(TabContents* new_contents,
+                                   const GURL& url,
+                                   const GURL& referrer,
+                                   WindowOpenDisposition disposition,
+                                   content::PageTransition transition,
+                                   int64 source_frame_id);
+
+  virtual void AppCacheAccessed(const GURL& manifest_url,
+                                bool blocked_by_policy);
 #if 0
   // For unifying with delegate...
 

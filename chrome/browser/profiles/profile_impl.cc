@@ -10,10 +10,10 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
@@ -25,16 +25,18 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/defaults.h"
-#include "chrome/browser/download/chrome_download_manager_delegate.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_message_service.h"
+#include "chrome/browser/extensions/extension_navigation_observer.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_settings.h"
+#include "chrome/browser/extensions/extension_settings_backend.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/favicon/favicon_service.h"
@@ -47,6 +49,7 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/net_pref_observer.h"
+#include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/password_manager/password_store_default.h"
@@ -55,13 +58,15 @@
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
-#include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile_dependency_manager.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/speech/chrome_speech_input_manager.h"
+#include "chrome/browser/speech/chrome_speech_input_preferences.h"
 #include "chrome/browser/spellchecker/spellcheck_profile.h"
 #include "chrome/browser/sync/profile_sync_factory_impl.h"
 #include "chrome/browser/sync/profile_sync_service.h"
@@ -89,7 +94,6 @@
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/chrome_blob_storage_context.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
 #include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
@@ -101,6 +105,7 @@
 #include "grit/browser_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/transport_security_state.h"
+#include "net/http/http_server_properties.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/quota/quota_manager.h"
@@ -125,11 +130,9 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/locale_change_guard.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/preferences.h"
-#include "chrome/browser/chromeos/prerender_condition_network.h"
 #endif
 
 using base::Time;
@@ -149,6 +152,28 @@ enum ContextType {
   kNormalContext,
   kMediaContext
 };
+
+typedef std::list<std::pair<FilePath::StringType, int> >
+    ComponentExtensionList;
+
+#if defined(FILE_MANAGER_EXTENSION)
+void AddFileManagerExtension(ComponentExtensionList* component_extensions) {
+#ifndef NDEBUG
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kFileManagerExtensionPath)) {
+    FilePath filemgr_extension_path =
+        command_line->GetSwitchValuePath(switches::kFileManagerExtensionPath);
+    component_extensions->push_back(std::make_pair(
+        filemgr_extension_path.value(),
+        IDR_FILEMANAGER_MANIFEST));
+    return;
+  }
+#endif  // NDEBUG
+  component_extensions->push_back(std::make_pair(
+      FILE_PATH_LITERAL("file_manager"),
+      IDR_FILEMANAGER_MANIFEST));
+}
+#endif  // defined(FILE_MANAGER_EXTENSION)
 
 // Gets the cache parameters from the command line. |type| is the type of
 // request context that we need, |cache_path| will be set to the user provided
@@ -191,59 +216,6 @@ FilePath GetCachePath(const FilePath& base) {
 
 FilePath GetMediaCachePath(const FilePath& base) {
   return base.Append(chrome::kMediaCacheDirname);
-}
-
-// Simple task to log the size of the current profile.
-class ProfileSizeTask : public Task {
- public:
-  explicit ProfileSizeTask(const FilePath& path) : path_(path) {}
-  virtual ~ProfileSizeTask() {}
-
-  virtual void Run();
- private:
-  FilePath path_;
-};
-
-void ProfileSizeTask::Run() {
-  int64 size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("*"));
-  int size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.TotalSize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("History"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.HistorySize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("History*"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.TotalHistorySize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Cookies"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.CookiesSize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Bookmarks"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.BookmarksSize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Favicons"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.FaviconsSize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Top Sites"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.TopSitesSize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Visited Links"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.VisitedLinksSize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Web Data"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.WebDataSize", size_MB);
-
-  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Extension*"));
-  size_MB = static_cast<int>(size  / (1024 * 1024));
-  UMA_HISTOGRAM_COUNTS_10000("Profile.ExtensionSize", size_MB);
 }
 
 }  // namespace
@@ -294,7 +266,8 @@ void ProfileImpl::RegisterUserPrefs(PrefService* prefs) {
 ProfileImpl::ProfileImpl(const FilePath& path,
                          Profile::Delegate* delegate)
     : path_(path),
-      visited_link_event_listener_(new VisitedLinkEventListener()),
+      ALLOW_THIS_IN_INITIALIZER_LIST(visited_link_event_listener_(
+          new VisitedLinkEventListener(this))),
       extension_devtools_manager_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(io_data_(this)),
       host_content_settings_map_(NULL),
@@ -303,18 +276,25 @@ ProfileImpl::ProfileImpl(const FilePath& path,
       favicon_service_created_(false),
       created_web_data_service_(false),
       created_password_store_(false),
-      created_download_manager_(false),
       start_time_(Time::Now()),
 #if defined(OS_WIN)
       checked_instant_promo_(false),
 #endif
-      delegate_(delegate) {
+      delegate_(delegate),
+      predictor_(NULL) {
   DCHECK(!path.empty()) << "Using an empty path will attempt to write " <<
                             "profile files to the root directory!";
 
   create_session_service_timer_.Start(FROM_HERE,
       TimeDelta::FromMilliseconds(kCreateSessionServiceDelayMS), this,
       &ProfileImpl::EnsureSessionServiceCreated);
+
+  // Determine if prefetch is enabled for this profile.
+  // If not profile_manager is present, it means we are in a unittest.
+  const CommandLine* command_line = CommandLine::ForCurrentProcess();
+  predictor_ = chrome_browser_net::Predictor::CreatePredictor(
+      !command_line->HasSwitch(switches::kDisablePreconnect),
+      g_browser_process->profile_manager() == NULL);
 
   if (delegate_) {
     prefs_.reset(PrefService::CreatePrefService(
@@ -341,7 +321,7 @@ void ProfileImpl::DoFinalInit() {
   pref_change_registrar_.Add(prefs::kSpellCheckDictionary, this);
   pref_change_registrar_.Add(prefs::kEnableSpellCheck, this);
   pref_change_registrar_.Add(prefs::kEnableAutoSpellCorrect, this);
-  pref_change_registrar_.Add(prefs::kSpeechInputCensorResults, this);
+  pref_change_registrar_.Add(prefs::kSpeechInputFilterProfanities, this);
   pref_change_registrar_.Add(prefs::kClearSiteDataOnExit, this);
   pref_change_registrar_.Add(prefs::kGoogleServicesUsername, this);
   pref_change_registrar_.Add(prefs::kDefaultZoomLevel, this);
@@ -378,14 +358,17 @@ void ProfileImpl::DoFinalInit() {
   // Initialize the BackgroundModeManager - this has to be done here before
   // InitExtensions() is called because it relies on receiving notifications
   // when extensions are loaded. BackgroundModeManager is not needed under
-  // ChromeOS because Chrome is always running (no need for special keep-alive
-  // or launch-on-startup support).
-#if !defined(OS_CHROMEOS)
-  if (g_browser_process->background_mode_manager())
-    g_browser_process->background_mode_manager()->RegisterProfile(this);
+  // ChromeOS because Chrome is always running, no need for special keep-alive
+  // or launch-on-startup support unless kKeepAliveForTest is set.
+  bool init_background_mode_manager = true;
+#if defined(OS_CHROMEOS)
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kKeepAliveForTest))
+    init_background_mode_manager = false;
 #endif
-
-  extension_info_map_ = new ExtensionInfoMap();
+  if (init_background_mode_manager) {
+    if (g_browser_process->background_mode_manager())
+      g_browser_process->background_mode_manager()->RegisterProfile(this);
+  }
 
   InitRegisteredProtocolHandlers();
 
@@ -398,10 +381,6 @@ void ProfileImpl::DoFinalInit() {
         UserMetricsAction("ClearSiteDataOnExitDisabled"));
   }
 
-  // Log the profile size after a reasonable startup delay.
-  BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
-                                 new ProfileSizeTask(path_), 112000);
-
   InstantController::RecordMetrics(this);
 
   // Instantiates Metrics object for spellchecking for use.
@@ -409,9 +388,6 @@ void ProfileImpl::DoFinalInit() {
       g_browser_process->metrics_service()->recording_active())
     GetSpellCheckProfile()->StartRecordingMetrics(
         GetPrefs()->GetBoolean(prefs::kEnableSpellCheck));
-
-  speech_input::ChromeSpeechInputManager::GetInstance()->set_censor_results(
-      prefs->GetBoolean(prefs::kSpeechInputCensorResults));
 
   FilePath cookie_path = GetPath();
   cookie_path = cookie_path.Append(chrome::kCookieFilename);
@@ -436,9 +412,12 @@ void ProfileImpl::DoFinalInit() {
 
   // Make sure we initialize the ProfileIOData after everything else has been
   // initialized that we might be reading from the IO thread.
+
   io_data_.Init(cookie_path, origin_bound_cert_path, cache_path,
                 cache_max_size, media_cache_path, media_cache_max_size,
-                extensions_cookie_path, app_path);
+                extensions_cookie_path, app_path, predictor_,
+                g_browser_process->local_state(),
+                g_browser_process->io_thread());
 
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
       PluginPrefs::GetForProfile(this), &GetResourceContext());
@@ -463,9 +442,13 @@ void ProfileImpl::InitExtensions(bool extensions_enabled) {
     extension_devtools_manager_ = new ExtensionDevToolsManager(this);
   }
 
+  // The ExtensionInfoMap needs to be created before the
+  // ExtensionProcessManager.
+  extension_info_map_ = new ExtensionInfoMap();
   extension_process_manager_.reset(ExtensionProcessManager::Create(this));
   extension_event_router_.reset(new ExtensionEventRouter(this));
   extension_message_service_ = new ExtensionMessageService(this);
+  extension_navigation_observer_.reset(new ExtensionNavigationObserver(this));
 
   ExtensionErrorReporter::Init(true);  // allow noisy errors.
 
@@ -483,7 +466,6 @@ void ProfileImpl::InitExtensions(bool extensions_enabled) {
       CommandLine::ForCurrentProcess(),
       GetPath().AppendASCII(ExtensionService::kInstallDirectoryName),
       extension_prefs_.get(),
-      extension_settings_.get(),
       autoupdate_enabled,
       extensions_enabled));
 
@@ -543,27 +525,10 @@ void ProfileImpl::RegisterComponentExtensions() {
       IDR_BOOKMARKS_MANIFEST));
 
 #if defined(FILE_MANAGER_EXTENSION)
-  const CommandLine* command_line = CommandLine::ForCurrentProcess();
-#ifndef NDEBUG
-  if (command_line->HasSwitch(switches::kFileManagerExtensionPath)) {
-    FilePath filemgr_extension_path =
-        command_line->GetSwitchValuePath(switches::kFileManagerExtensionPath);
-    component_extensions.push_back(std::make_pair(
-        filemgr_extension_path.value(),
-        IDR_FILEMANAGER_MANIFEST));
-  } else {
-    component_extensions.push_back(std::make_pair(
-        FILE_PATH_LITERAL("file_manager"),
-        IDR_FILEMANAGER_MANIFEST));
-  }
-#else
-  component_extensions.push_back(std::make_pair(
-      FILE_PATH_LITERAL("file_manager"),
-      IDR_FILEMANAGER_MANIFEST));
-#endif
+  AddFileManagerExtension(&component_extensions);
 #endif
 
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
   component_extensions.push_back(std::make_pair(
       FILE_PATH_LITERAL("keyboard"),
       IDR_KEYBOARD_MANIFEST));
@@ -574,6 +539,7 @@ void ProfileImpl::RegisterComponentExtensions() {
         FILE_PATH_LITERAL("/usr/share/chromeos-assets/mobile"),
         IDR_MOBILE_MANIFEST));
 
+    const CommandLine* command_line = CommandLine::ForCurrentProcess();
     if (command_line->HasSwitch(switches::kAuthExtensionPath)) {
       FilePath auth_extension_path =
           command_line->GetSwitchValuePath(switches::kAuthExtensionPath);
@@ -705,14 +671,6 @@ ProfileImpl::~ProfileImpl() {
             &webkit_database::DatabaseTracker::Shutdown));
   }
 
-  // DownloadManager is lazily created, so check before accessing it.
-  if (download_manager_.get()) {
-    // The download manager queries the history system and should be shut down
-    // before the history is shut down so it can properly cancel all requests.
-    download_manager_->Shutdown();
-    download_manager_ = NULL;
-  }
-
   // Password store uses WebDB, shut it down before the WebDB has been shutdown.
   if (password_store_.get())
     password_store_->Shutdown();
@@ -759,7 +717,7 @@ ProfileImpl::~ProfileImpl() {
 
   // FaviconService depends on HistoryServce so make sure we delete
   // HistoryService first.
-  favicon_service_ = NULL;
+  favicon_service_.reset();
 
   if (extension_message_service_)
     extension_message_service_->DestroyingProfile();
@@ -878,21 +836,6 @@ SSLHostState* ProfileImpl::GetSSLHostState() {
   return ssl_host_state_.get();
 }
 
-net::TransportSecurityState*
-    ProfileImpl::GetTransportSecurityState() {
-  if (!transport_security_state_.get()) {
-    transport_security_state_ = new net::TransportSecurityState(
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kHstsHosts));
-    transport_security_persister_ =
-        new TransportSecurityPersister(false /* read-write */);
-    transport_security_persister_->Initialize(
-        transport_security_state_.get(), path_);
-  }
-
-  return transport_security_state_.get();
-}
-
 void ProfileImpl::OnPrefsLoaded(bool success) {
   if (!success) {
     DCHECK(delegate_);
@@ -919,21 +862,25 @@ void ProfileImpl::OnPrefsLoaded(bool success) {
   // Make sure we save to disk that the session has opened.
   prefs_->ScheduleSavePersistentPrefs();
 
+  bool extensions_disabled =
+      prefs_->GetBoolean(prefs::kDisableExtensions) ||
+      CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableExtensions);
+
   // Ensure that preferences set by extensions are restored in the profile
   // as early as possible. The constructor takes care of that.
   extension_prefs_.reset(new ExtensionPrefs(
       prefs_.get(),
       GetPath().AppendASCII(ExtensionService::kInstallDirectoryName),
       GetExtensionPrefValueMap()));
-
-  extension_settings_ = new ExtensionSettings(
-      GetPath().AppendASCII(ExtensionService::kSettingsDirectoryName));
+  extension_prefs_->Init(extensions_disabled);
 
   ProfileDependencyManager::GetInstance()->CreateProfileServices(this, false);
 
   DCHECK(!net_pref_observer_.get());
-  net_pref_observer_.reset(
-      new NetPrefObserver(prefs_.get(), GetPrerenderManager()));
+  net_pref_observer_.reset(new NetPrefObserver(
+      prefs_.get(),
+      prerender::PrerenderManagerFactory::GetForProfile(this),
+      predictor_));
 
   DoFinalInit();
 }
@@ -996,8 +943,7 @@ const content::ResourceContext& ProfileImpl::GetResourceContext() {
 FaviconService* ProfileImpl::GetFaviconService(ServiceAccessType sat) {
   if (!favicon_service_created_) {
     favicon_service_created_ = true;
-    scoped_refptr<FaviconService> service(new FaviconService(this));
-    favicon_service_.swap(service);
+    favicon_service_.reset(new FaviconService(this));
   }
   return favicon_service_.get();
 }
@@ -1080,15 +1026,23 @@ HostZoomMap* ProfileImpl::GetHostZoomMap() {
 }
 
 GeolocationPermissionContext* ProfileImpl::GetGeolocationPermissionContext() {
-  if (!geolocation_permission_context_.get())
+  if (!geolocation_permission_context_.get()) {
     geolocation_permission_context_ =
         new ChromeGeolocationPermissionContext(this);
+  }
   return geolocation_permission_context_.get();
+}
+
+SpeechInputPreferences* ProfileImpl::GetSpeechInputPreferences() {
+  if (!speech_input_preferences_.get()) {
+    speech_input_preferences_ = new ChromeSpeechInputPreferences(GetPrefs());
+  }
+  return speech_input_preferences_.get();
 }
 
 UserStyleSheetWatcher* ProfileImpl::GetUserStyleSheetWatcher() {
   if (!user_style_sheet_watcher_.get()) {
-    user_style_sheet_watcher_ = new UserStyleSheetWatcher(GetPath());
+    user_style_sheet_watcher_ = new UserStyleSheetWatcher(this, GetPath());
     user_style_sheet_watcher_->Init();
   }
   return user_style_sheet_watcher_.get();
@@ -1283,29 +1237,7 @@ void ProfileImpl::CreatePasswordStore() {
 }
 
 DownloadManager* ProfileImpl::GetDownloadManager() {
-  if (!created_download_manager_) {
-    download_manager_delegate_= new ChromeDownloadManagerDelegate(this);
-    scoped_refptr<DownloadManager> dlm(
-        new DownloadManager(download_manager_delegate_,
-                            g_browser_process->download_status_updater()));
-    dlm->Init(this);
-    download_manager_delegate_->SetDownloadManager(dlm);
-    created_download_manager_ = true;
-    download_manager_.swap(dlm);
-  }
-  return download_manager_.get();
-}
-
-bool ProfileImpl::HasCreatedDownloadManager() const {
-  return created_download_manager_;
-}
-
-PersonalDataManager* ProfileImpl::GetPersonalDataManager() {
-  if (!personal_data_manager_.get()) {
-    personal_data_manager_ = new PersonalDataManager();
-    personal_data_manager_->Init(this);
-  }
-  return personal_data_manager_.get();
+  return DownloadServiceFactory::GetForProfile(this)->GetDownloadManager();
 }
 
 fileapi::FileSystemContext* ProfileImpl::GetFileSystemContext() {
@@ -1488,10 +1420,9 @@ void ProfileImpl::Observe(int type,
           RenderProcessHost* process = i.GetCurrentValue();
           process->Send(new SpellCheckMsg_EnableAutoSpellCorrect(enabled));
         }
-      } else if (*pref_name_in == prefs::kSpeechInputCensorResults) {
-        speech_input::ChromeSpeechInputManager::GetInstance()->
-            set_censor_results(prefs->GetBoolean(
-                prefs::kSpeechInputCensorResults));
+      } else if (*pref_name_in == prefs::kSpeechInputFilterProfanities) {
+        GetSpeechInputPreferences()->set_filter_profanities(prefs->GetBoolean(
+            prefs::kSpeechInputFilterProfanities));
       } else if (*pref_name_in == prefs::kClearSiteDataOnExit) {
         clear_local_state_on_exit_ =
             prefs->GetBoolean(prefs::kClearSiteDataOnExit);
@@ -1505,7 +1436,13 @@ void ProfileImpl::Observe(int type,
         }
       } else if (*pref_name_in == prefs::kGoogleServicesUsername) {
         ProfileManager* profile_manager = g_browser_process->profile_manager();
-        profile_manager->RegisterProfileName(this);
+        ProfileInfoCache& cache = profile_manager->GetProfileInfoCache();
+        size_t index = cache.GetIndexOfProfileWithPath(GetPath());
+        if (index != std::string::npos) {
+          std::string user_name =
+              GetPrefs()->GetString(prefs::kGoogleServicesUsername);
+          cache.SetUserNameOfProfileAtIndex(index, UTF8ToUTF16(user_name));
+        }
       } else if (*pref_name_in == prefs::kDefaultZoomLevel) {
           GetHostZoomMap()->set_default_zoom_level(
               prefs->GetDouble(prefs::kDefaultZoomLevel));
@@ -1733,21 +1670,12 @@ PrefProxyConfigTracker* ProfileImpl::GetProxyConfigTracker() {
   return pref_proxy_config_tracker_;
 }
 
-prerender::PrerenderManager* ProfileImpl::GetPrerenderManager() {
-  if (!prerender::PrerenderManager::IsPrerenderingPossible())
-    return NULL;
-  if (!prerender_manager_.get()) {
-    CHECK(g_browser_process->prerender_tracker());
-    prerender_manager_.reset(
-        new prerender::PrerenderManager(
-            this, g_browser_process->prerender_tracker()));
-#if defined(OS_CHROMEOS)
-    prerender_manager_->AddCondition(
-        new chromeos::PrerenderConditionNetwork(
-            chromeos::CrosLibrary::Get()->GetNetworkLibrary()));
-#endif
-  }
-  return prerender_manager_.get();
+chrome_browser_net::Predictor* ProfileImpl::GetNetworkPredictor() {
+  return predictor_;
+}
+
+void ProfileImpl::ClearNetworkingHistorySince(base::Time time) {
+  io_data_.ClearNetworkingHistorySince(time);
 }
 
 SpellCheckProfile* ProfileImpl::GetSpellCheckProfile() {

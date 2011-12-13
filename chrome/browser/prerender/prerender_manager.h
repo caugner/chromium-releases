@@ -7,9 +7,7 @@
 #pragma once
 
 #include <list>
-#include <map>
 #include <string>
-#include <vector>
 
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
@@ -23,10 +21,15 @@
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_origin.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "googleurl/src/gurl.h"
 
 class Profile;
 class TabContents;
+
+namespace base {
+class DictionaryValue;
+}
 
 #if defined(COMPILER_GCC)
 
@@ -49,10 +52,11 @@ class PrerenderHistory;
 class PrerenderTracker;
 
 // PrerenderManager is responsible for initiating and keeping prerendered
-// views of webpages. All methods must be called on the UI thread unless
+// views of web pages. All methods must be called on the UI thread unless
 // indicated otherwise.
 class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
-                         public base::NonThreadSafe {
+                         public base::NonThreadSafe,
+                         public ProfileKeyedService {
  public:
   // PrerenderManagerMode is used in a UMA_HISTOGRAM, so please do not
   // add in the middle.
@@ -80,6 +84,9 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   virtual ~PrerenderManager();
 
+  // ProfileKeyedService implementation.
+  virtual void Shutdown() OVERRIDE;
+
   // Entry points for adding prerenders.
 
   // Adds a prerender for |url| if valid. |process_id| and |route_id| identify
@@ -92,7 +99,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                                         const GURL& url, const GURL& referrer);
 
   // Adds a prerender for |url| if valid. As the prerender request is coming
-  // from a source without a RenderViewHost (ie, the omnibox) we don't have a
+  // from a source without a RenderViewHost (i.e., the omnibox) we don't have a
   // child or route id, or a referrer. This method uses sensible values for
   // those.
   bool AddPrerenderFromOmnibox(const GURL& url);
@@ -107,28 +114,17 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // For a given TabContents that wants to navigate to the URL supplied,
   // determines whether a prerendered version of the URL can be used,
-  // and substitutes the prerendered RVH into the TabContents.  Returns
-  // whether or not a prerendered RVH could be used or not.
+  // and substitutes the prerendered RVH into the TabContents. |opener_url| is
+  // set to the window.opener url that the TabContents should have set and
+  // will be empty if there is no opener set. Returns whether or not a
+  // prerendered RVH could be used or not.
   bool MaybeUsePrerenderedPage(TabContents* tab_contents,
                                const GURL& url,
-                               bool has_opener_set);
+                               const GURL& opener_url);
 
   // Moves a PrerenderContents to the pending delete list from the list of
   // active prerenders when prerendering should be cancelled.
   void MoveEntryToPendingDelete(PrerenderContents* entry);
-
-  // Retrieves the PrerenderContents object for the specified URL, if it
-  // has been prerendered.  The caller will then have ownership of the
-  // PrerenderContents object and is responsible for freeing it.
-  // Returns NULL if the specified URL has not been prerendered.
-  PrerenderContents* GetEntry(const GURL& url);
-
-  // Identical to GetEntry, with one exception:
-  // The TabContents specified indicates the TC in which to swap the
-  // prerendering into.  If the TabContents specified is the one
-  // to doing the prerendered itself, will return NULL.
-  PrerenderContents* GetEntryButNotSpecifiedTC(const GURL& url,
-                                               TabContents* tc);
 
   // Records the perceived page load time for a page - effectively the time from
   // when the user navigates to a page to when it finishes loading. The actual
@@ -136,7 +132,8 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // This must be called on the UI thread.
   static void RecordPerceivedPageLoadTime(
       base::TimeDelta perceived_page_load_time,
-      TabContents* tab_contents);
+      TabContents* tab_contents,
+      const GURL& url);
 
   // Returns whether prerendering is currently enabled for this manager.
   // Must be called on the UI thread.
@@ -166,7 +163,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   bool WouldTabContentsBePrerendered(TabContents* tab_contents) const;
   bool IsOldRenderViewHost(const RenderViewHost* render_view_host) const;
 
-  // Checks whether navigation to the provided URL has occured in a visible
+  // Checks whether navigation to the provided URL has occurred in a visible
   // tab recently.
   bool HasRecentlyBeenNavigatedTo(const GURL& url);
 
@@ -176,7 +173,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Returns a Value object containing the active pages being prerendered, and
   // a history of pages which were prerendered. The caller is responsible for
   // deleting the return value.
-  base::Value* GetAsValue() const;
+  base::DictionaryValue* GetAsValue() const;
 
   // Clears the data indicated by which bits of clear_flags are set.
   //
@@ -206,23 +203,38 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   bool IsTopSite(const GURL& url);
 
+  bool IsPendingEntry(const GURL& url) const;
+
  protected:
-  // Test that needs needs access to internal functions.
-  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ExpireTest);
-  FRIEND_TEST_ALL_PREFIXES(PrerenderManagerTest, ExtractURLInQueryStringTest);
-
-  struct PendingContentsData;
-
   void SetPrerenderContentsFactory(
       PrerenderContents::Factory* prerender_contents_factory);
 
-  PendingContentsData* FindPendingEntry(const GURL& url);
+  // Utility method that is called from the virtual Shutdown method on this
+  // class but is called directly from the TestPrerenderManager in the unit
+  // tests.
+  void DoShutdown();
 
  private:
+  // Needs access to AddPrerender.
+  friend class PrerenderContents;
+
   // Test that needs needs access to internal functions.
   friend class PrerenderBrowserTest;
-
-  friend class base::RefCountedThreadSafe<PrerenderManager>;
+  FRIEND_TEST(PrerenderManagerTest, AliasURLTest);
+  FRIEND_TEST(PrerenderManagerTest, ClearTest);
+  FRIEND_TEST(PrerenderManagerTest, ControlGroup);
+  FRIEND_TEST(PrerenderManagerTest, DropOldestRequestTest);
+  FRIEND_TEST(PrerenderManagerTest, DropSecondRequestTest);
+  FRIEND_TEST(PrerenderManagerTest, ExpireTest);
+  FRIEND_TEST(PrerenderManagerTest, FoundTest);
+  FRIEND_TEST(PrerenderManagerTest, FragmentMatchesFragmentTest);
+  FRIEND_TEST(PrerenderManagerTest, FragmentMatchesPageTest);
+  FRIEND_TEST(PrerenderManagerTest, PageMatchesFragmentTest);
+  FRIEND_TEST(PrerenderManagerTest, PendingPrerenderTest);
+  FRIEND_TEST(PrerenderManagerTest, RateLimitInWindowTest);
+  FRIEND_TEST(PrerenderManagerTest, RateLimitOutsideWindowTest);
+  FRIEND_TEST(PrerenderManagerTest, SourceRenderViewClosed);
+  FRIEND_TEST(PrerenderManagerTest, TwoElementPrerenderTest);
 
   struct PrerenderContentsData;
   struct NavigationRecord;
@@ -247,6 +259,19 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
                            const std::pair<int, int>& child_route_id_pair,
                            const GURL& url,
                            const GURL& referrer);
+
+  // Retrieves the PrerenderContents object for the specified URL, if it
+  // has been prerendered.  The caller will then have ownership of the
+  // PrerenderContents object and is responsible for freeing it.
+  // Returns NULL if the specified URL has not been prerendered.
+  PrerenderContents* GetEntry(const GURL& url);
+
+  // Identical to GetEntry, with one exception:
+  // The TabContents specified indicates the TC in which to swap the
+  // prerendering into.  If the TabContents specified is the one
+  // to doing the prerendered itself, will return NULL.
+  PrerenderContents* GetEntryButNotSpecifiedTC(const GURL& url,
+                                               TabContents* tc);
 
   // Starts scheduling periodic cleanups.
   void StartSchedulingPeriodicCleanups();
@@ -296,10 +321,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // observed.
   bool WithinWindow() const;
 
-  // Called when removing a preload to ensure we clean up any pending preloads
-  // that might remain in the map.
-  void RemovePendingPrerender(PrerenderContents* entry);
-
   bool DoesRateLimitAllowPrerender() const;
 
   // Deletes old TabContents that have been replaced by prerendered ones.  This
@@ -328,7 +349,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   // Destroys all pending prerenders using FinalStatus.  Also deletes them as
   // well as any swapped out TabContents queued for destruction.
-  // Used both on destruction, and when clearing the browing history.
+  // Used both on destruction, and when clearing the browsing history.
   void DestroyAllContents(FinalStatus final_status);
 
   // The configuration.
@@ -361,11 +382,6 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // (for the control group).
   base::hash_set<TabContents*> would_be_prerendered_tab_contents_set_;
 
-  // Map of child/route id pairs to pending prerender data.
-  typedef std::map<std::pair<int, int>, std::vector<PendingContentsData> >
-      PendingPrerenderList;
-  PendingPrerenderList pending_prerender_list_;
-
   scoped_ptr<PrerenderContents::Factory> prerender_contents_factory_;
 
   static PrerenderManagerMode mode_;
@@ -384,7 +400,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   std::list<TabContentsWrapper*> old_tab_contents_list_;
 
   // Cancels pending tasks on deletion.
-  ScopedRunnableMethodFactory<PrerenderManager> runnable_method_factory_;
+  base::WeakPtrFactory<PrerenderManager> weak_factory_;
 
   ScopedVector<OnCloseTabContentsDeleter> on_close_tab_contents_deleters_;
 
@@ -398,6 +414,9 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
 
   DISALLOW_COPY_AND_ASSIGN(PrerenderManager);
 };
+
+PrerenderManager* FindPrerenderManagerUsingRenderProcessId(
+    int render_process_id);
 
 }  // namespace prerender
 

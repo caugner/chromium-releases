@@ -4,6 +4,7 @@
 
 #include "chrome/browser/printing/print_view_manager.h"
 
+#include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
@@ -17,7 +18,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/print_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_service.h"
@@ -52,8 +52,7 @@ void ReleasePrinterQuery(int cookie) {
   if (printer_query.get()) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(printer_query.get(),
-                          &printing::PrinterQuery::StopWorker));
+        base::Bind(&printing::PrinterQuery::StopWorker, printer_query.get()));
   }
 }
 
@@ -159,13 +158,6 @@ string16 PrintViewManager::RenderSourceName() {
   return GenerateRenderSourceName(tab_contents());
 }
 
-GURL PrintViewManager::RenderSourceUrl() {
-  NavigationEntry* entry = tab_contents()->controller().GetActiveEntry();
-  if (entry)
-    return entry->virtual_url();
-  return GURL();
-}
-
 void PrintViewManager::OnDidGetPrintedPagesCount(int cookie, int number_pages) {
   DCHECK_GT(cookie, 0);
   DCHECK_GT(number_pages, 0);
@@ -236,8 +228,7 @@ void PrintViewManager::OnDidPrintPage(
                     metafile.release(),
                     params.actual_shrink,
                     params.page_size,
-                    params.content_area,
-                    params.has_visible_overlays);
+                    params.content_area);
 
   ShouldQuitFromInnerMessageLoop();
 }

@@ -11,13 +11,16 @@
 #include "base/basictypes.h"
 #include "content/browser/debugger/devtools_agent_host.h"
 #include "content/browser/renderer_host/render_view_host_observer.h"
+#include "content/common/content_export.h"
 
 class RenderViewHost;
+class TabContents;
 
-class RenderViewDevToolsAgentHost : public DevToolsAgentHost,
-                                    private RenderViewHostObserver {
+class CONTENT_EXPORT RenderViewDevToolsAgentHost
+    : public DevToolsAgentHost, private RenderViewHostObserver {
  public:
   static DevToolsAgentHost* FindFor(RenderViewHost*);
+  static bool IsDebuggerAttached(TabContents*);
 
  private:
   RenderViewDevToolsAgentHost(RenderViewHost*);
@@ -33,8 +36,7 @@ class RenderViewDevToolsAgentHost : public DevToolsAgentHost,
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void OnForwardToClient(const IPC::Message& message);
-  void OnRuntimePropertyChanged(const std::string& name,
-                                const std::string& value);
+  void OnSaveAgentRuntimeState(const std::string& state);
   void OnClearBrowserCache();
   void OnClearBrowserCookies();
 

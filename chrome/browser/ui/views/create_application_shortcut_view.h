@@ -8,23 +8,22 @@
 
 #include <string>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/web_applications/web_app.h"
-#include "views/controls/label.h"
-#include "views/view.h"
+#include "views/controls/button/button.h"
 #include "views/window/dialog_delegate.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+
+class Extension;
+class Profile;
+class TabContentsWrapper;
+class SkBitmap;
 
 namespace views {
 class Checkbox;
 class Label;
-};  // namespace views
-
-class Extension;
-class MessageLoop;
-class Profile;
-class TabContents;
-class TabContentsWrapper;
+}
 
 // CreateShortcutViewCommon implements a dialog that asks user where to create
 // the shortcut for given web app.  There are two variants of this dialog:
@@ -41,28 +40,27 @@ class CreateApplicationShortcutView : public views::DialogDelegateView,
   void InitControls();
 
   // Overridden from views::View:
-  virtual gfx::Size GetPreferredSize();
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
 
   // Overridden from views::DialogDelegate:
-  virtual std::wstring GetDialogButtonLabel(
-      MessageBoxFlags::DialogButton button) const;
+  virtual string16 GetDialogButtonLabel(
+      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(
-      MessageBoxFlags::DialogButton button) const;
-  virtual bool CanResize() const;
-  virtual bool CanMaximize() const;
-  virtual bool IsAlwaysOnTop() const;
-  virtual bool HasAlwaysOnTopMenu() const;
-  virtual bool IsModal() const;
-  virtual std::wstring GetWindowTitle() const;
-  virtual bool Accept();
-  virtual views::View* GetContentsView();
+      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual bool CanResize() const OVERRIDE;
+  virtual bool CanMaximize() const OVERRIDE;
+  virtual bool IsModal() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual bool Accept() OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE;
 
   // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
  protected:
   // Adds a new check-box as a child to the view.
-  views::Checkbox* AddCheckbox(const std::wstring& text, bool checked);
+  views::Checkbox* AddCheckbox(const string16& text, bool checked);
 
   // Profile in which the shortcuts will be created.
   Profile* profile_;
@@ -111,7 +109,7 @@ class CreateUrlApplicationShortcutView : public CreateApplicationShortcutView {
 
 // Create an application shortcut pointing to a chrome application.
 class CreateChromeApplicationShortcutView
-   : public CreateApplicationShortcutView,
+    : public CreateApplicationShortcutView,
      public ImageLoadingTracker::Observer {
  public:
   CreateChromeApplicationShortcutView(Profile* profile, const Extension* app);
@@ -130,6 +128,5 @@ class CreateChromeApplicationShortcutView
 
   DISALLOW_COPY_AND_ASSIGN(CreateChromeApplicationShortcutView);
 };
-
 
 #endif  // CHROME_BROWSER_UI_VIEWS_CREATE_APPLICATION_SHORTCUT_VIEW_H_

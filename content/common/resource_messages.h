@@ -6,12 +6,14 @@
 
 // Multiply-included message file, hence no include guard.
 #include "base/shared_memory.h"
-#include "content/common/page_transition_types.h"
+#include "content/common/common_param_traits.h"
 #include "content/common/resource_response.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/upload_data.h"
 
 #define IPC_MESSAGE_START ResourceMsgStart
+#undef IPC_MESSAGE_EXPORT
+#define IPC_MESSAGE_EXPORT CONTENT_EXPORT
 
 IPC_STRUCT_TRAITS_BEGIN(webkit_glue::ResourceResponseInfo)
   IPC_STRUCT_TRAITS_MEMBER(request_time)
@@ -101,7 +103,7 @@ IPC_STRUCT_BEGIN(ResourceHostMsg_Request)
   // -1 if unknown / invalid.
   IPC_STRUCT_MEMBER(int64, frame_id)
 
-  IPC_STRUCT_MEMBER(PageTransition::Type, transition_type)
+  IPC_STRUCT_MEMBER(content::PageTransition, transition_type)
 IPC_STRUCT_END()
 
 // Resource messages sent from the browser to the renderer.

@@ -42,6 +42,7 @@
 #include "net/http/http_response_body_drainer.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/http/http_server_properties.h"
 #include "net/http/http_stream_factory.h"
 #include "net/http/http_util.h"
 #include "net/http/url_security_manager.h"
@@ -61,18 +62,18 @@ namespace net {
 namespace {
 
 void ProcessAlternateProtocol(HttpStreamFactory* factory,
-                              HttpAlternateProtocols* alternate_protocols,
+                              HttpServerProperties* http_server_properties,
                               const HttpResponseHeaders& headers,
                               const HostPortPair& http_host_port_pair) {
   std::string alternate_protocol_str;
 
-  if (!headers.EnumerateHeader(NULL, HttpAlternateProtocols::kHeader,
+  if (!headers.EnumerateHeader(NULL, kAlternateProtocolHeader,
                                &alternate_protocol_str)) {
     // Header is not present.
     return;
   }
 
-  factory->ProcessAlternateProtocol(alternate_protocols,
+  factory->ProcessAlternateProtocol(http_server_properties,
                                     alternate_protocol_str,
                                     http_host_port_pair);
 }
@@ -151,7 +152,7 @@ HttpNetworkTransaction::~HttpNetworkTransaction() {
 }
 
 int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
-                                  CompletionCallback* callback,
+                                  OldCompletionCallback* callback,
                                   const BoundNetLog& net_log) {
   SIMPLE_STATS_COUNTER("HttpNetworkTransaction.Count");
 
@@ -172,7 +173,7 @@ int HttpNetworkTransaction::Start(const HttpRequestInfo* request_info,
 }
 
 int HttpNetworkTransaction::RestartIgnoringLastError(
-    CompletionCallback* callback) {
+    OldCompletionCallback* callback) {
   DCHECK(!stream_.get());
   DCHECK(!stream_request_.get());
   DCHECK_EQ(STATE_NONE, next_state_);
@@ -187,7 +188,7 @@ int HttpNetworkTransaction::RestartIgnoringLastError(
 
 int HttpNetworkTransaction::RestartWithCertificate(
     X509Certificate* client_cert,
-    CompletionCallback* callback) {
+    OldCompletionCallback* callback) {
   // In HandleCertificateRequest(), we always tear down existing stream
   // requests to force a new connection.  So we shouldn't have one here.
   DCHECK(!stream_request_.get());
@@ -213,7 +214,7 @@ int HttpNetworkTransaction::RestartWithCertificate(
 int HttpNetworkTransaction::RestartWithAuth(
     const string16& username,
     const string16& password,
-    CompletionCallback* callback) {
+    OldCompletionCallback* callback) {
   HttpAuth::Target target = pending_auth_target_;
   if (target == HttpAuth::AUTH_NONE) {
     NOTREACHED();
@@ -306,7 +307,7 @@ bool HttpNetworkTransaction::IsReadyToRestartForAuth() {
 }
 
 int HttpNetworkTransaction::Read(IOBuffer* buf, int buf_len,
-                                 CompletionCallback* callback) {
+                                 OldCompletionCallback* callback) {
   DCHECK(buf);
   DCHECK_LT(0, buf_len);
 
@@ -479,7 +480,7 @@ void HttpNetworkTransaction::DoCallback(int rv) {
   DCHECK(user_callback_);
 
   // Since Run may result in Read being called, clear user_callback_ up front.
-  CompletionCallback* c = user_callback_;
+  OldCompletionCallback* c = user_callback_;
   user_callback_ = NULL;
   c->Run(rv);
 }
@@ -864,7 +865,7 @@ int HttpNetworkTransaction::DoReadHeadersComplete(int result) {
   HostPortPair endpoint = HostPortPair(request_->url.HostNoBrackets(),
                                        request_->url.EffectiveIntPort());
   ProcessAlternateProtocol(session_->http_stream_factory(),
-                           session_->mutable_alternate_protocols(),
+                           session_->http_server_properties(),
                            *response_.headers,
                            endpoint);
 
@@ -1200,6 +1201,11 @@ int HttpNetworkTransaction::HandleIOError(int error) {
         ResetConnectionAndRequestForResend();
         error = OK;
       }
+      break;
+    case ERR_SPDY_PING_FAILED:
+    case ERR_SPDY_SERVER_REFUSED_STREAM:
+      ResetConnectionAndRequestForResend();
+      error = OK;
       break;
   }
   return error;

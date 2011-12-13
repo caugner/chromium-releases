@@ -1,6 +1,75 @@
 [
   {
     "namespace": "experimental.devtools.inspectedWindow",
+    "types": [
+      {
+        "id": "Resource",
+        "type": "object",
+        "description": "A resource within the inspected page, such as a document, a script or an image.",
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL of the resource."
+          }
+        },
+        "functions": [
+          {
+            "name": "getContent",
+            "type": "function",
+            "description": "Gets the content of the resource.",
+            "parameters": [
+              {
+                "name": "callback",
+                "type": "function",
+                "description": "A function that is called upon request completion.",
+                "parameters": [
+                  {
+                    "name": "content",
+                    "type": "string",
+                    "description": "Content of the resource (potentially encoded)."
+                  },
+                  {
+                    "name": "encoding",
+                    "type": "string",
+                    "description": "Empty if content is not encoded, encoding name otherwise. Currently, only base64 is supported."
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "setContent",
+            "type": "function",
+            "description": "Sets the content of the resource.",
+            "parameters": [
+              {
+                "name": "content",
+                "type": "string",
+                "description": "New content of the resource. Only resources with the text type are currently supported."
+              },
+              {
+                "name": "commit",
+                "type": "boolean",
+                "description": "True if the user has finished editing the resource and the new content of the resource should be persisted, false if this is a minor change sent in progress of the user editing the resource."
+              },
+              {
+                "name": "callback",
+                "type": "function",
+                "description": "A function called upon request completion.",
+                "parameters": [
+                  {
+                    "name": "error",
+                    "type": "object",
+                    "optional": true,
+                    "description": "Set to undefined if the operation completed successfully, describes error otherwise."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ],
     "properties": {
       "tabId": {
         "description": "The ID of the tab being inspected. This ID may be used with chrome.tabs.* API.",
@@ -47,6 +116,48 @@
             "type": "string",
             "optional": true,
             "description": "A user agent override string."
+          }
+        ]
+      },
+      {
+        "name": "getResources",
+        "type": "function",
+        "description": "Retrieves the list of resources from the inspected page.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "description": "A function that is called upon request completion.",
+            "parameters": [
+              {
+                "name": "resources",
+                "type": "array",
+                "items": { "$ref": "Resource" },
+                "description": "The resources within the page."
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "events": [
+      {
+        "name": "onResourceAdded",
+        "description": "Fired when a new resource is added to the inspected page.",
+        "parameters": [
+          {
+            "name": "resource",
+            "$ref": "Resource"
+          }
+        ]
+      },
+      {
+        "name": "onResourceContentCommitted",
+        "description": "Fired when a new revision of the resource is committed (e.g. user saves an edited version of the resource in the Developer Tools).",
+        "parameters": [
+          {
+            "name": "resource",
+            "$ref": "Resource"
           }
         ]
       }
@@ -232,21 +343,41 @@
             ]
           }
         ]
+      },
+      {
+        "name": "setOpenResourceHandler",
+        "type": "function",
+        "description": "Specifies the function to be called when the user clicks a resource link in the Developer Tools window. To unset the handler, either call the method with no parameters or pass null as the parameter.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "optional": true,
+            "description": "A function that is called when the user clicks on a valid resource link in Developer Tools window. Note that if the user clicks an invalid URL or an XHR, this function is not called.",
+            "parameters": [
+              {
+                "name": "Resource",
+                "type": "object",
+                "description": "A <a href=\"experimental.devtools.inspectedWindow.html#type-Resource\">Resource</a> object for the resource that was clicked."
+              }
+            ]
+          }
+        ]
       }
     ]
   },
   {
-    "namespace": "experimental.devtools.resources",
+    "namespace": "experimental.devtools.network",
     "types": [
       {
-        "id": "Resource",
+        "id": "Request",
         "type": "object",
-        "description": "Represents a resource (document, script, image etc). See HAR Specification for reference.",
+        "description": "Represents a network request for a document resource (script, image etc). See HAR Specification for reference.",
         "functions": [
           {
             "name": "getContent",
             "type": "function",
-            "description": "Returns resource content.",
+            "description": "Returns content of the response body.",
             "parameters": [
               {
                 "name": "callback",
@@ -256,12 +387,12 @@
                   {
                     "name": "content",
                     "type": "string",
-                    "description": "Resource content (potentially encoded)."
+                    "description": "Content of the response body (potentially encoded)."
                   },
                   {
                     "name": "encoding",
                     "type": "string",
-                    "description": "Empty if content is not encoded, encoding name otherwise. Currently, only base64 supported."
+                    "description": "Empty if content is not encoded, encoding name otherwise. Currently, only base64 is supported."
                   }
                 ]
               }
@@ -274,7 +405,7 @@
       {
         "name": "getHAR",
         "type": "function",
-        "description": "Returns HAR archive that contains all known resource objects.",
+        "description": "Returns HAR archive that contains all known network requests.",
         "parameters": [
           {
             "name": "callback",
@@ -284,7 +415,7 @@
               {
                 "name": "har",
                 "type": "object",
-                "description": "A HAR archieve. See HAR specification for details."
+                "description": "A HAR archive. See HAR specification for details."
               }
             ]
           }
@@ -293,11 +424,11 @@
     ],
     "events": [
       {
-        "name": "onFinished",
+        "name": "onRequestFinished",
         "type": "function",
-        "description": "Fired when a resource request is finished and all resource data are available.",
+        "description": "Fired when a network request is finished and all request data are available.",
         "parameters": [
-          { "name": "resource", "$ref": "Resource", "description": "Description of a newly finished resource in the form of a HAR entry. See HAR specification for details." }
+          { "name": "request", "$ref": "Request", "description": "Description of a network request in the form of a HAR entry. See HAR specification for details." }
         ]
       },
       {
@@ -310,6 +441,98 @@
             "type": "string",
             "description": "URL of the new page."
           }
+        ]
+      }
+    ]
+  },
+  {
+    "namespace": "experimental.devtools.console",
+    "functions": [
+      {
+        "name": "addMessage",
+        "type": "function",
+        "description": "Adds a message to the console.",
+        "parameters": [
+          { "name": "severity", "$ref": "Severity", "description": "The severity of the message." },
+          { "name": "text", "type": "string", "description": "The text of the message." }
+        ]
+      },
+      {
+        "name": "getMessages",
+        "type": "function",
+        "description": "Retrieves console messages.",
+        "parameters": [
+          {
+            "name": "callback",
+            "type": "function",
+            "description": "A function that is called upon request completion.",
+            "parameters": [
+              {
+                "name": "messages",
+                "type": "array",
+                "items": { "$ref": "ConsoleMessage" },
+                "description": "Console messages."
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "types": [
+      {
+        "id": "ConsoleMessage",
+        "type": "object",
+        "description": "A console message.",
+        "properties": {
+          "severity": {
+            "$ref": "Severity",
+            "description": "Message severity."
+          },
+          "text": {
+            "type": "string",
+            "description": "The text of the console message, as represented by the first argument to the console.log() or a similar method (no parameter substitution  performed)."
+          },
+          "url": {
+            "type": "string",
+            "optional": true,
+            "description": "The URL of the script that originated the message, if available."
+          },
+          "line": {
+            "type": "number",
+            "optional": true,
+            "description": "The number of the line where the message originated, if available."
+          }
+        }
+      },
+      {
+        "id": "Severity",
+        "type": "object",
+        "properties": {
+          "Tip": {
+            "type": "string"
+          },
+          "Debug": {
+            "type": "string"
+          },
+          "Log": {
+            "type": "string"
+          },
+          "Warning": {
+            "type": "string"
+          },
+          "Error": {
+            "type": "string"
+          }
+        }
+      }
+    ],
+    "events": [
+      {
+        "name": "onMessageAdded",
+        "type": "function",
+        "description": "Fired when a new message is added to the console.",
+        "parameters": [
+          { "name": "message", "$ref": "ConsoleMessage" }
         ]
       }
     ]

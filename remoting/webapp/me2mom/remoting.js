@@ -20,6 +20,7 @@ function pluginLostFocus_() {
 
 /** @enum {string} */
 remoting.AppMode = {
+  HOME: 'home',
   UNAUTHENTICATED: 'auth',
   CLIENT: 'client',
     CLIENT_UNCONNECTED: 'client.unconnected',
@@ -27,7 +28,6 @@ remoting.AppMode = {
     CLIENT_CONNECT_FAILED: 'client.connect-failed',
     CLIENT_SESSION_FINISHED: 'client.session-finished',
   HOST: 'host',
-    HOST_UNSHARED: 'host.unshared',
     HOST_WAITING_FOR_CODE: 'host.waiting-for-code',
     HOST_WAITING_FOR_CONNECTION: 'host.waiting-for-connection',
     HOST_SHARED: 'host.shared',
@@ -45,6 +45,9 @@ remoting.ClientError = {
   INVALID_ACCESS_CODE: /*i18n-content*/'ERROR_INVALID_ACCESS_CODE',
   MISSING_PLUGIN: /*i18n-content*/'ERROR_MISSING_PLUGIN',
   OAUTH_FETCH_FAILED: /*i18n-content*/'ERROR_AUTHENTICATION_FAILED',
+  HOST_IS_OFFLINE: /*i18n-content*/'ERROR_HOST_IS_OFFLINE',
+  INCOMPATIBLE_PROTOCOL: /*i18n-content*/'ERROR_INCOMPATIBLE_PROTOCOL',
+  BAD_PLUGIN_VERSION: /*i18n-content*/'ERROR_BAD_PLUGIN_VERSION',
   OTHER_ERROR: /*i18n-content*/'ERROR_GENERIC'
 };
 
@@ -57,6 +60,7 @@ remoting.scaleToFit = false;
 // Constants representing keys used for storing persistent application state.
 var KEY_APP_MODE_ = 'remoting-app-mode';
 var KEY_EMAIL_ = 'remoting-email';
+var KEY_USE_P2P_API_ = 'remoting-use-p2p-api';
 
 // Some constants for pretty-printing the access code.
 var kSupportIdLen = 7;
@@ -154,6 +158,8 @@ remoting.init = function() {
   remoting.oauth2 = new remoting.OAuth2();
   remoting.debug =
       new remoting.DebugLog(document.getElementById('debug-messages'));
+  /** @type {XMLHttpRequest} */
+  remoting.supportHostsXhr = null;
 
   refreshEmail_();
   var email = getEmail();
@@ -217,6 +223,7 @@ remoting.getMajorMode = function() {
 
 remoting.tryShare = function() {
   remoting.debug.log('Attempting to share...');
+  remoting.lastShareWasCancelled = false;
   if (remoting.oauth2.needsNewAccessToken()) {
     remoting.debug.log('Refreshing token...');
     remoting.oauth2.refreshAccessToken(function() {
@@ -243,6 +250,8 @@ remoting.tryShare = function() {
   plugin.width = 0;
   plugin.height = 0;
   div.appendChild(plugin);
+  onNatTraversalPolicyChanged_(true);  // Hide warning by default.
+  plugin.onNatTraversalPolicyChanged = onNatTraversalPolicyChanged_;
   plugin.onStateChanged = onStateChanged_;
   plugin.logDebugInfo = debugInfoCallback_;
   plugin.localize(chrome.i18n.getMessage);
@@ -300,6 +309,11 @@ remoting.updateAccessCodeTimeoutElement_ = function() {
   }
 }
 
+function onNatTraversalPolicyChanged_(enabled) {
+  var container = document.getElementById('nat-box-container');
+  container.hidden = enabled;
+}
+
 function onStateChanged_() {
   var plugin = /** @type {remoting.HostPlugin} */
       document.getElementById(remoting.HOST_PLUGIN_ID);
@@ -350,8 +364,12 @@ function onStateChanged_() {
     if (remoting.currentMode != remoting.AppMode.HOST_SHARE_FAILED) {
       // If an error is being displayed, then the plugin should not be able to
       // hide it by setting the state. Errors must be dismissed by the user
-      // clicking OK, which puts the app into mode HOST_UNSHARED.
-      remoting.setMode(remoting.AppMode.HOST_SHARE_FINISHED);
+      // clicking OK, which puts the app into mode HOME.
+      if (remoting.lastShareWasCancelled) {
+        remoting.setMode(remoting.AppMode.HOME);
+      } else {
+        remoting.setMode(remoting.AppMode.HOST_SHARE_FINISHED);
+      }
     }
     plugin.parentNode.removeChild(plugin);
   } else if (state == plugin.ERROR) {
@@ -363,20 +381,20 @@ function onStateChanged_() {
 }
 
 /**
-* This is the callback that the host plugin invokes to indicate that there
-* is additional debug log info to display.
-* @param {string} msg The message (which will not be localized) to be logged.
-*/
+ * This is the callback that the host plugin invokes to indicate that there
+ * is additional debug log info to display.
+ * @param {string} msg The message (which will not be localized) to be logged.
+ */
 function debugInfoCallback_(msg) {
   remoting.debug.log('plugin: ' + msg);
 }
 
 /**
-* Show a host-side error message.
-*
-* @param {string} errorTag The error message to be localized and displayed.
-* @return {void} Nothing.
-*/
+ * Show a host-side error message.
+ *
+ * @param {string} errorTag The error message to be localized and displayed.
+ * @return {void} Nothing.
+ */
 function showShareError_(errorTag) {
   var errorDiv = document.getElementById('host-plugin-error');
   l10n.localizeElementFromTag(errorDiv, errorTag);
@@ -384,8 +402,14 @@ function showShareError_(errorTag) {
   remoting.setMode(remoting.AppMode.HOST_SHARE_FAILED);
 }
 
+/**
+ * Cancel an active or pending share operation.
+ *
+ * @return {void} Nothing.
+ */
 remoting.cancelShare = function() {
   remoting.debug.log('Canceling share...');
+  remoting.lastShareWasCancelled = true;
   var plugin = /** @type {remoting.HostPlugin} */
       document.getElementById(remoting.HOST_PLUGIN_ID);
   try {
@@ -400,6 +424,23 @@ remoting.cancelShare = function() {
     showShareError_(/*i18n-content*/'ERROR_GENERIC');
   }
   disableTimeoutCountdown_();
+}
+
+/**
+ * Cancel an incomplete connect operation.
+ *
+ * @return {void} Nothing.
+ */
+remoting.cancelConnect = function() {
+  if (remoting.supportHostsXhr) {
+    remoting.supportHostsXhr.abort();
+    remoting.supportHostsXhr = null;
+  }
+  if (remoting.session) {
+    remoting.session.removePlugin();
+    remoting.session = null;
+  }
+  remoting.setMode(remoting.AppMode.HOME);
 }
 
 function updateStatistics() {
@@ -444,22 +485,27 @@ function showToolbarPreview_() {
 }
 
 function onClientStateChange_(oldState) {
+  if (!remoting.session) {
+    // If the connection has been cancelled, then we no longer have a reference
+    // to the session object and should ignore any state changes.
+    return;
+  }
   var state = remoting.session.state;
   if (state == remoting.ClientSession.State.CREATED) {
     remoting.debug.log('Created plugin');
   } else if (state == remoting.ClientSession.State.BAD_PLUGIN_VERSION) {
-    showConnectError_(remoting.ClientError.MISSING_PLUGIN);
+    showConnectError_(remoting.ClientError.BAD_PLUGIN_VERSION);
   } else if (state == remoting.ClientSession.State.CONNECTING) {
     remoting.debug.log('Connecting as ' + remoting.username);
   } else if (state == remoting.ClientSession.State.INITIALIZING) {
     remoting.debug.log('Initializing connection');
   } else if (state == remoting.ClientSession.State.CONNECTED) {
-    remoting.setMode(remoting.AppMode.IN_SESSION);
-    recenterToolbar_();
-    showToolbarPreview_();
-    updateStatistics();
-    var accessCode = document.getElementById('access-code-entry');
-    accessCode.value = '';
+    if (remoting.session) {
+      remoting.setMode(remoting.AppMode.IN_SESSION);
+      recenterToolbar_();
+      showToolbarPreview_();
+      updateStatistics();
+    }
   } else if (state == remoting.ClientSession.State.CLOSED) {
     if (oldState == remoting.ClientSession.State.CONNECTED) {
       remoting.session.removePlugin();
@@ -467,14 +513,28 @@ function onClientStateChange_(oldState) {
       remoting.debug.log('Connection closed by host');
       remoting.setMode(remoting.AppMode.CLIENT_SESSION_FINISHED);
     } else {
-      // TODO(jamiewalch): This is not quite correct, as it will report
-      // "Invalid access code", regardless of what actually went wrong.
-      // Fix this up by having the host send a suitable error code.
+      // The transition from CONNECTING to CLOSED state may happen
+      // only with older client plugins. Current version should go the
+      // FAILED state when connection fails.
       showConnectError_(remoting.ClientError.INVALID_ACCESS_CODE);
     }
   } else if (state == remoting.ClientSession.State.CONNECTION_FAILED) {
     remoting.debug.log('Client plugin reported connection failed');
-    showConnectError_(remoting.ClientError.OTHER_ERROR);
+    if (remoting.session.error ==
+        remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE) {
+      showConnectError_(remoting.ClientError.HOST_IS_OFFLINE);
+    } else if (remoting.session.error ==
+               remoting.ClientSession.ConnectionError.SESSION_REJECTED) {
+      showConnectError_(remoting.ClientError.INVALID_ACCESS_CODE);
+    } else if (remoting.session.error ==
+               remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL) {
+      showConnectError_(remoting.ClientError.INCOMPATIBLE_PROTOCOL);
+    } else if (remoting.session.error ==
+               remoting.ClientSession.ConnectionError.NETWORK_FAILURE) {
+      showConnectError_(remoting.ClientError.OTHER_ERROR);
+    } else {
+      showConnectError_(remoting.ClientError.OTHER_ERROR);
+    }
   } else {
     remoting.debug.log('Unexpected client plugin state: ' + state);
     // This should only happen if the web-app and client plugin get out of
@@ -485,6 +545,8 @@ function onClientStateChange_(oldState) {
 
 function startSession_() {
   remoting.debug.log('Starting session...');
+  var accessCode = document.getElementById('access-code-entry');
+  accessCode.value = '';  // The code has been validated and won't work again.
   remoting.username =
       /** @type {string} email must be non-NULL to get here */ getEmail();
   remoting.session =
@@ -517,7 +579,12 @@ function showConnectError_(errorTag) {
   remoting.setMode(remoting.AppMode.CLIENT_CONNECT_FAILED);
 }
 
+/**
+ * @param {XMLHttpRequest} xhr The XMLHttpRequest object.
+ * @return {void} Nothing.
+ */
 function parseServerResponse_(xhr) {
+  remoting.supportHostsXhr = null;
   remoting.debug.log('parseServerResponse: status = ' + xhr.status);
   if (xhr.status == 200) {
     var host = JSON.parse(xhr.responseText);
@@ -552,7 +619,7 @@ function resolveSupportId(supportId) {
     'Authorization': 'OAuth ' + remoting.oauth2.getAccessToken()
   };
 
-  remoting.xhr.get(
+  remoting.supportHostsXhr = remoting.xhr.get(
       'https://www.googleapis.com/chromoting/v1/support-hosts/' +
           encodeURIComponent(supportId),
       parseServerResponse_,
@@ -561,6 +628,7 @@ function resolveSupportId(supportId) {
 }
 
 remoting.tryConnect = function() {
+  document.getElementById('cancel-button').disabled = false;
   if (remoting.oauth2.needsNewAccessToken()) {
     remoting.oauth2.refreshAccessToken(function(xhr) {
       if (remoting.oauth2.needsNewAccessToken()) {
@@ -605,37 +673,27 @@ remoting.tryConnectWithWcs = function() {
 
 remoting.cancelPendingOperation = function() {
   document.getElementById('cancel-button').disabled = true;
-  if (remoting.getMajorMode() == remoting.AppMode.HOST) {
-    remoting.cancelShare();
+  switch (remoting.getMajorMode()) {
+    case remoting.AppMode.HOST:
+      remoting.cancelShare();
+      break;
+    case remoting.AppMode.CLIENT:
+      remoting.cancelConnect();
+      break;
   }
-}
-
-/**
- * Changes the major-mode of the application (Eg., client or host).
- *
- * @param {remoting.AppMode} mode The mode to shift the application into.
- * @return {void} Nothing.
- */
-remoting.setAppMode = function(mode) {
-  window.localStorage.setItem(KEY_APP_MODE_, mode);
-  remoting.setMode(getAppStartupMode());
 }
 
 /**
  * Gets the major-mode that this application should start up in.
  *
- * @return {remoting.AppMode} The mode (client or host) to start in.
+ * @return {remoting.AppMode} The mode to start in.
  */
 function getAppStartupMode() {
   if (!remoting.oauth2.isAuthenticated()) {
     return remoting.AppMode.UNAUTHENTICATED;
   }
   if (isHostModeSupported()) {
-    var mode = window.localStorage.getItem(KEY_APP_MODE_);
-    if (mode == remoting.AppMode.CLIENT) {
-      return remoting.AppMode.CLIENT_UNCONNECTED;
-    }
-    return remoting.AppMode.HOST_UNSHARED;
+    return remoting.AppMode.HOME;
   } else {
     return remoting.AppMode.CLIENT_UNCONNECTED;
   }
@@ -647,7 +705,7 @@ function getAppStartupMode() {
  * @return {boolean} True if Host mode is supported.
  */
 function isHostModeSupported() {
-  // Currently, ChromeOS is not supported.
+  // Currently, sharing on Chromebooks is not supported.
   return !navigator.userAgent.match(/\bCrOS\b/);
 }
 
@@ -722,7 +780,6 @@ function recenterToolbar_() {
   var toolbar = document.getElementById('session-toolbar');
   var toolbarX = (window.innerWidth - toolbar.clientWidth) / 2;
   toolbar.style['left'] = toolbarX + 'px';
-  remoting.debug.log('toolbar moved to ' + toolbarX);
 }
 
 }());

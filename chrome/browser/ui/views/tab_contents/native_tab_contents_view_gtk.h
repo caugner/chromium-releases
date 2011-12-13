@@ -12,7 +12,11 @@
 class ConstrainedWindowGtk;
 class TabContents;
 class TabContentsDragSource;
+class WebDragBookmarkHandlerGtk;
+
+namespace content {
 class WebDragDestGtk;
+}
 
 class NativeTabContentsViewGtk : public views::NativeWidgetGtk,
                                  public NativeTabContentsView {
@@ -34,7 +38,7 @@ class NativeTabContentsViewGtk : public views::NativeWidgetGtk,
   virtual RenderWidgetHostView* CreateRenderWidgetHostView(
       RenderWidgetHost* render_widget_host) OVERRIDE;
   virtual gfx::NativeWindow GetTopLevelNativeWindow() const OVERRIDE;
-  virtual void SetPageTitle(const std::wstring& title) OVERRIDE;
+  virtual void SetPageTitle(const string16& title) OVERRIDE;
   virtual void StartDragging(const WebDropData& drop_data,
                              WebKit::WebDragOperationsMask ops,
                              const SkBitmap& image,
@@ -71,7 +75,10 @@ class NativeTabContentsViewGtk : public views::NativeWidgetGtk,
 
   // The helper object that handles drag destination related interactions with
   // GTK.
-  scoped_ptr<WebDragDestGtk> drag_dest_;
+  scoped_ptr<content::WebDragDestGtk> drag_dest_;
+
+  // The chrome specific delegate that receives events from WebDragDestGtk.
+  scoped_ptr<WebDragBookmarkHandlerGtk> bookmark_handler_gtk_;
 
   // Current size. See comment in NativeWidgetGtk as to why this is cached.
   gfx::Size size_;

@@ -70,7 +70,8 @@ class MockHostStub : public HostStub {
   ~MockHostStub();
 
   MOCK_METHOD2(BeginSessionRequest,
-               void(const LocalLoginCredentials* credentials, Task* done));
+               void(const LocalLoginCredentials* credentials,
+                    const base::Closure&  done));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockHostStub);
@@ -82,9 +83,9 @@ class MockClientStub : public ClientStub {
   virtual ~MockClientStub();
 
   MOCK_METHOD2(NotifyResolution, void(const NotifyResolutionRequest* msg,
-                                      Task* done));
+                                      const base::Closure& done));
   MOCK_METHOD2(BeginSessionResponse, void(const LocalLoginStatus* msg,
-                                          Task* done));
+                                          const base::Closure& done));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockClientStub);
@@ -96,7 +97,7 @@ class MockVideoStub : public VideoStub {
   virtual ~MockVideoStub();
 
   MOCK_METHOD2(ProcessVideoPacket, void(const VideoPacket* video_packet,
-                                        Task* done));
+                                        const base::Closure& done));
   MOCK_METHOD0(GetPendingPackets, int());
 
  private:
@@ -108,7 +109,9 @@ class MockSession : public Session {
   MockSession();
   virtual ~MockSession();
 
-  MOCK_METHOD1(SetStateChangeCallback, void(StateChangeCallback* callback));
+  MOCK_METHOD1(SetStateChangeCallback,
+               void(const StateChangeCallback& callback));
+  MOCK_METHOD0(error, Session::Error());
   MOCK_METHOD2(CreateStreamChannel, void(
       const std::string& name, const StreamChannelCallback& callback));
   MOCK_METHOD2(CreateDatagramChannel, void(
@@ -120,8 +123,8 @@ class MockSession : public Session {
   MOCK_METHOD0(video_rtcp_channel, net::Socket*());
   MOCK_METHOD0(jid, const std::string&());
   MOCK_METHOD0(candidate_config, const CandidateSessionConfig*());
-  MOCK_METHOD0(config, const SessionConfig*());
-  MOCK_METHOD1(set_config, void(const SessionConfig* config));
+  MOCK_METHOD0(config, const SessionConfig&());
+  MOCK_METHOD1(set_config, void(const SessionConfig& config));
   MOCK_METHOD0(initiator_token, const std::string&());
   MOCK_METHOD1(set_initiator_token, void(const std::string& initiator_token));
   MOCK_METHOD0(receiver_token, const std::string&());

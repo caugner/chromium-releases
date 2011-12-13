@@ -18,13 +18,13 @@
 #include "content/browser/download/save_package.h"
 #include "content/browser/javascript_dialogs.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
-#include "content/browser/tab_contents/constrained_window.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/browser/tab_contents/render_view_host_manager.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/browser/webui/web_ui.h"
+#include "content/common/content_export.h"
 #include "content/common/property_bag.h"
 #include "content/common/renderer_preferences.h"
 #include "net/base/load_states.h"
@@ -37,6 +37,9 @@
 
 namespace gfx {
 class Rect;
+}
+namespace webkit_glue {
+struct WebIntentData;
 }
 
 class DownloadItem;
@@ -51,17 +54,18 @@ class TabContentsObserver;
 class TabContentsView;
 struct ThumbnailScore;
 class URLPattern;
+struct ViewHostMsg_DidFailProvisionalLoadWithError_Params;
 struct ViewHostMsg_FrameNavigate_Params;
+struct ViewHostMsg_RunFileChooser_Params;
 struct WebPreferences;
 class WebUI;
-struct ViewHostMsg_RunFileChooser_Params;
 
 // Describes what goes in the main content area of a tab. TabContents is
 // the only type of TabContents, and these should be merged together.
-class TabContents : public PageNavigator,
-                    public RenderViewHostDelegate,
-                    public RenderViewHostManager::Delegate,
-                    public content::JavaScriptDialogDelegate {
+class CONTENT_EXPORT TabContents : public PageNavigator,
+                                   public RenderViewHostDelegate,
+                                   public RenderViewHostManager::Delegate,
+                                   public content::JavaScriptDialogDelegate {
  public:
   // Flags passed to the TabContentsDelegate.NavigationStateChanged to tell it
   // what has changed. Combine them to update more than one thing.
@@ -123,6 +127,9 @@ class TabContents : public PageNavigator,
     return render_manager_.web_ui();
   }
 
+  // Returns the committed WebUI if one exists, otherwise the pending one.
+  // Callers who want to use the pending WebUI for the pending navigation entry
+  // should use GetWebUIForCurrentState instead.
   WebUI* web_ui() const {
     return render_manager_.web_ui() ? render_manager_.web_ui()
         : render_manager_.pending_web_ui();
@@ -164,12 +171,6 @@ class TabContents : public PageNavigator,
   // Returns the SiteInstance for the pending navigation, if any.  Otherwise
   // returns the current SiteInstance.
   SiteInstance* GetPendingSiteInstance() const;
-
-  // Defines whether this tab's URL should be displayed in the browser's URL
-  // bar. Normally this is true so you can see the URL. This is set to false
-  // for the new tab page and related pages so that the URL bar is empty and
-  // the user is invited to type into it.
-  virtual bool ShouldDisplayURL();
 
   // Return whether this tab contents is loading a resource, or whether its
   // web_ui is.
@@ -243,15 +244,10 @@ class TabContents : public PageNavigator,
   // returns false.
   bool NeedToFireBeforeUnload();
 
-#ifdef UNIT_TEST
   // Expose the render manager for testing.
-  RenderViewHostManager* render_manager() { return &render_manager_; }
-#endif
-
-  // In the underlying RenderViewHostManager, swaps in the provided
-  // RenderViewHost to replace the current RenderViewHost.  The current RVH
-  // will be shutdown and ultimately deleted.
-  void SwapInRenderViewHost(RenderViewHost* rvh);
+  RenderViewHostManager* render_manager_for_testing() {
+    return &render_manager_;
+  }
 
   // Commands ------------------------------------------------------------------
 
@@ -262,7 +258,7 @@ class TabContents : public PageNavigator,
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
-                               PageTransition::Type transition) OVERRIDE;
+                               content::PageTransition transition) OVERRIDE;
 
   virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE;
 
@@ -293,28 +289,11 @@ class TabContents : public PageNavigator,
 
   // Window management ---------------------------------------------------------
 
-  // Adds the given window to the list of child windows. The window will notify
-  // via WillClose() when it is being destroyed.
-  void AddConstrainedDialog(ConstrainedWindow* window);
-
   // Adds a new tab or window with the given already-created contents.
   void AddNewContents(TabContents* new_contents,
                       WindowOpenDisposition disposition,
                       const gfx::Rect& initial_pos,
                       bool user_gesture);
-
-  // Returns the number of constrained windows in this tab.  Used by tests.
-  size_t constrained_window_count() { return child_windows_.size(); }
-
-  typedef std::deque<ConstrainedWindow*> ConstrainedWindowList;
-
-  // Return an iterator for the first constrained window in this tab contents.
-  ConstrainedWindowList::iterator constrained_window_begin()
-  { return child_windows_.begin(); }
-
-  // Return an iterator for the last constrained window in this tab contents.
-  ConstrainedWindowList::iterator constrained_window_end()
-  { return child_windows_.end(); }
 
   // Views and focus -----------------------------------------------------------
   // TODO(brettw): Most of these should be removed and the caller should call
@@ -360,9 +339,6 @@ class TabContents : public PageNavigator,
 
   // Notifies the delegate that a download started.
   void OnStartDownload(DownloadItem* download);
-
-  // Called when a ConstrainedWindow we own is about to be closed.
-  void WillClose(ConstrainedWindow* window);
 
   // Interstitials -------------------------------------------------------------
 
@@ -494,6 +470,11 @@ class TabContents : public PageNavigator,
   // the pending WebUI, the committed WebUI, or NULL.
   WebUI* GetWebUIForCurrentState();
 
+  // Called when the reponse to a pending mouse lock request has arrived.
+  // Returns true if |allowed| is true and the mouse has been successfully
+  // locked.
+  bool GotResponseToLockMouseRequest(bool allowed);
+
  protected:
   friend class TabContentsObserver;
 
@@ -506,14 +487,10 @@ class TabContents : public PageNavigator,
 
  private:
   friend class NavigationController;
-  // Used to access the child_windows_ (ConstrainedWindowList) for testing
-  // automation purposes.
-  friend class TestingAutomationProvider;
 
   FRIEND_TEST_ALL_PREFIXES(TabContentsTest, NoJSMessageOnInterstitials);
   FRIEND_TEST_ALL_PREFIXES(TabContentsTest, UpdateTitle);
   FRIEND_TEST_ALL_PREFIXES(TabContentsTest, CrossSiteCantPreemptAfterUnload);
-  FRIEND_TEST_ALL_PREFIXES(TabContentsTest, ConstrainedWindows);
   FRIEND_TEST_ALL_PREFIXES(FormStructureBrowserTest, HTMLFiles);
   FRIEND_TEST_ALL_PREFIXES(NavigationControllerTest, HistoryNavigate);
   FRIEND_TEST_ALL_PREFIXES(RenderViewHostManagerTest, PageDoesBackAndReload);
@@ -537,17 +514,14 @@ class TabContents : public PageNavigator,
   // Message handlers.
   void OnDidStartProvisionalLoadForFrame(int64 frame_id,
                                          bool main_frame,
-                                         bool has_opener_set,
+                                         const GURL& opener_url,
                                          const GURL& url);
   void OnDidRedirectProvisionalLoad(int32 page_id,
-                                    bool has_opener_set,
+                                    const GURL& opener_url,
                                     const GURL& source_url,
                                     const GURL& target_url);
-  void OnDidFailProvisionalLoadWithError(int64 frame_id,
-                                         bool main_frame,
-                                         int error_code,
-                                         const GURL& url,
-                                         bool showing_repost_interstitial);
+  void OnDidFailProvisionalLoadWithError(
+      const ViewHostMsg_DidFailProvisionalLoadWithError_Params& params);
   void OnDidLoadResourceFromMemoryCache(const GURL& url,
                                         const std::string& security_info,
                                         const std::string& http_request,
@@ -573,14 +547,13 @@ class TabContents : public PageNavigator,
                                const string16& href,
                                const string16& title);
   void OnWebIntentDispatch(const IPC::Message& message,
-                           const string16& action,
-                           const string16& type,
-                           const string16& data,
+                           const webkit_glue::WebIntentData& intent,
                            int intent_id);
   void OnFindReply(int request_id, int number_of_matches,
                    const gfx::Rect& selection_rect, int active_match_ordinal,
                    bool final_update);
   void OnCrashedPlugin(const FilePath& plugin_path);
+  void OnAppCacheAccessed(const GURL& manifest_url, bool blocked_by_policy);
 
   // Changes the IsLoading state and notifies delegate as needed
   // |details| is used to provide details on the load that just finished
@@ -592,8 +565,6 @@ class TabContents : public PageNavigator,
   // response. This won't actually update the throbber, but it will get picked
   // up at the next animation step if the throbber is going.
   void SetNotWaitingForResponse() { waiting_for_response_ = false; }
-
-  ConstrainedWindowList child_windows_;
 
   // Navigation helpers --------------------------------------------------------
   //
@@ -610,9 +581,6 @@ class TabContents : public PageNavigator,
       RenderViewHost* render_view_host,
       const content::LoadCommittedDetails& details,
       const ViewHostMsg_FrameNavigate_Params& params);
-
-  // Closes all constrained windows.
-  void CloseConstrainedWindows();
 
   // If our controller was restored and the page id is > than the site
   // instance's page id, the site instances page id is updated as well as the
@@ -658,7 +626,7 @@ class TabContents : public PageNavigator,
   virtual RenderViewHostDelegate::RendererManagement*
       GetRendererManagementDelegate() OVERRIDE;
   virtual TabContents* GetAsTabContents() OVERRIDE;
-  virtual ViewType::Type GetRenderViewType() const OVERRIDE;
+  virtual content::ViewType GetRenderViewType() const OVERRIDE;
   virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewReady(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGone(RenderViewHost* render_view_host,
@@ -687,8 +655,10 @@ class TabContents : public PageNavigator,
   virtual void DocumentOnLoadCompletedInMainFrame(
       RenderViewHost* render_view_host,
       int32 page_id) OVERRIDE;
-  virtual void RequestOpenURL(const GURL& url, const GURL& referrer,
-                              WindowOpenDisposition disposition) OVERRIDE;
+  virtual void RequestOpenURL(const GURL& url,
+                              const GURL& referrer,
+                              WindowOpenDisposition disposition,
+                              int64 source_frame_id) OVERRIDE;
   virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
                                     const string16& message,
                                     const string16& default_prompt,
@@ -725,12 +695,12 @@ class TabContents : public PageNavigator,
   virtual void RunFileChooser(RenderViewHost* render_view_host,
                               const ViewHostMsg_RunFileChooser_Params& params);
   virtual void ToggleFullscreenMode(bool enter_fullscreen) OVERRIDE;
+  virtual bool IsFullscreenForCurrentTab() const OVERRIDE;
   virtual void UpdatePreferredSize(const gfx::Size& pref_size) OVERRIDE;
+  virtual void RequestToLockMouse() OVERRIDE;
+  virtual void LostMouseLock() OVERRIDE;
 
   // RenderViewHostManager::Delegate -------------------------------------------
-
-  // Blocks/unblocks interaction with renderer process.
-  void BlockTabContent(bool blocked);
 
   virtual void BeforeUnloadFiredFromRenderManager(
       bool proceed,

@@ -8,7 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -24,6 +25,8 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/media/media_player.h"
+#include "chrome/browser/download/download_service.h"
+#include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
@@ -36,11 +39,10 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/net/url_fetcher.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -217,23 +219,30 @@ WebUIMessageHandler* ActiveDownloadsHandler::Attach(WebUI* web_ui) {
 }
 
 void ActiveDownloadsHandler::Init() {
-  download_manager_ = profile_->GetDownloadManager();
+  download_manager_ =
+      DownloadServiceFactory::GetForProfile(profile_)->GetDownloadManager();
   download_manager_->AddObserver(this);
 }
 
 void ActiveDownloadsHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("getDownloads",
-      NewCallback(this, &ActiveDownloadsHandler::HandleGetDownloads));
+      base::Bind(&ActiveDownloadsHandler::HandleGetDownloads,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("pauseToggleDownload",
-      NewCallback(this, &ActiveDownloadsHandler::HandlePauseToggleDownload));
+      base::Bind(&ActiveDownloadsHandler::HandlePauseToggleDownload,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("cancelDownload",
-      NewCallback(this, &ActiveDownloadsHandler::HandleCancelDownload));
+      base::Bind(&ActiveDownloadsHandler::HandleCancelDownload,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("allowDownload",
-      NewCallback(this, &ActiveDownloadsHandler::HandleAllowDownload));
+      base::Bind(&ActiveDownloadsHandler::HandleAllowDownload,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("openNewFullWindow",
-      NewCallback(this, &ActiveDownloadsHandler::OpenNewFullWindow));
+      base::Bind(&ActiveDownloadsHandler::OpenNewFullWindow,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("playMediaFile",
-      NewCallback(this, &ActiveDownloadsHandler::PlayMediaFile));
+      base::Bind(&ActiveDownloadsHandler::PlayMediaFile,
+                 base::Unretained(this)));
 }
 
 void ActiveDownloadsHandler::PlayMediaFile(const ListValue* args) {
@@ -242,7 +251,8 @@ void ActiveDownloadsHandler::PlayMediaFile(const ListValue* args) {
   Browser* browser = Browser::GetBrowserForController(
       &tab_contents_->controller(), NULL);
   MediaPlayer* mediaplayer = MediaPlayer::GetInstance();
-  mediaplayer->ForcePlayMediaFile(profile_, file_path, browser);
+  mediaplayer->PopupMediaPlayer(browser);
+  mediaplayer->ForcePlayMediaFile(profile_, file_path);
 }
 
 DownloadItem* ActiveDownloadsHandler::GetDownloadById(
@@ -292,8 +302,10 @@ void ActiveDownloadsHandler::OpenNewFullWindow(const ListValue* args) {
   if (SelectTab(GURL(url)))
     return;
 
-  Browser* browser = BrowserList::GetLastActive();
-  browser::NavigateParams params(browser, GURL(url), PageTransition::LINK);
+  DCHECK(profile_);
+  Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
+  browser::NavigateParams params(
+      browser, GURL(url), content::PAGE_TRANSITION_LINK);
   params.disposition = NEW_FOREGROUND_TAB;
   browser::Navigate(&params);
   browser->window()->Show();
@@ -386,6 +398,33 @@ ActiveDownloadsUI::ActiveDownloadsUI(TabContents* contents)
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }
 
+#if defined(TOUCH_UI)
+
+// static
+TabContents* ActiveDownloadsUI::OpenPopup(Profile* profile) {
+  Browser* browser = Browser::GetOrCreateTabbedBrowser(profile);
+  OpenURLParams params(GURL(chrome::kChromeUIActiveDownloadsURL), GURL(),
+                      SINGLETON_TAB, content::PAGE_TRANSITION_LINK, false);
+  TabContents* download_contents = browser->OpenURL(params);
+  browser->window()->Show();
+  return download_contents;
+}
+
+TabContents* ActiveDownloadsUI::GetPopup(Browser** browser) {
+  for (TabContentsIterator it; !it.done(); ++it) {
+    TabContents* tab = it->tab_contents();
+    const GURL& url = tab->GetURL();
+    if (url.SchemeIs(chrome::kChromeUIScheme) &&
+        url.host() == chrome::kChromeUIActiveDownloadsHost) {
+      if (browser)
+        *browser = it.browser();
+      return tab;
+    }
+  }
+  return NULL;
+}
+
+#else  // defined(TOUCH_UI)
 // static
 Browser* ActiveDownloadsUI::OpenPopup(Profile* profile) {
   Browser* browser = GetPopup();
@@ -398,7 +437,7 @@ Browser* ActiveDownloadsUI::OpenPopup(Profile* profile) {
     browser::NavigateParams params(
         browser,
         GURL(chrome::kChromeUIActiveDownloadsURL),
-        PageTransition::LINK);
+        content::PAGE_TRANSITION_LINK);
     params.disposition = NEW_FOREGROUND_TAB;
     browser::Navigate(&params);
 
@@ -433,6 +472,7 @@ Browser* ActiveDownloadsUI::GetPopup() {
   }
   return NULL;
 }
+#endif  // defined(TOUCH_UI)
 
 const ActiveDownloadsUI::DownloadList& ActiveDownloadsUI::GetDownloads() const {
   return handler_->downloads();

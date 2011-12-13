@@ -12,12 +12,10 @@
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "chrome/common/web_apps.h"
-#include "content/common/view_types.h"
+#include "content/public/common/view_types.h"
 #include "ipc/ipc_message_macros.h"
 
 #define IPC_MESSAGE_START ExtensionMsgStart
-
-IPC_ENUM_TRAITS(ViewType::Type)
 
 // Parameters structure for ExtensionHostMsg_Request.
 IPC_STRUCT_BEGIN(ExtensionHostMsg_Request_Params)
@@ -238,7 +236,7 @@ IPC_MESSAGE_CONTROL5(ExtensionMsg_UpdatePermissions,
 
 // Tell the renderer which type this view is.
 IPC_MESSAGE_ROUTED1(ExtensionMsg_NotifyRenderViewType,
-                    ViewType::Type /* view_type */)
+                    content::ViewType /* view_type */)
 
 // Messages sent from the renderer to the browser.
 
@@ -325,6 +323,20 @@ IPC_MESSAGE_ROUTED3(ExtensionMsg_InlineWebstoreInstallResponse,
                     int32 /* install id */,
                     bool /* whether the install was successful */,
                     std::string /* error */)
+
+// Sent by the renderer when an App is requesting permission to send server
+// pushed notifications.
+IPC_MESSAGE_ROUTED4(ExtensionHostMsg_GetAppNotifyChannel,
+                    GURL /* requestor_url */,
+                    std::string /* client_id */,
+                    int32 /* return_route_id */,
+                    int32 /* callback_id */)
+
+// Response to the renderer for the above message.
+IPC_MESSAGE_ROUTED3(ExtensionMsg_GetAppNotifyChannelResponse,
+                    std::string /* channel_id */,
+                    std::string /* error */,
+                    int32 /* callback_id */)
 
 // Deliver a message sent with ExtensionHostMsg_PostMessage.
 IPC_MESSAGE_ROUTED2(ExtensionMsg_DeliverMessage,

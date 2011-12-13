@@ -12,6 +12,8 @@
 
 namespace policy {
 
+struct PolicyDefinitionList;
+
 // Wrapper class around a std::map<ConfigurationPolicyType, Value*> that
 // properly cleans up after itself when going out of scope.
 // Exposes interesting methods of the underlying std::map.
@@ -34,6 +36,13 @@ class PolicyMap {
   void Erase(ConfigurationPolicyType policy);
 
   void Swap(PolicyMap* other);
+  void CopyFrom(const PolicyMap& other);
+
+  // Loads the values in |policies| into this PolicyMap, mapped to their
+  // corresponding policy type. The policies to load, and their types, are
+  // listed in |list|.
+  void LoadFrom(const DictionaryValue* policies,
+                const PolicyDefinitionList* list);
 
   bool Equals(const PolicyMap& other) const;
   bool empty() const;

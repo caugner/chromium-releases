@@ -198,8 +198,7 @@ void ChromotingHost::OnStateChange(
 
     // Create and start session manager.
     protocol::JingleSessionManager* server =
-        protocol::JingleSessionManager::CreateNotSandboxed(
-            context_->network_message_loop());
+        new protocol::JingleSessionManager(context_->network_message_loop());
     // TODO(ajwong): Make this a command switch when we're more stable.
     server->set_allow_local_ips(true);
 
@@ -277,10 +276,9 @@ void ChromotingHost::OnIncomingSession(
   *protocol_config_->mutable_initial_resolution() =
       protocol::ScreenResolution(2048, 2048);
   // TODO(sergeyu): Respect resolution requested by the client if supported.
-  protocol::SessionConfig* config = protocol_config_->Select(
-      session->candidate_config(), true /* force_host_resolution */);
-
-  if (!config) {
+  protocol::SessionConfig config;
+  if (!protocol_config_->Select(session->candidate_config(),
+                                true /* force_host_resolution */, &config)) {
     LOG(WARNING) << "Rejecting connection from " << session->jid()
                  << " because no compatible configuration has been found.";
     *response = protocol::SessionManager::INCOMPATIBLE;
@@ -301,6 +299,7 @@ void ChromotingHost::OnIncomingSession(
   // We accept the connection, so create a connection object.
   ConnectionToClient* connection = new ConnectionToClient(
       context_->network_message_loop(), this);
+  connection->Init(session);
 
   // Create a client object.
   ClientSession* client = new ClientSession(
@@ -312,8 +311,6 @@ void ChromotingHost::OnIncomingSession(
   connection->set_host_stub(client);
   connection->set_input_stub(client);
 
-  connection->Init(session);
-
   clients_.push_back(client);
 }
 
@@ -324,7 +321,7 @@ void ChromotingHost::set_protocol_config(
   protocol_config_.reset(config);
 }
 
-void ChromotingHost::LocalMouseMoved(const gfx::Point& new_pos) {
+void ChromotingHost::LocalMouseMoved(const SkIPoint& new_pos) {
   if (!context_->network_message_loop()->BelongsToCurrentThread()) {
     context_->network_message_loop()->PostTask(
         FROM_HERE, base::Bind(&ChromotingHost::LocalMouseMoved, this, new_pos));
@@ -372,16 +369,11 @@ void ChromotingHost::OnClientDisconnected(ConnectionToClient* connection) {
     return;
 
   scoped_refptr<ClientSession> client = *it;
+
   clients_.erase(it);
 
-  // Remove the connection from the session manager and stop the session.
-  // TODO(hclam): Stop only if the last connection disconnected.
   if (recorder_.get()) {
     recorder_->RemoveConnection(connection);
-    // The recorder only exists to serve the unique authenticated client.
-    // If that client has disconnected, then we can kill the recorder.
-    if (client->authenticated())
-      StopScreenRecorder();
   }
 
   // Close the connection to client just to be safe.
@@ -390,21 +382,20 @@ void ChromotingHost::OnClientDisconnected(ConnectionToClient* connection) {
   // ClientSession::Disconnect().
   connection->Disconnect();
 
-  // Also remove reference to ConnectionToClient from this object.
-  int old_authenticated_clients = AuthenticatedClientsCount();
-
-
-  // Notify the observers of the change, if any.
-  int authenticated_clients = AuthenticatedClientsCount();
-  if (old_authenticated_clients != authenticated_clients) {
+  if (client->authenticated()) {
     for (StatusObserverList::iterator it = status_observers_.begin();
          it != status_observers_.end(); ++it) {
-      (*it)->OnClientDisconnected(connection);
+      (*it)->OnClientDisconnected(client->client_jid());
     }
   }
 
-  // Disable the "curtain" if there are no more active clients.
   if (AuthenticatedClientsCount() == 0) {
+    if (recorder_.get()) {
+      // Stop the recorder if there are no more clients.
+      StopScreenRecorder();
+    }
+
+    // Disable the "curtain" if there are no more active clients.
     EnableCurtainMode(false);
     if (is_it2me_) {
       desktop_environment_->OnLastDisconnect();
@@ -415,8 +406,8 @@ void ChromotingHost::OnClientDisconnected(ConnectionToClient* connection) {
 }
 
 // TODO(sergeyu): Move this to SessionManager?
-Encoder* ChromotingHost::CreateEncoder(const protocol::SessionConfig* config) {
-  const protocol::ChannelConfig& video_config = config->video_config();
+Encoder* ChromotingHost::CreateEncoder(const protocol::SessionConfig& config) {
+  const protocol::ChannelConfig& video_config = config.video_config();
 
   if (video_config.codec == protocol::ChannelConfig::CODEC_VERBATIM) {
     return EncoderRowBased::CreateVerbatimEncoder();
@@ -457,17 +448,24 @@ void ChromotingHost::EnableCurtainMode(bool enable) {
 
 void ChromotingHost::LocalLoginSucceeded(
     scoped_refptr<ConnectionToClient> connection) {
-  if (MessageLoop::current() != context_->main_message_loop()) {
-    context_->main_message_loop()->PostTask(
-        FROM_HERE, base::Bind(&ChromotingHost::LocalLoginSucceeded, this,
-                              connection));
-    return;
-  }
+  DCHECK(context_->network_message_loop()->BelongsToCurrentThread());
+
+  context_->main_message_loop()->PostTask(
+      FROM_HERE, base::Bind(&ChromotingHost::AddAuthenticatedClient,
+                            this, connection, connection->session()->config(),
+                            connection->session()->jid()));
+}
+
+void ChromotingHost::AddAuthenticatedClient(
+    scoped_refptr<ConnectionToClient> connection,
+    const protocol::SessionConfig& config,
+    const std::string& jid) {
+  DCHECK_EQ(context_->main_message_loop(), MessageLoop::current());
 
   protocol::LocalLoginStatus* status = new protocol::LocalLoginStatus();
   status->set_success(true);
   connection->client_stub()->BeginSessionResponse(
-      status, new DeleteTask<protocol::LocalLoginStatus>(status));
+      status, base::Bind(&DeletePointer<protocol::LocalLoginStatus>, status));
 
   // Disconnect all other clients.
   // Iterate over a copy of the list of clients, to avoid mutating the list
@@ -487,7 +485,7 @@ void ChromotingHost::LocalLoginSucceeded(
   if (!recorder_.get()) {
     // Then we create a ScreenRecorder passing the message loops that
     // it should run on.
-    Encoder* encoder = CreateEncoder(connection->session()->config());
+    Encoder* encoder = CreateEncoder(config);
 
     recorder_ = new ScreenRecorder(context_->main_message_loop(),
                                    context_->encode_message_loop(),
@@ -502,13 +500,13 @@ void ChromotingHost::LocalLoginSucceeded(
   // Notify observers that there is at least one authenticated client.
   for (StatusObserverList::iterator it = status_observers_.begin();
        it != status_observers_.end(); ++it) {
-    (*it)->OnClientAuthenticated(connection);
+    (*it)->OnClientAuthenticated(jid);
   }
   // TODO(jamiewalch): Tidy up actions to be taken on connect/disconnect,
   // including closing the connection on failure of a critical operation.
   EnableCurtainMode(true);
   if (is_it2me_) {
-    std::string username = connection->session()->jid();
+    std::string username = jid;
     size_t pos = username.find('/');
     if (pos != std::string::npos)
       username.replace(pos, std::string::npos, "");
@@ -528,7 +526,7 @@ void ChromotingHost::LocalLoginFailed(
   protocol::LocalLoginStatus* status = new protocol::LocalLoginStatus();
   status->set_success(false);
   connection->client_stub()->BeginSessionResponse(
-      status, new DeleteTask<protocol::LocalLoginStatus>(status));
+      status, base::Bind(&DeletePointer<protocol::LocalLoginStatus>, status));
 }
 
 void ChromotingHost::ProcessPreAuthentication(
@@ -541,7 +539,10 @@ void ChromotingHost::ProcessPreAuthentication(
       break;
   }
   CHECK(client != clients_.end());
-  client->get()->OnAuthorizationComplete(true);
+
+  context_->network_message_loop()->PostTask(
+      FROM_HERE, base::Bind(&ClientSession::OnAuthorizationComplete,
+                            client->get(), true));
 }
 
 void ChromotingHost::StopScreenRecorder() {

@@ -7,6 +7,10 @@
 #include <vector>
 
 #include "base/time.h"
+#include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/ui/constrained_window.h"
+#include "chrome/browser/ui/constrained_window_tab_helper.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/sad_tab_view.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view.h"
 #include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
@@ -52,10 +56,17 @@ TabContentsViewViews::~TabContentsViewViews() {
     view_storage->RemoveView(last_focused_view_storage_id_);
 }
 
+void TabContentsViewViews::AttachConstrainedWindow(
+    ConstrainedWindowGtk* constrained_window) {
+}
+void TabContentsViewViews::RemoveConstrainedWindow(
+    ConstrainedWindowGtk* constrained_window) {
+}
+
 void TabContentsViewViews::Unparent() {
   // Remember who our FocusManager is, we won't be able to access it once
   // un-parented.
-  focus_manager_ = GetFocusManager();
+  focus_manager_ = Widget::GetFocusManager();
   CHECK(native_tab_contents_view_);
   native_tab_contents_view_->Unparent();
 }
@@ -113,12 +124,18 @@ void TabContentsViewViews::StartDragging(const WebDropData& drop_data,
   native_tab_contents_view_->StartDragging(drop_data, ops, image, image_offset);
 }
 
-void TabContentsViewViews::SetPageTitle(const std::wstring& title) {
+void TabContentsViewViews::SetPageTitle(const string16& title) {
   native_tab_contents_view_->SetPageTitle(title);
 }
 
 void TabContentsViewViews::OnTabCrashed(base::TerminationStatus status,
                                         int /* error_code */) {
+  // Only show the sad tab if we're not in browser shutdown, so that TabContents
+  // objects that are not in a browser (e.g., HTML dialogs) and thus are
+  // visible do not flash a sad tab page.
+  if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
+    return;
+
   // Force an invalidation to render sad tab.
   // Note that it's possible to get this message after the window was destroyed.
   if (GetNativeView()) {
@@ -157,18 +174,37 @@ void TabContentsViewViews::Focus() {
     return;
   }
 
-  if (tab_contents_->constrained_window_count() > 0) {
-    ConstrainedWindow* window = *tab_contents_->constrained_window_begin();
-    DCHECK(window);
-    window->FocusConstrainedWindow();
-    return;
+  TabContentsWrapper* wrapper =
+      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
+  if (wrapper) {
+    // TODO(erg): TabContents used to own constrained windows, which is why
+    // this is here. Eventually this should be ported to a containing view
+    // specializing in constrained window management.
+    ConstrainedWindowTabHelper* helper =
+        wrapper->constrained_window_tab_helper();
+    if (helper->constrained_window_count() > 0) {
+      ConstrainedWindow* window = *helper->constrained_window_begin();
+      DCHECK(window);
+      window->FocusConstrainedWindow();
+      return;
+    }
   }
 
+  // Give focus to this tab content view.
   RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
+  if (rwhv) {
+    rwhv->Focus();
+    // rwhvv may not have a focus manager, so we try with our focus manager
+    // also if rwhvv cannot acquire focus.
+    if (rwhv->HasFocus())
+      return;
+  }
   views::FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager)
-    focus_manager->FocusNativeView(rwhv ? rwhv->GetNativeView()
-                                   : GetNativeView());
+  if (focus_manager) {
+    // if rwhvv cannot focus, or we don't have a rwhv, we try focusing
+    // on the current tab content view.
+    focus_manager->SetFocusedView(GetContentsView());
+  }
 }
 
 void TabContentsViewViews::SetInitialFocus() {
@@ -255,7 +291,8 @@ void TabContentsViewViews::GotFocus() {
 }
 
 void TabContentsViewViews::TakeFocus(bool reverse) {
-  if (!tab_contents_->delegate()->TakeFocus(reverse)) {
+  if (tab_contents_->delegate() &&
+      !tab_contents_->delegate()->TakeFocus(reverse)) {
     views::FocusManager* focus_manager = GetFocusManager();
 
     // We may not have a focus manager if the tab has been switched before this
@@ -307,8 +344,10 @@ void TabContentsViewViews::ShowCreatedFullscreenWidget(int route_id) {
 
 void TabContentsViewViews::ShowContextMenu(const ContextMenuParams& params) {
   // Allow delegates to handle the context menu operation first.
-  if (tab_contents_->delegate()->HandleContextMenu(params))
+  if (tab_contents_->delegate() &&
+      tab_contents_->delegate()->HandleContextMenu(params)) {
     return;
+  }
 
   context_menu_.reset(new RenderViewContextMenuViews(tab_contents_, params));
   context_menu_->Init();
@@ -411,4 +450,13 @@ views::FocusManager* TabContentsViewViews::GetFocusManager() {
   // that would prevent that code being executed in the unit-test case.
   // DCHECK(focus_manager_);
   return focus_manager_;
+}
+
+void TabContentsViewViews::OnNativeWidgetVisibilityChanged(bool visible) {
+  views::Widget::OnNativeWidgetVisibilityChanged(visible);
+  if (visible) {
+    tab_contents_->ShowContents();
+  } else {
+    tab_contents_->HideContents();
+  }
 }

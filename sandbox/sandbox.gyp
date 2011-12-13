@@ -136,7 +136,7 @@
       'targets': [
         {
           'target_name': 'sandbox',
-          'type': 'settings',
+          'type': 'none',
           'conditions': [
             # Only compile in the seccomp code for the flag combination
             # where we support it.
@@ -313,7 +313,6 @@
             'tests/common/test_utils.cc',
             'tests/common/test_utils.h',
             'tests/unit_tests/unit_tests.cc',
-            'src/handle_table_unittest.cc',
             'src/interception_unittest.cc',
             'src/service_resolver_unittest.cc',
             'src/restricted_token_unittest.cc',

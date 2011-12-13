@@ -140,18 +140,18 @@ BufferedResourceLoader::~BufferedResourceLoader() {
     url_loader_->cancel();
 }
 
-void BufferedResourceLoader::Start(net::CompletionCallback* start_callback,
-                                   NetworkEventCallback* event_callback,
+void BufferedResourceLoader::Start(net::OldCompletionCallback* start_callback,
+                                   const base::Closure& event_callback,
                                    WebFrame* frame) {
   // Make sure we have not started.
   DCHECK(!start_callback_.get());
-  DCHECK(!event_callback_.get());
+  DCHECK(event_callback_.is_null());
   DCHECK(start_callback);
-  DCHECK(event_callback);
+  DCHECK(!event_callback.is_null());
   CHECK(frame);
 
   start_callback_.reset(start_callback);
-  event_callback_.reset(event_callback);
+  event_callback_ = event_callback;
 
   if (first_byte_position_ != kPositionNotSpecified) {
     // TODO(hclam): server may not support range request so |offset_| may not
@@ -197,7 +197,7 @@ void BufferedResourceLoader::Start(net::CompletionCallback* start_callback,
 void BufferedResourceLoader::Stop() {
   // Reset callbacks.
   start_callback_.reset();
-  event_callback_.reset();
+  event_callback_.Reset();
   read_callback_.reset();
 
   // Use the internal buffer to signal that we have been stopped.
@@ -223,7 +223,7 @@ void BufferedResourceLoader::Stop() {
 void BufferedResourceLoader::Read(int64 position,
                                   int read_size,
                                   uint8* buffer,
-                                  net::CompletionCallback* read_callback) {
+                                  net::OldCompletionCallback* read_callback) {
   DCHECK(!read_callback_.get());
   DCHECK(buffer_.get());
   DCHECK(read_callback);
@@ -799,8 +799,8 @@ void BufferedResourceLoader::DoneStart(int error) {
 }
 
 void BufferedResourceLoader::NotifyNetworkEvent() {
-  if (event_callback_.get())
-    event_callback_->Run();
+  if (!event_callback_.is_null())
+    event_callback_.Run();
 }
 
 bool BufferedResourceLoader::IsRangeRequest() const {

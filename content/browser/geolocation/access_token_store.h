@@ -16,10 +16,11 @@
 
 #include <map>
 
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "content/browser/cancelable_request.h"
+#include "content/common/content_export.h"
 #include "googleurl/src/gurl.h"
 
 class GURL;
@@ -35,8 +36,9 @@ class AccessTokenStore : public base::RefCountedThreadSafe<AccessTokenStore>,
 
   // Map of server URLs to associated access token.
   typedef std::map<GURL, string16> AccessTokenSet;
-  typedef Callback2<AccessTokenSet, net::URLRequestContextGetter*>::Type
+  typedef base::Callback<void(AccessTokenSet, net::URLRequestContextGetter*)>
       LoadAccessTokensCallbackType;
+
   // |callback| will be invoked once per LoadAccessTokens call, after existing
   // access tokens have been loaded from persistent store. As a convenience the
   // URLRequestContextGetter is also supplied as an argument in |callback|, as
@@ -44,16 +46,17 @@ class AccessTokenStore : public base::RefCountedThreadSafe<AccessTokenStore>,
   // so it is efficient to piggyback it onto this request.
   // Takes ownership of |callback|.
   // Returns a handle which can subsequently be used with CancelRequest().
-  Handle LoadAccessTokens(CancelableRequestConsumerBase* consumer,
-                          LoadAccessTokensCallbackType* callback);
+  CONTENT_EXPORT Handle LoadAccessTokens(
+      CancelableRequestConsumerBase* consumer,
+      const LoadAccessTokensCallbackType& callback);
 
   virtual void SaveAccessToken(
       const GURL& server_url, const string16& access_token) = 0;
 
  protected:
   friend class base::RefCountedThreadSafe<AccessTokenStore>;
-  AccessTokenStore();
-  virtual ~AccessTokenStore();
+  CONTENT_EXPORT AccessTokenStore();
+  CONTENT_EXPORT virtual ~AccessTokenStore();
 
   virtual void DoLoadAccessTokens(
       scoped_refptr<CancelableRequest<LoadAccessTokensCallbackType> > req) = 0;

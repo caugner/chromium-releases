@@ -7,9 +7,10 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/views/handle_web_keyboard_event_gtk.h"
+#include "chrome/browser/ui/views/handle_web_keyboard_event.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -103,8 +104,9 @@ void RegistrationScreen::OnPageLoaded() {
   // their first and last names.
   if (g_browser_process) {
     const std::string locale = g_browser_process->GetApplicationLocale();
-    input_method::EnableInputMethods(
-        locale, input_method::kAllInputMethods, "");
+    input_method::InputMethodManager* manager =
+        input_method::InputMethodManager::GetInstance();
+    manager->EnableInputMethods(locale, input_method::kAllInputMethods, "");
   }
   view()->ShowPageContent();
 }
@@ -123,9 +125,10 @@ TabContents* RegistrationScreen::OpenURLFromTab(
     const GURL& url,
     const GURL& referrer,
     WindowOpenDisposition disposition,
-    PageTransition::Type transition) {
+    content::PageTransition transition) {
   return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition));
+                        OpenURLParams(url, referrer, disposition, transition,
+                                      false));
 }
 
 TabContents* RegistrationScreen::OpenURLFromTab(TabContents* source,
@@ -160,8 +163,9 @@ void RegistrationScreen::CloseScreen(ScreenObserver::ExitCodes code) {
   // password.
   if (g_browser_process) {
     const std::string locale = g_browser_process->GetApplicationLocale();
-    input_method::EnableInputMethods(
-        locale, input_method::kKeyboardLayoutsOnly, "");
+    input_method::InputMethodManager* manager =
+        input_method::InputMethodManager::GetInstance();
+    manager->EnableInputMethods(locale, input_method::kKeyboardLayoutsOnly, "");
   }
   delegate()->GetObserver()->OnExit(code);
 }

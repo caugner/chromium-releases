@@ -36,20 +36,22 @@ void TabContentsObserver::DidStartProvisionalLoadForFrame(
 
 void TabContentsObserver::ProvisionalChangeToMainFrameUrl(
     const GURL& url,
-    bool has_opener_set) {
+    const GURL& opener_url) {
 }
 
 void TabContentsObserver::DidCommitProvisionalLoadForFrame(
     int64 frame_id,
     bool is_main_frame,
     const GURL& url,
-    PageTransition::Type transition_type) {
+    content::PageTransition transition_type) {
 }
 
-void TabContentsObserver::DidFailProvisionalLoad(int64 frame_id,
-                                                 bool is_main_frame,
-                                                 const GURL& validated_url,
-                                                 int error_code) {
+void TabContentsObserver::DidFailProvisionalLoad(
+    int64 frame_id,
+    bool is_main_frame,
+    const GURL& validated_url,
+    int error_code,
+    const string16& error_description) {
 }
 
 void TabContentsObserver::DocumentLoadedInFrame(int64 frame_id) {
@@ -59,6 +61,9 @@ void TabContentsObserver::DidFinishLoad(int64 frame_id) {
 }
 
 void TabContentsObserver::DidGetUserGesture() {
+}
+
+void TabContentsObserver::DidGetIgnoredUIEvent() {
 }
 
 void TabContentsObserver::DidBecomeSelected() {
@@ -79,7 +84,20 @@ void TabContentsObserver::StopNavigation() {
 void TabContentsObserver::DidOpenURL(const GURL& url,
                                      const GURL& referrer,
                                      WindowOpenDisposition disposition,
-                                     PageTransition::Type transition) {
+                                     content::PageTransition transition) {
+}
+
+void TabContentsObserver::DidOpenRequestedURL(
+    TabContents* new_contents,
+    const GURL& url,
+    const GURL& referrer,
+    WindowOpenDisposition disposition,
+    content::PageTransition transition,
+    int64 source_frame_id) {
+}
+
+void TabContentsObserver::AppCacheAccessed(const GURL& manifest_url,
+                                           bool blocked_by_policy) {
 }
 
 TabContentsObserver::TabContentsObserver(TabContents* tab_contents)

@@ -221,30 +221,6 @@
 }
 
 {
-  bug_40244
-  ThreadSanitizer:Race
-  fun:*WebDataService*WebDataRequest*Cancel*
-  fun:*WebDataService*
-}
-
-{
-  bug_53192
-  ThreadSanitizer:UnlockNonLocked
-  fun:pthread_mutex_unlock
-  fun:talk_base::CriticalSection::Leave*
-  fun:talk_base::CritScope::~CritScope*
-  fun:talk_base::PosixSignalDeliveryDispatcher::ClearOwner*
-  fun:talk_base::PhysicalSocketServer::~PhysicalSocketServer*
-  fun:scoped_ptr*::~scoped_ptr*
-  fun:talk_base::MessageQueue::~MessageQueue*
-  fun:talk_base::Thread::~Thread*
-  fun:talk_base::ThreadManager::UnwrapCurrentThread*
-  fun:talk_base::ThreadManager::~ThreadManager*
-  fun:__tcf_0
-  fun:exit
-}
-
-{
   bug_70938
   ThreadSanitizer:Race
   ...
@@ -334,14 +310,6 @@
 
 # TODO(timurrrr): bug item
 {
-  Data race on vfptr in base/thread_unittest
-  ThreadSanitizer:Race
-  ...
-  fun:*ThreadTest_SleepInsideInit*TestBody*
-}
-
-# TODO(timurrrr): bug item
-{
   Data race on bool in chrome/browser/net/url_fetcher_unittest (1)
   ThreadSanitizer:Race
   fun:*URLFetcherCancelTest*TestContextReleased*
@@ -363,6 +331,26 @@
   ThreadSanitizer:Race
   fun:base::subtle::NoBarrier_Store
   fun:base::ThreadCollisionWarner::Leave
+}
+
+{
+   bug_100026
+   ThreadSanitizer:Race
+   ...
+   fun:std::ostream::operator*
+   ...
+   fun:logging::LogMessage::*LogMessage
+   fun:base::PlatformThread::SetThreadPriority
+   fun:base::SimpleThread::SetThreadPriority
+   fun:AudioRendererImpl::Run
+}
+{
+   bug_100143
+   ThreadSanitizer:Race
+   ...
+   fun:GpuDataManager::Initialize
+   fun:GpuDataManager::GetInstance
+   fun:GpuBlacklistUpdater::SetupOnFileThread
 }
 
 ############################
@@ -395,14 +383,6 @@
   ...
   fun:base::Histogram::*
   fun:HistogramSynchronizer::DeserializeHistogramList*
-}
-
-{
-  bug_71634
-  ThreadSanitizer:Race
-  fun:gdk_x_error
-  ...
-  fun:ui::GetWindowGeometry*
 }
 
 # 3. Suppressions for real chromium bugs that are not yet fixed.
@@ -493,20 +473,6 @@
 }
 
 {
-  bug_72169a
-  ThreadSanitizer:Race
-  fun:base::Thread::ThreadMain*
-}
-
-{
-  bug_72169b
-  ThreadSanitizer:Race
-  fun:base::Thread::message_loop*
-  ...
-  fun:*::InotifyReader::OnInotifyEvent*
-}
-
-{
   bug_72548
   ThreadSanitizer:Race
   ...
@@ -514,24 +480,12 @@
   fun:JSC::Yarr::Interpreter::interpret*
   fun:JSC::Yarr::interpret*
 }
-{
-  bug_86507
-  ThreadSanitizer:Race
-  fun:VideoCaptureController::OnDeviceStopped
-}
 
 {
   bug_86916
   ThreadSanitizer:Race
   fun:loopfilter_frame
   fun:loopfilter_thread
-}
-
-{
-  bug_87062a
-  ThreadSanitizer:Race
-  fun:net::SdchManager::SdchManager
-  fun:BrowserMain
 }
 
 {
@@ -545,7 +499,21 @@
   fun:net::URLRequest::Start
   fun:URLFetcher::Core::StartURLRequest
   fun:URLFetcher::Core::StartURLRequestWhenAppropriate
-  fun:DispatchToMethod
+}
+{
+  bug_87062c
+  ThreadSanitizer:Race
+  fun:net::SdchManager::~SdchManager
+  fun:ChromeBrowserMainParts::PreMainMessageLoopRunInternal
+  fun:ChromeBrowserMainParts::PreMainMessageLoopRun
+  fun:content::BrowserMainParts::RunMainMessageLoopParts
+}
+{
+  bug_87062d
+  ThreadSanitizer:Race
+  ...
+  fun:ChromeBrowserMainParts::MainMessageLoopRun
+  fun:content::BrowserMainParts::RunMainMessageLoopParts
 }
 {
   bug_87747
@@ -557,75 +525,42 @@
   fun:ProcessSingleton::LinuxWatcher::HandleMessage
 }
 {
-  bug_89295_a
+  bug_89141
   ThreadSanitizer:Race
-  fun:base::internal::WeakReference::Flag::~Flag
-  ...
-  fun:ProfileIOData::~ProfileIOData
-  fun:ProfileImplIOData::~ProfileImplIOData
-  ...
-  fun:scoped_refptr::~scoped_refptr
-  fun:ChromeURLRequestContextGetter::~ChromeURLRequestContextGetter
-  fun:DeleteTask::Run
+  fun:base::Thread::message_loop
+  fun:BrowserThread::IsMessageLoopValid
+  fun:ThreadWatcherList::StartWatching
+  fun:ThreadWatcherList::InitializeAndStartWatching
 }
 {
-  bug_89295_b
-  ThreadSanitizer:Race
-  fun:base::internal::WeakReference::Flag::Invalidate
-  ...
-  fun:base::SupportsWeakPtr::~SupportsWeakPtr
-  fun:prerender::PrerenderManager::~PrerenderManager
-}
-{
-  bug_93708_a
-  ThreadSanitizer:Race
-  fun:WTF::StringImplBase::ref
-  fun:WTF::String::String
-  fun:WebCore::KURLGooglePrivate::KURLGooglePrivate
-  fun:WebCore::KURL::KURL
-  fun:WebCore::WorkerContext::WorkerContext
-  fun:WebCore::DedicatedWorkerContext::DedicatedWorkerContext
-  fun:WebCore::DedicatedWorkerContext::create
-  fun:WebCore::DedicatedWorkerThread::createWorkerContext
-  fun:WebCore::WorkerThread::workerThread
-  fun:WebCore::WorkerThread::workerThreadStart
-  fun:WTF::threadEntryPoint
-}
-{
-  bug_93708_b
-  ThreadSanitizer:Race
-  fun:WebCore::KURLGooglePrivate::~KURLGooglePrivate
-  fun:WebCore::KURL::~KURL
-  fun:WebCore::WorkerScriptLoader::~WorkerScriptLoader
-  fun:WTF::RefCounted::deref
-  fun:WTF::RefPtr::clear
-  fun:WTF::RefPtr::operator=
-  fun:WebCore::Worker::notifyFinished
-  fun:WebCore::WorkerScriptLoader::notifyFinished
-  fun:WebCore::WorkerScriptLoader::didFinishLoading
-  fun:WebCore::DocumentThreadableLoader::didFinishLoading
-  fun:WebCore::DocumentThreadableLoader::didFinishLoading
-  fun:WebCore::SubresourceLoader::didFinishLoading
-  fun:WebCore::ResourceLoader::didFinishLoading
-  fun:WebCore::ResourceHandleInternal::didFinishLoading
-  fun:webkit_glue::WebURLLoaderImpl::Context::OnCompletedRequest
-  fun:ResourceDispatcher::OnRequestComplete
-}
-{
-  bug_93757
+  bug_93757_a
   ThreadSanitizer:Race
   fun:__memset_sse2
   fun:VisitedLinkMaster::CreateURLTable
+}
+{
+  bug_93757_b
+  ThreadSanitizer:Race
+  ...
+  fun:webkit::npapi::PluginLib::ReadWebPluginInfo
+  fun:webkit::npapi::PluginList::ReadPluginInfo
+  fun:webkit::npapi::PluginList::LoadPlugin
+  fun:webkit::npapi::PluginList::LoadPluginsFromDir
+  fun:webkit::npapi::PluginList::LoadPluginsInternal
+  fun:webkit::npapi::PluginList::LoadPlugins
+  fun:webkit::npapi::PluginList::GetPlugins
+  fun:PluginService::GetPluginsInternal
 }
 {
   bug_93932_a
   ThreadSanitizer:Race
   ...
   fun:frame_thread_free
-  fun:ff_thread_free
+  ...
   fun:avcodec_close
-  fun:avcodec_close
+  ...
   fun:media::FFmpegVideoDecodeEngine::~FFmpegVideoDecodeEngine
+  ...
   fun:scoped_ptr::reset
   fun:media::FFmpegVideoDecodeEngineTest::~FFmpegVideoDecodeEngineTest
 }
@@ -640,7 +575,7 @@
   fun:media::FFmpegVideoDecodeEngine::ConsumeVideoSample
   fun:media::DemuxCompleteActionP2::gmock_Impl::gmock_PerformImpl
   fun:testing::internal::ActionHelper::Perform
-  fun:media::DemuxCompleteActionP2::gmock_Impl::Perform
+  ...
   fun:testing::Action::Perform
   fun:testing::internal::ActionResultHolder::PerformAction
   fun:testing::internal::FunctionMockerBase::UntypedPerformAction
@@ -648,6 +583,7 @@
   fun:testing::internal::FunctionMockerBase::InvokeWith
   fun:testing::internal::FunctionMocker::Invoke
   fun:media::FFmpegVideoDecodeEngineTest::ProduceVideoSample
+  ...
   fun:media::FFmpegVideoDecodeEngine::ReadInput
 }
 {
@@ -661,7 +597,7 @@
   fun:media::FFmpegVideoDecodeEngine::ConsumeVideoSample
   fun:media::DemuxCompleteActionP2::gmock_Impl::gmock_PerformImpl
   fun:testing::internal::ActionHelper::Perform
-  fun:media::DemuxCompleteActionP2::gmock_Impl::Perform
+  ...
   fun:testing::Action::Perform
   fun:testing::internal::ActionResultHolder::PerformAction
   fun:testing::internal::FunctionMockerBase::UntypedPerformAction
@@ -669,6 +605,7 @@
   fun:testing::internal::FunctionMockerBase::InvokeWith
   fun:testing::internal::FunctionMocker::Invoke
   fun:media::FFmpegVideoDecodeEngineTest::ProduceVideoSample
+  ...
   fun:media::FFmpegVideoDecodeEngine::ReadInput
 }
 {
@@ -694,4 +631,12 @@
    fun:media::AudioRendererBase::Stop
    fun:media::CompositeFilter::CallFilter
    fun:media::CompositeFilter::SerialCallback
+}
+{
+  bug_100020
+  ThreadSanitizer:Race
+  fun:linked_ptr_internal::join
+  fun:linked_ptr::copy
+  ...
+  fun:HostContentSettingsMap::GetDefaultContentSetting
 }

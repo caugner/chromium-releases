@@ -12,9 +12,9 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autofill/autofill_field.h"
+#include "chrome/browser/autofill/autofill_regex_constants.h"
 #include "chrome/browser/autofill/autofill_scanner.h"
 #include "chrome/browser/autofill/field_types.h"
-#include "grit/autofill_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 FormField* AddressField::Parse(AutofillScanner* scanner) {
@@ -25,10 +25,8 @@ FormField* AddressField::Parse(AutofillScanner* scanner) {
   const AutofillField* const initial_field = scanner->Cursor();
   size_t saved_cursor = scanner->SaveCursor();
 
-  string16 attention_ignored =
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_ATTENTION_IGNORED_RE);
-  string16 region_ignored =
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_REGION_IGNORED_RE);
+  string16 attention_ignored = UTF8ToUTF16(autofill::kAttentionIgnoredRe);
+  string16 region_ignored = UTF8ToUTF16(autofill::kRegionIgnoredRe);
 
   // Allow address fields to appear in any order.
   size_t begin_trailing_non_labeled_fields = 0;
@@ -189,7 +187,7 @@ bool AddressField::ParseCompany(AutofillScanner* scanner,
   if (address_field->company_ && !address_field->company_->IsEmpty())
     return false;
 
-  return ParseField(scanner, l10n_util::GetStringUTF16(IDS_AUTOFILL_COMPANY_RE),
+  return ParseField(scanner, UTF8ToUTF16(autofill::kCompanyRe),
                     &address_field->company_);
 }
 
@@ -207,9 +205,8 @@ bool AddressField::ParseAddressLines(AutofillScanner* scanner,
   if (address_field->address1_)
     return false;
 
-  string16 pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_LINE_1_RE);
-  string16 label_pattern =
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_LINE_1_LABEL_RE);
+  string16 pattern = UTF8ToUTF16(autofill::kAddressLine1Re);
+  string16 label_pattern = UTF8ToUTF16(autofill::kAddressLine1LabelRe);
 
   if (!ParseField(scanner, pattern, &address_field->address1_) &&
       !ParseFieldSpecifics(scanner, label_pattern, MATCH_LABEL | MATCH_TEXT,
@@ -220,9 +217,8 @@ bool AddressField::ParseAddressLines(AutofillScanner* scanner,
   // Optionally parse more address lines, which may have empty labels.
   // Some pages have 3 address lines (eg SharperImageModifyAccount.html)
   // Some pages even have 4 address lines (e.g. uk/ShoesDirect2.html)!
-  pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_LINE_2_RE);
-  label_pattern =
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_LINE_1_LABEL_RE);
+  pattern = UTF8ToUTF16(autofill::kAddressLine2Re);
+  label_pattern = UTF8ToUTF16(autofill::kAddressLine2LabelRe);
   if (!ParseEmptyLabel(scanner, &address_field->address2_) &&
       !ParseField(scanner, pattern, &address_field->address2_)) {
     ParseFieldSpecifics(scanner, label_pattern, MATCH_LABEL | MATCH_TEXT,
@@ -231,7 +227,7 @@ bool AddressField::ParseAddressLines(AutofillScanner* scanner,
 
   // Try for a third line, which we will promptly discard.
   if (address_field->address2_ != NULL) {
-    pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_LINE_3_RE);
+    pattern = UTF8ToUTF16(autofill::kAddressLine3Re);
     ParseField(scanner, pattern, NULL);
   }
 
@@ -247,7 +243,7 @@ bool AddressField::ParseCountry(AutofillScanner* scanner,
     return false;
 
   return ParseFieldSpecifics(scanner,
-                             l10n_util::GetStringUTF16(IDS_AUTOFILL_COUNTRY_RE),
+                             UTF8ToUTF16(autofill::kCountryRe),
                              MATCH_DEFAULT | MATCH_SELECT,
                              &address_field->country_);
 }
@@ -265,7 +261,7 @@ bool AddressField::ParseZipCode(AutofillScanner* scanner,
   if (address_field->zip_)
     return false;
 
-  string16 pattern = l10n_util::GetStringUTF16(IDS_AUTOFILL_ZIP_CODE_RE);
+  string16 pattern = UTF8ToUTF16(autofill::kZipCodeRe);
   if (!ParseField(scanner, pattern, &address_field->zip_))
     return false;
 
@@ -273,7 +269,7 @@ bool AddressField::ParseZipCode(AutofillScanner* scanner,
   // Look for a zip+4, whose field name will also often contain
   // the substring "zip".
   ParseField(scanner,
-             l10n_util::GetStringUTF16(IDS_AUTOFILL_ZIP_4_RE),
+             UTF8ToUTF16(autofill::kZip4Re),
              &address_field->zip4_);
 
   return true;
@@ -289,7 +285,7 @@ bool AddressField::ParseCity(AutofillScanner* scanner,
 
   // Select fields are allowed here.  This occurs on top-100 site rediff.com.
   return ParseFieldSpecifics(scanner,
-                             l10n_util::GetStringUTF16(IDS_AUTOFILL_CITY_RE),
+                             UTF8ToUTF16(autofill::kCityRe),
                              MATCH_DEFAULT | MATCH_SELECT,
                              &address_field->city_);
 }
@@ -301,17 +297,16 @@ bool AddressField::ParseState(AutofillScanner* scanner,
     return false;
 
   return ParseFieldSpecifics(scanner,
-                             l10n_util::GetStringUTF16(IDS_AUTOFILL_STATE_RE),
+                             UTF8ToUTF16(autofill::kStateRe),
                              MATCH_DEFAULT | MATCH_SELECT,
                              &address_field->state_);
 }
 
 AddressField::AddressType AddressField::AddressTypeFromText(
     const string16 &text) {
-  if (text.find(l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_TYPE_SAME_AS_RE))
-          != string16::npos ||
-      text.find(l10n_util::GetStringUTF16(IDS_AUTOFILL_ADDRESS_TYPE_USE_MY_RE))
-          != string16::npos)
+  size_t same_as = text.find(UTF8ToUTF16(autofill::kAddressTypeSameAsRe));
+  size_t use_shipping = text.find(UTF8ToUTF16(autofill::kAddressTypeUseMyRe));
+  if (same_as != string16::npos || use_shipping != string16::npos)
     // This text could be a checkbox label such as "same as my billing
     // address" or "use my shipping address".
     // ++ It would help if we generally skipped all text that appears
@@ -321,10 +316,8 @@ AddressField::AddressType AddressField::AddressTypeFromText(
   // Not all pages say "billing address" and "shipping address" explicitly;
   // for example, Craft Catalog1.html has "Bill-to Address" and
   // "Ship-to Address".
-  size_t bill = text.rfind(
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_BILLING_DESIGNATOR_RE));
-  size_t ship = text.rfind(
-      l10n_util::GetStringUTF16(IDS_AUTOFILL_SHIPPING_DESIGNATOR_RE));
+  size_t bill = text.rfind(UTF8ToUTF16(autofill::kBillingDesignatorRe));
+  size_t ship = text.rfind(UTF8ToUTF16(autofill::kShippingDesignatorRe));
 
   if (bill == string16::npos && ship == string16::npos)
     return kGenericAddress;

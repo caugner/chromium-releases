@@ -29,7 +29,6 @@
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "content/common/chrome_descriptors.h"
-#include "content/common/content_switches.h"
 #include "content/common/font_config_ipc_linux.h"
 #include "content/common/main_function_params.h"
 #include "content/common/pepper_plugin_registry.h"
@@ -40,6 +39,7 @@
 #include "content/common/set_process_title.h"
 #include "content/common/unix_domain_socket_posix.h"
 #include "content/common/zygote_fork_delegate_linux.h"
+#include "content/public/common/content_switches.h"
 #include "skia/ext/SkFontHost_fontconfig_control.h"
 #include "unicode/timezone.h"
 #include "ipc/ipc_channel.h"
@@ -655,11 +655,15 @@ static void PreSandboxInit() {
 #if defined(USE_NSS)
   // NSS libraries are loaded before sandbox is activated. This is to allow
   // successful initialization of NSS which tries to load extra library files.
-  // Doing so will allow NSS to be used within sandbox for chromoting.
   crypto::LoadNSSLibraries();
+#elif defined(USE_OPENSSL)
+  // OpenSSL is intentionally not supported in the sandboxed processes, see
+  // http://crbug.com/99163. If that ever changes we'll likely need to init
+  // OpenSSL here (at least, load the library and error strings).
 #else
-    // TODO(bulach): implement openssl support.
-    NOTREACHED() << "Remoting is not supported for openssl";
+  // It's possible that another hypothetical crypto stack would not require
+  // pre-sandbox init, but more likely this is just a build configuration error.
+  #error Which SSL library are you using?
 #endif
 
   // Ensure access to the Pepper plugins before the sandbox is turned on.

@@ -274,6 +274,8 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     //   return 1;
     case GL_SHADER_SOURCE_LENGTH:
       return 1;
+    case GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE:
+      return 1;
 
     // -- glGetTexParameterfv, glGetTexParameteriv
     case GL_TEXTURE_MAG_FILTER:
@@ -348,6 +350,7 @@ int BytesPerElement(int type) {
   switch (type) {
     case GL_FLOAT:
     case GL_UNSIGNED_INT_24_8_OES:
+    case GL_UNSIGNED_INT:
       return 4;
     case GL_HALF_FLOAT_OES:
     case GL_UNSIGNED_SHORT:

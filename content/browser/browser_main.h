@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "content/common/content_export.h"
 
 class BrowserThread;
 class CommandLine;
@@ -66,18 +67,18 @@ namespace content {
 //    method with a well-defined purpose. (Likewise, if you're adding to an
 //    existing chunk which makes it longer than one or two lines, please move
 //    the code out into a separate method.)
-class BrowserMainParts {
+class CONTENT_EXPORT BrowserMainParts {
  public:
   explicit BrowserMainParts(const MainFunctionParams& parameters);
   virtual ~BrowserMainParts();
 
   // Parts to be called by |BrowserMain()|.
   void EarlyInitialization();
-  void MainMessageLoopStart();
   void InitializeToolkit();
+  void MainMessageLoopStart();
+  void RunMainMessageLoopParts();
 
-  // Temporary function since not all the code from chrome is moved over yet.
-  virtual int TemporaryContinue();
+  int result_code() const { return result_code_; }
 
  protected:
   // Methods to be overridden to provide platform-specific code; these
@@ -86,9 +87,9 @@ class BrowserMainParts {
   virtual void PostEarlyInitialization();
   virtual void PreMainMessageLoopStart();
   virtual void PostMainMessageLoopStart();
-
-  // Used to initialize NSPR where appropriate.
-  virtual void InitializeSSL();
+  virtual void PreMainMessageLoopRun();
+  virtual void MainMessageLoopRun();
+  virtual void PostMainMessageLoopRun();
 
   // Allows an embedder to do any extra toolkit initialization.
   virtual void ToolkitInitialized();
@@ -103,6 +104,7 @@ class BrowserMainParts {
   MessageLoop& main_message_loop() const {
     return *main_message_loop_;
   }
+  void set_result_code(int result_code) { result_code_ = result_code; }
 
  private:
   void InitializeMainThread();
@@ -111,6 +113,7 @@ class BrowserMainParts {
 
   const MainFunctionParams& parameters_;
   const CommandLine& parsed_command_line_;
+  int result_code_;
 
   // Members initialized in |MainMessageLoopStart()| ---------------------------
   scoped_ptr<MessageLoop> main_message_loop_;
@@ -122,12 +125,10 @@ class BrowserMainParts {
   DISALLOW_COPY_AND_ASSIGN(BrowserMainParts);
 };
 
-// Perform platform-specific work that needs to be done after the main event
-// loop has ended. The embedder must be sure to call this.
-// TODO(jam): change this so that content calls it so that we don't depend on
-// the embedder.
-void DidEndMainMessageLoop();
+bool ExitedMainMessageLoop();
 
 }  // namespace content
+
+CONTENT_EXPORT int BrowserMain(const MainFunctionParams& parameters);
 
 #endif  // CONTENT_BROWSER_BROWSER_MAIN_H_

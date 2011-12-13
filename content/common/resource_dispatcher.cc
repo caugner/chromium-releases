@@ -13,9 +13,9 @@
 #include "base/shared_memory.h"
 #include "base/string_util.h"
 #include "content/common/request_extra_data.h"
-#include "content/common/resource_dispatcher_delegate.h"
 #include "content/common/resource_messages.h"
 #include "content/common/resource_response.h"
+#include "content/public/common/resource_dispatcher_delegate.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/upload_data.h"
@@ -103,7 +103,7 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
   } else {
     request_.is_main_frame = false;
     request_.frame_id = -1;
-    request_.transition_type = PageTransition::LINK;
+    request_.transition_type = content::PAGE_TRANSITION_LINK;
   }
 }
 

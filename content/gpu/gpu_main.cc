@@ -14,9 +14,9 @@
 #include "base/threading/platform_thread.h"
 #include "base/win/scoped_com_initializer.h"
 #include "build/build_config.h"
-#include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_config.h"
 #include "content/common/main_function_params.h"
+#include "content/public/common/content_switches.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
 #include "ui/gfx/gl/gl_surface.h"
@@ -39,6 +39,19 @@ int GpuMain(const MainFunctionParams& parameters) {
   const CommandLine& command_line = parameters.command_line_;
   if (command_line.HasSwitch(switches::kGpuStartupDialog)) {
     ChildProcess::WaitForDebugger("Gpu");
+  }
+
+  if (!command_line.HasSwitch(switches::kSingleProcess)) {
+#if defined(OS_WIN)
+    // Prevent Windows from displaying a modal dialog on failures like not being
+    // able to load a DLL.
+    SetErrorMode(
+        SEM_FAILCRITICALERRORS |
+        SEM_NOGPFAULTERRORBOX |
+        SEM_NOOPENFILEERRORBOX);
+#elif defined(USE_X11)
+    ui::SetDefaultX11ErrorHandlers();
+#endif
   }
 
   // Initialization of the OpenGL bindings may fail, in which case we
@@ -91,19 +104,6 @@ int GpuMain(const MainFunctionParams& parameters) {
 
   MessageLoop main_message_loop(message_loop_type);
   base::PlatformThread::SetName("CrGpuMain");
-
-  if (!command_line.HasSwitch(switches::kSingleProcess)) {
-#if defined(OS_WIN)
-    // Prevent Windows from displaying a modal dialog on failures like not being
-    // able to load a DLL.
-    SetErrorMode(
-        SEM_FAILCRITICALERRORS |
-        SEM_NOGPFAULTERRORBOX |
-        SEM_NOOPENFILEERRORBOX);
-#elif defined(USE_X11)
-    ui::SetDefaultX11ErrorHandlers();
-#endif
-  }
 
   GpuProcess gpu_process;
 

@@ -4,6 +4,7 @@
 
 #include "chrome/renderer/extensions/extension_process_bindings.h"
 
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -11,9 +12,11 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
+#include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -22,52 +25,67 @@
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_view_types.h"
+#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/render_view_visitor.h"
 #include "chrome/renderer/chrome_render_process_observer.h"
-#include "chrome/renderer/extensions/bindings_utils.h"
+#include "chrome/renderer/extensions/chrome_v8_context.h"
+#include "chrome/renderer/extensions/chrome_v8_context_set.h"
+#include "chrome/renderer/extensions/chrome_v8_extension.h"
 #include "chrome/renderer/extensions/event_bindings.h"
-#include "chrome/renderer/extensions/extension_base.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/extensions/extension_helper.h"
-#include "chrome/renderer/extensions/js_only_v8_extensions.h"
 #include "chrome/renderer/extensions/renderer_extension_bindings.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
-#include "content/renderer/render_view.h"
-#include "content/renderer/render_view_visitor.h"
+#include "chrome/renderer/static_v8_external_string_resource.h"
+#include "content/public/renderer/render_view.h"
 #include "grit/common_resources.h"
 #include "grit/renderer_resources.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebBlob.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "v8/include/v8.h"
 #include "webkit/glue/webkit_glue.h"
 
-using bindings_utils::GetPendingRequestMap;
-using bindings_utils::PendingRequest;
-using bindings_utils::PendingRequestMap;
 using WebKit::WebFrame;
 using WebKit::WebView;
 
 namespace {
 
-const char kExtensionName[] = "chrome/ExtensionProcessBindings";
 const char* kExtensionDeps[] = {
-  EventBindings::kName,
-  JsonSchemaJsV8Extension::kName,
-  RendererExtensionBindings::kName,
-  ExtensionApiTestV8Extension::kName,
+  "extensions/event.js",
+  "extensions/json_schema.js",
+  "extensions/renderer_extension_bindings.js",
+  "extensions/apitest.js"
 };
+
+// Contains info relevant to a pending API request.
+struct PendingRequest {
+ public :
+  PendingRequest(v8::Persistent<v8::Context> context, const std::string& name)
+      : context(context), name(name) {
+  }
+  v8::Persistent<v8::Context> context;
+  std::string name;
+};
+typedef std::map<int, linked_ptr<PendingRequest> > PendingRequestMap;
+
+base::LazyInstance<PendingRequestMap> g_pending_requests(
+    base::LINKER_INITIALIZED);
 
 // A RenderViewVisitor class that iterates through the set of available
 // views, looking for a view of the given type, in the given browser window
 // and within the given extension.
 // Used to accumulate the list of views associated with an extension.
-class ExtensionViewAccumulator : public RenderViewVisitor {
+class ExtensionViewAccumulator : public content::RenderViewVisitor {
  public:
   ExtensionViewAccumulator(const std::string& extension_id,
                            int browser_window_id,
-                           ViewType::Type view_type)
+                           content::ViewType view_type)
       : extension_id_(extension_id),
         browser_window_id_(browser_window_id),
         view_type_(view_type),
@@ -77,12 +95,12 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
 
   v8::Local<v8::Array> views() { return views_; }
 
-  virtual bool Visit(RenderView* render_view) {
+  virtual bool Visit(content::RenderView* render_view) {
     ExtensionHelper* helper = ExtensionHelper::Get(render_view);
     if (!ViewTypeMatches(helper->view_type(), view_type_))
       return true;
 
-    GURL url = render_view->webview()->mainFrame()->document().url();
+    GURL url = render_view->GetWebView()->mainFrame()->document().url();
     if (!url.SchemeIs(chrome::kExtensionScheme))
       return true;
     const std::string& extension_id = url.host();
@@ -95,7 +113,7 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
     }
 
     v8::Local<v8::Context> context =
-        render_view->webview()->mainFrame()->mainWorldScriptContext();
+        render_view->GetWebView()->mainFrame()->mainWorldScriptContext();
     if (!context.IsEmpty()) {
       v8::Local<v8::Value> window = context->Global();
       DCHECK(!window.IsEmpty());
@@ -113,19 +131,19 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
     views_->Set(v8::Integer::New(index_), view_window);
     index_++;
 
-    if (view_type_ == ViewType::EXTENSION_BACKGROUND_PAGE)
+    if (view_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE)
       return false;  // There can be only one...
 
     return true;
   }
 
   // Returns true is |type| "isa" |match|.
-  static bool ViewTypeMatches(ViewType::Type type, ViewType::Type match) {
+  static bool ViewTypeMatches(content::ViewType type, content::ViewType match) {
     if (type == match)
       return true;
 
     // INVALID means match all.
-    if (match == ViewType::INVALID)
+    if (match == content::VIEW_TYPE_INVALID)
       return true;
 
     return false;
@@ -133,19 +151,19 @@ class ExtensionViewAccumulator : public RenderViewVisitor {
 
   std::string extension_id_;
   int browser_window_id_;
-  ViewType::Type view_type_;
+  content::ViewType view_type_;
   v8::Local<v8::Array> views_;
   int index_;
 };
 
-class ExtensionImpl : public ExtensionBase {
+class ExtensionImpl : public ChromeV8Extension {
  public:
   explicit ExtensionImpl(ExtensionDispatcher* extension_dispatcher)
-    : ExtensionBase(kExtensionName,
-                    GetStringResource(IDR_EXTENSION_PROCESS_BINDINGS_JS),
-                    arraysize(kExtensionDeps),
-                    kExtensionDeps,
-                    extension_dispatcher) {
+      : ChromeV8Extension("extensions/extension_process_bindings.js",
+                          IDR_EXTENSION_PROCESS_BINDINGS_JS,
+                          arraysize(kExtensionDeps),
+                          kExtensionDeps,
+                          extension_dispatcher) {
   }
   ~ExtensionImpl() {}
 
@@ -181,15 +199,20 @@ class ExtensionImpl : public ExtensionBase {
       return v8::FunctionTemplate::New(GetLocalFileSystem);
     } else if (name->Equals(v8::String::New("DecodeJPEG"))) {
       return v8::FunctionTemplate::New(DecodeJPEG, v8::External::New(this));
+    } else if (name->Equals(v8::String::New("CreateBlob"))) {
+      return v8::FunctionTemplate::New(CreateBlob, v8::External::New(this));
     }
 
-    return ExtensionBase::GetNativeFunction(name);
+    return ChromeV8Extension::GetNativeFunction(name);
   }
 
  private:
   static v8::Handle<v8::Value> GetExtensionAPIDefinition(
       const v8::Arguments& args) {
-    return v8::String::New(GetStringResource(IDR_EXTENSION_API_JSON));
+    return v8::String::NewExternal(
+        new StaticV8ExternalAsciiStringResource(
+            ResourceBundle::GetSharedInstance().GetRawDataResource(
+                IDR_EXTENSION_API_JSON)));
   }
 
   static v8::Handle<v8::Value> GetExtensionViews(const v8::Arguments& args) {
@@ -205,21 +228,22 @@ class ExtensionImpl : public ExtensionBase {
 
     std::string view_type_string = *v8::String::Utf8Value(args[1]->ToString());
     StringToUpperASCII(&view_type_string);
-    // |view_type| == ViewType::INVALID means getting any type of views.
-    ViewType::Type view_type = ViewType::INVALID;
-    if (view_type_string == ViewType::kBackgroundPage) {
-      view_type = ViewType::EXTENSION_BACKGROUND_PAGE;
-    } else if (view_type_string == ViewType::kInfobar) {
-      view_type = ViewType::EXTENSION_INFOBAR;
-    } else if (view_type_string == ViewType::kNotification) {
-      view_type = ViewType::NOTIFICATION;
-    } else if (view_type_string == ViewType::kTabContents) {
-      view_type = ViewType::TAB_CONTENTS;
-    } else if (view_type_string == ViewType::kPopup) {
-      view_type = ViewType::EXTENSION_POPUP;
-    } else if (view_type_string == ViewType::kExtensionDialog) {
-      view_type = ViewType::EXTENSION_DIALOG;
-    } else if (view_type_string != ViewType::kAll) {
+    // |view_type| == content::VIEW_TYPE_INVALID means getting any type of
+    // views.
+    content::ViewType view_type = content::VIEW_TYPE_INVALID;
+    if (view_type_string == chrome::kViewTypeBackgroundPage) {
+      view_type = chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE;
+    } else if (view_type_string == chrome::kViewTypeInfobar) {
+      view_type = chrome::VIEW_TYPE_EXTENSION_INFOBAR;
+    } else if (view_type_string == chrome::kViewTypeNotification) {
+      view_type = chrome::VIEW_TYPE_NOTIFICATION;
+    } else if (view_type_string == chrome::kViewTypeTabContents) {
+      view_type = content::VIEW_TYPE_TAB_CONTENTS;
+    } else if (view_type_string == chrome::kViewTypePopup) {
+      view_type = chrome::VIEW_TYPE_EXTENSION_POPUP;
+    } else if (view_type_string == chrome::kViewTypeExtensionDialog) {
+      view_type = chrome::VIEW_TYPE_EXTENSION_DIALOG;
+    } else if (view_type_string != chrome::kViewTypeAll) {
       return v8::Undefined();
     }
 
@@ -231,7 +255,7 @@ class ExtensionImpl : public ExtensionBase {
 
     ExtensionViewAccumulator accumulator(extension->id(), browser_window_id,
                                          view_type);
-    RenderView::ForEach(&accumulator);
+    content::RenderView::ForEach(&accumulator);
     return accumulator.views();
   }
 
@@ -336,11 +360,22 @@ class ExtensionImpl : public ExtensionBase {
     return bitmap_array;
   }
 
+  // Creates a Blob with the content of the specified file.
+  static v8::Handle<v8::Value> CreateBlob(const v8::Arguments& args) {
+    CHECK(args.Length() == 2);
+    CHECK(args[0]->IsString());
+    CHECK(args[1]->IsInt32());
+    WebKit::WebString path(UTF8ToUTF16(*v8::String::Utf8Value(args[0])));
+    WebKit::WebBlob blob =
+        WebKit::WebBlob::createFromFile(path, args[1]->Int32Value());
+    return blob.toV8Value();
+  }
+
   // Creates a new messaging channel to the tab with the given ID.
   static v8::Handle<v8::Value> OpenChannelToTab(const v8::Arguments& args) {
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
-    RenderView* renderview = GetCurrentRenderView();
+    content::RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -351,7 +386,7 @@ class ExtensionImpl : public ExtensionBase {
       std::string channel_name = *v8::String::Utf8Value(args[2]->ToString());
       int port_id = -1;
       renderview->Send(new ExtensionHostMsg_OpenChannelToTab(
-          renderview->routing_id(), tab_id, extension_id, channel_name,
+        renderview->GetRoutingId(), tab_id, extension_id, channel_name,
           &port_id));
       return v8::Integer::New(port_id);
     }
@@ -403,7 +438,7 @@ class ExtensionImpl : public ExtensionBase {
 
     // Get the current RenderView so that we can send a routed IPC message from
     // the correct source.
-    RenderView* renderview = GetCurrentRenderView();
+    content::RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
 
@@ -430,7 +465,7 @@ class ExtensionImpl : public ExtensionBase {
     v8::Persistent<v8::Context> current_context =
         v8::Persistent<v8::Context>::New(v8::Context::GetCurrent());
     DCHECK(!current_context.IsEmpty());
-    GetPendingRequestMap()[request_id].reset(new PendingRequest(
+    g_pending_requests.Get()[request_id].reset(new PendingRequest(
         current_context, name));
 
     ExtensionHostMsg_Request_Params params;
@@ -443,10 +478,10 @@ class ExtensionImpl : public ExtensionBase {
         webframe ? webframe->isProcessingUserGesture() : false;
     if (for_io_thread) {
       renderview->Send(new ExtensionHostMsg_RequestForIOThread(
-          renderview->routing_id(), params));
+          renderview->GetRoutingId(), params));
     } else {
       renderview->Send(new ExtensionHostMsg_Request(
-          renderview->routing_id(), params));
+          renderview->GetRoutingId(), params));
     }
 
     return v8::Undefined();
@@ -540,10 +575,10 @@ class ExtensionImpl : public ExtensionBase {
   }
 
   static v8::Handle<v8::Value> GetRenderViewId(const v8::Arguments& args) {
-    RenderView* renderview = GetCurrentRenderView();
+    content::RenderView* renderview = GetCurrentRenderView();
     if (!renderview)
       return v8::Undefined();
-    return v8::Integer::New(renderview->routing_id());
+    return v8::Integer::New(renderview->GetRoutingId());
   }
 };
 
@@ -558,12 +593,24 @@ v8::Extension* ExtensionProcessBindings::Get(
 }
 
 // static
-void ExtensionProcessBindings::HandleResponse(int request_id, bool success,
-                                              const std::string& response,
-                                              const std::string& error) {
-  PendingRequestMap& pending_requests = GetPendingRequestMap();
-  PendingRequestMap::iterator request = pending_requests.find(request_id);
-  if (request == pending_requests.end())
+void ExtensionProcessBindings::HandleResponse(
+    const ChromeV8ContextSet& contexts,
+    int request_id,
+    bool success,
+    const std::string& response,
+    const std::string& error) {
+  PendingRequestMap::iterator request =
+      g_pending_requests.Get().find(request_id);
+  if (request == g_pending_requests.Get().end()) {
+    // This should not be able to happen since we only remove requests when they
+    // are handled.
+    LOG(ERROR) << "Could not find specified request id: " << request_id;
+    return;
+  }
+
+  ChromeV8Context* v8_context =
+      contexts.GetByV8Context(request->second->context);
+  if (!v8_context)
     return;  // The frame went away.
 
   v8::HandleScope handle_scope;
@@ -573,8 +620,12 @@ void ExtensionProcessBindings::HandleResponse(int request_id, bool success,
   argv[2] = v8::Boolean::New(success);
   argv[3] = v8::String::New(response.c_str());
   argv[4] = v8::String::New(error.c_str());
-  v8::Handle<v8::Value> retval = bindings_utils::CallFunctionInContext(
-      request->second->context, "handleResponse", arraysize(argv), argv);
+
+  v8::Handle<v8::Value> retval;
+  CHECK(v8_context->CallChromeHiddenMethod("handleResponse",
+                                           arraysize(argv),
+                                           argv,
+                                           &retval));
   // In debug, the js will validate the callback parameters and return a
   // string if a validation error has occured.
 #ifndef NDEBUG
@@ -586,5 +637,5 @@ void ExtensionProcessBindings::HandleResponse(int request_id, bool success,
 
   request->second->context.Dispose();
   request->second->context.Clear();
-  pending_requests.erase(request);
+  g_pending_requests.Get().erase(request);
 }

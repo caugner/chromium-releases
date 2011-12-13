@@ -46,15 +46,16 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
 
   // ProxyScriptFetcher methods:
   virtual int Fetch(const GURL& url, string16* text,
-                    CompletionCallback* callback) OVERRIDE;
+                    OldCompletionCallback* callback) OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual URLRequestContext* GetRequestContext() const OVERRIDE;
 
   // URLRequest::Delegate methods:
   virtual void OnAuthRequired(URLRequest* request,
                               AuthChallengeInfo* auth_info) OVERRIDE;
-  virtual void OnSSLCertificateError(URLRequest* request, int cert_error,
-                                     X509Certificate* cert) OVERRIDE;
+  virtual void OnSSLCertificateError(URLRequest* request,
+                                     const SSLInfo& ssl_info,
+                                     bool is_hsts_ok) OVERRIDE;
   virtual void OnResponseStarted(URLRequest* request) OVERRIDE;
   virtual void OnReadCompleted(URLRequest* request, int num_bytes) OVERRIDE;
 
@@ -100,7 +101,7 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
   int cur_request_id_;
 
   // Callback to invoke on completion of the fetch.
-  CompletionCallback* callback_;
+  OldCompletionCallback* callback_;
 
   // Holds the error condition that was hit on the current request, or OK.
   int result_code_;

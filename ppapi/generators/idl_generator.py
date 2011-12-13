@@ -12,7 +12,7 @@ from idl_option import GetOption, Option, ParseOptions
 GeneratorList = []
 
 Option('release', 'Which release to generate.', default='')
-Option('range', 'Which ranges in the form of MIN,MAX.', default='M13,M14')
+Option('range', 'Which ranges in the form of MIN,MAX.', default='M13,M16')
 
 
 #
@@ -146,7 +146,7 @@ class GeneratorByFile(Generator):
     cnt = 0
     for filenode in ast.GetListOf('File'):
       # Skip this file if not required
-      if outlist and name not in outlist:
+      if outlist and filenode.GetName() not in outlist:
         continue
 
       # If this file has errors, skip it

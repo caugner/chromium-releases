@@ -9,6 +9,8 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/i18n/case_conversion.h"
+#include "base/i18n/string_search.h"
+#include "base/metrics/histogram.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
@@ -22,11 +24,9 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_strings.h"
@@ -76,8 +76,9 @@ class NewBrowserPageNavigator : public PageNavigator {
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
-                               PageTransition::Type transition) OVERRIDE {
-    return OpenURL(OpenURLParams(url, referrer, disposition, transition));
+                               content::PageTransition transition) OVERRIDE {
+    return OpenURL(OpenURLParams(url, referrer, disposition, transition,
+                                 false));
   }
 
   virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
@@ -155,7 +156,7 @@ void OpenAllImpl(const BookmarkNode* node,
     else
       disposition = initial_disposition;
     (*navigator)->OpenURL(OpenURLParams(node->url(), GURL(), disposition,
-                          PageTransition::AUTO_BOOKMARK));
+                          content::PAGE_TRANSITION_AUTO_BOOKMARK, false));
     if (!*opened_url) {
       *opened_url = true;
       // We opened the first URL which may have opened a new window or clobbered
@@ -204,7 +205,7 @@ bool MoreRecentlyModified(const BookmarkNode* n1, const BookmarkNode* n2) {
 bool DoesBookmarkTextContainWords(const string16& text,
                                   const std::vector<string16>& words) {
   for (size_t i = 0; i < words.size(); ++i) {
-    if (text.find(words[i]) == string16::npos)
+    if (!base::i18n::StringSearchIgnoringCaseAndAccents(words[i], text))
       return false;
   }
   return true;
@@ -216,13 +217,11 @@ bool DoesBookmarkContainWords(const BookmarkNode* node,
                               const std::vector<string16>& words,
                               const std::string& languages) {
   return
-      DoesBookmarkTextContainWords(
-          base::i18n::ToLower(node->GetTitle()), words) ||
-      DoesBookmarkTextContainWords(
-          base::i18n::ToLower(UTF8ToUTF16(node->url().spec())), words) ||
-      DoesBookmarkTextContainWords(base::i18n::ToLower(
-          net::FormatUrl(node->url(), languages, net::kFormatUrlOmitNothing,
-                         UnescapeRule::NORMAL, NULL, NULL, NULL)), words);
+      DoesBookmarkTextContainWords(node->GetTitle(), words) ||
+      DoesBookmarkTextContainWords(UTF8ToUTF16(node->url().spec()), words) ||
+      DoesBookmarkTextContainWords(net::FormatUrl(
+          node->url(), languages, net::kFormatUrlOmitNothing,
+          UnescapeRule::NORMAL, NULL, NULL, NULL), words);
 }
 
 }  // namespace
@@ -644,13 +643,6 @@ void ToggleWhenVisible(Profile* profile) {
   // The user changed when the bookmark bar is shown, update the preferences.
   prefs->SetBoolean(prefs::kShowBookmarkBar, always_show);
   prefs->ScheduleSavePersistentPrefs();
-
-  // And notify the notification service.
-  Source<Profile> source(profile);
-  NotificationService::current()->Notify(
-      chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-      source,
-      NotificationService::NoDetails());
 }
 
 void RegisterUserPrefs(PrefService* prefs) {
@@ -775,6 +767,15 @@ void RemoveAllBookmarks(BookmarkModel* model, const GURL& url) {
     if (index > -1)
       model->Remove(node->parent(), index);
   }
+}
+
+void RecordBookmarkLaunch(BookmarkLaunchLocation location) {
+#if defined(OS_WIN)
+  // TODO(estade): do this on other platforms too. For now it's compiled out
+  // so that stats from platforms for which this is incompletely implemented
+  // don't mix in with Windows, where it should be implemented exhaustively.
+  UMA_HISTOGRAM_ENUMERATION("Bookmarks.LaunchLocation", location, LAUNCH_LIMIT);
+#endif
 }
 
 }  // namespace bookmark_utils

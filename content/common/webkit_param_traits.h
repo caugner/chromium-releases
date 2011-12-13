@@ -17,6 +17,7 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "content/common/content_export.h"
 #include "ipc/ipc_message_utils.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
@@ -25,6 +26,7 @@
 #include "webkit/glue/resource_type.h"
 #include "webkit/glue/webcursor.h"
 #include "webkit/glue/window_open_disposition.h"
+#include "webkit/plugins/webplugininfo.h"
 
 namespace webkit_glue {
 struct PasswordForm;
@@ -88,14 +90,6 @@ struct ParamTraits<scoped_refptr<webkit_glue::ResourceDevToolsInfo> > {
 };
 
 template <>
-struct ParamTraits<scoped_refptr<webkit_blob::BlobData > > {
-  typedef scoped_refptr<webkit_blob::BlobData> param_type;
-  static void Write(Message* m, const param_type& p);
-  static bool Read(const Message* m, void** iter, param_type* r);
-  static void Log(const param_type& p, std::string* l);
-};
-
-template <>
 struct ParamTraits<NPVariant_Param> {
   typedef NPVariant_Param param_type;
   static void Write(Message* m, const param_type& p);
@@ -106,6 +100,22 @@ struct ParamTraits<NPVariant_Param> {
 template <>
 struct ParamTraits<NPIdentifier_Param> {
   typedef NPIdentifier_Param param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct ParamTraits<webkit::WebPluginMimeType> {
+  typedef webkit::WebPluginMimeType param_type;
+  static void Write(Message* m, const param_type& p);
+  static bool Read(const Message* m, void** iter, param_type* r);
+  static void Log(const param_type& p, std::string* l);
+};
+
+template <>
+struct CONTENT_EXPORT ParamTraits<webkit::WebPluginInfo> {
+  typedef webkit::WebPluginInfo param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* r);
   static void Log(const param_type& p, std::string* l);
@@ -227,7 +237,7 @@ struct SimilarTypeTraits<WindowOpenDisposition> {
 };
 
 template <>
-struct ParamTraits<webkit_glue::PasswordForm> {
+struct CONTENT_EXPORT ParamTraits<webkit_glue::PasswordForm> {
   typedef webkit_glue::PasswordForm param_type;
   static void Write(Message* m, const param_type& p);
   static bool Read(const Message* m, void** iter, param_type* p);

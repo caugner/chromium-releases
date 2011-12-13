@@ -12,7 +12,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/geolocation/device_data_provider.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/content_export.h"
+#include "content/common/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 
 class URLFetcher;
@@ -29,7 +30,7 @@ struct Position;
 class NetworkLocationRequest : private URLFetcher::Delegate {
  public:
   // ID passed to URLFetcher::Create(). Used for testing.
-  static int url_fetcher_id_for_tests;
+  CONTENT_EXPORT static int url_fetcher_id_for_tests;
   // Interface for receiving callbacks from a NetworkLocationRequest object.
   class ListenerInterface {
    public:
@@ -65,12 +66,7 @@ class NetworkLocationRequest : private URLFetcher::Delegate {
 
  private:
   // URLFetcher::Delegate
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data);
+  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
 
   scoped_refptr<net::URLRequestContextGetter> url_context_;
   ListenerInterface* listener_;

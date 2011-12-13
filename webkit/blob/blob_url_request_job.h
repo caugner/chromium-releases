@@ -6,11 +6,10 @@
 #define WEBKIT_BLOB_BLOB_URL_REQUEST_JOB_H_
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/platform_file.h"
 #include "base/task.h"
-#include "net/base/completion_callback.h"
 #include "net/http/http_byte_range.h"
 #include "net/url_request/url_request_job.h"
 #include "webkit/blob/blob_data.h"
@@ -69,10 +68,9 @@ class BlobURLRequestJob : public net::URLRequestJob {
                bool created);
   void DidRead(int result);
 
-  base::ScopedCallbackFactory<BlobURLRequestJob> callback_factory_;
+  base::WeakPtrFactory<BlobURLRequestJob> weak_factory_;
   scoped_refptr<BlobData> blob_data_;
   scoped_refptr<base::MessageLoopProxy> file_thread_proxy_;
-  net::CompletionCallbackImpl<BlobURLRequestJob> io_callback_;
   std::vector<int64> item_length_list_;
   scoped_ptr<net::FileStream> stream_;
   size_t item_index_;

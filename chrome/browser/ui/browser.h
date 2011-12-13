@@ -33,17 +33,20 @@
 #include "chrome/browser/ui/bookmarks/bookmark_bar.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
+#include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
 #include "chrome/browser/ui/shell_dialogs.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/page_transition_types.h"
 #include "content/common/page_zoom.h"
+#include "content/public/common/page_transition_types.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
 
@@ -72,6 +75,7 @@ class Browser : public TabHandlerDelegate,
                 public TabContentsDelegate,
                 public TabContentsWrapperDelegate,
                 public SearchEngineTabHelperDelegate,
+                public ConstrainedWindowTabHelperDelegate,
                 public BlockedContentTabHelperDelegate,
                 public BookmarkTabHelperDelegate,
                 public PageNavigator,
@@ -299,12 +303,6 @@ class Browser : public TabHandlerDelegate,
   // extensions which may run with no windows open.
   static void OpenExtensionsWindow(Profile* profile);
 
-  // Opens a new window with the given profile. This starts the session_service
-  // for the new profile as well; it is the static equivalent of the instance
-  // method Browser::NewWindow(), used for the creation of a Window from the
-  // multi-profile dropdown menu.
-  static void NewWindowWithProfile(Profile* profile);
-
   // State Storage and Retrieval for UI ///////////////////////////////////////
 
   // Save and restore the window position.
@@ -379,6 +377,7 @@ class Browser : public TabHandlerDelegate,
   TabContents* GetTabContentsAt(int index) const;
   void ActivateTabAt(int index, bool user_gesture);
   bool IsTabPinned(int index) const;
+  bool IsTabDiscarded(int index) const;
   void CloseAllTabs();
 
   // Tab adding/showing functions /////////////////////////////////////////////
@@ -396,12 +395,12 @@ class Browser : public TabHandlerDelegate,
   // created TabContents.
   TabContentsWrapper* AddSelectedTabWithURL(
       const GURL& url,
-      PageTransition::Type transition);
+      content::PageTransition transition);
 
   // Add a new tab, given a TabContents. A TabContents appropriate to
   // display the last committed entry is created and returned.
   TabContents* AddTab(TabContentsWrapper* tab_contents,
-                      PageTransition::Type type);
+                      content::PageTransition type);
 
   // Add a tab with its session history restored from the SessionRestore
   // system. If select is true, the tab is selected. |tab_index| gives the index
@@ -472,7 +471,7 @@ class Browser : public TabHandlerDelegate,
   browser::NavigateParams GetSingletonTabNavigateParams(const GURL& url);
 
   // Invoked when the fullscreen state of the window changes.
-  // BrowserWindow::SetFullscreen invokes this after the window has become
+  // BrowserWindow::EnterFullscreen invokes this after the window has become
   // fullscreen.
   void WindowFullscreenStateChanged();
 
@@ -511,9 +510,9 @@ class Browser : public TabHandlerDelegate,
   void WriteCurrentURLToClipboard();
   void ConvertPopupToTabbedBrowser();
   // In kiosk mode, the first toggle is valid, the rest is discarded.
-  void ToggleFullscreenMode();
+  void ToggleFullscreenMode(bool from_tab);
 #if defined(OS_MACOSX)
-  void TogglePresentationMode();
+  void TogglePresentationMode(bool from_tab);
 #endif
   void Exit();
 #if defined(OS_CHROMEOS)
@@ -619,10 +618,6 @@ class Browser : public TabHandlerDelegate,
 
   virtual void UpdateDownloadShelfVisibility(bool visible);
 
-  // Overridden from TabStripModelDelegate:
-  virtual bool UseVerticalTabs() const;
-  virtual bool UseCompactNavigationBar() const;
-
   /////////////////////////////////////////////////////////////////////////////
 
   // Sets the value of homepage related prefs to new values. Since we do not
@@ -678,14 +673,6 @@ class Browser : public TabHandlerDelegate,
                                           const string16& href,
                                           const string16& title);
 
-  // Helper function to handle WebIntent notifications.
-  static void WebIntentDispatchHelper(TabContents* tab,
-                                      int routing_id,
-                                      const string16& action,
-                                      const string16& type,
-                                      const string16& data,
-                                      int intent_id);
-
   // Helper function to handle find results.
   static void FindReplyHelper(TabContents* tab,
                               int request_id,
@@ -733,7 +720,7 @@ class Browser : public TabHandlerDelegate,
   // Called by browser::Navigate() when a navigation has occurred in a tab in
   // this Browser. Updates the UI for the start of this navigation.
   void UpdateUIForNavigationInTab(TabContentsWrapper* contents,
-                                  PageTransition::Type transition,
+                                  content::PageTransition transition,
                                   bool user_initiated);
 
   // Called by browser::Navigate() to retrieve the home page if no URL is
@@ -751,7 +738,7 @@ class Browser : public TabHandlerDelegate,
   virtual TabContents* OpenURL(const GURL& url,
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
-                               PageTransition::Type transition) OVERRIDE;
+                               content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE;
 
   // Overridden from CommandUpdater::CommandUpdaterDelegate:
@@ -785,12 +772,13 @@ class Browser : public TabHandlerDelegate,
   virtual int GetDragActions() const;
   // Construct a TabContents for a given URL, profile and transition type.
   // If instance is not null, its process will be used to render the tab.
-  virtual TabContentsWrapper* CreateTabContentsForURL(const GURL& url,
-                                               const GURL& referrer,
-                                               Profile* profile,
-                                               PageTransition::Type transition,
-                                               bool defer_load,
-                                               SiteInstance* instance) const;
+  virtual TabContentsWrapper* CreateTabContentsForURL(
+      const GURL& url,
+      const GURL& referrer,
+      Profile* profile,
+      content::PageTransition transition,
+      bool defer_load,
+      SiteInstance* instance) const;
   virtual bool CanDuplicateContentsAt(int index);
   virtual void DuplicateContentsAt(int index);
   virtual void CloseFrameAfterDragSession();
@@ -800,8 +788,6 @@ class Browser : public TabHandlerDelegate,
   virtual bool CanBookmarkAllTabs() const;
   virtual void BookmarkAllTabs();
   virtual bool CanCloseTab() const;
-  virtual void ToggleUseVerticalTabs();
-  virtual void ToggleUseCompactNavigationBar();
   virtual bool CanRestoreTab();
   virtual void RestoreTab();
   virtual bool LargeIconsPermitted() const;
@@ -829,6 +815,12 @@ class Browser : public TabHandlerDelegate,
   virtual void TabPinnedStateChanged(TabContentsWrapper* contents, int index);
   virtual void TabStripEmpty();
 
+  // Fullscreen permission infobar callbacks.
+  void OnAcceptFullscreenPermission(const GURL& url,
+                                    FullscreenExitBubbleType bubble_type);
+  void OnDenyFullscreenPermission(FullscreenExitBubbleType bubble_type);
+  ContentSetting GetFullscreenSetting(const GURL& url);
+
   // Figure out if there are tabs that have beforeunload handlers.
   bool TabsNeedBeforeUnloadFired();
 
@@ -843,6 +835,9 @@ class Browser : public TabHandlerDelegate,
   // webkitRequestFullScreen.
   bool is_fullscreen_for_tab() const { return fullscreened_tab_ != NULL; }
 
+  // Called each time the browser window is shown.
+  void OnWindowDidShow();
+
  protected:
   // Wrapper for the factory method in BrowserWindow. This allows subclasses to
   // set their own window.
@@ -856,6 +851,7 @@ class Browser : public TabHandlerDelegate,
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, AppIdSwitch);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, TestNewTabExitsFullscreen);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, TestTabExitsItselfFromFullscreen);
+  FRIEND_TEST_ALL_PREFIXES(BrowserTest, TestFullscreenBubbleMouseLockState);
   FRIEND_TEST_ALL_PREFIXES(BrowserTest, TabEntersPresentationModeFromWindowed);
   FRIEND_TEST_ALL_PREFIXES(BrowserInitTest, OpenAppShortcutNoPref);
   FRIEND_TEST_ALL_PREFIXES(BrowserInitTest, OpenAppShortcutWindowPref);
@@ -893,14 +889,24 @@ class Browser : public TabHandlerDelegate,
     BOOKMARK_BAR_STATE_CHANGE_TOGGLE_FULLSCREEN,
   };
 
+  enum MouseLockState {
+    MOUSELOCK_NOT_REQUESTED,
+    // The page requests to lock the mouse and the user hasn't responded to the
+    // request.
+    MOUSELOCK_REQUESTED,
+    // Mouse lock has been allowed by the user.
+    MOUSELOCK_ACCEPTED
+  };
+
   // Overridden from TabContentsDelegate:
   // Deprecated. Please use two-argument variant.
   // TODO(adriansc): Remove this method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const GURL& url,
-                                      const GURL& referrer,
-                                      WindowOpenDisposition disposition,
-                                      PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(
+      TabContents* source,
+      const GURL& url,
+      const GURL& referrer,
+      WindowOpenDisposition disposition,
+      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
   virtual void NavigationStateChanged(const TabContents* source,
@@ -923,8 +929,6 @@ class Browser : public TabHandlerDelegate,
   virtual void ContentsMouseEvent(
       TabContents* source, const gfx::Point& location, bool motion) OVERRIDE;
   virtual void ContentsZoomChange(bool zoom_in) OVERRIDE;
-  virtual void SetTabContentBlocked(TabContents* contents,
-                                    bool blocked) OVERRIDE;
   virtual void TabContentsFocused(TabContents* tab_content) OVERRIDE;
   virtual bool TakeFocus(bool reverse) OVERRIDE;
   virtual bool IsApplication() const OVERRIDE;
@@ -954,7 +958,7 @@ class Browser : public TabHandlerDelegate,
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) OVERRIDE;
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
-      NavigationType::Type navigation_type) OVERRIDE;
+      content::NavigationType navigation_type) OVERRIDE;
   virtual void ContentRestrictionsChanged(TabContents* source) OVERRIDE;
   virtual void RendererUnresponsive(TabContents* source) OVERRIDE;
   virtual void RendererResponsive(TabContents* source) OVERRIDE;
@@ -970,6 +974,7 @@ class Browser : public TabHandlerDelegate,
                                 const FilePath& path) OVERRIDE;
   virtual void ToggleFullscreenModeForTab(TabContents* tab,
       bool enter_fullscreen) OVERRIDE;
+  virtual bool IsFullscreenForTab(const TabContents* tab) const OVERRIDE;
   virtual void JSOutOfMemory(TabContents* tab) OVERRIDE;
   virtual void RegisterProtocolHandler(TabContents* tab,
                                        const std::string& protocol,
@@ -982,9 +987,7 @@ class Browser : public TabHandlerDelegate,
                                      const string16& title) OVERRIDE;
   virtual void WebIntentDispatch(TabContents* tab,
                                  int routing_id,
-                                 const string16& action,
-                                 const string16& type,
-                                 const string16& data,
+                                 const webkit_glue::WebIntentData& intent,
                                  int intent_id) OVERRIDE;
   virtual void UpdatePreferredSize(TabContents* source,
                                    const gfx::Size& pref_size) OVERRIDE;
@@ -999,6 +1002,9 @@ class Browser : public TabHandlerDelegate,
   virtual void CrashedPlugin(TabContents* tab,
                              const FilePath& plugin_path) OVERRIDE;
 
+  virtual void RequestToLockMouse(TabContents* tab) OVERRIDE;
+  virtual void LostMouseLock() OVERRIDE;
+
   // Overridden from TabContentsWrapperDelegate:
   virtual void OnDidGetApplicationInfo(TabContentsWrapper* source,
                                        int32 page_id) OVERRIDE;
@@ -1008,15 +1014,18 @@ class Browser : public TabHandlerDelegate,
 
   // Note that the caller is responsible for deleting |old_tab_contents|.
   virtual void SwapTabContents(TabContentsWrapper* old_tab_contents,
-                               TabContentsWrapper* new_tab_contents);
+                               TabContentsWrapper* new_tab_contents) OVERRIDE;
 
   // Overridden from SearchEngineTabHelperDelegate:
-  virtual void ConfirmSetDefaultSearchProvider(
-      TabContents* tab_contents,
-      TemplateURL* template_url,
-      TemplateURLService* template_url_service) OVERRIDE;
+  virtual void ConfirmSetDefaultSearchProvider(TabContents* tab_contents,
+                                               TemplateURL* template_url,
+                                               Profile* profile) OVERRIDE;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
+
+  // Overridden from ConstrainedWindowTabHelperDelegate:
+  virtual void SetTabContentBlocked(TabContentsWrapper* contents,
+                                    bool blocked) OVERRIDE;
 
   // Overridden from BlockedContentTabHelperDelegate:
   virtual TabContentsWrapper* GetConstrainingContentsWrapper(
@@ -1038,7 +1047,6 @@ class Browser : public TabHandlerDelegate,
   virtual void OnStateChanged();
 
   // Overriden from InstantDelegate:
-  virtual void PrepareForInstant() OVERRIDE;
   virtual void ShowInstant(TabContentsWrapper* preview_contents) OVERRIDE;
   virtual void HideInstant() OVERRIDE;
   virtual void CommitInstant(TabContentsWrapper* preview_contents) OVERRIDE;
@@ -1217,18 +1225,6 @@ class Browser : public TabHandlerDelegate,
   // current tab.
   TabContents* GetOrCloneTabForDisposition(WindowOpenDisposition disposition);
 
-  // Sets the insertion policy of the tabstrip based on whether vertical tabs
-  // are enabled.
-  void UpdateTabStripModelInsertionPolicy();
-
-  // Invoked when the use vertical tabs preference changes. Resets the insertion
-  // policy of the tab strip model and notifies the window.
-  void UseVerticalTabsChanged();
-
-  // Invoked when the use of the compact navigation bar preference changes.
-  // Notifies the window.
-  void UseCompactNavigationBarChanged();
-
   // Implementation of SupportsWindowFeature and CanSupportWindowFeature. If
   // |check_fullscreen| is true, the set of features reflect the actual state of
   // the browser, otherwise the set of features reflect the possible state of
@@ -1279,6 +1275,12 @@ class Browser : public TabHandlerDelegate,
 
   // Notifies the tab that it has been forced out of fullscreen mode.
   void NotifyTabOfFullscreenExit();
+
+  // Determines what should be shown in the fullscreen exit bubble.
+  FullscreenExitBubbleType GetFullscreenExitBubbleType() const;
+
+  // Updates the content of the fullscreen exit bubble.
+  void UpdateFullscreenExitBubbleContent();
 
   // Data members /////////////////////////////////////////////////////////////
 
@@ -1405,12 +1407,6 @@ class Browser : public TabHandlerDelegate,
   // from a TabContents. Currently, only one pending action is allowed.
   WebAppAction pending_web_app_action_;
 
-  // Tracks the display mode of the tabstrip.
-  mutable BooleanPrefMember use_vertical_tabs_;
-
-  // Tracks the display mode of the navigation bar.
-  mutable BooleanPrefMember use_compact_navigation_bar_;
-
   // The profile's tab restore service. The service is owned by the profile,
   // and we install ourselves as an observer.
   TabRestoreService* tab_restore_service_;
@@ -1432,6 +1428,14 @@ class Browser : public TabHandlerDelegate,
 
   // True if the current tab entered fullscreen mode via webkitRequestFullScreen
   bool tab_caused_fullscreen_;
+  // True if tab fullscreen has been allowed, either by settings or by user
+  // clicking the allow button on the fullscreen infobar.
+  bool tab_fullscreen_accepted_;
+
+  MouseLockState mouse_lock_state_;
+
+  // True if the browser window has been shown at least once.
+  bool window_has_shown_;
 
   DISALLOW_COPY_AND_ASSIGN(Browser);
 };

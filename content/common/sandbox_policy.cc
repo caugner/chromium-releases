@@ -17,9 +17,9 @@
 #include "base/string_util.h"
 #include "base/win/windows_version.h"
 #include "content/common/content_client.h"
-#include "content/common/content_switches.h"
 #include "content/common/child_process_info.h"
 #include "content/common/debug_flags.h"
+#include "content/public/common/content_switches.h"
 #include "sandbox/src/sandbox.h"
 #include "ui/gfx/gl/gl_switches.h"
 
@@ -220,7 +220,7 @@ void AddPluginDllEvictionPolicy(sandbox::TargetPolicy* policy) {
 // Returns the object path prepended with the current logon session.
 string16 PrependWindowsSessionPath(const char16* object) {
   // Cache this because it can't change after process creation.
-  uintptr_t s_session_id = 0;
+  static uintptr_t s_session_id = 0;
   if (s_session_id == 0) {
     HANDLE token;
     DWORD session_id_length;
@@ -230,7 +230,8 @@ string16 PrependWindowsSessionPath(const char16* object) {
     CHECK(::GetTokenInformation(token, TokenSessionId, &session_id,
         sizeof(session_id), &session_id_length));
     CloseHandle(token);
-    s_session_id = session_id;
+    if (session_id)
+      s_session_id = session_id;
   }
 
   return base::StringPrintf(L"\\Sessions\\%d%ls", s_session_id, object);
@@ -295,6 +296,7 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
 // TODO(cpu): Lock down the sandbox more if possible.
 // TODO(apatrick): Use D3D9Ex to render windowless.
 bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
+#if !defined(NACL_WIN64)  // We don't need this code on win nacl64.
   if (base::win::GetVersion() > base::win::VERSION_XP) {
     policy->SetTokenLevel(sandbox::USER_RESTRICTED_SAME_ACCESS,
                           sandbox::USER_LIMITED);
@@ -323,6 +325,7 @@ bool AddPolicyForGPU(CommandLine* cmd_line, sandbox::TargetPolicy* policy) {
   }
 
   AddGenericDllEvictionPolicy(policy);
+#endif
   return true;
 }
 
@@ -385,9 +388,6 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   std::string type_str = cmd_line->GetSwitchValueASCII(switches::kProcessType);
   if (type_str == switches::kRendererProcess) {
     type = ChildProcessInfo::RENDER_PROCESS;
-  } else if (type_str == switches::kExtensionProcess) {
-    // Extensions are just renderers with another name.
-    type = ChildProcessInfo::RENDER_PROCESS;
   } else if (type_str == switches::kPluginProcess) {
     type = ChildProcessInfo::PLUGIN_PROCESS;
   } else if (type_str == switches::kWorkerProcess) {
@@ -423,8 +423,9 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
     VLOG(1) << "GPU sandbox is disabled";
   }
 
-  if (browser_command_line.HasSwitch(switches::kNoSandbox)) {
-    // The user has explicity opted-out from all sandboxing.
+  if (browser_command_line.HasSwitch(switches::kNoSandbox) ||
+      cmd_line->HasSwitch(switches::kNoSandbox)) {
+    // The user or the caller has explicity opted-out from all sandboxing.
     in_sandbox = false;
   }
 
@@ -460,11 +461,13 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
   PROCESS_INFORMATION target = {0};
   sandbox::TargetPolicy* policy = g_broker_services->CreatePolicy();
 
+#if !defined(NACL_WIN64)  // We don't need this code on win nacl64.
   if (type == ChildProcessInfo::PLUGIN_PROCESS &&
       !browser_command_line.HasSwitch(switches::kNoSandbox) &&
       content::GetContentClient()->SandboxPlugin(cmd_line, policy)) {
     in_sandbox = true;
   }
+#endif
 
   if (!in_sandbox) {
     policy->Release();
@@ -528,8 +531,10 @@ base::ProcessHandle StartProcessWithAccess(CommandLine* cmd_line,
 
   TRACE_EVENT_END_ETW("StartProcessWithAccess::LAUNCHPROCESS", 0, 0);
 
-  if (sandbox::SBOX_ALL_OK != result)
+  if (sandbox::SBOX_ALL_OK != result) {
+    LOG(ERROR) << "Failed to launch process. Error: " << result;
     return 0;
+  }
 
   // For Native Client sel_ldr processes on 32-bit Windows, reserve 1 GB of
   // address space to prevent later failure due to address space fragmentation

@@ -11,26 +11,47 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/system_monitor/system_monitor.h"
+#include "base/threading/thread_restrictions.h"
+#include "base/tracked_objects.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/content_browser_client.h"
-#include "content/common/content_switches.h"
 #include "content/common/hi_res_timer_manager.h"
 #include "content/common/main_function_params.h"
+#include "content/common/notification_service.h"
+#include "content/common/result_codes.h"
 #include "content/common/sandbox_policy.h"
+#include "content/public/common/content_switches.h"
+#include "crypto/nss_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/ssl_config_service.h"
+#include "net/socket/client_socket_factory.h"
 #include "net/socket/tcp_client_socket.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
 #include <commctrl.h>
+#include <ole2.h>
 #include <shellapi.h>
 
+#include "base/win/scoped_com_initializer.h"
+#include "net/base/winsock_init.h"
 #include "sandbox/src/sandbox.h"
+#include "ui/base/l10n/l10n_util_win.h"
+#endif
+
+#if defined(OS_LINUX)
+#include <glib-object.h>
+#endif
+
+#if defined(OS_CHROMEOS)
+#include <dbus/dbus-glib.h>
 #endif
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include <dbus/dbus-glib.h>
+#include <sys/stat.h>
+
+#include "content/browser/renderer_host/render_sandbox_host_linux.h"
+#include "content/browser/zygote_host_linux.h"
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
@@ -39,11 +60,10 @@
 
 namespace {
 
-// Windows-specific initialization code for the sandbox broker services. This
-// is just a NOP on non-Windows platforms to reduce ifdefs later on.
+#if defined(OS_WIN)
+// Windows-specific initialization code for the sandbox broker services.
 void InitializeBrokerServices(const MainFunctionParams& parameters,
                               const CommandLine& parsed_command_line) {
-#if defined(OS_WIN)
   sandbox::BrokerServices* broker_services =
       parameters.sandbox_info_.BrokerServices();
   if (broker_services) {
@@ -58,10 +78,38 @@ void InitializeBrokerServices(const MainFunctionParams& parameters,
       policy->Release();
     }
   }
-#endif
 }
+#elif defined(OS_POSIX) && !defined(OS_MACOSX)
+void SetupSandbox(const CommandLine& parsed_command_line) {
+  // TODO(evanm): move this into SandboxWrapper; I'm just trying to move this
+  // code en masse out of chrome_main for now.
+  const char* sandbox_binary = NULL;
+  struct stat st;
 
-#if defined(TOOLKIT_USES_GTK)
+  // In Chromium branded builds, developers can set an environment variable to
+  // use the development sandbox. See
+  // http://code.google.com/p/chromium/wiki/LinuxSUIDSandboxDevelopment
+  if (stat("/proc/self/exe", &st) == 0 && st.st_uid == getuid())
+    sandbox_binary = getenv("CHROME_DEVEL_SANDBOX");
+
+#if defined(LINUX_SANDBOX_PATH)
+  if (!sandbox_binary)
+    sandbox_binary = LINUX_SANDBOX_PATH;
+#endif
+
+  std::string sandbox_cmd;
+  if (sandbox_binary && !parsed_command_line.HasSwitch(switches::kNoSandbox))
+    sandbox_cmd = sandbox_binary;
+
+  // Tickle the sandbox host and zygote host so they fork now.
+  RenderSandboxHostLinux* shost = RenderSandboxHostLinux::GetInstance();
+  shost->Init(sandbox_cmd);
+  ZygoteHost* zhost = ZygoteHost::GetInstance();
+  zhost->Init(sandbox_cmd);
+}
+#endif
+
+#if defined(OS_LINUX)
 static void GLibLogHandler(const gchar* log_domain,
                            GLogLevelFlags log_level,
                            const gchar* message,
@@ -92,6 +140,8 @@ static void GLibLogHandler(const gchar* log_domain,
              strstr(log_domain, "<unknown>")) {
     LOG(ERROR) << "DBus call timeout or out of memory: "
                << "http://crosbug.com/15496";
+  } else if (strstr(message, "XDG_RUNTIME_DIR variable not set")) {
+    LOG(ERROR) << message << " (http://bugs.chromium.org/97293)";
   } else {
     LOG(DFATAL) << log_domain << ": " << message;
   }
@@ -119,19 +169,45 @@ namespace content {
 
 BrowserMainParts::BrowserMainParts(const MainFunctionParams& parameters)
     : parameters_(parameters),
-      parsed_command_line_(parameters.command_line_) {
+      parsed_command_line_(parameters.command_line_),
+      result_code_(content::RESULT_CODE_NORMAL_EXIT) {
+#if defined(OS_WIN)
+  OleInitialize(NULL);
+#endif
 }
 
 BrowserMainParts::~BrowserMainParts() {
+#if defined(OS_WIN)
+  OleUninitialize();
+#endif
 }
 
 void BrowserMainParts::EarlyInitialization() {
   PreEarlyInitialization();
 
-  if (parsed_command_line().HasSwitch(switches::kEnableBenchmarking))
-    base::FieldTrial::EnableBenchmarking();
+#if defined(OS_WIN)
+  net::EnsureWinsockInit();
+#endif
 
-  InitializeSSL();
+  // Use NSS for SSL by default.
+  // The default client socket factory uses NSS for SSL by default on
+  // Windows and Mac.
+#if defined(OS_WIN) || defined(OS_MACOSX)
+  if (parsed_command_line().HasSwitch(switches::kUseSystemSSL)) {
+    net::ClientSocketFactory::UseSystemSSL();
+  } else {
+#elif defined(USE_NSS)
+  if (true) {
+#else
+  if (false) {
+#endif
+    // We want to be sure to init NSPR on the main thread.
+    crypto::EnsureNSPRInit();
+  }
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+  SetupSandbox(parsed_command_line());
+#endif
 
   if (parsed_command_line().HasSwitch(switches::kDisableSSLFalseStart))
     net::SSLConfigService::DisableFalseStart();
@@ -145,7 +221,7 @@ void BrowserMainParts::EarlyInitialization() {
   }
 
   // TODO(abarth): Should this move to InitializeNetworkOptions?  This doesn't
-  // seem dependent on InitializeSSL().
+  // seem dependent on SSL initialization().
   if (parsed_command_line().HasSwitch(switches::kEnableTcpFastOpen))
     net::set_tcp_fastopen_enabled(true);
 
@@ -155,23 +231,52 @@ void BrowserMainParts::EarlyInitialization() {
 void BrowserMainParts::MainMessageLoopStart() {
   PreMainMessageLoopStart();
 
+#if defined(OS_WIN)
+  // If we're running tests (ui_task is non-null), then the ResourceBundle
+  // has already been initialized.
+  if (!parameters().ui_task) {
+    // Override the configured locale with the user's preferred UI language.
+    l10n_util::OverrideLocaleWithUILanguageList();
+  }
+#endif
+
   main_message_loop_.reset(new MessageLoop(MessageLoop::TYPE_UI));
 
-  // TODO(viettrungluu): should these really go before setting the thread name?
+  InitializeMainThread();
+
   system_monitor_.reset(new base::SystemMonitor);
   hi_res_timer_manager_.reset(new HighResolutionTimerManager);
-
-  InitializeMainThread();
 
   network_change_notifier_.reset(net::NetworkChangeNotifier::Create());
 
   PostMainMessageLoopStart();
 }
 
+static bool g_exited_main_message_loop = false;
+
+void BrowserMainParts::RunMainMessageLoopParts() {
+  PreMainMessageLoopRun();
+
+  TRACE_EVENT_BEGIN_ETW("BrowserMain:MESSAGE_LOOP", 0, "");
+  // If the UI thread blocks, the whole UI is unresponsive.
+  // Do not allow disk IO from the UI thread.
+  base::ThreadRestrictions::SetIOAllowed(false);
+  MainMessageLoopRun();
+  TRACE_EVENT_END_ETW("BrowserMain:MESSAGE_LOOP", 0, "");
+
+  g_exited_main_message_loop = true;
+
+  PostMainMessageLoopRun();
+}
+
 void BrowserMainParts::InitializeMainThread() {
   const char* kThreadName = "CrBrowserMain";
   base::PlatformThread::SetName(kThreadName);
   main_message_loop().set_thread_name(kThreadName);
+
+#if defined(TRACK_ALL_TASK_OBJECTS)
+  tracked_objects::ThreadData::InitializeThreadContext(kThreadName);
+#endif  // TRACK_ALL_TASK_OBJECTS
 
   // Register the main thread by instantiating it, but don't call any methods.
   main_thread_.reset(new BrowserThread(BrowserThread::UI,
@@ -183,7 +288,7 @@ void BrowserMainParts::InitializeToolkit() {
   // of intersecting ifdefs we have.  To keep it easy to follow, there
   // are no #else branches on any #ifs.
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(OS_LINUX)
   // We want to call g_thread_init(), but in some codepaths (tests) it
   // is possible it has already been called.  In older versions of
   // GTK, it is an error to call g_thread_init twice; unfortunately,
@@ -199,11 +304,14 @@ void BrowserMainParts::InitializeToolkit() {
   // definitely harmless, so retained as a reminder of this
   // requirement for gconf.
   g_type_init();
-  // We use glib-dbus for geolocation and it's possible other libraries
-  // (e.g. gnome-keyring) will use it, so initialize its threading here
-  // as well.
+#if defined(OS_CHROMEOS)
+  // ChromeOS still uses dbus-glib, so initialize its threading here.
+  // TODO(satorux, stevenjb): remove this once it is no longer needed.
   dbus_g_thread_init();
+#endif
+#if !defined(USE_AURA)
   gfx::GtkInitFromCommandLine(parameters().command_line_);
+#endif
   SetUpGLibLogHandler();
 #endif
 
@@ -237,14 +345,28 @@ void BrowserMainParts::PreMainMessageLoopStart() {
 void BrowserMainParts::PostMainMessageLoopStart() {
 }
 
-void BrowserMainParts::InitializeSSL() {
+void BrowserMainParts::PreMainMessageLoopRun() {
+}
+
+void BrowserMainParts::MainMessageLoopRun() {
+  if (parameters().ui_task)
+    MessageLoopForUI::current()->PostTask(FROM_HERE, parameters().ui_task);
+
+#if defined(OS_MACOSX)
+  MessageLoopForUI::current()->Run();
+#else
+  MessageLoopForUI::current()->Run(NULL);
+#endif
+}
+
+void BrowserMainParts::PostMainMessageLoopRun() {
 }
 
 void BrowserMainParts::ToolkitInitialized() {
 }
 
-int BrowserMainParts::TemporaryContinue() {
-  return 0;
+bool ExitedMainMessageLoop() {
+  return g_exited_main_message_loop;
 }
 
 }  // namespace content
@@ -253,9 +375,13 @@ int BrowserMainParts::TemporaryContinue() {
 int BrowserMain(const MainFunctionParams& parameters) {
   TRACE_EVENT_BEGIN_ETW("BrowserMain", 0, "");
 
+  NotificationService main_notification_service;
+
   scoped_ptr<content::BrowserMainParts> parts(
       content::GetContentClient()->browser()->CreateBrowserMainParts(
           parameters));
+  if (!parts.get())
+    parts.reset(new content::BrowserMainParts(parameters));
 
   parts->EarlyInitialization();
 
@@ -288,32 +414,28 @@ int BrowserMain(const MainFunctionParams& parameters) {
   // Thanks!
 
   // TODO(viettrungluu): put the remainder into BrowserMainParts
-  const CommandLine& parsed_command_line = parameters.command_line_;
 
-#if defined(OS_WIN) && !defined(NO_TCMALLOC)
+#if defined(OS_WIN)
+#if !defined(NO_TCMALLOC)
   // When linking shared libraries, NO_TCMALLOC is defined, and dynamic
   // allocator selection is not supported.
 
   // Make this call before going multithreaded, or spawning any subprocesses.
   base::allocator::SetupSubprocessAllocator();
-#endif  // OS_WIN
-
+#endif
   // The broker service initialization needs to run early because it will
   // initialize the sandbox broker, which requires the process to swap its
   // window station. During this time all the UI will be broken. This has to
   // run before threads and windows are created.
-  InitializeBrokerServices(parameters, parsed_command_line);
+  InitializeBrokerServices(parameters, parameters.command_line_);
 
-  // Initialize histogram statistics gathering system.
+  base::win::ScopedCOMInitializer com_initializer;
+#endif  // OS_WIN
+
   base::StatisticsRecorder statistics;
 
-  // TODO(jam): bring the content parts from this chrome function here.
-  int result_code = parts->TemporaryContinue();
-
-  // Release BrowserMainParts here, before shutting down CrosLibrary, since
-  // some of the classes initialized there have CrosLibrary dependencies.
-  parts.reset(NULL);
+  parts->RunMainMessageLoopParts();
 
   TRACE_EVENT_END_ETW("BrowserMain", 0, 0);
-  return result_code;
+  return parts->result_code();
 }

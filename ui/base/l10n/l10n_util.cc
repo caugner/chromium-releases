@@ -4,7 +4,7 @@
 
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(TOOLKIT_USES_GTK)
+#if defined(USE_X11)
 #include <glib/gutils.h>
 #endif
 
@@ -279,7 +279,6 @@ bool CheckAndResolveLocale(const std::string& locale,
       } else {
         tmp_locale.append("-CN");
       }
-#if defined(OS_CHROMEOS)
     } else if (LowerCaseEqualsASCII(lang, "en")) {
       // Map Australian, Canadian, New Zealand and South African English
       // to British English for now.
@@ -293,7 +292,6 @@ bool CheckAndResolveLocale(const std::string& locale,
       } else {
         tmp_locale.append("-US");
       }
-#endif
     }
     if (IsLocaleAvailable(tmp_locale)) {
       resolved_locale->swap(tmp_locale);
@@ -333,7 +331,7 @@ bool CheckAndResolveLocale(const std::string& locale,
 // if "foo bar" is RTL. So this function prepends the necessary RLM in such
 // cases.
 void AdjustParagraphDirectionality(string16* paragraph) {
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
   if (base::i18n::IsRTL() &&
       base::i18n::StringContainsStrongRTLChars(*paragraph)) {
     paragraph->insert(0, 1, static_cast<char16>(base::i18n::kRightToLeftMark));
@@ -406,7 +404,13 @@ std::string GetApplicationLocale(const std::string& pref_locale) {
   if (!pref_locale.empty())
     candidates.push_back(pref_locale);
 
-#elif defined(OS_POSIX) && defined(TOOLKIT_USES_GTK)
+#elif defined(OS_ANDROID)
+
+  // TODO(jcivelli): use the application locale preference for now.
+  if (!pref_locale.empty())
+    candidates.push_back(pref_locale);
+
+#elif !defined(OS_MACOSX)
 
   // GLib implements correct environment variable parsing with
   // the precedence order: LANGUAGE, LC_ALL, LC_MESSAGES and LANG.

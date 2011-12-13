@@ -54,11 +54,28 @@ remoting.ClientSession.State = {
   CONNECTION_FAILED: 8
 };
 
+/** @enum {number} */
+remoting.ClientSession.ConnectionError = {
+  NONE: 0,
+  HOST_IS_OFFLINE: 1,
+  SESSION_REJECTED: 2,
+  INCOMPATIBLE_PROTOCOL: 3,
+  NETWORK_FAILURE: 4,
+  OTHER: 5
+};
+
 /**
  * The current state of the session.
  * @type {remoting.ClientSession.State}
  */
 remoting.ClientSession.prototype.state = remoting.ClientSession.State.UNKNOWN;
+
+/**
+ * The last connection error. Set when state is set to CONNECTION_FAILED.
+ * @type {remoting.ClientSession.ConnectionError}
+ */
+remoting.ClientSession.prototype.error =
+    remoting.ClientSession.ConnectionError.NONE;
 
 /**
  * Chromoting session API version (for this javascript).
@@ -71,16 +88,6 @@ remoting.ClientSession.prototype.state = remoting.ClientSession.State.UNKNOWN;
 remoting.ClientSession.prototype.API_VERSION_ = 2;
 
 /**
- * Server used to bridge into the Jabber network for establishing Jingle
- * connections.
- *
- * @const
- * @private
- */
-remoting.ClientSession.prototype.HTTP_XMPP_PROXY_ =
-    'https://chromoting-httpxmpp-oauth2-dev.corp.google.com';
-
-/**
  * The oldest API version that we support.
  * This will differ from the |API_VERSION_| if we maintain backward
  * compatibility with older API versions.
@@ -89,6 +96,16 @@ remoting.ClientSession.prototype.HTTP_XMPP_PROXY_ =
  * @private
  */
 remoting.ClientSession.prototype.API_MIN_VERSION_ = 1;
+
+/**
+ * Server used to bridge into the Jabber network for establishing Jingle
+ * connections.
+ *
+ * @const
+ * @private
+ */
+remoting.ClientSession.prototype.HTTP_XMPP_PROXY_ =
+    'https://chromoting-httpxmpp-oauth2-dev.corp.google.com';
 
 /**
  * The id of the client plugin
@@ -278,6 +295,18 @@ remoting.ClientSession.prototype.connectionInfoUpdateCallback = function() {
   } else if (state == this.plugin.STATUS_CLOSED) {
     this.setState_(remoting.ClientSession.State.CLOSED);
   } else if (state == this.plugin.STATUS_FAILED) {
+    var error = this.plugin.error;
+    if (error == this.plugin.ERROR_HOST_IS_OFFLINE) {
+      this.error = remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE;
+    } else if (error == this.plugin.ERROR_SESSION_REJECTED) {
+      this.error = remoting.ClientSession.ConnectionError.SESSION_REJECTED;
+    } else if (error == this.plugin.ERROR_INCOMPATIBLE_PROTOCOL) {
+      this.error = remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL;
+    } else if (error == this.plugin.NETWORK_FAILURE) {
+      this.error = remoting.ClientSession.ConnectionError.NETWORK_FAILURE;
+    } else {
+      this.error = remoting.ClientSession.ConnectionError.OTHER;
+    }
     this.setState_(remoting.ClientSession.State.CONNECTION_FAILED);
   }
 };
@@ -326,7 +355,6 @@ remoting.ClientSession.prototype.onDesktopSizeChanged_ = function() {
  * Refreshes the plugin's dimensions, taking into account the sizes of the
  * remote desktop and client window, and the current scale-to-fit setting.
  *
- * @param {boolean} shouldScale If the plugin should scale itself.
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.updateDimensions = function() {

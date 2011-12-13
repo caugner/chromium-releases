@@ -8,6 +8,7 @@
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
@@ -49,7 +50,7 @@ class SSLUITest : public InProcessBrowserTest {
     ASSERT_TRUE(entry);
     EXPECT_EQ(NORMAL_PAGE, entry->page_type());
     EXPECT_EQ(SECURITY_STYLE_AUTHENTICATED, entry->ssl().security_style());
-    EXPECT_EQ(0, entry->ssl().cert_status() & net::CERT_STATUS_ALL_ERRORS);
+    EXPECT_EQ(0U, entry->ssl().cert_status() & net::CERT_STATUS_ALL_ERRORS);
     EXPECT_EQ(displayed_insecure_content,
               entry->ssl().displayed_insecure_content());
     EXPECT_FALSE(entry->ssl().ran_insecure_content());
@@ -60,13 +61,13 @@ class SSLUITest : public InProcessBrowserTest {
     ASSERT_TRUE(entry);
     EXPECT_EQ(NORMAL_PAGE, entry->page_type());
     EXPECT_EQ(SECURITY_STYLE_UNAUTHENTICATED, entry->ssl().security_style());
-    EXPECT_EQ(0, entry->ssl().cert_status() & net::CERT_STATUS_ALL_ERRORS);
+    EXPECT_EQ(0U, entry->ssl().cert_status() & net::CERT_STATUS_ALL_ERRORS);
     EXPECT_FALSE(entry->ssl().displayed_insecure_content());
     EXPECT_FALSE(entry->ssl().ran_insecure_content());
   }
 
   void CheckAuthenticationBrokenState(TabContents* tab,
-                                      int error,
+                                      net::CertStatus error,
                                       bool ran_insecure_content,
                                       bool interstitial) {
     NavigationEntry* entry = tab->controller().GetActiveEntry();
@@ -123,6 +124,12 @@ class SSLUITest : public InProcessBrowserTest {
         Source<NavigationController>(&tab->controller()));
     interstitial_page->Proceed();
     observer.Wait();
+  }
+
+  int GetConstrainedWindowCount() const {
+    return static_cast<int>(
+        browser()->GetSelectedTabContentsWrapper()->
+        constrained_window_tab_helper()->constrained_window_count());
   }
 
   static bool GetFilePathWithHostAndPortReplacement(
@@ -357,13 +364,16 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestHTTPSExpiredCertAndGoBackViaButton) {
   CheckAuthenticationBrokenState(tab, net::CERT_STATUS_DATE_INVALID, false,
                                  true);  // Interstitial showing
 
+  ui_test_utils::WindowedNotificationObserver load_failed_observer(
+      content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
+      NotificationService::AllSources());
+
   // Simulate user clicking on back button (crbug.com/39248).
   browser()->GoBack(CURRENT_TAB);
 
   // Wait until we hear the load failure, and make sure we haven't swapped out
   // the previous page.  Prevents regression of http://crbug.com/82667.
-  ui_test_utils::WaitForNotification(
-      content::NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR);
+  load_failed_observer.Wait();
   EXPECT_FALSE(tab->render_view_host()->is_swapped_out());
 
   // We should be back at the original good page.
@@ -467,7 +477,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, MAYBE_TestHTTPSErrorWithNoNavEntry) {
 
   GURL url = https_server_expired_.GetURL("files/ssl/google.htm");
   TabContentsWrapper* tab2 =
-      browser()->AddSelectedTabWithURL(url, PageTransition::TYPED);
+      browser()->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_TYPED);
   ui_test_utils::WaitForLoadStop(tab2->tab_contents());
 
   // Verify our assumption that there was no prior navigation.
@@ -494,7 +504,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestBadHTTPSDownload) {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
     browser::NavigateParams navigate_params(browser(), url_dangerous,
-                                            PageTransition::TYPED);
+                                            content::PAGE_TRANSITION_TYPED);
     browser::Navigate(&navigate_params);
     observer.Wait();
   }
@@ -584,7 +594,7 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, FLAKY_TestUnsafeContents) {
   // opened (the iframe content opens one).
   // Note: because of bug 1115868, no constrained window is opened right now.
   //       Once the bug is fixed, this will do the real check.
-  EXPECT_EQ(0, static_cast<int>(tab->constrained_window_count()));
+  EXPECT_EQ(0, GetConstrainedWindowCount());
 
   int img_width;
   EXPECT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractInt(
@@ -652,7 +662,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestDisplaysInsecureContentTwoTabs) {
       &replacement_path));
 
   GURL url = https_server_.GetURL(replacement_path);
-  browser::NavigateParams params(browser(), url, PageTransition::TYPED);
+  browser::NavigateParams params(
+      browser(), url, content::PAGE_TRANSITION_TYPED);
   params.disposition = NEW_FOREGROUND_TAB;
   params.tabstrip_index = 0;
   params.source_contents = tab1;
@@ -692,7 +703,8 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, TestRunsInsecureContentTwoTabs) {
 
   // Create a new tab.
   GURL url = https_server_.GetURL(replacement_path);
-  browser::NavigateParams params(browser(), url, PageTransition::TYPED);
+  browser::NavigateParams params(
+      browser(), url, content::PAGE_TRANSITION_TYPED);
   params.disposition = NEW_FOREGROUND_TAB;
   params.source_contents = tab1;
   ui_test_utils::WindowedNotificationObserver observer(
@@ -859,20 +871,20 @@ IN_PROC_BROWSER_TEST_F(SSLUITest, DISABLED_TestCloseTabWithUnsafePopup) {
   // It is probably overkill to add a notification for a popup-opening, let's
   // just poll.
   for (int i = 0; i < 10; i++) {
-    if (static_cast<int>(tab1->constrained_window_count()) > 0)
+    if (GetConstrainedWindowCount() > 0)
       break;
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
                                             new MessageLoop::QuitTask(), 1000);
     ui_test_utils::RunMessageLoop();
   }
-  ASSERT_EQ(1, static_cast<int>(tab1->constrained_window_count()));
+  ASSERT_EQ(1, GetConstrainedWindowCount());
 
   // Let's add another tab to make sure the browser does not exit when we close
   // the first tab.
   GURL url = test_server()->GetURL("files/ssl/google.html");
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
-  browser()->AddSelectedTabWithURL(url, PageTransition::TYPED);
+  browser()->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_TYPED);
   observer.Wait();
 
   // Close the first tab.

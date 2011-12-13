@@ -85,11 +85,17 @@
         'tests/test_char_set.h',
         'tests/test_core.cc',
         'tests/test_core.h',
+        'tests/test_crypto.cc',
+        'tests/test_crypto.h',
         'tests/test_cpp_includes.cc',
         'tests/test_cursor_control.cc',
         'tests/test_cursor_control.h',
         'tests/test_directory_reader.cc',
         'tests/test_directory_reader.h',
+        'tests/test_fullscreen.cc',
+        'tests/test_fullscreen.h',
+        'tests/test_flash_fullscreen.cc',
+        'tests/test_flash_fullscreen.h',
         'tests/test_file_io.cc',
         'tests/test_file_io.h',
         'tests/test_file_ref.cc',
@@ -201,7 +207,6 @@
       'sources': [
         'proxy/run_all_unittests.cc',
 
-        'proxy/host_dispatcher_unittest.cc',
         'proxy/mock_resource.cc',
         'proxy/mock_resource.h',
         'proxy/plugin_dispatcher_unittest.cc',
@@ -210,10 +215,44 @@
         'proxy/ppapi_proxy_test.cc',
         'proxy/ppapi_proxy_test.h',
         'proxy/ppb_var_unittest.cc',
-        'proxy/ppp_instance_proxy_test.cc',
-        'proxy/ppp_messaging_proxy_test.cc',
+        'proxy/ppp_instance_private_proxy_unittest.cc',
+        'proxy/ppp_instance_proxy_unittest.cc',
+        'proxy/ppp_messaging_proxy_unittest.cc',
         'proxy/serialized_var_unittest.cc',
         'shared_impl/resource_tracker_unittest.cc',
+      ],
+    },
+    {
+      'target_name': 'ppapi_example_skeleton',
+      'suppress_wildcard': 1,
+      'type': 'none',
+      'direct_dependent_settings': {
+        'product_name': '>(_target_name)',
+        'conditions': [
+          ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris" or OS=="android"', {
+            'cflags': ['-fvisibility=hidden'],
+            'type': 'shared_library',
+            # -gstabs, used in the official builds, causes an ICE. Simply remove
+            # it.
+            'cflags!': ['-gstabs'],
+          }],
+          ['OS=="win"', {
+            'type': 'shared_library',
+          }],
+          ['OS=="mac"', {
+            'type': 'loadable_module',
+          }],
+        ],
+      },
+    },
+    {
+      'target_name': 'ppapi_example_mouse_lock',
+      'dependencies': [
+        'ppapi_example_skeleton',
+        'ppapi.gyp:ppapi_cpp',
+      ],
+      'sources': [
+        'examples/mouse_lock/mouse_lock.cc',
       ],
     },
   ],
@@ -223,29 +262,6 @@
     # http://code.google.com/p/chromium/issues/detail?id=54005 tracks mac.
     ['OS!="mac"', {
       'targets': [
-        {
-          'target_name': 'ppapi_example_skeleton',
-          'suppress_wildcard': 1,
-          'type': 'none',
-          'direct_dependent_settings': {
-            'product_name': '>(_target_name)',
-            'conditions': [
-              ['OS=="linux" or OS=="freebsd" or OS=="openbsd" or OS=="solaris"', {
-                'cflags': ['-fvisibility=hidden'],
-                'type': 'shared_library',
-                # -gstabs, used in the official builds, causes an ICE. Simply remove
-                # it.
-                'cflags!': ['-gstabs'],
-              }],
-              ['OS=="win"', {
-                'type': 'shared_library',
-              }],
-              ['OS=="mac"', {
-                'type': 'loadable_module',
-              }],
-            ],
-          },
-        },
         {
           'target_name': 'ppapi_example_c_stub',
           'dependencies': [
@@ -294,6 +310,16 @@
           ],
           'sources': [
             'examples/2d/graphics_2d_example.c',
+          ],
+        },
+        {
+          'target_name': 'ppapi_example_ime',
+          'dependencies': [
+            'ppapi_example_skeleton',
+            'ppapi.gyp:ppapi_cpp',
+          ],
+          'sources': [
+            'examples/ime/ime.cc',
           ],
         },
         {
@@ -360,6 +386,21 @@
           'sources': [
             'examples/gles2/gles2.cc',
             'examples/gles2/testdata.h',
+          ],
+        },
+        {
+          'target_name': 'ppapi_example_vc',
+          'dependencies': [
+            'ppapi_example_skeleton',
+            'ppapi.gyp:ppapi_cpp',
+            'ppapi.gyp:ppapi_gles2',
+            'ppapi.gyp:ppapi_egl',
+          ],
+          'include_dirs': [
+            'lib/gl/include',
+          ],
+          'sources': [
+            'examples/video_capture/video_capture.cc',
           ],
         },
       ],

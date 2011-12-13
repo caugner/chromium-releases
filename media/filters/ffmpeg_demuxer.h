@@ -28,8 +28,9 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/synchronization/waitable_event.h"
+#include "media/base/audio_decoder_config.h"
 #include "media/base/buffers.h"
-#include "media/base/filters.h"
+#include "media/base/demuxer.h"
 #include "media/base/pipeline.h"
 #include "media/filters/ffmpeg_glue.h"
 
@@ -37,7 +38,6 @@
 struct AVFormatContext;
 struct AVPacket;
 struct AVRational;
-struct AVStream;
 
 namespace media {
 
@@ -56,22 +56,22 @@ class FFmpegDemuxerStream : public DemuxerStream {
   // Returns true is this stream has pending reads, false otherwise.
   //
   // Safe to call on any thread.
-  virtual bool HasPendingReads();
+  bool HasPendingReads();
 
   // Enqueues and takes ownership over the given AVPacket.
-  virtual void EnqueuePacket(AVPacket* packet);
+  void EnqueuePacket(AVPacket* packet);
 
   // Signals to empty the buffer queue and mark next packet as discontinuous.
-  virtual void FlushBuffers();
+  void FlushBuffers();
 
   // Empties the queues and ignores any additional calls to Read().
-  virtual void Stop();
+  void Stop();
 
   // Returns the duration of this stream.
-  virtual base::TimeDelta duration();
+  base::TimeDelta duration();
 
   // DemuxerStream implementation.
-  virtual Type type();
+  virtual Type type() OVERRIDE;
 
   // If |buffer_queue_| is not empty will execute on caller's thread, otherwise
   // will post ReadTask to execute on demuxer's thread. Read will acquire
@@ -79,10 +79,10 @@ class FFmpegDemuxerStream : public DemuxerStream {
   // not make calls into FFmpegDemuxerStream directly or that may cause a
   // deadlock. |read_callback| should execute as quickly as possible because
   // |lock_| is held throughout the life of the callback.
-  virtual void Read(const ReadCallback& read_callback);
-  // Bitstream converter to convert input packet.
-  virtual void EnableBitstreamConverter();
-  virtual AVStream* GetAVStream();
+  virtual void Read(const ReadCallback& read_callback) OVERRIDE;
+  virtual void EnableBitstreamConverter() OVERRIDE;
+  virtual AVStream* GetAVStream() OVERRIDE;
+  virtual const AudioDecoderConfig& audio_decoder_config() OVERRIDE;
 
  private:
   virtual ~FFmpegDemuxerStream();
@@ -101,6 +101,7 @@ class FFmpegDemuxerStream : public DemuxerStream {
 
   FFmpegDemuxer* demuxer_;
   AVStream* stream_;
+  AudioDecoderConfig audio_config_;
   Type type_;
   base::TimeDelta duration_;
   bool discontinuous_;
@@ -136,24 +137,23 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
   void Initialize(
       DataSource* data_source, const PipelineStatusCB& callback);
 
-  // Filter implementation.
-  virtual void Stop(FilterCallback* callback);
-  virtual void Seek(base::TimeDelta time, const FilterStatusCB& cb);
-  virtual void OnAudioRendererDisabled();
-  virtual void set_host(FilterHost* filter_host);
-  virtual void SetPlaybackRate(float playback_rate);
-  virtual void SetPreload(Preload preload);
-
   // Demuxer implementation.
-  virtual scoped_refptr<DemuxerStream> GetStream(DemuxerStream::Type type);
-  virtual base::TimeDelta GetStartTime() const;
+  virtual void Stop(const base::Closure& callback) OVERRIDE;
+  virtual void Seek(base::TimeDelta time, const FilterStatusCB& cb) OVERRIDE;
+  virtual void OnAudioRendererDisabled() OVERRIDE;
+  virtual void set_host(FilterHost* filter_host) OVERRIDE;
+  virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
+  virtual scoped_refptr<DemuxerStream> GetStream(
+      DemuxerStream::Type type) OVERRIDE;
+  virtual void SetPreload(Preload preload) OVERRIDE;
+  virtual base::TimeDelta GetStartTime() const OVERRIDE;
 
   // FFmpegProtocol implementation.
-  virtual int Read(int size, uint8* data);
-  virtual bool GetPosition(int64* position_out);
-  virtual bool SetPosition(int64 position);
-  virtual bool GetSize(int64* size_out);
-  virtual bool IsStreaming();
+  virtual int Read(int size, uint8* data) OVERRIDE;
+  virtual bool GetPosition(int64* position_out) OVERRIDE;
+  virtual bool SetPosition(int64 position) OVERRIDE;
+  virtual bool GetSize(int64* size_out) OVERRIDE;
+  virtual bool IsStreaming() OVERRIDE;
 
   // Provide access to FFmpegDemuxerStream.
   MessageLoop* message_loop();
@@ -181,7 +181,7 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
   void DemuxTask();
 
   // Carries out stopping the demuxer streams on the demuxer thread.
-  void StopTask(FilterCallback* callback);
+  void StopTask(const base::Closure& callback);
 
   // Carries out disabling the audio stream on the demuxer thread.
   void DisableAudioStreamTask();

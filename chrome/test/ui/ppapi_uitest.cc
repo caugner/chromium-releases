@@ -6,7 +6,7 @@
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
-#include "content/common/content_switches.h"
+#include "content/public/common/content_switches.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/ui/ui_test.h"
@@ -51,11 +51,6 @@ class PPAPITest : public UITest {
     // Some stuff is hung off of the testing interface which is not enabled
     // by default.
     launch_arguments_.AppendSwitch(switches::kEnablePepperTesting);
-
-    // Give unlimited quota for files to Pepper tests.
-    // TODO(dumi): remove this switch once we have a quota management
-    // system in place.
-    launch_arguments_.AppendSwitch(switches::kUnlimitedQuotaForFiles);
 
     // Smooth scrolling confuses the scrollbar test.
     launch_arguments_.AppendSwitch(switches::kDisableSmoothScrolling);
@@ -174,8 +169,7 @@ TEST_PPAPI_IN_PROCESS(Instance)
 TEST_PPAPI_OUT_OF_PROCESS(DISABLED_Instance)
 
 TEST_PPAPI_IN_PROCESS(Graphics2D)
-// Disabled because it times out: http://crbug.com/89961
-//TEST_PPAPI_OUT_OF_PROCESS(Graphics2D)
+TEST_PPAPI_OUT_OF_PROCESS(Graphics2D)
 
 TEST_PPAPI_IN_PROCESS(ImageData)
 TEST_PPAPI_OUT_OF_PROCESS(ImageData)
@@ -211,6 +205,9 @@ TEST_PPAPI_OUT_OF_PROCESS(URLUtil)
 
 TEST_PPAPI_IN_PROCESS(CharSet)
 TEST_PPAPI_OUT_OF_PROCESS(CharSet)
+
+TEST_PPAPI_IN_PROCESS(Crypto)
+TEST_PPAPI_OUT_OF_PROCESS(Crypto)
 
 TEST_PPAPI_IN_PROCESS(Var)
 // http://crbug.com/89961
@@ -254,10 +251,30 @@ TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileRef)
 //TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileRef)
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileSystem)
-// http://crbug.com/90040
-TEST_F(OutOfProcessPPAPITest, FLAKY_FileSystem) {
-  RunTestViaHTTP("FileSystem");
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileSystem)
+
+// http://crbug.com/96767
+#if !defined(OS_MACOSX)
+TEST_F(PPAPITest, FLAKY_FlashFullscreen) {
+  RunTestViaHTTP("FlashFullscreen");
 }
+TEST_F(OutOfProcessPPAPITest, FLAKY_FlashFullscreen) {
+  RunTestViaHTTP("FlashFullscreen");
+}
+// New implementation only honors fullscreen requests within a context of
+// a user gesture. Since we do not yet have an infrastructure for testing
+// those under ppapi_tests, the tests below time out when run automtically.
+// To test the code, run them manually following the directions here:
+//   www.chromium.org/developers/design-documents/pepper-plugin-implementation
+// and click on the plugin area (gray square) to force fullscreen mode and
+// get the test unstuck.
+TEST_F(PPAPITest, DISABLED_Fullscreen) {
+  RunTestViaHTTP("Fullscreen");
+}
+TEST_F(OutOfProcessPPAPITest, DISABLED_Fullscreen) {
+  RunTestViaHTTP("Fullscreen");
+}
+#endif
 
 #if defined(OS_POSIX)
 #define MAYBE_DirectoryReader FLAKY_DirectoryReader

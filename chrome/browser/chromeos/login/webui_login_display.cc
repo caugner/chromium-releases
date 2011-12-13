@@ -4,15 +4,19 @@
 
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 
+#include "chrome/browser/chromeos/input_method/xkeyboard.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_accessibility_helper.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "views/widget/widget.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#endif
 
 namespace chromeos {
 
@@ -113,6 +117,14 @@ void WebUILoginDisplay::ShowError(int error_msg_id,
     default:
       error_text = l10n_util::GetStringUTF8(error_msg_id);
       break;
+  }
+
+  // Display a warning if Caps Lock is on and error is authentication-related.
+  if (input_method::XKeyboard::CapsLockIsEnabled() &&
+      error_msg_id != IDS_LOGIN_ERROR_WHITELIST) {
+    // TODO(ivankr): use a format string instead of concatenation.
+    error_text += "\n" +
+        l10n_util::GetStringUTF8(IDS_LOGIN_ERROR_CAPS_LOCK_HINT);
   }
 
   std::string help_link;

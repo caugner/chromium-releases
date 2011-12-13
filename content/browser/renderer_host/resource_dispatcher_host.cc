@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
+#include "base/debug/alias.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -32,7 +33,6 @@
 #include "content/browser/download/save_file_resource_handler.h"
 #include "content/browser/in_process_webkit/webkit_thread.h"
 #include "content/browser/plugin_service.h"
-#include "content/browser/resource_context.h"
 #include "content/browser/renderer_host/async_resource_handler.h"
 #include "content/browser/renderer_host/buffered_resource_handler.h"
 #include "content/browser/renderer_host/cross_site_resource_handler.h"
@@ -48,14 +48,15 @@
 #include "content/browser/renderer_host/resource_queue.h"
 #include "content/browser/renderer_host/resource_request_details.h"
 #include "content/browser/renderer_host/sync_resource_handler.h"
+#include "content/browser/resource_context.h"
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/browser/worker_host/worker_service.h"
-#include "content/common/content_switches.h"
 #include "content/common/notification_service.h"
 #include "content/common/resource_messages.h"
-#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/auth.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cookie_monster.h"
@@ -456,6 +457,12 @@ void ResourceDispatcherHost::BeginRequest(
   ChildProcessInfo::ProcessType process_type = filter_->process_type();
   int child_id = filter_->child_id();
 
+  // If we crash here, figure out what URL the renderer was requesting.
+  // http://crbug.com/91398
+  char url_buf[128];
+  base::strlcpy(url_buf, request_data.url.spec().c_str(), arraysize(url_buf));
+  base::debug::Alias(url_buf);
+
   const content::ResourceContext& resource_context =
       filter_->resource_context();
 
@@ -746,7 +753,7 @@ ResourceDispatcherHostRequestInfo* ResourceDispatcherHost::CreateRequestInfo(
                                                false,     // is_main_frame
                                                -1,        // frame_id
                                                ResourceType::SUB_RESOURCE,
-                                               PageTransition::LINK,
+                                               content::PAGE_TRANSITION_LINK,
                                                0,         // upload_size
                                                download,  // is_download
                                                download,  // allow_download
@@ -787,27 +794,43 @@ void ResourceDispatcherHost::OnDidLoadResourceFromMemoryCache(
 
 // We are explicitly forcing the download of 'url'.
 void ResourceDispatcherHost::BeginDownload(
-    const GURL& url,
-    const GURL& referrer,
+    net::URLRequest* request,
     const DownloadSaveInfo& save_info,
     bool prompt_for_save_location,
+    const DownloadResourceHandler::OnStartedCallback& started_cb,
     int child_id,
     int route_id,
     const content::ResourceContext& context) {
-  if (is_shutdown_)
+  scoped_ptr<net::URLRequest> delete_request(request);
+  // If DownloadResourceHandler is not begun, then started_cb must be called
+  // here in order to satisfy its semantics.
+  if (is_shutdown_) {
+    if (!started_cb.is_null())
+      started_cb.Run(DownloadId::Invalid(), net::ERR_INSUFFICIENT_RESOURCES);
+    // Time and RDH are resources that are running out.
     return;
+  }
+  const GURL& url = request->original_url();
+  const net::URLRequestContext* request_context = context.request_context();
+  request->set_referrer(MaybeStripReferrer(GURL(request->referrer())).spec());
+  request->set_method("GET");
+  request->set_context(request_context);
+  request->set_load_flags(request->load_flags() |
+      net::LOAD_IS_DOWNLOAD);
 
   // Check if the renderer is permitted to request the requested URL.
   if (!ChildProcessSecurityPolicy::GetInstance()->
           CanRequestURL(child_id, url)) {
     VLOG(1) << "Denied unauthorized download request for "
             << url.possibly_invalid_spec();
+    if (!started_cb.is_null())
+      started_cb.Run(DownloadId::Invalid(), net::ERR_ACCESS_DENIED);
     return;
   }
 
-  net::URLRequest* request = new net::URLRequest(url, this);
-
   request_id_--;
+
+  DownloadId dl_id = context.next_download_id_thunk().Run();
 
   scoped_refptr<ResourceHandler> handler(
       new DownloadResourceHandler(this,
@@ -815,9 +838,11 @@ void ResourceDispatcherHost::BeginDownload(
                                   route_id,
                                   request_id_,
                                   url,
+                                  dl_id,
                                   download_file_manager_.get(),
                                   request,
                                   prompt_for_save_location,
+                                  started_cb,
                                   save_info));
 
   if (delegate_) {
@@ -826,25 +851,19 @@ void ResourceDispatcherHost::BeginDownload(
         false);
   }
 
-  const net::URLRequestContext* request_context = context.request_context();
-
   if (!request_context->job_factory()->IsHandledURL(url)) {
     VLOG(1) << "Download request for unsupported protocol: "
             << url.possibly_invalid_spec();
+    if (!started_cb.is_null())
+      started_cb.Run(DownloadId::Invalid(), net::ERR_ACCESS_DENIED);
     return;
   }
-
-  request->set_method("GET");
-  request->set_referrer(MaybeStripReferrer(referrer).spec());
-  request->set_context(context.request_context());
-  request->set_load_flags(request->load_flags() |
-      net::LOAD_IS_DOWNLOAD);
 
   ResourceDispatcherHostRequestInfo* extra_info =
       CreateRequestInfo(handler, child_id, route_id, true, context);
   SetRequestInfo(request, extra_info);  // Request takes ownership.
 
-  BeginRequestInternal(request);
+  BeginRequestInternal(delete_request.release());
 }
 
 // This function is only used for saving feature.
@@ -1080,13 +1099,10 @@ void ResourceDispatcherHost::CancelRequestsForContext(
   for (BlockedRequestMap::iterator i = blocked_requests_map_.begin();
        i != blocked_requests_map_.end();) {
     BlockedRequestsList* requests = i->second;
-    // TODO(willchan): Investigate why this condition is possible. It shouldn't
-    // be possible, since when blocked requests get canceled, we should delete
-    // the list when empty. Or are we creating BlockedRequestsLists but never
-    // adding requests to them?
     if (requests->empty()) {
-      blocked_requests_map_.erase(i++);
-      delete requests;
+      // This can happen if BlockRequestsForRoute() has been called for a route,
+      // but we haven't blocked any matching requests yet.
+      ++i;
       continue;
     }
     ResourceDispatcherHostRequestInfo* info =
@@ -1290,10 +1306,10 @@ void ResourceDispatcherHost::OnCertificateRequested(
 
 void ResourceDispatcherHost::OnSSLCertificateError(
     net::URLRequest* request,
-    int cert_error,
-    net::X509Certificate* cert) {
+    const net::SSLInfo& ssl_info,
+    bool is_hsts_host) {
   DCHECK(request);
-  SSLManager::OnSSLCertificateError(this, request, cert_error, cert);
+  SSLManager::OnSSLCertificateError(this, request, ssl_info, is_hsts_host);
 }
 
 bool ResourceDispatcherHost::CanGetCookies(
@@ -1739,13 +1755,13 @@ void ResourceDispatcherHost::OnResponseCompleted(net::URLRequest* request) {
   // since it will probably cause the user to see an error page.
   if (!request->status().is_success() &&
       info->resource_type() == ResourceType::MAIN_FRAME &&
-      request->status().os_error() != net::ERR_ABORTED) {
+      request->status().error() != net::ERR_ABORTED) {
     // This enumeration has "2" appended to its name to distinguish it from
     // its original version. We changed the buckets at one point (added
     // guard buckets by using CustomHistogram::ArrayToCustomRanges).
     UMA_HISTOGRAM_CUSTOM_ENUMERATION(
         "Net.ErrorCodesForMainFrame2",
-        -request->status().os_error(),
+        -request->status().error(),
         base::CustomHistogram::ArrayToCustomRanges(
             kAllNetErrorCodes, arraysize(kAllNetErrorCodes)));
   }

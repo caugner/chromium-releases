@@ -6,10 +6,13 @@
 
 namespace extension_webrequest_api_constants {
 
+const char kChallengerKey[] = "challenger";
 const char kErrorKey[] = "error";
 const char kFrameIdKey[] = "frameId";
 const char kFromCache[] = "fromCache";
+const char kHostKey[] = "host";
 const char kIpKey[] = "ip";
+const char kPortKey[] = "port";
 const char kMethodKey[] = "method";
 const char kRedirectUrlKey[] = "redirectUrl";
 const char kRequestIdKey[] = "requestId";
@@ -26,6 +29,9 @@ const char kHeaderValueKey[] = "value";
 const char kIsProxyKey[] = "isProxy";
 const char kSchemeKey[] = "scheme";
 const char kRealmKey[] = "realm";
+const char kAuthCredentialsKey[] = "authCredentials";
+const char kUsernameKey[] = "username";
+const char kPasswordKey[] = "password";
 
 const char kOnBeforeRedirect[] = "experimental.webRequest.onBeforeRedirect";
 const char kOnBeforeRequest[] = "experimental.webRequest.onBeforeRequest";
@@ -33,6 +39,7 @@ const char kOnBeforeSendHeaders[] =
     "experimental.webRequest.onBeforeSendHeaders";
 const char kOnCompleted[] = "experimental.webRequest.onCompleted";
 const char kOnErrorOccurred[] = "experimental.webRequest.onErrorOccurred";
+const char kOnHeadersReceived[] = "experimental.webRequest.onHeadersReceived";
 const char kOnResponseStarted[] = "experimental.webRequest.onResponseStarted";
 const char kOnSendHeaders[] = "experimental.webRequest.onSendHeaders";
 const char kOnAuthRequired[] = "experimental.webRequest.onAuthRequired";

@@ -25,7 +25,7 @@
 // with the Bind() function in bind.h, they provide a type-safe method for
 // performing currying of arguments, and creating a "closure."
 //
-// In programing languages, a closure is a first-class function where all its
+// In programming languages, a closure is a first-class function where all its
 // parameters have been bound (usually via currying).  Closures are well
 // suited for representing, and passing around a unit of delayed execution.
 // They are used in Chromium code to schedule tasks on different MessageLoops.
@@ -258,6 +258,10 @@ class Callback<R(void)> : public internal::CallbackBase {
                    callback_type_does_not_match_bind_result);
   }
 
+  bool Equals(const Callback& other) const {
+    return CallbackBase::Equals(other);
+  }
+
   R Run() const {
     PolymorphicInvoke f =
         reinterpret_cast<PolymorphicInvoke>(polymorphic_invoke_);
@@ -290,6 +294,10 @@ class Callback<R(A1)> : public internal::CallbackBase {
     COMPILE_ASSERT((is_same<PolymorphicInvoke,
                     typename T::Invoker::DoInvokeType>::value),
                    callback_type_does_not_match_bind_result);
+  }
+
+  bool Equals(const Callback& other) const {
+    return CallbackBase::Equals(other);
   }
 
   R Run(typename internal::ParamTraits<A1>::ForwardType a1) const {
@@ -325,6 +333,10 @@ class Callback<R(A1, A2)> : public internal::CallbackBase {
     COMPILE_ASSERT((is_same<PolymorphicInvoke,
                     typename T::Invoker::DoInvokeType>::value),
                    callback_type_does_not_match_bind_result);
+  }
+
+  bool Equals(const Callback& other) const {
+    return CallbackBase::Equals(other);
   }
 
   R Run(typename internal::ParamTraits<A1>::ForwardType a1,
@@ -363,6 +375,10 @@ class Callback<R(A1, A2, A3)> : public internal::CallbackBase {
     COMPILE_ASSERT((is_same<PolymorphicInvoke,
                     typename T::Invoker::DoInvokeType>::value),
                    callback_type_does_not_match_bind_result);
+  }
+
+  bool Equals(const Callback& other) const {
+    return CallbackBase::Equals(other);
   }
 
   R Run(typename internal::ParamTraits<A1>::ForwardType a1,
@@ -404,6 +420,10 @@ class Callback<R(A1, A2, A3, A4)> : public internal::CallbackBase {
     COMPILE_ASSERT((is_same<PolymorphicInvoke,
                     typename T::Invoker::DoInvokeType>::value),
                    callback_type_does_not_match_bind_result);
+  }
+
+  bool Equals(const Callback& other) const {
+    return CallbackBase::Equals(other);
   }
 
   R Run(typename internal::ParamTraits<A1>::ForwardType a1,
@@ -449,6 +469,10 @@ class Callback<R(A1, A2, A3, A4, A5)> : public internal::CallbackBase {
     COMPILE_ASSERT((is_same<PolymorphicInvoke,
                     typename T::Invoker::DoInvokeType>::value),
                    callback_type_does_not_match_bind_result);
+  }
+
+  bool Equals(const Callback& other) const {
+    return CallbackBase::Equals(other);
   }
 
   R Run(typename internal::ParamTraits<A1>::ForwardType a1,
@@ -497,6 +521,10 @@ class Callback<R(A1, A2, A3, A4, A5, A6)> : public internal::CallbackBase {
     COMPILE_ASSERT((is_same<PolymorphicInvoke,
                     typename T::Invoker::DoInvokeType>::value),
                    callback_type_does_not_match_bind_result);
+  }
+
+  bool Equals(const Callback& other) const {
+    return CallbackBase::Equals(other);
   }
 
   R Run(typename internal::ParamTraits<A1>::ForwardType a1,

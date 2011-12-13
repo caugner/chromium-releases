@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "chrome/browser/download/download_item_model.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -18,6 +19,7 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/download/download_item.h"
+#include "content/browser/download/download_stats.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -66,7 +68,7 @@ DownloadShelfGtk::DownloadShelfGtk(Browser* browser, GtkWidget* parent)
       theme_service_(GtkThemeService::GetFrom(browser->profile())),
       close_on_mouse_out_(false),
       mouse_in_shelf_(false),
-      auto_close_factory_(this) {
+      weak_factory_(this) {
   // Logically, the shelf is a vbox that contains two children: a one pixel
   // tall event box, which serves as the top border, and an hbox, which holds
   // the download items and other shelf widgets (close button, show-all-
@@ -194,6 +196,13 @@ void DownloadShelfGtk::Close() {
   gdk_window_raise(shelf_.get()->window);
   slide_widget_->Close();
   browser_->UpdateDownloadShelfVisibility(false);
+  int num_in_progress = 0;
+  for (size_t i = 0; i < download_items_.size(); ++i) {
+    if (download_items_[i]->get_download()->IsInProgress())
+      ++num_in_progress;
+  }
+  download_stats::RecordShelfClose(
+      download_items_.size(), num_in_progress, close_on_mouse_out_);
   SetCloseOnMouseOut(false);
 }
 
@@ -303,7 +312,7 @@ void DownloadShelfGtk::AutoCloseIfPossible() {
 
 void DownloadShelfGtk::CancelAutoClose() {
   SetCloseOnMouseOut(false);
-  auto_close_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
 }
 
 void DownloadShelfGtk::ItemOpened() {
@@ -369,10 +378,10 @@ void DownloadShelfGtk::MouseLeftShelf() {
 
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      auto_close_factory_.NewRunnableMethod(&DownloadShelfGtk::Close),
+      base::Bind(&DownloadShelfGtk::Close, weak_factory_.GetWeakPtr()),
       kAutoCloseDelayMs);
 }
 
 void DownloadShelfGtk::MouseEnteredShelf() {
-  auto_close_factory_.RevokeAll();
+  weak_factory_.InvalidateWeakPtrs();
 }

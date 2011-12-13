@@ -8,7 +8,9 @@
 
 #include <string>
 
+#include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/scoped_temp_dir.h"
 #include "content/browser/content_browser_client.h"
 
 namespace content {
@@ -16,10 +18,13 @@ namespace content {
 // Base for unit tests that need to mock the ContentBrowserClient.
 class MockContentBrowserClient : public ContentBrowserClient {
  public:
+  MockContentBrowserClient();
   virtual ~MockContentBrowserClient();
 
   virtual BrowserMainParts* CreateBrowserMainParts(
       const MainFunctionParams& parameters) OVERRIDE;
+  virtual RenderWidgetHostView* CreateViewForWidget(
+      RenderWidgetHost* widget) OVERRIDE;
   virtual TabContentsView* CreateTabContentsView(
       TabContents* tab_contents) OVERRIDE;
   virtual void RenderViewHostCreated(
@@ -34,6 +39,10 @@ class MockContentBrowserClient : public ContentBrowserClient {
   virtual bool ShouldUseProcessPerSite(BrowserContext* browser_context,
                                        const GURL& effective_url) OVERRIDE;
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) OVERRIDE;
+  virtual bool IsSuitableHost(RenderProcessHost* process_host,
+                              const GURL& site_url) OVERRIDE;
+  virtual bool ShouldSwapProcessesForNavigation(const GURL& current_url,
+                                                const GURL& new_url) OVERRIDE;
   virtual std::string GetCanonicalEncodingNameByAliasName(
       const std::string& alias_name) OVERRIDE;
   virtual void AppendExtraCommandLineSwitches(CommandLine* command_line,
@@ -42,6 +51,7 @@ class MockContentBrowserClient : public ContentBrowserClient {
   virtual std::string GetAcceptLangs(const TabContents* tab) OVERRIDE;
   virtual SkBitmap* GetDefaultFavicon() OVERRIDE;
   virtual bool AllowAppCache(const GURL& manifest_url,
+                             const GURL& first_party,
                              const content::ResourceContext& context) OVERRIDE;
   virtual bool AllowGetCookie(const GURL& url,
                               const GURL& first_party,
@@ -66,7 +76,8 @@ class MockContentBrowserClient : public ContentBrowserClient {
   virtual void AllowCertificateError(
       SSLCertErrorHandler* handler,
       bool overridable,
-      Callback2<SSLCertErrorHandler*, bool>::Type* callback) OVERRIDE;
+      const base::Callback<void(SSLCertErrorHandler*, bool)>& callback)
+      OVERRIDE;
   virtual void SelectClientCertificate(
       int render_process_id,
       int render_view_id,
@@ -119,12 +130,9 @@ class MockContentBrowserClient : public ContentBrowserClient {
   virtual void ClearCache(RenderViewHost* rvh)  OVERRIDE;
   virtual void ClearCookies(RenderViewHost* rvh)  OVERRIDE;
   virtual FilePath GetDefaultDownloadDirectory() OVERRIDE;
-  virtual net::URLRequestContextGetter*
-      GetDefaultRequestContextDeprecatedCrBug64339() OVERRIDE;
-  virtual net::URLRequestContextGetter* GetSystemRequestContext() OVERRIDE;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  virtual int GetCrashSignalFD(const std::string& process_type) OVERRIDE;
+  virtual int GetCrashSignalFD(const CommandLine& command_line) OVERRIDE;
 #endif
 
 #if defined(OS_WIN)
@@ -136,6 +144,12 @@ class MockContentBrowserClient : public ContentBrowserClient {
       crypto::CryptoModuleBlockingPasswordDelegate* GetCryptoPasswordDelegate(
           const GURL& url) OVERRIDE;
 #endif
+
+ private:
+  // Temporary directory for GetDefaultDownloadDirectory.
+  ScopedTempDir download_dir_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockContentBrowserClient);
 };
 
 }  // namespace content

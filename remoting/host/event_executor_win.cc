@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "media/base/callback.h"
 #include "remoting/host/capturer.h"
 #include "remoting/proto/event.pb.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -110,10 +109,10 @@ void EventExecutorWin::HandleMouse(const MouseEvent& event) {
     INPUT input;
     input.type = INPUT_MOUSE;
     input.mi.time = 0;
-    gfx::Size screen_size = capturer_->size_most_recent();
-    if ((screen_size.width() > 0) && (screen_size.height() > 0)) {
-      input.mi.dx = static_cast<int>((x * 65535) / screen_size.width());
-      input.mi.dy = static_cast<int>((y * 65535) / screen_size.height());
+    SkISize screen_size = capturer_->size_most_recent();
+    if ((screen_size.width() > 1) && (screen_size.height() > 1)) {
+      input.mi.dx = static_cast<int>((x * 65535) / (screen_size.width() - 1));
+      input.mi.dy = static_cast<int>((y * 65535) / (screen_size.height() - 1));
       input.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE;
       SendInput(1, &input, sizeof(INPUT));
     }
@@ -128,12 +127,12 @@ void EventExecutorWin::HandleMouse(const MouseEvent& event) {
     int dy = event.wheel_offset_y();
 
     if (dx != 0) {
-      wheel.mi.mouseData = dx;
+      wheel.mi.mouseData = dx * WHEEL_DELTA;
       wheel.mi.dwFlags = MOUSEEVENTF_HWHEEL;
       SendInput(1, &wheel, sizeof(INPUT));
     }
     if (dy != 0) {
-      wheel.mi.mouseData = dy;
+      wheel.mi.mouseData = dy * WHEEL_DELTA;
       wheel.mi.dwFlags = MOUSEEVENTF_WHEEL;
       SendInput(1, &wheel, sizeof(INPUT));
     }

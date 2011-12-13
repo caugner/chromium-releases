@@ -20,9 +20,9 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -310,7 +310,7 @@ class CloudPrintHtmlDialogDelegateTest : public testing::Test {
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(_));
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(NULL));
     delegate_.reset(new CloudPrintHtmlDialogDelegate(
-        mock_flow_handler_.get(), 100, 100, std::string(), true));
+        mock_flow_handler_.get(), 100, 100, std::string(), true, false));
   }
 
   virtual void TearDown() {

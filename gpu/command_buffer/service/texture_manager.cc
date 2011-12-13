@@ -343,11 +343,10 @@ void TextureManager::TextureInfo::Update(const FeatureInfo* feature_info) {
 
   // Update texture_complete and cube_complete status.
   const TextureInfo::LevelInfo& first_face = level_infos_[0][0];
+  int levels_needed = ComputeMipMapCount(
+      first_face.width, first_face.height, first_face.depth);
   texture_complete_ =
-      (max_level_set_ == ComputeMipMapCount(first_face.width,
-                                            first_face.height,
-                                            first_face.depth) - 1) &&
-      max_level_set_ >= 0;
+      max_level_set_ >= (levels_needed - 1) && max_level_set_ >= 0;
   cube_complete_ = (level_infos_.size() == 6) &&
                    (first_face.width == first_face.height);
   if (first_face.width == 0 || first_face.height == 0) {
@@ -381,7 +380,7 @@ void TextureManager::TextureInfo::Update(const FeatureInfo* feature_info) {
     GLsizei width = level0.width;
     GLsizei height = level0.height;
     GLsizei depth = level0.depth;
-    for (GLint jj = 1; jj <= max_level_set_; ++jj) {
+    for (GLint jj = 1; jj < levels_needed; ++jj) {
       // compute required size for mip.
       width = std::max(1, width >> 1);
       height = std::max(1, height >> 1);
@@ -442,11 +441,11 @@ bool TextureManager::Initialize(const FeatureInfo* feature_info) {
 
   FeatureInfo temp_feature_info;
   default_texture_2d_ = TextureInfo::Ref(new TextureInfo(ids[1]));
-  SetInfoTarget(default_texture_2d_, GL_TEXTURE_2D);
+  SetInfoTarget(feature_info, default_texture_2d_, GL_TEXTURE_2D);
   default_texture_2d_->SetLevelInfo(&temp_feature_info,
       GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
   default_texture_cube_map_ = TextureInfo::Ref(new TextureInfo(ids[3]));
-  SetInfoTarget(default_texture_cube_map_, GL_TEXTURE_CUBE_MAP);
+  SetInfoTarget(feature_info, default_texture_cube_map_, GL_TEXTURE_CUBE_MAP);
   for (int ii = 0; ii < GLES2Util::kNumFaces; ++ii) {
     default_texture_cube_map_->SetLevelInfo(
       &temp_feature_info, GLES2Util::IndexToGLFaceTarget(ii),
@@ -462,7 +461,9 @@ bool TextureManager::Initialize(const FeatureInfo* feature_info) {
     glBindTexture(GL_TEXTURE_EXTERNAL_OES, 0);
     default_texture_external_oes_ = TextureInfo::Ref(
         new TextureInfo(external_ids[0]));
-    SetInfoTarget(default_texture_external_oes_, GL_TEXTURE_EXTERNAL_OES);
+    SetInfoTarget(feature_info,
+                  default_texture_external_oes_,
+                  GL_TEXTURE_EXTERNAL_OES);
     default_texture_external_oes_->SetLevelInfo(
         &temp_feature_info, GL_TEXTURE_EXTERNAL_OES, 0,
         GL_RGBA, 1, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE);
@@ -494,6 +495,19 @@ bool TextureManager::ValidForTarget(
            !GLES2Util::IsNPOT(depth))) &&
          (target != GL_TEXTURE_CUBE_MAP || (width == height && depth == 1)) &&
          (target != GL_TEXTURE_2D || (depth == 1));
+}
+
+void TextureManager::SetInfoTarget(
+    const FeatureInfo* feature_info,
+    TextureInfo* info, GLenum target) {
+  DCHECK(info);
+  if (!info->CanRender(feature_info)) {
+    --num_unrenderable_textures_;
+  }
+  info->SetTarget(target, MaxLevelsForTarget(target));
+  if (!info->CanRender(feature_info)) {
+    ++num_unrenderable_textures_;
+  }
 }
 
 void TextureManager::SetLevelInfo(

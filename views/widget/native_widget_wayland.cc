@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <list>
 
+#include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "ui/base/view_prop.h"
 #include "ui/gfx/canvas_skia_paint.h"
@@ -77,8 +78,7 @@ void NativeWidgetWayland::InitNativeWidget(const Widget::InitParams& params) {
 
   egl_window_ = wl_egl_window_create(wayland_window_->surface(),
                                      allocation_.width(),
-                                     allocation_.height(),
-                                     wayland_display_->visual());
+                                     allocation_.height());
 
   SetNativeWindowProperty(kNativeWidgetKey, this);
 
@@ -86,13 +86,18 @@ void NativeWidgetWayland::InitNativeWidget(const Widget::InitParams& params) {
     if (Widget::compositor_factory()) {
       compositor_ = (*Widget::compositor_factory())();
     } else {
-      compositor_ = ui::Compositor::Create(egl_window_, allocation_.size());
+      compositor_ = ui::Compositor::Create(this,
+                                           egl_window_,
+                                           allocation_.size());
     }
     if (compositor_.get())
       delegate_->AsWidget()->GetRootView()->SetPaintToLayer(true);
   } else {
     surface_ = gfx::GLSurface::CreateViewGLSurface(false, egl_window_);
-    context_ = gfx::GLContext::CreateGLContext(NULL, surface_.get());
+    context_ = gfx::GLContext::CreateGLContext(
+        NULL,
+        surface_.get(),
+        gfx::PreferIntegratedGpu);
 
     if (!context_->MakeCurrent(surface_.get()))
       DLOG(ERROR) << "Failed to make surface current";
@@ -180,12 +185,12 @@ ui::Compositor* NativeWidgetWayland::GetCompositor() {
   return compositor_.get();
 }
 
-void NativeWidgetWayland::MarkLayerDirty() {
-}
-
 void NativeWidgetWayland::CalculateOffsetToAncestorWithLayer(
     gfx::Point* offset,
-    View** ancestor) {
+    ui::Layer** layer_parent) {
+}
+
+void NativeWidgetWayland::ReorderLayers() {
 }
 
 void NativeWidgetWayland::ViewRemoved(View* view) {
@@ -247,20 +252,20 @@ void NativeWidgetWayland::CenterWindow(const gfx::Size& size) {
   NOTIMPLEMENTED();
 }
 
-void NativeWidgetWayland::GetWindowBoundsAndMaximizedState(
+void NativeWidgetWayland::GetWindowPlacement(
     gfx::Rect* bounds,
-    bool* maximized) const {
+    ui::WindowShowState* show_state) const {
   NOTIMPLEMENTED();
 }
 
-void NativeWidgetWayland::SetWindowTitle(const std::wstring& title) {
+void NativeWidgetWayland::SetWindowTitle(const string16& title) {
 }
 
 void NativeWidgetWayland::SetWindowIcons(const SkBitmap& window_icon,
                                          const SkBitmap& app_icon) {
 }
 
-void NativeWidgetWayland::SetAccessibleName(const std::wstring& name) {
+void NativeWidgetWayland::SetAccessibleName(const string16& name) {
 }
 
 void NativeWidgetWayland::SetAccessibleRole(
@@ -334,10 +339,11 @@ void NativeWidgetWayland::SetShape(gfx::NativeRegion shape) {
 
 void NativeWidgetWayland::Close() {
   Hide();
-  if (close_widget_factory_.empty()) {
-    MessageLoop::current()->PostTask(FROM_HERE,
-        close_widget_factory_.NewRunnableMethod(
-            &NativeWidgetWayland::CloseNow));
+  if (!close_widget_factory_.HasWeakPtrs()) {
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&NativeWidgetWayland::CloseNow,
+                   close_widget_factory_.GetWeakPtr()));
   }
 }
 
@@ -369,7 +375,7 @@ void NativeWidgetWayland::ShowMaximizedWithBounds(
   saved_allocation_ = restored_bounds;
 }
 
-void NativeWidgetWayland::ShowWithState(ShowState state) {
+void NativeWidgetWayland::ShowWithWindowState(ui::WindowShowState state) {
   NOTIMPLEMENTED();
 }
 
@@ -506,6 +512,10 @@ bool NativeWidgetWayland::ConvertPointFromAncestor(
     const Widget* ancestor, gfx::Point* point) const {
   NOTREACHED();
   return false;
+}
+
+void NativeWidgetWayland::ScheduleDraw() {
+  SchedulePaintInRect(allocation_);
 }
 
 // Overridden from NativeWidget

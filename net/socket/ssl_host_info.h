@@ -10,6 +10,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/cert_verify_result.h"
@@ -49,7 +50,7 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   //
   // |callback| may be NULL, in which case ERR_IO_PENDING may still be returned
   // but, obviously, a callback will never be made.
-  virtual int WaitForDataReady(CompletionCallback* callback) = 0;
+  virtual int WaitForDataReady(OldCompletionCallback* callback) = 0;
 
   // Persist allows for the host information to be updated for future users.
   // This is a fire and forget operation: the caller may drop its reference
@@ -89,7 +90,7 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   // callback to be called when the verification completes. If the verification
   // has already finished then WaitForCertVerification returns the result of
   // that verification.
-  int WaitForCertVerification(CompletionCallback* callback);
+  int WaitForCertVerification(OldCompletionCallback* callback);
 
   base::TimeTicks verification_start_time() const {
     return verification_start_time_;
@@ -119,7 +120,7 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   // This is the hostname that we'll validate the certificates against.
   const std::string hostname_;
   bool cert_parsing_failed_;
-  CompletionCallback* cert_verification_callback_;
+  OldCompletionCallback* cert_verification_callback_;
   // These two members are taken from the SSLConfig.
   bool rev_checking_enabled_;
   bool verify_ev_cert_;
@@ -128,10 +129,10 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   CertVerifyResult cert_verify_result_;
   SingleRequestCertVerifier verifier_;
   scoped_refptr<X509Certificate> cert_;
-  scoped_refptr<CancelableCompletionCallback<SSLHostInfo> > callback_;
+  base::WeakPtrFactory<SSLHostInfo> weak_factory_;
 
   DnsRRResolver* dnsrr_resolver_;
-  CompletionCallback* dns_callback_;
+  OldCompletionCallback* dns_callback_;
   DnsRRResolver::Handle dns_handle_;
   RRResponse dns_response_;
   base::TimeTicks dns_lookup_start_time_;

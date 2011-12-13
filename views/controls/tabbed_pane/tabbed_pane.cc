@@ -6,8 +6,6 @@
 
 #include "base/logging.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-// TODO(avi): remove when not needed
-#include "base/utf_string_conversions.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "views/controls/native/native_view_host.h"
 #include "views/controls/tabbed_pane/native_tabbed_pane_wrapper.h"
@@ -38,13 +36,13 @@ View* TabbedPane::GetSelectedTab() {
   return native_tabbed_pane_->GetSelectedTab();
 }
 
-void TabbedPane::AddTab(const std::wstring& title, View* contents) {
+void TabbedPane::AddTab(const string16& title, View* contents) {
   native_tabbed_pane_->AddTab(title, contents);
   PreferredSizeChanged();
 }
 
 void TabbedPane::AddTabAtIndex(int index,
-                               const std::wstring& title,
+                               const string16& title,
                                View* contents,
                                bool select_if_first_tab) {
   native_tabbed_pane_->AddTabAtIndex(index, title, contents,
@@ -71,10 +69,6 @@ gfx::Size TabbedPane::GetPreferredSize() {
       native_tabbed_pane_->GetPreferredSize() : gfx::Size();
 }
 
-void TabbedPane::CreateWrapper() {
-  native_tabbed_pane_ = NativeTabbedPaneWrapper::CreateNativeWrapper(this);
-}
-
 void TabbedPane::LoadAccelerators() {
   // Ctrl+Shift+Tab
   AddAccelerator(views::Accelerator(ui::VKEY_TAB, true, true, false));
@@ -89,7 +83,9 @@ void TabbedPane::Layout() {
 
 void TabbedPane::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
   if (is_add && !native_tabbed_pane_) {
-    CreateWrapper();
+    // The native wrapper's lifetime will be managed by the view hierarchy after
+    // we call AddChildView.
+    native_tabbed_pane_ = NativeTabbedPaneWrapper::CreateNativeWrapper(this);
     AddChildView(native_tabbed_pane_->GetView());
     LoadAccelerators();
   }
@@ -97,8 +93,7 @@ void TabbedPane::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
 
 bool TabbedPane::AcceleratorPressed(const views::Accelerator& accelerator) {
   // We only accept Ctrl+Tab keyboard events.
-  DCHECK(accelerator.key_code() ==
-      ui::VKEY_TAB && accelerator.IsCtrlDown());
+  DCHECK(accelerator.key_code() == ui::VKEY_TAB && accelerator.IsCtrlDown());
 
   int tab_count = GetTabCount();
   if (tab_count <= 1)
@@ -128,10 +123,10 @@ void TabbedPane::OnFocus() {
       selected_tab->GetWidget()->NotifyAccessibilityEvent(
           selected_tab, ui::AccessibilityTypes::EVENT_FOCUS, true);
     }
-  }
-  else
+  } else {
     View::OnFocus();  // Will focus the RootView window (so we still get
                       // keyboard messages).
+  }
 }
 
 void TabbedPane::OnPaintFocusBorder(gfx::Canvas* canvas) {

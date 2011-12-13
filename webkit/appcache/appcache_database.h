@@ -15,6 +15,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/appcache/appcache_export.h"
 
 namespace sql {
 class Connection;
@@ -25,9 +26,9 @@ class StatementID;
 
 namespace appcache {
 
-class AppCacheDatabase {
+class APPCACHE_EXPORT AppCacheDatabase {
  public:
-  struct GroupRecord {
+  struct APPCACHE_EXPORT GroupRecord {
     GroupRecord();
     ~GroupRecord();
 
@@ -38,7 +39,7 @@ class AppCacheDatabase {
     base::Time last_access_time;
   };
 
-  struct CacheRecord {
+  struct APPCACHE_EXPORT CacheRecord {
     CacheRecord()
         : cache_id(0), group_id(0), online_wildcard(false), cache_size(0) {}
 
@@ -59,7 +60,7 @@ class AppCacheDatabase {
     int64 response_size;
   };
 
-  struct FallbackNameSpaceRecord {
+  struct APPCACHE_EXPORT FallbackNameSpaceRecord {
     FallbackNameSpaceRecord();
     ~FallbackNameSpaceRecord();
 

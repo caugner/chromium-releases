@@ -35,6 +35,28 @@ std::string GetResponseHeaderLines(const net::HttpResponseHeaders& headers) {
   return cr_separated_headers;
 }
 
+// Return true if |headers| contain multiple |field_name| fields.  If
+// |count_same_value| is false, returns false if all copies of the field have
+// the same value.
+bool HeadersContainMultipleCopiesOfField(
+    const net::HttpResponseHeaders& headers,
+    const std::string& field_name,
+    bool count_same_value) {
+  void* it = NULL;
+  std::string field_value;
+  if (!headers.EnumerateHeader(&it, field_name, &field_value))
+    return false;
+  // There's at least one |field_name| header.  Check if there are any more
+  // such headers, and if so, return true if they have different values or
+  // |count_same_value| is true.
+  std::string field_value2;
+  while (headers.EnumerateHeader(&it, field_name, &field_value2)) {
+    if (count_same_value || field_value != field_value2)
+      return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 namespace net {
@@ -75,7 +97,7 @@ int HttpStreamParser::SendRequest(const std::string& request_line,
                                   const HttpRequestHeaders& headers,
                                   UploadDataStream* request_body,
                                   HttpResponseInfo* response,
-                                  CompletionCallback* callback) {
+                                  OldCompletionCallback* callback) {
   DCHECK_EQ(STATE_NONE, io_state_);
   DCHECK(!user_callback_);
   DCHECK(callback);
@@ -119,7 +141,7 @@ int HttpStreamParser::SendRequest(const std::string& request_line,
   return result > 0 ? OK : result;
 }
 
-int HttpStreamParser::ReadResponseHeaders(CompletionCallback* callback) {
+int HttpStreamParser::ReadResponseHeaders(OldCompletionCallback* callback) {
   DCHECK(io_state_ == STATE_REQUEST_SENT || io_state_ == STATE_DONE);
   DCHECK(!user_callback_);
   DCHECK(callback);
@@ -154,7 +176,7 @@ void HttpStreamParser::Close(bool not_reusable) {
 }
 
 int HttpStreamParser::ReadResponseBody(IOBuffer* buf, int buf_len,
-                                       CompletionCallback* callback) {
+                                       OldCompletionCallback* callback) {
   DCHECK(io_state_ == STATE_BODY_PENDING || io_state_ == STATE_DONE);
   DCHECK(!user_callback_);
   DCHECK(callback);
@@ -180,7 +202,7 @@ void HttpStreamParser::OnIOComplete(int result) {
   // The client callback can do anything, including destroying this class,
   // so any pending callback must be issued after everything else is done.
   if (result != ERR_IO_PENDING && user_callback_) {
-    CompletionCallback* c = user_callback_;
+    OldCompletionCallback* c = user_callback_;
     user_callback_ = NULL;
     c->Run(result);
   }
@@ -509,7 +531,7 @@ int HttpStreamParser::DoReadBody() {
 }
 
 int HttpStreamParser::DoReadBodyComplete(int result) {
-  // If we didn't get a content-length and aren't using a chunked encoding,
+  // If we didn't get a Content-Length and aren't using a chunked encoding,
   // the only way to signal the end of a stream is to close the connection,
   // so we don't treat that as an error, though in some cases we may not
   // have completely received the resource.
@@ -617,26 +639,26 @@ int HttpStreamParser::DoParseResponseHeaders(int end_offset) {
     headers = new HttpResponseHeaders(std::string("HTTP/0.9 200 OK"));
   }
 
-  // Check for multiple Content-Length headers with a Transfer-Encoding header.
-  // If they exist, it's a potential response smuggling attack.
-
-  void* it = NULL;
-  const std::string content_length_header("Content-Length");
-  std::string content_length_value;
-  if (!headers->HasHeader("Transfer-Encoding") &&
-      headers->EnumerateHeader(
-          &it, content_length_header, &content_length_value)) {
-    // Ok, there's no Transfer-Encoding header and there's at least one
-    // Content-Length header.  Check if there are any more Content-Length
-    // headers, and if so, make sure they have the same value.  Otherwise, it's
-    // a possible response smuggling attack.
-    std::string content_length_value2;
-    while (headers->EnumerateHeader(
-        &it, content_length_header, &content_length_value2)) {
-      if (content_length_value != content_length_value2)
-        return ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_LENGTH;
+  // Check for multiple Content-Length headers with no Transfer-Encoding header.
+  // If they exist, and have distinct values, it's a potential response
+  // smuggling attack.
+  if (!headers->HasHeader("Transfer-Encoding")) {
+    if (HeadersContainMultipleCopiesOfField(*headers,
+                                            "Content-Length",
+                                            false)) {
+      return ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_LENGTH;
     }
   }
+
+  // Check for multiple Content-Disposition or Location headers.  If they exist,
+  // it's also a potential response smuggling attack.
+  if (HeadersContainMultipleCopiesOfField(*headers,
+                                          "Content-Disposition",
+                                          true)) {
+    return ERR_RESPONSE_HEADERS_MULTIPLE_CONTENT_DISPOSITION;
+  }
+  if (HeadersContainMultipleCopiesOfField(*headers, "Location", true))
+    return ERR_RESPONSE_HEADERS_MULTIPLE_LOCATION;
 
   response_->headers = headers;
   response_->vary_data.Init(*request_, *response_->headers);

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/notifications/balloon_collection_impl.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "chrome/browser/notifications/balloon.h"
@@ -64,8 +65,8 @@ void BalloonCollectionImpl::Add(const Notification& notification,
     space_change_listener_->OnBalloonSpaceChanged();
 
   // This is used only for testing.
-  if (on_collection_changed_callback_.get())
-    on_collection_changed_callback_->Run();
+  if (!on_collection_changed_callback_.is_null())
+    on_collection_changed_callback_.Run();
 }
 
 bool BalloonCollectionImpl::RemoveById(const std::string& id) {
@@ -144,8 +145,8 @@ void BalloonCollectionImpl::OnBalloonClosed(Balloon* source) {
     space_change_listener_->OnBalloonSpaceChanged();
 
   // This is used only for testing.
-  if (on_collection_changed_callback_.get())
-    on_collection_changed_callback_->Run();
+  if (!on_collection_changed_callback_.is_null())
+    on_collection_changed_callback_.Run();
 }
 
 const BalloonCollection::Balloons& BalloonCollectionImpl::GetActiveBalloons() {
@@ -198,7 +199,7 @@ void BalloonCollectionImpl::RemoveMessageLoopObserver() {
 }
 
 void BalloonCollectionImpl::CancelOffsets() {
-  reposition_factory_.RevokeAll();
+  reposition_factory_.InvalidateWeakPtrs();
 
   // Unhook from listening to all UI events.
   RemoveMessageLoopObserver();
@@ -216,16 +217,16 @@ void BalloonCollectionImpl::HandleMouseMoveEvent() {
   if (!IsCursorInBalloonCollection()) {
     // Mouse has left the region.  Schedule a reposition after
     // a short delay.
-    if (reposition_factory_.empty()) {
+    if (!reposition_factory_.HasWeakPtrs()) {
       MessageLoop::current()->PostDelayedTask(
           FROM_HERE,
-          reposition_factory_.NewRunnableMethod(
-              &BalloonCollectionImpl::CancelOffsets),
+          base::Bind(&BalloonCollectionImpl::CancelOffsets,
+                     reposition_factory_.GetWeakPtr()),
           kRepositionDelay);
     }
   } else {
     // Mouse moved back into the region.  Cancel the reposition.
-    reposition_factory_.RevokeAll();
+    reposition_factory_.InvalidateWeakPtrs();
   }
 }
 #endif

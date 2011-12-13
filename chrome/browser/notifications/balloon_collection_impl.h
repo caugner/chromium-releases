@@ -11,6 +11,8 @@
 #include <deque>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/notifications/balloon_collection.h"
 #include "chrome/browser/notifications/balloon_collection_base.h"
@@ -53,13 +55,13 @@ class BalloonCollectionImpl : public BalloonCollection
   virtual const Balloons& GetActiveBalloons();
 
   // MessageLoopForUI::Observer interface.
-#if defined(OS_WIN)
-  virtual void WillProcessMessage(const MSG& event) {}
-  virtual void DidProcessMessage(const MSG& event);
-#endif
-#if defined(TOOLKIT_USES_GTK)
-  virtual void WillProcessEvent(GdkEvent* event) {}
-  virtual void DidProcessEvent(GdkEvent* event);
+#if defined(OS_WIN) || defined(TOUCH_UI) || defined(USE_AURA)
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
+#elif defined(TOOLKIT_USES_GTK)
+  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE;
+  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE;
 #endif
 
  protected:
@@ -184,7 +186,7 @@ class BalloonCollectionImpl : public BalloonCollection
   bool IsCursorInBalloonCollection() const;
 
   // Factory for generating delayed reposition tasks on mouse motion.
-  ScopedRunnableMethodFactory<BalloonCollectionImpl> reposition_factory_;
+  base::WeakPtrFactory<BalloonCollectionImpl> reposition_factory_;
 
   // Is the balloon collection currently listening for UI events?
   bool added_as_message_loop_observer_;

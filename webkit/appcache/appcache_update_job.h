@@ -19,6 +19,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "webkit/appcache/appcache.h"
+#include "webkit/appcache/appcache_export.h"
 #include "webkit/appcache/appcache_host.h"
 #include "webkit/appcache/appcache_interfaces.h"
 #include "webkit/appcache/appcache_response.h"
@@ -29,8 +30,8 @@ namespace appcache {
 class HostNotifier;
 
 // Application cache Update algorithm and state.
-class AppCacheUpdateJob : public AppCacheStorage::Delegate,
-                          public AppCacheHost::Observer {
+class APPCACHE_EXPORT AppCacheUpdateJob : public AppCacheStorage::Delegate,
+                                          public AppCacheHost::Observer {
  public:
   AppCacheUpdateJob(AppCacheService* service, AppCacheGroup* group);
   virtual ~AppCacheUpdateJob();
@@ -142,7 +143,7 @@ class AppCacheUpdateJob : public AppCacheStorage::Delegate,
     scoped_refptr<net::HttpResponseHeaders> existing_response_headers_;
     std::string manifest_data_;
     scoped_ptr<AppCacheResponseWriter> response_writer_;
-    net::CompletionCallbackImpl<URLFetcher> write_callback_;
+    net::OldCompletionCallbackImpl<URLFetcher> write_callback_;
   };  // class URLFetcher
 
   AppCacheResponseWriter* CreateResponseWriter();
@@ -159,9 +160,6 @@ class AppCacheUpdateJob : public AppCacheStorage::Delegate,
   // Methods for AppCacheHost::Observer.
   virtual void OnCacheSelectionComplete(AppCacheHost* host) {}  // N/A
   virtual void OnDestructionImminent(AppCacheHost* host);
-
-  void CheckPolicy();
-  void OnPolicyCheckComplete(int rv);
 
   void HandleCacheFailure(const std::string& error_message);
 
@@ -306,12 +304,9 @@ class AppCacheUpdateJob : public AppCacheStorage::Delegate,
   // Whether we've stored the resulting group/cache yet.
   StoredState stored_state_;
 
-  net::CompletionCallbackImpl<AppCacheUpdateJob> manifest_info_write_callback_;
-  net::CompletionCallbackImpl<AppCacheUpdateJob> manifest_data_write_callback_;
-  net::CompletionCallbackImpl<AppCacheUpdateJob> manifest_data_read_callback_;
-
-  scoped_refptr<net::CancelableCompletionCallback<AppCacheUpdateJob> >
-      policy_callback_;
+  net::OldCompletionCallbackImpl<AppCacheUpdateJob> manifest_info_write_callback_;
+  net::OldCompletionCallbackImpl<AppCacheUpdateJob> manifest_data_write_callback_;
+  net::OldCompletionCallbackImpl<AppCacheUpdateJob> manifest_data_read_callback_;
 
   FRIEND_TEST_ALL_PREFIXES(AppCacheGroupTest, QueueUpdate);
 

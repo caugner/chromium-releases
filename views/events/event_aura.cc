@@ -4,120 +4,58 @@
 
 #include "views/events/event.h"
 
-#include "aura/event.h"
 #include "base/logging.h"
+#include "ui/aura/event.h"
 
 namespace views {
-
-namespace {
-
-int GetKeyStateFlags() {
-  NOTIMPLEMENTED();
-  return 0;
-}
-
-ui::EventType EventTypeFromNative(NativeEvent native_event) {
-  return native_event->type();
-}
-
-int EventFlagsFromNative(NativeEvent native_event) {
-  return native_event->flags();
-}
-
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Event, private:
-
-void Event::Init() {
-}
-
-void Event::InitWithNativeEvent(NativeEvent native_event) {
-  native_event_ = native_event;
-  // TODO(beng): remove once we rid views of Gtk/Gdk.
-  native_event_2_ = NULL;
-}
-
-void Event::InitWithNativeEvent2(NativeEvent2 native_event_2,
-                                 FromNativeEvent2) {
-  // No one should ever call this on Aura.
-  // TODO(beng): remove once we rid views of Gtk/Gdk.
-  NOTREACHED();
-  native_event_2_ = NULL;
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // LocatedEvent, protected:
 
-LocatedEvent::LocatedEvent(NativeEvent native_event)
+LocatedEvent::LocatedEvent(const NativeEvent& native_event)
     : Event(native_event, native_event->type(), native_event->flags()),
       location_(static_cast<aura::LocatedEvent*>(native_event)->location()) {
 }
 
-LocatedEvent::LocatedEvent(NativeEvent2 native_event_2,
-                           FromNativeEvent2 from_native)
-    : Event(native_event_2, ui::ET_UNKNOWN, 0, from_native) {
-  // No one should ever call this on Windows.
-  // TODO(msw): remove once we rid views of Gtk/Gdk.
-  NOTREACHED();
+////////////////////////////////////////////////////////////////////////////////
+// TouchEvent, public:
+
+TouchEvent::TouchEvent(const NativeEvent& event)
+    : LocatedEvent(event),
+      touch_id_(static_cast<aura::TouchEvent*>(event)->touch_id()),
+      radius_x_(static_cast<aura::TouchEvent*>(event)->radius_x()),
+      radius_y_(static_cast<aura::TouchEvent*>(event)->radius_y()),
+      rotation_angle_(static_cast<aura::TouchEvent*>(event)->rotation_angle()),
+      force_(static_cast<aura::TouchEvent*>(event)->force()) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // KeyEvent, public:
 
-KeyEvent::KeyEvent(NativeEvent native_event)
-    : Event(native_event, native_event->type(), GetKeyStateFlags()),
+KeyEvent::KeyEvent(const NativeEvent& native_event)
+    : Event(native_event, native_event->type(), native_event->flags()),
       key_code_(static_cast<aura::KeyEvent*>(native_event)->key_code()),
-      character_(0),
+      character_(GetCharacterFromKeyCode(key_code_, flags())),
       unmodified_character_(0) {
 }
 
-KeyEvent::KeyEvent(NativeEvent2 native_event_2, FromNativeEvent2 from_native)
-    : Event(native_event_2, ui::ET_UNKNOWN, 0, from_native) {
-  // No one should ever call this on Windows.
-  // TODO(beng): remove once we rid views of Gtk/Gdk.
-  NOTREACHED();
-}
-
 uint16 KeyEvent::GetCharacter() const {
-  NOTIMPLEMENTED();
-  return key_code_;
+  return character_;
 }
 
 uint16 KeyEvent::GetUnmodifiedCharacter() const {
-  NOTIMPLEMENTED();
-  return key_code_;
-}
+  if (unmodified_character_)
+    return unmodified_character_;
 
-////////////////////////////////////////////////////////////////////////////////
-// MouseEvent, public:
-
-MouseEvent::MouseEvent(NativeEvent native_event)
-    : LocatedEvent(native_event) {
-}
-
-MouseEvent::MouseEvent(NativeEvent2 native_event_2,
-                       FromNativeEvent2 from_native)
-    : LocatedEvent(native_event_2, from_native) {
-  // No one should ever call this on Windows.
-  // TODO(msw): remove once we rid views of Gtk/Gdk.
-  NOTREACHED();
+  return GetCharacterFromKeyCode(key_code_, flags() & ui::EF_SHIFT_DOWN);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // MouseWheelEvent, public:
 
-MouseWheelEvent::MouseWheelEvent(NativeEvent native_event)
+MouseWheelEvent::MouseWheelEvent(const NativeEvent& native_event)
     : MouseEvent(native_event),
-      offset_(0 /* TODO(beng): obtain */) {
-}
-
-MouseWheelEvent::MouseWheelEvent(NativeEvent2 native_event_2,
-                                 FromNativeEvent2 from_native)
-    : MouseEvent(native_event_2, from_native) {
-  // No one should ever call this on Windows.
-  // TODO(msw): remove once we rid views of Gtk/Gdk.
-  NOTREACHED();
+      offset_(ui::GetMouseWheelOffset(native_event->native_event())) {
 }
 
 }  // namespace views

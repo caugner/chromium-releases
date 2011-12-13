@@ -4,6 +4,8 @@
 
 #include "chrome/browser/task_manager/task_manager_resource_providers.h"
 
+#include <string>
+
 #include "base/basictypes.h"
 #include "base/file_version_info.h"
 #include "base/i18n/rtl.h"
@@ -22,6 +24,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/prerender/prerender_manager.h"
+#include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -33,6 +36,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/common/chrome_view_types.h"
+#include "chrome/common/url_constants.h"
 #include "content/browser/browser_child_process_host.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_message_filter.h"
@@ -40,8 +45,6 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
-#include "content/common/url_constants.h"
-#include "content/common/view_messages.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -116,7 +119,7 @@ void TaskManagerRendererResource::Refresh() {
   }
   if (!pending_fps_update_) {
     render_view_host_->Send(
-        new ViewMsg_GetFPS(render_view_host_->routing_id()));
+        new ChromeViewMsg_GetFPS(render_view_host_->routing_id()));
     pending_fps_update_ = true;
   }
   if (!pending_v8_memory_allocated_update_) {
@@ -212,7 +215,8 @@ TaskManagerTabContentsResource::~TaskManagerTabContentsResource() {
 
 bool TaskManagerTabContentsResource::IsPrerendering() const {
   prerender::PrerenderManager* prerender_manager =
-      tab_contents_->profile()->GetPrerenderManager();
+      prerender::PrerenderManagerFactory::GetForProfile(
+          tab_contents_->profile());
   return prerender_manager &&
          prerender_manager->IsTabContentsPrerendering(
              tab_contents_->tab_contents());
@@ -254,8 +258,11 @@ string16 TaskManagerTabContentsResource::GetTitle() const {
   // was installed as an app.)
   ExtensionService* extensions_service =
       tab_contents_->profile()->GetExtensionService();
+  ExtensionProcessManager* extension_process_manager =
+      tab_contents_->profile()->GetExtensionProcessManager();
   bool is_app = extensions_service->IsInstalledApp(url) &&
-      contents->GetRenderProcessHost()->is_extension_process();
+      extension_process_manager->IsExtensionProcess(
+          contents->GetRenderProcessHost()->id());
 
   int message_id = GetMessagePrefixID(
       is_app,
@@ -269,8 +276,11 @@ string16 TaskManagerTabContentsResource::GetProfileName() const {
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   Profile* profile = tab_contents_->profile()->GetOriginalProfile();
-  return cache.GetNameOfProfileAtIndex(
-      cache.GetIndexOfProfileWithPath(profile->GetPath()));
+  size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  if (index == std::string::npos)
+    return string16();
+  else
+    return cache.GetNameOfProfileAtIndex(index);
 }
 
 SkBitmap TaskManagerTabContentsResource::GetIcon() const {
@@ -560,23 +570,30 @@ void TaskManagerBackgroundContentsResourceProvider::StartUpdating() {
   DCHECK(!updating_);
   updating_ = true;
 
-  // Add all the existing BackgroundContents from every profile.
+  // Add all the existing BackgroundContents from every profile, including
+  // incognito profiles.
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   std::vector<Profile*> profiles(profile_manager->GetLoadedProfiles());
+  size_t num_default_profiles = profiles.size();
+  for (size_t i = 0; i < num_default_profiles; ++i) {
+    if (profiles[i]->HasOffTheRecordProfile()) {
+      profiles.push_back(profiles[i]->GetOffTheRecordProfile());
+    }
+  }
   for (size_t i = 0; i < profiles.size(); ++i) {
     BackgroundContentsService* background_contents_service =
         BackgroundContentsServiceFactory::GetForProfile(profiles[i]);
-    ExtensionService* extensions_service = profiles[i]->GetExtensionService();
     std::vector<BackgroundContents*> contents =
         background_contents_service->GetBackgroundContents();
+    ExtensionService* extension_service = profiles[i]->GetExtensionService();
     for (std::vector<BackgroundContents*>::iterator iterator = contents.begin();
          iterator != contents.end(); ++iterator) {
       string16 application_name;
       // Lookup the name from the parent extension.
-      if (extensions_service) {
+      if (extension_service) {
         const string16& application_id =
             background_contents_service->GetParentApplicationId(*iterator);
-        const Extension* extension = extensions_service->GetExtensionById(
+        const Extension* extension = extension_service->GetExtensionById(
             UTF16ToUTF8(application_id), false);
         if (extension)
           application_name = UTF8ToUTF16(extension->name());
@@ -759,6 +776,8 @@ TaskManager::Resource::Type TaskManagerChildProcessResource::GetType() const {
     case ChildProcessInfo::RENDER_PROCESS:
       return TaskManager::Resource::RENDERER;
     case ChildProcessInfo::PLUGIN_PROCESS:
+    case ChildProcessInfo::PPAPI_PLUGIN_PROCESS:
+    case ChildProcessInfo::PPAPI_BROKER_PROCESS:
       return TaskManager::Resource::PLUGIN;
     case ChildProcessInfo::WORKER_PROCESS:
       return TaskManager::Resource::WORKER;
@@ -790,9 +809,17 @@ void TaskManagerChildProcessResource::SetSupportNetworkUsage() {
 
 string16 TaskManagerChildProcessResource::GetLocalizedTitle() const {
   string16 title = child_process_.name();
-  if (child_process_.type() == ChildProcessInfo::PLUGIN_PROCESS &&
-      title.empty()) {
-    title = l10n_util::GetStringUTF16(IDS_TASK_MANAGER_UNKNOWN_PLUGIN_NAME);
+  if (title.empty()) {
+    switch (child_process_.type()) {
+      case ChildProcessInfo::PLUGIN_PROCESS:
+      case ChildProcessInfo::PPAPI_PLUGIN_PROCESS:
+      case ChildProcessInfo::PPAPI_BROKER_PROCESS:
+        title = l10n_util::GetStringUTF16(IDS_TASK_MANAGER_UNKNOWN_PLUGIN_NAME);
+        break;
+      default:
+        // Nothing to do for non-plugin processes.
+        break;
+    }
   }
 
   // Explicitly mark name as LTR if there is no strong RTL character,
@@ -816,10 +843,12 @@ string16 TaskManagerChildProcessResource::GetLocalizedTitle() const {
 
     case ChildProcessInfo::PLUGIN_PROCESS:
     case ChildProcessInfo::PPAPI_PLUGIN_PROCESS:
-    case ChildProcessInfo::PPAPI_BROKER_PROCESS: {
       return l10n_util::GetStringFUTF16(
           IDS_TASK_MANAGER_PLUGIN_PREFIX, title, child_process_.version());
-    }
+
+    case ChildProcessInfo::PPAPI_BROKER_PROCESS:
+      return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_PLUGIN_BROKER_PREFIX,
+                                        title, child_process_.version());
 
     case ChildProcessInfo::NACL_LOADER_PROCESS:
       return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_NACL_PREFIX, title);
@@ -1034,8 +1063,11 @@ string16 TaskManagerExtensionProcessResource::GetProfileName() const {
   ProfileInfoCache& cache =
       g_browser_process->profile_manager()->GetProfileInfoCache();
   Profile* profile = extension_host_->profile()->GetOriginalProfile();
-  return cache.GetNameOfProfileAtIndex(
-      cache.GetIndexOfProfileWithPath(profile->GetPath()));
+  size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
+  if (index == std::string::npos)
+    return string16();
+  else
+    return cache.GetNameOfProfileAtIndex(index);
 }
 
 SkBitmap TaskManagerExtensionProcessResource::GetIcon() const {
@@ -1065,7 +1097,7 @@ const Extension* TaskManagerExtensionProcessResource::GetExtension() const {
 
 bool TaskManagerExtensionProcessResource::IsBackground() const {
   return extension_host_->GetRenderViewType() ==
-      ViewType::EXTENSION_BACKGROUND_PAGE;
+      chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1225,14 +1257,7 @@ TaskManagerBrowserProcessResource::TaskManagerBrowserProcessResource()
   if (!default_icon_) {
     HICON icon = GetAppIcon();
     if (icon) {
-      ICONINFO icon_info = {0};
-      BITMAP bitmap_info = {0};
-
-      GetIconInfo(icon, &icon_info);
-      GetObject(icon_info.hbmMask, sizeof(bitmap_info), &bitmap_info);
-
-      gfx::Size icon_size(bitmap_info.bmWidth, bitmap_info.bmHeight);
-      default_icon_ = IconUtil::CreateSkBitmapFromHICON(icon, icon_size);
+      default_icon_ = IconUtil::CreateSkBitmapFromHICON(icon);
     }
   }
 #elif defined(OS_POSIX) && !defined(OS_MACOSX)

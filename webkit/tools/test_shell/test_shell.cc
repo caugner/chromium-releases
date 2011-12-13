@@ -146,6 +146,8 @@ TestShell::TestShell()
     filter->AddHostnameHandler("test-shell-resource", "inspector",
                                &URLRequestTestShellFileJob::InspectorFactory);
     url_util::AddStandardScheme("test-shell-resource");
+    webkit_glue::SetUserAgent(webkit_glue::BuildUserAgentFromProduct(
+        "TestShell/0.0.0.0"), false);
 }
 
 TestShell::~TestShell() {
@@ -604,8 +606,10 @@ WebKit::WebSpeechInputControllerMock*
 TestShell::CreateSpeechInputControllerMock(
     WebKit::WebSpeechInputListener* listener) {
   DCHECK(!speech_input_controller_mock_.get());
+#if defined(ENABLE_INPUT_SPEECH)
   speech_input_controller_mock_.reset(
       WebKit::WebSpeechInputControllerMock::create(listener));
+#endif
   return speech_input_controller_mock_.get();
 }
 
@@ -635,54 +639,6 @@ bool IsProtocolSupportedForMedia(const GURL& url) {
   return false;
 }
 
-std::string GetWebKitLocale() {
-  return "en-US";
-}
-
-void CloseCurrentConnections() {
-  // Used in benchmarking,  Ignored for test_shell.
-}
-
-void SetCacheMode(bool enabled) {
-  // Used in benchmarking,  Ignored for test_shell.
-}
-
-void ClearCache(bool preserve_ssl_entries) {
-  // Used in benchmarking,  Ignored for test_shell.
-}
-
-void ClearHostResolverCache() {
-  // Used in benchmarking,  Ignored for test_shell.
-}
-
-void ClearPredictorCache() {
-  // Used in benchmarking,  Ignored for test_shell.
-}
-
-void EnableSpdy(bool enable) {
-  // Used in benchmarking,  Ignored for test_shell.
-}
-
-std::string BuildUserAgent(bool mimic_windows) {
-  return webkit_glue::BuildUserAgentHelper(mimic_windows, "Chrome/0.0.0.0");
-}
-
-bool IsSingleProcess() {
-  return true;
-}
-
-#if defined(OS_LINUX)
-int MatchFontWithFallback(const std::string& face, bool bold,
-                          bool italic, int charset) {
-  return -1;
-}
-
-bool GetFontTable(int fd, uint32_t table, uint8_t* output,
-                  size_t* output_length) {
-  return false;
-}
-#endif
-
 void GetPlugins(bool refresh,
                 std::vector<webkit::WebPluginInfo>* plugins) {
   if (refresh)
@@ -699,7 +655,6 @@ void GetPlugins(bool refresh,
     webkit::WebPluginInfo plugin_info = plugins->at(i);
     for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
       if (plugin_info.path.BaseName() == FilePath(kPluginBlackList[j])) {
-        webkit::npapi::PluginList::Singleton()->DisablePlugin(plugin_info.path);
         plugins->erase(plugins->begin() + i);
       }
     }

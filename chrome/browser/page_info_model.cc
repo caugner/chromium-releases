@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/string_number_conversions.h"
@@ -15,7 +17,7 @@
 #include "chrome/browser/ssl/ssl_error_info.h"
 #include "content/browser/cert_store.h"
 #include "content/browser/ssl/ssl_manager.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -57,19 +59,12 @@ PageInfoModel::PageInfoModel(Profile* profile,
     empty_subject_name = true;
   }
 
-  // Some of what IsCertStatusError classifies as errors we want to show as
-  // warnings instead.
-  static const int cert_warnings =
-      net::CERT_STATUS_UNABLE_TO_CHECK_REVOCATION |
-      net::CERT_STATUS_NO_REVOCATION_MECHANISM;
-  int status_with_warnings_removed = ssl.cert_status() & ~cert_warnings;
-
   if (ssl.cert_id() &&
       CertStore::GetInstance()->RetrieveCert(ssl.cert_id(), &cert) &&
-      !net::IsCertStatusError(status_with_warnings_removed)) {
-    // No error found so far, check cert_status warnings.
-    int cert_status = ssl.cert_status();
-    if (cert_status & cert_warnings) {
+      (!net::IsCertStatusError(ssl.cert_status()) ||
+       net::IsCertStatusMinorError(ssl.cert_status()))) {
+    // There are no major errors. Check for minor errors.
+    if (net::IsCertStatusMinorError(ssl.cert_status())) {
       string16 issuer_name(UTF8ToUTF16(cert->issuer().GetDisplayName()));
       if (issuer_name.empty()) {
         issuer_name.assign(l10n_util::GetStringUTF16(
@@ -79,17 +74,17 @@ PageInfoModel::PageInfoModel(Profile* profile,
           IDS_PAGE_INFO_SECURITY_TAB_SECURE_IDENTITY, issuer_name));
 
       description += ASCIIToUTF16("\n\n");
-      if (cert_status & net::CERT_STATUS_UNABLE_TO_CHECK_REVOCATION) {
+      if (ssl.cert_status() & net::CERT_STATUS_UNABLE_TO_CHECK_REVOCATION) {
         description += l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_UNABLE_TO_CHECK_REVOCATION);
-      } else if (cert_status & net::CERT_STATUS_NO_REVOCATION_MECHANISM) {
+      } else if (ssl.cert_status() & net::CERT_STATUS_NO_REVOCATION_MECHANISM) {
         description += l10n_util::GetStringUTF16(
             IDS_PAGE_INFO_SECURITY_TAB_NO_REVOCATION_MECHANISM);
       } else {
         NOTREACHED() << "Need to specify string for this warning";
       }
       icon_id = ICON_STATE_WARNING_MINOR;
-    } else if ((ssl.cert_status() & net::CERT_STATUS_IS_EV) != 0) {
+    } else if (ssl.cert_status() & net::CERT_STATUS_IS_EV) {
       // EV HTTPS page.
       DCHECK(!cert->subject().organization_names.empty());
       headline =
@@ -119,7 +114,7 @@ PageInfoModel::PageInfoModel(Profile* profile,
           UTF8ToUTF16(cert->subject().organization_names[0]),
           locality,
           UTF8ToUTF16(cert->issuer().GetDisplayName())));
-    } else if ((ssl.cert_status() & net::CERT_STATUS_IS_DNSSEC) != 0) {
+    } else if (ssl.cert_status() & net::CERT_STATUS_IS_DNSSEC) {
       // DNSSEC authenticated page.
       if (empty_subject_name)
         headline.clear();  // Don't display any title.
@@ -284,7 +279,8 @@ PageInfoModel::PageInfoModel(Profile* profile,
     history->GetVisibleVisitCountToHost(
         url,
         &request_consumer_,
-        NewCallback(this, &PageInfoModel::OnGotVisitCountToHost));
+        base::Bind(&PageInfoModel::OnGotVisitCountToHost,
+                   base::Unretained(this)));
   }
 }
 

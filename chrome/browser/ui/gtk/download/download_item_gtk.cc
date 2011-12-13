@@ -186,6 +186,8 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
 
   if (IsDangerous()) {
     // Hide the download item components for now.
+    gtk_widget_set_no_show_all(body_.get(), TRUE);
+    gtk_widget_set_no_show_all(menu_button_, TRUE);
     gtk_widget_hide(body_.get());
     gtk_widget_hide(menu_button_);
 
@@ -266,6 +268,10 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
 }
 
 DownloadItemGtk::~DownloadItemGtk() {
+  // First close the menu and then destroy the GtkWidgets. Bug#97724
+  if (menu_.get())
+    menu_.reset();
+
   icon_consumer_.CancelAllRequests();
   StopDownloadProgress();
   get_download()->RemoveObserver(this);
@@ -289,6 +295,8 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
   if (dangerous_prompt_ != NULL &&
       download->safety_state() == DownloadItem::DANGEROUS_BUT_VALIDATED) {
     // We have been approved.
+    gtk_widget_set_no_show_all(body_.get(), FALSE);
+    gtk_widget_set_no_show_all(menu_button_, FALSE);
     gtk_widget_show_all(hbox_.get());
     gtk_widget_destroy(dangerous_prompt_);
     gtk_widget_set_size_request(body_.get(), kBodyWidth, -1);
@@ -453,10 +461,12 @@ void DownloadItemGtk::LoadIcon() {
   icon_filepath_ = get_download()->GetUserVerifiedFilePath();
   im->LoadIcon(icon_filepath_,
                IconLoader::SMALL, &icon_consumer_,
-               NewCallback(this, &DownloadItemGtk::OnLoadSmallIconComplete));
+               base::Bind(&DownloadItemGtk::OnLoadSmallIconComplete,
+                          base::Unretained(this)));
   im->LoadIcon(icon_filepath_,
                IconLoader::LARGE, &icon_consumer_,
-               NewCallback(this, &DownloadItemGtk::OnLoadLargeIconComplete));
+               base::Bind(&DownloadItemGtk::OnLoadLargeIconComplete,
+                          base::Unretained(this)));
 }
 
 void DownloadItemGtk::UpdateTooltip() {

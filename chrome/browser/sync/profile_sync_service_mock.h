@@ -38,6 +38,7 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_METHOD2(OnUnrecoverableError,
                void(const tracked_objects::Location& location,
                const std::string& message));
+  MOCK_CONST_METHOD0(GetUserShare, sync_api::UserShare*());
   MOCK_METHOD3(ActivateDataType,
                void(syncable::ModelType, browser_sync::ModelSafeGroup,
                     browser_sync::ChangeProcessor*));
@@ -64,6 +65,11 @@ class ProfileSyncServiceMock : public ProfileSyncService {
   MOCK_CONST_METHOD0(unrecoverable_error_detected, bool());
   MOCK_METHOD1(OnActionableError, void(
       const browser_sync::SyncProtocolError&));
+
+  MOCK_CONST_METHOD0(IsPassphraseRequired, bool());
+  MOCK_CONST_METHOD0(IsPassphraseRequiredForDecryption, bool());
+
+  MOCK_METHOD0(ShowErrorUI, void());
 };
 
 #endif  // CHROME_BROWSER_SYNC_PROFILE_SYNC_SERVICE_MOCK_H_

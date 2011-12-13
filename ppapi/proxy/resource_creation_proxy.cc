@@ -21,6 +21,7 @@
 #include "ppapi/proxy/ppb_flash_menu_proxy.h"
 #include "ppapi/proxy/ppb_flash_net_connector_proxy.h"
 #include "ppapi/proxy/ppb_flash_tcp_socket_proxy.h"
+#include "ppapi/proxy/ppb_flash_udp_socket_proxy.h"
 #include "ppapi/proxy/ppb_font_proxy.h"
 #include "ppapi/proxy/ppb_graphics_2d_proxy.h"
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
@@ -45,10 +46,15 @@ namespace ppapi {
 namespace proxy {
 
 ResourceCreationProxy::ResourceCreationProxy(Dispatcher* dispatcher)
-    : dispatcher_(dispatcher) {
+    : InterfaceProxy(dispatcher) {
 }
 
 ResourceCreationProxy::~ResourceCreationProxy() {
+}
+
+// static
+InterfaceProxy* ResourceCreationProxy::Create(Dispatcher* dispatcher) {
+  return new ResourceCreationProxy(dispatcher);
 }
 
 ResourceCreationAPI* ResourceCreationProxy::AsResourceCreationAPI() {
@@ -114,7 +120,7 @@ PP_Resource ResourceCreationProxy::CreateDirectoryReader(
 PP_Resource ResourceCreationProxy::CreateFileChooser(
     PP_Instance instance,
     PP_FileChooserMode_Dev mode,
-    const PP_Var& accept_mime_types) {
+    const char* accept_mime_types) {
   return PPB_FileChooser_Proxy::CreateProxyResource(instance, mode,
                                                     accept_mime_types);
 }
@@ -149,6 +155,11 @@ PP_Resource ResourceCreationProxy::CreateFlashNetConnector(
 PP_Resource ResourceCreationProxy::CreateFlashTCPSocket(
     PP_Instance instance) {
   return PPB_Flash_TCPSocket_Proxy::CreateProxyResource(instance);
+}
+
+PP_Resource ResourceCreationProxy::CreateFlashUDPSocket(
+    PP_Instance instance) {
+  return PPB_Flash_UDPSocket_Proxy::CreateProxyResource(instance);
 }
 
 PP_Resource ResourceCreationProxy::CreateFontObject(
@@ -282,7 +293,7 @@ PP_Resource ResourceCreationProxy::CreateSurface3D(
 
 PP_Resource ResourceCreationProxy::CreateTransport(PP_Instance instance,
                                                    const char* name,
-                                                   const char* proto) {
+                                                   PP_TransportType type) {
   NOTIMPLEMENTED();  // Not proxied yet.
   return 0;
 }
@@ -337,7 +348,7 @@ PP_Resource ResourceCreationProxy::CreateWheelInputEvent(
 }
 
 bool ResourceCreationProxy::Send(IPC::Message* msg) {
-  return dispatcher_->Send(msg);
+  return dispatcher()->Send(msg);
 }
 
 bool ResourceCreationProxy::OnMessageReceived(const IPC::Message& msg) {
@@ -395,14 +406,14 @@ void ResourceCreationProxy::OnMsgCreateImageData(
   // Get the shared memory handle.
   const PPB_ImageDataTrusted* trusted =
       reinterpret_cast<const PPB_ImageDataTrusted*>(
-          dispatcher_->GetLocalInterface(PPB_IMAGEDATA_TRUSTED_INTERFACE));
+          dispatcher()->local_get_interface()(PPB_IMAGEDATA_TRUSTED_INTERFACE));
   uint32_t byte_count = 0;
   if (trusted) {
     int32_t handle;
     if (trusted->GetSharedMemory(resource, &handle, &byte_count) == PP_OK) {
 #if defined(OS_WIN)
       ImageHandle ih = ImageData::HandleFromInt(handle);
-      *result_image_handle = dispatcher_->ShareHandleWithRemote(ih, false);
+      *result_image_handle = dispatcher()->ShareHandleWithRemote(ih, false);
 #else
       *result_image_handle = ImageData::HandleFromInt(handle);
 #endif

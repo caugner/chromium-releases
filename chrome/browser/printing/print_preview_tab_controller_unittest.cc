@@ -13,7 +13,8 @@
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
-#include "content/common/url_constants.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/url_constants.h"
 
 typedef BrowserWithTestWindowTest PrintPreviewTabControllerUnitTest;
 
@@ -88,14 +89,15 @@ TEST_F(PrintPreviewTabControllerUnitTest, TitleAfterReload) {
   // Set up a PrintPreviewUI for |preview_tab|.
   PrintPreviewUI* preview_ui = new PrintPreviewUI(preview_tab->tab_contents());
   // RenderViewHostManager takes ownership of |preview_ui|.
-  preview_tab->tab_contents()->render_manager()->SetWebUIPostCommit(preview_ui);
+  preview_tab->tab_contents()->render_manager_for_testing()->
+      SetWebUIPostCommit(preview_ui);
 
   // Simulate a reload event on |preview_tab|.
   scoped_ptr<NavigationEntry> entry;
   entry.reset(new NavigationEntry());
-  entry->set_transition_type(PageTransition::RELOAD);
+  entry->set_transition_type(content::PAGE_TRANSITION_RELOAD);
   content::LoadCommittedDetails details;
-  details.type = NavigationType::SAME_PAGE;
+  details.type = content::NAVIGATION_TYPE_SAME_PAGE;
   details.entry = entry.get();
   NotificationService::current()->Notify(
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,

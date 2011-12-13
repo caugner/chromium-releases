@@ -37,6 +37,10 @@
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 #endif
 
+#if defined(OS_WIN)
+#include "chrome/browser/ui/views/omnibox/omnibox_view_win.h"
+#endif
+
 namespace {
 
 // Textfield for autocomplete that intercepts events that are necessary
@@ -84,12 +88,12 @@ class AutocompleteTextfield : public views::Textfield {
 
 // Stores omnibox state for each tab.
 struct ViewState {
-  explicit ViewState(const ui::Range& selection_range)
-      : selection_range(selection_range) {
+  explicit ViewState(const gfx::SelectionModel& selection_model)
+      : selection_model(selection_model) {
   }
 
-  // Range of selected text.
-  ui::Range selection_range;
+  // SelectionModel of selected text.
+  gfx::SelectionModel selection_model;
 };
 
 struct AutocompleteEditState {
@@ -237,7 +241,7 @@ bool OmniboxViewViews::HandleAfterKeyEvent(const views::KeyEvent& event,
       GetSelectionBounds(&start, &end);
       if (start != end || start < length) {
         OnBeforePossibleChange();
-        SelectRange(length, length);
+        textfield_->SelectRange(ui::Range(length, length));
         OnAfterPossibleChange();
         handled = true;
       }
@@ -298,6 +302,11 @@ std::string OmniboxViewViews::GetClassName() const {
   return kViewClassName;
 }
 
+void OmniboxViewViews::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  if (popup_view_->IsOpen())
+    popup_view_->UpdatePopupAppearance();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // OmniboxViewViews, AutocopmleteEditView implementation:
 
@@ -314,8 +323,8 @@ void OmniboxViewViews::SaveStateToTab(TabContents* tab) {
 
   // NOTE: GetStateForTabSwitch may affect GetSelection, so order is important.
   AutocompleteEditModel::State model_state = model_->GetStateForTabSwitch();
-  ui::Range selection;
-  textfield_->GetSelectedRange(&selection);
+  gfx::SelectionModel selection;
+  textfield_->GetSelectionModel(&selection);
   GetStateAccessor()->SetProperty(
       tab->property_bag(),
       AutocompleteEditState(model_state, ViewState(selection)));
@@ -342,7 +351,7 @@ void OmniboxViewViews::Update(const TabContents* contents) {
 
       // Move the marks for the cursor and the other end of the selection to
       // the previously-saved offsets (but preserve PRIMARY).
-      textfield_->SelectRange(state->view_state.selection_range);
+      textfield_->SelectSelectionModel(state->view_state.selection_model);
       // We do not carry over the current edit history to another tab.
       // TODO(oshima): consider saving/restoring edit history.
       textfield_->ClearEditHistory();
@@ -404,11 +413,10 @@ void OmniboxViewViews::SetWindowTextAndCaretPos(const string16& text,
 void OmniboxViewViews::SetForcedQuery() {
   const string16 current_text(GetText());
   const size_t start = current_text.find_first_not_of(kWhitespaceUTF16);
-  if (start == string16::npos || (current_text[start] != '?')) {
+  if (start == string16::npos || (current_text[start] != '?'))
     SetUserText(ASCIIToUTF16("?"));
-  } else {
-    SelectRange(current_text.size(), start + 1);
-  }
+  else
+    textfield_->SelectRange(ui::Range(current_text.size(), start + 1));
 }
 
 bool OmniboxViewViews::IsSelectAll() {
@@ -430,9 +438,9 @@ void OmniboxViewViews::GetSelectionBounds(string16::size_type* start,
 
 void OmniboxViewViews::SelectAll(bool reversed) {
   if (reversed)
-    SelectRange(GetTextLength(), 0);
+    textfield_->SelectRange(ui::Range(GetTextLength(), 0));
   else
-    SelectRange(0, GetTextLength());
+    textfield_->SelectRange(ui::Range(0, GetTextLength()));
 }
 
 void OmniboxViewViews::RevertAll() {
@@ -539,6 +547,14 @@ bool OmniboxViewViews::OnAfterPossibleChange() {
 
 gfx::NativeView OmniboxViewViews::GetNativeView() const {
   return GetWidget()->GetNativeView();
+}
+
+gfx::NativeView OmniboxViewViews::GetRelativeWindowForPopup() const {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  return OmniboxViewWin::GetRelativeWindowForNativeView(GetNativeView());
+#else
+  return GetWidget()->GetTopLevelWidget()->GetNativeView();
+#endif
 }
 
 CommandUpdater* OmniboxViewViews::GetCommandUpdater() {
@@ -687,11 +703,6 @@ void OmniboxViewViews::SetTextAndSelectedRange(const string16& text,
 string16 OmniboxViewViews::GetSelectedText() const {
   // TODO(oshima): Support instant, IME.
   return textfield_->GetSelectedText();
-}
-
-void OmniboxViewViews::SelectRange(size_t caret, size_t end) {
-  const ui::Range range(caret, end);
-  textfield_->SelectRange(range);
 }
 
 AutocompletePopupView* OmniboxViewViews::CreatePopupView(

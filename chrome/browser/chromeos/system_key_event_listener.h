@@ -6,11 +6,12 @@
 #define CHROME_BROWSER_CHROMEOS_SYSTEM_KEY_EVENT_LISTENER_H_
 #pragma once
 
+#if defined(TOOLKIT_USES_GTK)
 #include <gdk/gdk.h>
+#endif
 
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
-#include "chrome/browser/chromeos/wm_message_listener.h"
 
 typedef union _XEvent XEvent;
 
@@ -22,21 +23,16 @@ class AudioHandler;
 // tells the AudioHandler to adjust volume accordingly.  Start by just calling
 // instance() to get it going.
 
-// TODO(davej): Remove WmMessageListener::Observer once volume key handling has
-// been removed from the window manager since those keys take precedence.
-
-class SystemKeyEventListener : public WmMessageListener::Observer,
-                               public MessageLoopForUI::Observer {
+class SystemKeyEventListener : public MessageLoopForUI::Observer {
  public:
   class CapsLockObserver {
    public:
     virtual void OnCapsLockChange(bool enabled) = 0;
   };
+  static void Initialize();
+  static void Shutdown();
+  // GetInstance returns NULL if not initialized or if already shutdown.
   static SystemKeyEventListener* GetInstance();
-
-  // WmMessageListener::Observer:
-  virtual void ProcessWmMessage(const WmIpc::Message& message,
-                                GdkWindow* window);
 
   void Stop();
 
@@ -51,9 +47,13 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
   SystemKeyEventListener();
   virtual ~SystemKeyEventListener();
 
-#if defined(TOUCH_UI)
+  AudioHandler* GetAudioHandler() const;
+
+#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
   // MessageLoopForUI::Observer overrides.
-  virtual EventStatus WillProcessXEvent(XEvent* xevent) OVERRIDE;
+  virtual base::EventStatus WillProcessEvent(
+      const base::NativeEvent& event) OVERRIDE;
+  virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
 #else
   // This event filter intercepts events before they reach GDK, allowing us to
   // check for system level keyboard events regardless of which window has
@@ -71,6 +71,8 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
   // CapsLock and Numlock are always ignored.
   void GrabKey(int32 key, uint32 mask);
 
+  void OnBrightnessDown();
+  void OnBrightnessUp();
   void OnVolumeMute();
   void OnVolumeDown();
   void OnVolumeUp();
@@ -83,9 +85,13 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
   // Returns true if the event was processed, false otherwise.
   virtual bool ProcessedXEvent(XEvent* xevent);
 
+  int32 key_brightness_down_;
+  int32 key_brightness_up_;
   int32 key_volume_mute_;
   int32 key_volume_down_;
   int32 key_volume_up_;
+  int32 key_f6_;
+  int32 key_f7_;
   int32 key_f8_;
   int32 key_f9_;
   int32 key_f10_;
@@ -94,19 +100,11 @@ class SystemKeyEventListener : public WmMessageListener::Observer,
 
   bool stopped_;
 
-  // Are we waiting for a Shift key press event to toggle Caps Lock (i.e. the
-  // last key press event was regarding the other Shift key)?
-  bool waiting_for_shift_for_caps_lock_;
-
   bool caps_lock_is_on_;
   ObserverList<CapsLockObserver> caps_lock_observers_;
 
   // Base X ID for events from the XKB extension.
   int xkb_event_base_;
-
-  // AudioHandler is a Singleton class we are just caching a pointer to here,
-  // and we do not own the pointer.
-  AudioHandler* const audio_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(SystemKeyEventListener);
 };

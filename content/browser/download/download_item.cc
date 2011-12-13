@@ -8,6 +8,7 @@
 #include "base/file_util.h"
 #include "base/format_macros.h"
 #include "base/i18n/case_conversion.h"
+#include "base/i18n/string_search.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
@@ -19,11 +20,13 @@
 #include "content/browser/download/download_file.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file_manager.h"
+#include "content/browser/download/download_id.h"
 #include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_manager_delegate.h"
 #include "content/browser/download/download_persistent_store_info.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_stats.h"
+#include "content/browser/download/interrupt_reasons.h"
 
 // A DownloadItem normally goes through the following states:
 //      * Created (when download starts)
@@ -127,6 +130,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       start_tick_(base::TimeTicks()),
       state_(static_cast<DownloadState>(info.state)),
       start_time_(info.start_time),
+      end_time_(info.end_time),
       db_handle_(info.db_handle),
       download_manager_(download_manager),
       is_paused_(false),
@@ -137,7 +141,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       is_otr_(false),
       is_temporary_(false),
       all_data_saved_(false),
-      opened_(false),
+      opened_(info.opened),
       open_enabled_(true),
       delegate_delayed_complete_(false) {
   if (IsInProgress())
@@ -167,7 +171,7 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
       referrer_charset_(info.referrer_charset),
       total_bytes_(info.total_bytes),
       received_bytes_(0),
-      last_error_(net::OK),
+      last_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
       start_tick_(base::TimeTicks::Now()),
       state_(IN_PROGRESS),
       start_time_(info.start_time),
@@ -192,14 +196,14 @@ DownloadItem::DownloadItem(DownloadManager* download_manager,
                            const FilePath& path,
                            const GURL& url,
                            bool is_otr,
-                           int download_id)
-    : download_id_(download_id),
+                           DownloadId download_id)
+    : download_id_(download_id.local()),
       full_path_(path),
       url_chain_(1, url),
       referrer_url_(GURL()),
       total_bytes_(0),
       received_bytes_(0),
-      last_error_(net::OK),
+      last_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
       start_tick_(base::TimeTicks::Now()),
       state_(IN_PROGRESS),
       start_time_(base::Time::Now()),
@@ -225,6 +229,10 @@ DownloadItem::~DownloadItem() {
 
   TransitionTo(REMOVING);
   download_manager_->AssertQueueStateConsistent(this);
+}
+
+DownloadId DownloadItem::global_id() const {
+  return DownloadId(download_manager_, id());
 }
 
 void DownloadItem::AddObserver(Observer* observer) {
@@ -278,8 +286,10 @@ void DownloadItem::OpenDownload() {
   // program that opens the file.  So instead we spawn a check to update
   // the UI if the file has been deleted in parallel with the open.
   download_manager_->CheckForFileRemoval(this);
+  download_stats::RecordOpen(end_time(), !opened());
   opened_ = true;
   FOR_EACH_OBSERVER(Observer, observers_, OnDownloadOpened(this));
+  download_manager_->MarkDownloadOpened(this);
 
   // For testing: If download opening is disabled on this item,
   // make the rest of the routine a no-op.
@@ -355,9 +365,13 @@ void DownloadItem::Update(int64 bytes_so_far) {
 }
 
 // Triggered by a user action.
-void DownloadItem::Cancel(bool update_history) {
+void DownloadItem::Cancel(bool user_cancel) {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  last_reason_ = user_cancel ?
+      DOWNLOAD_INTERRUPT_REASON_USER_CANCELED :
+      DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN;
 
   VLOG(20) << __FUNCTION__ << "() download = " << DebugString(true);
   if (!IsPartialDownload()) {
@@ -370,7 +384,7 @@ void DownloadItem::Cancel(bool update_history) {
 
   TransitionTo(CANCELLED);
   StopProgressTimer();
-  if (update_history)
+  if (user_cancel)
     download_manager_->DownloadCancelledInternal(this);
 }
 
@@ -379,6 +393,7 @@ void DownloadItem::MarkAsComplete() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   DCHECK(all_data_saved_);
+  end_time_ = base::Time::Now();
   TransitionTo(COMPLETE);
 }
 
@@ -409,9 +424,10 @@ void DownloadItem::Completed() {
   VLOG(20) << __FUNCTION__ << "() " << DebugString(false);
 
   DCHECK(all_data_saved_);
+  end_time_ = base::Time::Now();
   TransitionTo(COMPLETE);
   download_manager_->DownloadCompleted(id());
-  download_stats::RecordDownloadCompleted(start_tick_);
+  download_stats::RecordDownloadCompleted(start_tick_, received_bytes_);
 
   if (auto_opened_) {
     // If it was already handled by the delegate, do nothing.
@@ -455,17 +471,17 @@ void DownloadItem::UpdateTarget() {
     state_info_.target_name = full_path_.BaseName();
 }
 
-void DownloadItem::Interrupted(int64 size, net::Error net_error) {
+void DownloadItem::Interrupted(int64 size, InterruptReason reason) {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   if (!IsInProgress())
     return;
 
-  last_error_ = net_error;
+  last_reason_ = reason;
   UpdateSize(size);
   StopProgressTimer();
-  download_stats::RecordDownloadInterrupted(net_error,
+  download_stats::RecordDownloadInterrupted(reason,
                                             received_bytes_,
                                             total_bytes_);
   TransitionTo(INTERRUPTED);
@@ -579,16 +595,15 @@ void DownloadItem::OnDownloadCompleting(DownloadFileManager* file_manager) {
   if (NeedsRename()) {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         NewRunnableMethod(file_manager,
-            &DownloadFileManager::RenameCompletingDownloadFile, id(),
+            &DownloadFileManager::RenameCompletingDownloadFile, global_id(),
             GetTargetFilePath(), safety_state() == SAFE));
     return;
   }
 
   Completed();
 
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(file_manager, &DownloadFileManager::CompleteDownload,
-                        id()));
+  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE, NewRunnableMethod(
+        file_manager, &DownloadFileManager::CompleteDownload, global_id()));
 }
 
 void DownloadItem::OnDownloadRenamedToFinalName(const FilePath& full_path) {
@@ -616,8 +631,8 @@ bool DownloadItem::MatchesQuery(const string16& query) const {
 
   DCHECK_EQ(query, base::i18n::ToLower(query));
 
-  string16 url_raw(base::i18n::ToLower(UTF8ToUTF16(GetURL().spec())));
-  if (url_raw.find(query) != string16::npos)
+  string16 url_raw(UTF8ToUTF16(GetURL().spec()));
+  if (base::i18n::StringSearchIgnoringCaseAndAccents(query, url_raw))
     return true;
 
   // TODO(phajdan.jr): write a test case for the following code.
@@ -629,17 +644,12 @@ bool DownloadItem::MatchesQuery(const string16& query) const {
   TabContents* tab = request_handle_.GetTabContents();
   if (tab)
     languages = content::GetContentClient()->browser()->GetAcceptLangs(tab);
-  string16 url_formatted(
-      base::i18n::ToLower(net::FormatUrl(GetURL(), languages)));
-  if (url_formatted.find(query) != string16::npos)
+  string16 url_formatted(net::FormatUrl(GetURL(), languages));
+  if (base::i18n::StringSearchIgnoringCaseAndAccents(query, url_formatted))
     return true;
 
-  string16 path(base::i18n::ToLower(full_path().LossyDisplayName()));
-  // This shouldn't just do a substring match; it is wrong for Unicode
-  // due to normalization and we have a fancier search-query system
-  // used elsewhere.
-  // http://code.google.com/p/chromium/issues/detail?id=71982
-  return (path.find(query) != string16::npos);
+  string16 path(full_path().LossyDisplayName());
+  return base::i18n::StringSearchIgnoringCaseAndAccents(query, path);
 }
 
 void DownloadItem::SetFileCheckResults(const DownloadStateInfo& state) {
@@ -683,10 +693,12 @@ DownloadPersistentStoreInfo DownloadItem::GetPersistentStoreInfo() const {
                                      GetURL(),
                                      referrer_url(),
                                      start_time(),
+                                     end_time(),
                                      received_bytes(),
                                      total_bytes(),
                                      state(),
-                                     db_handle());
+                                     db_handle(),
+                                     opened());
 }
 
 FilePath DownloadItem::GetTargetFilePath() const {
@@ -714,7 +726,7 @@ void DownloadItem::OffThreadCancel(DownloadFileManager* file_manager) {
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       NewRunnableMethod(
-          file_manager, &DownloadFileManager::CancelDownload, download_id_));
+          file_manager, &DownloadFileManager::CancelDownload, global_id()));
 }
 
 void DownloadItem::Init(bool active) {

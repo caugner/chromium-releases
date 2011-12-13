@@ -12,9 +12,9 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/sync/glue/password_model_associator.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_types.h"
 
 class PasswordStore;
 class MessageLoop;
@@ -45,8 +45,7 @@ class PasswordChangeProcessor : public ChangeProcessor,
   // sync_api model -> WebDataService change application.
   virtual void ApplyChangesFromSyncModel(
       const sync_api::BaseTransaction* trans,
-      const sync_api::SyncManager::ChangeRecord* changes,
-      int change_count) OVERRIDE;
+      const sync_api::ImmutableChangeRecordList& changes) OVERRIDE;
 
   // Commit changes buffered during ApplyChanges. We must commit them to the
   // password store only after the sync_api transaction is released, else there

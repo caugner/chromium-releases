@@ -9,7 +9,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "content/renderer/content_renderer_client.h"
+#include "content/public/renderer/content_renderer_client.h"
 
 namespace content {
 
@@ -22,16 +22,18 @@ class MockContentRendererClient : public ContentRendererClient {
   virtual void SetNumberOfViews(int number_of_views) OVERRIDE;
   virtual SkBitmap* GetSadPluginBitmap() OVERRIDE;
   virtual std::string GetDefaultEncoding() OVERRIDE;
-  virtual WebKit::WebPlugin* CreatePlugin(
+  virtual bool OverrideCreatePlugin(
       RenderView* render_view,
       WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params) OVERRIDE;
-  virtual void ShowErrorPage(RenderView* render_view,
-                             WebKit::WebFrame* frame,
-                             int http_status_code) OVERRIDE;
-  virtual std::string GetNavigationErrorHtml(
+      const WebKit::WebPluginParams& params,
+      WebKit::WebPlugin** plugin) OVERRIDE;
+  virtual bool HasErrorPage(int http_status_code,
+                            std::string* error_domain) OVERRIDE;
+  virtual void GetNavigationErrorStrings(
       const WebKit::WebURLRequest& failed_request,
-      const WebKit::WebURLError& error) OVERRIDE;
+      const WebKit::WebURLError& error,
+      std::string* error_html,
+      string16* error_description) OVERRIDE;
   virtual bool RunIdleHandlerWhenWidgetsHidden() OVERRIDE;
   virtual bool AllowPopup(const GURL& creator) OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
@@ -43,11 +45,12 @@ class MockContentRendererClient : public ContentRendererClient {
                                const GURL& url,
                                GURL* new_url) OVERRIDE;
   virtual bool ShouldPumpEventsDuringCookieMessage() OVERRIDE;
-  virtual void DidCreateScriptContext(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void DidDestroyScriptContext(WebKit::WebFrame* frame) OVERRIDE;
-  virtual void DidCreateIsolatedScriptContext(
-      WebKit::WebFrame* frame, int world_id,
-      v8::Handle<v8::Context> context) OVERRIDE;
+  virtual void DidCreateScriptContext(WebKit::WebFrame* frame,
+                                      v8::Handle<v8::Context> context,
+                                      int world_id) OVERRIDE;
+  virtual void WillReleaseScriptContext(WebKit::WebFrame* frame,
+                                        v8::Handle<v8::Context> context,
+                                        int world_id) OVERRIDE;
   virtual unsigned long long VisitedLinkHash(const char* canonical_url,
                                              size_t length) OVERRIDE;
   virtual bool IsLinkVisited(unsigned long long link_hash) OVERRIDE;
@@ -63,6 +66,7 @@ class MockContentRendererClient : public ContentRendererClient {
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
                                       const std::string& value) OVERRIDE;
+  virtual bool IsProtocolSupportedForMedia(const GURL& url) OVERRIDE;
 };
 
 }  // namespace content

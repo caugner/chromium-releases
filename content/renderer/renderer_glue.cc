@@ -18,12 +18,13 @@
 #include "base/string_util.h"
 #include "content/common/clipboard_messages.h"
 #include "content/common/content_client.h"
-#include "content/common/content_switches.h"
+#include "content/common/npobject_util.h"
 #include "content/common/socket_stream_dispatcher.h"
-#include "content/common/url_constants.h"
 #include "content/common/view_messages.h"
-#include "content/plugin/npobject_util.h"
-#include "content/renderer/render_thread.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/common/url_constants.h"
+#include "content/public/renderer/content_renderer_client.h"
+#include "content/renderer/render_thread_impl.h"
 #include "googleurl/src/url_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
@@ -34,10 +35,6 @@
 #include "webkit/glue/scoped_clipboard_writer_glue.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/websocketstreamhandle_bridge.h"
-
-#if defined(OS_LINUX)
-#include "content/common/child_process_sandbox_support_linux.h"
-#endif
 
 // This definition of WriteBitmapFromPixels uses shared memory to communicate
 // across processes.
@@ -50,37 +47,12 @@ void ScopedClipboardWriterGlue::WriteBitmapFromPixels(const void* pixels,
   uint32 buf_size = 4 * size.width() * size.height();
 
   // Allocate a shared memory buffer to hold the bitmap bits.
-#if defined(OS_POSIX)
-  // On POSIX, we need to ask the browser to create the shared memory for us,
-  // since this is blocked by the sandbox.
-  base::SharedMemoryHandle shared_mem_handle;
-  ViewHostMsg_AllocateSharedMemoryBuffer *msg =
-      new ViewHostMsg_AllocateSharedMemoryBuffer(buf_size,
-                                                 &shared_mem_handle);
-  if (RenderThread::current()->Send(msg)) {
-    if (base::SharedMemory::IsHandleValid(shared_mem_handle)) {
-      shared_buf_ = new base::SharedMemory(shared_mem_handle, false);
-      if (!shared_buf_ || !shared_buf_->Map(buf_size)) {
-        NOTREACHED() << "Map failed";
-        return;
-      }
-    } else {
-      NOTREACHED() << "Browser failed to allocate shared memory";
-      return;
-    }
-  } else {
-    NOTREACHED() << "Browser allocation request message failed";
+  shared_buf_ = ChildThread::current()->AllocateSharedMemory(buf_size);
+  if (!shared_buf_)
     return;
-  }
-#else  // !OS_POSIX
-  shared_buf_ = new base::SharedMemory;
-  if (!shared_buf_->CreateAndMapAnonymous(buf_size)) {
-    NOTREACHED();
-    return;
-  }
-#endif
 
   // Copy the bits into shared memory
+  DCHECK(shared_buf_->memory());
   memcpy(shared_buf_->memory(), pixels, buf_size);
   shared_buf_->Unmap();
 
@@ -106,14 +78,14 @@ ScopedClipboardWriterGlue::~ScopedClipboardWriterGlue() {
     return;
 
   if (shared_buf_) {
-    RenderThread::current()->Send(
+    RenderThreadImpl::current()->Send(
         new ClipboardHostMsg_WriteObjectsSync(objects_,
                 shared_buf_->handle()));
     delete shared_buf_;
     return;
   }
 
-  RenderThread::current()->Send(
+  RenderThreadImpl::current()->Send(
       new ClipboardHostMsg_WriteObjectsAsync(objects_));
 }
 
@@ -128,7 +100,7 @@ ui::Clipboard* ClipboardGetClipboard() {
 bool ClipboardIsFormatAvailable(const ui::Clipboard::FormatType& format,
                                 ui::Clipboard::Buffer buffer) {
   bool result;
-  RenderThread::current()->Send(
+  RenderThreadImpl::current()->Send(
       new ClipboardHostMsg_IsFormatAvailable(format, buffer, &result));
   return result;
 }
@@ -136,29 +108,32 @@ bool ClipboardIsFormatAvailable(const ui::Clipboard::FormatType& format,
 void ClipboardReadAvailableTypes(ui::Clipboard::Buffer buffer,
                                  std::vector<string16>* types,
                                  bool* contains_filenames) {
-  RenderThread::current()->Send(new ClipboardHostMsg_ReadAvailableTypes(
+  RenderThreadImpl::current()->Send(new ClipboardHostMsg_ReadAvailableTypes(
       buffer, types, contains_filenames));
 }
 
 void ClipboardReadText(ui::Clipboard::Buffer buffer, string16* result) {
-  RenderThread::current()->Send(new ClipboardHostMsg_ReadText(buffer, result));
+  RenderThreadImpl::current()->Send(
+      new ClipboardHostMsg_ReadText(buffer, result));
 }
 
 void ClipboardReadAsciiText(ui::Clipboard::Buffer buffer, std::string* result) {
-  RenderThread::current()->Send(
+  RenderThreadImpl::current()->Send(
       new ClipboardHostMsg_ReadAsciiText(buffer, result));
 }
 
 void ClipboardReadHTML(ui::Clipboard::Buffer buffer, string16* markup,
-                       GURL* url) {
-  RenderThread::current()->Send(
-      new ClipboardHostMsg_ReadHTML(buffer, markup, url));
+                       GURL* url, uint32* fragment_start,
+                       uint32* fragment_end) {
+  RenderThreadImpl::current()->Send(
+      new ClipboardHostMsg_ReadHTML(buffer, markup, url, fragment_start,
+                                    fragment_end));
 }
 
 void ClipboardReadImage(ui::Clipboard::Buffer buffer, std::string* data) {
   base::SharedMemoryHandle image_handle;
   uint32 image_size;
-  RenderThread::current()->Send(
+  RenderThreadImpl::current()->Send(
       new ClipboardHostMsg_ReadImage(buffer, &image_handle, &image_size));
   if (base::SharedMemory::IsHandleValid(image_handle)) {
     base::SharedMemory buffer(image_handle, true);
@@ -170,7 +145,7 @@ void ClipboardReadImage(ui::Clipboard::Buffer buffer, std::string* data) {
 bool ClipboardReadData(ui::Clipboard::Buffer buffer, const string16& type,
                        string16* data, string16* metadata) {
   bool result = false;
-  RenderThread::current()->Send(new ClipboardHostMsg_ReadData(
+  RenderThreadImpl::current()->Send(new ClipboardHostMsg_ReadData(
       buffer, type, &result, data, metadata));
   return result;
 }
@@ -178,23 +153,24 @@ bool ClipboardReadData(ui::Clipboard::Buffer buffer, const string16& type,
 bool ClipboardReadFilenames(ui::Clipboard::Buffer buffer,
                             std::vector<string16>* filenames) {
   bool result;
-  RenderThread::current()->Send(new ClipboardHostMsg_ReadFilenames(
+  RenderThreadImpl::current()->Send(new ClipboardHostMsg_ReadFilenames(
       buffer, &result, filenames));
   return result;
 }
 
 uint64 ClipboardGetSequenceNumber() {
   uint64 seq_num = 0;
-  RenderThread::current()->Send(
+  RenderThreadImpl::current()->Send(
       new ClipboardHostMsg_GetSequenceNumber(&seq_num));
   return seq_num;
 }
 
 void GetPlugins(bool refresh,
                 std::vector<webkit::WebPluginInfo>* plugins) {
-  if (!RenderThread::current()->plugin_refresh_allowed())
+  if (!RenderThreadImpl::current()->plugin_refresh_allowed())
     refresh = false;
-  RenderThread::current()->Send(new ViewHostMsg_GetPlugins(refresh, plugins));
+  RenderThreadImpl::current()->Send(
+      new ViewHostMsg_GetPlugins(refresh, plugins));
 }
 
 bool IsProtocolSupportedForMedia(const GURL& url) {
@@ -203,11 +179,11 @@ bool IsProtocolSupportedForMedia(const GURL& url) {
   if (url.SchemeIsFile() || url.SchemeIs(chrome::kHttpScheme) ||
       url.SchemeIs(chrome::kHttpsScheme) ||
       url.SchemeIs(chrome::kDataScheme) ||
-      url.SchemeIs(chrome::kExtensionScheme) ||
       url.SchemeIs(chrome::kFileSystemScheme) ||
       url.SchemeIs(chrome::kBlobScheme))
     return true;
-  return false;
+  return
+      content::GetContentClient()->renderer()->IsProtocolSupportedForMedia(url);
 }
 
 // static factory function
@@ -225,71 +201,12 @@ WebSocketStreamHandleBridge* WebSocketStreamHandleBridge::Create(
   return dispatcher->CreateBridge(handle, delegate);
 }
 
-void CloseCurrentConnections() {
-  RenderThread::current()->CloseCurrentConnections();
-}
-
-void SetCacheMode(bool enabled) {
-  RenderThread::current()->SetCacheMode(enabled);
-}
-
-void ClearCache(bool preserve_ssl_host_info) {
-  RenderThread::current()->ClearCache(preserve_ssl_host_info);
-}
-
-void ClearHostResolverCache() {
-  RenderThread::current()->ClearHostResolverCache();
-}
-
-void ClearPredictorCache() {
-  RenderThread::current()->ClearPredictorCache();
-}
-
-bool IsSingleProcess() {
-  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kSingleProcess);
-}
-
-void EnableSpdy(bool enable) {
-  RenderThread::current()->EnableSpdy(enable);
-}
-
-#if defined(OS_LINUX)
-int MatchFontWithFallback(const std::string& face, bool bold,
-                          bool italic, int charset) {
-  return child_process_sandbox_support::MatchFontWithFallback(
-      face, bold, italic, charset);
-}
-
-bool GetFontTable(int fd, uint32_t table, uint8_t* output,
-                  size_t* output_length) {
-  return child_process_sandbox_support::GetFontTable(
-      fd, table, output, output_length);
-}
-#endif
-
-std::string GetWebKitLocale() {
-  // The browser process should have passed the locale to the renderer via the
-  // --lang command line flag.  In single process mode, this will return the
-  // wrong value.  TODO(tc): Fix this for single process mode.
-  const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
-  const std::string& lang =
-      parsed_command_line.GetSwitchValueASCII(switches::kLang);
-  DCHECK(!lang.empty() ||
-      (!parsed_command_line.HasSwitch(switches::kRendererProcess) &&
-       !parsed_command_line.HasSwitch(switches::kPluginProcess)));
-  return lang;
-}
-
 string16 GetLocalizedString(int message_id) {
   return content::GetContentClient()->GetLocalizedString(message_id);
 }
 
 base::StringPiece GetDataResource(int resource_id) {
   return content::GetContentClient()->GetDataResource(resource_id);
-}
-
-std::string BuildUserAgent(bool mimic_windows) {
-  return content::GetContentClient()->GetUserAgent(mimic_windows);
 }
 
 }  // namespace webkit_glue

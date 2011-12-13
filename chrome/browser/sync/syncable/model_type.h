@@ -74,6 +74,10 @@ enum ModelType {
   SESSIONS,
   // An app folder or an app object.
   APPS,
+  // A setting from the extension settings API.
+  EXTENSION_SETTINGS,
+  // App notifications.
+  APP_NOTIFICATIONS,
 
   MODEL_TYPE_COUNT,
 };

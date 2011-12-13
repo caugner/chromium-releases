@@ -4,17 +4,13 @@
 
 #include "chrome/browser/extensions/extension_settings_storage_unittest.h"
 
+#include "chrome/browser/extensions/extension_settings_leveldb_storage.h"
+
 namespace {
 
-void Param(
-    ExtensionSettings* settings,
-    const std::string& extension_id,
-    const ExtensionSettings::Callback& callback) {
-  settings->GetStorageForTesting(
-      ExtensionSettingsStorage::LEVELDB,
-      false,
-      extension_id,
-      callback);
+ExtensionSettingsStorage* Param(
+    const FilePath& file_path, const std::string& extension_id) {
+  return ExtensionSettingsLeveldbStorage::Create(file_path, extension_id);
 }
 
 }  // namespace

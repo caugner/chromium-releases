@@ -9,21 +9,18 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/enterprise_install_attributes.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 
-class FilePath;
 class TestingBrowserProcess;
 class TokenService;
 
 namespace policy {
 
-class CloudPolicyDataStore;
 class CloudPolicyProvider;
 class CloudPolicySubsystem;
 class ConfigurationPolicyProvider;
@@ -162,7 +159,9 @@ class BrowserPolicyConnector : public NotificationObserver {
   scoped_ptr<CloudPolicyDataStore> user_data_store_;
   scoped_ptr<CloudPolicySubsystem> user_cloud_policy_subsystem_;
 
-  ScopedRunnableMethodFactory<BrowserPolicyConnector> method_factory_;
+  // Used to initialize the device policy subsystem once the message loops
+  // are spinning.
+  base::WeakPtrFactory<BrowserPolicyConnector> weak_ptr_factory_;
 
   // Registers the provider for notification of successful Gaia logins.
   NotificationRegistrar registrar_;

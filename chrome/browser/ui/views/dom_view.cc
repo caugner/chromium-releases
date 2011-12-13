@@ -6,12 +6,10 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "views/focus/focus_manager.h"
-
-#if defined(TOUCH_UI)
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_touch.h"
-#endif
+#include "views/widget/native_widget_views.h"
 
 // static
 const char DOMView::kViewClassName[] =
@@ -56,7 +54,7 @@ TabContents* DOMView::CreateTabContents(Profile* profile,
 void DOMView::LoadURL(const GURL& url) {
   DCHECK(initialized_);
   dom_contents_->tab_contents()->controller().LoadURL(
-      url, GURL(), PageTransition::START_PAGE);
+      url, GURL(), content::PAGE_TRANSITION_START_PAGE, std::string());
 }
 
 bool DOMView::SkipDefaultKeyEventProcessing(const views::KeyEvent& e) {
@@ -82,10 +80,13 @@ void DOMView::ViewHierarchyChanged(bool is_add, views::View* parent,
 }
 
 void DOMView::AttachTabContents() {
-#if defined(TOUCH_UI)
-  AttachToView(static_cast<TabContentsViewTouch*>(
-      dom_contents_->tab_contents()->view()));
-#else
-  Attach(dom_contents_->tab_contents()->GetNativeView());
-#endif
+  if (views::Widget::IsPureViews()) {
+    TabContentsViewViews* widget = static_cast<TabContentsViewViews*>(
+        dom_contents_->tab_contents()->view());
+    views::NativeWidgetViews* nwv =
+        static_cast<views::NativeWidgetViews*>(widget->native_widget());
+    AttachToView(nwv->GetView());
+  } else {
+    Attach(dom_contents_->tab_contents()->GetNativeView());
+  }
 }

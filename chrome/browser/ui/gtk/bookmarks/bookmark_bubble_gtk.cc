@@ -7,6 +7,7 @@
 #include <gtk/gtk.h>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -44,7 +45,10 @@ void BookmarkBubbleGtk::Show(GtkWidget* anchor,
                              Profile* profile,
                              const GURL& url,
                              bool newly_bookmarked) {
-  DCHECK(!g_bubble);
+  // Sometimes Ctrl+D may get pressed more than once on top level window
+  // before the bookmark bubble window is shown and takes the keyboad focus.
+  if (g_bubble)
+    return;
   g_bubble = new BookmarkBubbleGtk(anchor, profile, url, newly_bookmarked);
 }
 
@@ -226,8 +230,9 @@ void BookmarkBubbleGtk::OnFolderChanged(GtkWidget* widget) {
     // signal.  Since showing the editor also closes the bubble, delay this
     // so that GTK can unwind.  Specifically gtk_menu_shell_button_release
     // will run, and we need to keep the combo box alive until then.
-    MessageLoop::current()->PostTask(FROM_HERE,
-        factory_.NewRunnableMethod(&BookmarkBubbleGtk::ShowEditor));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&BookmarkBubbleGtk::ShowEditor, factory_.GetWeakPtr()));
   }
 }
 
@@ -309,25 +314,17 @@ void BookmarkBubbleGtk::ShowEditor() {
   // Commit any edits now.
   ApplyEdits();
 
-#if !defined(WEBUI_DIALOGS)
   // Closing might delete us, so we'll cache what we need on the stack.
   Profile* profile = profile_;
   GtkWindow* toplevel = GTK_WINDOW(gtk_widget_get_toplevel(anchor_));
-#endif
 
   // Close the bubble, deleting the C++ objects, etc.
   bubble_->Close();
 
   if (node) {
-#if defined(WEBUI_DIALOGS)
-    Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-    DCHECK(browser);
-    browser->OpenBookmarkManagerEditNode(node->id());
-#else
-    BookmarkEditor::Show(toplevel, profile, NULL,
-                         BookmarkEditor::EditDetails(node),
+    BookmarkEditor::Show(toplevel, profile,
+                         BookmarkEditor::EditDetails::EditNode(node),
                          BookmarkEditor::SHOW_TREE);
-#endif
   }
 }
 

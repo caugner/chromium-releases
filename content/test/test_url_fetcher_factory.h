@@ -12,7 +12,7 @@
 #include <utility>
 
 #include "base/threading/non_thread_safe.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/url_request/url_request_status.h"
 
@@ -96,6 +96,10 @@ class TestURLFetcher : public URLFetcher {
   }
   virtual int response_code() const OVERRIDE;
 
+  void set_was_fetched_via_proxy(bool flag);
+
+  void set_response_headers(scoped_refptr<net::HttpResponseHeaders> headers);
+
   // Set string data.
   void SetResponseString(const std::string& response);
 
@@ -103,6 +107,7 @@ class TestURLFetcher : public URLFetcher {
   void SetResponseFilePath(const FilePath& path);
 
   // Override response access functions to return fake data.
+  virtual const std::string& GetResponseStringRef() const OVERRIDE;
   virtual bool GetResponseAsString(std::string* out_response_string) const
       OVERRIDE;
   virtual bool GetResponseAsFilePath(bool take_ownership,
@@ -210,7 +215,7 @@ class FakeURLFetcherFactory : public URLFetcher::Factory,
 
   // Clear all the fake responses that were previously set via
   // SetFakeResponse().
-  void ClearFakeReponses();
+  void ClearFakeResponses();
 
  private:
   typedef std::map<GURL, std::pair<std::string, bool> > FakeResponseMap;

@@ -23,7 +23,6 @@
 #include "chrome/browser/autofill/form_structure.h"
 #include "chrome/browser/autofill/name_field.h"
 #include "chrome/browser/autofill/phone_field.h"
-#include "grit/autofill_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -56,7 +55,7 @@ void FormField::ParseFormFields(const std::vector<AutofillField*>& fields,
   // Email pass.
   ParseFormFieldsPass(EmailField::Parse, &remaining_fields, map);
 
-  // Phone/fax pass.
+  // Phone pass.
   ParseFormFieldsPass(PhoneField::Parse, &remaining_fields, map);
 
   // Address pass.

@@ -11,15 +11,15 @@
 
 namespace views {
 
+const int kCheckboxLabelSpacing = 4;
+
 // static
 const char Checkbox::kViewClassName[] = "views/Checkbox";
-
-static const int kCheckboxLabelSpacing = 4;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Checkbox, public:
 
-Checkbox::Checkbox(const std::wstring& label)
+Checkbox::Checkbox(const string16& label)
     : TextButtonBase(NULL, label),
       checked_(false) {
   set_border(new TextButtonNativeThemeBorder(this));

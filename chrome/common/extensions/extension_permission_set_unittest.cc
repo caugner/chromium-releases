@@ -4,12 +4,12 @@
 
 #include "chrome/common/extensions/extension_permission_set.h"
 
+#include "base/json/json_value_serializer.h"
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/common/json_value_serializer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -152,7 +152,6 @@ TEST(ExtensionAPIPermissionTest, HostedAppPermissions) {
   hosted_perms.insert(ExtensionAPIPermission::kNotification);
   hosted_perms.insert(ExtensionAPIPermission::kUnlimitedStorage);
   hosted_perms.insert(ExtensionAPIPermission::kWebstorePrivate);
-  hosted_perms.insert(ExtensionAPIPermission::kPermissions);
 
   ExtensionAPIPermissionSet perms = info->GetAll();
   size_t count = 0;
@@ -346,8 +345,8 @@ TEST(ExtensionPermissionSetTest, CreateUnion) {
   AddPattern(&expected_explicit_hosts, "http://*.example.com/*");
   AddPattern(&expected_scriptable_hosts, "http://*.google.com/*");
 
-  effective_hosts.ClearPatterns();
-  AddPattern(&effective_hosts, "<all_urls>");
+  URLPatternSet::CreateUnion(
+      explicit_hosts2, scriptable_hosts2, &effective_hosts);
 
   set2 = new ExtensionPermissionSet(apis2, explicit_hosts2, scriptable_hosts2);
   union_set = ExtensionPermissionSet::CreateUnion(set1.get(), set2.get());
@@ -611,7 +610,6 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
   skip.insert(ExtensionAPIPermission::kIdle);
   skip.insert(ExtensionAPIPermission::kNotification);
   skip.insert(ExtensionAPIPermission::kUnlimitedStorage);
-  skip.insert(ExtensionAPIPermission::kContentSettings);
   skip.insert(ExtensionAPIPermission::kTts);
 
   // TODO(erikkay) add a string for this permission.
@@ -623,8 +621,11 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
   // permissions.
   skip.insert(ExtensionAPIPermission::kCookie);
 
-  // The proxy permission is warned as part of host permission checks.
+  // The proxy, webNavigation, and webRequest permissions are warned as part of
+  // host permission checks.
   skip.insert(ExtensionAPIPermission::kProxy);
+  skip.insert(ExtensionAPIPermission::kWebNavigation);
+  skip.insert(ExtensionAPIPermission::kWebRequest);
 
   // This permission requires explicit user action (context menu handler)
   // so we won't prompt for it for now.
@@ -646,9 +647,6 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
 
   // Warned as part of host permissions.
   skip.insert(ExtensionAPIPermission::kDevtools);
-
-  // This will warn users later, when they request new permissions.
-  skip.insert(ExtensionAPIPermission::kPermissions);
 
   ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
   ExtensionAPIPermissionSet permissions = info->GetAll();

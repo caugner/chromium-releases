@@ -15,6 +15,13 @@ namespace prefs {
 // or not.
 const char kAppsPromoCounter[] = "apps_promo_counter";
 
+// A string property indicating whether default apps should be installed
+// in this profile.  Use the value "install" to enable defaults apps, or
+// "noinstall" to disable them.  This property is usually set in the
+// master_preferences and copied into the profile preferences on first run.
+// Defaults apps are installed only when creating a new profile.
+const char kDefaultApps[] = "default_apps";
+
 // Whether we have installed default apps yet in this profile.
 const char kDefaultAppsInstalled[] = "default_apps_installed";
 
@@ -44,10 +51,6 @@ const char kRestoreOnStartup[] = "session.restore_on_startup";
 // The URLs to restore on startup or when the home button is pressed. The URLs
 // are only restored on startup if kRestoreOnStartup is 4.
 const char kURLsToRestoreOnStartup[] = "session.urls_to_restore_on_startup";
-
-// A bool pref to used to determine if the sync promo should be expanded or
-// collapsed.
-const char kSyncPromoExpanded[] = "profile.sync_promo_expanded";
 
 // The application locale.
 // For OS_CHROMEOS we maintain kApplicationLocale property in both local state
@@ -331,6 +334,12 @@ const char kDnsPrefetchingHostReferralList[] =
 // Disables the SPDY protocol.
 const char kDisableSpdy[] = "spdy.disabled";
 
+// Prefs for server names that support SPDY protocol.
+const char kSpdyServers[] = "spdy.servers";
+
+// Prefs for servers that support Alternate-Protocol.
+const char kAlternateProtocolServers[] = "spdy.alternate_protocol";
+
 // Disables the listed protocol schemes.
 const char kDisabledSchemes[] = "protocol.disabled_schemes";
 
@@ -567,10 +576,6 @@ const char kShowPlanNotifications[] =
 const char kShow3gPromoNotification[] =
     "settings.internet.mobile.show_3g_promo_notification";
 
-// Map of timestamps of the last used file browser tasks.
-const char kLastUsedFileBrowserHandlers[] =
-    "filebrowser.handler.lastused";
-
 // A boolean pref that uses shared proxies.
 const char kUseSharedProxies[] = "settings.use_shared_proxies";
 
@@ -611,7 +616,8 @@ const char kEnabledLabsExperiments[] = "browser.enabled_labs_experiments";
 const char kEnableAutoSpellCorrect[] = "browser.enable_autospellcorrect";
 
 // Boolean pref to define the default setting for "block offensive words".
-const char kSpeechInputCensorResults[] =
+// The old key value is kept to avoid unnecessary migration code.
+const char kSpeechInputFilterProfanities[] =
     "browser.speechinput_censor_results";
 
 // Boolean controlling whether history saving is disabled.
@@ -621,7 +627,7 @@ const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
 const char kPrintingEnabled[] = "printing.enabled";
 
 // Enable print preview once for supported platforms.
-#if defined(GOOGLE_CHROME_BUILD) && !defined(OS_CHROMEOS)
+#if defined(GOOGLE_CHROME_BUILD)
 const char kPrintingPrintPreviewEnabledOnce[] =
     "printing.print_preview_enabled_once";
 #endif
@@ -774,18 +780,8 @@ const char kAutofillPersonalDataManagerFirstRun[] = "autofill.pdm.first_run";
 // Modifying bookmarks is completely disabled when this is set to false.
 const char kEditBookmarksEnabled[] = "bookmarks.editing_enabled";
 
-// Boolean that is true when the tabstrip is to be laid out vertically down the
-// side of the browser window.
-const char kUseVerticalTabs[] = "tabs.use_vertical_tabs";
-
-// Boolean that is true when the compact navigation bar is to be used.
-const char kUseCompactNavigationBar[] = "tabs.use_compact_navigation_bar";
-
 // Boolean that is true when the translate feature is enabled.
 const char kEnableTranslate[] = "translate.enabled";
-
-// Boolean that is true when the bookmark bar for the new tab page is enabled.
-const char kEnableBookmarkBar[] = "bookmark_bar.enabled";
 
 const char kPinnedTabs[] = "pinned_tabs";
 
@@ -854,9 +850,6 @@ const char kPasswordsUseLocalProfileId[] =
 
 // Directory of the last profile used.
 const char kProfileLastUsed[] = "profile.last_used";
-
-// Maps profile data directories to login names.
-const char kProfileDirectoryMap[] = "profile.directory_map";
 
 // Total number of profiles created for this Chrome build. Used to tag profile
 // directories.
@@ -1065,6 +1058,10 @@ const char kSelectFileLastDirectory[] = "selectfile.last_directory";
 // Boolean that specifies if file selection dialogs are shown.
 const char kAllowFileSelectionDialogs[] = "select_file_dialogs.allowed";
 
+// Map of timestamps of the last used file browser tasks.
+const char kLastUsedFileBrowserHandlers[] =
+    "filebrowser.handler.lastused";
+
 // Extensions which should be opened upon completion.
 const char kDownloadExtensionsToOpen[] = "download.extensions_to_open";
 
@@ -1198,6 +1195,10 @@ const char kExtensionInstallAllowList[] = "extensions.install.allowlist";
 // Google controlled.
 const char kExtensionInstallDenyList[] = "extensions.install.denylist";
 
+// Whether we have run the extension-alert system (see ExtensionGlobalError)
+// at least once for this profile.
+const char kExtensionAlertsInitializedPref[] = "extensions.alerts.initialized";
+
 // A list containing extensions that Chrome will silently install
 // at startup time. It is a list of strings, each string contains
 // an extension ID and an update URL, delimited by a semicolon.
@@ -1285,6 +1286,12 @@ const char kNTPPromoGroupTimeSlice[] = "ntp.promo_group_timeslice";
 // Number of groups to roll out this promo to.
 const char kNTPPromoGroupMax[] = "ntp.promo_group_max";
 
+// Number of views of this promo.
+const char kNTPPromoViews[] = "ntp.promo_views";
+
+// Max number of views of this promo.
+const char kNTPPromoViewsMax[] = "ntp.promo_views_max";
+
 // Promo line from server.
 const char kNTPPromoLine[] = "ntp.promo_line";
 
@@ -1292,6 +1299,13 @@ const char kNTPPromoLine[] = "ntp.promo_line";
 // from the promo server.
 const char kNTPPromoStart[] = "ntp.promo_start";
 const char kNTPPromoEnd[] = "ntp.promo_end";
+
+// A randomly generated group created to control the number of users we show the
+// sync promo to on the NTP.
+const char kNTPSyncPromoGroup[] = "ntp.sync_promo.group";
+
+// The maximum allowable group that can be shown the sync promotion on the NTP.
+const char kNTPSyncPromoGroupMax[] = "ntp.sync_promo.group_max";
 
 // Boolean indicating whether the web store is active for the current locale.
 const char kNTPWebStoreEnabled[] = "ntp.webstore_enabled";
@@ -1313,6 +1327,9 @@ const char kNTPWebStorePromoLink[] = "ntp.webstorepromo.link";
 
 // The image URL for the NTP web store promo logo.
 const char kNTPWebStorePromoLogo[] = "ntp.webstorepromo.logo";
+
+// The original URL for the NTP web store promo logo.
+const char kNTPWebStorePromoLogoSource[] = "ntp.webstorepromo.logo_source";
 
 // The "hide this" link text for the NTP web store promo.
 const char kNTPWebStorePromoExpire[] = "ntp.webstorepromo.expire";
@@ -1350,7 +1367,7 @@ const char kSyncHasSetupCompleted[] = "sync.has_setup_completed";
 // Boolean specifying whether to automatically sync all data types (including
 // future ones, as they're added).  If this is true, the following preferences
 // (kSyncBookmarks, kSyncPasswords, etc.) can all be ignored.
-const char kKeepEverythingSynced[] = "sync.keep_everything_synced";
+const char kSyncKeepEverythingSynced[] = "sync.keep_everything_synced";
 
 // Booleans specifying whether the user has selected to sync the following
 // datatypes.
@@ -1363,8 +1380,10 @@ const char kSyncAutofillProfile[] = "sync.autofill_profile";
 const char kSyncThemes[] = "sync.themes";
 const char kSyncTypedUrls[] = "sync.typed_urls";
 const char kSyncExtensions[] = "sync.extensions";
+const char kSyncExtensionSettings[] = "sync.extension_settings";
 const char kSyncSearchEngines[] = "sync.search_engines";
 const char kSyncSessions[] = "sync.sessions";
+const char kSyncAppNotifications[] = "sync.app_notifications";
 
 // Boolean used by enterprise configuration management in order to lock down
 // sync.
@@ -1374,17 +1393,18 @@ const char kSyncManaged[] = "sync.managed";
 // used when sync is disabled by the user via the privacy dashboard.
 const char kSyncSuppressStart[] = "sync.suppress_start";
 
-// Boolean to represent whether the legacy autofill profile data has been
-// migrated to the new model.
-const char kAutofillProfileMigrated[] = "sync.autofill_migrated";
-
 // List of the currently acknowledged set of sync types, used to figure out
 // if a new sync type has rolled out so we can notify the user.
-const char kAcknowledgedSyncTypes[] = "sync.acknowledged_types";
+const char kSyncAcknowledgedSyncTypes[] = "sync.acknowledged_types";
+
+// Dictionary from sync model type (as an int) to max invalidation
+// version (int64 represented as a string).
+const char kSyncMaxInvalidationVersions[] = "sync.max_invalidation_versions";
 
 // A string that can be used to restore sync encryption infrastructure on
 // startup so that the user doesn't need to provide credentials on each start.
-const char kEncryptionBootstrapToken[] = "sync.encryption_bootstrap_token";
+const char kSyncEncryptionBootstrapToken[] =
+    "sync.encryption_bootstrap_token";
 
 // Boolean tracking whether the user authenticated with OAuth.
 const char kSyncUsingOAuth[] = "sync.using_oauth";
@@ -1395,6 +1415,22 @@ const char kSyncUsingSecondaryPassphrase[] = "sync.using_secondary_passphrase";
 
 // String that identifies the user logged into sync and other google services.
 const char kGoogleServicesUsername[] = "google.services.username";
+
+// Tracks the number of times that we have shown the sync promo at startup.
+const char kSyncPromoStartupCount[] = "sync_promo.startup_count";
+
+// A counter to remember the number of times we've been to the sync promo page
+// (not at startup).
+const char kSyncPromoViewCount[] = "sync_promo.view_count";
+
+// Boolean tracking whether the user chose to skip the sync promo.
+const char kSyncPromoUserSkipped[] = "sync_promo.user_skipped";
+
+// Boolean that specifies if the sync promo is allowed to show on first run.
+// This preference is specified in the master preference file to suppress the
+// sync promo for some installations.
+const char kSyncPromoShowOnFirstRunAllowed[] =
+    "sync_promo.show_on_first_run_allowed";
 
 // Create web application shortcut dialog preferences.
 const char kWebAppCreateOnDesktop[] = "browser.web_app.create_on_desktop";
@@ -1557,6 +1593,10 @@ const char kManagedPopupsAllowedForUrls[] =
     "profile.managed_popups_allowed_for_urls";
 const char kManagedPopupsBlockedForUrls[] =
     "profile.managed_popups_blocked_for_urls";
+const char kManagedNotificationsAllowedForUrls[] =
+    "profile.managed_notifications_allowed_for_urls";
+const char kManagedNotificationsBlockedForUrls[] =
+    "profile.managed_notifications_blocked_for_urls";
 const char kManagedAutoSelectCertificateForUrls[] =
     "profile.managed_auto_select_certificate_for_urls";
 
@@ -1584,5 +1624,13 @@ const char kCustomHandlersEnabled[] = "custom_handlers.enabled";
 // by the cloud policy subsystem.
 const char kDevicePolicyRefreshRate[] = "policy.device_refresh_rate";
 const char kUserPolicyRefreshRate[] = "policy.user_refresh_rate";
+
+// String that represents the recovery component last downloaded version. This
+// takes the usual 'a.b.c.d' notation.
+const char kRecoveryComponentVersion[] = "recovery_component.version";
+
+// String that stores the component updater last known state. This is used for
+// troubleshooting.
+const char kComponentUpdaterState[] = "component_updater.state";
 
 }  // namespace prefs

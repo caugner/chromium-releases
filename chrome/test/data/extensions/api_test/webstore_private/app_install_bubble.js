@@ -5,13 +5,13 @@
 var tests = [
   function appInstallBubble() {
     // See things through all the way to a successful install.
-    listenOnce(chrome.management.onInstalled, callbackPass(function(info) {
+    listenOnce(chrome.management.onInstalled, function(info) {
       assertEq(info.id, appId);
-    }));
+    });
 
     var manifest = getManifest("app/manifest.json");
     // Begin installing.
-    chrome.webstorePrivate.beginInstallWithManifest2(
+    chrome.webstorePrivate.beginInstallWithManifest3(
         {'id': appId,'manifest': manifest, 'appInstallBubble':true},
         callbackPass(function(result) {
       assertEq(result, "");

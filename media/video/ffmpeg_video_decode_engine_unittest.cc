@@ -5,7 +5,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "media/base/data_buffer.h"
-#include "media/base/mock_task.h"
 #include "media/base/pipeline.h"
 #include "media/base/test_data_util.h"
 #include "media/filters/ffmpeg_glue.h"
@@ -23,10 +22,10 @@ using ::testing::StrictMock;
 
 namespace media {
 
-static const size_t kWidth = 320;
-static const size_t kHeight = 240;
-static const size_t kSurfaceWidth = 522;
-static const size_t kSurfaceHeight = 288;
+static const VideoFrame::Format kVideoFormat = VideoFrame::YV12;
+static const gfx::Size kCodedSize(320, 240);
+static const gfx::Rect kVisibleRect(320, 240);
+static const gfx::Size kNaturalSize(522, 288);
 static const AVRational kFrameRate = { 100, 1 };
 
 ACTION_P2(DemuxComplete, engine, buffer) {
@@ -38,12 +37,12 @@ class FFmpegVideoDecodeEngineTest
       public VideoDecodeEngine::EventHandler {
  public:
   FFmpegVideoDecodeEngineTest()
-      : config_(kCodecVP8, kWidth, kHeight, kSurfaceWidth, kSurfaceHeight,
+      : config_(kCodecVP8, kVideoFormat, kCodedSize, kVisibleRect,
                 kFrameRate.num, kFrameRate.den, NULL, 0) {
     CHECK(FFmpegGlue::GetInstance());
 
     // Setup FFmpeg structures.
-    frame_buffer_.reset(new uint8[kWidth * kHeight]);
+    frame_buffer_.reset(new uint8[kCodedSize.GetArea()]);
 
     test_engine_.reset(new FFmpegVideoDecodeEngine());
 
@@ -58,11 +57,8 @@ class FFmpegVideoDecodeEngineTest
   }
 
   void Initialize() {
-    VideoCodecInfo info;
-    EXPECT_CALL(*this, OnInitializeComplete(_))
-        .WillOnce(SaveArg<0>(&info));
+    EXPECT_CALL(*this, OnInitializeComplete(true));
     test_engine_->Initialize(MessageLoop::current(), this, NULL, config_);
-    EXPECT_TRUE(info.success);
   }
 
   // Decodes the single compressed frame in |buffer| and writes the
@@ -105,31 +101,29 @@ class FFmpegVideoDecodeEngineTest
     CallProduceVideoFrame();
     CallProduceVideoFrame();
 
-    EXPECT_EQ(kSurfaceWidth, video_frame_a->width());
-    EXPECT_EQ(kSurfaceHeight, video_frame_a->height());
-    EXPECT_EQ(kSurfaceWidth, video_frame_b->width());
-    EXPECT_EQ(kSurfaceHeight, video_frame_b->height());
+    size_t expected_width = static_cast<size_t>(kVisibleRect.width());
+    size_t expected_height = static_cast<size_t>(kVisibleRect.height());
+
+    EXPECT_EQ(expected_width, video_frame_a->width());
+    EXPECT_EQ(expected_height, video_frame_a->height());
+    EXPECT_EQ(expected_width, video_frame_b->width());
+    EXPECT_EQ(expected_height, video_frame_b->height());
   }
 
   // VideoDecodeEngine::EventHandler implementation.
   MOCK_METHOD2(ConsumeVideoFrame,
-               void(scoped_refptr<VideoFrame> video_frame,
-                    const PipelineStatistics& statistics));
-  MOCK_METHOD1(ProduceVideoSample,
-               void(scoped_refptr<Buffer> buffer));
-  MOCK_METHOD1(OnInitializeComplete,
-               void(const VideoCodecInfo& info));
+               void(scoped_refptr<VideoFrame>, const PipelineStatistics&));
+  MOCK_METHOD1(ProduceVideoSample, void(scoped_refptr<Buffer>));
+  MOCK_METHOD1(OnInitializeComplete, void(bool));
   MOCK_METHOD0(OnUninitializeComplete, void());
   MOCK_METHOD0(OnFlushComplete, void());
   MOCK_METHOD0(OnSeekComplete, void());
   MOCK_METHOD0(OnError, void());
 
   void CallProduceVideoFrame() {
-    test_engine_->ProduceVideoFrame(VideoFrame::CreateFrame(VideoFrame::YV12,
-                                                            kWidth,
-                                                            kHeight,
-                                                            kNoTimestamp,
-                                                            kNoTimestamp));
+    test_engine_->ProduceVideoFrame(VideoFrame::CreateFrame(
+        VideoFrame::YV12, kVisibleRect.width(), kVisibleRect.height(),
+        kNoTimestamp, kNoTimestamp));
   }
 
  protected:
@@ -149,35 +143,28 @@ TEST_F(FFmpegVideoDecodeEngineTest, Initialize_Normal) {
 }
 
 TEST_F(FFmpegVideoDecodeEngineTest, Initialize_FindDecoderFails) {
-  VideoDecoderConfig config(kUnknown, kWidth, kHeight, kSurfaceWidth,
-                            kSurfaceHeight, kFrameRate.num, kFrameRate.den,
+  VideoDecoderConfig config(kUnknownVideoCodec, kVideoFormat,
+                            kCodedSize, kVisibleRect,
+                            kFrameRate.num, kFrameRate.den,
                             NULL, 0);
+
   // Test avcodec_find_decoder() returning NULL.
-  VideoCodecInfo info;
-  EXPECT_CALL(*this, OnInitializeComplete(_))
-     .WillOnce(SaveArg<0>(&info));
+  EXPECT_CALL(*this, OnInitializeComplete(false));
   test_engine_->Initialize(MessageLoop::current(), this, NULL, config);
-  EXPECT_FALSE(info.success);
 }
 
 TEST_F(FFmpegVideoDecodeEngineTest, Initialize_OpenDecoderFails) {
   // Specify Theora w/o extra data so that avcodec_open() fails.
-  VideoDecoderConfig config(kCodecTheora, kWidth, kHeight, kSurfaceWidth,
-                            kSurfaceHeight, kFrameRate.num, kFrameRate.den,
+  VideoDecoderConfig config(kCodecTheora, kVideoFormat,
+                            kCodedSize, kVisibleRect,
+                            kFrameRate.num, kFrameRate.den,
                             NULL, 0);
-  VideoCodecInfo info;
-  EXPECT_CALL(*this, OnInitializeComplete(_))
-     .WillOnce(SaveArg<0>(&info));
+  EXPECT_CALL(*this, OnInitializeComplete(false));
   test_engine_->Initialize(MessageLoop::current(), this, NULL, config);
-  EXPECT_FALSE(info.success);
 }
 
 TEST_F(FFmpegVideoDecodeEngineTest, DecodeFrame_Normal) {
   Initialize();
-
-  // We rely on FFmpeg for timestamp and duration reporting.
-  const base::TimeDelta kTimestamp = base::TimeDelta::FromMicroseconds(0);
-  const base::TimeDelta kDuration = base::TimeDelta::FromMicroseconds(10000);
 
   // Simulate decoding a single frame.
   scoped_refptr<VideoFrame> video_frame;
@@ -187,8 +174,7 @@ TEST_F(FFmpegVideoDecodeEngineTest, DecodeFrame_Normal) {
   // the buffer timestamp.
   ASSERT_TRUE(video_frame);
   EXPECT_EQ(0, video_frame->GetTimestamp().ToInternalValue());
-  EXPECT_EQ(kDuration.ToInternalValue(),
-            video_frame->GetDuration().ToInternalValue());
+  EXPECT_EQ(10000, video_frame->GetDuration().ToInternalValue());
 }
 
 

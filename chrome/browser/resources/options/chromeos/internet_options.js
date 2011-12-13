@@ -207,7 +207,6 @@ cr.define('options', function() {
         // When PIN will be entered and value changed,
         // we'll update UI to reflect that change.
         $('sim-card-lock-enabled').checked = !newValue;
-        InternetOptions.enableSecurityTab(false);
         chrome.send('setSimCardLock', [newValue]);
       });
       $('change-pin').addEventListener('click', function(event) {
@@ -319,29 +318,24 @@ cr.define('options', function() {
     OptionsPage.closeOverlay();
   };
 
-  InternetOptions.enableSecurityTab = function(enabled) {
-    $('sim-card-lock-enabled').disabled = !enabled;
-    $('change-pin').disabled = !enabled;
-  };
-
   InternetOptions.setupAttributes = function(data) {
     var buttons = $('wireless-buttons');
     if (data.wifiEnabled) {
-      $('disable-wifi').disabled = false;
+      $('disable-wifi').disabled = data.wifiBusy;
       $('disable-wifi').hidden = false;
       $('enable-wifi').hidden = true;
     } else {
-      $('enable-wifi').disabled = false;
+      $('enable-wifi').disabled = data.wifiBusy;
       $('enable-wifi').hidden = false;
       $('disable-wifi').hidden = true;
     }
     if (data.cellularAvailable) {
       if (data.cellularEnabled) {
-        $('disable-cellular').disabled = false;
+        $('disable-cellular').disabled = data.cellularBusy;
         $('disable-cellular').hidden = false;
         $('enable-cellular').hidden = true;
       } else {
-        $('enable-cellular').disabled = false;
+        $('enable-cellular').disabled = data.cellularBusy;
         $('enable-cellular').hidden = false;
         $('disable-cellular').hidden = true;
       }
@@ -399,9 +393,9 @@ cr.define('options', function() {
     $('activateDetails').hidden = !data.showActivateButton;
   };
 
-  InternetOptions.updateSecurityTab = function(data) {
-    InternetOptions.enableSecurityTab(true);
-    $('sim-card-lock-enabled').checked = data.requirePin;
+  InternetOptions.updateSecurityTab = function(requirePin) {
+    $('sim-card-lock-enabled').checked = requirePin;
+    $('change-pin').hidden = !requirePin;
   };
 
   InternetOptions.showDetailedInfo = function (data) {
@@ -625,8 +619,7 @@ cr.define('options', function() {
           cr.doc.querySelectorAll('.apn-details-view'),
           true);
 
-        $('sim-card-lock-enabled').checked = data.simCardLockEnabled;
-        InternetOptions.enableSecurityTab(true);
+        InternetOptions.updateSecurityTab(data.simCardLockEnabled);
       }
       $('autoConnectNetworkCellular').checked = data.autoConnect;
       $('autoConnectNetworkCellular').disabled = false;

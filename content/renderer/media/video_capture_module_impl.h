@@ -22,7 +22,10 @@ class VideoCaptureModuleImpl
  public:
   VideoCaptureModuleImpl(const media::VideoCaptureSessionId id,
                          VideoCaptureImplManager* vc_manager);
-  virtual ~VideoCaptureModuleImpl();
+  // Implement reference counting. This make it possible to reference the
+  // object from both Chromium and WebRtc.
+  virtual int32_t AddRef() OVERRIDE;
+  virtual int32_t Release() OVERRIDE;
 
   // Override webrtc::videocapturemodule::VideoCaptureImpl implementation.
   virtual WebRtc_Word32 StartCapture(
@@ -37,6 +40,7 @@ class VideoCaptureModuleImpl
   virtual void OnStopped(media::VideoCapture* capture);
   virtual void OnPaused(media::VideoCapture* capture);
   virtual void OnError(media::VideoCapture* capture, int error_code);
+  virtual void OnRemoved(media::VideoCapture* capture);
   virtual void OnBufferReady(
       media::VideoCapture* capture,
       scoped_refptr<media::VideoCapture::VideoFrameBuffer> buf);
@@ -45,6 +49,7 @@ class VideoCaptureModuleImpl
       const media::VideoCaptureParams& device_info);
 
  private:
+  virtual ~VideoCaptureModuleImpl();
   void Init();
 
   void StartCaptureOnCaptureThread(
@@ -76,6 +81,7 @@ class VideoCaptureModuleImpl
   media::VideoCapture* capture_engine_;
   bool pending_start_;
   webrtc::VideoCaptureCapability pending_cap_;
+  int ref_count_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureModuleImpl);
 };

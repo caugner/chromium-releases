@@ -443,6 +443,82 @@ class ExtensionPrefsBlacklist : public ExtensionPrefsTest {
 };
 TEST_F(ExtensionPrefsBlacklist, Blacklist) {}
 
+class ExtensionPrefsAcknowledgment : public ExtensionPrefsTest {
+ public:
+  virtual void Initialize() {
+    not_installed_id_ = "pghjnghklobnfoidcldiidjjjhkeeaoi";
+
+    // Install some extensions.
+    for (int i = 0; i < 5; i++) {
+      std::string name = "test" + base::IntToString(i);
+      extensions_.push_back(prefs_.AddExtension(name));
+    }
+    EXPECT_EQ(NULL, prefs()->GetInstalledExtensionInfo(not_installed_id_));
+
+    ExtensionList::const_iterator iter;
+    for (iter = extensions_.begin(); iter != extensions_.end(); ++iter) {
+      std::string id = (*iter)->id();
+      EXPECT_FALSE(prefs()->IsExternalExtensionAcknowledged(id));
+      EXPECT_FALSE(prefs()->IsBlacklistedExtensionAcknowledged(id));
+      EXPECT_FALSE(prefs()->IsOrphanedExtensionAcknowledged(id));
+      if (external_id_.empty()) {
+        external_id_ = id;
+        continue;
+      }
+      if (blacklisted_id_.empty()) {
+        blacklisted_id_ = id;
+        continue;
+      }
+      if (orphaned_id_.empty()) {
+        orphaned_id_ = id;
+        continue;
+      }
+    }
+    // For each type of acknowledgment, acknowledge one installed and one
+    // not-installed extension id.
+    prefs()->AcknowledgeExternalExtension(external_id_);
+    prefs()->AcknowledgeBlacklistedExtension(blacklisted_id_);
+    prefs()->AcknowledgeOrphanedExtension(orphaned_id_);
+    prefs()->AcknowledgeExternalExtension(not_installed_id_);
+    prefs()->AcknowledgeBlacklistedExtension(not_installed_id_);
+    prefs()->AcknowledgeOrphanedExtension(not_installed_id_);
+  }
+
+  virtual void Verify() {
+    ExtensionList::const_iterator iter;
+    for (iter = extensions_.begin(); iter != extensions_.end(); ++iter) {
+      std::string id = (*iter)->id();
+      if (id == external_id_) {
+        EXPECT_TRUE(prefs()->IsExternalExtensionAcknowledged(id));
+      } else {
+        EXPECT_FALSE(prefs()->IsExternalExtensionAcknowledged(id));
+      }
+      if (id == blacklisted_id_) {
+        EXPECT_TRUE(prefs()->IsBlacklistedExtensionAcknowledged(id));
+      } else {
+        EXPECT_FALSE(prefs()->IsBlacklistedExtensionAcknowledged(id));
+      }
+      if (id == orphaned_id_) {
+        EXPECT_TRUE(prefs()->IsOrphanedExtensionAcknowledged(id));
+      } else {
+        EXPECT_FALSE(prefs()->IsOrphanedExtensionAcknowledged(id));
+      }
+    }
+    EXPECT_TRUE(prefs()->IsExternalExtensionAcknowledged(not_installed_id_));
+    EXPECT_TRUE(prefs()->IsBlacklistedExtensionAcknowledged(not_installed_id_));
+    EXPECT_TRUE(prefs()->IsOrphanedExtensionAcknowledged(not_installed_id_));
+  }
+
+ private:
+  ExtensionList extensions_;
+
+  std::string not_installed_id_;
+  std::string external_id_;
+  std::string blacklisted_id_;
+  std::string orphaned_id_;
+};
+TEST_F(ExtensionPrefsAcknowledgment, Acknowledgment) {}
+
 // Tests force hiding browser actions.
 class ExtensionPrefsHidingBrowserActions : public ExtensionPrefsTest {
  public:
@@ -1111,3 +1187,31 @@ class ExtensionPrefsSetExtensionControlledPref
 };
 TEST_F(ExtensionPrefsSetExtensionControlledPref,
     ExtensionPrefsSetExtensionControlledPref) {}
+
+// Tests that the switches::kDisableExtensions command-line flag prevents
+// extension controlled preferences from being enacted.
+class ExtensionPrefsDisableExtensions
+    : public ExtensionPrefsPreferencesBase {
+ public:
+  ExtensionPrefsDisableExtensions()
+      : iteration_(0) {}
+  virtual ~ExtensionPrefsDisableExtensions() {}
+  virtual void Initialize() {
+    InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
+    // This becomes only active in the second verification phase.
+    prefs_.set_extensions_disabled(true);
+  }
+  virtual void Verify() {
+    std::string actual = prefs()->pref_service()->GetString(kPref1);
+    if (iteration_ == 0) {
+      EXPECT_EQ("val1", actual);
+      ++iteration_;
+    } else {
+      EXPECT_EQ(kDefaultPref1, actual);
+    }
+  }
+
+ private:
+  int iteration_;
+};
+TEST_F(ExtensionPrefsDisableExtensions, ExtensionPrefsDisableExtensions) {}

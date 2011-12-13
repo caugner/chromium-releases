@@ -29,6 +29,9 @@
       }],
     ],
   },
+  'includes': [
+    '../build/win_precompile.gypi',
+  ],
   'target_defaults': {
     'dependencies': [
       '../chrome/chrome.gyp:chrome_resources',
@@ -132,7 +135,7 @@
           'conditions': [
             ['OS=="win"', {
               'dependencies': [
-                '../breakpad/breakpad.gyp:breakpad_handler',              
+                '../breakpad/breakpad.gyp:breakpad_handler',
                 # TODO(slightlyoff): Get automation targets working on OS X
                 '../chrome/chrome.gyp:automation',
               ],
@@ -646,6 +649,7 @@
         '../chrome/app/policy/cloud_policy_codegen.gyp:policy',
         '../chrome/chrome.gyp:common',
         '../chrome/chrome.gyp:utility',
+        '../content/content.gyp:content_common',
         '../net/net.gyp:net',
         '../third_party/libxml/libxml.gyp:libxml',
         '../third_party/bzip2/bzip2.gyp:bzip2',
@@ -898,8 +902,6 @@
           },
           'msvs_settings': {
             'VCLinkerTool': {
-              'OutputFile':
-                  '$(OutDir)\\servers\\$(ProjectName).dll',
               'DelayLoadDLLs': [],
               'BaseAddress': '0x33000000',
               # Set /SUBSYSTEM:WINDOWS (for consistency).

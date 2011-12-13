@@ -41,6 +41,8 @@ SadTabView::SadTabView(TabContents* tab_contents, Kind kind)
     : tab_contents_(tab_contents),
       kind_(kind),
       painted_(false),
+      base_font_(ResourceBundle::GetSharedInstance().GetFont(
+          ResourceBundle::BaseFont)),
       message_(NULL),
       help_link_(NULL),
       feedback_link_(NULL) {
@@ -63,7 +65,8 @@ void SadTabView::LinkClicked(views::Link* source, int event_flags) {
         google_util::AppendGoogleLocaleParam(GURL(kind_ == CRASHED ?
                                                   chrome::kCrashReasonURL :
                                                   chrome::kKillReasonURL));
-    tab_contents_->OpenURL(help_url, GURL(), CURRENT_TAB, PageTransition::LINK);
+    tab_contents_->OpenURL(
+        help_url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_LINK);
   } else if (tab_contents_ != NULL && source == feedback_link_) {
     browser::ShowHtmlBugReportView(
         Browser::GetBrowserForController(&tab_contents_->controller(), NULL),
@@ -95,48 +98,33 @@ void SadTabView::ViewHierarchyChanged(bool is_add,
   columns->AddPaddingColumn(1, kPadding);
 
   views::ImageView* image = new views::ImageView();
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  image->SetImage(
-      rb.GetBitmapNamed((kind_ == CRASHED) ? IDR_SAD_TAB : IDR_KILLED_TAB));
+  image->SetImage(ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      (kind_ == CRASHED) ? IDR_SAD_TAB : IDR_KILLED_TAB));
   layout->StartRowWithPadding(0, column_set_id, 1, kPadding);
   layout->AddView(image);
 
-  views::Label* title = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      (kind_ == CRASHED) ? IDS_SAD_TAB_TITLE : IDS_KILLED_TAB_TITLE)));
-  const gfx::Font& base_font = rb.GetFont(ResourceBundle::BaseFont);
-  title->SetFont(base_font.DeriveFont(kTitleFontSizeDelta, gfx::Font::BOLD));
-  title->SetColor(kTextColor);
+  views::Label* title = CreateLabel(l10n_util::GetStringUTF16(
+      (kind_ == CRASHED) ? IDS_SAD_TAB_TITLE : IDS_KILLED_TAB_TITLE));
+  title->SetFont(base_font_.DeriveFont(kTitleFontSizeDelta, gfx::Font::BOLD));
   layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
   layout->AddView(title);
 
-  message_ = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      (kind_ == CRASHED) ? IDS_SAD_TAB_MESSAGE : IDS_KILLED_TAB_MESSAGE)));
-  message_->SetFont(base_font.DeriveFont(kMessageFontSizeDelta));
-  message_->SetColor(kTextColor);
+  message_ = CreateLabel(l10n_util::GetStringUTF16(
+      (kind_ == CRASHED) ? IDS_SAD_TAB_MESSAGE : IDS_KILLED_TAB_MESSAGE));
   message_->SetMultiLine(true);
   layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
   layout->AddView(message_);
 
   if (tab_contents_) {
-    std::wstring help_link(UTF16ToWide(l10n_util::GetStringUTF16(
-        (kind_ == CRASHED) ? IDS_SAD_TAB_HELP_LINK : IDS_LEARN_MORE)));
-    help_link_ = new views::Link(help_link);
-    help_link_->SetFont(base_font.DeriveFont(kMessageFontSizeDelta));
-    help_link_->SetNormalColor(kTextColor);
-    help_link_->set_listener(this);
+    help_link_ = CreateLink(l10n_util::GetStringUTF16(
+        (kind_ == CRASHED) ? IDS_SAD_TAB_HELP_LINK : IDS_LEARN_MORE));
 
     if (kind_ == CRASHED) {
       size_t offset = 0;
       string16 help_text(l10n_util::GetStringFUTF16(IDS_SAD_TAB_HELP_MESSAGE,
                                                     string16(), &offset));
-      views::Label* help_prefix =
-          new views::Label(UTF16ToWide(help_text.substr(0, offset)));
-      help_prefix->SetFont(base_font.DeriveFont(kMessageFontSizeDelta));
-      help_prefix->SetColor(kTextColor);
-      views::Label* help_suffix =
-          new views::Label(UTF16ToWide(help_text.substr(offset)));
-      help_suffix->SetFont(base_font.DeriveFont(kMessageFontSizeDelta));
-      help_suffix->SetColor(kTextColor);
+      views::Label* help_prefix = CreateLabel(help_text.substr(0, offset));
+      views::Label* help_suffix = CreateLabel(help_text.substr(offset));
 
       const int help_column_set_id = 1;
       views::ColumnSet* help_columns = layout->AddColumnSet(help_column_set_id);
@@ -155,11 +143,8 @@ void SadTabView::ViewHierarchyChanged(bool is_add,
       layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
       layout->AddView(help_link_);
 
-      feedback_link_ = new views::Link(UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_KILLED_TAB_FEEDBACK_LINK)));
-      feedback_link_->SetFont(base_font.DeriveFont(kMessageFontSizeDelta));
-      feedback_link_->SetNormalColor(kTextColor);
-      feedback_link_->set_listener(this);
+      feedback_link_ = CreateLink(
+          l10n_util::GetStringUTF16(IDS_KILLED_TAB_FEEDBACK_LINK));
       layout->StartRowWithPadding(0, column_set_id, 0, kPadding);
       layout->AddView(feedback_link_);
     }
@@ -174,4 +159,21 @@ void SadTabView::OnPaint(gfx::Canvas* canvas) {
     painted_ = true;
   }
   View::OnPaint(canvas);
+}
+
+views::Label* SadTabView::CreateLabel(const string16& text) {
+  views::Label* label = new views::Label(text);
+  label->SetFont(base_font_.DeriveFont(kMessageFontSizeDelta));
+  label->SetBackgroundColor(background()->get_color());
+  label->SetEnabledColor(kTextColor);
+  return label;
+}
+
+views::Link* SadTabView::CreateLink(const string16& text) {
+  views::Link* link = new views::Link(text);
+  link->SetFont(base_font_.DeriveFont(kMessageFontSizeDelta));
+  link->SetBackgroundColor(background()->get_color());
+  link->SetEnabledColor(kTextColor);
+  link->set_listener(this);
+  return link;
 }

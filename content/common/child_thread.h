@@ -8,6 +8,8 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/shared_memory.h"
+#include "content/common/content_export.h"
 #include "content/common/message_router.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
@@ -24,8 +26,8 @@ class SyncMessageFilter;
 }
 
 // The main thread of a child process derives from this class.
-class ChildThread : public IPC::Channel::Listener,
-                    public IPC::Message::Sender {
+class CONTENT_EXPORT ChildThread : public IPC::Channel::Listener,
+                                   public IPC::Message::Sender {
  public:
   // Creates the thread.
   ChildThread();
@@ -48,6 +50,12 @@ class ChildThread : public IPC::Channel::Listener,
   // Tests can override this method if they want a custom loading behavior.
   virtual webkit_glue::ResourceLoaderBridge* CreateBridge(
       const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info);
+
+  // Allocates a block of shared memory of the given size and
+  // maps in into the address space. Returns NULL of failure.
+  // Note: On posix, this requires a sync IPC to the browser process,
+  // but on windows the child process directly allocates the block.
+  base::SharedMemory* AllocateSharedMemory(size_t buf_size);
 
   ResourceDispatcher* resource_dispatcher();
 
@@ -85,6 +93,8 @@ class ChildThread : public IPC::Channel::Listener,
 #ifdef IPC_MESSAGE_LOG_ENABLED
   virtual void OnSetIPCLoggingEnabled(bool enable);
 #endif
+
+  virtual void OnDumpHandles();
 
   void set_on_channel_error_called(bool on_channel_error_called) {
     on_channel_error_called_ = on_channel_error_called;

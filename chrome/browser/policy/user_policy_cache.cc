@@ -8,18 +8,17 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/file_path.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
-#include "base/values.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/policy/browser_policy_connector.h"
-#include "chrome/browser/policy/cloud_policy_provider.h"
+#include "chrome/browser/policy/configuration_policy_pref_store.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/browser/policy/policy_map.h"
 #include "chrome/browser/policy/proto/cloud_policy.pb.h"
 #include "chrome/browser/policy/proto/device_management_local.pb.h"
 #include "chrome/browser/policy/proto/old_generic_format.pb.h"
 #include "policy/configuration_policy_type.h"
+#include "policy/policy_constants.h"
 
 namespace policy {
 
@@ -114,23 +113,6 @@ bool UserPolicyCache::DecodePolicyData(const em::PolicyData& policy_data,
 using google::protobuf::RepeatedField;
 using google::protobuf::RepeatedPtrField;
 
-class PolicyMapProxy : public ConfigurationPolicyStoreInterface {
- public:
-  // Does not take ownership of |policy_map|, and callers need to make sure
-  // that |policy_map| outlives this PolicyMapProxy.
-  explicit PolicyMapProxy(PolicyMap* policy_map)
-      : policy_map_(policy_map) {}
-  virtual ~PolicyMapProxy() {}
-  virtual void Apply(ConfigurationPolicyType policy, Value* value) {
-    policy_map_->Set(policy, value);
-  }
-
- private:
-  PolicyMap* policy_map_;
-
-  DISALLOW_COPY_AND_ASSIGN(PolicyMapProxy);
-};
-
 void UserPolicyCache::MaybeDecodeOldstylePolicy(
     const std::string& policy_data,
     PolicyMap* mandatory,
@@ -158,11 +140,7 @@ void UserPolicyCache::MaybeDecodeOldstylePolicy(
         result.Set(named_value->name(), decoded_value);
     }
   }
-  // Hack: Let one of the providers do the transformation from DictionaryValue
-  // to PolicyMap, since they have the required code anyway.
-  PolicyMapProxy map_proxy(mandatory);
-  g_browser_process->browser_policy_connector()->GetManagedCloudProvider()->
-      ApplyPolicyValueTree(&result, &map_proxy);
+  mandatory->LoadFrom(&result, GetChromePolicyDefinitionList());
 }
 
 Value* UserPolicyCache::DecodeIntegerValue(

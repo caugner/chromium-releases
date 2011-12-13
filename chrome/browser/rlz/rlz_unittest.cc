@@ -37,6 +37,8 @@ const wchar_t kRlzTempHklm[] = L"rlz_hklm";
 // Dummy RLZ string for the access points.
 const char kOmniboxRlzString[] = "test_omnibox";
 const char kHomepageRlzString[] = "test_homepage";
+const char kNewOmniboxRlzString[] = "new_omnibox";
+const char kNewHomepageRlzString[] = "new_homepage";
 
 // Some helper macros to test it a string contains/does not contain a substring.
 
@@ -81,7 +83,7 @@ class TestRLZTracker : public RLZTracker {
   using RLZTracker::DelayedInit;
   using RLZTracker::Observe;
 
-  TestRLZTracker() : pingnow_called_(false), assume_io_thread_(false) {
+  TestRLZTracker() : pingnow_called_(false), assume_not_ui_thread_(false) {
     set_tracker(this);
   }
 
@@ -93,12 +95,8 @@ class TestRLZTracker : public RLZTracker {
     return pingnow_called_;
   }
 
-  bool assume_io_thread() const {
-    return assume_io_thread_;
-  }
-
-  void set_assume_io_thread(bool assume_io_thread) {
-    assume_io_thread_ = assume_io_thread;
+  void set_assume_not_ui_thread(bool assume_not_ui_thread) {
+    assume_not_ui_thread_ = assume_not_ui_thread;
   }
 
  private:
@@ -114,20 +112,25 @@ class TestRLZTracker : public RLZTracker {
   }
 
   virtual bool ScheduleGetAccessPointRlz(rlz_lib::AccessPoint point) OVERRIDE {
-    return !assume_io_thread_;
+    return !assume_not_ui_thread_;
   }
 
-  virtual bool SendFinancialPing(const std::wstring& brand,
-                                 const std::wstring& lang,
-                                 const std::wstring& referral,
-                                 bool exclude_id) OVERRIDE {
+  virtual bool SendFinancialPing(const std::string& brand,
+                                 const string16& lang,
+                                 const string16& referral) OVERRIDE {
     // Don't ping the server during tests.
     pingnow_called_ = true;
+
+    // Set new access points RLZ string, like the actual server ping would have
+    // done.
+    rlz_lib::SetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, kNewOmniboxRlzString);
+    rlz_lib::SetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE,
+                               kNewHomepageRlzString);
     return true;
   }
 
   bool pingnow_called_;
-  bool assume_io_thread_;
+  bool assume_not_ui_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(TestRLZTracker);
 };
@@ -155,7 +158,7 @@ void RlzLibTest::SetUp() {
   // so that the rlz_lib calls work. This needs to be done before we do the
   // override.
 
-  std::wstring temp_hklm_path = base::StringPrintf(
+  string16 temp_hklm_path = base::StringPrintf(
       L"%ls\\%ls",
       RegistryOverrideManager::kTempTestKeyPath,
       kRlzTempHklm);
@@ -165,7 +168,7 @@ void RlzLibTest::SetUp() {
                                        temp_hklm_path.c_str(),
                                        KEY_READ));
 
-  std::wstring temp_hkcu_path = base::StringPrintf(
+  string16 temp_hkcu_path = base::StringPrintf(
       L"%ls\\%ls",
       RegistryOverrideManager::kTempTestKeyPath,
       kRlzTempHkcu);
@@ -185,7 +188,7 @@ void RlzLibTest::SetUp() {
   // Make sure a non-organic brand code is set in the registry or the RLZTracker
   // is pretty much a no-op.
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  std::wstring reg_path = dist->GetStateKey();
+  string16 reg_path = dist->GetStateKey();
   RegKey key(HKEY_CURRENT_USER, reg_path.c_str(), KEY_SET_VALUE);
   ASSERT_EQ(ERROR_SUCCESS, key.WriteValue(google_update::kRegRLZBrandField,
                                           L"TEST"));
@@ -203,7 +206,7 @@ void RlzLibTest::SimulateOmniboxUsage() {
 
 void RlzLibTest::SimulateHomepageUsage() {
   NavigationEntry entry(NULL, 0, GURL(), GURL(), string16(),
-                        PageTransition::HOME_PAGE);
+                        content::PAGE_TRANSITION_HOME_PAGE, false);
   tracker_.Observe(content::NOTIFICATION_NAV_ENTRY_PENDING,
                    NotificationService::AllSources(),
                    Details<NavigationEntry>(&entry));
@@ -463,9 +466,9 @@ TEST_F(RlzLibTest, GetAccessPointRlzOnIoThread) {
   // Set dummy RLZ string.
   rlz_lib::SetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, kOmniboxRlzString);
 
-  std::wstring rlz;
+  string16 rlz;
 
-  tracker_.set_assume_io_thread(true);
+  tracker_.set_assume_not_ui_thread(true);
   EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
   EXPECT_STREQ(kOmniboxRlzString, WideToUTF8(rlz).c_str());
 }
@@ -474,9 +477,9 @@ TEST_F(RlzLibTest, GetAccessPointRlzNotOnIoThread) {
   // Set dummy RLZ string.
   rlz_lib::SetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, kOmniboxRlzString);
 
-  std::wstring rlz;
+  string16 rlz;
 
-  tracker_.set_assume_io_thread(false);
+  tracker_.set_assume_not_ui_thread(false);
   EXPECT_FALSE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
 }
 
@@ -484,48 +487,61 @@ TEST_F(RlzLibTest, GetAccessPointRlzIsCached) {
   // Set dummy RLZ string.
   rlz_lib::SetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, kOmniboxRlzString);
 
-  std::wstring rlz;
+  string16 rlz;
 
-  tracker_.set_assume_io_thread(false);
+  tracker_.set_assume_not_ui_thread(false);
   EXPECT_FALSE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
 
-  tracker_.set_assume_io_thread(true);
+  tracker_.set_assume_not_ui_thread(true);
   EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
   EXPECT_STREQ(kOmniboxRlzString, WideToUTF8(rlz).c_str());
 
-  tracker_.set_assume_io_thread(false);
+  tracker_.set_assume_not_ui_thread(false);
   EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
   EXPECT_STREQ(kOmniboxRlzString, WideToUTF8(rlz).c_str());
 }
 
-TEST_F(RlzLibTest, PingInvalidatesRlzCache) {
+TEST_F(RlzLibTest, PingUpdatesRlzCache) {
   // Set dummy RLZ string.
   rlz_lib::SetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, kOmniboxRlzString);
+  rlz_lib::SetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, kHomepageRlzString);
 
-  std::wstring rlz;
+  string16 rlz;
 
   // Prime the cache.
-  tracker_.set_assume_io_thread(true);
+  tracker_.set_assume_not_ui_thread(true);
+
   EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
   EXPECT_STREQ(kOmniboxRlzString, WideToUTF8(rlz).c_str());
+  EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, &rlz));
+  EXPECT_STREQ(kHomepageRlzString, WideToUTF8(rlz).c_str());
 
   // Make sure cache is valid.
-  tracker_.set_assume_io_thread(false);
+  tracker_.set_assume_not_ui_thread(false);
+
   EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
   EXPECT_STREQ(kOmniboxRlzString, WideToUTF8(rlz).c_str());
+  EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, &rlz));
+  EXPECT_STREQ(kHomepageRlzString, WideToUTF8(rlz).c_str());
 
   // Perform ping.
+  tracker_.set_assume_not_ui_thread(true);
   RLZTracker::InitRlzDelayed(true, 20, true, true);
   InvokeDelayedInit();
   ExpectRlzPingSent(true);
 
-  // Make sure cache is now invalid.
-  EXPECT_FALSE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
+  // Make sure cache is now updated.
+  tracker_.set_assume_not_ui_thread(false);
+
+  EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, &rlz));
+  EXPECT_STREQ(kNewOmniboxRlzString, WideToUTF8(rlz).c_str());
+  EXPECT_TRUE(RLZTracker::GetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, &rlz));
+  EXPECT_STREQ(kNewHomepageRlzString, WideToUTF8(rlz).c_str());
 }
 
 TEST_F(RlzLibTest, ObserveHandlesBadArgs) {
   NavigationEntry entry(NULL, 0, GURL(), GURL(), string16(),
-                        PageTransition::LINK);
+                        content::PAGE_TRANSITION_LINK, false);
   tracker_.Observe(content::NOTIFICATION_NAV_ENTRY_PENDING,
                    NotificationService::AllSources(),
                    Details<NavigationEntry>(NULL));

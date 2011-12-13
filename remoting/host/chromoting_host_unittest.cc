@@ -50,8 +50,7 @@ void PostQuitTask(MessageLoop* message_loop) {
 // Run the task and delete it afterwards. This action is used to deal with
 // done callbacks.
 ACTION(RunDoneTask) {
-  arg1->Run();
-  delete arg1;
+  arg1.Run();
 }
 
 ACTION_P(QuitMainMessageLoop, message_loop) {
@@ -112,15 +111,15 @@ class ChromotingHostTest : public testing::Test {
         &handler_, &host_stub2_, &event_executor2_);
     session_.reset(new MockSession());
     session2_.reset(new MockSession());
-    session_config_.reset(SessionConfig::CreateDefault());
-    session_config2_.reset(SessionConfig::CreateDefault());
+    session_config_ = SessionConfig::GetDefault();
+    session_jid_ = "user@domain/rest-of-jid";
+    session2_jid_ = "user2@domain/rest-of-jid";
+    session_config2_ = SessionConfig::GetDefault();
 
     ON_CALL(video_stub_, ProcessVideoPacket(_, _))
-        .WillByDefault(
-            DoAll(DeleteArg<0>(), DeleteArg<1>()));
+        .WillByDefault(DeleteArg<0>());
     ON_CALL(video_stub2_, ProcessVideoPacket(_, _))
-        .WillByDefault(
-            DoAll(DeleteArg<0>(), DeleteArg<1>()));
+        .WillByDefault(DeleteArg<0>());
     ON_CALL(*connection_.get(), video_stub())
         .WillByDefault(Return(&video_stub_));
     ON_CALL(*connection_.get(), client_stub())
@@ -134,9 +133,13 @@ class ChromotingHostTest : public testing::Test {
     ON_CALL(*connection2_.get(), session())
         .WillByDefault(Return(session2_.get()));
     ON_CALL(*session_.get(), config())
-        .WillByDefault(Return(session_config_.get()));
+        .WillByDefault(ReturnRef(session_config_));
     ON_CALL(*session2_.get(), config())
-        .WillByDefault(Return(session_config2_.get()));
+        .WillByDefault(ReturnRef(session_config2_));
+    EXPECT_CALL(*session_, jid())
+        .WillRepeatedly(ReturnRef(session_jid_));
+    EXPECT_CALL(*session2_, jid())
+        .WillRepeatedly(ReturnRef(session2_jid_));
     EXPECT_CALL(*connection_.get(), video_stub())
         .Times(AnyNumber());
     EXPECT_CALL(*connection_.get(), client_stub())
@@ -185,7 +188,7 @@ class ChromotingHostTest : public testing::Test {
         NewRunnableMethod(client.get(),
                           &ClientSession::BeginSessionRequest,
                           &credentials_,
-                          NewRunnableFunction(&DummyDoneTask)));
+                          base::Bind(&DummyDoneTask)));
   }
 
   // Helper method to remove a client connection from ChromotingHost.
@@ -217,14 +220,16 @@ class ChromotingHostTest : public testing::Test {
   MockChromotingHostContext context_;
   protocol::LocalLoginCredentials credentials_;
   scoped_refptr<MockConnectionToClient> connection_;
+  std::string session_jid_;
   scoped_ptr<MockSession> session_;
-  scoped_ptr<SessionConfig> session_config_;
+  SessionConfig session_config_;
   MockVideoStub video_stub_;
   MockClientStub client_stub_;
   MockHostStub host_stub_;
   scoped_refptr<MockConnectionToClient> connection2_;
+  std::string session2_jid_;
   scoped_ptr<MockSession> session2_;
-  scoped_ptr<SessionConfig> session_config2_;
+  SessionConfig session_config2_;
   MockVideoStub video_stub2_;
   MockClientStub client_stub2_;
   MockHostStub host_stub2_;
@@ -462,7 +467,6 @@ TEST_F(ChromotingHostTest, CurtainModeIT2Me) {
   // When the video packet is received we first shutdown ChromotingHost
   // then execute the done task.
   bool curtain_activated = false;
-  std::string mockJid("user@domain/rest-of-jid");
   {
     Sequence s1, s2;
     // Can't just expect Times(0) because if it fails then the host will
@@ -470,10 +474,6 @@ TEST_F(ChromotingHostTest, CurtainModeIT2Me) {
     EXPECT_CALL(*curtain_, EnableCurtainMode(_))
         .Times(AnyNumber())
         .WillRepeatedly(SetBool(&curtain_activated));
-    EXPECT_CALL(*session_, jid())
-        .Times(1)
-        .InSequence(s1)
-        .WillOnce(ReturnRef(mockJid));
     EXPECT_CALL(*disconnect_window_, Show(_, "user@domain"))
         .Times(1)
         .InSequence(s1);
@@ -498,4 +498,5 @@ TEST_F(ChromotingHostTest, CurtainModeIT2Me) {
   host_->set_it2me(false);
   EXPECT_THAT(curtain_activated, false);
 }
+
 }  // namespace remoting

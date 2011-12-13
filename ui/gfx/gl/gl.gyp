@@ -69,6 +69,8 @@
         'gl_surface_osmesa.h',
         'gl_switches.cc',
         'gl_switches.h',
+        'scoped_make_current.cc',
+        'scoped_make_current.h',
         '<(gl_binding_output_dir)/gl_bindings_autogen_gl.cc',
         '<(gl_binding_output_dir)/gl_bindings_autogen_gl.h',
         '<(gl_binding_output_dir)/gl_bindings_autogen_mock.cc',
@@ -107,7 +109,7 @@
         },
       ],
       'conditions': [
-        ['OS != "mac"', {
+        ['OS != "mac" and OS != "android"', {
           'sources': [
             'egl_util.cc',
             'egl_util.h',

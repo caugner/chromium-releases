@@ -1,6 +1,10 @@
 // Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// This file contains intentional memory errors, some of which may lead to
+// crashes if the test is ran without special memory testing tools. We use these
+// errors to verify the sanity of the tools.
 
 #include "base/atomicops.h"
 #include "base/message_loop.h"
@@ -14,8 +18,20 @@ namespace {
 
 const base::subtle::Atomic32 kMagicValue = 42;
 
+// Helper for memory accesses that can potentially corrupt memory or cause a
+// crash during a native run.
+#ifdef ADDRESS_SANITIZER
+#define HARMFUL_ACCESS(action,error_regexp) EXPECT_DEATH(action,error_regexp)
+#else
+#define HARMFUL_ACCESS(action,error_regexp) \
+do { if (RunningOnValgrind()) { action; } } while (0)
+#endif
+
 void ReadUninitializedValue(char *ptr) {
-  if (*ptr == '\0') {
+  // The || in the conditional is to prevent clang from optimizing away the
+  // jump -- valgrind only catches jumps and conditional moves, but clang uses
+  // the borrow flag if the condition is just `*ptr == '\0'`.
+  if (*ptr == '\0' || *ptr == 64) {
     (*ptr)++;
   } else {
     (*ptr)--;
@@ -44,10 +60,14 @@ void WriteValueOutOfArrayBoundsRight(char *ptr, size_t size) {
 
 void MakeSomeErrors(char *ptr, size_t size) {
   ReadUninitializedValue(ptr);
-  ReadValueOutOfArrayBoundsLeft(ptr);
-  ReadValueOutOfArrayBoundsRight(ptr, size);
-  WriteValueOutOfArrayBoundsLeft(ptr);
-  WriteValueOutOfArrayBoundsRight(ptr, size);
+  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsLeft(ptr),
+                 "heap-buffer-overflow.*2 bytes to the left");
+  HARMFUL_ACCESS(ReadValueOutOfArrayBoundsRight(ptr, size),
+                 "heap-buffer-overflow.*1 bytes to the right");
+  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsLeft(ptr),
+                 "heap-buffer-overflow.*1 bytes to the left");
+  HARMFUL_ACCESS(WriteValueOutOfArrayBoundsRight(ptr, size),
+                 "heap-buffer-overflow.*0 bytes to the right");
 }
 
 }  // namespace
@@ -59,44 +79,56 @@ TEST(ToolsSanityTest, MemoryLeak) {
 }
 
 TEST(ToolsSanityTest, AccessesToNewMemory) {
-  // This test may corrupt memory if not run under Valgrind.
-  if (!RunningOnValgrind())
-    return;
-
   char *foo = new char[10];
   MakeSomeErrors(foo, 10);
   delete [] foo;
-  foo[5] = 0;  // Use after delete. This won't break anything under Valgrind.
+  // Use after delete.
+  HARMFUL_ACCESS(foo[5] = 0, "heap-use-after-free");
 }
 
 TEST(ToolsSanityTest, AccessesToMallocMemory) {
-  // This test may corrupt memory if not run under Valgrind.
-  if (!RunningOnValgrind())
-    return;
   char *foo = reinterpret_cast<char*>(malloc(10));
   MakeSomeErrors(foo, 10);
   free(foo);
-  foo[5] = 0;  // Use after free. This won't break anything under Valgrind.
+  // Use after free.
+  HARMFUL_ACCESS(foo[5] = 0, "heap-use-after-free");
 }
 
 TEST(ToolsSanityTest, ArrayDeletedWithoutBraces) {
-  // This test may corrupt memory if not run under Valgrind.
+#ifndef ADDRESS_SANITIZER
+  // This test may corrupt memory if not run under Valgrind or compiled with
+  // AddressSanitizer.
   if (!RunningOnValgrind())
     return;
+#endif
 
-  int *foo = new int[10];
+  // Without the |volatile|, clang optimizes away the next two lines.
+  int* volatile foo = new int[10];
   delete foo;
 }
 
 TEST(ToolsSanityTest, SingleElementDeletedWithBraces) {
-  // This test may corrupt memory if not run under Valgrind.
+#ifndef ADDRESS_SANITIZER
+  // This test may corrupt memory if not run under Valgrind or compiled with
+  // AddressSanitizer.
   if (!RunningOnValgrind())
     return;
+#endif
 
-  int *foo = new int;
+  // Without the |volatile|, clang optimizes away the next two lines.
+  int* volatile foo = new int;
+  (void) foo;
   delete [] foo;
 }
 
+#ifdef ADDRESS_SANITIZER
+TEST(ToolsSanityTest, DISABLED_AddressSanitizerCrashTest) {
+  // Intentionally crash to make sure AddressSanitizer is running.
+  // This test should not be ran on bots.
+  int* volatile zero = NULL;
+  *zero = 0;
+}
+#endif
 
 namespace {
 

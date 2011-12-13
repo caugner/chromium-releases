@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/string_number_conversions.h"
@@ -13,18 +14,13 @@
 #include "content/browser/speech/speech_input_dispatcher_host.h"
 #include "content/browser/speech/speech_input_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_switches.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/content_switches.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
 namespace speech_input {
 class FakeSpeechInputManager;
 }
-
-// This class does not need to be refcounted (typically done by PostTask) since
-// it will outlive the test and gets released only when the test shuts down.
-// Disabling refcounting here saves a bit of unnecessary code and the factory
-// method can return a plain pointer below as required by the real code.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(speech_input::FakeSpeechInputManager);
 
 namespace speech_input {
 
@@ -59,7 +55,9 @@ class FakeSpeechInputManager : public SpeechInputManager {
                                 const gfx::Rect& element_rect,
                                 const std::string& language,
                                 const std::string& grammar,
-                                const std::string& origin_url) {
+                                const std::string& origin_url,
+                                net::URLRequestContextGetter* context_getter,
+                                SpeechInputPreferences* speech_input_prefs) {
     VLOG(1) << "StartRecognition invoked.";
     EXPECT_EQ(0, caller_id_);
     EXPECT_EQ(NULL, delegate_);
@@ -68,8 +66,14 @@ class FakeSpeechInputManager : public SpeechInputManager {
     grammar_ = grammar;
     if (send_fake_response_) {
       // Give the fake result in a short while.
-      MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(this,
-          &FakeSpeechInputManager::SetFakeRecognitionResult));
+      MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
+          &FakeSpeechInputManager::SetFakeRecognitionResult,
+          // This class does not need to be refcounted (typically done by
+          // PostTask) since it will outlive the test and gets released only
+          // when the test shuts down. Disabling refcounting here saves a bit
+          // of unnecessary code and the factory method can return a plain
+          // pointer below as required by the real code.
+          base::Unretained(this)));
     }
   }
   virtual void CancelRecognition(int caller_id) {
@@ -92,13 +96,33 @@ class FakeSpeechInputManager : public SpeechInputManager {
     did_cancel_all_ = true;
   }
 
+ protected:
+  virtual void GetRequestInfo(bool* can_report_metrics,
+                              std::string* request_info) {}
+  virtual void ShowRecognitionRequested(int caller_id,
+                                        int render_process_id,
+                                        int render_view_id,
+                                        const gfx::Rect& element_rect) {}
+  virtual void ShowWarmUp(int caller_id) {}
+  virtual void ShowRecognizing(int caller_id) {}
+  virtual void ShowRecording(int caller_id)  {}
+  virtual void ShowInputVolume(int caller_id,
+                               float volume,
+                               float noise_volume) {}
+  virtual void ShowMicError(int caller_id,
+                            SpeechInputManager::MicError error) {}
+  virtual void ShowRecognizerError(int caller_id,
+                                   SpeechInputError error) {}
+  virtual void DoClose(int caller_id) {}
+
  private:
   void SetFakeRecognitionResult() {
     if (caller_id_) {  // Do a check in case we were cancelled..
       VLOG(1) << "Setting fake recognition result.";
       delegate_->DidCompleteRecording(caller_id_);
-      SpeechInputResultArray results;
-      results.push_back(SpeechInputResultItem(ASCIIToUTF16(kTestResult), 1.0));
+      SpeechInputResult results;
+      results.hypotheses.push_back(SpeechInputHypothesis(
+          ASCIIToUTF16(kTestResult), 1.0));
       delegate_->SetRecognitionResult(caller_id_, results);
       delegate_->DidCompleteRecognition(caller_id_);
       caller_id_ = 0;

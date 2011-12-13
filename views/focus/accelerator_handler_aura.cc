@@ -9,12 +9,21 @@ namespace views {
 AcceleratorHandler::AcceleratorHandler() {
 }
 
-bool AcceleratorHandler::Dispatch(const MSG& msg) {
 #if defined(OS_WIN)
+bool AcceleratorHandler::Dispatch(const MSG& msg) {
   TranslateMessage(&msg);
   DispatchMessage(&msg);
-#endif
   return true;
 }
+#else
+base::MessagePumpDispatcher::DispatchStatus AcceleratorHandler::Dispatch(
+    XEvent*) {
+  return base::MessagePumpDispatcher::EVENT_IGNORED;
+}
+
+bool DispatchXEvent(XEvent* xev) {
+  return false;
+}
+#endif  // defined(OS_WIN)
 
 }  // namespace views

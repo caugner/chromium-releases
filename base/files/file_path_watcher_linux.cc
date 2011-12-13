@@ -16,11 +16,13 @@
 #include <utility>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/eintr_wrapper.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/hash_tables.h"
 #include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -316,12 +318,12 @@ void FilePathWatcherImpl::OnFilePathChanged(
   if (!message_loop()->BelongsToCurrentThread()) {
     // Switch to message_loop_ to access watches_ safely.
     message_loop()->PostTask(FROM_HERE,
-        NewRunnableMethod(this,
-                          &FilePathWatcherImpl::OnFilePathChanged,
-                          fired_watch,
-                          child,
-                          created,
-                          is_directory));
+        base::Bind(&FilePathWatcherImpl::OnFilePathChanged,
+                   this,
+                   fired_watch,
+                   child,
+                   created,
+                   is_directory));
     return;
   }
 

@@ -4,8 +4,10 @@
 
 #include "chrome/browser/ui/views/download/download_item_view.h"
 
+#include <algorithm>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/file_path.h"
 #include "base/i18n/break_iterator.h"
@@ -99,8 +101,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
     dangerous_download_label_sized_(false),
     disabled_while_opening_(false),
     creation_time_(base::Time::Now()),
-    ALLOW_THIS_IN_INITIALIZER_LIST(reenable_method_factory_(this)),
-    deleted_(NULL) {
+    ALLOW_THIS_IN_INITIALIZER_LIST(reenable_method_factory_(this)) {
   DCHECK(download_);
   download_->AddObserver(this);
 
@@ -180,8 +181,7 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
   dangerous_mode_body_image_set_ = dangerous_mode_body_image_set;
 
   LoadIcon();
-  tooltip_text_ =
-      UTF16ToWide(download_->GetFileNameToReportUser().LossyDisplayName());
+  tooltip_text_ = download_->GetFileNameToReportUser().LossyDisplayName();
 
   font_ = ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
   box_height_ = std::max<int>(2 * kVerticalPadding + font_.GetHeight() +
@@ -277,10 +277,11 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
       }
     }
 
-    dangerous_download_label_ = new views::Label(UTF16ToWide(dangerous_label));
+    dangerous_download_label_ = new views::Label(dangerous_label);
     dangerous_download_label_->SetMultiLine(true);
     dangerous_download_label_->SetHorizontalAlignment(
         views::Label::ALIGN_LEFT);
+    dangerous_download_label_->SetAutoColorReadabilityEnabled(false);
     AddChildView(dangerous_download_label_);
     SizeLabelToMinWidth();
   }
@@ -293,14 +294,11 @@ DownloadItemView::DownloadItemView(DownloadItem* download,
 }
 
 DownloadItemView::~DownloadItemView() {
-  if (context_menu_.get()) {
+  if (context_menu_.get())
     context_menu_->Stop();
-  }
   icon_consumer_.CancelAllRequests();
   StopDownloadProgress();
   download_->RemoveObserver(this);
-  if (deleted_)
-    *deleted_ = true;
 }
 
 // Progress animation handlers.
@@ -396,7 +394,8 @@ void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
   SetEnabled(false);
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      reenable_method_factory_.NewRunnableMethod(&DownloadItemView::Reenable),
+      base::Bind(&DownloadItemView::Reenable,
+                 reenable_method_factory_.GetWeakPtr()),
       kDisabledOnOpenDuration);
 
   // Notify our parent.
@@ -408,7 +407,7 @@ void DownloadItemView::OnDownloadOpened(DownloadItem* download) {
 // In dangerous mode we have to layout our buttons.
 void DownloadItemView::Layout() {
   if (IsDangerousMode()) {
-    dangerous_download_label_->SetColor(
+    dangerous_download_label_->SetEnabledColor(
       GetThemeProvider()->GetColor(ThemeService::COLOR_BOOKMARK_TEXT));
 
     int x = kLeftPadding + dangerous_mode_body_image_set_.top_left->width() +
@@ -581,7 +580,7 @@ bool DownloadItemView::OnKeyPressed(const views::KeyEvent& event) {
 }
 
 bool DownloadItemView::GetTooltipText(const gfx::Point& p,
-                                      std::wstring* tooltip) {
+                                      string16* tooltip) {
   if (tooltip_text_.empty())
     return false;
 
@@ -623,12 +622,8 @@ void DownloadItemView::ShowContextMenu(const gfx::Point& p,
     context_menu_.reset(new DownloadShelfContextMenuView(model_.get()));
   // When we call the Run method on the menu, it runs an inner message loop
   // that might causes us to be deleted.
-  bool deleted = false;
-  deleted_ = &deleted;
-  context_menu_->Run(point);
-  if (deleted)
+  if (context_menu_->Run(GetWidget()->GetTopLevelWidget(), point))
     return;  // We have been deleted! Don't access 'this'.
-  deleted_ = NULL;
 
   // If the menu action was to remove the download, this view will also be
   // invalid so we must not access 'this' in this case.
@@ -774,7 +769,7 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
   if (body_hover_animation_->GetCurrentValue() > 0) {
     canvas->SaveLayerAlpha(
         static_cast<int>(body_hover_animation_->GetCurrentValue() * 255));
-    canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
+    canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
     int x = kLeftPadding;
     PaintBitmaps(canvas,
@@ -808,8 +803,8 @@ void DownloadItemView::OnPaint(gfx::Canvas* canvas) {
     if (drop_hover_animation_->GetCurrentValue() > 0) {
       canvas->SaveLayerAlpha(
           static_cast<int>(drop_hover_animation_->GetCurrentValue() * 255));
-      canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255,
-                                       SkXfermode::kClear_Mode);
+      canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255,
+                                      SkXfermode::kClear_Mode);
 
       PaintBitmaps(canvas,
                    drop_down_image_set->top, drop_down_image_set->center,
@@ -929,7 +924,8 @@ void DownloadItemView::LoadIcon() {
   last_download_item_path_ = download_->GetUserVerifiedFilePath();
   im->LoadIcon(last_download_item_path_,
                IconLoader::SMALL, &icon_consumer_,
-               NewCallback(this, &DownloadItemView::OnExtractIconComplete));
+               base::Bind(&DownloadItemView::OnExtractIconComplete,
+                          base::Unretained(this)));
 }
 
 void DownloadItemView::LoadIconIfItemPathChanged() {
@@ -997,8 +993,7 @@ void DownloadItemView::ClearDangerousMode() {
 
   // We need to load the icon now that the download_ has the real path.
   LoadIcon();
-  tooltip_text_ =
-      UTF16ToWide(download_->GetFileNameToReportUser().LossyDisplayName());
+  tooltip_text_ = download_->GetFileNameToReportUser().LossyDisplayName();
 
   // Force the shelf to layout again as our size has changed.
   parent_->Layout();
@@ -1035,7 +1030,7 @@ void DownloadItemView::SizeLabelToMinWidth() {
   if (dangerous_download_label_sized_)
     return;
 
-  string16 text = WideToUTF16(dangerous_download_label_->GetText());
+  string16 text = dangerous_download_label_->GetText();
   TrimWhitespace(text, TRIM_ALL, &text);
   DCHECK_EQ(string16::npos, text.find('\n'));
 
@@ -1066,7 +1061,7 @@ void DownloadItemView::SizeLabelToMinWidth() {
       current_text.replace(pos - 1, 1, 1, char16('\n'));
     else
       current_text.insert(pos, 1, char16('\n'));
-    dangerous_download_label_->SetText(UTF16ToWide(current_text));
+    dangerous_download_label_->SetText(current_text);
     size = dangerous_download_label_->GetPreferredSize();
 
     if (min_width == -1)
@@ -1074,7 +1069,7 @@ void DownloadItemView::SizeLabelToMinWidth() {
 
     // If the width is growing again, it means we passed the optimal width spot.
     if (size.width() > min_width) {
-      dangerous_download_label_->SetText(UTF16ToWide(prev_text));
+      dangerous_download_label_->SetText(prev_text);
       break;
     } else {
       min_width = size.width();
@@ -1108,7 +1103,7 @@ bool DownloadItemView::InDropDownButtonXCoordinateRange(int x) {
 void DownloadItemView::UpdateAccessibleName() {
   string16 new_name;
   if (download_->safety_state() == DownloadItem::DANGEROUS) {
-    new_name = WideToUTF16Hack(dangerous_download_label_->GetText());
+    new_name = dangerous_download_label_->GetText();
   } else {
     new_name = status_text_ + char16(' ') +
         download_->GetFileNameToReportUser().LossyDisplayName();

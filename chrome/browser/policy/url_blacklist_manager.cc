@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
-#include "base/string_util.h"
 #include "base/values.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -21,10 +20,6 @@
 namespace policy {
 
 namespace {
-
-// Time to wait before starting an update of the blacklist. Scheduling another
-// update during this period will reset the timer.
-const int64 kUpdateDelayMs = 1000;
 
 // Maximum filters per policy. Filters over this index are ignored.
 const size_t kMaxFiltersPerPolicy = 100;
@@ -84,60 +79,6 @@ URLBlacklist::URLBlacklist() {
 
 URLBlacklist::~URLBlacklist() {
   STLDeleteValues(&host_filters_);
-}
-
-void URLBlacklist::AddFilter(const std::string& filter, bool block) {
-  std::string scheme;
-  std::string host;
-  uint16 port;
-  std::string path;
-  SchemeFlag flag;
-  bool match_subdomains = true;
-
-  if (!FilterToComponents(filter, &scheme, &host, &port, &path)) {
-    LOG(WARNING) << "Invalid filter, ignoring: " << filter;
-    return;
-  }
-
-  if (!SchemeToFlag(scheme, &flag)) {
-    LOG(WARNING) << "Unsupported scheme in filter, ignoring filter: " << filter;
-    return;
-  }
-
-  // Special syntax to disable subdomain matching.
-  if (!host.empty() && host[0] == '.') {
-    host.erase(0, 1);
-    match_subdomains = false;
-  }
-
-  // Try to find an existing PathFilter with the same path prefix, port and
-  // match_subdomains value.
-  PathFilterList* list;
-  HostFilterTable::iterator host_filter = host_filters_.find(host);
-  if (host_filter == host_filters_.end()) {
-    list = new PathFilterList;
-    host_filters_[host] = list;
-  } else {
-    list = host_filter->second;
-  }
-  PathFilterList::iterator it;
-  for (it = list->begin(); it != list->end(); ++it) {
-    if (it->port == port && it->match_subdomains == match_subdomains &&
-        it->path_prefix == path)
-      break;
-  }
-  PathFilter* path_filter;
-  if (it == list->end()) {
-    list->push_back(PathFilter(path, port, match_subdomains));
-    path_filter = &list->back();
-  } else {
-    path_filter = &(*it);
-  }
-
-  if (block)
-    path_filter->blocked_schemes |= flag;
-  else
-    path_filter->allowed_schemes |= flag;
 }
 
 void URLBlacklist::Block(const std::string& filter) {
@@ -295,8 +236,62 @@ bool URLBlacklist::FilterToComponents(const std::string& filter,
   return true;
 }
 
+void URLBlacklist::AddFilter(const std::string& filter, bool block) {
+  std::string scheme;
+  std::string host;
+  uint16 port;
+  std::string path;
+  SchemeFlag flag;
+  bool match_subdomains = true;
+
+  if (!FilterToComponents(filter, &scheme, &host, &port, &path)) {
+    LOG(WARNING) << "Invalid filter, ignoring: " << filter;
+    return;
+  }
+
+  if (!SchemeToFlag(scheme, &flag)) {
+    LOG(WARNING) << "Unsupported scheme in filter, ignoring filter: " << filter;
+    return;
+  }
+
+  // Special syntax to disable subdomain matching.
+  if (!host.empty() && host[0] == '.') {
+    host.erase(0, 1);
+    match_subdomains = false;
+  }
+
+  // Try to find an existing PathFilter with the same path prefix, port and
+  // match_subdomains value.
+  PathFilterList* list;
+  HostFilterTable::iterator host_filter = host_filters_.find(host);
+  if (host_filter == host_filters_.end()) {
+    list = new PathFilterList;
+    host_filters_[host] = list;
+  } else {
+    list = host_filter->second;
+  }
+  PathFilterList::iterator it;
+  for (it = list->begin(); it != list->end(); ++it) {
+    if (it->port == port && it->match_subdomains == match_subdomains &&
+        it->path_prefix == path)
+      break;
+  }
+  PathFilter* path_filter;
+  if (it == list->end()) {
+    list->push_back(PathFilter(path, port, match_subdomains));
+    path_filter = &list->back();
+  } else {
+    path_filter = &(*it);
+  }
+
+  if (block)
+    path_filter->blocked_schemes |= flag;
+  else
+    path_filter->allowed_schemes |= flag;
+}
+
 URLBlacklistManager::URLBlacklistManager(PrefService* pref_service)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(ui_method_factory_(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(ui_weak_ptr_factory_(this)),
       pref_service_(pref_service),
       ALLOW_THIS_IN_INITIALIZER_LIST(io_weak_ptr_factory_(this)),
       blacklist_(new URLBlacklist) {
@@ -315,7 +310,7 @@ URLBlacklistManager::URLBlacklistManager(PrefService* pref_service)
 void URLBlacklistManager::ShutdownOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Cancel any pending updates, and stop listening for pref change updates.
-  ui_method_factory_.RevokeAll();
+  ui_weak_ptr_factory_.InvalidateWeakPtrs();
   pref_change_registrar_.RemoveAll();
 }
 
@@ -337,16 +332,14 @@ void URLBlacklistManager::Observe(int type,
 
 void URLBlacklistManager::ScheduleUpdate() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Cancel pending updates, if any.
-  ui_method_factory_.RevokeAll();
-  PostUpdateTask(
-      ui_method_factory_.NewRunnableMethod(&URLBlacklistManager::Update));
-}
-
-void URLBlacklistManager::PostUpdateTask(Task* task) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // This is overridden in tests to post the task without the delay.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE, task, kUpdateDelayMs);
+  // Cancel pending updates, if any. This can happen if two preferences that
+  // change the blacklist are updated in one message loop cycle. In those cases,
+  // only rebuild the blacklist after all the preference updates are processed.
+  ui_weak_ptr_factory_.InvalidateWeakPtrs();
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&URLBlacklistManager::Update,
+                 ui_weak_ptr_factory_.GetWeakPtr()));
 }
 
 void URLBlacklistManager::Update() {

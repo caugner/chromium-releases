@@ -7,6 +7,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -193,7 +194,7 @@ void PageActionImageView::UpdateVisibility(TabContents* contents,
 
   // Set the tooltip.
   tooltip_ = page_action_->GetTitle(current_tab_id_);
-  SetTooltipText(UTF8ToWide(tooltip_));
+  SetTooltipText(UTF8ToUTF16(tooltip_));
 
   // Set the image.
   // It can come from three places. In descending order of priority:

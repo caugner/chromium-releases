@@ -11,6 +11,7 @@
 #include "base/i18n/break_iterator.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/icu_string_conversions.h"
+#include "base/json/json_value_serializer.h"
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/common/json_value_serializer.h"
 #include "googleurl/src/url_util.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
@@ -686,7 +686,8 @@ SearchProvider::ScoredTerms SearchProvider::ScoreHistoryTerms(
     if (!prevent_inline_autocomplete && classifier && (i->term != input_text)) {
       AutocompleteMatch match;
       classifier->Classify(i->term, string16(), false, false, &match, NULL);
-      prevent_inline_autocomplete = match.transition == PageTransition::TYPED;
+      prevent_inline_autocomplete =
+          match.transition == content::PAGE_TRANSITION_TYPED;
     }
 
     int relevance = CalculateRelevanceForHistory(i->time, is_keyword,
@@ -887,8 +888,8 @@ void SearchProvider::AddMatchToMap(const string16& query_string,
       profile_, provider, query_string, accepted_suggestion, input_text));
 
   // Search results don't look like URLs.
-  match.transition =
-      is_keyword ? PageTransition::KEYWORD : PageTransition::GENERATED;
+  match.transition = is_keyword ?
+      content::PAGE_TRANSITION_KEYWORD : content::PAGE_TRANSITION_GENERATED;
 
   // Try to add |match| to |map|.  If a match for |query_string| is already in
   // |map|, replace it if |match| is more relevant.

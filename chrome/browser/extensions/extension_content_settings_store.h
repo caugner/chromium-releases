@@ -5,7 +5,6 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_EXTENSION_CONTENT_SETTINGS_STORE_H_
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_CONTENT_SETTINGS_STORE_H_
 
-#include <list>
 #include <map>
 #include <string>
 
@@ -14,14 +13,19 @@
 #include "base/threading/thread_checker.h"
 #include "base/time.h"
 #include "base/tuple.h"
-#include "chrome/browser/content_settings/content_settings_pattern.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/extensions/extension_prefs_scope.h"
 #include "chrome/common/content_settings.h"
+#include "chrome/common/content_settings_pattern.h"
 #include "googleurl/src/gurl.h"
 
 namespace base {
 class ListValue;
+}
+
+namespace content_settings {
+class OriginIdentifierValueMap;
+class RuleIterator;
 }
 
 // This class is the backend for extension-defined content settings. It is used
@@ -46,6 +50,11 @@ class ExtensionContentSettingsStore
 
   // //////////////////////////////////////////////////////////////////////////
 
+  content_settings::RuleIterator* GetRuleIterator(
+      ContentSettingsType type,
+      const content_settings::ResourceIdentifier& identifier,
+      bool incognito) const;
+
   // Sets the content |setting| for |pattern| of extension |ext_id|. The
   // |incognito| flag allow to set whether the provided setting is for
   // incognito mode only.
@@ -60,25 +69,9 @@ class ExtensionContentSettingsStore
       ContentSetting setting,
       ExtensionPrefsScope scope);
 
-  ContentSetting GetEffectiveContentSetting(
-      const GURL& embedded_url,
-      const GURL& top_level_url,
-      ContentSettingsType type,
-      const content_settings::ResourceIdentifier& identifier,
-      bool incognito) const;
-
   // Clears all contents settings set by the extension |ext_id|.
   void ClearContentSettingsForExtension(const std::string& ext_id,
                                         ExtensionPrefsScope scope);
-
-  // Returns a list of all content setting rules for the content type |type|
-  // and the resource identifier (if specified and the content type uses
-  // resource identifiers).
-  void GetContentSettingsForContentType(
-      ContentSettingsType type,
-      const content_settings::ResourceIdentifier& identifier,
-      bool incognito,
-      content_settings::ProviderInterface::Rules* rules) const;
 
   // Serializes all content settings set by the extension with ID |extension_id|
   // and returns them as a ListValue. The caller takes ownership of the returned
@@ -116,52 +109,26 @@ class ExtensionContentSettingsStore
   friend class base::RefCountedThreadSafe<ExtensionContentSettingsStore>;
 
   struct ExtensionEntry;
-  struct ContentSettingSpec {
-    ContentSettingSpec(const ContentSettingsPattern& primary_pattern,
-                       const ContentSettingsPattern& secondary_pattern,
-                       ContentSettingsType type,
-                       const content_settings::ResourceIdentifier& identifier,
-                       ContentSetting setting);
 
-    ContentSettingsPattern primary_pattern;
-    ContentSettingsPattern secondary_pattern;
-    ContentSettingsType content_type;
-    content_settings::ResourceIdentifier resource_identifier;
-    ContentSetting setting;
-  };
-
-  typedef std::map<std::string, ExtensionEntry*> ExtensionEntryMap;
-
-  typedef std::list<ContentSettingSpec> ContentSettingSpecList;
+  typedef std::multimap<base::Time, ExtensionEntry*> ExtensionEntryMap;
 
   virtual ~ExtensionContentSettingsStore();
 
-  ContentSetting GetContentSettingFromSpecList(
-      const GURL& embedded_url,
-      const GURL& top_level_url,
-      ContentSettingsType type,
-      const content_settings::ResourceIdentifier& identifier,
-      const ContentSettingSpecList& setting_spec_list) const;
-
-  ContentSettingSpecList* GetContentSettingSpecList(
+  content_settings::OriginIdentifierValueMap* GetValueMap(
       const std::string& ext_id,
       ExtensionPrefsScope scope);
 
-  const ContentSettingSpecList* GetContentSettingSpecList(
+  const content_settings::OriginIdentifierValueMap* GetValueMap(
       const std::string& ext_id,
       ExtensionPrefsScope scope) const;
-
-  // Adds all content setting rules for |type| and |identifier| found in
-  // |setting_spec_list| to |rules|.
-  static void AddRules(ContentSettingsType type,
-                       const content_settings::ResourceIdentifier& identifier,
-                       const ContentSettingSpecList* setting_spec_list,
-                       content_settings::ProviderInterface::Rules* rules);
 
   void NotifyOfContentSettingChanged(const std::string& extension_id,
                                      bool incognito);
 
   bool OnCorrectThread();
+
+  ExtensionEntryMap::iterator FindEntry(const std::string& ext_id);
+  ExtensionEntryMap::const_iterator FindEntry(const std::string& ext_id) const;
 
   ExtensionEntryMap entries_;
 

@@ -110,6 +110,27 @@ bool DeleteReparsePoint(HANDLE source) {
 }
 #endif
 
+#if defined(OS_POSIX)
+// Provide a simple way to change the permissions bits on |path| in tests.
+// ASSERT failures will return, but not stop the test.  Caller should wrap
+// calls to this function in ASSERT_NO_FATAL_FAILURE().
+void ChangePosixFilePermissions(const FilePath& path,
+                                mode_t mode_bits_to_set,
+                                mode_t mode_bits_to_clear) {
+  ASSERT_FALSE(mode_bits_to_set & mode_bits_to_clear)
+      << "Can't set and clear the same bits.";
+
+  struct stat stat_buf;
+  ASSERT_EQ(0, stat(path.value().c_str(), &stat_buf));
+
+  mode_t updated_mode_bits = stat_buf.st_mode;
+  updated_mode_bits |= mode_bits_to_set;
+  updated_mode_bits &= ~mode_bits_to_clear;
+
+  ASSERT_EQ(0, chmod(path.value().c_str(), updated_mode_bits));
+}
+#endif  // defined(OS_POSIX)
+
 const wchar_t bogus_content[] = L"I'm cannon fodder.";
 
 const file_util::FileEnumerator::FileType FILES_AND_DIRECTORIES =
@@ -223,7 +244,7 @@ TEST_F(FileUtilTest, AppendToPath) {
     EXPECT_EQ(value.result, result);
   }
 
-#ifdef NDEBUG
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
   file_util::AppendToPath(NULL, L"path");  // asserts in debug mode
 #endif
 }
@@ -1812,5 +1833,375 @@ TEST_F(FileUtilTest, IsDirectoryEmpty) {
 
   EXPECT_FALSE(file_util::IsDirectoryEmpty(empty_dir));
 }
+
+#if defined(OS_POSIX)
+
+// Testing VerifyPathControlledByAdmin() is hard, because there is no
+// way a test can make a file owned by root, or change file paths
+// at the root of the file system.  VerifyPathControlledByAdmin()
+// is implemented as a call to VerifyPathControlledByUser, which gives
+// us the ability to test with paths under the test's temp directory,
+// using a user id we control.
+// Pull tests of VerifyPathControlledByUserTest() into a separate test class
+// with a common SetUp() method.
+class VerifyPathControlledByUserTest : public FileUtilTest {
+ protected:
+  virtual void SetUp() {
+    FileUtilTest::SetUp();
+
+    // Create a basic structure used by each test.
+    // base_dir_
+    //  |-> sub_dir_
+    //       |-> text_file_
+
+    base_dir_ = temp_dir_.path().AppendASCII("base_dir");
+    ASSERT_TRUE(file_util::CreateDirectory(base_dir_));
+
+    sub_dir_ = base_dir_.AppendASCII("sub_dir");
+    ASSERT_TRUE(file_util::CreateDirectory(sub_dir_));
+
+    text_file_ = sub_dir_.AppendASCII("file.txt");
+    CreateTextFile(text_file_, L"This text file has some text in it.");
+
+    // Get the user and group files are created with from |base_dir_|.
+    struct stat stat_buf;
+    ASSERT_EQ(0, stat(base_dir_.value().c_str(), &stat_buf));
+    uid_ = stat_buf.st_uid;
+    ok_gids_.insert(stat_buf.st_gid);
+    bad_gids_.insert(stat_buf.st_gid + 1);
+
+    ASSERT_EQ(uid_, getuid());  // This process should be the owner.
+
+    // To ensure that umask settings do not cause the initial state
+    // of permissions to be different from what we expect, explicitly
+    // set permissions on the directories we create.
+    // Make all files and directories non-world-writable.
+    mode_t enabled_permissions =
+        S_IRWXU | // User can read, write, traverse
+        S_IRWXG;  // Group can read, write, traverse
+    mode_t disabled_permissions =
+        S_IRWXO;  // Other users can't read, write, traverse.
+
+    ASSERT_NO_FATAL_FAILURE(
+        ChangePosixFilePermissions(
+            base_dir_, enabled_permissions, disabled_permissions));
+    ASSERT_NO_FATAL_FAILURE(
+        ChangePosixFilePermissions(
+            sub_dir_, enabled_permissions, disabled_permissions));
+  }
+
+  FilePath base_dir_;
+  FilePath sub_dir_;
+  FilePath text_file_;
+  uid_t uid_;
+
+  std::set<gid_t> ok_gids_;
+  std::set<gid_t> bad_gids_;
+};
+
+TEST_F(VerifyPathControlledByUserTest, BadPaths) {
+  // File does not exist.
+  FilePath does_not_exist = base_dir_.AppendASCII("does")
+                                     .AppendASCII("not")
+                                     .AppendASCII("exist");
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, does_not_exist, uid_, ok_gids_));
+
+  // |base| not a subpath of |path|.
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, base_dir_, uid_, ok_gids_));
+
+  // An empty base path will fail to be a prefix for any path.
+  FilePath empty;
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          empty, base_dir_, uid_, ok_gids_));
+
+  // Finding that a bad call fails proves nothing unless a good call succeeds.
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+}
+
+TEST_F(VerifyPathControlledByUserTest, Symlinks) {
+  // Symlinks in the path should cause failure.
+
+  // Symlink to the file at the end of the path.
+  FilePath file_link =  base_dir_.AppendASCII("file_link");
+  ASSERT_TRUE(file_util::CreateSymbolicLink(text_file_, file_link))
+      << "Failed to create symlink.";
+
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, file_link, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          file_link, file_link, uid_, ok_gids_));
+
+  // Symlink from one directory to another within the path.
+  FilePath link_to_sub_dir =  base_dir_.AppendASCII("link_to_sub_dir");
+  ASSERT_TRUE(file_util::CreateSymbolicLink(sub_dir_, link_to_sub_dir))
+    << "Failed to create symlink.";
+
+  FilePath file_path_with_link = link_to_sub_dir.AppendASCII("file.txt");
+  ASSERT_TRUE(file_util::PathExists(file_path_with_link));
+
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, file_path_with_link, uid_, ok_gids_));
+
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          link_to_sub_dir, file_path_with_link, uid_, ok_gids_));
+
+  // Symlinks in parents of base path are allowed.
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          file_path_with_link, file_path_with_link, uid_, ok_gids_));
+}
+
+TEST_F(VerifyPathControlledByUserTest, OwnershipChecks) {
+  // Get a uid that is not the uid of files we create.
+  uid_t bad_uid = uid_ + 1;
+
+  // Make all files and directories non-world-writable.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(base_dir_, 0u, S_IWOTH));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(sub_dir_, 0u, S_IWOTH));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(text_file_, 0u, S_IWOTH));
+
+  // We control these paths.
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  // Another user does not control these paths.
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, bad_uid, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, bad_uid, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, bad_uid, ok_gids_));
+
+  // Another group does not control the paths.
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, bad_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, bad_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, bad_gids_));
+}
+
+TEST_F(VerifyPathControlledByUserTest, GroupWriteTest) {
+  // Make all files and directories writable only by their owner.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(base_dir_, 0u, S_IWOTH|S_IWGRP));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(sub_dir_, 0u, S_IWOTH|S_IWGRP));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(text_file_, 0u, S_IWOTH|S_IWGRP));
+
+  // Any group is okay because the path is not group-writable.
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, bad_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, bad_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, bad_gids_));
+
+  // No group is okay, because we don't check the group
+  // if no group can write.
+  std::set<gid_t> no_gids;  // Empty set of gids.
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, no_gids));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, no_gids));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, no_gids));
+
+
+  // Make all files and directories writable by their group.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(base_dir_, S_IWGRP, 0u));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(sub_dir_, S_IWGRP, 0u));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(text_file_, S_IWGRP, 0u));
+
+  // Now |ok_gids_| works, but |bad_gids_| fails.
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, bad_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, bad_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, bad_gids_));
+
+  // Because any group in the group set is allowed,
+  // the union of good and bad gids passes.
+
+  std::set<gid_t> multiple_gids;
+  std::set_union(
+      ok_gids_.begin(), ok_gids_.end(),
+      bad_gids_.begin(), bad_gids_.end(),
+      std::inserter(multiple_gids, multiple_gids.begin()));
+
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, multiple_gids));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, multiple_gids));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, multiple_gids));
+
+}
+
+TEST_F(VerifyPathControlledByUserTest, WriteBitChecks) {
+  // Make all files and directories non-world-writable.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(base_dir_, 0u, S_IWOTH));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(sub_dir_, 0u, S_IWOTH));
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(text_file_, 0u, S_IWOTH));
+
+  // Initialy, we control all parts of the path.
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+   // Make base_dir_ world-writable.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(base_dir_, S_IWOTH, 0u));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  // Make sub_dir_ world writable.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(sub_dir_, S_IWOTH, 0u));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  // Make text_file_ world writable.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(text_file_, S_IWOTH, 0u));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  // Make sub_dir_ non-world writable.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(sub_dir_, 0u, S_IWOTH));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  // Make base_dir_ non-world-writable.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(base_dir_, 0u, S_IWOTH));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_FALSE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+
+  // Back to the initial state: Nothing is writable, so every path
+  // should pass.
+  ASSERT_NO_FATAL_FAILURE(
+      ChangePosixFilePermissions(text_file_, 0u, S_IWOTH));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, sub_dir_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          base_dir_, text_file_, uid_, ok_gids_));
+  EXPECT_TRUE(
+      file_util::VerifyPathControlledByUser(
+          sub_dir_, text_file_, uid_, ok_gids_));
+}
+
+#endif  // defined(OS_POSIX)
 
 }  // namespace

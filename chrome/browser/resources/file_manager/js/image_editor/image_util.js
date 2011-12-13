@@ -152,6 +152,13 @@ Rect.prototype.inside = function(x, y) {
          this.top <= y && y < this.top + this.height;
 };
 
+Rect.prototype.intersects = function(rect) {
+  return (this.left + this.width) > rect.left &&
+         (rect.left + rect.width) > this.left &&
+         (this.top + this.height) > rect.top &&
+         (rect.top + rect.height) > this.top;
+};
+
 /**
  * Clamp the rectangle to the bounds by moving it.
  * Decrease the size only if necessary.
@@ -182,6 +189,10 @@ Rect.prototype.clamp = function(bounds) {
   return rect;
 };
 
+Rect.prototype.toString = function() {
+  return '(' + this.left + ',' + this.top + '):' +
+         '(' + (this.left + this.width) + ',' + (this.top + this.height) + ')';
+};
 /*
  * Useful shortcuts for drawing (static functions).
  */
@@ -252,4 +263,131 @@ Circle.prototype.inside = function(x, y) {
   x -= this.x;
   y -= this.y;
   return x * x + y * y <= this.squaredR;
+};
+
+/**
+ * Copy an image applying scaling and rotation.
+ *
+ * @param {HTMLCanvasElement} dst destination
+ * @param {HTMLCanvasElement|HTMLImageElement} src source
+ * @param {number} scaleX
+ * @param {number} scaleY
+ * @param {number} angle (in radians)
+ */
+ImageUtil.drawImageTransformed = function(dst, src, scaleX, scaleY, angle) {
+  var context = dst.getContext('2d');
+  context.save();
+  context.translate(context.canvas.width / 2, context.canvas.height / 2);
+  context.rotate(angle);
+  context.scale(scaleX, scaleY);
+  context.drawImage(src, -src.width / 2, -src.height / 2);
+  context.restore();
+};
+
+
+ImageUtil.deepCopy = function(obj) {
+  if (obj == null || typeof obj != 'object')
+    return obj;  // Copy built-in types as is.
+
+  var res;
+  if (obj.constructor.name == 'Array') {
+    // obj.constructor == Array would give a false negative if obj came
+    // from a different context.
+    res = [];
+    for (var i = 0; i != obj.length; i++) {
+      res[i] = ImageUtil.deepCopy(obj[i]);
+    }
+  } else {
+    res = {};
+    for (var p in obj) {
+      res[p] = ImageUtil.deepCopy(obj[p]);
+    }
+  }
+  return res;
+};
+
+ImageUtil.setAttribute = function(element, attribute, on) {
+  if (on)
+    element.setAttribute(attribute, attribute);
+  else
+    element.removeAttribute(attribute);
+};
+
+/**
+ * Load image into a canvas taking the transform into account.
+ *
+ * The source image is copied to the canvas stripe-by-stripe to avoid
+ * freezing up the UI.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {string|HTMLImageElement|HTMLCanvasElement} source
+ * @param {{scaleX: number, scaleY: number, rotate90: number}} transform
+ * @param {number} delay
+ * @param {function} callback
+ * @return {function()} Function to call to cancel the load.
+ */
+ImageUtil.loadImageAsync = function(
+    canvas, source, transform, delay, callback) {
+  var image;
+  var timeout = setTimeout(resolveURL, delay);
+
+  function resolveURL() {
+    timeout = null;
+    if (typeof source == 'string') {
+      image = new Image();
+      image.onload = function(e) { image = null; loadImage(e.target); };
+      image.src = source;
+    } else {
+      loadImage(source);
+    }
+  }
+
+  function loadImage(image) {
+    transform = transform || { scaleX: 1, scaleY: 1, rotate90: 0};
+
+    if (transform.rotate90 & 1) {  // Rotated +/-90deg, swap the dimensions.
+      canvas.width = image.height;
+      canvas.height = image.width;
+    } else  {
+      canvas.width = image.width;
+      canvas.height = image.height;
+    }
+
+    ImageUtil.trace.resetTimer('load-draw');
+
+    var context = canvas.getContext('2d');
+    context.save();
+    context.translate(context.canvas.width / 2, context.canvas.height / 2);
+    context.rotate(transform.rotate90 * Math.PI/2);
+    context.scale(transform.scaleX, transform.scaleY);
+
+    var stripCount = Math.ceil (image.width * image.height / ( 1 << 20));
+    var to = 0;
+    var step = Math.max(16, Math.ceil(image.height / stripCount)) & 0xFFFFF0;
+
+    function copyStrip() {
+      var from = to;
+      to = Math.min (from + step, image.height);
+
+      context.drawImage(image,
+          0, from, image.width, to - from,
+          - image.width/2, from - image.height/2, image.width, to - from);
+
+      if (to == image.height) {
+        context.restore();
+        timeout = null;
+        ImageUtil.trace.reportTimer('load-draw');
+        callback();
+      } else {
+        timeout = setTimeout(copyStrip, 0);
+      }
+    }
+
+    copyStrip();
+  }
+
+  return function () {
+    if (image) image.onload = function(){};
+    if (timeout) clearTimeout(timeout);
+  };
 };

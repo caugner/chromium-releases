@@ -4,9 +4,10 @@
 
 #include "chrome/browser/content_settings/content_settings_extension_provider.h"
 
+#include "base/scoped_ptr.h"
+#include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/extensions/extension_content_settings_store.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/content_settings_pattern.h"
 
 namespace content_settings {
 
@@ -21,47 +22,13 @@ ExtensionProvider::ExtensionProvider(
 ExtensionProvider::~ExtensionProvider() {
 }
 
-ContentSetting ExtensionProvider::GetContentSetting(
-    const GURL& primary_url,
-    const GURL& secondary_url,
-    ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier) const {
-  // TODO(markusheintz): Instead of getting the effective setting every time
-  // effective patterns could be cached in here.
-  DCHECK(extensions_settings_);
-  return extensions_settings_->GetEffectiveContentSetting(
-      primary_url,
-      secondary_url,
-      content_type,
-      resource_identifier,
-      incognito_);
-}
-
-Value* ExtensionProvider::GetContentSettingValue(
-    const GURL& primary_url,
-    const GURL& secondary_url,
-    ContentSettingsType content_type,
-    const ResourceIdentifier& resource_identifier) const {
-  // TODO(markusheintz): Change the ExtensionSettingsStore to use the
-  // OriginIdentifierValueMap to allow arbitray |Value|s to be stored instead of
-  // |ContentSetting|s.
-  ContentSetting setting = GetContentSetting(
-      primary_url,
-      secondary_url,
-      content_type,
-      resource_identifier);
-  if (setting == CONTENT_SETTING_DEFAULT)
-    return NULL;
-  return Value::CreateIntegerValue(setting);
-}
-
-
-void ExtensionProvider::GetAllContentSettingsRules(
+RuleIterator* ExtensionProvider::GetRuleIterator(
     ContentSettingsType content_type,
     const ResourceIdentifier& resource_identifier,
-    Rules* content_setting_rules) const {
-  return extensions_settings_->GetContentSettingsForContentType(
-      content_type, resource_identifier, incognito_, content_setting_rules);
+    bool incognito) const {
+  return extensions_settings_->GetRuleIterator(content_type,
+                                               resource_identifier,
+                                               incognito);
 }
 
 void ExtensionProvider::ShutdownOnUIThread() {

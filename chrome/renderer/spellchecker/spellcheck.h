@@ -15,7 +15,7 @@
 #include "base/string16.h"
 #include "base/time.h"
 #include "chrome/renderer/spellchecker/spellcheck_worditerator.h"
-#include "content/renderer/render_process_observer.h"
+#include "content/public/renderer/render_process_observer.h"
 #include "ipc/ipc_platform_file.h"
 #include "unicode/uscript.h"
 
@@ -27,7 +27,7 @@ class MemoryMappedFile;
 
 // TODO(morrita): Needs reorg with SpellCheckProvider.
 // See http://crbug.com/73699.
-class SpellCheck : public RenderProcessObserver {
+class SpellCheck : public content::RenderProcessObserver {
  public:
   SpellCheck();
   virtual ~SpellCheck();
@@ -121,6 +121,14 @@ class SpellCheck : public RenderProcessObserver {
   // Represents character attributes used for filtering out characters which
   // are not supported by this SpellCheck object.
   SpellcheckCharAttribute character_attributes_;
+
+  // Represents word iterators used in this spellchecker. The |text_iterator_|
+  // splits text provided by WebKit into words, contractions, or concatenated
+  // words. The |contraction_iterator_| splits a concatenated word extracted by
+  // |text_iterator_| into word components so we can treat a concatenated word
+  // consisting only of correct words as a correct word.
+  SpellcheckWordIterator text_iterator_;
+  SpellcheckWordIterator contraction_iterator_;
 
   // Remember state for auto spell correct.
   bool auto_spell_correct_turned_on_;

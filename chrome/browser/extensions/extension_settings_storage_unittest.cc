@@ -4,288 +4,306 @@
 
 #include "chrome/browser/extensions/extension_settings_storage_unittest.h"
 
-#include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/file_util.h"
-#include "base/memory/scoped_ptr.h"
-#include "base/message_loop.h"
 #include "base/values.h"
-#include "chrome/browser/extensions/extension_settings.h"
-#include "content/browser/browser_thread.h"
-
-// Define macro to get the __LINE__ expansion.
-#define NEW_CALLBACK(expected) \
-    (new AssertEqualsCallback((expected), __LINE__))
 
 namespace {
 
-// Callback from storage methods which performs the test assertions.
-class AssertEqualsCallback : public ExtensionSettingsStorage::Callback {
- public:
-  AssertEqualsCallback(DictionaryValue* expected, int line)
-      : expected_(expected), line_(line), called_(false) {
-  }
+// Gets the pretty-printed JSON for a value.
+std::string GetJSON(const Value& value) {
+  std::string json;
+  base::JSONWriter::Write(&value, true, &json);
+  return json;
+}
 
-  ~AssertEqualsCallback() {
-    // Need to DCHECK since ASSERT_* can't be used from destructors.
-    DCHECK(called_);
-  }
-
-  virtual void OnSuccess(DictionaryValue* actual) OVERRIDE {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    ASSERT_FALSE(called_) << "Callback has already been called";
-    called_ = true;
-    if (expected_ == NULL) {
-      ASSERT_TRUE(actual == NULL) << "Values are different:\n" <<
-        "Line:     " << line_ << "\n" <<
-        "Expected: NULL\n" <<
-        "Got:      " << GetJson(actual);
-    } else {
-      ASSERT_TRUE(expected_->Equals(actual)) << "Values are different:\n" <<
-          "Line:     " << line_ << "\n" <<
-          "Expected: " << GetJson(expected_) <<
-          "Got:      " << GetJson(actual);
-      delete actual;
+// Pretty-prints a set of strings.
+std::string ToString(const std::set<std::string>& strings) {
+  std::string string("{");
+  for (std::set<std::string>::const_iterator it = strings.begin();
+      it != strings.end(); ++it) {
+    if (it != strings.begin()) {
+      string.append(", ");
     }
+    string.append(*it);
   }
-
-  virtual void OnFailure(const std::string& message) OVERRIDE {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    ASSERT_FALSE(called_) << "Callback has already been called";
-    called_ = true;
-    // No tests allow failure (yet).
-    ASSERT_TRUE(false) << "Callback failed on line " << line_;
-  }
-
- private:
-  std::string GetJson(Value* value) {
-    std::string json;
-    base::JSONWriter::Write(value, true, &json);
-    return json;
-  }
-
-  DictionaryValue* expected_;
-  int line_;
-  bool called_;
-};
+  string.append("}");
+  return string;
+}
 
 }  // namespace
 
+// Returns whether the result of a storage operation has the expected settings
+// and changed keys.
+testing::AssertionResult SettingsEq(
+    const char* _1, const char* _2, const char* _3,
+    DictionaryValue* expected_settings,
+    std::set<std::string>* expected_changed_keys,
+    ExtensionSettingsStorage::Result actual) {
+  if (actual.HasError()) {
+    return testing::AssertionFailure() <<
+        "Expected: " << GetJSON(*expected_settings) <<
+        ", " << ToString(*expected_changed_keys) << "\n" <<
+        ", actual has error: " << actual.GetError();
+  }
+  if (expected_settings == NULL && actual.GetSettings() != NULL) {
+    return testing::AssertionFailure() <<
+        "Expected NULL settings, actual: " << GetJSON(*actual.GetSettings());
+  }
+  if (expected_changed_keys == NULL && actual.GetChangedKeys() != NULL) {
+    return testing::AssertionFailure() <<
+        "Expected NULL changed keys, actual: " <<
+        ToString(*actual.GetChangedKeys());
+  }
+  if (expected_settings != NULL && actual.GetSettings() == NULL) {
+    return testing::AssertionFailure() <<
+        "Expected: " << GetJSON(*expected_settings) << ", actual NULL";
+  }
+  if (expected_changed_keys != NULL && actual.GetChangedKeys() == NULL) {
+    return testing::AssertionFailure() <<
+        "Expected: " << ToString(*expected_changed_keys) << ", actual NULL";
+  }
+  if (expected_settings != actual.GetSettings() &&
+      !expected_settings->Equals(actual.GetSettings())) {
+    return testing::AssertionFailure() <<
+        "Expected: " << GetJSON(*expected_settings) <<
+        ", actual: " << GetJSON(*actual.GetSettings());
+  }
+  if (expected_changed_keys != actual.GetChangedKeys() &&
+        *expected_changed_keys != *actual.GetChangedKeys()) {
+    return testing::AssertionFailure() <<
+        "Expected: " << ToString(*expected_changed_keys) <<
+        ", actual: " << ToString(*actual.GetChangedKeys());
+  }
+  return testing::AssertionSuccess();
+}
+
 ExtensionSettingsStorageTest::ExtensionSettingsStorageTest()
-    : key1_("foo"), key2_("bar"), key3_("baz") {
+    : key1_("foo"),
+      key2_("bar"),
+      key3_("baz"),
+      empty_dict_(new DictionaryValue),
+      dict1_(new DictionaryValue),
+      dict12_(new DictionaryValue),
+      dict123_(new DictionaryValue),
+      ui_thread_(BrowserThread::UI, MessageLoop::current()),
+      file_thread_(BrowserThread::FILE, MessageLoop::current()) {
   val1_.reset(Value::CreateStringValue(key1_ + "Value"));
   val2_.reset(Value::CreateStringValue(key2_ + "Value"));
   val3_.reset(Value::CreateStringValue(key3_ + "Value"));
 
-  emptyList_.reset(new ListValue());
+  list1_.push_back(key1_);
+  list2_.push_back(key2_);
+  list3_.push_back(key3_);
+  list12_.push_back(key1_);
+  list12_.push_back(key2_);
+  list13_.push_back(key1_);
+  list13_.push_back(key3_);
+  list123_.push_back(key1_);
+  list123_.push_back(key2_);
+  list123_.push_back(key3_);
 
-  list1_.reset(new ListValue());
-  list1_->Append(Value::CreateStringValue(key1_));
+  set1_.insert(list1_.begin(), list1_.end());
+  set2_.insert(list2_.begin(), list2_.end());
+  set3_.insert(list3_.begin(), list3_.end());
+  set12_.insert(list12_.begin(), list12_.end());
+  set13_.insert(list13_.begin(), list13_.end());
+  set123_.insert(list123_.begin(), list123_.end());
 
-  list2_.reset(new ListValue());
-  list2_->Append(Value::CreateStringValue(key2_));
-
-  list12_.reset(new ListValue());
-  list12_->Append(Value::CreateStringValue(key1_));
-  list12_->Append(Value::CreateStringValue(key2_));
-
-  list13_.reset(new ListValue());
-  list13_->Append(Value::CreateStringValue(key1_));
-  list13_->Append(Value::CreateStringValue(key3_));
-
-  list123_.reset(new ListValue());
-  list123_->Append(Value::CreateStringValue(key1_));
-  list123_->Append(Value::CreateStringValue(key2_));
-  list123_->Append(Value::CreateStringValue(key3_));
-
-  emptyDict_.reset(new DictionaryValue());
-
-  dict1_.reset(new DictionaryValue());
   dict1_->Set(key1_, val1_->DeepCopy());
-
-  dict12_.reset(new DictionaryValue());
   dict12_->Set(key1_, val1_->DeepCopy());
   dict12_->Set(key2_, val2_->DeepCopy());
-
-  dict123_.reset(new DictionaryValue());
   dict123_->Set(key1_, val1_->DeepCopy());
   dict123_->Set(key2_, val2_->DeepCopy());
   dict123_->Set(key3_, val3_->DeepCopy());
 }
 
-ExtensionSettingsStorageTest::~ExtensionSettingsStorageTest() {
-}
+ExtensionSettingsStorageTest::~ExtensionSettingsStorageTest() {}
 
 void ExtensionSettingsStorageTest::SetUp() {
-  ui_message_loop_ = new MessageLoopForUI();
-  // Use the same message loop for the UI and FILE threads, giving a test
-  // pattern where storage API calls get posted to the same message loop (the
-  // current one), then all run with MessageLoop::current()->RunAllPending().
-  ui_thread_ = new BrowserThread(BrowserThread::UI, MessageLoop::current());
-  file_thread_ = new BrowserThread(BrowserThread::FILE, MessageLoop::current());
-
-  FilePath temp_dir;
-  file_util::CreateNewTempDirectory(FilePath::StringType(), &temp_dir);
-  settings_ = new ExtensionSettings(temp_dir);
-
-  storage_ = NULL;
-  (GetParam())(
-      settings_,
-      "fakeExtension",
-      base::Bind(
-          &ExtensionSettingsStorageTest::SetStorage,
-          base::Unretained(this)));
-  MessageLoop::current()->RunAllPending();
-  DCHECK(storage_ != NULL);
+  ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
+  storage_.reset((GetParam())(temp_dir_.path(), "fakeExtension"));
+  ASSERT_TRUE(storage_.get());
 }
 
 void ExtensionSettingsStorageTest::TearDown() {
-  settings_ = NULL;
-  delete file_thread_;
-  delete ui_thread_;
-  delete ui_message_loop_;
-}
-
-void ExtensionSettingsStorageTest::SetStorage(
-    ExtensionSettingsStorage* storage) {
-  storage_ = storage;
+  storage_.reset();
 }
 
 TEST_P(ExtensionSettingsStorageTest, GetWhenEmpty) {
-  storage_->Get(key1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(key2_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(key3_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*emptyList_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list123_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(NEW_CALLBACK(emptyDict_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, GetWithSingleValue) {
-  storage_->Set(key1_, *val1_, NEW_CALLBACK(dict1_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), &set1_, storage_->Set(key1_, *val1_));
 
-  storage_->Get(key1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(key2_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(key3_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*emptyList_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list2_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list123_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(NEW_CALLBACK(dict1_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key2_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key3_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, GetWithMultipleValues) {
-  storage_->Set(*dict12_, NEW_CALLBACK(dict12_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), &set12_, storage_->Set(*dict12_));
 
-  storage_->Get(key1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(key3_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*emptyList_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list13_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list12_, NEW_CALLBACK(dict12_.get()));
-  storage_->Get(*list123_, NEW_CALLBACK(dict12_.get()));
-  storage_->Get(NEW_CALLBACK(dict12_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key3_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, RemoveWhenEmpty) {
-  storage_->Remove(key1_, NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &empty_set_, storage_->Remove(key1_));
 
-  storage_->Get(key1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(NEW_CALLBACK(emptyDict_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, RemoveWithSingleValue) {
-  storage_->Set(key1_, *val1_, NEW_CALLBACK(dict1_.get()));
-  MessageLoop::current()->RunAllPending();
-  storage_->Remove(key1_, NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), &set1_, storage_->Set(*dict1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &set1_, storage_->Remove(key1_));
 
-  storage_->Get(key1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(key2_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list12_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(NEW_CALLBACK(emptyDict_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key2_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, RemoveWithMultipleValues) {
-  storage_->Set(*dict123_, NEW_CALLBACK(dict123_.get()));
-  MessageLoop::current()->RunAllPending();
-  storage_->Remove(key3_, NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict123_.get(), &set123_, storage_->Set(*dict123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &set3_, storage_->Remove(key3_));
 
-  storage_->Get(key1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(key3_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*emptyList_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list13_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list12_, NEW_CALLBACK(dict12_.get()));
-  storage_->Get(*list123_, NEW_CALLBACK(dict12_.get()));
-  storage_->Get(NEW_CALLBACK(dict12_.get()));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key3_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(list1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get(list12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(list13_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get());
 
-  storage_->Remove(*list2_, NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &set12_, storage_->Remove(list12_));
 
-  storage_->Get(key1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(key2_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(key3_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*emptyList_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list2_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list123_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(NEW_CALLBACK(dict1_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key3_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list13_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, SetWhenOverwriting) {
-  DictionaryValue key1Val2;
-  key1Val2.Set(key1_, val2_->DeepCopy());
-  storage_->Set(key1_, *val2_, NEW_CALLBACK(&key1Val2));
-  MessageLoop::current()->RunAllPending();
+  DictionaryValue key1_val2;
+  key1_val2.Set(key1_, val2_->DeepCopy());
 
-  storage_->Set(*dict12_, NEW_CALLBACK(dict12_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &key1_val2, &set1_, storage_->Set(key1_, *val2_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), &set12_, storage_->Set(*dict12_));
 
-  storage_->Get(key1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(key3_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*emptyList_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list13_, NEW_CALLBACK(dict1_.get()));
-  storage_->Get(*list12_, NEW_CALLBACK(dict12_.get()));
-  storage_->Get(*list123_, NEW_CALLBACK(dict12_.get()));
-  storage_->Get(NEW_CALLBACK(dict12_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key3_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(list1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get(list12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), NULL, storage_->Get(list13_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, ClearWhenEmpty) {
-  storage_->Clear(NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &empty_set_, storage_->Clear());
 
-  storage_->Get(key1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(NEW_CALLBACK(emptyDict_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, ClearWhenNotEmpty) {
-  storage_->Set(*dict12_, NEW_CALLBACK(dict12_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), &set12_, storage_->Set(*dict12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &set12_, storage_->Clear());
 
-  storage_->Clear(NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
-
-  storage_->Get(key1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(*list1_, NEW_CALLBACK(emptyDict_.get()));
-  storage_->Get(NEW_CALLBACK(emptyDict_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(empty_list_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(list123_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get());
 }
 
 // Dots should be allowed in key names; they shouldn't be interpreted as
@@ -293,31 +311,40 @@ TEST_P(ExtensionSettingsStorageTest, ClearWhenNotEmpty) {
 TEST_P(ExtensionSettingsStorageTest, DotsInKeyNames) {
   std::string dot_key("foo.bar");
   StringValue dot_value("baz.qux");
-  ListValue dot_list;
-  dot_list.Append(Value::CreateStringValue(dot_key));
+  std::vector<std::string> dot_list;
+  dot_list.push_back(dot_key);
+  std::set<std::string> dot_set;
+  dot_set.insert(dot_key);
   DictionaryValue dot_dict;
   dot_dict.SetWithoutPathExpansion(dot_key, dot_value.DeepCopy());
 
-  storage_->Set(dot_key, dot_value, NEW_CALLBACK(&dot_dict));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(dot_key));
 
-  storage_->Get(dot_key, NEW_CALLBACK(&dot_dict));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &dot_dict, &dot_set, storage_->Set(dot_key, dot_value));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &dot_dict, &empty_set_, storage_->Set(dot_key, dot_value));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &dot_dict, NULL, storage_->Get(dot_key));
 
-  storage_->Remove(dot_key, NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &dot_set, storage_->Remove(dot_key));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &empty_set_, storage_->Remove(dot_key));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &dot_dict, &dot_set, storage_->Set(dot_dict));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &dot_dict, NULL, storage_->Get(dot_list));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &dot_dict, NULL, storage_->Get());
 
-  storage_->Set(dot_dict, NEW_CALLBACK(&dot_dict));
-  MessageLoop::current()->RunAllPending();
-
-  storage_->Get(dot_list, NEW_CALLBACK(&dot_dict));
-  MessageLoop::current()->RunAllPending();
-
-  storage_->Remove(dot_list, NEW_CALLBACK(NULL));
-  MessageLoop::current()->RunAllPending();
-
-  storage_->Get(NEW_CALLBACK(emptyDict_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &dot_set, storage_->Remove(dot_list));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get(dot_key));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get());
 }
 
 TEST_P(ExtensionSettingsStorageTest, DotsInKeyNamesWithDicts) {
@@ -325,13 +352,85 @@ TEST_P(ExtensionSettingsStorageTest, DotsInKeyNamesWithDicts) {
   DictionaryValue* inner_dict = new DictionaryValue();
   outer_dict.Set("foo", inner_dict);
   inner_dict->Set("bar", Value::CreateStringValue("baz"));
+  std::set<std::string> changed_keys;
+  changed_keys.insert("foo");
 
-  storage_->Set(outer_dict, NEW_CALLBACK(&outer_dict));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &outer_dict, &changed_keys, storage_->Set(outer_dict));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &outer_dict, NULL, storage_->Get("foo"));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      empty_dict_.get(), NULL, storage_->Get("foo.bar"));
+}
 
-  storage_->Get("foo", NEW_CALLBACK(&outer_dict));
-  MessageLoop::current()->RunAllPending();
+TEST_P(ExtensionSettingsStorageTest, ComplexChangedKeysScenarios) {
+  // Test:
+  //   - Setting over missing/changed/same keys, combinations.
+  //   - Removing over missing and present keys, combinations.
+  //   - Clearing.
+  std::vector<std::string> complex_list;
+  std::set<std::string> complex_set;
+  DictionaryValue complex_dict;
 
-  storage_->Get("foo.bar", NEW_CALLBACK(emptyDict_.get()));
-  MessageLoop::current()->RunAllPending();
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), &set1_, storage_->Set(key1_, *val1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), &empty_set_, storage_->Set(key1_, *val1_));
+
+  complex_dict.Clear();
+  complex_dict.Set(key1_, val2_->DeepCopy());
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &complex_dict, &set1_, storage_->Set(key1_, *val2_));
+
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &set1_, storage_->Remove(key1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &empty_set_, storage_->Remove(key1_));
+
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict1_.get(), &set1_, storage_->Set(key1_, *val1_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &set1_, storage_->Clear());
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &empty_set_, storage_->Clear());
+
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), &set12_, storage_->Set(*dict12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict12_.get(), &empty_set_, storage_->Set(*dict12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      dict123_.get(), &set3_, storage_->Set(*dict123_));
+
+  complex_dict.Clear();
+  complex_dict.Set(key1_, val2_->DeepCopy());
+  complex_dict.Set(key2_, val2_->DeepCopy());
+  complex_dict.Set("asdf", val1_->DeepCopy());
+  complex_dict.Set("qwerty", val3_->DeepCopy());
+  complex_set.clear();
+  complex_set.insert(key1_);
+  complex_set.insert("asdf");
+  complex_set.insert("qwerty");
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      &complex_dict, &complex_set, storage_->Set(complex_dict));
+
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &set12_, storage_->Remove(list12_));
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &empty_set_, storage_->Remove(list12_));
+
+  complex_list.clear();
+  complex_list.push_back(key1_);
+  complex_list.push_back("asdf");
+  complex_set.clear();
+  complex_set.insert("asdf");
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &complex_set, storage_->Remove(complex_list));
+
+  complex_set.clear();
+  complex_set.insert(key3_);
+  complex_set.insert("qwerty");
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &complex_set, storage_->Clear());
+  EXPECT_PRED_FORMAT3(SettingsEq,
+      NULL, &empty_set_, storage_->Clear());
 }

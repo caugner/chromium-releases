@@ -6,6 +6,9 @@
 
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback_old.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -77,11 +80,6 @@ class TracingMessageHandler
   // Callbacks.
   void LoadTraceFileComplete(std::string* file_contents);
   void SaveTraceFileComplete();
-
-  // Executes the javascript function |function_name| in the renderer, passing
-  // it the argument |value|.
-  void CallJavascriptFunction(const std::wstring& function_name,
-                              const Value* value);
 
  private:
   // The file dialog to select a file for loading or saving traces.
@@ -168,26 +166,24 @@ WebUIMessageHandler* TracingMessageHandler::Attach(WebUI* web_ui) {
 void TracingMessageHandler::RegisterMessages() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  web_ui_->RegisterMessageCallback(
-      "tracingControllerInitialized",
-      NewCallback(this,
-                  &TracingMessageHandler::OnTracingControllerInitialized));
-  web_ui_->RegisterMessageCallback(
-      "beginTracing",
-      NewCallback(this, &TracingMessageHandler::OnBeginTracing));
-  web_ui_->RegisterMessageCallback(
-      "endTracingAsync",
-      NewCallback(this, &TracingMessageHandler::OnEndTracingAsync));
-  web_ui_->RegisterMessageCallback(
-      "beginRequestBufferPercentFull",
-      NewCallback(this,
-                  &TracingMessageHandler::OnBeginRequestBufferPercentFull));
-  web_ui_->RegisterMessageCallback(
-      "loadTraceFile",
-      NewCallback(this, &TracingMessageHandler::OnLoadTraceFile));
-  web_ui_->RegisterMessageCallback(
-      "saveTraceFile",
-      NewCallback(this, &TracingMessageHandler::OnSaveTraceFile));
+  web_ui_->RegisterMessageCallback("tracingControllerInitialized",
+      base::Bind(&TracingMessageHandler::OnTracingControllerInitialized,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("beginTracing",
+      base::Bind(&TracingMessageHandler::OnBeginTracing,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("endTracingAsync",
+      base::Bind(&TracingMessageHandler::OnEndTracingAsync,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("beginRequestBufferPercentFull",
+      base::Bind(&TracingMessageHandler::OnBeginRequestBufferPercentFull,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("loadTraceFile",
+      base::Bind(&TracingMessageHandler::OnLoadTraceFile,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("saveTraceFile",
+      base::Bind(&TracingMessageHandler::OnSaveTraceFile,
+                 base::Unretained(this)));
 }
 
 void TracingMessageHandler::OnTracingControllerInitialized(
@@ -275,9 +271,8 @@ class ReadTraceFileTask : public Task {
     }
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(proxy_.get(),
-                          &TaskProxy::LoadTraceFileCompleteProxy,
-                          file_contents));
+        base::Bind(&TaskProxy::LoadTraceFileCompleteProxy, proxy_.get(),
+                   file_contents));
   }
 
  private:
@@ -304,8 +299,7 @@ class WriteTraceFileTask : public Task {
       return;
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(proxy_.get(),
-                          &TaskProxy::SaveTraceFileCompleteProxy));
+        base::Bind(&TaskProxy::SaveTraceFileCompleteProxy, proxy_.get()));
   }
 
  private:
@@ -360,14 +354,11 @@ void TracingMessageHandler::OnLoadTraceFile(const ListValue* list) {
 
 void TracingMessageHandler::LoadTraceFileComplete(std::string* file_contents) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::wstring javascript;
-  javascript += L"tracingController.onLoadTraceFileComplete(";
-  javascript += UTF8ToWide(*file_contents);
-  javascript += L");";
+  std::string javascript = "tracingController.onLoadTraceFileComplete("
+      + *file_contents + ");";
 
   web_ui_->tab_contents()->render_view_host()->
-      ExecuteJavascriptInWebFrame(string16(),
-                                  WideToUTF16Hack(javascript));
+      ExecuteJavascriptInWebFrame(string16(), UTF8ToUTF16(javascript));
 }
 
 void TracingMessageHandler::OnSaveTraceFile(const ListValue* list) {
@@ -394,7 +385,6 @@ void TracingMessageHandler::OnSaveTraceFile(const ListValue* list) {
 
 void TracingMessageHandler::SaveTraceFileComplete() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::wstring javascript;
   web_ui_->CallJavascriptFunction("tracingController.onSaveTraceFileComplete");
 }
 
@@ -431,14 +421,11 @@ void TracingMessageHandler::OnEndTracingComplete() {
 void TracingMessageHandler::OnTraceDataCollected(
     const std::string& json_events) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::wstring javascript;
-  javascript += L"tracingController.onTraceDataCollected(";
-  javascript += UTF8ToWide(json_events);
-  javascript += L");";
+  std::string javascript = "tracingController.onTraceDataCollected("
+      + json_events + ");";
 
   web_ui_->tab_contents()->render_view_host()->
-      ExecuteJavascriptInWebFrame(string16(),
-                                  WideToUTF16Hack(javascript));
+      ExecuteJavascriptInWebFrame(string16(), UTF8ToUTF16(javascript));
 }
 
 void TracingMessageHandler::OnTraceBufferPercentFullReply(float percent_full) {

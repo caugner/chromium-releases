@@ -7,13 +7,27 @@
 #pragma once
 
 #include "base/compiler_specific.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/platform_file.h"
-#include "content/utility/content_utility_client.h"
+#include "content/public/utility/content_utility_client.h"
+#include "printing/pdf_render_settings.h"
 
+class ExternalProcessImporterBridge;
 class FilePath;
+class Importer;
+
+namespace base {
+class DictionaryValue;
+class Thread;
+}
 
 namespace gfx {
 class Rect;
+}
+
+namespace importer {
+struct SourceProfile;
 }
 
 namespace printing {
@@ -42,8 +56,7 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
   void OnRenderPDFPagesToMetafile(
       base::PlatformFile pdf_file,
       const FilePath& metafile_path,
-      const gfx::Rect& render_area,
-      int render_dpi,
+      const printing::PdfRenderSettings& pdf_render_settings,
       const std::vector<printing::PageRange>& page_ranges);
   void OnParseJSON(const std::string& json);
 
@@ -55,11 +68,36 @@ class ChromeContentUtilityClient : public content::ContentUtilityClient {
       const FilePath& metafile_path,
       const gfx::Rect& render_area,
       int render_dpi,
+      bool autorotate,
       const std::vector<printing::PageRange>& page_ranges,
       int* highest_rendered_page_number);
 #endif   // defined(OS_WIN)
 
   void OnGetPrinterCapsAndDefaults(const std::string& printer_name);
+
+  void OnImportStart(
+      const importer::SourceProfile& source_profile,
+      uint16 items,
+      const base::DictionaryValue& localized_strings);
+  void OnImportCancel();
+  void OnImportItemFinished(uint16 item);
+
+  // The following are used with out of process profile import:
+  void ImporterCleanup();
+
+  // Thread that importer runs on, while ProfileImportThread handles messages
+  // from the browser process.
+  scoped_ptr<base::Thread> import_thread_;
+
+  // Bridge object is passed to importer, so that it can send IPC calls
+  // directly back to the ProfileImportProcessHost.
+  scoped_refptr<ExternalProcessImporterBridge> bridge_;
+
+  // A bitmask of importer::ImportItem.
+  uint16 items_to_import_;
+
+  // Importer of the appropriate type (Firefox, Safari, IE, etc.)
+  scoped_refptr<Importer> importer_;
 };
 
 }  // namespace chrome

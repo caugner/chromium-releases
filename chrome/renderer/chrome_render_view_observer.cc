@@ -16,6 +16,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/about_handler.h"
 #include "chrome/renderer/automation/dom_automation_controller.h"
+#include "chrome/renderer/chrome_render_process_observer.h"
 #include "chrome/renderer/content_settings_observer.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "chrome/renderer/external_host_bindings.h"
@@ -23,16 +24,18 @@
 #include "chrome/renderer/prerender/prerender_helper.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier_delegate.h"
 #include "chrome/renderer/translate_helper.h"
-#include "content/common/bindings_policy.h"
-#include "content/common/view_messages.h"
-#include "content/renderer/content_renderer_client.h"
+#include "content/public/common/bindings_policy.h"
+#include "content/public/renderer/render_view.h"
+#include "content/public/renderer/content_renderer_client.h"
 #include "net/base/data_url.h"
 #include "skia/ext/image_operations.h"
 #include "skia/ext/platform_canvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
@@ -47,6 +50,7 @@
 #include "webkit/glue/webkit_glue.h"
 #include "v8/include/v8-testing.h"
 
+using WebKit::WebAccessibilityObject;
 using WebKit::WebCString;
 using WebKit::WebDataSource;
 using WebKit::WebFrame;
@@ -55,6 +59,7 @@ using WebKit::WebRect;
 using WebKit::WebSecurityOrigin;
 using WebKit::WebSize;
 using WebKit::WebString;
+using WebKit::WebTouchEvent;
 using WebKit::WebURL;
 using WebKit::WebURLRequest;
 using WebKit::WebView;
@@ -207,13 +212,15 @@ GURL StripRef(const GURL& url) {
 }  // namespace
 
 ChromeRenderViewObserver::ChromeRenderViewObserver(
-    RenderView* render_view,
+    content::RenderView* render_view,
     ContentSettingsObserver* content_settings,
+    ChromeRenderProcessObserver* chrome_render_process_observer,
     ExtensionDispatcher* extension_dispatcher,
     TranslateHelper* translate_helper)
-    : RenderViewObserver(render_view),
-      content_settings_(content_settings),
+    : content::RenderViewObserver(render_view),
+      chrome_render_process_observer_(chrome_render_process_observer),
       extension_dispatcher_(extension_dispatcher),
+      content_settings_(content_settings),
       translate_helper_(translate_helper),
       phishing_classifier_(NULL),
       last_indexed_page_id_(-1),
@@ -222,11 +229,11 @@ ChromeRenderViewObserver::ChromeRenderViewObserver(
       ALLOW_THIS_IN_INITIALIZER_LIST(page_info_method_factory_(this)) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kDomAutomationController)) {
-    int old_bindings = render_view->enabled_bindings();
-    render_view->set_enabled_bindings(
-        old_bindings |= BindingsPolicy::DOM_AUTOMATION);
+    int old_bindings = render_view->GetEnabledBindings();
+    render_view->SetEnabledBindings(
+        old_bindings |= content::BINDINGS_POLICY_DOM_AUTOMATION);
   }
-  render_view->webview()->setPermissionClient(this);
+  render_view->GetWebView()->setPermissionClient(this);
   if (!command_line.HasSwitch(switches::kDisableClientSidePhishingDetection))
     OnSetClientSidePhishingDetection(true);
 }
@@ -253,12 +260,12 @@ bool ChromeRenderViewObserver::OnMessageReceived(const IPC::Message& message) {
 #if defined(OS_CHROMEOS)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_StartFrameSniffer, OnStartFrameSniffer)
 #endif
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_GetFPS, OnGetFPS)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
   // Filter only.
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderViewObserver, message)
-    IPC_MESSAGE_HANDLER(ViewMsg_Navigate, OnNavigate)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetIsPrerendering, OnSetIsPrerendering);
   IPC_END_MESSAGE_MAP()
 
@@ -281,11 +288,11 @@ void ChromeRenderViewObserver::OnCaptureSnapshot() {
   SkBitmap snapshot;
   bool error = false;
 
-  WebFrame* main_frame = render_view()->webview()->mainFrame();
+  WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   if (!main_frame)
     error = true;
 
-  if (!error && !CaptureSnapshot(render_view()->webview(), &snapshot))
+  if (!error && !CaptureSnapshot(render_view()->GetWebView(), &snapshot))
     error = true;
 
   DCHECK(error == snapshot.empty()) <<
@@ -336,7 +343,7 @@ void ChromeRenderViewObserver::OnDownloadFavicon(int id,
 
 void ChromeRenderViewObserver::OnSetAllowDisplayingInsecureContent(bool allow) {
   allow_displaying_insecure_content_ = allow;
-  WebFrame* main_frame = render_view()->webview()->mainFrame();
+  WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   if (main_frame)
     main_frame->reload();
 }
@@ -344,6 +351,14 @@ void ChromeRenderViewObserver::OnSetAllowDisplayingInsecureContent(bool allow) {
 void ChromeRenderViewObserver::OnSetAllowRunningInsecureContent(bool allow) {
   allow_running_insecure_content_ = allow;
   OnSetAllowDisplayingInsecureContent(allow);
+}
+
+void ChromeRenderViewObserver::Navigate(const GURL& url) {
+  // Execute cache clear operations that were postponed until a navigation
+  // event (including tab reload).
+  if (chrome_render_process_observer_)
+    chrome_render_process_observer_->ExecutePendingClearCache();
+  AboutHandler::MaybeHandle(url);
 }
 
 void ChromeRenderViewObserver::OnSetClientSidePhishingDetection(
@@ -360,6 +375,12 @@ void ChromeRenderViewObserver::OnStartFrameSniffer(const string16& frame_name) {
   new FrameSniffer(render_view(), frame_name);
 }
 
+void ChromeRenderViewObserver::OnGetFPS() {
+  float fps = (render_view()->GetFilteredTimePerFrame() > 0.0f)?
+      1.0f / render_view()->GetFilteredTimePerFrame() : 0.0f;
+  Send(new ChromeViewHostMsg_FPS(routing_id(), fps));
+}
+
 bool ChromeRenderViewObserver::allowDatabase(
     WebFrame* frame,
     const WebString& name,
@@ -373,9 +394,10 @@ bool ChromeRenderViewObserver::allowFileSystem(WebFrame* frame) {
   return content_settings_->AllowFileSystem(frame);
 }
 
-bool ChromeRenderViewObserver::allowImages(WebFrame* frame,
-                                          bool enabled_per_settings) {
-  return content_settings_->AllowImages(frame, enabled_per_settings);
+bool ChromeRenderViewObserver::allowImage(WebFrame* frame,
+                                          bool enabled_per_settings,
+                                          const WebURL& image_url) {
+  return content_settings_->AllowImage(frame, enabled_per_settings, image_url);
 }
 
 bool ChromeRenderViewObserver::allowIndexedDB(WebFrame* frame,
@@ -512,7 +534,7 @@ bool ChromeRenderViewObserver::allowRunningInsecureContent(
     const WebKit::WebSecurityOrigin& origin,
     const WebKit::WebURL& url) {
   // Single value to control permissive mixed content behaviour.
-  const bool enforce_insecure_content_on_all_domains = false;
+  const bool enforce_insecure_content_on_all_domains = true;
 
   UMA_HISTOGRAM_ENUMERATION(kSSLInsecureContent,
                             INSECURE_CONTENT_RUN,
@@ -631,11 +653,6 @@ void ChromeRenderViewObserver::didNotAllowScript(WebFrame* frame) {
   content_settings_->DidNotAllowScript(frame);
 }
 
-void ChromeRenderViewObserver::OnNavigate(
-    const ViewMsg_Navigate_Params& params) {
-  AboutHandler::MaybeHandle(params.url);
-}
-
 void ChromeRenderViewObserver::OnSetIsPrerendering(bool is_prerendering) {
   if (is_prerendering) {
     DCHECK(!prerender::PrerenderHelper::Get(render_view()));
@@ -646,7 +663,7 @@ void ChromeRenderViewObserver::OnSetIsPrerendering(bool is_prerendering) {
 }
 
 void ChromeRenderViewObserver::DidStartLoading() {
-  if (BindingsPolicy::is_web_ui_enabled(render_view()->enabled_bindings()) &&
+  if ((render_view()->GetEnabledBindings() & content::BINDINGS_POLICY_WEB_UI) &&
       webui_javascript_.get()) {
     render_view()->EvaluateScript(webui_javascript_->frame_xpath,
                                   webui_javascript_->jscript,
@@ -659,15 +676,16 @@ void ChromeRenderViewObserver::DidStopLoading() {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       page_info_method_factory_.NewRunnableMethod(
-          &ChromeRenderViewObserver::CapturePageInfo, render_view()->page_id(),
+          &ChromeRenderViewObserver::CapturePageInfo,
+          render_view()->GetPageId(),
           false),
-      render_view()->content_state_immediately() ? 0 : kDelayForCaptureMs);
+      render_view()->GetContentStateImmediately() ? 0 : kDelayForCaptureMs);
 
-  WebFrame* main_frame = render_view()->webview()->mainFrame();
+  WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   GURL osd_url = main_frame->document().openSearchDescriptionURL();
   if (!osd_url.is_empty()) {
     Send(new ChromeViewHostMsg_PageHasOSDD(
-        routing_id(), render_view()->page_id(), osd_url,
+        routing_id(), render_view()->GetPageId(), osd_url,
         search_provider::AUTODETECTED_PROVIDER));
   }
 
@@ -676,7 +694,7 @@ void ChromeRenderViewObserver::DidStopLoading() {
     icon_types |= WebIconURL::TypeTouchPrecomposed | WebIconURL::TypeTouch;
 
   WebVector<WebIconURL> icon_urls =
-      render_view()->webview()->mainFrame()->iconURLs(icon_types);
+      render_view()->GetWebView()->mainFrame()->iconURLs(icon_types);
   std::vector<FaviconURL> urls;
   for (size_t i = 0; i < icon_urls.size(); i++) {
     WebURL url = icon_urls[i].iconURL();
@@ -685,7 +703,7 @@ void ChromeRenderViewObserver::DidStopLoading() {
   }
   if (!urls.empty()) {
     Send(new IconHostMsg_UpdateFaviconURL(
-        routing_id(), render_view()->page_id(), urls));
+        routing_id(), render_view()->GetPageId(), urls));
   }
 }
 
@@ -705,7 +723,7 @@ void ChromeRenderViewObserver::DidChangeIcon(WebFrame* frame,
                               ToFaviconType(icon_urls[i].iconType())));
   }
   Send(new IconHostMsg_UpdateFaviconURL(
-      routing_id(), render_view()->page_id(), urls));
+      routing_id(), render_view()->GetPageId(), urls));
 }
 
 void ChromeRenderViewObserver::DidCommitProvisionalLoad(
@@ -716,28 +734,56 @@ void ChromeRenderViewObserver::DidCommitProvisionalLoad(
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       page_info_method_factory_.NewRunnableMethod(
-          &ChromeRenderViewObserver::CapturePageInfo, render_view()->page_id(),
+          &ChromeRenderViewObserver::CapturePageInfo,
+          render_view()->GetPageId(),
           true),
       kDelayForForcedCaptureMs);
 }
 
 void ChromeRenderViewObserver::DidClearWindowObject(WebFrame* frame) {
-  if (BindingsPolicy::is_dom_automation_enabled(
-          render_view()->enabled_bindings())) {
+  if (render_view()->GetEnabledBindings() &
+          content::BINDINGS_POLICY_DOM_AUTOMATION) {
     BindDOMAutomationController(frame);
   }
 
-  if (BindingsPolicy::is_external_host_enabled(
-          render_view()->enabled_bindings())) {
-    GetExternalHostBindings()->set_message_sender(render_view());
-    GetExternalHostBindings()->set_routing_id(routing_id());
+  if (render_view()->GetEnabledBindings() &
+          content::BINDINGS_POLICY_EXTERNAL_HOST) {
     GetExternalHostBindings()->BindToJavascript(frame, "externalHost");
   }
 }
 
+void ChromeRenderViewObserver::DidHandleTouchEvent(const WebTouchEvent& event) {
+  // TODO(mazda): Consider using WebKit::WebInputEvent::GestureTap event when
+  //              it's implemented. Only sends the message on touch end event
+  //              for now.
+  if (event.type != WebKit::WebInputEvent::TouchEnd)
+    return;
+  // Ignore the case of multiple touches
+  if (event.touchesLength != 1)
+    return;
+  if (render_view()->GetWebView()->textInputType() ==
+      WebKit::WebTextInputTypeNone) {
+    return;
+  }
+  WebKit::WebNode node = render_view()->GetFocusedNode();
+  if (node.isNull())
+    return;
+  WebKit::WebAccessibilityObject accessibility =
+      render_view()->GetWebView()->accessibilityObject();
+  if (accessibility.isNull())
+    return;
+  const WebKit::WebTouchPoint point = event.touches[0];
+  accessibility = accessibility.hitTest(point.position);
+  if (accessibility.isNull())
+    return;
+  if (accessibility.node() == node)
+    render_view()->Send(new ChromeViewHostMsg_FocusedEditableNodeTouched(
+    render_view()->GetRoutingId()));
+}
+
 void ChromeRenderViewObserver::CapturePageInfo(int load_id,
                                                bool preliminary_capture) {
-  if (load_id != render_view()->page_id())
+  if (load_id != render_view()->GetPageId())
     return;  // This capture call is no longer relevant due to navigation.
 
   // Skip indexing if this is not a new load.  Note that the case where
@@ -747,10 +793,10 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
   if (load_id < last_indexed_page_id_)
     return;
 
-  if (!render_view()->webview())
+  if (!render_view()->GetWebView())
     return;
 
-  WebFrame* main_frame = render_view()->webview()->mainFrame();
+  WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   if (!main_frame)
     return;
 
@@ -762,6 +808,10 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
   // level frame so the thumbnail may contain a frame that failed to load.
   WebDataSource* ds = main_frame->dataSource();
   if (ds && ds->hasUnreachableURL())
+    return;
+
+  // Don't index/capture pages that are being prerendered.
+  if (prerender::PrerenderHelper::IsPrerendering(render_view()))
     return;
 
   bool same_page_id = last_indexed_page_id_ == load_id;
@@ -847,7 +897,7 @@ void ChromeRenderViewObserver::CaptureText(WebFrame* frame,
 }
 
 void ChromeRenderViewObserver::CaptureThumbnail() {
-  WebFrame* main_frame = render_view()->webview()->mainFrame();
+  WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   if (!main_frame)
     return;
 
@@ -856,12 +906,12 @@ void ChromeRenderViewObserver::CaptureThumbnail() {
   if (url.is_empty())
     return;
 
-  if (render_view()->size().IsEmpty())
+  if (render_view()->GetSize().IsEmpty())
     return;  // Don't create an empty thumbnail!
 
   ThumbnailScore score;
   SkBitmap thumbnail;
-  if (!CaptureFrameThumbnail(render_view()->webview(), kThumbnailWidth,
+  if (!CaptureFrameThumbnail(render_view()->GetWebView(), kThumbnailWidth,
                              kThumbnailHeight, &thumbnail, &score))
     return;
 
@@ -969,8 +1019,10 @@ void ChromeRenderViewObserver::BindDOMAutomationController(WebFrame* frame) {
 }
 
 ExternalHostBindings* ChromeRenderViewObserver::GetExternalHostBindings() {
-  if (!external_host_bindings_.get())
-    external_host_bindings_.reset(new ExternalHostBindings());
+  if (!external_host_bindings_.get()) {
+    external_host_bindings_.reset(new ExternalHostBindings(
+        render_view(), routing_id()));
+  }
   return external_host_bindings_.get();
 }
 
@@ -978,12 +1030,12 @@ bool ChromeRenderViewObserver::DownloadFavicon(int id,
                                                const GURL& image_url,
                                                int image_size) {
   // Make sure webview was not shut down.
-  if (!render_view()->webview())
+  if (!render_view()->GetWebView())
     return false;
   // Create an image resource fetcher and assign it with a call back object.
   image_fetchers_.push_back(linked_ptr<ImageResourceFetcher>(
       new ImageResourceFetcher(
-          image_url, render_view()->webview()->mainFrame(), id, image_size,
+          image_url, render_view()->GetWebView()->mainFrame(), id, image_size,
           WebURLRequest::TargetIsFavicon,
           NewCallback(this, &ChromeRenderViewObserver::DidDownloadFavicon))));
   return true;
@@ -1000,7 +1052,7 @@ void ChromeRenderViewObserver::DidDownloadFavicon(
 
   // Remove the image fetcher from our pending list. We're in the callback from
   // ImageResourceFetcher, best to delay deletion.
-  RenderView::ImageResourceFetcherList::iterator iter;
+  ImageResourceFetcherList::iterator iter;
   for (iter = image_fetchers_.begin(); iter != image_fetchers_.end(); ++iter) {
     if (iter->get() == fetcher) {
       iter->release();
@@ -1015,7 +1067,8 @@ SkBitmap ChromeRenderViewObserver::ImageFromDataUrl(const GURL& url) const {
   std::string mime_type, char_set, data;
   if (net::DataURL::Parse(url, &mime_type, &char_set, &data) && !data.empty()) {
     // Decode the favicon using WebKit's image decoder.
-    webkit_glue::ImageDecoder decoder(gfx::Size(kFaviconSize, kFaviconSize));
+    webkit_glue::ImageDecoder decoder(
+        gfx::Size(gfx::kFaviconSize, gfx::kFaviconSize));
     const unsigned char* src_data =
         reinterpret_cast<const unsigned char*>(&data[0]);
 

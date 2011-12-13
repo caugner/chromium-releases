@@ -43,6 +43,19 @@ static const int kPreferredPaddingVertical = 5;
 static const int kPreferredNativeThemePaddingHorizontal = 12;
 static const int kPreferredNativeThemePaddingVertical = 5;
 
+// Default background color for buttons.
+const SkColor kBackgroundColor = SkColorSetRGB(0xde, 0xde, 0xde);
+
+#if defined(USE_AURA)
+// static
+const SkColor TextButtonBase::kEnabledColor = SkColorSetRGB(0x44, 0x44, 0x44);
+// static
+const SkColor TextButtonBase::kHighlightColor = SkColorSetRGB(0, 0, 0);
+// static
+const SkColor TextButtonBase::kDisabledColor = SkColorSetRGB(0x99, 0x99, 0x99);
+// static
+const SkColor TextButtonBase::kHoverColor = TextButton::kEnabledColor;
+#else  // !defined(USE_AURA)
 // static
 const SkColor TextButtonBase::kEnabledColor = SkColorSetRGB(6, 45, 117);
 // static
@@ -52,6 +65,7 @@ const SkColor TextButtonBase::kHighlightColor =
 const SkColor TextButtonBase::kDisabledColor = SkColorSetRGB(161, 161, 146);
 // static
 const SkColor TextButtonBase::kHoverColor = TextButton::kEnabledColor;
+#endif  // defined(USE_AURA)
 
 // How long the hover fade animation should last.
 static const int kHoverAnimationDurationMs = 170;
@@ -141,8 +155,8 @@ void TextButtonBorder::Paint(const View& view, gfx::Canvas* canvas) const {
       // handle the case of having a non-NULL |normal_set_|.
       canvas->SaveLayerAlpha(static_cast<uint8>(
           button->GetAnimation()->CurrentValueBetween(0, 255)));
-      canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255,
-                                       SkXfermode::kClear_Mode);
+      canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255,
+                                      SkXfermode::kClear_Mode);
       Paint(view, canvas, *set);
       canvas->Restore();
     } else {
@@ -213,7 +227,6 @@ void TextButtonNativeThemeBorder::Paint(const View& view,
   const TextButtonBase* tb = static_cast<const TextButton*>(&view);
   const gfx::NativeTheme* native_theme = gfx::NativeTheme::instance();
   gfx::NativeTheme::Part part = delegate_->GetThemePart();
-  gfx::CanvasSkia* skia_canvas = canvas->AsCanvasSkia();
   gfx::Rect rect(delegate_->GetThemePaintRect());
 
   if (tb->show_multiple_icon_states() &&
@@ -223,19 +236,20 @@ void TextButtonNativeThemeBorder::Paint(const View& view,
     gfx::NativeTheme::ExtraParams prev_extra;
     gfx::NativeTheme::State prev_state =
         delegate_->GetBackgroundThemeState(&prev_extra);
-    native_theme->Paint(skia_canvas, part, prev_state, rect, prev_extra);
+    native_theme->Paint(
+        canvas->GetSkCanvas(), part, prev_state, rect, prev_extra);
 
     // Composite foreground state above it.
     gfx::NativeTheme::ExtraParams extra;
     gfx::NativeTheme::State state = delegate_->GetForegroundThemeState(&extra);
     int alpha = delegate_->GetThemeAnimation()->CurrentValueBetween(0, 255);
-    skia_canvas->SaveLayerAlpha(static_cast<uint8>(alpha));
-    native_theme->Paint(skia_canvas, part, state, rect, extra);
-    skia_canvas->Restore();
+    canvas->SaveLayerAlpha(static_cast<uint8>(alpha));
+    native_theme->Paint(canvas->GetSkCanvas(), part, state, rect, extra);
+    canvas->Restore();
   } else {
     gfx::NativeTheme::ExtraParams extra;
     gfx::NativeTheme::State state = delegate_->GetThemeState(&extra);
-    native_theme->Paint(skia_canvas, part, state, rect, extra);
+    native_theme->Paint(canvas->GetSkCanvas(), part, state, rect, extra);
   }
 }
 
@@ -250,8 +264,7 @@ void TextButtonNativeThemeBorder::GetInsets(gfx::Insets* insets) const {
 ////////////////////////////////////////////////////////////////////////////////
 // TextButtonBase, public:
 
-TextButtonBase::TextButtonBase(ButtonListener* listener,
-                               const std::wstring& text)
+TextButtonBase::TextButtonBase(ButtonListener* listener, const string16& text)
     : CustomButton(listener),
       alignment_(ALIGN_LEFT),
       font_(ResourceBundle::GetSharedInstance().GetFont(
@@ -290,9 +303,9 @@ void TextButtonBase::SetIsDefault(bool is_default) {
   SchedulePaint();
 }
 
-void TextButtonBase::SetText(const std::wstring& text) {
-  text_ = WideToUTF16Hack(text);
-  SetAccessibleName(WideToUTF16Hack(text));
+void TextButtonBase::SetText(const string16& text) {
+  text_ = text;
+  SetAccessibleName(text);
   UpdateTextSize();
 }
 
@@ -449,7 +462,7 @@ void TextButtonBase::GetExtraParams(
   params->button.is_default = false;
   params->button.has_border = false;
   params->button.classic_state = 0;
-  params->button.background_color = kEnabledColor;
+  params->button.background_color = kBackgroundColor;
 }
 
 gfx::Rect TextButtonBase::GetContentBounds(int extra_width) const {
@@ -609,7 +622,9 @@ gfx::NativeTheme::State TextButtonBase::GetThemeState(
 }
 
 const ui::Animation* TextButtonBase::GetThemeAnimation() const {
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  return hover_animation_.get();
+#elif defined(OS_WIN)
   return gfx::NativeThemeWin::instance()->IsThemingActive()
       ? hover_animation_.get() : NULL;
 #else
@@ -637,7 +652,7 @@ gfx::NativeTheme::State TextButtonBase::GetForegroundThemeState(
 
 TextButton::TextButton(ButtonListener* listener,
                        const std::wstring& text)
-    : TextButtonBase(listener, text),
+    : TextButtonBase(listener, WideToUTF16Hack(text)),
       icon_placement_(ICON_ON_LEFT),
       has_hover_icon_(false),
       has_pushed_icon_(false),
@@ -651,16 +666,19 @@ TextButton::~TextButton() {
 
 void TextButton::SetIcon(const SkBitmap& icon) {
   icon_ = icon;
+  SchedulePaint();
 }
 
 void TextButton::SetHoverIcon(const SkBitmap& icon) {
   icon_hover_ = icon;
   has_hover_icon_ = true;
+  SchedulePaint();
 }
 
 void TextButton::SetPushedIcon(const SkBitmap& icon) {
   icon_pushed_ = icon;
   has_pushed_icon_ = true;
+  SchedulePaint();
 }
 
 gfx::Size TextButton::GetPreferredSize() {

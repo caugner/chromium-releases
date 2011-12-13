@@ -69,7 +69,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   virtual NextProtoStatus GetNextProto(std::string* proto);
 
   // StreamSocket methods:
-  virtual int Connect(CompletionCallback* callback);
+  virtual int Connect(OldCompletionCallback* callback);
   virtual void Disconnect();
   virtual bool IsConnected() const;
   virtual bool IsConnectedAndIdle() const;
@@ -84,8 +84,8 @@ class SSLClientSocketNSS : public SSLClientSocket {
   virtual base::TimeDelta GetConnectTimeMicros() const;
 
   // Socket methods:
-  virtual int Read(IOBuffer* buf, int buf_len, CompletionCallback* callback);
-  virtual int Write(IOBuffer* buf, int buf_len, CompletionCallback* callback);
+  virtual int Read(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
+  virtual int Write(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
   virtual bool SetReceiveBufferSize(int32 size);
   virtual bool SetSendBufferSize(int32 size);
 
@@ -157,14 +157,27 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // argument.
   static SECStatus OwnAuthCertHandler(void* arg, PRFileDesc* socket,
                                       PRBool checksig, PRBool is_server);
-  // NSS calls this when client authentication is requested.
+  // Returns true if connection negotiated the origin bound cert extension.
+  static bool OriginBoundCertNegotiated(PRFileDesc* socket);
+  // Origin bound cert client auth handler.
+  // Returns the value the ClientAuthHandler function should return.
+  SECStatus OriginBoundClientAuthHandler(CERTCertificate** result_certificate,
+                                         SECKEYPrivateKey** result_private_key);
 #if defined(NSS_PLATFORM_CLIENT_AUTH)
-  static SECStatus PlatformClientAuthHandler(void* arg,
-                                             PRFileDesc* socket,
-                                             CERTDistNames* ca_names,
-                                             CERTCertList** result_certs,
-                                             void** result_private_key);
+  // On platforms where we use the native certificate store, NSS calls this
+  // instead when client authentication is requested.  At most one of
+  // (result_certs, result_private_key) or
+  // (result_nss_certificate, result_nss_private_key) should be set.
+  static SECStatus PlatformClientAuthHandler(
+      void* arg,
+      PRFileDesc* socket,
+      CERTDistNames* ca_names,
+      CERTCertList** result_certs,
+      void** result_private_key,
+      CERTCertificate** result_nss_certificate,
+      SECKEYPrivateKey** result_nss_private_key);
 #else
+  // NSS calls this when client authentication is requested.
   static SECStatus ClientAuthHandler(void* arg,
                                      PRFileDesc* socket,
                                      CERTDistNames* ca_names,
@@ -180,8 +193,8 @@ class SSLClientSocketNSS : public SSLClientSocket {
   void EnsureThreadIdAssigned() const;
   bool CalledOnValidThread() const;
 
-  CompletionCallbackImpl<SSLClientSocketNSS> buffer_send_callback_;
-  CompletionCallbackImpl<SSLClientSocketNSS> buffer_recv_callback_;
+  OldCompletionCallbackImpl<SSLClientSocketNSS> buffer_send_callback_;
+  OldCompletionCallbackImpl<SSLClientSocketNSS> buffer_recv_callback_;
   bool transport_send_busy_;
   bool transport_recv_busy_;
   // corked_ is true if we are currently suspending writes to the network. This
@@ -192,14 +205,14 @@ class SSLClientSocketNSS : public SSLClientSocket {
   base::OneShotTimer<SSLClientSocketNSS> uncork_timer_;
   scoped_refptr<IOBuffer> recv_buffer_;
 
-  CompletionCallbackImpl<SSLClientSocketNSS> handshake_io_callback_;
+  OldCompletionCallbackImpl<SSLClientSocketNSS> handshake_io_callback_;
   scoped_ptr<ClientSocketHandle> transport_;
   HostPortPair host_and_port_;
   SSLConfig ssl_config_;
 
-  CompletionCallback* user_connect_callback_;
-  CompletionCallback* user_read_callback_;
-  CompletionCallback* user_write_callback_;
+  OldCompletionCallback* user_connect_callback_;
+  OldCompletionCallback* user_read_callback_;
+  OldCompletionCallback* user_write_callback_;
 
   // Used by Read function.
   scoped_refptr<IOBuffer> user_read_buf_;
@@ -219,6 +232,7 @@ class SSLClientSocketNSS : public SSLClientSocket {
   // we used an SSLHostInfo's verification.
   const CertVerifyResult* server_cert_verify_result_;
   CertVerifyResult local_server_cert_verify_result_;
+  std::vector<SHA1Fingerprint> side_pinned_public_keys_;
   int ssl_connection_status_;
 
   // Stores client authentication information between ClientAuthHandler and

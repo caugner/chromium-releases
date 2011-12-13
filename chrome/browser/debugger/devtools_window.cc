@@ -32,7 +32,6 @@
 #include "content/browser/browsing_instance.h"
 #include "content/browser/content_browser_client.h"
 #include "content/browser/debugger/devtools_manager.h"
-#include "content/browser/debugger/worker_devtools_manager_io.h"
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
 #include "content/browser/load_notification_details.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -40,9 +39,9 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/bindings_policy.h"
 #include "content/common/devtools_messages.h"
 #include "content/common/notification_service.h"
+#include "content/public/common/bindings_policy.h"
 #include "grit/generated_resources.h"
 
 const char DevToolsWindow::kDevToolsApp[] = "DevToolsApp";
@@ -104,7 +103,10 @@ DevToolsWindow* DevToolsWindow::ToggleDevToolsWindow(
 void DevToolsWindow::InspectElement(RenderViewHost* inspected_rvh,
                                     int x,
                                     int y) {
-  DevToolsManager::GetInstance()->SendInspectElement(inspected_rvh, x, y);
+  inspected_rvh->Send(new DevToolsAgentMsg_InspectElement(
+      inspected_rvh->routing_id(),
+      x,
+      y));
   // TODO(loislo): we should initiate DevTools window opening from within
   // renderer. Otherwise, we still can hit a race condition here.
   OpenDevToolsWindow(inspected_rvh);
@@ -119,11 +121,13 @@ DevToolsWindow* DevToolsWindow::Create(
   // Create TabContents with devtools.
   TabContentsWrapper* tab_contents =
       Browser::TabContentsFactory(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
-  tab_contents->render_view_host()->AllowBindings(BindingsPolicy::WEB_UI);
+  tab_contents->render_view_host()->AllowBindings(
+      content::BINDINGS_POLICY_WEB_UI);
   tab_contents->controller().LoadURL(
       GetDevToolsUrl(profile, docked, shared_worker_frontend),
       GURL(),
-      PageTransition::START_PAGE);
+      content::PAGE_TRANSITION_START_PAGE,
+      std::string());
   return new DevToolsWindow(tab_contents, profile, inspected_rvh, docked);
 }
 
@@ -337,7 +341,8 @@ void DevToolsWindow::CreateDevToolsBrowser() {
 
   browser_ = Browser::CreateForDevTools(profile_);
   browser_->tabstrip_model()->AddTabContents(
-      tab_contents_, -1, PageTransition::START_PAGE, TabStripModel::ADD_ACTIVE);
+      tab_contents_, -1, content::PAGE_TRANSITION_START_PAGE,
+      TabStripModel::ADD_ACTIVE);
 }
 
 bool DevToolsWindow::FindInspectedBrowserAndTabIndex(Browser** browser,
@@ -403,19 +408,22 @@ void DevToolsWindow::AddDevToolsExtensionsToClient() {
     DictionaryValue* extension_info = new DictionaryValue();
     extension_info->Set("startPage",
         new StringValue((*extension)->devtools_url().spec()));
+    extension_info->Set("name", new StringValue((*extension)->name()));
     results.Append(extension_info);
   }
   CallClientFunction(ASCIIToUTF16("WebInspector.addExtensions"), results);
 }
 
 // TODO(adriansc): Remove this method once refactoring changed all call sites.
-TabContents* DevToolsWindow::OpenURLFromTab(TabContents* source,
-                                            const GURL& url,
-                                            const GURL& referrer,
-                                            WindowOpenDisposition disposition,
-                                            PageTransition::Type transition) {
+TabContents* DevToolsWindow::OpenURLFromTab(
+    TabContents* source,
+    const GURL& url,
+    const GURL& referrer,
+    WindowOpenDisposition disposition,
+    content::PageTransition transition) {
   return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition));
+                        OpenURLParams(url, referrer, disposition, transition,
+                                      false));
 }
 
 TabContents* DevToolsWindow::OpenURLFromTab(TabContents* source,
@@ -423,7 +431,7 @@ TabContents* DevToolsWindow::OpenURLFromTab(TabContents* source,
   if (inspected_tab_) {
     OpenURLParams forward_params = params;
     forward_params.disposition = NEW_FOREGROUND_TAB;
-    forward_params.transition = PageTransition::LINK;
+    forward_params.transition = content::PAGE_TRANSITION_LINK;
     return inspected_tab_->tab_contents()->OpenURL(forward_params);
   }
   return NULL;
@@ -621,7 +629,7 @@ void DevToolsWindow::RenderViewHostDestroyed() {
 bool DevToolsWindow::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(DevToolsWindow, message)
-    IPC_MESSAGE_HANDLER(DevToolsHostMsg_ForwardToAgent, OnForwardToAgent)
+    IPC_MESSAGE_HANDLER(DevToolsHostMsg_ForwardToAgent, ForwardToDevToolsAgent)
     IPC_MESSAGE_HANDLER(DevToolsHostMsg_ActivateWindow, OnActivateWindow)
     IPC_MESSAGE_HANDLER(DevToolsHostMsg_CloseWindow, OnCloseWindow)
     IPC_MESSAGE_HANDLER(DevToolsHostMsg_RequestDockWindow, OnRequestDockWindow)
@@ -632,14 +640,6 @@ bool DevToolsWindow::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void DevToolsWindow::OnForwardToAgent(const IPC::Message& message) {
-  if (DevToolsManager::GetInstance()->
-          ForwardToDevToolsAgent(this, message))
-    return;
-  WorkerDevToolsManagerIO::ForwardToWorkerDevToolsAgentOnUIThread(
-      this, message);
 }
 
 void DevToolsWindow::OnRequestDockWindow() {

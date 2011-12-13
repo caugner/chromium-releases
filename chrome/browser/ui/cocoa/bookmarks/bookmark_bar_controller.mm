@@ -693,22 +693,16 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     return;
   }
 
-#if defined(WEBUI_DIALOGS)
-  browser_->OpenBookmarkManagerEditNode(node->id());
-#else
-  // There is no real need to jump to a platform-common routine at
-  // this point (which just jumps back to objc) other than consistency
-  // across platforms.
+  // This jumps to a platform-common routine at this point (which may just
+  // jump back to objc or may use the WebUI dialog).
   //
   // TODO(jrg): identify when we NO_TREE.  I can see it in the code
   // for the other platforms but can't find a way to trigger it in the
   // UI.
   BookmarkEditor::Show([[self view] window],
                        browser_->profile(),
-                       node->parent(),
-                       BookmarkEditor::EditDetails(node),
+                       BookmarkEditor::EditDetails::EditNode(node),
                        BookmarkEditor::SHOW_TREE);
-#endif
 }
 
 - (IBAction)cutBookmark:(id)sender {
@@ -786,15 +780,10 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   const BookmarkNode* parent = [self nodeFromMenuItem:sender];
   if (!parent)
     parent = bookmarkModel_->bookmark_bar_node();
-#if defined(WEBUI_DIALOGS)
-  browser_->OpenBookmarkManagerAddNodeIn(parent->id());
-#else
   BookmarkEditor::Show([[self view] window],
                        browser_->profile(),
-                       parent,
-                       BookmarkEditor::EditDetails(),
+                       BookmarkEditor::EditDetails::AddNodeInFolder(parent),
                        BookmarkEditor::SHOW_TREE);
-#endif
 }
 
 // Might be called from the context menu over the bar OR over a
@@ -1122,7 +1111,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // Actually open the URL.  This is the last chance for a unit test to
 // override.
 - (void)openURL:(GURL)url disposition:(WindowOpenDisposition)disposition {
-  browser_->OpenURL(url, GURL(), disposition, PageTransition::AUTO_BOOKMARK);
+  browser_->OpenURL(
+      url, GURL(), disposition, content::PAGE_TRANSITION_AUTO_BOOKMARK);
 }
 
 - (void)clearMenuTagMap {

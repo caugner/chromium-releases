@@ -15,10 +15,15 @@
 #include "chrome/browser/chromeos/login/new_user_view.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/user_view.h"
-#include "chrome/browser/chromeos/wm_ipc.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "views/widget/widget.h"
 #include "views/widget/widget_delegate.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_ipc.h"
+#else
+#include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
+#endif
 
 namespace views {
 class Widget;
@@ -167,7 +172,7 @@ class UserController : public views::WidgetDelegate,
                           int controls_width, int controls_height);
 
   // Returns tooltip text for user name.
-  std::wstring GetNameTooltip() const;
+  string16 GetNameTooltip() const;
 
   // Creates the widget that holds the controls. Caller owns the returned
   // widget.

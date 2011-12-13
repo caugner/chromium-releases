@@ -9,6 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/ui/tabs/tab_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -42,7 +43,7 @@ static const int kCloseButtonVertFuzz = 0;
 static const int kTabIconSize = 32;
 static const int kCloseButtonHorzFuzz = -10;
 #else
-static const int kTabIconSize = kFaviconSize;
+static const int kTabIconSize = gfx::kFaviconSize;
 static const int kCloseButtonHorzFuzz = 5;
 #endif
 
@@ -89,11 +90,6 @@ static const int kMiniTitleChangeGradientRadius = 20;
 static const SkColor kMiniTitleChangeGradientColor1 = SK_ColorWHITE;
 static const SkColor kMiniTitleChangeGradientColor2 =
     SkColorSetARGB(0, 255, 255, 255);
-
-// Hit mask constants.
-static const SkScalar kTabCapWidth = 15;
-static const SkScalar kTabTopCurveWidth = 4;
-static const SkScalar kTabBottomCurveWidth = 3;
 
 // static
 const char Tab::kViewClassName[] = "browser/tabs/Tab";
@@ -155,7 +151,7 @@ gfx::Size Tab::GetMinimumUnselectedSize() {
 // static
 gfx::Size Tab::GetMinimumSelectedSize() {
   gfx::Size minimum_size = GetMinimumUnselectedSize();
-  minimum_size.set_width(kLeftPadding + kFaviconSize + kRightPadding);
+  minimum_size.set_width(kLeftPadding + gfx::kFaviconSize + kRightPadding);
   return minimum_size;
 }
 
@@ -331,29 +327,7 @@ bool Tab::HasHitTestMask() const {
 }
 
 void Tab::GetHitTestMask(gfx::Path* path) const {
-  DCHECK(path);
-
-  SkScalar h = SkIntToScalar(height());
-  SkScalar w = SkIntToScalar(width());
-
-  path->moveTo(0, h);
-
-  // Left end cap.
-  path->lineTo(kTabBottomCurveWidth, h - kTabBottomCurveWidth);
-  path->lineTo(kTabCapWidth - kTabTopCurveWidth, kTabTopCurveWidth);
-  path->lineTo(kTabCapWidth, 0);
-
-  // Connect to the right cap.
-  path->lineTo(w - kTabCapWidth, 0);
-
-  // Right end cap.
-  path->lineTo(w - kTabCapWidth + kTabTopCurveWidth, kTabTopCurveWidth);
-  path->lineTo(w - kTabBottomCurveWidth, h - kTabBottomCurveWidth);
-  path->lineTo(w, h);
-
-  // Close out the path.
-  path->lineTo(0, h);
-  path->close();
+  TabResources::GetHitTestMask(width(), height(), path);
 }
 
 bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) {
@@ -385,8 +359,8 @@ void Tab::PaintTabBackground(gfx::Canvas* canvas) {
     if (throb_value > 0) {
       canvas->SaveLayerAlpha(static_cast<int>(throb_value * 0xff),
                              gfx::Rect(width(), height()));
-      canvas->AsCanvasSkia()->drawARGB(0, 255, 255, 255,
-                                       SkXfermode::kClear_Mode);
+      canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255,
+                                      SkXfermode::kClear_Mode);
       PaintActiveTabBackground(canvas);
       canvas->Restore();
     }

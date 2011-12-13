@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/view_types.h"
+#include "content/public/common/view_types.h"
 
 class Browser;
 class BrowsingInstance;
@@ -39,10 +39,10 @@ class ExtensionProcessManager : public NotificationObserver {
   virtual ExtensionHost* CreateViewHost(const Extension* extension,
                                         const GURL& url,
                                         Browser* browser,
-                                        ViewType::Type view_type);
+                                        content::ViewType view_type);
   ExtensionHost* CreateViewHost(const GURL& url,
                                 Browser* browser,
-                                ViewType::Type view_type);
+                                content::ViewType view_type);
   ExtensionHost* CreatePopupHost(const Extension* extension,
                                  const GURL& url,
                                  Browser* browser);
@@ -69,13 +69,22 @@ class ExtensionProcessManager : public NotificationObserver {
   // Returns the SiteInstance that the given URL belongs to.
   virtual SiteInstance* GetSiteInstanceForURL(const GURL& url);
 
-  // Registers a SiteInstance with |site_instance_id| as hosting the extension
-  // with |extension_id|.
-  void RegisterExtensionSiteInstance(int site_instance_id,
-                                     const std::string& extension_id);
+  // Registers a SiteInstance as hosting a given extension.
+  void RegisterExtensionSiteInstance(SiteInstance* site_instance,
+                                     const Extension* extension);
 
-  // Unregisters the extension associated with |site_instance_id|.
-  void UnregisterExtensionSiteInstance(int site_instance_id);
+  // Unregisters the extension associated with |site_instance|.
+  void UnregisterExtensionSiteInstance(SiteInstance* site_instance);
+
+  // True if this process host is hosting an extension.
+  bool IsExtensionProcess(int render_process_id);
+
+  // True if this process host is hosting an extension with extension bindings
+  // enabled.
+  bool AreBindingsEnabledForProcess(int render_process_id);
+
+  // True if this process host is restricted to only access isolated storage.
+  bool IsStorageIsolatedForProcess(int host_id);
 
   // Returns the extension process that |url| is associated with if it exists.
   // This is not valid for hosted apps without the background permission, since
@@ -125,6 +134,15 @@ class ExtensionProcessManager : public NotificationObserver {
   // A map of site instance ID to the ID of the extension it hosts.
   typedef std::map<int, std::string> SiteInstanceIDMap;
   SiteInstanceIDMap extension_ids_;
+
+  // A map of process ID to site instance ID of the site instances it hosts.
+  typedef std::map<int, std::set<int> > ProcessIDMap;
+  ProcessIDMap process_ids_;
+
+  // A set of all process IDs that are designated for hosting webapps with
+  // isolated storage.
+  typedef std::set<int> ProcessIDSet;
+  ProcessIDSet isolated_storage_process_ids_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionProcessManager);
 };

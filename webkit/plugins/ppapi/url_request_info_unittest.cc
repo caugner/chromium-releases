@@ -8,6 +8,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "webkit/glue/user_agent.h"
+#include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
 #include "webkit/plugins/ppapi/ppapi_unittest.h"
@@ -58,6 +60,8 @@ class URLRequestInfoTest : public PpapiUnittest {
   }
 
   static void SetUpTestCase() {
+    webkit_glue::SetUserAgent(webkit_glue::BuildUserAgentFromProduct(
+        "TestShell/0.0.0.0"), false);
     web_view_ = WebView::create(NULL);
     web_view_->initializeMainFrame(&web_frame_client_);
     WebURL web_url(GURL(""));
@@ -119,16 +123,16 @@ WebView* URLRequestInfoTest::web_view_;
 WebFrame* URLRequestInfoTest::frame_;
 
 TEST_F(URLRequestInfoTest, GetInterface) {
-  const PPB_URLRequestInfo* interface =
+  const PPB_URLRequestInfo* request_info =
       ::ppapi::thunk::GetPPB_URLRequestInfo_Thunk();
-  EXPECT_TRUE(interface);
-  EXPECT_TRUE(interface->Create);
-  EXPECT_TRUE(interface->IsURLRequestInfo);
-  EXPECT_TRUE(interface->SetProperty);
-  EXPECT_TRUE(interface->AppendDataToBody);
-  EXPECT_TRUE(interface->AppendFileToBody);
-  EXPECT_TRUE(interface->Create);
-  EXPECT_TRUE(interface->Create);
+  EXPECT_TRUE(request_info);
+  EXPECT_TRUE(request_info->Create);
+  EXPECT_TRUE(request_info->IsURLRequestInfo);
+  EXPECT_TRUE(request_info->SetProperty);
+  EXPECT_TRUE(request_info->AppendDataToBody);
+  EXPECT_TRUE(request_info->AppendFileToBody);
+  EXPECT_TRUE(request_info->Create);
+  EXPECT_TRUE(request_info->Create);
 }
 
 TEST_F(URLRequestInfoTest, AsURLRequestInfo) {

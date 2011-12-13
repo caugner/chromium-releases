@@ -41,7 +41,7 @@ TEST(LabelTest, FontPropertyArial) {
 
 TEST(LabelTest, TextProperty) {
   Label label;
-  std::wstring test_text(L"A random string.");
+  string16 test_text(ASCIIToUTF16("A random string."));
   label.SetText(test_text);
   EXPECT_EQ(test_text, label.GetText());
 }
@@ -52,14 +52,15 @@ TEST(LabelTest, UrlProperty) {
   GURL url(my_url);
   label.SetURL(url);
   EXPECT_EQ(my_url, label.GetURL().spec());
-  EXPECT_EQ(UTF8ToWide(my_url), label.GetText());
+  EXPECT_EQ(UTF8ToUTF16(my_url), label.GetText());
 }
 
 TEST(LabelTest, ColorProperty) {
   Label label;
   SkColor color = SkColorSetARGB(20, 40, 10, 5);
-  label.SetColor(color);
-  EXPECT_EQ(color, label.GetColor());
+  label.SetAutoColorReadabilityEnabled(false);
+  label.SetEnabledColor(color);
+  EXPECT_EQ(color, label.enabled_color());
 }
 
 TEST(LabelTest, AlignmentProperty) {
@@ -110,19 +111,19 @@ TEST(LabelTest, MultiLineProperty) {
 
 TEST(LabelTest, TooltipProperty) {
   Label label;
-  std::wstring test_text(L"My cool string.");
+  string16 test_text(ASCIIToUTF16("My cool string."));
   label.SetText(test_text);
 
-  std::wstring tooltip;
+  string16 tooltip;
   EXPECT_TRUE(label.GetTooltipText(gfx::Point(), &tooltip));
   EXPECT_EQ(test_text, tooltip);
 
-  std::wstring tooltip_text(L"The tooltip!");
+  string16 tooltip_text(ASCIIToUTF16("The tooltip!"));
   label.SetTooltipText(tooltip_text);
   EXPECT_TRUE(label.GetTooltipText(gfx::Point(), &tooltip));
   EXPECT_EQ(tooltip_text, tooltip);
 
-  std::wstring empty_text;
+  string16 empty_text;
   label.SetTooltipText(empty_text);
   EXPECT_TRUE(label.GetTooltipText(gfx::Point(), &tooltip));
   EXPECT_EQ(test_text, tooltip);
@@ -158,7 +159,7 @@ TEST(LabelTest, TooltipProperty) {
 TEST(LabelTest, Accessibility) {
   Label label;
   string16 test_text(ASCIIToUTF16("My special text."));
-  label.SetText(UTF16ToWideHack(test_text));
+  label.SetText(test_text);
 
   ui::AccessibleViewState state;
   label.GetAccessibleState(&state);
@@ -169,7 +170,7 @@ TEST(LabelTest, Accessibility) {
 
 TEST(LabelTest, SingleLineSizing) {
   Label label;
-  std::wstring test_text(L"A not so random string in one line.");
+  string16 test_text(ASCIIToUTF16("A not so random string in one line."));
   label.SetText(test_text);
 
   // GetPreferredSize
@@ -196,7 +197,8 @@ TEST(LabelTest, SingleLineSizing) {
 TEST(LabelTest, MultiLineSizing) {
   Label label;
   label.set_focusable(false);
-  std::wstring test_text(L"A random string\nwith multiple lines\nand returns!");
+  string16 test_text(
+      ASCIIToUTF16("A random string\nwith multiple lines\nand returns!"));
   label.SetText(test_text);
   label.SetMultiLine(true);
 
@@ -284,7 +286,7 @@ TEST(LabelTest, DrawSingleLineString) {
   // align right really means align left.
   label.set_rtl_alignment_mode(Label::AUTO_DETECT_ALIGNMENT);
 
-  std::wstring test_text(L"Here's a string with no returns.");
+  string16 test_text(ASCIIToUTF16("Here's a string with no returns."));
   label.SetText(test_text);
   gfx::Size required_size(label.GetPreferredSize());
   gfx::Size extra(22, 8);
@@ -294,7 +296,7 @@ TEST(LabelTest, DrawSingleLineString) {
                   required_size.height() + extra.height());
 
   // Do some basic verifications for all three alignments.
-  std::wstring paint_text;
+  string16 paint_text;
   gfx::Rect text_bounds;
   int flags;
 
@@ -402,7 +404,7 @@ TEST(LabelTest, DrawMultiLineString) {
   // align right really means align left.
   label.set_rtl_alignment_mode(Label::AUTO_DETECT_ALIGNMENT);
 
-  std::wstring test_text(L"Another string\nwith returns\n\n!");
+  string16 test_text(ASCIIToUTF16("Another string\nwith returns\n\n!"));
   label.SetText(test_text);
   label.SetMultiLine(true);
   label.SizeToFit(0);
@@ -413,7 +415,7 @@ TEST(LabelTest, DrawMultiLineString) {
                   label.height() + extra.height());
 
   // Do some basic verifications for all three alignments.
-  std::wstring paint_text;
+  string16 paint_text;
   gfx::Rect text_bounds;
   int flags;
   label.CalculateDrawStringParams(&paint_text, &text_bounds, &flags);
@@ -542,7 +544,7 @@ TEST(LabelTest, DrawSingleLineStringInRTL) {
   std::string locale = l10n_util::GetApplicationLocale("");
   base::i18n::SetICUDefaultLocale("he");
 
-  std::wstring test_text(L"Here's a string with no returns.");
+  string16 test_text(ASCIIToUTF16("Here's a string with no returns."));
   label.SetText(test_text);
   gfx::Size required_size(label.GetPreferredSize());
   gfx::Size extra(22, 8);
@@ -552,7 +554,7 @@ TEST(LabelTest, DrawSingleLineStringInRTL) {
                   required_size.height() + extra.height());
 
   // Do some basic verifications for all three alignments.
-  std::wstring paint_text;
+  string16 paint_text;
   gfx::Rect text_bounds;
   int flags;
 
@@ -664,7 +666,7 @@ TEST(LabelTest, DrawMultiLineStringInRTL) {
   std::string locale = l10n_util::GetApplicationLocale("");
   base::i18n::SetICUDefaultLocale("he");
 
-  std::wstring test_text(L"Another string\nwith returns\n\n!");
+  string16 test_text(ASCIIToUTF16("Another string\nwith returns\n\n!"));
   label.SetText(test_text);
   label.SetMultiLine(true);
   label.SizeToFit(0);
@@ -675,7 +677,7 @@ TEST(LabelTest, DrawMultiLineStringInRTL) {
                   label.height() + extra.height());
 
   // Do some basic verifications for all three alignments.
-  std::wstring paint_text;
+  string16 paint_text;
   gfx::Rect text_bounds;
   int flags;
   label.CalculateDrawStringParams(&paint_text, &text_bounds, &flags);

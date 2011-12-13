@@ -9,9 +9,9 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
+#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
-#include "chrome/browser/tab_contents/infobar.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/test/base/testing_profile.h"
@@ -174,9 +174,10 @@ void GeolocationPermissionContextTests::CheckPermissionMessageSentInternal(
 void GeolocationPermissionContextTests::AddNewTab(const GURL& url) {
   TabContents* new_tab =
       new TabContents(profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
-  new_tab->controller().LoadURL(url, GURL(), PageTransition::TYPED);
-  static_cast<TestRenderViewHost*>(new_tab->render_manager()->current_host())->
-      SendNavigate(extra_tabs_.size() + 1, url);
+  new_tab->controller().LoadURL(url, GURL(), content::PAGE_TRANSITION_TYPED,
+                                std::string());
+  static_cast<TestRenderViewHost*>(new_tab->render_manager_for_testing()->
+      current_host())->SendNavigate(extra_tabs_.size() + 1, url);
   extra_tabs_.push_back(new TabContentsWrapper(new_tab));
 }
 

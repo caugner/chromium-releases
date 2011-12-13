@@ -12,6 +12,7 @@
 #include <list>
 #include <map>
 
+#include "content/common/content_export.h"
 #include "content/renderer/media/video_capture_message_filter.h"
 #include "media/video/capture/video_capture.h"
 
@@ -19,9 +20,8 @@ namespace base {
 class MessageLoopProxy;
 }
 
-class VideoCaptureImpl
-    : public media::VideoCapture,
-      public VideoCaptureMessageFilter::Delegate {
+class CONTENT_EXPORT VideoCaptureImpl
+    : public media::VideoCapture, public VideoCaptureMessageFilter::Delegate {
  public:
   // media::VideoCapture interface.
   virtual void StartCapture(media::VideoCapture::EventHandler* handler,
@@ -79,13 +79,17 @@ class VideoCaptureImpl
   void DoDelegateAdded(int32 device_id);
 
   void Init();
-  void DeInit(Task* task);
+  void DeInit(base::Closure task);
   void StopDevice();
   void RestartCapture();
   void StartCaptureInternal();
   void AddDelegateOnIOThread();
-  void RemoveDelegateOnIOThread(Task* task);
+  void RemoveDelegateOnIOThread(base::Closure task);
   virtual void Send(IPC::Message* message);
+
+  // Helpers.
+  bool CapabilityMatchesParameters(const VideoCaptureCapability& capability,
+                                   const media::VideoCaptureParams& params);
 
   scoped_refptr<VideoCaptureMessageFilter> message_filter_;
   scoped_refptr<base::MessageLoopProxy> ml_proxy_;
@@ -112,6 +116,10 @@ class VideoCaptureImpl
   // The parameter is being used in current capture session. A capture session
   // starts with StartCapture and ends with StopCapture.
   media::VideoCaptureParams current_params_;
+
+  // The information about the device sent from browser process side.
+  media::VideoCaptureParams device_info_;
+  bool device_info_available_;
 
   // The parameter will be used in next capture session.
   media::VideoCaptureParams new_params_;

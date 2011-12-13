@@ -446,12 +446,12 @@ class SessionRestoreImpl : public NotificationObserver {
 
   // Restore window(s) from a foreign session.
   void RestoreForeignSession(
-      std::vector<SessionWindow*>::const_iterator begin,
-      std::vector<SessionWindow*>::const_iterator end) {
+      std::vector<const SessionWindow*>::const_iterator begin,
+      std::vector<const SessionWindow*>::const_iterator end) {
     StartTabCreation();
     // Create a browser instance to put the restored tabs in.
-    for (std::vector<SessionWindow*>::const_iterator i = begin;
-        i != end; ++i) {
+    for (std::vector<const SessionWindow*>::const_iterator i = begin;
+         i != end; ++i) {
       Browser* browser = CreateRestoredBrowser(
           static_cast<Browser::Type>((*i)->type),
           (*i)->bounds,
@@ -562,7 +562,7 @@ class SessionRestoreImpl : public NotificationObserver {
     if (synchronous_) {
       // See comment above windows_ as to why we don't process immediately.
       windows_.swap(*windows);
-      MessageLoop::current()->Quit();
+      MessageLoop::current()->QuitNow();
       return;
     }
 
@@ -751,7 +751,7 @@ class SessionRestoreImpl : public NotificationObserver {
         add_types |= TabStripModel::ADD_ACTIVE;
       int index = browser->GetIndexForInsertionDuringRestore(i);
       browser::NavigateParams params(browser, urls[i],
-                                     PageTransition::START_PAGE);
+                                     content::PAGE_TRANSITION_START_PAGE);
       params.disposition = i == 0 ? NEW_FOREGROUND_TAB : NEW_BACKGROUND_TAB;
       params.tabstrip_index = index;
       params.tabstrip_add_types = add_types;
@@ -842,8 +842,8 @@ Browser* SessionRestore::RestoreSession(Profile* profile,
 // static
 void SessionRestore::RestoreForeignSessionWindows(
     Profile* profile,
-    std::vector<SessionWindow*>::const_iterator begin,
-    std::vector<SessionWindow*>::const_iterator end) {
+    std::vector<const SessionWindow*>::const_iterator begin,
+    std::vector<const SessionWindow*>::const_iterator end) {
   // Create a SessionRestore object to eventually restore the tabs.
   std::vector<GURL> gurls;
   SessionRestoreImpl restorer(profile,

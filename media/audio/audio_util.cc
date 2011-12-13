@@ -21,6 +21,8 @@
 
 using base::subtle::Atomic32;
 
+const uint32 kUnknownDataSize = static_cast<uint32>(-1);
+
 namespace media {
 
 // TODO(fbarchard): Convert to intrinsics for better efficiency.
@@ -175,7 +177,7 @@ bool DeinterleaveAudioChannel(void* source,
       uint8* source8 = static_cast<uint8*>(source) + channel_index;
       const float kScale = 1.0f / 128.0f;
       for (unsigned i = 0; i < number_of_frames; ++i) {
-        destination[i] = kScale * static_cast<int>(*source8 + 128);
+        destination[i] = kScale * (static_cast<int>(*source8) - 128);
         source8 += channels;
       }
       return true;
@@ -240,6 +242,23 @@ double GetAudioHardwareSampleRate()
 #endif
 }
 
+size_t GetAudioHardwareBufferSize() {
+  // The sizes here were determined by experimentation and are roughly
+  // the lowest value (for low latency) that still allowed glitch-free
+  // audio under high loads.
+  //
+  // For Mac OS X the chromium audio backend uses a low-latency
+  // CoreAudio API, so a low buffer size is possible.  For other OSes,
+  // further tuning may be needed.
+#if defined(OS_MACOSX)
+  return 128;
+#elif defined(OS_LINUX)
+  return 2048;
+#else
+  return 2048;
+#endif
+}
+
 // When transferring data in the shared memory, first word is size of data
 // in bytes. Actual data starts immediately after it.
 
@@ -257,7 +276,7 @@ uint32 GetActualDataSizeInBytes(base::SharedMemory* shared_memory,
   char* ptr = static_cast<char*>(shared_memory->memory()) + shared_memory_size;
   DCHECK_EQ(0u, reinterpret_cast<size_t>(ptr) & 3);
 
-  // Actual data size stored in the beginning of the buffer.
+  // Actual data size stored at the end of the buffer.
   uint32 actual_data_size =
       base::subtle::Acquire_Load(reinterpret_cast<volatile Atomic32*>(ptr));
   return std::min(actual_data_size, shared_memory_size);
@@ -269,9 +288,25 @@ void SetActualDataSizeInBytes(base::SharedMemory* shared_memory,
   char* ptr = static_cast<char*>(shared_memory->memory()) + shared_memory_size;
   DCHECK_EQ(0u, reinterpret_cast<size_t>(ptr) & 3);
 
-  // Set actual data size in the beginning of the buffer.
+  // Set actual data size at the end of the buffer.
   base::subtle::Release_Store(reinterpret_cast<volatile Atomic32*>(ptr),
                               actual_data_size);
+}
+
+void SetUnknownDataSize(base::SharedMemory* shared_memory,
+                        uint32 shared_memory_size) {
+  SetActualDataSizeInBytes(shared_memory, shared_memory_size, kUnknownDataSize);
+}
+
+bool IsUnknownDataSize(base::SharedMemory* shared_memory,
+                       uint32 shared_memory_size) {
+  char* ptr = static_cast<char*>(shared_memory->memory()) + shared_memory_size;
+  DCHECK_EQ(0u, reinterpret_cast<size_t>(ptr) & 3);
+
+  // Actual data size stored at the end of the buffer.
+  uint32 actual_data_size =
+      base::subtle::Acquire_Load(reinterpret_cast<volatile Atomic32*>(ptr));
+  return actual_data_size == kUnknownDataSize;
 }
 
 }  // namespace media

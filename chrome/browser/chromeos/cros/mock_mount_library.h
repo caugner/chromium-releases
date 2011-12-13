@@ -22,6 +22,7 @@ class MockMountLibrary : public MountLibrary {
   MockMountLibrary();
   virtual ~MockMountLibrary();
 
+  MOCK_METHOD0(Init, void(void));
   MOCK_METHOD1(AddObserver, void(MountLibrary::Observer*));
   MOCK_METHOD1(RemoveObserver, void(MountLibrary::Observer*));
   MOCK_CONST_METHOD0(disks, const MountLibrary::DiskMap&(void));
@@ -31,6 +32,7 @@ class MockMountLibrary : public MountLibrary {
   MOCK_METHOD3(MountPath, void(const char*, MountType,
                                const MountPathOptions&));
   MOCK_METHOD1(UnmountPath, void(const char*));
+  MOCK_METHOD3(GetSizeStatsOnFileThread, void(const char*, size_t*, size_t*));
   MOCK_METHOD1(FormatUnmountedDevice, void(const char*));
   MOCK_METHOD1(FormatMountedDevice, void(const char*));
   MOCK_METHOD3(UnmountDeviceRecursive, void(const char*,

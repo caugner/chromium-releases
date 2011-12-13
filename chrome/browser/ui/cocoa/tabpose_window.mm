@@ -10,7 +10,7 @@
 
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
-#include "base/memory/scoped_callback_factory.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -18,7 +18,6 @@
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/cocoa/animation_utils.h"
@@ -32,6 +31,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/backing_store_mac.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
@@ -136,7 +136,7 @@ namespace tabpose {
 class ThumbnailLoader : public base::RefCountedThreadSafe<ThumbnailLoader> {
  public:
   ThumbnailLoader(gfx::Size size, RenderWidgetHost* rwh, ThumbnailLayer* layer)
-      : size_(size), rwh_(rwh), layer_(layer), factory_(this) {}
+      : size_(size), rwh_(rwh), layer_(layer), weak_factory_(this) {}
 
   // Starts the fetch.
   void LoadThumbnail();
@@ -160,7 +160,7 @@ class ThumbnailLoader : public base::RefCountedThreadSafe<ThumbnailLoader> {
   gfx::Size size_;
   RenderWidgetHost* rwh_;  // weak
   ThumbnailLayer* layer_;  // weak, owns us
-  base::ScopedCallbackFactory<ThumbnailLoader> factory_;
+  base::WeakPtrFactory<ThumbnailLoader> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ThumbnailLoader);
 };
@@ -185,7 +185,8 @@ void ThumbnailLoader::LoadThumbnail() {
   generator->AskForSnapshot(
       rwh_,
       /*prefer_backing_store=*/false,
-      factory_.NewCallback(&ThumbnailLoader::DidReceiveBitmap),
+      base::Bind(&ThumbnailLoader::DidReceiveBitmap,
+                 weak_factory_.GetWeakPtr()),
       page_size,
       pixel_size);
 }

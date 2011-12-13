@@ -37,6 +37,7 @@
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
+#include "chrome/browser/memory_details.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/password_manager/password_store_consumer.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
@@ -48,9 +49,9 @@
 #include "content/browser/cancelable_request.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_manager.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_types.h"
 #include "ui/gfx/size.h"
 
 class AutocompleteEditModel;
@@ -60,6 +61,7 @@ class Browser;
 class Extension;
 class ExtensionProcessManager;
 class ExtensionService;
+class InfoBarTabHelper;
 class NavigationController;
 class Profile;
 class RenderViewHost;
@@ -109,6 +111,7 @@ class InitialLoadObserver : public NotificationObserver {
   NotificationRegistrar registrar_;
 
   base::WeakPtr<AutomationProvider> automation_;
+  size_t crashed_tab_count_;
   size_t outstanding_tab_count_;
   base::TimeTicks init_time_;
   TabTimeMap loading_tabs_;
@@ -845,27 +848,55 @@ class ToggleNetworkDeviceObserver
   DISALLOW_COPY_AND_ASSIGN(ToggleNetworkDeviceObserver);
 };
 
+class NetworkStatusObserver
+    : public chromeos::NetworkLibrary::NetworkManagerObserver {
+ public:
+  NetworkStatusObserver(AutomationProvider* automation,
+                        IPC::Message* reply_message);
+  virtual ~NetworkStatusObserver();
+
+  virtual const chromeos::Network* GetNetwork(
+      chromeos::NetworkLibrary* network_library) = 0;
+  // NetworkLibrary::NetworkManagerObserver implementation.
+  virtual void OnNetworkManagerChanged(chromeos::NetworkLibrary* obj);
+  virtual void NetworkStatusCheck(const chromeos::Network* network) = 0;
+
+ protected:
+  base::WeakPtr<AutomationProvider> automation_;
+  scoped_ptr<IPC::Message> reply_message_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NetworkStatusObserver);
+};
+
 // Waits for a connection success or failure for the specified
 // network and returns the status to the automation provider.
-class NetworkConnectObserver
-    : public chromeos::NetworkLibrary::NetworkManagerObserver {
+class NetworkConnectObserver : public NetworkStatusObserver {
  public:
   NetworkConnectObserver(AutomationProvider* automation,
                          IPC::Message* reply_message);
 
-  virtual ~NetworkConnectObserver();
-
-  virtual const chromeos::WifiNetwork* GetWifiNetwork(
-      chromeos::NetworkLibrary* network_library) = 0;
-
-  // NetworkLibrary::NetworkManagerObserver implementation.
-  virtual void OnNetworkManagerChanged(chromeos::NetworkLibrary* obj);
+  virtual void NetworkStatusCheck(const chromeos::Network* network);
 
  private:
-  base::WeakPtr<AutomationProvider> automation_;
-  scoped_ptr<IPC::Message> reply_message_;
-
   DISALLOW_COPY_AND_ASSIGN(NetworkConnectObserver);
+};
+
+// Waits until a network has disconnected.  Then returns success
+// or failure.
+class NetworkDisconnectObserver : public NetworkStatusObserver {
+ public:
+  NetworkDisconnectObserver(AutomationProvider* automation,
+                            IPC::Message* reply_message,
+                            const std::string& service_path);
+
+  virtual void NetworkStatusCheck(const chromeos::Network* network);
+  const chromeos::Network* GetNetwork(
+      chromeos::NetworkLibrary* network_library);
+
+ private:
+  std::string service_path_;
+  DISALLOW_COPY_AND_ASSIGN(NetworkDisconnectObserver);
 };
 
 // Waits for a connection success or failure for the specified
@@ -876,13 +907,28 @@ class ServicePathConnectObserver : public NetworkConnectObserver {
                              IPC::Message* reply_message,
                              const std::string& service_path);
 
-  virtual const chromeos::WifiNetwork* GetWifiNetwork(
+  const chromeos::Network* GetNetwork(
       chromeos::NetworkLibrary* network_library);
 
  private:
   std::string service_path_;
-
   DISALLOW_COPY_AND_ASSIGN(ServicePathConnectObserver);
+};
+
+// Waits for a connection success or failure for the specified
+// network and returns the status to the automation provider.
+class SSIDConnectObserver : public NetworkConnectObserver {
+ public:
+  SSIDConnectObserver(AutomationProvider* automation,
+                      IPC::Message* reply_message,
+                      const std::string& ssid);
+
+  const chromeos::Network* GetNetwork(
+      chromeos::NetworkLibrary* network_library);
+
+ private:
+  std::string ssid_;
+  DISALLOW_COPY_AND_ASSIGN(SSIDConnectObserver);
 };
 
 // Waits for a connection success or failure for the specified
@@ -957,23 +1003,6 @@ class EnrollmentObserver
   chromeos::EnterpriseEnrollmentScreen* enrollment_screen_;
 
   DISALLOW_COPY_AND_ASSIGN(EnrollmentObserver);
-};
-
-// Waits for a connection success or failure for the specified
-// network and returns the status to the automation provider.
-class SSIDConnectObserver : public NetworkConnectObserver {
- public:
-  SSIDConnectObserver(AutomationProvider* automation,
-                      IPC::Message* reply_message,
-                      const std::string& ssid);
-
-  virtual const chromeos::WifiNetwork* GetWifiNetwork(
-      chromeos::NetworkLibrary* network_library);
-
- private:
-  std::string ssid_;
-
-  DISALLOW_COPY_AND_ASSIGN(SSIDConnectObserver);
 };
 
 // Waits for profile photo to be captured by the camera,
@@ -1498,7 +1527,7 @@ class AutofillFormSubmittedObserver
   base::WeakPtr<AutomationProvider> automation_;
   scoped_ptr<IPC::Message> reply_message_;
   PersonalDataManager* pdm_;
-  TabContentsWrapper* tab_contents_;
+  InfoBarTabHelper* infobar_helper_;
 };
 
 // Allows the automation provider to wait until all the notification
@@ -1704,6 +1733,51 @@ class DragTargetDropAckNotificationObserver : public NotificationObserver {
   scoped_ptr<IPC::Message> reply_message_;
 
   DISALLOW_COPY_AND_ASSIGN(DragTargetDropAckNotificationObserver);
+};
+
+// Allows the automation provider to wait for process memory details to be
+// available before sending this information to the client.
+class ProcessInfoObserver : public MemoryDetails {
+ public:
+  ProcessInfoObserver(AutomationProvider* automation,
+                      IPC::Message* reply_message);
+
+  virtual void OnDetailsAvailable() OVERRIDE;
+
+ private:
+  virtual ~ProcessInfoObserver();
+  base::WeakPtr<AutomationProvider> automation_;
+  scoped_ptr<IPC::Message> reply_message_;
+
+  DISALLOW_COPY_AND_ASSIGN(ProcessInfoObserver);
+};
+
+// Manages the process of creating a new Profile and opening a new browser with
+// that profile. This observer should be created, and then a new Profile
+// should be created through the ProfileManager using
+// profile_manager->CreateMultiProfileAsync(). The Observer watches for profile
+// creation, upon which it creates a new browser window; after observing
+// window creation, it creates a new tab and then finally observes it finish
+// loading.
+class BrowserOpenedWithNewProfileNotificationObserver
+    : public NotificationObserver {
+ public:
+  BrowserOpenedWithNewProfileNotificationObserver(
+      AutomationProvider* automation,
+      IPC::Message* reply_message);
+  virtual ~BrowserOpenedWithNewProfileNotificationObserver();
+
+  virtual void Observe(int type,
+                       const NotificationSource& source,
+                       const NotificationDetails& details);
+
+ private:
+  NotificationRegistrar registrar_;
+  base::WeakPtr<AutomationProvider> automation_;
+  scoped_ptr<IPC::Message> reply_message_;
+  int new_window_id_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowserOpenedWithNewProfileNotificationObserver);
 };
 
 #endif  // CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_OBSERVERS_H_

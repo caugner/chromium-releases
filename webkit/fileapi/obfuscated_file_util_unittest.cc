@@ -160,7 +160,6 @@ class ObfuscatedFileUtilTest : public testing::Test {
         data_dir_.path(),
         false /* incognito */,
         true /* allow_file_access_from_files */,
-        false /* unlimited_quota */,
         NULL /* path_manager */);
 
     obfuscated_file_util_ = static_cast<ObfuscatedFileUtil*>(
@@ -1284,8 +1283,7 @@ TEST_F(ObfuscatedFileUtilTest, TestOriginEnumerator) {
       ASSERT_TRUE(type() == kFileSystemTypeTemporary);
       EXPECT_EQ(true,
           enumerator->HasFileSystemType(kFileSystemTypeTemporary));
-      EXPECT_EQ(false,
-          enumerator->HasFileSystemType(kFileSystemTypePersistent));
+      EXPECT_FALSE(enumerator->HasFileSystemType(kFileSystemTypePersistent));
       found = true;
     }
     EXPECT_TRUE(found);

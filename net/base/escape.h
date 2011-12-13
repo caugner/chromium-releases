@@ -39,10 +39,6 @@ NET_EXPORT std::string EscapeExternalHandlerValue(const std::string& text);
 // the character would be interpretted as an HTML delimiter.
 NET_EXPORT void AppendEscapedCharForHTML(char c, std::string* output);
 
-// Escape chars that might cause this text to be interpretted as HTML tags.
-NET_EXPORT std::string EscapeForHTML(const std::string& text);
-NET_EXPORT string16 EscapeForHTML(const string16& text);
-
 // Unescaping ------------------------------------------------------------------
 
 class UnescapeRule {
@@ -84,6 +80,12 @@ class UnescapeRule {
     REPLACE_PLUS_WITH_SPACE = 16,
   };
 };
+
+namespace net {
+
+// Escape chars that might cause this text to be interpretted as HTML tags.
+NET_EXPORT std::string EscapeForHTML(const std::string& text);
+NET_EXPORT string16 EscapeForHTML(const string16& text);
 
 // Unescapes |escaped_text| and returns the result.
 // Unescaping consists of looking for the exact pattern "%XX", where each X is
@@ -142,6 +144,8 @@ NET_EXPORT bool EscapeQueryParamValue(const string16& text,
 NET_EXPORT string16 EscapeQueryParamValueUTF8(const string16& text,
                                               bool use_plus);
 
+namespace internal {
+
 // Private Functions (Exposed for Unit Testing) --------------------------------
 
 // A function called by std::for_each that will adjust any offset which occurs
@@ -154,5 +158,9 @@ struct NET_EXPORT_PRIVATE AdjustEncodingOffset {
 
   const Adjustments& adjustments;
 };
+
+}  // namespace internal
+
+}  // namespace net
 
 #endif  // NET_BASE_ESCAPE_H_

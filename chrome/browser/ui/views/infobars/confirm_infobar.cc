@@ -13,13 +13,13 @@
 
 // ConfirmInfoBarDelegate -----------------------------------------------------
 
-InfoBar* ConfirmInfoBarDelegate::CreateInfoBar(TabContentsWrapper* owner) {
+InfoBar* ConfirmInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   return new ConfirmInfoBar(owner, this);
 }
 
 // ConfirmInfoBar -------------------------------------------------------------
 
-ConfirmInfoBar::ConfirmInfoBar(TabContentsWrapper* owner,
+ConfirmInfoBar::ConfirmInfoBar(InfoBarTabHelper* owner,
                                ConfirmInfoBarDelegate* delegate)
     : InfoBarView(owner, delegate),
       label_(NULL),
@@ -86,7 +86,7 @@ void ConfirmInfoBar::ViewHierarchyChanged(bool is_add,
 
     string16 link_text(delegate->GetLinkText());
     if (!link_text.empty()) {
-      link_ = CreateLink(link_text, this, background()->get_color());
+      link_ = CreateLink(link_text, this);
       AddChildView(link_);
     }
   }
@@ -98,6 +98,8 @@ void ConfirmInfoBar::ViewHierarchyChanged(bool is_add,
 
 void ConfirmInfoBar::ButtonPressed(views::Button* sender,
                                    const views::Event& event) {
+  if (!owned())
+    return;  // We're closing; don't call anything, it might access the owner.
   ConfirmInfoBarDelegate* delegate = GetDelegate();
   if ((ok_button_ != NULL) && sender == ok_button_) {
     if (delegate->Accept())
@@ -122,6 +124,8 @@ int ConfirmInfoBar::ContentMinimumWidth() const {
 }
 
 void ConfirmInfoBar::LinkClicked(views::Link* source, int event_flags) {
+  if (!owned())
+    return;  // We're closing; don't call anything, it might access the owner.
   DCHECK(link_ != NULL);
   DCHECK_EQ(link_, source);
   if (GetDelegate()->LinkClicked(

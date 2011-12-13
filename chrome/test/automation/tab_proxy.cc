@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/json/json_value_serializer.h"
 #include "base/logging.h"
 #include "base/string16.h"
 #include "base/threading/platform_thread.h"
@@ -14,7 +15,6 @@
 #include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/browser_proxy.h"
-#include "content/common/json_value_serializer.h"
 #include "googleurl/src/gurl.h"
 
 TabProxy::TabProxy(AutomationMessageSender* sender,
@@ -261,14 +261,13 @@ bool TabProxy::GetProcessID(int* process_id) const {
 bool TabProxy::ExecuteAndExtractString(const std::wstring& frame_xpath,
                                        const std::wstring& jscript,
                                        std::wstring* string_value) {
-  Value* root = NULL;
-  bool succeeded = ExecuteAndExtractValue(frame_xpath, jscript, &root);
-  if (!succeeded)
+  scoped_ptr<Value> root(ExecuteAndExtractValue(frame_xpath, jscript));
+  if (root == NULL)
     return false;
 
   DCHECK(root->IsType(Value::TYPE_LIST));
   Value* value = NULL;
-  succeeded = static_cast<ListValue*>(root)->Get(0, &value);
+  bool succeeded = static_cast<ListValue*>(root.get())->Get(0, &value);
   if (succeeded) {
     string16 read_value;
     succeeded = value->GetAsString(&read_value);
@@ -277,80 +276,66 @@ bool TabProxy::ExecuteAndExtractString(const std::wstring& frame_xpath,
       *string_value = UTF16ToWideHack(read_value);
     }
   }
-
-  delete root;
   return succeeded;
 }
 
 bool TabProxy::ExecuteAndExtractBool(const std::wstring& frame_xpath,
                                      const std::wstring& jscript,
                                      bool* bool_value) {
-  Value* root = NULL;
-  bool succeeded = ExecuteAndExtractValue(frame_xpath, jscript, &root);
-  if (!succeeded)
+  scoped_ptr<Value> root(ExecuteAndExtractValue(frame_xpath, jscript));
+  if (root == NULL)
     return false;
 
   bool read_value = false;
   DCHECK(root->IsType(Value::TYPE_LIST));
   Value* value = NULL;
-  succeeded = static_cast<ListValue*>(root)->Get(0, &value);
+  bool succeeded = static_cast<ListValue*>(root.get())->Get(0, &value);
   if (succeeded) {
     succeeded = value->GetAsBoolean(&read_value);
     if (succeeded) {
       *bool_value = read_value;
     }
   }
-
-  delete value;
   return succeeded;
 }
 
 bool TabProxy::ExecuteAndExtractInt(const std::wstring& frame_xpath,
                                     const std::wstring& jscript,
                                     int* int_value) {
-  Value* root = NULL;
-  bool succeeded = ExecuteAndExtractValue(frame_xpath, jscript, &root);
-  if (!succeeded)
+  scoped_ptr<Value> root(ExecuteAndExtractValue(frame_xpath, jscript));
+  if (root == NULL)
     return false;
 
   int read_value = 0;
   DCHECK(root->IsType(Value::TYPE_LIST));
   Value* value = NULL;
-  succeeded = static_cast<ListValue*>(root)->Get(0, &value);
+  bool succeeded = static_cast<ListValue*>(root.get())->Get(0, &value);
   if (succeeded) {
     succeeded = value->GetAsInteger(&read_value);
     if (succeeded) {
       *int_value = read_value;
     }
   }
-
-  delete value;
   return succeeded;
 }
 
-bool TabProxy::ExecuteAndExtractValue(const std::wstring& frame_xpath,
-                                      const std::wstring& jscript,
-                                      Value** value) {
+Value* TabProxy::ExecuteAndExtractValue(const std::wstring& frame_xpath,
+                                        const std::wstring& jscript) {
   if (!is_valid())
-    return false;
-
-  if (!value) {
-    NOTREACHED();
-    return false;
-  }
+    return NULL;
 
   std::string json;
   if (!sender_->Send(new AutomationMsg_DomOperation(handle_, frame_xpath,
-                                                    jscript, &json)))
-    return false;
+                                                    jscript, &json))) {
+    return NULL;
+  }
   // Wrap |json| in an array before deserializing because valid JSON has an
   // array or an object as the root.
   json.insert(0, "[");
   json.append("]");
 
   JSONStringValueSerializer deserializer(json);
-  *value = deserializer.Deserialize(NULL, NULL);
-  return *value != NULL;
+  return deserializer.Deserialize(NULL, NULL);
 }
 
 DOMElementProxyRef TabProxy::GetDOMDocument() {
@@ -586,7 +571,7 @@ bool TabProxy::WaitForTabToBeRestored(uint32 timeout_ms) {
 }
 
 bool TabProxy::GetSecurityState(SecurityStyle* security_style,
-                                int* ssl_cert_status,
+                                net::CertStatus* ssl_cert_status,
                                 int* insecure_content_status) {
   DCHECK(security_style && ssl_cert_status && insecure_content_status);
 

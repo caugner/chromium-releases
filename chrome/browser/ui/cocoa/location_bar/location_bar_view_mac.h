@@ -13,6 +13,7 @@
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/first_run/first_run.h"
@@ -59,7 +60,7 @@ class LocationBarViewMac : public AutocompleteEditController,
                                 InstantCompleteBehavior behavior) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const OVERRIDE;
-  virtual PageTransition::Type GetPageTransition() const OVERRIDE;
+  virtual content::PageTransition GetPageTransition() const OVERRIDE;
   virtual void AcceptInput() OVERRIDE;
   virtual void FocusLocation(bool select_all) OVERRIDE;
   virtual void FocusSearch() OVERRIDE;
@@ -129,7 +130,7 @@ class LocationBarViewMac : public AutocompleteEditController,
   // AutocompleteEditController implementation.
   virtual void OnAutocompleteAccept(const GURL& url,
       WindowOpenDisposition disposition,
-      PageTransition::Type transition,
+      content::PageTransition transition,
       const GURL& alternate_nav_url);
   virtual void OnChanged();
   virtual void OnSelectionBoundsChanged();
@@ -217,13 +218,13 @@ class LocationBarViewMac : public AutocompleteEditController,
   ToolbarModel* toolbar_model_;  // Weak, owned by Browser.
 
   // The transition type to use for the navigation.
-  PageTransition::Type transition_;
+  content::PageTransition transition_;
 
   // Used to register for notifications received by NotificationObserver.
   NotificationRegistrar registrar_;
 
   // Used to schedule a task for the first run info bubble.
-  ScopedRunnableMethodFactory<LocationBarViewMac> first_run_bubble_;
+  base::WeakPtrFactory<LocationBarViewMac> weak_ptr_factory_;
 
   // Used to change the visibility of the star decoration.
   BooleanPrefMember edit_bookmarks_enabled_;

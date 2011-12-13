@@ -20,10 +20,10 @@
 #include "base/process_util.h"
 #include "base/threading/thread_local.h"
 #include "content/common/child_process.h"
-#include "content/common/content_switches.h"
+#include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
-#include "content/plugin/content_plugin_client.h"
-#include "content/plugin/npobject_util.h"
+#include "content/public/common/content_switches.h"
+#include "content/public/plugin/content_plugin_client.h"
 #include "ipc/ipc_channel_handle.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
@@ -69,12 +69,13 @@ static base::LazyInstance<base::ThreadLocalPointer<PluginThread> > lazy_tls(
 
 PluginThread::PluginThread()
     : preloaded_plugin_module_(NULL) {
-  plugin_path_ =
-      CommandLine::ForCurrentProcess()->GetSwitchValuePath(
-          switches::kPluginPath);
+  FilePath plugin_path = CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+      switches::kPluginPath);
 
   lazy_tls.Pointer()->Set(this);
-#if defined(TOOLKIT_USES_GTK)
+#if defined(USE_AURA)
+  // TODO(saintlou):
+#elif defined(TOOLKIT_USES_GTK)
   {
     // XEmbed plugins assume they are hosted in a Gtk application, so we need
     // to initialize Gtk in the plugin process.
@@ -99,10 +100,10 @@ PluginThread::PluginThread()
   PatchNPNFunctions();
 
   // Preload the library to avoid loading, unloading then reloading
-  preloaded_plugin_module_ = base::LoadNativeLibrary(plugin_path_, NULL);
+  preloaded_plugin_module_ = base::LoadNativeLibrary(plugin_path, NULL);
 
   scoped_refptr<webkit::npapi::PluginLib> plugin(
-      webkit::npapi::PluginLib::CreatePluginLib(plugin_path_));
+      webkit::npapi::PluginLib::CreatePluginLib(plugin_path));
   if (plugin.get()) {
     plugin->NP_Initialize();
     // For OOP plugins the plugin dll will be unloaded during process shutdown
@@ -124,7 +125,7 @@ PluginThread::~PluginThread() {
     base::UnloadNativeLibrary(preloaded_plugin_module_);
     preloaded_plugin_module_ = NULL;
   }
-  PluginChannelBase::CleanupChannels();
+  NPChannelBase::CleanupChannels();
   webkit::npapi::PluginLib::UnloadAllPlugins();
 
   if (webkit_glue::ShouldForcefullyTerminatePluginProcess())
@@ -157,7 +158,8 @@ void PluginThread::OnCreateChannel(int renderer_id,
     channel_handle.name = channel->channel_handle().name;
 #if defined(OS_POSIX)
     // On POSIX, pass the renderer-side FD.
-    channel_handle.socket = base::FileDescriptor(channel->renderer_fd(), false);
+    channel_handle.socket =
+        base::FileDescriptor(channel->TakeRendererFileDescriptor(), true);
 #endif
     channel->set_incognito(incognito);
   }

@@ -10,17 +10,21 @@
 #include "content/common/child_process.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/child_trace_message_filter.h"
-#include "content/common/content_switches.h"
 #include "content/common/file_system/file_system_dispatcher.h"
 #include "content/common/notification_service.h"
 #include "content/common/quota_dispatcher.h"
 #include "content/common/resource_dispatcher.h"
 #include "content/common/socket_stream_dispatcher.h"
+#include "content/public/common/content_switches.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
 #include "ipc/ipc_switches.h"
 #include "webkit/glue/webkit_glue.h"
+
+#if defined(OS_WIN)
+#include "content/common/handle_enumerator_win.h"
+#endif
 
 ChildThread::ChildThread() {
   channel_name_ = CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
@@ -37,12 +41,6 @@ void ChildThread::Init() {
   check_with_browser_before_shutdown_ = false;
   on_channel_error_called_ = false;
   message_loop_ = MessageLoop::current();
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUserAgent)) {
-    webkit_glue::SetUserAgent(
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kUserAgent));
-  }
-
   channel_.reset(new IPC::SyncChannel(channel_name_,
       IPC::Channel::MODE_CLIENT, this,
       ChildProcess::current()->io_message_loop_proxy(), true,
@@ -59,12 +57,7 @@ void ChildThread::Init() {
   sync_message_filter_ =
       new IPC::SyncMessageFilter(ChildProcess::current()->GetShutDownEvent());
   channel_->AddFilter(sync_message_filter_.get());
-
-#if !defined(NACL_WIN64)
-  // This brings in a depenency on gpu, which isn't linked in with NaCl's win64
-  // build.
   channel_->AddFilter(new ChildTraceMessageFilter());
-#endif
 
   // When running in unit tests, there is already a NotificationService object.
   // Since only one can exist at a time per thread, check first.
@@ -132,6 +125,39 @@ webkit_glue::ResourceLoaderBridge* ChildThread::CreateBridge(
   return resource_dispatcher()->CreateBridge(request_info);
 }
 
+base::SharedMemory* ChildThread::AllocateSharedMemory(
+    size_t buf_size) {
+  scoped_ptr<base::SharedMemory> shared_buf;
+#if defined(OS_WIN)
+  shared_buf.reset(new base::SharedMemory);
+  if (!shared_buf->CreateAndMapAnonymous(buf_size)) {
+    NOTREACHED();
+    return NULL;
+  }
+#else
+  // On POSIX, we need to ask the browser to create the shared memory for us,
+  // since this is blocked by the sandbox.
+  base::SharedMemoryHandle shared_mem_handle;
+  if (Send(new ChildProcessHostMsg_SyncAllocateSharedMemory(
+                   buf_size, &shared_mem_handle))) {
+    if (base::SharedMemory::IsHandleValid(shared_mem_handle)) {
+      shared_buf.reset(new base::SharedMemory(shared_mem_handle, false));
+      if (!shared_buf->Map(buf_size)) {
+        NOTREACHED() << "Map failed";
+        return NULL;
+      }
+    } else {
+      NOTREACHED() << "Browser failed to allocate shared memory";
+      return NULL;
+    }
+  } else {
+    NOTREACHED() << "Browser allocation request message failed";
+    return NULL;
+  }
+#endif
+  return shared_buf.release();
+}
+
 ResourceDispatcher* ChildThread::resource_dispatcher() {
   return resource_dispatcher_.get();
 }
@@ -163,6 +189,7 @@ bool ChildThread::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ChildProcessMsg_SetIPCLoggingEnabled,
                         OnSetIPCLoggingEnabled)
 #endif
+    IPC_MESSAGE_HANDLER(ChildProcessMsg_DumpHandles, OnDumpHandles)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -195,6 +222,20 @@ void ChildThread::OnSetIPCLoggingEnabled(bool enable) {
     IPC::Logging::GetInstance()->Disable();
 }
 #endif  //  IPC_MESSAGE_LOG_ENABLED
+
+void ChildThread::OnDumpHandles() {
+#if defined(OS_WIN)
+  scoped_refptr<content::HandleEnumerator> handle_enum(
+      new content::HandleEnumerator(
+          CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kAuditAllHandles)));
+  handle_enum->EnumerateHandles();
+  Send(new ChildProcessHostMsg_DumpHandlesDone);
+  return;
+#endif
+
+  NOTIMPLEMENTED();
+}
 
 ChildThread* ChildThread::current() {
   return ChildProcess::current()->main_thread();

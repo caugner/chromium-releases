@@ -6,10 +6,11 @@
 #define CHROME_RENDERER_BLOCKED_PLUGIN_H_
 #pragma once
 
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "webkit/glue/cpp_bound_class.h"
 #include "webkit/plugins/npapi/webview_plugin.h"
+#include "webkit/plugins/webplugininfo.h"
 
 class GURL;
 
@@ -23,16 +24,17 @@ namespace webkit_glue {
 struct CustomContextMenuContext;
 }
 
-class BlockedPlugin : public RenderViewObserver,
+class BlockedPlugin : public content::RenderViewObserver,
                       public CppBoundClass,
                       public webkit::npapi::WebViewPlugin::Delegate {
  public:
-  BlockedPlugin(RenderView* render_view,
+  BlockedPlugin(content::RenderView* render_view,
                 WebKit::WebFrame* frame,
-                const webkit::npapi::PluginGroup& info,
+                const webkit::WebPluginInfo& info,
                 const WebKit::WebPluginParams& params,
                 const WebPreferences& settings,
                 int template_id,
+                const string16& name,
                 const string16& message,
                 bool is_blocked_for_prerendering,
                 bool allow_loading);
@@ -48,31 +50,33 @@ class BlockedPlugin : public RenderViewObserver,
   virtual ~BlockedPlugin();
 
   // RenderViewObserver methods:
-  virtual bool OnMessageReceived(const IPC::Message& message);
-
-  void OnMenuItemSelected(
-      const webkit_glue::CustomContextMenuContext& /* ignored */,
-      unsigned id);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void ContextMenuAction(unsigned id) OVERRIDE;
 
   void OnLoadBlockedPlugins();
   void OnSetIsPrerendering(bool is_prerendering);
 
-  // Load the blocked plugin.
-  void LoadPlugin();
-
   // Javascript callbacks:
   // Load the blocked plugin by calling LoadPlugin().
   // Takes no arguments, and returns nothing.
-  void Load(const CppArgumentList& args, CppVariant* result);
+  void LoadCallback(const CppArgumentList& args, CppVariant* result);
 
   // Hide the blocked plugin by calling HidePlugin().
   // Takes no arguments, and returns nothing.
-  void Hide(const CppArgumentList& args, CppVariant* result);
+  void HideCallback(const CppArgumentList& args, CppVariant* result);
+
+  // Opens a URL in a new tab.
+  // Takes one argument, a string specifying the URL to open. Returns nothing.
+  void OpenUrlCallback(const CppArgumentList& args, CppVariant* result);
+
+  // Load the blocked plugin.
+  void LoadPlugin();
 
   // Hide the blocked plugin.
   void HidePlugin();
 
   WebKit::WebFrame* frame_;
+  webkit::WebPluginInfo plugin_info_;
   WebKit::WebPluginParams plugin_params_;
   webkit::npapi::WebViewPlugin* plugin_;
   // The name of the plugin that was blocked.

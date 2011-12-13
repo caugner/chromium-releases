@@ -16,7 +16,7 @@
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/extensions/url_pattern_set.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "net/base/registry_controlled_domain.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -45,6 +45,7 @@ const char kI18NModuleName[] = "i18n";
 const char kOmniboxModuleName[] = "omnibox";
 const char kPageActionModuleName[] = "pageAction";
 const char kPageActionsModuleName[] = "pageActions";
+const char kPermissionsModuleName[] = "permissions";
 const char kTestModuleName[] = "test";
 const char kTypesModuleName[] = "types";
 
@@ -59,6 +60,7 @@ const char* kNonPermissionModuleNames[] = {
   kOmniboxModuleName,
   kPageActionModuleName,
   kPageActionsModuleName,
+  kPermissionsModuleName,
   kTestModuleName,
   kTypesModuleName
 };
@@ -222,6 +224,9 @@ ExtensionPermissionsInfo::ExtensionPermissionsInfo()
   int component_only = ExtensionAPIPermission::kFlagComponentOnly;
   int full_access = ExtensionAPIPermission::kFlagImpliesFullAccess;
   int all_urls = ExtensionAPIPermission::kFlagImpliesFullURLAccess;
+
+  // Note: please update the permissions API documentation when modifying which
+  // permissions can be specified as optional.
   int optional = ExtensionAPIPermission::kFlagSupportsOptional;
 
   // Hosted app permissions
@@ -251,9 +256,6 @@ ExtensionPermissionsInfo::ExtensionPermissionsInfo()
   RegisterPermission(
       ExtensionAPIPermission::kUnlimitedStorage, "unlimitedStorage", 0,
       ExtensionPermissionMessage::kNone, hosted_app);
-  RegisterPermission(
-      ExtensionAPIPermission::kPermissions, "permissions", 0,
-      ExtensionPermissionMessage::kNone, hosted_app);
 
   // Hosted app and private permissions.
   RegisterPermission(
@@ -269,8 +271,9 @@ ExtensionPermissionsInfo::ExtensionPermissionsInfo()
       IDS_EXTENSION_PROMPT_WARNING_BOOKMARKS,
       ExtensionPermissionMessage::kBookmarks, optional);
   RegisterPermission(
-      ExtensionAPIPermission::kContentSettings, "contentSettings", 0,
-      ExtensionPermissionMessage::kNone, none);
+      ExtensionAPIPermission::kContentSettings, "contentSettings",
+      IDS_EXTENSION_PROMPT_WARNING_CONTENT_SETTINGS,
+      ExtensionPermissionMessage::kContentSettings, none);
   RegisterPermission(
       ExtensionAPIPermission::kContextMenus, "contextMenus", 0,
       ExtensionPermissionMessage::kNone, optional);
@@ -309,6 +312,12 @@ ExtensionPermissionsInfo::ExtensionPermissionsInfo()
       ExtensionAPIPermission::kTtsEngine, "ttsEngine",
       IDS_EXTENSION_PROMPT_WARNING_TTS_ENGINE,
       ExtensionPermissionMessage::kTtsEngine, none);
+  RegisterPermission(
+      ExtensionAPIPermission::kWebNavigation, "webNavigation", 0,
+      ExtensionPermissionMessage::kNone, none);
+  RegisterPermission(
+      ExtensionAPIPermission::kWebRequest, "webRequest", 0,
+      ExtensionPermissionMessage::kNone, none);
   RegisterPermission(
       ExtensionAPIPermission::kWebSocketProxyPrivate,
       "webSocketProxyPrivate", 0,
@@ -742,13 +751,6 @@ std::set<std::string> ExtensionPermissionSet::GetDistinctHosts(
 
 void ExtensionPermissionSet::InitEffectiveHosts() {
   effective_hosts_.ClearPatterns();
-
-  if (HasEffectiveAccessToAllHosts()) {
-    URLPattern all_urls(URLPattern::SCHEME_ALL);
-    all_urls.SetMatchAllURLs(true);
-    effective_hosts_.AddPattern(all_urls);
-    return;
-  }
 
   URLPatternSet::CreateUnion(
       explicit_hosts(), scriptable_hosts(), &effective_hosts_);

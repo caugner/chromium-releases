@@ -322,9 +322,7 @@ void BackgroundContentsService::Observe(int type,
 
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED: {
       // Remove any "This extension has crashed" balloons.
-      const UninstalledExtensionInfo* uninstalled_extension =
-          Details<const UninstalledExtensionInfo>(details).ptr();
-      ScheduleCloseBalloon(uninstalled_extension->extension_id);
+      ScheduleCloseBalloon(*Details<const std::string>(details).ptr());
       break;
     }
 
@@ -354,10 +352,13 @@ void BackgroundContentsService::LoadBackgroundContentsFromPrefs(
       // We should never reach here - it should not be possible for an app
       // to become uninstalled without the associated BackgroundContents being
       // unregistered via the EXTENSIONS_UNLOADED notification, unless there's a
-      // crash before we could save our prefs.
+      // crash before we could save our prefs, or if the user deletes the
+      // extension files manually rather than uninstalling it.
       NOTREACHED() << "No extension found for BackgroundContents - id = "
                    << *it;
-      return;
+      // Don't cancel out of our loop, just ignore this BackgroundContents and
+      // load the next one.
+      continue;
     }
     LoadBackgroundContentsFromDictionary(profile, *it, contents);
   }
@@ -561,12 +562,6 @@ const string16& BackgroundContentsService::GetParentApplicationId(
       return it->first;
   }
   return EmptyString16();
-}
-
-// static
-void BackgroundContentsService::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterDictionaryPref(prefs::kRegisteredBackgroundContents,
-                                PrefService::UNSYNCABLE_PREF);
 }
 
 void BackgroundContentsService::AddTabContents(

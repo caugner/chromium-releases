@@ -8,6 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/fullscreen_exit_bubble.h"
+#include "googleurl/src/gurl.h"
 #include "views/controls/link_listener.h"
 
 namespace views {
@@ -22,10 +23,13 @@ class Widget;
 class FullscreenExitBubbleViews : public views::LinkListener,
                                   public FullscreenExitBubble {
  public:
-  FullscreenExitBubbleViews(
-      views::Widget* frame,
-      CommandUpdater::CommandUpdaterDelegate* delegate);
+  FullscreenExitBubbleViews(views::Widget* frame,
+                            Browser* browser,
+                            const GURL& url,
+                            FullscreenExitBubbleType bubble_type);
   virtual ~FullscreenExitBubbleViews();
+
+  void UpdateContent(const GURL& url, FullscreenExitBubbleType bubble_type);
 
  protected:
   // FullScreenExitBubble
@@ -39,6 +43,8 @@ class FullscreenExitBubbleViews : public views::LinkListener,
 
  private:
   class FullscreenExitView;
+
+  void StartWatchingMouseIfNecessary();
 
   // views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;

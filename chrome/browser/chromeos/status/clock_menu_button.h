@@ -10,11 +10,11 @@
 #include "base/timer.h"
 #include "chrome/browser/chromeos/cros/power_library.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
+#include "chrome/browser/chromeos/system/timezone_settings.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_observer.h"
-#include "chrome/browser/chromeos/system/timezone_settings.h"
+#include "content/public/browser/notification_types.h"
 #include "unicode/calendar.h"
 #include "views/controls/button/menu_button.h"
 #include "views/controls/menu/menu_delegate.h"
@@ -41,7 +41,7 @@ class ClockMenuButton : public StatusAreaButton,
   virtual ~ClockMenuButton();
 
   // views::MenuDelegate implementation
-  virtual std::wstring GetLabel(int id) const OVERRIDE;
+  virtual string16 GetLabel(int id) const OVERRIDE;
   virtual bool IsCommandEnabled(int id) const OVERRIDE;
   virtual void ExecuteCommand(int id) OVERRIDE;
 
@@ -58,6 +58,9 @@ class ClockMenuButton : public StatusAreaButton,
   // Updates the time on the menu button. Can be called by host if timezone
   // changes.
   void UpdateText();
+
+  // Sets default use 24hour clock mode.
+  void SetDefaultUse24HourClock(bool use_24hour_clock);
 
   // NotificationObserver implementation.
   virtual void Observe(int type,
@@ -83,6 +86,10 @@ class ClockMenuButton : public StatusAreaButton,
   scoped_ptr<views::MenuRunner> menu_runner_;
 
   PrefChangeRegistrar registrar_;
+
+  // Default value for use_24hour_clock. Used when StatusAreaHost does not
+  // have a profile, i.e. on login screen and lock screen.
+  bool default_use_24hour_clock_;
 
   DISALLOW_COPY_AND_ASSIGN(ClockMenuButton);
 };

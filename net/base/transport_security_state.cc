@@ -4,6 +4,18 @@
 
 #include "net/base/transport_security_state.h"
 
+#if defined(USE_OPENSSL)
+#include <openssl/ecdsa.h>
+#include <openssl/ssl.h>
+#else  // !defined(USE_OPENSSL)
+#include <nspr.h>
+
+#include <cryptohi.h>
+#include <hasht.h>
+#include <keyhi.h>
+#include <pk11pub.h>
+#endif
+
 #include "base/base64.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
@@ -19,6 +31,10 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/dns_util.h"
 
+#if defined(USE_OPENSSL)
+#include "crypto/openssl_util.h"
+#endif
+
 namespace net {
 
 const long int TransportSecurityState::kMaxHSTSAgeSecs = 86400 * 365;  // 1 year
@@ -32,13 +48,20 @@ TransportSecurityState::TransportSecurityState(const std::string& hsts_hosts)
 }
 
 static std::string HashHost(const std::string& canonicalized_host) {
-  char hashed[crypto::SHA256_LENGTH];
+  char hashed[crypto::kSHA256Length];
   crypto::SHA256HashString(canonicalized_host, hashed, sizeof(hashed));
   return std::string(hashed, sizeof(hashed));
 }
 
+void TransportSecurityState::SetDelegate(
+    TransportSecurityState::Delegate* delegate) {
+  delegate_ = delegate;
+}
+
 void TransportSecurityState::EnableHost(const std::string& host,
                                         const DomainState& state) {
+  DCHECK(CalledOnValidThread());
+
   const std::string canonicalized_host = CanonicalizeHost(host);
   if (canonicalized_host.empty())
     return;
@@ -67,6 +90,8 @@ void TransportSecurityState::EnableHost(const std::string& host,
 }
 
 bool TransportSecurityState::DeleteHost(const std::string& host) {
+  DCHECK(CalledOnValidThread());
+
   const std::string canonicalized_host = CanonicalizeHost(host);
   if (canonicalized_host.empty())
     return false;
@@ -84,6 +109,8 @@ bool TransportSecurityState::DeleteHost(const std::string& host) {
 bool TransportSecurityState::HasPinsForHost(DomainState* result,
                                             const std::string& host,
                                             bool sni_available) {
+  DCHECK(CalledOnValidThread());
+
   return HasMetadata(result, host, sni_available) &&
          !result->public_key_hashes.empty();
 }
@@ -91,6 +118,8 @@ bool TransportSecurityState::HasPinsForHost(DomainState* result,
 bool TransportSecurityState::IsEnabledForHost(DomainState* result,
                                               const std::string& host,
                                               bool sni_available) {
+  DCHECK(CalledOnValidThread());
+
   return HasMetadata(result, host, sni_available) &&
          result->mode != DomainState::MODE_NONE;
 }
@@ -98,6 +127,8 @@ bool TransportSecurityState::IsEnabledForHost(DomainState* result,
 bool TransportSecurityState::HasMetadata(DomainState* result,
                                          const std::string& host,
                                          bool sni_available) {
+  DCHECK(CalledOnValidThread());
+
   *result = DomainState();
 
   const std::string canonicalized_host = CanonicalizeHost(host);
@@ -142,6 +173,8 @@ bool TransportSecurityState::HasMetadata(DomainState* result,
 }
 
 void TransportSecurityState::DeleteSince(const base::Time& time) {
+  DCHECK(CalledOnValidThread());
+
   bool dirtied = false;
 
   std::map<std::string, DomainState>::iterator i = enabled_hosts_.begin();
@@ -178,6 +211,8 @@ static bool MaxAgeToInt(std::string::const_iterator begin,
 
 // "Strict-Transport-Security" ":"
 //     "max-age" "=" delta-seconds [ ";" "includeSubDomains" ]
+//
+// static
 bool TransportSecurityState::ParseHeader(const std::string& value,
                                          int* max_age,
                                          bool* include_subdomains) {
@@ -275,9 +310,278 @@ bool TransportSecurityState::ParseHeader(const std::string& value,
   }
 }
 
-void TransportSecurityState::SetDelegate(
-    TransportSecurityState::Delegate* delegate) {
-  delegate_ = delegate;
+// Side pinning and superfluous certificates:
+//
+// In SSLClientSocketNSS::DoVerifyCertComplete we look for certificates with a
+// Subject of CN=meta. When we find one we'll currently try and parse side
+// pinned key from it.
+//
+// A side pin is a key which can be pinned to, but also can be kept offline and
+// still held by the site owner. The CN=meta certificate is just a backwards
+// compatiable method of carrying a lump of bytes to the client. (We could use
+// a TLS extension just as well, but it's a lot easier for admins to add extra
+// certificates to the chain.)
+
+// A TagMap represents the simple key-value structure that we use. Keys are
+// 32-bit ints. Values are byte strings.
+typedef std::map<uint32, base::StringPiece> TagMap;
+
+// ParseTags parses a list of key-value pairs from |in| to |out| and advances
+// |in| past the data. The key-value pair data is:
+//   u16le num_tags
+//   u32le tag[num_tags]
+//   u16le lengths[num_tags]
+//   ...data...
+static bool ParseTags(base::StringPiece* in, TagMap *out) {
+  // Many part of Chrome already assume little-endian. This is just to help
+  // anyone who should try to port it in the future.
+#if defined(__BYTE_ORDER)
+  // Linux check
+  COMPILE_ASSERT(__BYTE_ORDER == __LITTLE_ENDIAN, assumes_little_endian);
+#elif defined(__BIG_ENDIAN__)
+  // Mac check
+  #error assumes little endian
+#endif
+
+  if (in->size() < sizeof(uint16))
+    return false;
+
+  uint16 num_tags_16;
+  memcpy(&num_tags_16, in->data(), sizeof(uint16));
+  in->remove_prefix(sizeof(uint16));
+  unsigned num_tags = num_tags_16;
+
+  if (in->size() < 6 * num_tags)
+    return false;
+
+  const uint32* tags = reinterpret_cast<const uint32*>(in->data());
+  const uint16* lens = reinterpret_cast<const uint16*>(
+      in->data() + 4*num_tags);
+  in->remove_prefix(6*num_tags);
+
+  uint32 prev_tag = 0;
+  for (unsigned i = 0; i < num_tags; i++) {
+    size_t len = lens[i];
+    uint32 tag = tags[i];
+
+    if (in->size() < len)
+      return false;
+    // tags must be in ascending order.
+    if (i > 0 && prev_tag >= tag)
+      return false;
+    (*out)[tag] = base::StringPiece(in->data(), len);
+    in->remove_prefix(len);
+    prev_tag = tag;
+  }
+
+  return true;
+}
+
+// GetTag extracts the data associated with |tag| in |tags|.
+static bool GetTag(uint32 tag, const TagMap& tags, base::StringPiece* out) {
+  TagMap::const_iterator i = tags.find(tag);
+  if (i == tags.end())
+    return false;
+
+  *out = i->second;
+  return true;
+}
+
+// kP256SubjectPublicKeyInfoPrefix can be prepended onto a P256 elliptic curve
+// point in X9.62 format in order to make a valid SubjectPublicKeyInfo. The
+// ASN.1 interpretation of these bytes is:
+//
+//     0:d=0  hl=2 l=  89 cons: SEQUENCE
+//     2:d=1  hl=2 l=  19 cons: SEQUENCE
+//     4:d=2  hl=2 l=   7 prim: OBJECT            :id-ecPublicKey
+//    13:d=2  hl=2 l=   8 prim: OBJECT            :prime256v1
+//    23:d=1  hl=2 l=  66 prim: BIT STRING
+static const uint8 kP256SubjectPublicKeyInfoPrefix[] = {
+  0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86,
+  0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+  0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03,
+  0x42, 0x00,
+};
+
+// VerifySignature returns true iff |sig| is a valid signature of
+// |hash| by |pubkey|. The actual implementation is crypto library
+// specific.
+static bool VerifySignature(const base::StringPiece& pubkey,
+                            const base::StringPiece& sig,
+                            const base::StringPiece& hash);
+
+#if defined(USE_OPENSSL)
+
+static EVP_PKEY* DecodeX962P256PublicKey(
+    const base::StringPiece& pubkey_bytes) {
+  // The public key is an X9.62 encoded P256 point.
+  if (pubkey_bytes.size() != 1 + 2*32)
+    return NULL;
+
+  std::string pubkey_spki(
+      reinterpret_cast<const char*>(kP256SubjectPublicKeyInfoPrefix),
+      sizeof(kP256SubjectPublicKeyInfoPrefix));
+  pubkey_spki += pubkey_bytes.as_string();
+
+  EVP_PKEY* ret = NULL;
+  const unsigned char* der_pubkey =
+      reinterpret_cast<const unsigned char*>(pubkey_spki.data());
+  d2i_PUBKEY(&ret, &der_pubkey, pubkey_spki.size());
+  return ret;
+}
+
+static bool VerifySignature(const base::StringPiece& pubkey,
+                            const base::StringPiece& sig,
+                            const base::StringPiece& hash) {
+  crypto::ScopedOpenSSL<EVP_PKEY, EVP_PKEY_free> secpubkey(
+      DecodeX962P256PublicKey(pubkey));
+  if (!secpubkey.get())
+    return false;
+
+
+  crypto::ScopedOpenSSL<EC_KEY, EC_KEY_free> ec_key(
+      EVP_PKEY_get1_EC_KEY(secpubkey.get()));
+  if (!ec_key.get())
+    return false;
+
+  return ECDSA_verify(0, reinterpret_cast<const unsigned char*>(hash.data()),
+                      hash.size(),
+                      reinterpret_cast<const unsigned char*>(sig.data()),
+                      sig.size(), ec_key.get()) == 1;
+}
+
+#else
+
+// DecodeX962P256PublicKey parses an uncompressed, X9.62 format, P256 elliptic
+// curve point from |pubkey_bytes| and returns it as a SECKEYPublicKey.
+static SECKEYPublicKey* DecodeX962P256PublicKey(
+    const base::StringPiece& pubkey_bytes) {
+  // The public key is an X9.62 encoded P256 point.
+  if (pubkey_bytes.size() != 1 + 2*32)
+    return NULL;
+
+  std::string pubkey_spki(
+      reinterpret_cast<const char*>(kP256SubjectPublicKeyInfoPrefix),
+      sizeof(kP256SubjectPublicKeyInfoPrefix));
+  pubkey_spki += pubkey_bytes.as_string();
+
+  SECItem der;
+  memset(&der, 0, sizeof(der));
+  der.data = reinterpret_cast<uint8*>(const_cast<char*>(pubkey_spki.data()));
+  der.len = pubkey_spki.size();
+
+  CERTSubjectPublicKeyInfo* spki = SECKEY_DecodeDERSubjectPublicKeyInfo(&der);
+  if (!spki)
+    return NULL;
+  SECKEYPublicKey* public_key = SECKEY_ExtractPublicKey(spki);
+  SECKEY_DestroySubjectPublicKeyInfo(spki);
+
+  return public_key;
+}
+
+static bool VerifySignature(const base::StringPiece& pubkey,
+                            const base::StringPiece& sig,
+                            const base::StringPiece& hash) {
+  SECKEYPublicKey* secpubkey = DecodeX962P256PublicKey(pubkey);
+  if (!secpubkey)
+    return false;
+
+  SECItem sigitem;
+  memset(&sigitem, 0, sizeof(sigitem));
+  sigitem.data = reinterpret_cast<uint8*>(const_cast<char*>(sig.data()));
+  sigitem.len = sig.size();
+
+  // |decoded_sigitem| is newly allocated, as is the data that it points to.
+  SECItem* decoded_sigitem = DSAU_DecodeDerSigToLen(
+      &sigitem, SECKEY_SignatureLen(secpubkey));
+
+  if (!decoded_sigitem) {
+    SECKEY_DestroyPublicKey(secpubkey);
+    return false;
+  }
+
+  SECItem hashitem;
+  memset(&hashitem, 0, sizeof(hashitem));
+  hashitem.data = reinterpret_cast<unsigned char*>(
+      const_cast<char*>(hash.data()));
+  hashitem.len = hash.size();
+
+  SECStatus rv = PK11_Verify(secpubkey, decoded_sigitem, &hashitem, NULL);
+  SECKEY_DestroyPublicKey(secpubkey);
+  SECITEM_FreeItem(decoded_sigitem, PR_TRUE);
+  return rv == SECSuccess;
+}
+
+#endif  // !defined(USE_OPENSSL)
+
+// These are the tag values that we use. Tags are little-endian on the wire and
+// these values correspond to the ASCII of the name.
+static const uint32 kTagALGO = 0x4f474c41;
+static const uint32 kTagP256 = 0x36353250;
+static const uint32 kTagPUBK = 0x4b425550;
+static const uint32 kTagSIG = 0x474953;
+static const uint32 kTagSPIN = 0x4e495053;
+
+// static
+bool TransportSecurityState::ParseSidePin(
+    const base::StringPiece& leaf_spki,
+    const base::StringPiece& in_side_info,
+    std::vector<SHA1Fingerprint> *out_pub_key_hash) {
+  base::StringPiece side_info(in_side_info);
+
+  TagMap outer;
+  if (!ParseTags(&side_info, &outer))
+    return false;
+  // trailing data is not allowed
+  if (side_info.size())
+    return false;
+
+  base::StringPiece side_pin_bytes;
+  if (!GetTag(kTagSPIN, outer, &side_pin_bytes))
+    return false;
+
+  bool have_parsed_a_key = false;
+  uint8 leaf_spki_hash[crypto::kSHA256Length];
+  bool have_leaf_spki_hash = false;
+
+  while (side_pin_bytes.size() > 0) {
+    TagMap side_pin;
+    if (!ParseTags(&side_pin_bytes, &side_pin))
+      return false;
+
+    base::StringPiece algo, pubkey, sig;
+    if (!GetTag(kTagALGO, side_pin, &algo) ||
+        !GetTag(kTagPUBK, side_pin, &pubkey) ||
+        !GetTag(kTagSIG, side_pin, &sig)) {
+      return false;
+    }
+
+    if (algo.size() != sizeof(kTagP256) ||
+        0 != memcmp(algo.data(), &kTagP256, sizeof(kTagP256))) {
+      // We don't support anything but P256 at the moment.
+      continue;
+    }
+
+    if (!have_leaf_spki_hash) {
+      crypto::SHA256HashString(
+          leaf_spki.as_string(), leaf_spki_hash, sizeof(leaf_spki_hash));
+      have_leaf_spki_hash = true;
+    }
+
+    if (VerifySignature(pubkey, sig, base::StringPiece(
+        reinterpret_cast<const char*>(leaf_spki_hash),
+        sizeof(leaf_spki_hash)))) {
+      SHA1Fingerprint fpr;
+      base::SHA1HashBytes(
+          reinterpret_cast<const uint8*>(pubkey.data()),
+          pubkey.size(),
+          fpr.data);
+      out_pub_key_hash->push_back(fpr);
+      have_parsed_a_key = true;
+    }
+  }
+
+  return have_parsed_a_key;
 }
 
 // This function converts the binary hashes, which we store in
@@ -293,7 +597,7 @@ static std::string HashedDomainToExternalString(const std::string& hashed) {
 static std::string ExternalStringToHashedDomain(const std::string& external) {
   std::string out;
   if (!base::Base64Decode(external, &out) ||
-      out.size() != crypto::SHA256_LENGTH) {
+      out.size() != crypto::kSHA256Length) {
     return std::string();
   }
 
@@ -301,6 +605,8 @@ static std::string ExternalStringToHashedDomain(const std::string& external) {
 }
 
 bool TransportSecurityState::Serialise(std::string* output) {
+  DCHECK(CalledOnValidThread());
+
   DictionaryValue toplevel;
   for (std::map<std::string, DomainState>::const_iterator
        i = enabled_hosts_.begin(); i != enabled_hosts_.end(); ++i) {
@@ -312,9 +618,6 @@ bool TransportSecurityState::Serialise(std::string* output) {
     switch (i->second.mode) {
       case DomainState::MODE_STRICT:
         state->SetString("mode", "strict");
-        break;
-      case DomainState::MODE_OPPORTUNISTIC:
-        state->SetString("mode", "opportunistic");
         break;
       case DomainState::MODE_SPDY_ONLY:
         state->SetString("mode", "spdy-only");
@@ -346,6 +649,8 @@ bool TransportSecurityState::Serialise(std::string* output) {
 
 bool TransportSecurityState::LoadEntries(const std::string& input,
                                          bool* dirty) {
+  DCHECK(CalledOnValidThread());
+
   enabled_hosts_.clear();
   return Deserialise(input, dirty, &enabled_hosts_);
 }
@@ -356,7 +661,7 @@ static bool AddHash(const std::string& type_and_base64,
   if (type_and_base64.find("sha1/") == 0 &&
       base::Base64Decode(type_and_base64.substr(5, type_and_base64.size() - 5),
                          &hash_str) &&
-      hash_str.size() == base::SHA1_LENGTH) {
+      hash_str.size() == base::kSHA1Length) {
     SHA1Fingerprint hash;
     memcpy(hash.data, hash_str.data(), sizeof(hash.data));
     out->push_back(hash);
@@ -410,8 +715,6 @@ bool TransportSecurityState::Deserialise(
     DomainState::Mode mode;
     if (mode_string == "strict") {
       mode = DomainState::MODE_STRICT;
-    } else if (mode_string == "opportunistic") {
-      mode = DomainState::MODE_OPPORTUNISTIC;
     } else if (mode_string == "spdy-only") {
       mode = DomainState::MODE_SPDY_ONLY;
     } else if (mode_string == "none") {
@@ -462,6 +765,8 @@ TransportSecurityState::~TransportSecurityState() {
 }
 
 void TransportSecurityState::DirtyNotify() {
+  DCHECK(CalledOnValidThread());
+
   if (delegate_)
     delegate_->StateIsDirty(this);
 }
@@ -507,7 +812,7 @@ struct HSTSPreload {
   bool include_subdomains;
   char dns_name[30];
   bool https_required;
-  const char** required_hashes;
+  const char* const* required_hashes;
 };
 
 static bool HasPreload(const struct HSTSPreload* entries, size_t num_entries,
@@ -525,10 +830,10 @@ static bool HasPreload(const struct HSTSPreload* entries, size_t num_entries,
         if (!entries[j].https_required)
           out->mode = TransportSecurityState::DomainState::MODE_NONE;
         if (entries[j].required_hashes) {
-          const char** hash = entries[j].required_hashes;
+          const char* const* hash = entries[j].required_hashes;
           while (*hash) {
             bool ok = AddHash(*hash, &out->public_key_hashes);
-            DCHECK(ok);
+            DCHECK(ok) << " failed to parse " << *hash;
             hash++;
           }
         }
@@ -539,152 +844,317 @@ static bool HasPreload(const struct HSTSPreload* entries, size_t num_entries,
   return false;
 }
 
+// These hashes are base64 encodings of SHA1 hashes for cert public keys.
+static const char kCertPKHashVerisignClass3[] =
+      "sha1/4n972HfV354KP560yw4uqe/baXc=";
+static const char kCertPKHashVerisignClass3G3[] =
+      "sha1/IvGeLsbqzPxdI0b0wuj2xVTdXgc=";
+static const char kCertPKHashGoogle1024[] =
+      "sha1/QMVAHW+MuvCLAO3vse6H0AWzuc0=";
+static const char kCertPKHashGoogle2048[] =
+      "sha1/AbkhxY0L343gKf+cki7NVWp+ozk=";
+static const char kCertPKHashEquifaxSecureCA[] =
+      "sha1/SOZo+SvSspXXR9gjIBBPM5iQn9Q=";
+static const char* const kGoogleAcceptableCerts[] = {
+  kCertPKHashVerisignClass3,
+  kCertPKHashVerisignClass3G3,
+  kCertPKHashGoogle1024,
+  kCertPKHashGoogle2048,
+  kCertPKHashEquifaxSecureCA,
+  NULL,
+};
+
+static const char kCertRapidSSL[] =
+    "sha1/m9lHYJYke9k0GtVZ+bXSQYE8nDI=";
+static const char kCertDigiCertEVRoot[] =
+    "sha1/gzF+YoVCU9bXeDGQ7JGQVumRueM=";
+static const char kCertTor1[] =
+    "sha1/juNxSTv9UANmpC9kF5GKpmWNx3Y=";
+static const char kCertTor2[] =
+    "sha1/lia43lPolzSPVIq34Dw57uYcLD8=";
+static const char kCertTor3[] =
+    "sha1/rzEyQIKOh77j87n5bjWUNguXF8Y=";
+static const char* const kTorAcceptableCerts[] = {
+  kCertRapidSSL,
+  kCertDigiCertEVRoot,
+  kCertTor1,
+  kCertTor2,
+  kCertTor3,
+  NULL,
+};
+
+static const char kCertVerisignClass1[] =
+    "sha1/I0PRSKJViZuUfUYaeX7ATP7RcLc=";
+static const char kCertVerisignClass3[] =
+    "sha1/4n972HfV354KP560yw4uqe/baXc=";
+static const char kCertVerisignClass3_G4[] =
+    "sha1/7WYxNdMb1OymFMQp4xkGn5TBJlA=";
+static const char kCertVerisignClass4_G3[] =
+    "sha1/PANDaGiVHPNpKri0Jtq6j+ki5b0=";
+static const char kCertVerisignClass3_G3[] =
+    "sha1/IvGeLsbqzPxdI0b0wuj2xVTdXgc=";
+static const char kCertVerisignClass1_G3[] =
+    "sha1/VRmyeKyygdftp6vBg5nDu2kEJLU=";
+static const char kCertVerisignClass2_G3[] =
+    "sha1/Wr7Fddyu87COJxlD/H8lDD32YeM=";
+static const char kCertVerisignClass3_G2[] =
+    "sha1/GiG0lStik84Ys2XsnA6TTLOB5tQ=";
+static const char kCertVerisignClass2_G2[] =
+    "sha1/Eje6RRfurSkm/cHN/r7t8t7ZFFw=";
+static const char kCertVerisignClass3_G5[] =
+    "sha1/sYEIGhmkwJQf+uiVKMEkyZs0rMc=";
+static const char kCertVerisignUniversal[] =
+    "sha1/u8I+KQuzKHcdrT6iTb30I70GsD0=";
+
+static const char kCertTwitter1[] =
+    "sha1/Vv7zwhR9TtOIN/29MFI4cgHld40=";
+
+static const char kCertGeoTrustGlobal[] =
+    "sha1/wHqYaI2J+6sFZAwRfap9ZbjKzE4=";
+static const char kCertGeoTrustGlobal2[] =
+    "sha1/cTg28gIxU0crbrplRqkQFVggBQk=";
+static const char kCertGeoTrustUniversal[] =
+    "sha1/h+hbY1PGI6MSjLD/u/VR/lmADiI=";
+static const char kCertGeoTrustUniversal2[] =
+    "sha1/Xk9ThoXdT57KX9wNRW99UbHcm3s=";
+static const char kCertGeoTrustPrimary[] =
+    "sha1/sBmJ5+/7Sq/LFI9YRjl2IkFQ4bo=";
+static const char kCertGeoTrustPrimaryG2[] =
+    "sha1/vb6nG6txV/nkddlU0rcngBqCJoI=";
+static const char kCertGeoTrustPrimaryG3[] =
+    "sha1/nKmNAK90Dd2BgNITRaWLjy6UONY=";
+
+static const char* const kTwitterComAcceptableCerts[] = {
+  kCertVerisignClass1,
+  kCertVerisignClass3,
+  kCertVerisignClass3_G4,
+  kCertVerisignClass4_G3,
+  kCertVerisignClass3_G3,
+  kCertVerisignClass1_G3,
+  kCertVerisignClass2_G3,
+  kCertVerisignClass3_G2,
+  kCertVerisignClass2_G2,
+  kCertVerisignClass3_G5,
+  kCertVerisignUniversal,
+  kCertGeoTrustGlobal,
+  kCertGeoTrustGlobal2,
+  kCertGeoTrustUniversal,
+  kCertGeoTrustUniversal2,
+  kCertGeoTrustPrimary,
+  kCertGeoTrustPrimaryG2,
+  kCertGeoTrustPrimaryG3,
+  kCertTwitter1,
+  NULL,
+};
+
+// kTestAcceptableCerts doesn't actually match any public keys and is used
+// with "pinningtest.appspot.com", below, to test if pinning is active.
+static const char* const kTestAcceptableCerts[] = {
+  "sha1/AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+};
+
+#if defined(OS_CHROMEOS)
+  static const bool kTwitterHSTS = true;
+#else
+  static const bool kTwitterHSTS = false;
+#endif
+
+// In the medium term this list is likely to just be hardcoded here. This
+// slightly odd form removes the need for additional relocations records.
+static const struct HSTSPreload kPreloadedSTS[] = {
+  // (*.)google.com, iff using SSL must use an acceptable certificate.
+  {12, true, "\006google\003com", false, kGoogleAcceptableCerts },
+  {25, true, "\013pinningtest\007appspot\003com", false,
+      kTestAcceptableCerts },
+  // Now we force HTTPS for subtrees of google.com.
+  {19, true, "\006health\006google\003com", true, kGoogleAcceptableCerts },
+  {21, true, "\010checkout\006google\003com", true, kGoogleAcceptableCerts },
+  {19, true, "\006chrome\006google\003com", true, kGoogleAcceptableCerts },
+  {17, true, "\004docs\006google\003com", true, kGoogleAcceptableCerts },
+  {18, true, "\005sites\006google\003com", true, kGoogleAcceptableCerts },
+  {25, true, "\014spreadsheets\006google\003com", true,
+      kGoogleAcceptableCerts },
+  {22, false, "\011appengine\006google\003com", true,
+      kGoogleAcceptableCerts },
+  {22, true, "\011encrypted\006google\003com", true, kGoogleAcceptableCerts },
+  {21, true, "\010accounts\006google\003com", true, kGoogleAcceptableCerts },
+  {21, true, "\010profiles\006google\003com", true, kGoogleAcceptableCerts },
+  {17, true, "\004mail\006google\003com", true, kGoogleAcceptableCerts },
+  {23, true, "\012talkgadget\006google\003com", true,
+      kGoogleAcceptableCerts },
+  {17, true, "\004talk\006google\003com", true, kGoogleAcceptableCerts },
+  {29, true, "\020hostedtalkgadget\006google\003com", true,
+      kGoogleAcceptableCerts },
+  {17, true, "\004plus\006google\003com", true, kGoogleAcceptableCerts },
+  // Other Google-related domains that must use HTTPS.
+  {20, true, "\006market\007android\003com", true, kGoogleAcceptableCerts },
+  {26, true, "\003ssl\020google-analytics\003com", true,
+      kGoogleAcceptableCerts },
+  {18, true, "\005drive\006google\003com", true, kGoogleAcceptableCerts },
+  {16, true, "\012googleplex\003com", true, kGoogleAcceptableCerts },
+  // Other Google-related domains that must use an acceptable certificate
+  // iff using SSL.
+  {11, true, "\005ytimg\003com", false, kGoogleAcceptableCerts },
+  {23, true, "\021googleusercontent\003com", false, kGoogleAcceptableCerts },
+  {13, true, "\007youtube\003com", false, kGoogleAcceptableCerts },
+  {16, true, "\012googleapis\003com", false, kGoogleAcceptableCerts },
+  {22, true, "\020googleadservices\003com", false, kGoogleAcceptableCerts },
+  {16, true, "\012googlecode\003com", false, kGoogleAcceptableCerts },
+  {13, true, "\007appspot\003com", false, kGoogleAcceptableCerts },
+  {23, true, "\021googlesyndication\003com", false, kGoogleAcceptableCerts },
+  {17, true, "\013doubleclick\003net", false, kGoogleAcceptableCerts },
+  {17, true, "\003ssl\007gstatic\003com", false, kGoogleAcceptableCerts },
+  // Exclude the learn.doubleclick.net subdomain because it uses a different
+  // CA.
+  {23, true, "\005learn\013doubleclick\003net", false, 0 },
+  // Now we force HTTPS for other sites that have requested it.
+  {16, false, "\003www\006paypal\003com", true, 0 },
+  {16, false, "\003www\006elanex\003biz", true, 0 },
+  {12, true,  "\006jottit\003com", true, 0 },
+  {19, true,  "\015sunshinepress\003org", true, 0 },
+  {21, false, "\003www\013noisebridge\003net", true, 0 },
+  {10, false, "\004neg9\003org", true, 0 },
+  {12, true, "\006riseup\003net", true, 0 },
+  {11, false, "\006factor\002cc", true, 0 },
+  {22, false, "\007members\010mayfirst\003org", true, 0 },
+  {22, false, "\007support\010mayfirst\003org", true, 0 },
+  {17, false, "\002id\010mayfirst\003org", true, 0 },
+  {20, false, "\005lists\010mayfirst\003org", true, 0 },
+  {19, true, "\015splendidbacon\003com", true, 0 },
+  {28, false, "\016aladdinschools\007appspot\003com", true, 0 },
+  {14, true, "\011ottospora\002nl", true, 0 },
+  {25, false, "\003www\017paycheckrecords\003com", true, 0 },
+  {14, false, "\010lastpass\003com", true, 0 },
+  {18, false, "\003www\010lastpass\003com", true, 0 },
+  {14, true, "\010keyerror\003com", true, 0 },
+  {13, false, "\010entropia\002de", true, 0 },
+  {17, false, "\003www\010entropia\002de", true, 0 },
+  {11, true, "\005romab\003com", true, 0 },
+  {16, false, "\012logentries\003com", true, 0 },
+  {20, false, "\003www\012logentries\003com", true, 0 },
+  {12, true, "\006stripe\003com", true, 0 },
+  {27, true, "\025cloudsecurityalliance\003org", true, 0 },
+  {15, true, "\005login\004sapo\002pt", true, 0 },
+  {19, true, "\015mattmccutchen\003net", true, 0 },
+  {11, true, "\006betnet\002fr", true, 0 },
+  {13, true, "\010uprotect\002it", true, 0 },
+  {14, false, "\010squareup\003com", true, 0 },
+  {9, true, "\004cert\002se", true, 0 },
+  {11, true, "\006crypto\002is", true, 0 },
+  {20, true, "\005simon\007butcher\004name", true, 0 },
+  {10, true, "\004linx\003net", true, 0 },
+  {13, false, "\007dropcam\003com", true, 0 },
+  {17, false, "\003www\007dropcam\003com", true, 0 },
+  {30, true, "\010ebanking\014indovinabank\003com\002vn", true, 0 },
+  {13, false, "\007epoxate\003com", true, 0 },
+  {16, false, "\012torproject\003org", true, kTorAcceptableCerts },
+  {21, true, "\004blog\012torproject\003org", true, kTorAcceptableCerts },
+  {22, true, "\005check\012torproject\003org", true, kTorAcceptableCerts },
+  {20, true, "\003www\012torproject\003org", true, kTorAcceptableCerts },
+  {22, true, "\003www\014moneybookers\003com", true, 0 },
+  {17, false, "\013ledgerscope\003net", true, 0 },
+  {21, false, "\003www\013ledgerscope\003net", true, 0 },
+  {10, false, "\004kyps\003net", true, 0 },
+  {14, false, "\003www\004kyps\003net", true, 0 },
+  {17, true, "\003app\007recurly\003com", true, 0 },
+  {17, true, "\003api\007recurly\003com", true, 0 },
+  {13, false, "\007greplin\003com", true, 0 },
+  {17, false, "\003www\007greplin\003com", true, 0 },
+  {27, true, "\006luneta\016nearbuysystems\003com", true, 0 },
+  {12, true, "\006ubertt\003org", true, 0 },
+
+  {13, false, "\007twitter\003com", kTwitterHSTS, kTwitterComAcceptableCerts },
+  {17, true, "\003www\007twitter\003com", kTwitterHSTS, kTwitterComAcceptableCerts },
+  {17, true, "\003api\007twitter\003com", kTwitterHSTS, kTwitterComAcceptableCerts },
+  {19, true, "\005oauth\007twitter\003com", kTwitterHSTS, kTwitterComAcceptableCerts },
+  {20, true, "\006mobile\007twitter\003com", kTwitterHSTS, kTwitterComAcceptableCerts },
+  {17, true, "\003dev\007twitter\003com", kTwitterHSTS, kTwitterComAcceptableCerts },
+  {22, true, "\010business\007twitter\003com", kTwitterHSTS, kTwitterComAcceptableCerts },
+
+#if 0
+  // Twitter CDN pins disabled in order to track down pinning failures --agl
+  {22, true, "\010platform\007twitter\003com", false, kTwitterCDNAcceptableCerts },
+  {15, true, "\003si0\005twimg\003com", false, kTwitterCDNAcceptableCerts },
+  {23, true, "\010twimg0-a\010akamaihd\003net", false, kTwitterCDNAcceptableCerts },
+#endif
+};
+static const size_t kNumPreloadedSTS = ARRAYSIZE_UNSAFE(kPreloadedSTS);
+
+static const struct HSTSPreload kPreloadedSNISTS[] = {
+  // These SNI-only domains must always use HTTPS.
+  {11, false, "\005gmail\003com", true, kGoogleAcceptableCerts },
+  {16, false, "\012googlemail\003com", true, kGoogleAcceptableCerts },
+  {15, false, "\003www\005gmail\003com", true, kGoogleAcceptableCerts },
+  {20, false, "\003www\012googlemail\003com", true, kGoogleAcceptableCerts },
+  // These SNI-only domains must use an acceptable certificate iff using
+  // HTTPS.
+  {22, true, "\020google-analytics\003com", false, kGoogleAcceptableCerts },
+  // www. requires SNI.
+  {18, true, "\014googlegroups\003com", false, kGoogleAcceptableCerts },
+};
+static const size_t kNumPreloadedSNISTS = ARRAYSIZE_UNSAFE(kPreloadedSNISTS);
+
+// Returns true if there is an HSTSPreload entry for the host in |entries|, and
+// if its |required_hashes| member is identical (by address) to |certs|.
+static bool ScanForHostAndCerts(
+    const std::string& canonicalized_host,
+    const struct HSTSPreload* entries,
+    size_t num_entries,
+    const char* const certs[]) {
+  bool hit = false;
+
+  for (size_t i = 0; canonicalized_host[i]; i += canonicalized_host[i] + 1) {
+    for (size_t j = 0; j < num_entries; j++) {
+      const struct HSTSPreload& entry = entries[j];
+
+      if (i != 0 && !entry.include_subdomains)
+        continue;
+
+      if (entry.length == canonicalized_host.size() - i &&
+          memcmp(entry.dns_name, &canonicalized_host[i], entry.length) == 0) {
+        hit = entry.required_hashes == certs;
+        // Return immediately upon exact match:
+        if (i == 0)
+          return hit;
+      }
+    }
+  }
+
+  return hit;
+}
+
+// static
+bool TransportSecurityState::IsGooglePinnedProperty(const std::string& host,
+                                                    bool sni_available) {
+  std::string canonicalized_host = CanonicalizeHost(host);
+
+  if (ScanForHostAndCerts(canonicalized_host, kPreloadedSTS, kNumPreloadedSTS,
+                          kGoogleAcceptableCerts)) {
+    return true;
+  }
+
+  if (sni_available) {
+    if (ScanForHostAndCerts(canonicalized_host, kPreloadedSNISTS, kNumPreloadedSNISTS,
+                            kGoogleAcceptableCerts)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
 // IsPreloadedSTS returns true if the canonicalized hostname should always be
 // considered to have STS enabled.
 bool TransportSecurityState::IsPreloadedSTS(
     const std::string& canonicalized_host,
     bool sni_available,
     DomainState* out) {
+  DCHECK(CalledOnValidThread());
+
   out->preloaded = true;
   out->mode = DomainState::MODE_STRICT;
   out->include_subdomains = false;
-
-  // These hashes are base64 encodings of SHA1 hashes for cert public keys.
-  static const char kCertPKHashVerisignClass3[] =
-      "sha1/4n972HfV354KP560yw4uqe/baXc=";
-  static const char kCertPKHashVerisignClass3G3[] =
-      "sha1/IvGeLsbqzPxdI0b0wuj2xVTdXgc=";
-  static const char kCertPKHashGoogle1024[] =
-      "sha1/QMVAHW+MuvCLAO3vse6H0AWzuc0=";
-  static const char kCertPKHashGoogle2048[] =
-      "sha1/AbkhxY0L343gKf+cki7NVWp+ozk=";
-  static const char kCertPKHashEquifaxSecureCA[] =
-      "sha1/SOZo+SvSspXXR9gjIBBPM5iQn9Q=";
-  static const char* kGoogleAcceptableCerts[] = {
-    kCertPKHashVerisignClass3,
-    kCertPKHashVerisignClass3G3,
-    kCertPKHashGoogle1024,
-    kCertPKHashGoogle2048,
-    kCertPKHashEquifaxSecureCA,
-    0,
-  };
-
-  // kTestAcceptableCerts doesn't actually match any public keys and is used
-  // with "pinningtest.appspot.com", below, to test if pinning is active.
-  static const char* kTestAcceptableCerts[] = {
-    "sha1/AAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-  };
-
-  // In the medium term this list is likely to just be hardcoded here. This,
-  // slightly odd, form removes the need for additional relocations records.
-  static const struct HSTSPreload kPreloadedSTS[] = {
-    // (*.)google.com, iff using SSL must use an acceptable certificate.
-    {12, true, "\006google\003com", false, kGoogleAcceptableCerts },
-    {25, true, "\013pinningtest\007appspot\003com", false,
-     kTestAcceptableCerts },
-    // Now we force HTTPS for subtrees of google.com.
-    {19, true, "\006health\006google\003com", true, kGoogleAcceptableCerts },
-    {21, true, "\010checkout\006google\003com", true, kGoogleAcceptableCerts },
-    {19, true, "\006chrome\006google\003com", true, kGoogleAcceptableCerts },
-    {17, true, "\004docs\006google\003com", true, kGoogleAcceptableCerts },
-    {18, true, "\005sites\006google\003com", true, kGoogleAcceptableCerts },
-    {25, true, "\014spreadsheets\006google\003com", true,
-     kGoogleAcceptableCerts },
-    {22, false, "\011appengine\006google\003com", true,
-     kGoogleAcceptableCerts },
-    {22, true, "\011encrypted\006google\003com", true, kGoogleAcceptableCerts },
-    {21, true, "\010accounts\006google\003com", true, kGoogleAcceptableCerts },
-    {21, true, "\010profiles\006google\003com", true, kGoogleAcceptableCerts },
-    {17, true, "\004mail\006google\003com", true, kGoogleAcceptableCerts },
-    {23, true, "\012talkgadget\006google\003com", true,
-     kGoogleAcceptableCerts },
-    {17, true, "\004talk\006google\003com", true, kGoogleAcceptableCerts },
-    {29, true, "\020hostedtalkgadget\006google\003com", true,
-     kGoogleAcceptableCerts },
-    {17, true, "\004plus\006google\003com", true, kGoogleAcceptableCerts },
-    // Other Google-related domains that must use HTTPS.
-    {20, true, "\006market\007android\003com", true, kGoogleAcceptableCerts },
-    {26, true, "\003ssl\020google-analytics\003com", true,
-     kGoogleAcceptableCerts },
-    {18, true, "\005drive\006google\003com", true, kGoogleAcceptableCerts },
-    // Other Google-related domains that must use an acceptable certificate
-    // iff using SSL.
-    {11, true, "\005ytimg\003com", false, kGoogleAcceptableCerts },
-    {23, true, "\021googleusercontent\003com", false, kGoogleAcceptableCerts },
-    {13, true, "\007youtube\003com", false, kGoogleAcceptableCerts },
-    {16, true, "\012googleapis\003com", false, kGoogleAcceptableCerts },
-    {22, true, "\020googleadservices\003com", false, kGoogleAcceptableCerts },
-    {16, true, "\012googlecode\003com", false, kGoogleAcceptableCerts },
-    {13, true, "\007appspot\003com", false, kGoogleAcceptableCerts },
-    {23, true, "\021googlesyndication\003com", false, kGoogleAcceptableCerts },
-    {17, true, "\013doubleclick\003net", false, kGoogleAcceptableCerts },
-    {17, true, "\003ssl\007gstatic\003com", false, kGoogleAcceptableCerts },
-    // Exclude the learn.doubleclick.net subdomain because it uses a different
-    // CA.
-    {23, true, "\005learn\013doubleclick\003net", false, 0 },
-    // Now we force HTTPS for other sites that have requested it.
-    {16, false, "\003www\006paypal\003com", true, 0 },
-    {16, false, "\003www\006elanex\003biz", true, 0 },
-    {12, true,  "\006jottit\003com", true, 0 },
-    {19, true,  "\015sunshinepress\003org", true, 0 },
-    {21, false, "\003www\013noisebridge\003net", true, 0 },
-    {10, false, "\004neg9\003org", true, 0 },
-    {12, true, "\006riseup\003net", true, 0 },
-    {11, false, "\006factor\002cc", true, 0 },
-    {22, false, "\007members\010mayfirst\003org", true, 0 },
-    {22, false, "\007support\010mayfirst\003org", true, 0 },
-    {17, false, "\002id\010mayfirst\003org", true, 0 },
-    {20, false, "\005lists\010mayfirst\003org", true, 0 },
-    {19, true, "\015splendidbacon\003com", true, 0 },
-    {28, false, "\016aladdinschools\007appspot\003com", true, 0 },
-    {14, true, "\011ottospora\002nl", true, 0 },
-    {25, false, "\003www\017paycheckrecords\003com", true, 0 },
-    {14, false, "\010lastpass\003com", true, 0 },
-    {18, false, "\003www\010lastpass\003com", true, 0 },
-    {14, true, "\010keyerror\003com", true, 0 },
-    {13, false, "\010entropia\002de", true, 0 },
-    {17, false, "\003www\010entropia\002de", true, 0 },
-    {11, true, "\005romab\003com", true, 0 },
-    {16, false, "\012logentries\003com", true, 0 },
-    {20, false, "\003www\012logentries\003com", true, 0 },
-    {12, true, "\006stripe\003com", true, 0 },
-    {27, true, "\025cloudsecurityalliance\003org", true, 0 },
-    {15, true, "\005login\004sapo\002pt", true, 0 },
-    {19, true, "\015mattmccutchen\003net", true, 0 },
-    {11, true, "\006betnet\002fr", true, 0 },
-    {13, true, "\010uprotect\002it", true, 0 },
-    {14, false, "\010squareup\003com", true, 0 },
-    {9, true, "\004cert\002se", true, 0 },
-    {11, true, "\006crypto\002is", true, 0 },
-    {20, true, "\005simon\007butcher\004name", true, 0 },
-    {10, true, "\004linx\003net", true, 0 },
-    {13, false, "\007dropcam\003com", true, 0 },
-    {17, false, "\003www\007dropcam\003com", true, 0 },
-    {30, true, "\010ebanking\014indovinabank\003com\002vn", true, 0 },
-    {13, false, "\007epoxate\003com", true, 0 },
-#if defined(OS_CHROMEOS)
-    {13, false, "\007twitter\003com", true, 0 },
-    {17, false, "\003www\007twitter\003com", true, 0 },
-    {17, false, "\003api\007twitter\003com", true, 0 },
-    {17, false, "\003dev\007twitter\003com", true, 0 },
-    {22, false, "\010business\007twitter\003com", true, 0 },
-#endif
-  };
-  static const size_t kNumPreloadedSTS = ARRAYSIZE_UNSAFE(kPreloadedSTS);
-
-  static const struct HSTSPreload kPreloadedSNISTS[] = {
-    // These SNI-only domains must always use HTTPS.
-    {11, false, "\005gmail\003com", true, kGoogleAcceptableCerts },
-    {16, false, "\012googlemail\003com", true, kGoogleAcceptableCerts },
-    {15, false, "\003www\005gmail\003com", true, kGoogleAcceptableCerts },
-    {20, false, "\003www\012googlemail\003com", true, kGoogleAcceptableCerts },
-    // These SNI-only domains must use an acceptable certificate iff using
-    // HTTPS.
-    {22, true, "\020google-analytics\003com", false, kGoogleAcceptableCerts },
-    // www. requires SNI.
-    {18, true, "\014googlegroups\003com", false, kGoogleAcceptableCerts },
-  };
-  static const size_t kNumPreloadedSNISTS = ARRAYSIZE_UNSAFE(kPreloadedSNISTS);
 
   for (size_t i = 0; canonicalized_host[i]; i += canonicalized_host[i] + 1) {
     std::string host_sub_chunk(&canonicalized_host[i],

@@ -9,6 +9,8 @@
 #include <wayland-client.h>
 
 #include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
+#include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_surface.h"
 #include "ui/gfx/size.h"
@@ -38,6 +40,7 @@ class NativeWidgetDelegate;
 
 // Widget implementation for Wayland
 class NativeWidgetWayland : public internal::NativeWidgetPrivate,
+                            public ui::CompositorDelegate,
                             public ui::WaylandWidget {
  public:
   explicit NativeWidgetWayland(internal::NativeWidgetDelegate* delegate);
@@ -56,9 +59,10 @@ class NativeWidgetWayland : public internal::NativeWidgetPrivate,
   virtual Widget* GetTopLevelWidget() OVERRIDE;
   virtual const ui::Compositor* GetCompositor() const OVERRIDE;
   virtual ui::Compositor* GetCompositor() OVERRIDE;
-  virtual void MarkLayerDirty() OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor) OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
+      ui::Layer** layer_parent) OVERRIDE;
+  virtual void ReorderLayers() OVERRIDE;
   virtual void ViewRemoved(View* view) OVERRIDE;
   virtual void SetNativeWindowProperty(const char* name, void* value) OVERRIDE;
   virtual void* GetNativeWindowProperty(const char* name) const OVERRIDE;
@@ -72,12 +76,13 @@ class NativeWidgetWayland : public internal::NativeWidgetPrivate,
   virtual bool HasMouseCapture() const OVERRIDE;
   virtual InputMethod* CreateInputMethod() OVERRIDE;
   virtual void CenterWindow(const gfx::Size& size) OVERRIDE;
-  virtual void GetWindowBoundsAndMaximizedState(gfx::Rect* bounds,
-                                                bool* maximized) const OVERRIDE;
-  virtual void SetWindowTitle(const std::wstring& title) OVERRIDE;
+  virtual void GetWindowPlacement(
+      gfx::Rect* bounds,
+      ui::WindowShowState* show_state) const OVERRIDE;
+  virtual void SetWindowTitle(const string16& title) OVERRIDE;
   virtual void SetWindowIcons(const SkBitmap& window_icon,
                               const SkBitmap& app_icon) OVERRIDE;
-  virtual void SetAccessibleName(const std::wstring& name) OVERRIDE;
+  virtual void SetAccessibleName(const string16& name) OVERRIDE;
   virtual void SetAccessibleRole(ui::AccessibilityTypes::Role role) OVERRIDE;
   virtual void SetAccessibleState(ui::AccessibilityTypes::State state) OVERRIDE;
   virtual void BecomeModal() OVERRIDE;
@@ -98,7 +103,7 @@ class NativeWidgetWayland : public internal::NativeWidgetPrivate,
   virtual void Hide() OVERRIDE;
   virtual void ShowMaximizedWithBounds(
       const gfx::Rect& restored_bounds) OVERRIDE;
-  virtual void ShowWithState(ShowState state) OVERRIDE;
+  virtual void ShowWithWindowState(ui::WindowShowState window_state) OVERRIDE;
   virtual bool IsVisible() const OVERRIDE;
   virtual void Activate() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
@@ -135,6 +140,9 @@ class NativeWidgetWayland : public internal::NativeWidgetPrivate,
  private:
   typedef ScopedVector<ui::ViewProp> ViewProps;
 
+  // Overridden from ui::CompositorDelegate
+  virtual void ScheduleDraw();
+
   // Overridden from NativeWidget
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
 
@@ -152,7 +160,7 @@ class NativeWidgetWayland : public internal::NativeWidgetPrivate,
   scoped_ptr<TooltipManager> tooltip_manager_;
 
   // The following factory is used to delay destruction.
-  ScopedRunnableMethodFactory<NativeWidgetWayland> close_widget_factory_;
+  base::WeakPtrFactory<NativeWidgetWayland> close_widget_factory_;
 
   // See class documentation for Widget in widget.h for a note about ownership.
   Widget::InitParams::Ownership ownership_;

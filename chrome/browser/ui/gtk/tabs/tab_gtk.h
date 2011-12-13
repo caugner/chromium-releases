@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/gtk/tabs/tab_renderer_gtk.h"
@@ -113,6 +114,9 @@ class TabGtk : public TabRendererGtk,
   void set_dragging(bool dragging) { dragging_ = dragging; }
   bool dragging() const { return dragging_; }
 
+  // Raise to top of Z-order.
+  void Raise() const;
+
   // TabRendererGtk overrides:
   virtual bool IsActive() const;
   virtual bool IsSelected() const;
@@ -209,14 +213,14 @@ class TabGtk : public TabRendererGtk,
   scoped_ptr<TabGtkObserverHelper> observer_;
 
   // Used to destroy the drag widget after a return to the message loop.
-  ScopedRunnableMethodFactory<TabGtk> destroy_factory_;
+  base::WeakPtrFactory<TabGtk> destroy_factory_;
 
   // Due to a bug in GTK+, we need to force the end of a drag when we get a
   // mouse release event on the the dragged widget, otherwise, we don't know
   // when the drag has ended when the user presses space or enter.  We queue
   // a task to end the drag and only run it if GTK+ didn't send us the
   // drag-failed event.
-  ScopedRunnableMethodFactory<TabGtk> drag_end_factory_;
+  base::WeakPtrFactory<TabGtk> drag_end_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(TabGtk);
 };

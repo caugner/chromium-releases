@@ -133,7 +133,7 @@ class DatabaseTracker
   // if non-NULL.
   int DeleteDatabase(const string16& origin_identifier,
                      const string16& database_name,
-                     net::CompletionCallback* callback);
+                     net::OldCompletionCallback* callback);
 
   // Delete any databases that have been touched since the cutoff date that's
   // supplied, omitting any that match IDs within |protected_origins|.
@@ -142,14 +142,14 @@ class DatabaseTracker
   // if non-NULL. Protected origins, according the the SpecialStoragePolicy,
   // are not deleted by this method.
   int DeleteDataModifiedSince(const base::Time& cutoff,
-                              net::CompletionCallback* callback);
+                              net::OldCompletionCallback* callback);
 
   // Delete all databases that belong to the given origin. Returns net::OK on
   // success, net::FAILED if not all databases could be deleted, and
   // net::ERR_IO_PENDING and |callback| is invoked upon completion, if non-NULL.
   // virtual for unit testing only
   virtual int DeleteDataForOrigin(const string16& origin_identifier,
-                                  net::CompletionCallback* callback);
+                                  net::OldCompletionCallback* callback);
 
   bool IsIncognitoProfile() const { return is_incognito_; }
 
@@ -170,7 +170,7 @@ class DatabaseTracker
   friend class MockDatabaseTracker;  // for testing
 
   typedef std::map<string16, std::set<string16> > DatabaseSet;
-  typedef std::map<net::CompletionCallback*, DatabaseSet> PendingCompletionMap;
+  typedef std::map<net::OldCompletionCallback*, DatabaseSet> PendingCompletionMap;
   typedef std::map<string16, base::PlatformFile> FileHandlesMap;
   typedef std::map<string16, string16> OriginDirectoriesMap;
 
@@ -198,10 +198,10 @@ class DatabaseTracker
   // Deletes the directory that stores all DBs in incognito mode, if it exists.
   void DeleteIncognitoDBDirectory();
 
-  // Deletes databases not protected by the special storage policy if
-  // |clear_local_state_on_exit_| is true and blocks databases from being
-  // created/opened.
-  void ClearLocalState();
+  // If clear_all_databases is true, deletes all databases not protected by
+  // special storage policy. Otherwise deletes session-only databases. Blocks
+  // databases from being created/opened.
+  void ClearLocalState(bool clear_all_databases);
 
   bool DeleteClosedDatabase(const string16& origin_identifier,
                             const string16& database_name);
@@ -247,7 +247,7 @@ class DatabaseTracker
   // Schedule a set of open databases for deletion. If non-null, callback is
   // invoked upon completion.
   void ScheduleDatabasesForDeletion(const DatabaseSet& databases,
-                                    net::CompletionCallback* callback);
+                                    net::OldCompletionCallback* callback);
 
   // Returns the directory where all DB files for the given origin are stored.
   string16 GetOriginDirectory(const string16& origin_identifier);

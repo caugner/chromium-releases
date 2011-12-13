@@ -21,7 +21,7 @@
 #include "views/widget/widget.h"
 #include "views/window/client_view.h"
 
-static const int kDefaultMessageWidth = 320;
+const int kDefaultMessageWidth = 320;
 
 namespace views {
 
@@ -29,36 +29,32 @@ namespace views {
 // MessageBoxView, public:
 
 MessageBoxView::MessageBoxView(int dialog_flags,
-                               const std::wstring& message,
-                               const std::wstring& default_prompt,
+                               const string16& message,
+                               const string16& default_prompt,
                                int message_width)
     : message_label_(new Label(message)),
       prompt_field_(NULL),
       icon_(NULL),
       checkbox_(NULL),
-      message_width_(message_width),
-      ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)) {
+      message_width_(message_width) {
   Init(dialog_flags, default_prompt);
 }
 
 MessageBoxView::MessageBoxView(int dialog_flags,
-                               const std::wstring& message,
-                               const std::wstring& default_prompt)
+                               const string16& message,
+                               const string16& default_prompt)
     : message_label_(new Label(message)),
       prompt_field_(NULL),
       icon_(NULL),
       checkbox_(NULL),
-      message_width_(kDefaultMessageWidth),
-      ALLOW_THIS_IN_INITIALIZER_LIST(focus_grabber_factory_(this)) {
+      message_width_(kDefaultMessageWidth) {
   Init(dialog_flags, default_prompt);
 }
 
 MessageBoxView::~MessageBoxView() {}
 
-std::wstring MessageBoxView::GetInputText() {
-  if (prompt_field_)
-    return UTF16ToWideHack(prompt_field_->text());
-  return std::wstring();
+string16 MessageBoxView::GetInputText() {
+  return prompt_field_ ? prompt_field_->text() : string16();
 }
 
 bool MessageBoxView::IsCheckBoxSelected() {
@@ -73,7 +69,7 @@ void MessageBoxView::SetIcon(const SkBitmap& icon) {
   ResetLayoutManager();
 }
 
-void MessageBoxView::SetCheckBoxLabel(const std::wstring& label) {
+void MessageBoxView::SetCheckBoxLabel(const string16& label) {
   if (!checkbox_)
     checkbox_ = new Checkbox(label);
   else
@@ -123,7 +119,7 @@ bool MessageBoxView::AcceleratorPressed(
     return false;
 
   ui::ScopedClipboardWriter scw(clipboard);
-  scw.WriteText(WideToUTF16Hack(message_label_->GetText()));
+  scw.WriteText(message_label_->GetText());
   return true;
 }
 
@@ -131,7 +127,7 @@ bool MessageBoxView::AcceleratorPressed(
 // MessageBoxView, private:
 
 void MessageBoxView::Init(int dialog_flags,
-                          const std::wstring& default_prompt) {
+                          const string16& default_prompt) {
   message_label_->SetMultiLine(true);
   message_label_->SetAllowCharacterBreak(true);
   if (dialog_flags & ui::MessageBoxFlags::kAutoDetectAlignment) {
@@ -139,7 +135,7 @@ void MessageBoxView::Init(int dialog_flags,
     // with strong directionality.
     base::i18n::TextDirection direction =
         base::i18n::GetFirstStrongCharacterDirection(
-            WideToUTF16(message_label_->GetText()));
+            message_label_->GetText());
     Label::Alignment alignment;
     if (direction == base::i18n::RIGHT_TO_LEFT)
       alignment = Label::ALIGN_RIGHT;
@@ -156,7 +152,7 @@ void MessageBoxView::Init(int dialog_flags,
 
   if (dialog_flags & ui::MessageBoxFlags::kFlagHasPromptField) {
     prompt_field_ = new Textfield;
-    prompt_field_->SetText(WideToUTF16Hack(default_prompt));
+    prompt_field_->SetText(default_prompt);
   }
 
   ResetLayoutManager();

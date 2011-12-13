@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/gtk/infobars/infobar_gtk.h"
 
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
@@ -13,9 +15,12 @@
 #include "chrome/browser/ui/gtk/infobars/infobar_container_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "content/browser/tab_contents/tab_contents.h"
 #include "content/common/notification_service.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
+#include "ui/base/gtk/gtk_signal_registrar.h"
+#include "ui/base/models/menu_model.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 
@@ -44,9 +49,11 @@ const int InfoBar::kDefaultBarTargetHeight = 36;
 // static
 const int InfoBarGtk::kEndOfLabelSpacing = 6;
 
-InfoBarGtk::InfoBarGtk(TabContentsWrapper* owner, InfoBarDelegate* delegate)
+InfoBarGtk::InfoBarGtk(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
     : InfoBar(owner, delegate),
-      theme_service_(GtkThemeService::GetFrom(owner->profile())) {
+      theme_service_(GtkThemeService::GetFrom(Profile::FromBrowserContext(
+          owner->tab_contents()->browser_context()))),
+      signals_(new ui::GtkSignalRegistrar) {
   DCHECK(delegate);
   // Create |hbox_| and pad the sides.
   hbox_ = gtk_hbox_new(FALSE, kElementPadding);
@@ -77,8 +84,8 @@ InfoBarGtk::InfoBarGtk(TabContentsWrapper* owner, InfoBarDelegate* delegate)
 
   close_button_.reset(CustomDrawButton::CloseButton(theme_service_));
   gtk_util::CenterWidgetInHBox(hbox_, close_button_->widget(), true, 0);
-  g_signal_connect(close_button_->widget(), "clicked",
-                   G_CALLBACK(OnCloseButtonThunk), this);
+  signals_->Connect(close_button_->widget(), "clicked",
+                    G_CALLBACK(OnCloseButtonThunk), this);
 
   widget_.Own(gtk_expanded_container_new());
   gtk_container_add(GTK_CONTAINER(widget_.get()), bg_box_);
@@ -108,6 +115,10 @@ int InfoBarGtk::AnimatingHeight() const {
   return animation().is_animating() ? bar_target_height() : 0;
 }
 
+ui::GtkSignalRegistrar* InfoBarGtk::Signals() {
+  return signals_.get();
+}
+
 GtkWidget* InfoBarGtk::CreateLabel(const std::string& text) {
   return theme_service_->BuildLabel(text, ui::kGdkBlack);
 }
@@ -130,7 +141,7 @@ void InfoBarGtk::AddLabelWithInlineLink(const string16& display_text,
   gtk_util::ForceFontSizePixels(
       GTK_CHROME_LINK_BUTTON(link_button)->label, 13.4);
   DCHECK(callback);
-  g_signal_connect(link_button, "clicked", callback, this);
+  signals_->Connect(link_button, "clicked", callback, this);
   gtk_util::SetButtonTriggersNavigation(link_button);
 
   GtkWidget* hbox = gtk_hbox_new(FALSE, 0);
@@ -157,6 +168,14 @@ void InfoBarGtk::AddLabelWithInlineLink(const string16& display_text,
   gtk_box_pack_start(GTK_BOX(hbox), initial_label, FALSE, FALSE, 0);
   gtk_util::CenterWidgetInHBox(hbox, link_button, false, 0);
   gtk_box_pack_start(GTK_BOX(hbox), trailing_label, FALSE, FALSE, 0);
+}
+
+void InfoBarGtk::ShowMenuWithModel(GtkWidget* sender,
+                                   MenuGtk::Delegate* delegate,
+                                   ui::MenuModel* model) {
+  menu_model_.reset(model);
+  menu_.reset(new MenuGtk(delegate, menu_model_.get()));
+  menu_->PopupForWidget(sender, 1, gtk_get_current_event_time());
 }
 
 void InfoBarGtk::GetTopColor(InfoBarDelegate::Type type,
@@ -240,6 +259,14 @@ void InfoBarGtk::PlatformSpecificShow(bool animate) {
 
   if (bg_box_->window)
     gdk_window_lower(bg_box_->window);
+}
+
+void InfoBarGtk::PlatformSpecificOnCloseSoon() {
+  // We must close all menus and prevent any signals from being emitted while
+  // we are animating the info bar closed.
+  menu_.reset();
+  menu_model_.reset();
+  signals_.reset();
 }
 
 void InfoBarGtk::PlatformSpecificOnHeightsRecalculated() {

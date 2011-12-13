@@ -6,7 +6,9 @@
 
 #include <set>
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback_old.h"
 #include "base/i18n/time_formatting.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
@@ -26,15 +28,13 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_source.h"
 #include "content/common/notification_details.h"
+#include "content/common/notification_source.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -114,13 +114,17 @@ WebUIMessageHandler* BrowsingHistoryHandler2::Attach(WebUI* web_ui) {
 
 void BrowsingHistoryHandler2::RegisterMessages() {
   web_ui_->RegisterMessageCallback("getHistory",
-      NewCallback(this, &BrowsingHistoryHandler2::HandleGetHistory));
+      base::Bind(&BrowsingHistoryHandler2::HandleGetHistory,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("searchHistory",
-      NewCallback(this, &BrowsingHistoryHandler2::HandleSearchHistory));
+      base::Bind(&BrowsingHistoryHandler2::HandleSearchHistory,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("removeURLsOnOneDay",
-      NewCallback(this, &BrowsingHistoryHandler2::HandleRemoveURLsOnOneDay));
+      base::Bind(&BrowsingHistoryHandler2::HandleRemoveURLsOnOneDay,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("clearBrowsingData",
-      NewCallback(this, &BrowsingHistoryHandler2::HandleClearBrowsingData));
+      base::Bind(&BrowsingHistoryHandler2::HandleClearBrowsingData,
+                 base::Unretained(this)));
 }
 
 void BrowsingHistoryHandler2::HandleGetHistory(const ListValue* args) {
@@ -146,7 +150,8 @@ void BrowsingHistoryHandler2::HandleGetHistory(const ListValue* args) {
   hs->QueryHistory(search_text_,
       options,
       &cancelable_search_consumer_,
-      NewCallback(this, &BrowsingHistoryHandler2::QueryComplete));
+      base::Bind(&BrowsingHistoryHandler2::QueryComplete,
+                 base::Unretained(this)));
 }
 
 void BrowsingHistoryHandler2::HandleSearchHistory(const ListValue* args) {
@@ -171,7 +176,8 @@ void BrowsingHistoryHandler2::HandleSearchHistory(const ListValue* args) {
   hs->QueryHistory(search_text_,
       options,
       &cancelable_search_consumer_,
-      NewCallback(this, &BrowsingHistoryHandler2::QueryComplete));
+      base::Bind(&BrowsingHistoryHandler2::QueryComplete,
+                 base::Unretained(this)));
 }
 
 void BrowsingHistoryHandler2::HandleRemoveURLsOnOneDay(const ListValue* args) {
@@ -212,7 +218,8 @@ void BrowsingHistoryHandler2::HandleRemoveURLsOnOneDay(const ListValue* args) {
       Profile::FromWebUI(web_ui_)->GetHistoryService(Profile::EXPLICIT_ACCESS);
   hs->ExpireHistoryBetween(
       urls_to_be_deleted_, begin_time, end_time, &cancelable_delete_consumer_,
-      NewCallback(this, &BrowsingHistoryHandler2::RemoveComplete));
+      base::Bind(&BrowsingHistoryHandler2::RemoveComplete,
+                 base::Unretained(this)));
 }
 
 void BrowsingHistoryHandler2::HandleClearBrowsingData(const ListValue* args) {
@@ -388,7 +395,7 @@ HistoryUI2::HistoryUI2(TabContents* contents) : ChromeWebUI(contents) {
 // static
 const GURL HistoryUI2::GetHistoryURLWithSearchText(const string16& text) {
   return GURL(std::string(chrome::kChromeUIHistory2URL) + "#q=" +
-              EscapeQueryParamValue(UTF16ToUTF8(text), true));
+              net::EscapeQueryParamValue(UTF16ToUTF8(text), true));
 }
 
 // static

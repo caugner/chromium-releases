@@ -9,26 +9,31 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/path_service.h"
+#include "base/metrics/field_trial.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/default_apps_trial.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/webui/sync_promo_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
+#include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "grit/generated_resources.h"
 #include "net/http/http_transaction_factory.h"
@@ -44,12 +49,95 @@
 
 namespace {
 
-void DeleteProfileDirectories(const std::vector<FilePath>& paths) {
+// Profiles that should be deleted on shutdown.
+std::vector<FilePath>& ProfilesToDelete() {
+  static std::vector<FilePath> profiles_to_delete;
+  return profiles_to_delete;
+}
+
+// Simple task to log the size of the current profile.
+class ProfileSizeTask : public Task {
+ public:
+  explicit ProfileSizeTask(Profile* profile);
+  virtual ~ProfileSizeTask() {}
+
+  virtual void Run();
+ private:
+  FilePath path_;
+  int extension_count_;
+};
+
+ProfileSizeTask::ProfileSizeTask(Profile* profile)
+    : path_(profile->GetPath()), extension_count_(-1) {
+  // This object should not remember the profile pointer since it should not
+  // be accessed from IO thread.
+
+  // Count number of extensions in this profile.
+  ExtensionService* extension_service = profile->GetExtensionService();
+  if (extension_service)
+    extension_count_ = extension_service->GetAppIds().size();
+}
+
+void ProfileSizeTask::Run() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
-  for (std::vector<FilePath>::const_iterator it = paths.begin();
-       it != paths.end(); ++it) {
-    file_util::Delete(*it, true);
+
+  int64 size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("*"));
+  int size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.TotalSize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("History"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.HistorySize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("History*"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.TotalHistorySize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Cookies"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.CookiesSize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Bookmarks"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.BookmarksSize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Favicons"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.FaviconsSize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Top Sites"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.TopSitesSize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Visited Links"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.VisitedLinksSize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Web Data"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.WebDataSize", size_MB);
+
+  size = file_util::ComputeFilesSize(path_, FILE_PATH_LITERAL("Extension*"));
+  size_MB = static_cast<int>(size  / (1024 * 1024));
+  UMA_HISTOGRAM_COUNTS_10000("Profile.ExtensionSize", size_MB);
+
+  // Count number of extensions in this profile, if we know.
+  if (extension_count_ != -1) {
+    UMA_HISTOGRAM_COUNTS_10000("Profile.AppCount", extension_count_);
+
+    static bool default_apps_trial_exists = base::FieldTrialList::TrialExists(
+        kDefaultAppsTrial_Name);
+    if (default_apps_trial_exists) {
+      UMA_HISTOGRAM_COUNTS_10000(
+          base::FieldTrial::MakeName("Profile.AppCount",
+                                     kDefaultAppsTrial_Name),
+          extension_count_);
+    }
   }
+}
+
+void QueueProfileDirectoryForDeletion(const FilePath& path) {
+  ProfilesToDelete().push_back(path);
 }
 
 } // namespace
@@ -66,11 +154,9 @@ class NewProfileLauncher : public ProfileManagerObserver {
  public:
   virtual void OnProfileCreated(Profile* profile, Status status) {
     if (status == STATUS_INITIALIZED) {
-      DCHECK(profile);
-      Browser* browser = Browser::Create(profile);
-      browser->AddSelectedTabWithURL(GURL(chrome::kChromeUINewTabURL),
-                                     PageTransition::LINK);
-      browser->window()->Show();
+      ProfileManager::NewWindowWithProfile(profile,
+                                           BrowserInit::IS_PROCESS_STARTUP,
+                                           BrowserInit::IS_FIRST_RUN);
     }
   }
 
@@ -88,19 +174,26 @@ void ProfileManager::ShutdownSessionServices() {
 }
 
 // static
+void ProfileManager::NukeDeletedProfilesFromDisk() {
+  for (std::vector<FilePath>::iterator it =
+          ProfilesToDelete().begin();
+       it != ProfilesToDelete().end();
+       ++it) {
+    file_util::Delete(*it, true);
+  }
+  ProfilesToDelete().clear();
+}
+
+// static
 Profile* ProfileManager::GetDefaultProfile() {
-  FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
-  return profile_manager->GetDefaultProfile(user_data_dir);
+  return profile_manager->GetDefaultProfile(profile_manager->user_data_dir_);
 }
 
 // static
 Profile* ProfileManager::GetLastUsedProfile() {
-  FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   ProfileManager* profile_manager = g_browser_process->profile_manager();
-  return profile_manager->GetLastUsedProfile(user_data_dir);
+  return profile_manager->GetLastUsedProfile(profile_manager->user_data_dir_);
 }
 
 ProfileManager::ProfileManager(const FilePath& user_data_dir)
@@ -118,14 +211,6 @@ ProfileManager::ProfileManager(const FilePath& user_data_dir)
 
 ProfileManager::~ProfileManager() {
   BrowserList::RemoveObserver(this);
-
-  // TODO(sail): fix http://crbug.com/88586
-  if (profiles_to_delete_.size()) {
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        NewRunnableFunction(&DeleteProfileDirectories, profiles_to_delete_));
-    profiles_to_delete_.clear();
-  }
 }
 
 FilePath ProfileManager::GetDefaultProfileDir(
@@ -181,18 +266,6 @@ Profile* ProfileManager::GetLastUsedProfile(const FilePath& user_data_dir) {
   return GetProfile(last_used_profile_dir);
 }
 
-void ProfileManager::RegisterProfileName(Profile* profile) {
-  std::string profile_name = profile->GetProfileName();
-  std::string dir_base = profile->GetPath().BaseName().MaybeAsASCII();
-  DictionaryPrefUpdate update(g_browser_process->local_state(),
-                              prefs::kProfileDirectoryMap);
-  DictionaryValue* path_map = update.Get();
-  // We don't check for duplicates because we should be able to overwrite
-  // path->name mappings here, if the user syncs a local account to a
-  // different Google account.
-  path_map->SetString(dir_base, profile_name);
-}
-
 Profile* ProfileManager::GetDefaultProfile(const FilePath& user_data_dir) {
   FilePath default_profile_dir(user_data_dir);
   default_profile_dir = default_profile_dir.Append(GetInitialProfileDir());
@@ -244,7 +317,7 @@ Profile* ProfileManager::GetProfile(const FilePath& profile_dir) {
   if (NULL != profile)
     return profile;
 
-  profile = Profile::CreateProfile(profile_dir);
+  profile = CreateProfile(profile_dir);
   DCHECK(profile);
   if (profile) {
     bool result = AddProfile(profile);
@@ -284,8 +357,7 @@ void ProfileManager::CreateDefaultProfileAsync(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   ProfileManager* profile_manager = g_browser_process->profile_manager();
 
-  FilePath default_profile_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &default_profile_dir);
+  FilePath default_profile_dir = profile_manager->user_data_dir_;
   // TODO(mirandac): current directory will not always be default in the future
   default_profile_dir = default_profile_dir.Append(
       profile_manager->GetInitialProfileDir());
@@ -321,6 +393,25 @@ ProfileManager::ProfileInfo* ProfileManager::RegisterProfile(Profile* profile,
 Profile* ProfileManager::GetProfileByPath(const FilePath& path) const {
   ProfilesInfoMap::const_iterator iter = profiles_info_.find(path);
   return (iter == profiles_info_.end()) ? NULL : iter->second->profile.get();
+}
+
+// static
+void ProfileManager::NewWindowWithProfile(
+    Profile* profile,
+    BrowserInit::IsProcessStartup process_startup,
+    BrowserInit::IsFirstRun is_first_run) {
+  DCHECK(profile);
+  Browser* browser = BrowserList::FindTabbedBrowser(profile, false);
+  if (browser) {
+    browser->window()->Activate();
+  } else {
+    UserMetrics::RecordAction(UserMetricsAction("NewWindow"));
+    CommandLine command_line(CommandLine::NO_PROGRAM);
+    int return_code;
+    BrowserInit browser_init;
+    browser_init.LaunchBrowser(command_line, profile, FilePath(),
+                               process_startup, is_first_run, &return_code);
+  }
 }
 
 void ProfileManager::Observe(
@@ -377,6 +468,14 @@ void ProfileManager::DoFinalInit(Profile* profile, bool go_off_the_record) {
   if (!command_line.HasSwitch(switches::kDisableWebResources))
     profile->InitPromoResources();
   AddProfileToCache(profile);
+
+  // Log the profile size after a reasonable startup delay.
+  BrowserThread::PostDelayedTask(BrowserThread::FILE, FROM_HERE,
+                                 new ProfileSizeTask(profile), 112000);
+}
+
+Profile* ProfileManager::CreateProfile(const FilePath& path) {
+  return Profile::CreateProfile(path);
 }
 
 void ProfileManager::OnProfileCreated(Profile* profile, bool success) {
@@ -431,11 +530,12 @@ void ProfileManager::CreateMultiProfileAsync() {
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
 
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+
   int next_directory = local_state->GetInteger(prefs::kProfilesNumCreated);
   std::string profile_name = chrome::kMultiProfileDirPrefix;
   profile_name.append(base::IntToString(next_directory));
-  FilePath new_path;
-  PathService::Get(chrome::DIR_USER_DATA, &new_path);
+  FilePath new_path = profile_manager->user_data_dir_;
 #if defined(OS_WIN)
   new_path = new_path.Append(ASCIIToUTF16(profile_name));
 #else
@@ -443,7 +543,6 @@ void ProfileManager::CreateMultiProfileAsync() {
 #endif
   local_state->SetInteger(prefs::kProfilesNumCreated, ++next_directory);
 
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
   // The launcher is deleted by the manager when profile creation is finished.
   NewProfileLauncher* launcher = new NewProfileLauncher();
   profile_manager->CreateProfileAsync(new_path, launcher);
@@ -452,27 +551,11 @@ void ProfileManager::CreateMultiProfileAsync() {
 // static
 void ProfileManager::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterStringPref(prefs::kProfileLastUsed, "");
-  prefs->RegisterDictionaryPref(prefs::kProfileDirectoryMap);
   prefs->RegisterIntegerPref(prefs::kProfilesNumCreated, 1);
 }
 
-
 size_t ProfileManager::GetNumberOfProfiles() {
-  const DictionaryValue* path_map =
-      g_browser_process->local_state()->GetDictionary(
-          prefs::kProfileDirectoryMap);
-  return path_map ? path_map->size() : 0;
-}
-
-string16 ProfileManager::GetNameOfProfileAtIndex(size_t index) {
-  return GetSortedProfilesFromDirectoryMap()[index].second;
-}
-
-FilePath ProfileManager::GetFilePathOfProfileAtIndex(
-    size_t index,
-    const FilePath& user_data_dir) {
-  FilePath base_name = GetSortedProfilesFromDirectoryMap()[index].first;
-  return user_data_dir.Append(base_name);
+  return GetProfileInfoCache().GetNumberOfProfiles();
 }
 
 bool ProfileManager::CompareProfilePathAndName(
@@ -486,37 +569,6 @@ bool ProfileManager::CompareProfilePathAndName(
   } else {
     return pair1.first < pair2.first;
   }
-}
-
-ProfileManager::ProfilePathAndNames
-ProfileManager::GetSortedProfilesFromDirectoryMap() {
-  ProfilePathAndNames profiles;
-
-  const DictionaryValue* path_map =
-      g_browser_process->local_state()->GetDictionary(
-          prefs::kProfileDirectoryMap);
-  if (!path_map)
-    return profiles;
-
-  for (DictionaryValue::key_iterator it = path_map->begin_keys();
-       it != path_map->end_keys(); ++it) {
-    std::string name_ascii;
-    path_map->GetString(*it, &name_ascii);
-    string16 name = ASCIIToUTF16(name_ascii);
-    if (name.empty())
-      name = l10n_util::GetStringUTF16(IDS_DEFAULT_PROFILE_NAME);
-#if defined(OS_POSIX)
-    FilePath file_path(*it);
-#elif defined(OS_WIN)
-    FilePath file_path(ASCIIToWide(*it));
-#endif
-
-    // Pending, need to insert it alphabetically.
-    profiles.push_back(std::pair<FilePath, string16>(file_path, name));
-  }
-
-  std::sort(profiles.begin(), profiles.end(), CompareProfilePathAndName);
-  return profiles;
 }
 
 ProfileInfoCache& ProfileManager::GetProfileInfoCache() {
@@ -535,15 +587,19 @@ void ProfileManager::AddProfileToCache(Profile* profile) {
   if (cache.GetIndexOfProfileWithPath(profile->GetPath()) != std::string::npos)
     return;
 
+  string16 username = UTF8ToUTF16(profile->GetPrefs()->GetString(
+      prefs::kGoogleServicesUsername));
+
   if (profile->GetPath() == GetDefaultProfileDir(cache.GetUserDataDir())) {
     cache.AddProfileToCache(
         profile->GetPath(),
-        l10n_util::GetStringUTF16(IDS_DEFAULT_PROFILE_NAME), 0);
+        l10n_util::GetStringUTF16(IDS_DEFAULT_PROFILE_NAME), username, 0);
   } else {
-    cache.AddProfileToCache(
-        profile->GetPath(),
-        cache.ChooseNameForNewProfile(),
-        cache.ChooseAvatarIconIndexForNewProfile());
+    size_t icon_index = cache.ChooseAvatarIconIndexForNewProfile();
+    cache.AddProfileToCache(profile->GetPath(),
+                            cache.ChooseNameForNewProfile(icon_index),
+                            username,
+                            icon_index);
   }
 }
 
@@ -566,16 +622,40 @@ void ProfileManager::ScheduleProfileForDeletion(const FilePath& profile_dir) {
   Profile* profile = GetProfileByPath(profile_dir);
   if (profile)
     BrowserList::CloseAllBrowsersWithProfile(profile);
-  profiles_to_delete_.push_back(profile_dir);
+  QueueProfileDirectoryForDeletion(profile_dir);
   ProfileInfoCache& cache = GetProfileInfoCache();
   cache.DeleteProfileFromCache(profile_dir);
 }
 
 // static
 bool ProfileManager::IsMultipleProfilesEnabled() {
+#if defined(OS_CHROMEOS)
   return CommandLine::ForCurrentProcess()->HasSwitch(switches::kMultiProfiles);
+#else
+  return true;
+#endif
+}
+
+void ProfileManager::AutoloadProfiles() {
+  ProfileInfoCache& cache = GetProfileInfoCache();
+  size_t number_of_profiles = cache.GetNumberOfProfiles();
+  for (size_t p = 0; p < number_of_profiles; ++p) {
+    if (cache.GetBackgroundStatusOfProfileAtIndex(p)) {
+      // If status is true, that profile is running background apps. By calling
+      // GetProfile, we automatically cause the profile to be loaded which will
+      // register it with the BackgroundModeManager.
+      GetProfile(cache.GetPathOfProfileAtIndex(p));
+    }
+  }
 }
 
 ProfileManagerWithoutInit::ProfileManagerWithoutInit(
     const FilePath& user_data_dir) : ProfileManager(user_data_dir) {
+}
+
+void ProfileManager::RegisterTestingProfile(Profile* profile,
+                                            bool add_to_cache) {
+  RegisterProfile(profile, true);
+  if (add_to_cache)
+    AddProfileToCache(profile);
 }

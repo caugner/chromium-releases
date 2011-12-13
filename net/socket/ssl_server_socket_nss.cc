@@ -92,7 +92,7 @@ SSLServerSocketNSS::~SSLServerSocketNSS() {
   }
 }
 
-int SSLServerSocketNSS::Handshake(CompletionCallback* callback) {
+int SSLServerSocketNSS::Handshake(OldCompletionCallback* callback) {
   net_log_.BeginEvent(NetLog::TYPE_SSL_SERVER_HANDSHAKE, NULL);
 
   int rv = Init();
@@ -143,13 +143,13 @@ int SSLServerSocketNSS::ExportKeyingMaterial(const base::StringPiece& label,
   return OK;
 }
 
-int SSLServerSocketNSS::Connect(CompletionCallback* callback) {
+int SSLServerSocketNSS::Connect(OldCompletionCallback* callback) {
   NOTIMPLEMENTED();
   return ERR_NOT_IMPLEMENTED;
 }
 
 int SSLServerSocketNSS::Read(IOBuffer* buf, int buf_len,
-                             CompletionCallback* callback) {
+                             OldCompletionCallback* callback) {
   DCHECK(!user_read_callback_);
   DCHECK(!user_handshake_callback_);
   DCHECK(!user_read_buf_);
@@ -172,7 +172,7 @@ int SSLServerSocketNSS::Read(IOBuffer* buf, int buf_len,
 }
 
 int SSLServerSocketNSS::Write(IOBuffer* buf, int buf_len,
-                              CompletionCallback* callback) {
+                              OldCompletionCallback* callback) {
   DCHECK(!user_write_callback_);
   DCHECK(!user_write_buf_);
   DCHECK(nss_bufs_);
@@ -369,6 +369,10 @@ int SSLServerSocketNSS::InitializeSSLOptions() {
   // Parse into a CERTCertificate structure.
   CERTCertificate* cert = CERT_NewTempCertificate(
       CERT_GetDefaultCertDB(), &der_cert, NULL, PR_FALSE, PR_TRUE);
+  if (!cert) {
+    LogFailedNSSFunction(net_log_, "CERT_NewTempCertificate", "");
+    return MapNSSError(PORT_GetError());
+  }
 
   // Get a key of SECKEYPrivateKey* structure.
   std::vector<uint8> key_vector;
@@ -702,7 +706,7 @@ int SSLServerSocketNSS::DoHandshake() {
 void SSLServerSocketNSS::DoHandshakeCallback(int rv) {
   DCHECK_NE(rv, ERR_IO_PENDING);
 
-  CompletionCallback* c = user_handshake_callback_;
+  OldCompletionCallback* c = user_handshake_callback_;
   user_handshake_callback_ = NULL;
   c->Run(rv > OK ? OK : rv);
 }
@@ -713,7 +717,7 @@ void SSLServerSocketNSS::DoReadCallback(int rv) {
 
   // Since Run may result in Read being called, clear |user_read_callback_|
   // up front.
-  CompletionCallback* c = user_read_callback_;
+  OldCompletionCallback* c = user_read_callback_;
   user_read_callback_ = NULL;
   user_read_buf_ = NULL;
   user_read_buf_len_ = 0;
@@ -726,7 +730,7 @@ void SSLServerSocketNSS::DoWriteCallback(int rv) {
 
   // Since Run may result in Write being called, clear |user_write_callback_|
   // up front.
-  CompletionCallback* c = user_write_callback_;
+  OldCompletionCallback* c = user_write_callback_;
   user_write_callback_ = NULL;
   user_write_buf_ = NULL;
   user_write_buf_len_ = 0;

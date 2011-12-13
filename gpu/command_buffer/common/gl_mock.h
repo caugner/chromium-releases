@@ -28,6 +28,9 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD2(BindBuffer, void(GLenum target, GLuint buffer));
 
+  MOCK_METHOD3(BindFragDataLocation, void(GLuint program, GLuint colorNumber,
+      const char* name));
+
   MOCK_METHOD4(BindFragDataLocationIndexedARB, void(GLuint program,
       GLuint colorNumber, GLuint index, const char* name));
 
@@ -232,6 +235,9 @@ class MockGLInterface : public GLInterface {
 
   MOCK_METHOD3(GetTexParameteriv, void(
       GLenum target, GLenum pname, GLint* params));
+
+  MOCK_METHOD4(GetTranslatedShaderSourceANGLE, void(
+      GLuint shader, GLsizei bufsize, GLsizei* length, char* source));
 
   MOCK_METHOD3(GetUniformfv,
                void(GLuint program, GLint location, GLfloat* params));

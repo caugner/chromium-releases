@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
@@ -58,7 +59,6 @@
 #include "content/browser/file_system/browser_file_system_helper.h"
 #include "content/browser/in_process_webkit/dom_storage_context.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
-#include "content/common/json_value_serializer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 #include "googleurl/src/gurl.h"
@@ -2666,8 +2666,14 @@ TEST_F(ExtensionServiceTest, ReloadExtensions) {
   EXPECT_EQ(0u, service_->disabled_extensions()->size());
 }
 
-// Tests uninstalling normal extensions
-TEST_F(ExtensionServiceTest, UninstallExtension) {
+// Tests uninstalling normal extensions.
+// Occasionally fails on Windows. See http://crbug.com/96296
+#if defined(OS_WIN)
+#define MAYBE_UninstallExtension FLAKY_UninstallExtension
+#else
+#define MAYBE_UninstallExtension UninstallExtension
+#endif
+TEST_F(ExtensionServiceTest, MAYBE_UninstallExtension) {
   InitializeEmptyExtensionService();
   InstallCrx(data_dir_.AppendASCII("good.crx"), true);
   UninstallExtension(good_crx, false);

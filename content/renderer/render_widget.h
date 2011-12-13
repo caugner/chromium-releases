@@ -9,9 +9,11 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "content/common/content_export.h"
 #include "content/renderer/paint_aggregator.h"
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
@@ -27,24 +29,28 @@
 #include "ui/gfx/surface/transport_dib.h"
 #include "webkit/glue/webcursor.h"
 
-class RenderThreadBase;
+namespace IPC {
+class SyncMessage;
+}
+
+namespace WebKit {
+class WebInputEvent;
+class WebMouseEvent;
+class WebTouchEvent;
+class WebWidget;
+struct WebPopupMenuInfo;
+}
 
 namespace gfx {
 class Point;
-}
-
-namespace IPC {
-class SyncMessage;
 }
 
 namespace skia {
 class PlatformCanvas;
 }
 
-namespace WebKit {
-class WebMouseEvent;
-class WebWidget;
-struct WebPopupMenuInfo;
+namespace ui {
+class Range;
 }
 
 namespace webkit {
@@ -59,16 +65,15 @@ class PluginInstance;
 
 // RenderWidget provides a communication bridge between a WebWidget and
 // a RenderWidgetHost, the latter of which lives in a different process.
-class RenderWidget : public IPC::Channel::Listener,
-                     public IPC::Message::Sender,
-                     virtual public WebKit::WebWidgetClient,
-                     public base::RefCounted<RenderWidget> {
+class CONTENT_EXPORT RenderWidget
+    : public IPC::Channel::Listener,
+      public IPC::Message::Sender,
+      NON_EXPORTED_BASE(virtual public WebKit::WebWidgetClient),
+      public base::RefCounted<RenderWidget> {
  public:
   // Creates a new RenderWidget.  The opener_id is the routing ID of the
-  // RenderView that this widget lives inside. The render_thread is any
-  // RenderThreadBase implementation, mostly commonly RenderThread::current().
+  // RenderView that this widget lives inside.
   static RenderWidget* Create(int32 opener_id,
-                              RenderThreadBase* render_thread,
                               WebKit::WebPopupType popup_type);
 
   // Creates a WebWidget based on the popup type.
@@ -86,9 +91,11 @@ class RenderWidget : public IPC::Channel::Listener,
 
   // May return NULL when the window is closing.
   WebKit::WebWidget* webwidget() const { return webwidget_; }
+
   gfx::NativeViewId host_window() const { return host_window_; }
   gfx::Size size() const { return size_; }
   bool has_focus() const { return has_focus_; }
+  bool is_fullscreen() const { return is_fullscreen_; }
 
   // IPC::Channel::Listener
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -99,7 +106,8 @@ class RenderWidget : public IPC::Channel::Listener,
   // WebKit::WebWidgetClient
   virtual void didInvalidateRect(const WebKit::WebRect&);
   virtual void didScrollRect(int dx, int dy, const WebKit::WebRect& clipRect);
-  virtual void didActivateAcceleratedCompositing(bool active);
+  virtual void didActivateCompositor(int compositorIdentifier);
+  virtual void didDeactivateCompositor();
   virtual void scheduleComposite();
   virtual void scheduleAnimation();
   virtual void didFocus();
@@ -128,6 +136,10 @@ class RenderWidget : public IPC::Channel::Listener,
   // Close the underlying WebWidget.
   virtual void Close();
 
+  float filtered_time_per_frame() const {
+    return filtered_time_per_frame_;
+  }
+
  protected:
   // Friend RefCounted so that the dtor can be non-public. Using this class
   // without ref-counting is an error.
@@ -135,8 +147,7 @@ class RenderWidget : public IPC::Channel::Listener,
   // For unit tests.
   friend class RenderWidgetTest;
 
-  RenderWidget(RenderThreadBase* render_thread,
-               WebKit::WebPopupType popup_type);
+  explicit RenderWidget(WebKit::WebPopupType popup_type);
   virtual ~RenderWidget();
 
   // Initializes this view with the given opener.  CompleteInit must be called
@@ -184,7 +195,8 @@ class RenderWidget : public IPC::Channel::Listener,
   void OnClose();
   void OnCreatingNewAck(gfx::NativeViewId parent);
   virtual void OnResize(const gfx::Size& new_size,
-                        const gfx::Rect& resizer_rect);
+                        const gfx::Rect& resizer_rect,
+                        bool is_fullscreen);
   virtual void OnWasHidden();
   virtual void OnWasRestored(bool needs_repainting);
   virtual void OnWasSwappedOut();
@@ -201,7 +213,8 @@ class RenderWidget : public IPC::Channel::Listener,
       const std::vector<WebKit::WebCompositionUnderline>& underlines,
       int selection_start,
       int selection_end);
-  virtual void OnImeConfirmComposition(const string16& text);
+  virtual void OnImeConfirmComposition(
+      const string16& text, const ui::Range& replacement_range);
   void OnMsgPaintAtSize(const TransportDIB::Handle& dib_id,
                         int tag,
                         const gfx::Size& page_size,
@@ -268,13 +281,18 @@ class RenderWidget : public IPC::Channel::Listener,
   void set_next_paint_is_restore_ack();
   void set_next_paint_is_repaint_ack();
 
-  // Checks if the input method state and caret position have been changed.
+  // Checks if the text input state and compose inline mode have been changed.
   // If they are changed, the new value will be sent to the browser process.
-  void UpdateInputMethod();
+  void UpdateTextInputState();
+
+  // Checks if the selection bounds have been changed. If they are changed,
+  // the new value will be sent to the browser process.
+  void UpdateSelectionBounds();
 
   // Override point to obtain that the current input method state and caret
   // position.
   virtual ui::TextInputType GetTextInputType();
+  virtual gfx::Rect GetCaretBounds();
 
   // Override point to obtain that the current input method state about
   // composition text.
@@ -296,9 +314,23 @@ class RenderWidget : public IPC::Channel::Listener,
   // just handled.
   virtual void DidHandleKeyEvent() {}
 
+  // Called by OnHandleInputEvent() to notify subclasses that a mouse event is
+  // about to be handled.
+  // Returns true if no further handling is needed. In that case, the event
+  // won't be sent to WebKit or trigger DidHandleMouseEvent().
+  virtual bool WillHandleMouseEvent(const WebKit::WebMouseEvent& event);
+
   // Called by OnHandleInputEvent() to notify subclasses that a mouse event was
   // just handled.
   virtual void DidHandleMouseEvent(const WebKit::WebMouseEvent& event) {}
+
+  // Called by OnHandleInputEvent() to notify subclasses that a touch event was
+  // just handled.
+  virtual void DidHandleTouchEvent(const WebKit::WebTouchEvent& event) {}
+
+  // Should return true if the underlying WebWidget is responsible for
+  // the scheduling of compositing requests.
+  virtual bool WebWidgetHandlesCompositorScheduling() const;
 
   // Routing ID that allows us to communicate to the parent browser process
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.
@@ -315,9 +347,6 @@ class RenderWidget : public IPC::Channel::Listener,
   // This ID may refer to an invalid view if that view is closed before this
   // view is.
   int32 opener_id_;
-
-  // The thread that does our IPC.
-  RenderThreadBase* render_thread_;
 
   // The position where this view should be initially shown.
   gfx::Rect initial_pos_;
@@ -371,6 +400,9 @@ class RenderWidget : public IPC::Channel::Listener,
   // Indicates that we shouldn't bother generated paint events.
   bool is_hidden_;
 
+  // Indicates that we are in fullscreen mode.
+  bool is_fullscreen_;
+
   // Indicates that we should be repainted when restored.  This flag is set to
   // true if we receive an invalidation / scroll event from webkit while our
   // is_hidden_ flag is set to true.  This is used to force a repaint once we
@@ -402,8 +434,9 @@ class RenderWidget : public IPC::Channel::Listener,
   // Stores the current type of composition text rendering of |webwidget_|.
   bool can_compose_inline_;
 
-  // Stores the current caret bounds of input focus.
-  WebKit::WebRect caret_bounds_;
+  // Stores the current selection bounds.
+  gfx::Rect selection_start_rect_;
+  gfx::Rect selection_end_rect_;
 
   // The kind of popup this widget represents, NONE if not a popup.
   WebKit::WebPopupType popup_type_;

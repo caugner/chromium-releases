@@ -78,7 +78,7 @@ class ProcessSingleton : public base::NonThreadSafe {
       int timeout_seconds);
 #endif  // defined(OS_LINUX)
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // Used in specific cases to let us know that there is an existing instance
   // of Chrome running with this profile. In general, you should not use this
   // function. Instead consider using NotifyOtherProcessOrCreate().
@@ -128,7 +128,9 @@ class ProcessSingleton : public base::NonThreadSafe {
   bool locked_;
   gfx::NativeWindow foreground_window_;
 
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  // TODO(saintlou): The process_singleton_aura.cc is still a stub.
+#elif defined(OS_WIN)
   // This ugly behemoth handles startup commands sent from another process.
   LRESULT OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds);
 

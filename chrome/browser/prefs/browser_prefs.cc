@@ -6,7 +6,6 @@
 
 #include "chrome/browser/about_flags.h"
 #include "chrome/browser/autofill/autofill_manager.h"
-#include "chrome/browser/background/background_contents_service.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
@@ -18,7 +17,6 @@
 #include "chrome/browser/extensions/apps_promo.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
-#include "chrome/browser/extensions/extensions_ui.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/geolocation/geolocation_prefs.h"
 #include "chrome/browser/google/google_url_tracker.h"
@@ -26,15 +24,15 @@
 #include "chrome/browser/intranet_redirect_detector.h"
 #include "chrome/browser/metrics/metrics_log.h"
 #include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/browser/net/http_server_properties_manager.h"
 #include "chrome/browser/net/net_pref_observer.h"
-#include "chrome/browser/net/predictor_api.h"
+#include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/browser/page_info_model.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/url_blacklist_manager.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -46,7 +44,6 @@
 #include "chrome/browser/remoting/firewall_traversal_observer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/tabs/pinned_tab_codec.h"
@@ -57,7 +54,9 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/browser/ui/webui/options/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
+#include "chrome/browser/ui/webui/sync_promo_ui.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
@@ -146,16 +145,15 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   BookmarkModel::RegisterUserPrefs(user_prefs);
   Browser::RegisterUserPrefs(user_prefs);
   PasswordManager::RegisterUserPrefs(user_prefs);
-  chrome_browser_net::RegisterUserPrefs(user_prefs);
+  chrome_browser_net::Predictor::RegisterUserPrefs(user_prefs);
   DownloadPrefs::RegisterUserPrefs(user_prefs);
   bookmark_utils::RegisterUserPrefs(user_prefs);
   TabContentsWrapper::RegisterUserPrefs(user_prefs);
   TemplateURLPrepopulateData::RegisterUserPrefs(user_prefs);
   ExtensionWebUI::RegisterUserPrefs(user_prefs);
-  ExtensionsUI::RegisterUserPrefs(user_prefs);
+  ExtensionSettingsHandler::RegisterUserPrefs(user_prefs);
   IncognitoModePrefs::RegisterUserPrefs(user_prefs);
   NewTabUI::RegisterUserPrefs(user_prefs);
-  PluginPrefs::RegisterPrefs(user_prefs);
   PluginsUI::RegisterUserPrefs(user_prefs);
   ProfileImpl::RegisterUserPrefs(user_prefs);
   PromoResourceService::RegisterUserPrefs(user_prefs);
@@ -173,9 +171,7 @@ void RegisterUserPrefs(PrefService* user_prefs) {
 #if defined(OS_CHROMEOS)
   chromeos::Preferences::RegisterUserPrefs(user_prefs);
 #endif
-  BackgroundContentsService::RegisterUserPrefs(user_prefs);
   SigninManager::RegisterUserPrefs(user_prefs);
-  TemplateURLService::RegisterUserPrefs(user_prefs);
   InstantController::RegisterUserPrefs(user_prefs);
   NetPrefObserver::RegisterPrefs(user_prefs);
   ProtocolHandlerRegistry::RegisterPrefs(user_prefs);
@@ -186,6 +182,8 @@ void RegisterUserPrefs(PrefService* user_prefs) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::URLBlacklistManager::RegisterPrefs(user_prefs);
 #endif
+  SyncPromoUI::RegisterUserPrefs(user_prefs);
+  chrome_browser_net::HttpServerPropertiesManager::RegisterPrefs(user_prefs);
 }
 
 void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {

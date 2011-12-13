@@ -37,8 +37,12 @@
 // 'views'.
 
 #if defined(USE_AURA)
-#include "aura/window.h"
-#endif
+class SkRegion;
+namespace aura {
+class Window;
+}
+#endif  // defined(USE_AURA)
+
 #if defined(OS_WIN)
 #include <windows.h>  // NOLINT
 typedef struct HFONT__* HFONT;
@@ -58,9 +62,12 @@ class NSView;
 class NSWindow;
 class NSTextField;
 #endif  // __OBJC__
-#elif defined(USE_WAYLAND)
+#elif defined(OS_POSIX)
 typedef struct _PangoFontDescription PangoFontDescription;
 typedef struct _cairo cairo_t;
+#endif
+
+#if defined(USE_WAYLAND)
 typedef struct _GdkPixbuf GdkPixbuf;
 struct wl_egl_window;
 
@@ -71,69 +78,92 @@ class WaylandCursor;
 
 typedef struct _GdkRegion GdkRegion;
 #elif defined(TOOLKIT_USES_GTK)
-typedef struct _PangoFontDescription PangoFontDescription;
 typedef struct _GdkCursor GdkCursor;
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GdkRegion GdkRegion;
 typedef struct _GtkWidget GtkWidget;
 typedef struct _GtkWindow GtkWindow;
-typedef struct _cairo cairo_t;
+#elif defined(OS_ANDROID)
+class ChromeView;
 #endif
 class SkBitmap;
 
 namespace gfx {
 
 #if defined(USE_AURA)
+// See ui/aura/cursor.h for values.
+typedef int NativeCursor;
 typedef aura::Window* NativeView;
 typedef aura::Window* NativeWindow;
+typedef SkRegion* NativeRegion;
 #elif defined(OS_WIN)
+typedef HCURSOR NativeCursor;
 typedef HWND NativeView;
 typedef HWND NativeWindow;
+typedef HRGN NativeRegion;
 #elif defined(OS_MACOSX)
+typedef void* NativeCursor;
 typedef NSView* NativeView;
 typedef NSWindow* NativeWindow;
 #elif defined(USE_WAYLAND)
+typedef void* NativeCursor;
 typedef ui::WaylandWindow* NativeView;
 typedef ui::WaylandWindow* NativeWindow;
+// TODO(dnicoara) This should be replaced with a cairo region or maybe
+// a Wayland specific region
+typedef GdkRegion* NativeRegion;
 #elif defined(USE_X11)
+typedef GdkCursor* NativeCursor;
 typedef GtkWidget* NativeView;
 typedef GtkWindow* NativeWindow;
+typedef GdkRegion* NativeRegion;
+#elif defined(OS_ANDROID)
+typedef void* NativeCursor;
+typedef ChromeView* NativeView;
+typedef ChromeView* NativeWindow;
+typedef void* NativeRegion;
 #endif
 
 #if defined(OS_WIN)
 typedef HFONT NativeFont;
 typedef HWND NativeEditView;
 typedef HDC NativeDrawingContext;
-typedef HCURSOR NativeCursor;
 typedef HMENU NativeMenu;
-typedef HRGN NativeRegion;
 typedef IAccessible* NativeViewAccessible;
 #elif defined(OS_MACOSX)
 typedef NSFont* NativeFont;
 typedef NSTextField* NativeEditView;
 typedef CGContext* NativeDrawingContext;
-typedef void* NativeCursor;
 typedef void* NativeMenu;
 typedef void* NativeViewAccessible;
 #elif defined(USE_WAYLAND)
 typedef PangoFontDescription* NativeFont;
 typedef void* NativeEditView;
 typedef cairo_t* NativeDrawingContext;
-typedef void* NativeCursor;
 typedef void* NativeMenu;
-// TODO(dnicoara) This should be replaced with a cairo region or maybe
-// a Wayland specific region
-typedef GdkRegion* NativeRegion;
 typedef void* NativeViewAccessible;
-#elif defined(USE_X11)
+#elif defined(TOOLKIT_USES_GTK)
 typedef PangoFontDescription* NativeFont;
 typedef GtkWidget* NativeEditView;
 typedef cairo_t* NativeDrawingContext;
-typedef GdkCursor* NativeCursor;
 typedef GtkWidget* NativeMenu;
-typedef GdkRegion* NativeRegion;
+typedef void* NativeViewAccessible;
+#elif defined(USE_AURA)
+typedef PangoFontDescription* NativeFont;
+typedef void* NativeEditView;
+typedef cairo_t* NativeDrawingContext;
+typedef void* NativeMenu;
+typedef void* NativeViewAccessible;
+#elif defined(OS_ANDROID)
+typedef void* NativeFont;
+typedef void* NativeEditView;
+typedef void* NativeDrawingContext;
+typedef void* NativeMenu;
 typedef void* NativeViewAccessible;
 #endif
+
+// A constant value to indicate that gfx::NativeCursor refers to no cursor.
+const gfx::NativeCursor kNullCursor = static_cast<gfx::NativeCursor>(NULL);
 
 #if defined(OS_MACOSX)
 typedef NSImage NativeImageType;

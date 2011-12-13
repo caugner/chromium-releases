@@ -6,6 +6,7 @@
 #define VIEWS_WINDOW_DIALOG_DELEGATE_H_
 #pragma once
 
+#include "base/string16.h"
 #include "ui/base/accessibility/accessibility_types.h"
 #include "ui/base/message_box_flags.h"
 #include "views/widget/widget_delegate.h"
@@ -47,7 +48,7 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
       ui::MessageBoxFlags::DialogButton button);
 
   // Returns the label of the specified DialogButton.
-  virtual std::wstring GetDialogButtonLabel(
+  virtual string16 GetDialogButtonLabel(
       ui::MessageBoxFlags::DialogButton button) const;
 
   // Override this function if with a view which will be shown in the same
@@ -87,11 +88,10 @@ class VIEWS_EXPORT DialogDelegate : public WidgetDelegate {
   // For Dialog boxes, this is called when the user presses the "OK" button,
   // or the Enter key.  Can also be called on Esc key or close button
   // presses if there is no "Cancel" button.  This function should return
-  // true if the window can be closed after the window can be closed after
-  // it returns, or false if it must remain open.  If |window_closing| is
-  // true, it means that this handler is being called because the window is
-  // being closed (e.g.  by Window::Close) and there is no Cancel handler,
-  // so Accept is being called instead.
+  // true if the window can be closed after it returns, or false if it must
+  // remain open.  If |window_closing| is true, it means that this handler is
+  // being called because the window is being closed (e.g.  by Window::Close)
+  // and there is no Cancel handler, so Accept is being called instead.
   virtual bool Accept(bool window_closing);
   virtual bool Accept();
 

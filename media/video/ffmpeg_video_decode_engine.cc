@@ -8,7 +8,6 @@
 #include "base/string_number_conversions.h"
 #include "base/task.h"
 #include "media/base/buffers.h"
-#include "media/base/callback.h"
 #include "media/base/limits.h"
 #include "media/base/media_switches.h"
 #include "media/base/pipeline.h"
@@ -56,13 +55,11 @@ void FFmpegVideoDecodeEngine::Initialize(
 
   // Initialize AVCodecContext structure.
   codec_context_ = avcodec_alloc_context();
-
-  // TODO(scherkus): should video format get passed in via VideoDecoderConfig?
-  codec_context_->pix_fmt = PIX_FMT_YUV420P;
+  codec_context_->pix_fmt = VideoFormatToPixelFormat(config.format());
   codec_context_->codec_type = AVMEDIA_TYPE_VIDEO;
   codec_context_->codec_id = VideoCodecToCodecID(config.codec());
-  codec_context_->coded_width = config.width();
-  codec_context_->coded_height = config.height();
+  codec_context_->coded_width = config.coded_size().width();
+  codec_context_->coded_height = config.coded_size().height();
 
   frame_rate_numerator_ = config.frame_rate_numerator();
   frame_rate_denominator_ = config.frame_rate_denominator();
@@ -93,42 +90,39 @@ void FFmpegVideoDecodeEngine::Initialize(
   const CommandLine* cmd_line = CommandLine::ForCurrentProcess();
   std::string threads(cmd_line->GetSwitchValueASCII(switches::kVideoThreads));
   if ((!threads.empty() &&
-      !base::StringToInt(threads, &decode_threads)) ||
+       !base::StringToInt(threads, &decode_threads)) ||
       decode_threads < 0 || decode_threads > kMaxDecodeThreads) {
     decode_threads = kDecodeThreads;
   }
+
+  codec_context_->thread_count = decode_threads;
 
   // We don't allocate AVFrame on the stack since different versions of FFmpeg
   // may change the size of AVFrame, causing stack corruption.  The solution is
   // to let FFmpeg allocate the structure via avcodec_alloc_frame().
   av_frame_.reset(avcodec_alloc_frame());
-  VideoCodecInfo info;
-  info.success = false;
-  info.surface_width = config.surface_width();
-  info.surface_height = config.surface_height();
 
   // If we do not have enough buffers, we will report error too.
   frame_queue_available_.clear();
 
   // Create output buffer pool when direct rendering is not used.
   for (size_t i = 0; i < Limits::kMaxVideoFrames; ++i) {
+    VideoFrame::Format format =
+        PixelFormatToVideoFormat(codec_context_->pix_fmt);
+
     scoped_refptr<VideoFrame> video_frame =
-        VideoFrame::CreateFrame(VideoFrame::YV12,
-                                config.surface_width(),
-                                config.surface_height(),
+        VideoFrame::CreateFrame(format,
+                                config.visible_rect().width(),
+                                config.visible_rect().height(),
                                 kNoTimestamp,
                                 kNoTimestamp);
     frame_queue_available_.push_back(video_frame);
   }
 
-  codec_context_->thread_count = decode_threads;
-  if (codec &&
-      avcodec_open(codec_context_, codec) >= 0 &&
-      av_frame_.get()) {
-    info.success = true;
-  }
+  // Open the codec!
+  bool success = codec && avcodec_open(codec_context_, codec) >= 0;
   event_handler_ = event_handler;
-  event_handler_->OnInitializeComplete(info);
+  event_handler_->OnInitializeComplete(success);
 }
 
 void FFmpegVideoDecodeEngine::ConsumeVideoSample(
@@ -250,8 +244,15 @@ void FFmpegVideoDecodeEngine::DecodeFrame(scoped_refptr<Buffer> buffer) {
   // Copy the frame data since FFmpeg reuses internal buffers for AVFrame
   // output, meaning the data is only valid until the next
   // avcodec_decode_video() call.
+  //
+  // TODO(scherkus): use VideoFrame dimensions instead and re-allocate
+  // VideoFrame if dimensions changes, but for now adjust size locally.
   int y_rows = codec_context_->height;
-  int uv_rows = codec_context_->height / 2;
+  int uv_rows = codec_context_->height;
+  if (codec_context_->pix_fmt == PIX_FMT_YUV420P) {
+    uv_rows /= 2;
+  }
+
   CopyYPlane(av_frame_->data[0], av_frame_->linesize[0], y_rows, video_frame);
   CopyUPlane(av_frame_->data[1], av_frame_->linesize[1], uv_rows, video_frame);
   CopyVPlane(av_frame_->data[2], av_frame_->linesize[2], uv_rows, video_frame);

@@ -5,33 +5,14 @@
 #ifndef CHROME_BROWSER_CONTENT_SETTINGS_CONTENT_SETTINGS_OBSERVABLE_PROVIDER_H_
 #define CHROME_BROWSER_CONTENT_SETTINGS_CONTENT_SETTINGS_OBSERVABLE_PROVIDER_H_
 
-#include <set>
 #include <string>
 
 #include "base/observer_list.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/content_settings_observer.h"
+#include "chrome/common/content_settings_pattern.h"
 
 namespace content_settings {
-
-class ObservableDefaultProvider : public DefaultProviderInterface {
- public:
-  ObservableDefaultProvider();
-  virtual ~ObservableDefaultProvider();
-
-  void AddObserver(Observer* observer);
-  void RemoveObserver(Observer* observer);
-
- protected:
-  void NotifyObservers(ContentSettingsPattern primary_pattern,
-                       ContentSettingsPattern secondary_pattern,
-                       ContentSettingsType content_type,
-                       std::string resource_identifier);
-  void RemoveAllObservers();
-
- private:
-  ObserverList<Observer, true> observer_list_;
-};
 
 class ObservableProvider : public ProviderInterface {
  public:

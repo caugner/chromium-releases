@@ -256,6 +256,20 @@ static void PPP_Messaging_HandleMessageDispatcher(
   );
 }
 
+static void PPP_MouseLock_MouseLockLostDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  UNREFERENCED_PARAMETER(outputs);
+  PppMouseLockRpcServer::PPP_MouseLock_MouseLockLost(
+      rpc,
+      done,
+      inputs[0]->u.ival
+  );
+}
+
 static void PPP_Printing_QuerySupportedFormatsDispatcher(
     NaClSrpcRpc* rpc,
     NaClSrpcArg** inputs,
@@ -312,6 +326,20 @@ static void PPP_Printing_EndDispatcher(
       rpc,
       done,
       inputs[0]->u.ival
+  );
+}
+
+static void PPP_Printing_IsScalingDisabledDispatcher(
+    NaClSrpcRpc* rpc,
+    NaClSrpcArg** inputs,
+    NaClSrpcArg** outputs,
+    NaClSrpcClosure* done
+) {
+  PppPrintingRpcServer::PPP_Printing_IsScalingDisabled(
+      rpc,
+      done,
+      inputs[0]->u.ival,
+      &(outputs[0]->u.ival)
   );
 }
 
@@ -412,10 +440,12 @@ NaClSrpcHandlerDesc PppRpcs::srpc_methods[] = {
   { "PPP_Instance_DidChangeFocus:ib:", PPP_Instance_DidChangeFocusDispatcher },
   { "PPP_Instance_HandleDocumentLoad:ii:i", PPP_Instance_HandleDocumentLoadDispatcher },
   { "PPP_Messaging_HandleMessage:iC:", PPP_Messaging_HandleMessageDispatcher },
+  { "PPP_MouseLock_MouseLockLost:i:", PPP_MouseLock_MouseLockLostDispatcher },
   { "PPP_Printing_QuerySupportedFormats:i:i", PPP_Printing_QuerySupportedFormatsDispatcher },
   { "PPP_Printing_Begin:iC:i", PPP_Printing_BeginDispatcher },
   { "PPP_Printing_PrintPages:iCi:i", PPP_Printing_PrintPagesDispatcher },
   { "PPP_Printing_End:i:", PPP_Printing_EndDispatcher },
+  { "PPP_Printing_IsScalingDisabled:i:i", PPP_Printing_IsScalingDisabledDispatcher },
   { "PPP_Scrollbar_ValueChanged:iii:", PPP_Scrollbar_ValueChangedDispatcher },
   { "PPP_Scrollbar_OverlayChanged:iii:", PPP_Scrollbar_OverlayChangedDispatcher },
   { "PPP_Selection_GetSelectedText:ii:C", PPP_Selection_GetSelectedTextDispatcher },

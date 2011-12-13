@@ -12,7 +12,8 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/path_service.h"
@@ -543,7 +544,8 @@ void JumpList::Observe(int type,
       if (top_sites) {
         top_sites->GetMostVisitedURLs(
             &topsites_consumer_,
-            NewCallback(this, &JumpList::OnMostVisitedURLsAvailable));
+            base::Bind(&JumpList::OnMostVisitedURLsAvailable,
+                       base::Unretained(this)));
       }
       break;
     }
@@ -710,7 +712,7 @@ bool JumpList::StartLoadingFavicon() {
       profile_->GetFaviconService(Profile::EXPLICIT_ACCESS);
   handle_ = favicon_service->GetFaviconForURL(
       url, history::FAVICON, &favicon_consumer_,
-      NewCallback(this, &JumpList::OnFaviconDataAvailable));
+      base::Bind(&JumpList::OnFaviconDataAvailable, base::Unretained(this)));
   return true;
 }
 
@@ -742,7 +744,7 @@ void JumpList::OnFaviconDataAvailable(
   // the file thread.
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this, &JumpList::RunUpdate));
+      base::Bind(&JumpList::RunUpdate, this));
 }
 
 void JumpList::RunUpdate() {

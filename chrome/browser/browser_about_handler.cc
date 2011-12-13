@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
@@ -30,7 +32,7 @@
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/memory_details.h"
 #include "chrome/browser/metrics/histogram_synchronizer.h"
-#include "chrome/browser/net/predictor_api.h"
+#include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -46,8 +48,10 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/gpu/gpu_process_host.h"
+#include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/sensors/sensors_provider.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "crypto/nss_util.h"
 #include "googleurl/src/gurl.h"
@@ -59,13 +63,10 @@
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "webkit/glue/webkit_glue.h"
-#include "webkit/plugins/npapi/plugin_list.h"
-#include "webkit/plugins/webplugininfo.h"
-
-#ifdef CHROME_V8
 #include "v8/include/v8.h"
-#endif
+#include "webkit/glue/user_agent.h"
+#include "webkit/glue/webkit_glue.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/enumerate_modules_model_win.h"
@@ -76,6 +77,7 @@
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/version_loader.h"
+#include "chrome/browser/oom_priority_manager.h"
 #include "content/browser/zygote_host_linux.h"
 #elif defined(OS_LINUX)
 #include "content/browser/zygote_host_linux.h"
@@ -138,13 +140,14 @@ const char* const kChromePaths[] = {
   chrome::kChromeUISettingsHost,
   chrome::kChromeUIStatsHost,
   chrome::kChromeUISyncInternalsHost,
+  chrome::kChromeUITaskManagerHost,
   chrome::kChromeUITCMallocHost,
   chrome::kChromeUITermsHost,
   chrome::kChromeUITracingHost,
   chrome::kChromeUIVersionHost,
   chrome::kChromeUIWorkersHost,
-#ifdef TRACK_ALL_TASK_OBJECTS
-  chrome::kChromeUITaskManagerHost,
+#if defined(TRACK_ALL_TASK_OBJECTS)
+  chrome::kChromeUITrackingHost,
 #endif
 #if defined(OS_WIN)
   chrome::kChromeUIConflictsHost,
@@ -157,6 +160,7 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIActiveDownloadsHost,
   chrome::kChromeUIChooseMobileNetworkHost,
   chrome::kChromeUICryptohomeHost,
+  chrome::kChromeUIDiscardsHost,
   chrome::kChromeUIImageBurnerHost,
   chrome::kChromeUIKeyboardOverlayHost,
   chrome::kChromeUILoginHost,
@@ -177,10 +181,11 @@ const char* const kAboutSourceNames[] = {
   chrome::kChromeUIMemoryHost,
   chrome::kChromeUIMemoryRedirectHost,
   chrome::kChromeUIStatsHost,
+  chrome::kChromeUITaskManagerHost,
   chrome::kChromeUITermsHost,
   chrome::kChromeUIVersionHost,
-#ifdef TRACK_ALL_TASK_OBJECTS
-  chrome::kChromeUITaskManagerHost,
+#if defined(TRACK_ALL_TASK_OBJECTS)
+  chrome::kChromeUITrackingHost,
 #endif
 #if defined(USE_TCMALLOC)
   chrome::kChromeUITCMallocHost,
@@ -190,8 +195,9 @@ const char* const kAboutSourceNames[] = {
   chrome::kChromeUISandboxHost,
 #endif
 #if defined(OS_CHROMEOS)
-  chrome::kChromeUINetworkHost,
   chrome::kChromeUICryptohomeHost,
+  chrome::kChromeUIDiscardsHost,
+  chrome::kChromeUINetworkHost,
   chrome::kChromeUIOSCreditsHost,
 #endif
 };
@@ -254,7 +260,7 @@ class AboutMemoryHandler : public MemoryDetails {
         request_id_(request_id) {
   }
 
-  virtual void OnDetailsAvailable();
+  virtual void OnDetailsAvailable() OVERRIDE;
 
  private:
   ~AboutMemoryHandler() {}
@@ -396,12 +402,10 @@ void AppendHeader(std::string* output, int refresh,
   output->append("<!DOCTYPE HTML>\n<html>\n<head>\n");
   if (!unescaped_title.empty()) {
     output->append("<title>");
-    output->append(EscapeForHTML(unescaped_title));
+    output->append(net::EscapeForHTML(unescaped_title));
     output->append("</title>\n");
   }
   output->append("<meta charset=\"utf-8\">\n");
-  output->append(ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_CONTENT_SECURITY_POLICY_HTML).as_string());
   if (refresh > 0) {
     output->append("<meta http-equiv=\"refresh\" content=\"");
     output->append(base::IntToString(refresh));
@@ -441,6 +445,11 @@ std::string ChromeURLs() {
 
 // Html output helper functions
 // TODO(stevenjb): L10N this.
+
+// Helper function to wrap HTML with a tag.
+std::string WrapWithTag(const std::string& tag, const std::string& text) {
+  return "<" + tag + ">" + text + "</" + tag + ">";
+}
 
 // Helper function to wrap Html with <th> tag.
 std::string WrapWithTH(const std::string& text) {
@@ -669,6 +678,73 @@ std::string AboutCryptohome(const std::string& query) {
   return GetCryptohomeHtmlInfo(refresh);
 }
 
+std::string AboutDiscardsRun() {
+  std::string output;
+  AppendHeader(&output, 0, "About discards");
+  output.append(StringPrintf("<meta http-equiv=\"refresh\" content=\"2;%s\">",
+                             chrome::kChromeUIDiscardsURL));
+  output.append(WrapWithTag("p", "Discarding a tab..."));
+  g_browser_process->oom_priority_manager()->DiscardTab();
+  AppendFooter(&output);
+  return output;
+}
+
+std::string AboutDiscards(const std::string& path) {
+  std::string output;
+  const char kRunCommand[] = "run";
+  if (path == kRunCommand)
+    return AboutDiscardsRun();
+  AppendHeader(&output, 0, "About discards");
+  AppendBody(&output);
+  output.append("<h3>About discards</h3>");
+  output.append(
+      "<p>Tabs sorted from most interesting to least interesting. The least "
+      "interesting tab may be discarded if we run out of physical memory.</p>");
+
+  std::vector<string16> titles =
+      g_browser_process->oom_priority_manager()->GetTabTitles();
+  if (!titles.empty()) {
+    output.append("<ol>");
+    std::vector<string16>::iterator it = titles.begin();
+    for ( ; it != titles.end(); ++it) {
+      std::string title = UTF16ToUTF8(*it);
+      output.append(WrapWithTag("li", title));
+    }
+    output.append("</ol>");
+  } else {
+    output.append("<p>None found.  Wait 10 seconds, then refresh.</p>");
+  }
+  output.append(StringPrintf("<a href='%s%s'>Discard tab now</a>",
+                             chrome::kChromeUIDiscardsURL,
+                             kRunCommand));
+
+  base::SystemMemoryInfoKB meminfo;
+  base::GetSystemMemoryInfo(&meminfo);
+  output.append("<h3>System memory information in MB</h3>");
+  output.append("<table>");
+  output.append(AddStringRow(
+    "Total", base::IntToString(meminfo.total / 1024)));
+  output.append(AddStringRow(
+    "Free", base::IntToString(meminfo.free / 1024)));
+  output.append(AddStringRow(
+    "Buffered", base::IntToString(meminfo.buffers / 1024)));
+  output.append(AddStringRow(
+    "Cached", base::IntToString(meminfo.cached / 1024)));
+  output.append(AddStringRow(
+    "Committed", base::IntToString(
+    (meminfo.total - meminfo.free - meminfo.buffers - meminfo.cached) / 1024)));
+  output.append(AddStringRow(
+    "Active Anon", base::IntToString(meminfo.active_anon / 1024)));
+  output.append(AddStringRow(
+    "Inactive Anon", base::IntToString(meminfo.inactive_anon / 1024)));
+  output.append(AddStringRow(
+    "Shared", base::IntToString(meminfo.shmem / 1024)));
+  output.append("</table>");
+
+  AppendFooter(&output);
+  return output;
+}
+
 #endif  // OS_CHROMEOS
 
 // AboutDnsHandler bounces the request back to the IO thread to collect
@@ -691,18 +767,20 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
   // Calls FinishOnUIThread() on completion.
   void StartOnUIThread() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    chrome_browser_net::Predictor* predictor =
+        source_->profile()->GetNetworkPredictor();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &AboutDnsHandler::StartOnIOThread));
+        NewRunnableMethod(this, &AboutDnsHandler::StartOnIOThread, predictor));
   }
 
-  void StartOnIOThread() {
+  void StartOnIOThread(chrome_browser_net::Predictor* predictor) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
     std::string data;
     AppendHeader(&data, 0, "About DNS");
     AppendBody(&data);
-    chrome_browser_net::PredictorGetHtmlInfo(&data);
+    chrome_browser_net::Predictor::PredictorGetHtmlInfo(predictor, &data);
     AppendFooter(&data);
 
     BrowserThread::PostTask(
@@ -779,7 +857,7 @@ std::string AboutHistograms(const std::string& query) {
   std::string unescaped_query;
   std::string unescaped_title("About Histograms");
   if (!query.empty()) {
-    unescaped_query = UnescapeURLComponent(query, UnescapeRule::NORMAL);
+    unescaped_query = net::UnescapeURLComponent(query, UnescapeRule::NORMAL);
     unescaped_title += " - " + unescaped_query;
   }
 
@@ -806,12 +884,12 @@ void AboutMemory(const std::string& path, AboutSource* source, int request_id) {
   }
 }
 
-#ifdef TRACK_ALL_TASK_OBJECTS
-static std::string AboutObjects(const std::string& query) {
-  std::string unescaped_title("About Histograms");
+#if defined(TRACK_ALL_TASK_OBJECTS)
+static std::string AboutTracking(const std::string& query) {
+  std::string unescaped_title("About Tracking");
   if (!query.empty()) {
     unescaped_title += " - ";
-    unescaped_title += UnescapeURLComponent(query, UnescapeRule::NORMAL);
+    unescaped_title += net::UnescapeURLComponent(query, UnescapeRule::NORMAL);
   }
   std::string data;
   AppendHeader(&data, 0, unescaped_title);
@@ -1070,15 +1148,6 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
       l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_TITLE));
   chrome::VersionInfo version_info;
 
-  std::string webkit_version = webkit_glue::GetWebKitVersion();
-#ifdef CHROME_V8
-  std::string js_version(v8::V8::GetVersion());
-  std::string js_engine = "V8";
-#else
-  std::string js_version = webkit_version;
-  std::string js_engine = "JavaScriptCore";
-#endif
-
   localized_strings->SetString("name",
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
   localized_strings->SetString("version", version_info.Version());
@@ -1092,14 +1161,15 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   localized_strings->SetString("platform",
                                l10n_util::GetStringUTF16(IDS_PLATFORM_LABEL));
   localized_strings->SetString("os_type", version_info.OSType());
-  localized_strings->SetString("webkit_version", webkit_version);
-  localized_strings->SetString("js_engine", js_engine);
-  localized_strings->SetString("js_version", js_version);
+  localized_strings->SetString("webkit_version",
+                               webkit_glue::GetWebKitVersion());
+  localized_strings->SetString("js_engine", "V8");
+  localized_strings->SetString("js_version", v8::V8::GetVersion());
 
   // Obtain the version of the first enabled Flash plugin.
   std::vector<webkit::WebPluginInfo> info_array;
-  webkit::npapi::PluginList::Singleton()->GetPluginInfoArray(
-      GURL(), "application/x-shockwave-flash", false, NULL, &info_array, NULL);
+  PluginService::GetInstance()->GetPluginInfoArray(
+      GURL(), "application/x-shockwave-flash", false, &info_array, NULL);
   string16 flash_version =
       l10n_util::GetStringUTF16(IDS_PLUGINS_DISABLED_PLUGIN);
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
@@ -1111,7 +1181,6 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   }
   localized_strings->SetString("flash_plugin", "Flash");
   localized_strings->SetString("flash_version", flash_version);
-  localized_strings->SetString("webkit_version", webkit_version);
   localized_strings->SetString("company",
       l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_COMPANY_NAME));
   localized_strings->SetString("copyright",
@@ -1171,6 +1240,21 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   std::string data;
   jstemplate_builder::AppendJsonJS(localized_strings, &data);
   return data;
+}
+
+// Used as a callback for PluginService::GetPlugins().
+void HandleAboutVersionStrings(AboutSource* source,
+                               int request_id,
+                               const std::vector<webkit::WebPluginInfo>&) {
+#if defined(OS_CHROMEOS)
+  new ChromeOSAboutVersionHandler(source, request_id);
+#else
+  DictionaryValue localized_strings;
+  localized_strings.SetString("os_version", "");
+  source->FinishDataRequest(
+      AboutVersionStrings(&localized_strings, source->profile()),
+      request_id);
+#endif
 }
 
 // AboutMemoryHandler ----------------------------------------------------------
@@ -1307,9 +1391,9 @@ ChromeOSAboutVersionHandler::ChromeOSAboutVersionHandler(
     int request_id)
     : source_(source),
       request_id_(request_id) {
-  loader_.EnablePlatformVersions(true);
   loader_.GetVersion(&consumer_,
-                     NewCallback(this, &ChromeOSAboutVersionHandler::OnVersion),
+                     base::Bind(&ChromeOSAboutVersionHandler::OnVersion,
+                                base::Unretained(this)),
                      chromeos::VersionLoader::VERSION_FULL);
 }
 
@@ -1345,53 +1429,53 @@ void AboutSource::StartDataRequest(const std::string& path,
                                    int request_id) {
   std::string response;
   std::string host = source_name();
-  if (host == chrome::kChromeUIDNSHost) {
+  // Add your data source here, in alphabetical order.
+  if (host == chrome::kChromeUIChromeURLsHost) {
+    response = ChromeURLs();
+  } else if (host == chrome::kChromeUICreditsHost) {
+    int idr = (path == kCreditsJsPath) ? IDR_CREDITS_JS : IDR_CREDITS_HTML;
+    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
+        idr).as_string();
+#if defined(OS_CHROMEOS)
+  } else if (host == chrome::kChromeUICryptohomeHost) {
+    response = AboutCryptohome(path);
+  } else if (host == chrome::kChromeUIDiscardsHost) {
+    response = AboutDiscards(path);
+#endif
+  } else if (host == chrome::kChromeUIDNSHost) {
     AboutDnsHandler::Start(this, request_id);
     return;
   } else if (host == chrome::kChromeUIHistogramsHost) {
     response = AboutHistograms(path);
+#if defined(OS_LINUX)
+  } else if (host == chrome::kChromeUILinuxProxyConfigHost) {
+    response = AboutLinuxProxyConfig();
+#endif
   } else if (host == chrome::kChromeUIMemoryHost) {
     response = GetAboutMemoryRedirectResponse(profile());
   } else if (host == chrome::kChromeUIMemoryRedirectHost) {
     AboutMemory(path, this, request_id);
     return;
-#ifdef TRACK_ALL_TASK_OBJECTS
-  } else if (host == chrome::kChromeUITaskManagerHost) {
-    response = AboutObjects(path);
-#endif
-  } else if (host == chrome::kChromeUIStatsHost) {
-    response = AboutStats(path);
-#if defined(USE_TCMALLOC)
-  } else if (host == chrome::kChromeUITCMallocHost) {
-    response = AboutTcmalloc();
-#endif
-  } else if (host == chrome::kChromeUIVersionHost) {
-    if (path == kStringsJsPath) {
 #if defined(OS_CHROMEOS)
-      new ChromeOSAboutVersionHandler(this, request_id);
-      return;
-#else
-      DictionaryValue localized_strings;
-      localized_strings.SetString("os_version", "");
-      response = AboutVersionStrings(&localized_strings, profile_);
-#endif
-    } else {
-      response = AboutVersionStaticContent(path);
-    }
-  } else if (host == chrome::kChromeUICreditsHost) {
-    int idr = (path == kCreditsJsPath) ? IDR_CREDITS_JS : IDR_CREDITS_HTML;
-    response = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        idr).as_string();
-  } else if (host == chrome::kChromeUIChromeURLsHost) {
-    response = ChromeURLs();
-#if defined(OS_CHROMEOS)
+  } else if (host == chrome::kChromeUINetworkHost) {
+    response = AboutNetwork(path);
   } else if (host == chrome::kChromeUIOSCreditsHost) {
     response = ResourceBundle::GetSharedInstance().GetRawDataResource(
         IDR_OS_CREDITS_HTML).as_string();
-  } else if (host == chrome::kChromeUINetworkHost) {
-    response = AboutNetwork(path);
-  } else if (host == chrome::kChromeUICryptohomeHost) {
-    response = AboutCryptohome(path);
+#endif
+#if defined(OS_LINUX)
+  } else if (host == chrome::kChromeUISandboxHost) {
+    response = AboutSandbox();
+#endif
+  } else if (host == chrome::kChromeUIStatsHost) {
+    response = AboutStats(path);
+#if defined(TRACK_ALL_TASK_OBJECTS)
+  } else if (host == chrome::kChromeUITrackingHost) {
+    response = AboutTracking(path);
+#endif
+#if defined(USE_TCMALLOC)
+  } else if (host == chrome::kChromeUITCMallocHost) {
+    response = AboutTcmalloc();
 #endif
   } else if (host == chrome::kChromeUITermsHost) {
 #if defined(OS_CHROMEOS)
@@ -1401,12 +1485,17 @@ void AboutSource::StartDataRequest(const std::string& path,
     response = ResourceBundle::GetSharedInstance().GetRawDataResource(
         IDR_TERMS_HTML).as_string();
 #endif
-#if defined(OS_LINUX)
-  } else if (host == chrome::kChromeUILinuxProxyConfigHost) {
-    response = AboutLinuxProxyConfig();
-  } else if (host == chrome::kChromeUISandboxHost) {
-    response = AboutSandbox();
-#endif
+  } else if (host == chrome::kChromeUIVersionHost) {
+    if (path == kStringsJsPath) {
+      // The Flash version information is needed on this page, so make sure
+      // the plugins are loaded.
+      PluginService::GetInstance()->GetPlugins(
+          base::Bind(&HandleAboutVersionStrings,
+                     make_scoped_refptr(this), request_id));
+      return;
+    } else {
+      response = AboutVersionStaticContent(path);
+    }
   }
 
   FinishDataRequest(response, request_id);
@@ -1462,20 +1551,28 @@ bool WillHandleBrowserAboutURL(GURL* url,
     return false;
 
   std::string host(url->host());
+  std::string path;
   // Replace about with chrome-urls.
   if (host == chrome::kChromeUIAboutHost)
     host = chrome::kChromeUIChromeURLsHost;
   // Replace cache with view-http-cache.
-  if (host == chrome::kChromeUICacheHost)
+  if (host == chrome::kChromeUICacheHost) {
     host = chrome::kChromeUINetworkViewCacheHost;
   // Replace gpu with gpu-internals.
-  else if (host == chrome::kChromeUIGpuHost)
+  } else if (host == chrome::kChromeUIGpuHost) {
     host = chrome::kChromeUIGpuInternalsHost;
   // Replace sync with sync-internals (for legacy reasons).
-  else if (host == chrome::kChromeUISyncHost)
+  } else if (host == chrome::kChromeUISyncHost) {
     host = chrome::kChromeUISyncInternalsHost;
+  // Redirect chrome://extensions to chrome://settings/extensions.
+  } else if (host == chrome::kChromeUIExtensionsHost) {
+    host = chrome::kChromeUISettingsHost;
+    path = chrome::kExtensionsSubPage;
+  }
   GURL::Replacements replacements;
   replacements.SetHostStr(host);
+  if (!path.empty())
+    replacements.SetPathStr(path);
   *url = url->ReplaceComponents(replacements);
 
   // Handle URLs to crash the browser or wreck the gpu process.
@@ -1491,6 +1588,26 @@ bool WillHandleBrowserAboutURL(GURL* url,
   } else if (host == chrome::kChromeUIGpuHangHost) {
     GpuProcessHost::SendOnIO(
         0, content::CAUSE_FOR_GPU_LAUNCH_ABOUT_GPUHANG, new GpuMsg_Hang());
+#if defined(OS_CHROMEOS)
+  } else if (host == chrome::kChromeUIRotateHost) {
+    sensors::ScreenOrientation change;
+    std::string query(url->query());
+    if (query == "left") {
+      change.upward = sensors::ScreenOrientation::LEFT;
+    } else if (query == "right") {
+      change.upward = sensors::ScreenOrientation::RIGHT;
+    } else if (query == "top") {
+      change.upward = sensors::ScreenOrientation::TOP;
+    } else if (query == "bottom") {
+      change.upward = sensors::ScreenOrientation::BOTTOM;
+    } else {
+      NOTREACHED() << "Unknown orientation";
+    }
+    sensors::Provider::GetInstance()->ScreenOrientationChanged(change);
+    // Nothing to communicate to the user, so show a blank page.
+    host = chrome::kChromeUIBlankHost;
+    *url = GURL(chrome::kChromeUIBlankHost);
+#endif
   }
 
   // Initialize any potentially corresponding AboutSource handler.

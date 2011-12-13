@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef VIEWS_DESKTOP_DESKTOP_WINDOW_H_
-#define VIEWS_DESKTOP_DESKTOP_WINDOW_H_
+#ifndef VIEWS_DESKTOP_DESKTOP_WINDOW_VIEW_H_
+#define VIEWS_DESKTOP_DESKTOP_WINDOW_VIEW_H_
 
+#include "base/observer_list.h"
 #include "views/view.h"
 #include "views/widget/widget_delegate.h"
 
@@ -16,6 +17,15 @@ namespace desktop {
 
 class DesktopWindowView : public WidgetDelegateView {
  public:
+  // Observers can listen to various events on the desktop.
+  class Observer {
+   public:
+    virtual void OnDesktopBoundsChanged(const gfx::Rect& previous_bounds) = 0;
+
+   protected:
+    virtual ~Observer() {}
+  };
+
   // The look and feel will be slightly different for different kinds of
   // desktop.
   enum DesktopType {
@@ -26,21 +36,27 @@ class DesktopWindowView : public WidgetDelegateView {
 
   static DesktopWindowView* desktop_window_view;
 
-  DesktopWindowView(DesktopType type);
+  explicit DesktopWindowView(DesktopType type);
   virtual ~DesktopWindowView();
 
   static void CreateDesktopWindow(DesktopType type);
 
-  void CreateTestWindow(const std::wstring& title,
+  void CreateTestWindow(const string16& title,
                         SkColor color,
                         gfx::Rect initial_bounds,
                         bool rotate);
 
   DesktopType type() const { return type_; }
 
+  // Add/remove observer.
+  void AddObserver(Observer* observer);
+  void RemoveObserver(Observer* observer);
+  bool HasObserver(Observer* observer);
+
  private:
   // Overridden from View:
   virtual void Layout() OVERRIDE;
+  virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
   virtual void ViewHierarchyChanged(
       bool is_add, View* parent, View* child) OVERRIDE;
 
@@ -49,7 +65,7 @@ class DesktopWindowView : public WidgetDelegateView {
   virtual const Widget* GetWidget() const OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
+  virtual string16 GetWindowTitle() const OVERRIDE;
   virtual SkBitmap GetWindowAppIcon() OVERRIDE;
   virtual SkBitmap GetWindowIcon() OVERRIDE;
   virtual bool ShouldShowWindowIcon() const OVERRIDE;
@@ -57,6 +73,7 @@ class DesktopWindowView : public WidgetDelegateView {
   virtual View* GetContentsView() OVERRIDE;
   virtual NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 
+  ObserverList<Observer> observers_;
   DesktopType type_;
   Widget* widget_;
 
@@ -66,4 +83,4 @@ class DesktopWindowView : public WidgetDelegateView {
 }  // namespace desktop
 }  // namespace views
 
-#endif  // VIEWS_DESKTOP_DESKTOP_WINDOW_H_
+#endif  // VIEWS_DESKTOP_DESKTOP_WINDOW_VIEW_H_

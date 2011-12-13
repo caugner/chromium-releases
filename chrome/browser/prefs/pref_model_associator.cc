@@ -6,15 +6,15 @@
 
 #include "base/auto_reset.h"
 #include "base/json/json_reader.h"
+#include "base/json/json_value_serializer.h"
+#include "base/location.h"
 #include "base/logging.h"
-#include "base/tracked.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/protocol/preference_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/json_value_serializer.h"
 #include "content/common/notification_service.h"
 
 using syncable::PREFERENCES;
@@ -81,8 +81,6 @@ void PrefModelAssociator::InitPrefAndAssociate(
     } else if (!pref->GetValue()->Equals(new_value.get())) {
       pref_service_->Set(pref_name.c_str(), *new_value);
     }
-
-    SendUpdateNotificationsIfNecessary(pref_name);
 
     // If the merge resulted in an updated value, inform the syncer.
     if (!value->Equals(new_value.get())) {
@@ -273,18 +271,6 @@ Value* PrefModelAssociator::MergeDictionaryValues(
   return result;
 }
 
-void PrefModelAssociator::SendUpdateNotificationsIfNecessary(
-    const std::string& pref_name) {
-  // The bookmark bar visibility preference requires a special
-  // notification to update the UI.
-  if (0 == pref_name.compare(prefs::kShowBookmarkBar)) {
-    NotificationService::current()->Notify(
-        chrome::NOTIFICATION_BOOKMARK_BAR_VISIBILITY_PREF_CHANGED,
-        Source<PrefModelAssociator>(this),
-        NotificationService::NoDetails());
-  }
-}
-
 // Note: This will build a model of all preferences registered as syncable
 // with user controlled data. We do not track any information for preferences
 // not registered locally as syncable and do not inform the syncer of
@@ -365,8 +351,6 @@ SyncError PrefModelAssociator::ProcessSyncChanges(
     if (iter->change_type() == SyncChange::ACTION_ADD) {
       synced_preferences_.insert(name);
     }
-
-    SendUpdateNotificationsIfNecessary(name);
   }
   return SyncError();
 }
@@ -428,10 +412,9 @@ void PrefModelAssociator::ProcessPrefChange(const std::string& name) {
   AutoReset<bool> processing_changes(&processing_syncer_changes_, true);
 
   if (synced_preferences_.count(name) == 0) {
-    DCHECK(preference->IsUserControlled());
-    // This preference was previously not user controlled and there was no sync
-    // data, but is now user controlled. We must associate it and create a sync
-    // node for it.
+    // Not in synced_preferences_ means no synced data. InitPrefAndAssociate(..)
+    // will determine if we care about its data (e.g. if it has a default value
+    // and hasn't been changed yet we don't) and take care syncing any new data.
     InitPrefAndAssociate(SyncData(), name, &changes);
   } else {
     // We are already syncing this preference, just update it's sync node.

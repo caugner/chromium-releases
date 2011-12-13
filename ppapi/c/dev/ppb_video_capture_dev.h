@@ -2,18 +2,32 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
+
+/* From dev/ppb_video_capture_dev.idl modified Wed Oct  5 09:11:07 2011. */
+
 #ifndef PPAPI_C_DEV_PPB_VIDEO_CAPTURE_DEV_H_
 #define PPAPI_C_DEV_PPB_VIDEO_CAPTURE_DEV_H_
 
 #include "ppapi/c/dev/pp_video_capture_dev.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
 
-#define PPB_VIDEO_CAPTURE_DEV_INTERFACE_0_1 "PPB_VideoCapture(Dev);0.1"
-#define PPB_VIDEO_CAPTURE_DEV_INTERFACE PPB_VIDEO_CAPTURE_DEV_INTERFACE_0_1
+#define PPB_VIDEOCAPTURE_DEV_INTERFACE_0_1 "PPB_VideoCapture(Dev);0.1"
+#define PPB_VIDEOCAPTURE_DEV_INTERFACE PPB_VIDEOCAPTURE_DEV_INTERFACE_0_1
 
+/**
+ * @file
+ * This file defines the <code>PPB_VideoCapture_Dev</code> interface.
+ */
+
+
+/**
+ * @addtogroup Interfaces
+ * @{
+ */
 /**
  * Video capture interface. It goes hand-in-hand with PPP_VideoCapture_Dev.
  *
@@ -44,12 +58,10 @@ struct PPB_VideoCapture_Dev {
    * Creates a new VideoCapture.
    */
   PP_Resource (*Create)(PP_Instance instance);
-
   /**
    * Returns PP_TRUE if the given resource is a VideoCapture.
    */
   PP_Bool (*IsVideoCapture)(PP_Resource video_capture);
-
   /**
    * Starts the capture. |requested_info| is a pointer to a structure containing
    * the requested resolution and frame rate. |buffer_count| is the number of
@@ -67,7 +79,6 @@ struct PPB_VideoCapture_Dev {
       PP_Resource video_capture,
       const struct PP_VideoCaptureDeviceInfo_Dev* requested_info,
       uint32_t buffer_count);
-
   /**
    * Allows the browser to reuse a buffer that was previously sent by
    * PPP_VideoCapture_Dev.OnBufferReady. |buffer| is the index of the buffer in
@@ -78,7 +89,6 @@ struct PPB_VideoCapture_Dev {
    * is not currently owned by the plugin. Returns PP_OK otherwise.
    */
   int32_t (*ReuseBuffer)(PP_Resource video_capture, uint32_t buffer);
-
   /**
    * Stops the capture.
    *
@@ -87,5 +97,9 @@ struct PPB_VideoCapture_Dev {
    */
   int32_t (*StopCapture)(PP_Resource video_capture);
 };
+/**
+ * @}
+ */
 
 #endif  /* PPAPI_C_DEV_PPB_VIDEO_CAPTURE_DEV_H_ */
+

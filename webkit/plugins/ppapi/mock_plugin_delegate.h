@@ -15,7 +15,9 @@ class MockPluginDelegate : public PluginDelegate {
   MockPluginDelegate();
   virtual ~MockPluginDelegate();
 
-  virtual void PluginFocusChanged(bool focused);
+  virtual void PluginFocusChanged(PluginInstance* instance, bool focused);
+  virtual void PluginTextInputTypeChanged(PluginInstance* instance);
+  virtual void PluginRequestedCancelComposition(PluginInstance* instance);
   virtual void PluginCrashed(PluginInstance* instance);
   virtual void InstanceCreated(PluginInstance* instance);
   virtual void InstanceDeleted(PluginInstance* instance);
@@ -40,10 +42,10 @@ class MockPluginDelegate : public PluginDelegate {
       WebKit::WebFileChooserCompletion* chooser_completion);
   virtual bool AsyncOpenFile(const FilePath& path,
                              int flags,
-                             AsyncOpenFileCallback* callback);
+                             const AsyncOpenFileCallback& callback);
   virtual bool AsyncOpenFileSystemURL(const GURL& path,
                                       int flags,
-                                      AsyncOpenFileCallback* callback);
+                                      const AsyncOpenFileCallback& callback);
   virtual bool OpenFileSystem(
       const GURL& url,
       fileapi::FileSystemType type,
@@ -69,7 +71,7 @@ class MockPluginDelegate : public PluginDelegate {
       fileapi::FileSystemCallbackDispatcher* dispatcher);
   virtual void QueryAvailableSpace(const GURL& origin,
                                    quota::StorageType type,
-                                   AvailableSpaceCallback* callback);
+                                   const AvailableSpaceCallback& callback);
   virtual void WillUpdateFile(const GURL& file_path);
   virtual void DidUpdateFile(const GURL& file_path, int64_t delta);
   virtual base::PlatformFileError OpenFile(const PepperFilePath& path,
@@ -112,12 +114,17 @@ class MockPluginDelegate : public PluginDelegate {
   virtual void DidStopLoading();
   virtual void SetContentRestriction(int restrictions);
   virtual void SaveURLAs(const GURL& url);
-  virtual content::P2PSocketDispatcher* GetP2PSocketDispatcher();
   virtual webkit_glue::P2PTransport* CreateP2PTransport();
   virtual double GetLocalTimeZoneOffset(base::Time t);
   virtual std::string GetFlashCommandLineArgs();
   virtual base::SharedMemory* CreateAnonymousSharedMemory(uint32_t size);
   virtual ::ppapi::Preferences GetPreferences();
+  virtual void LockMouse(PluginInstance* instance);
+  virtual void UnlockMouse(PluginInstance* instance);
+  virtual void DidChangeCursor(PluginInstance* instance,
+                               const WebKit::WebCursorInfo& cursor);
+  virtual void DidReceiveMouseEvent(PluginInstance* instance);
+  virtual bool IsInFullscreenMode();
 };
 
 }  // namespace ppapi

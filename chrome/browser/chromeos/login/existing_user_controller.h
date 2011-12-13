@@ -10,6 +10,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "base/task.h"
 #include "base/timer.h"
@@ -20,12 +21,15 @@
 #include "chrome/browser/chromeos/login/ownership_status_checker.h"
 #include "chrome/browser/chromeos/login/password_changed_view.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
-#include "chrome/browser/chromeos/wm_message_listener.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "ui/gfx/rect.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include "chrome/browser/chromeos/wm_message_listener.h"
+#endif
 
 namespace chromeos {
 
@@ -143,9 +147,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
     login_performer_delegate_.reset(d);
   }
 
-  // Passes owner user to cryptohomed and initiates disk control control check.
+  // Passes owner user to cryptohomed. Called right before mounting a user.
   // Subsequent disk space control checks are invoked by cryptohomed timer.
-  void StartAutomaticFreeDiskSpaceControl();
+  void SetOwnerUserInCryptohome();
 
   // Used to execute login operations.
   scoped_ptr<LoginPerformer> login_performer_;
@@ -185,7 +189,7 @@ class ExistingUserController : public LoginDisplay::Delegate,
   NotificationRegistrar registrar_;
 
   // Factory of callbacks.
-  ScopedRunnableMethodFactory<ExistingUserController> method_factory_;
+  base::WeakPtrFactory<ExistingUserController> weak_factory_;
 
   // Whether everything is ready to launch the browser.
   bool ready_for_browser_launch_;

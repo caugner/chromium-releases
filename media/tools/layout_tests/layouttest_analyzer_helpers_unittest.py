@@ -4,9 +4,12 @@
 # found in the LICENSE file.
 
 import copy
+from datetime import datetime
 import os
 import pickle
+import time
 import unittest
+
 
 import layouttest_analyzer_helpers
 
@@ -106,6 +109,79 @@ class TestLayoutTestAnalyzerHelpers(unittest.TestCase):
     self.assertEquals(
         len(analyzerResultMapBase.GetListOfBugsForNonSkippedTests().keys()),
         10)
+
+  def RunTestGetRevisionString(self, current_time_str, prev_time_str,
+                               expected_rev_str, expected_simple_rev_str,
+                               expected_rev_number, expected_rev_date,
+                               testname, diff_map_none=False):
+    current_time = datetime.strptime(current_time_str, '%Y-%m-%d-%H')
+    current_time = time.mktime(current_time.timetuple())
+    prev_time = datetime.strptime(prev_time_str, '%Y-%m-%d-%H')
+    prev_time = time.mktime(prev_time.timetuple())
+    if diff_map_none:
+      diff_map = None
+    else:
+      diff_map = {
+        'whole': [[], []],
+        'skip': [[(testname, 'te_info1')], []],
+        'nonskip': [[], []],
+      }
+    (rev_str, simple_rev_str, rev_number, rev_date) = (
+        layouttest_analyzer_helpers.GetRevisionString(prev_time, current_time,
+                                                      diff_map))
+    self.assertEquals(rev_str, expected_rev_str)
+    self.assertEquals(simple_rev_str, expected_simple_rev_str)
+    self.assertEquals(rev_number, expected_rev_number)
+    self.assertEquals(rev_date, expected_rev_date)
+
+  def testGetRevisionString(self):
+    expected_rev_str = ('<ul><a href="http://trac.webkit.org/changeset?'
+                        'new=94377@trunk/LayoutTests/platform/chromium/'
+                        'test_expectations.txt&old=94366@trunk/LayoutTests/'
+                        'platform/chromium/test_expectations.txt">94366->'
+                        '94377</a>\n'
+                        '<li>jamesr@google.com</li>\n'
+                        '<li>2011-09-01 18:00:23</li>\n'
+                        '<ul><li>-BUGWK63878 : fast/dom/dom-constructors.html'
+                        ' = TEXT</li>\n'
+                        '</ul></ul>')
+    expected_simple_rev_str = ('<a href="http://trac.webkit.org/changeset?'
+                               'new=94377@trunk/LayoutTests/platform/chromium/'
+                               'test_expectations.txt&old=94366@trunk/'
+                               'LayoutTests/platform/chromium/'
+                               'test_expectations.txt">94366->94377</a>,')
+    self.RunTestGetRevisionString('2011-09-02-00', '2011-09-01-00',
+                                  expected_rev_str, expected_simple_rev_str,
+                                  94377, '2011-09-01 18:00:23',
+                                  'fast/dom/dom-constructors.html')
+
+  def testGetRevisionStringNoneDiffMap(self):
+    self.RunTestGetRevisionString('2011-09-02-00', '2011-09-01-00', '', '',
+                                  '', '', '', diff_map_none=True)
+
+  def testGetRevisionStringNoMatchingTest(self):
+    self.RunTestGetRevisionString('2011-09-01-00', '2011-09-02-00', '', '',
+                                  '', '', 'foo1.html')
+
+  def testReplaceLineInFile(self):
+    file_path = os.path.join('test_data', 'inplace.txt')
+    f = open(file_path, 'w')
+    f.write('Hello')
+    f.close()
+    layouttest_analyzer_helpers.ReplaceLineInFile(
+        file_path, 'Hello', 'Goodbye')
+    f = open(file_path, 'r')
+    self.assertEquals(f.readline(), 'Goodbye')
+    f.close()
+    layouttest_analyzer_helpers.ReplaceLineInFile(
+        file_path, 'Bye', 'Hello')
+    f = open(file_path, 'r')
+    self.assertEquals(f.readline(), 'Goodbye')
+    f.close()
+
+  def testFindLatestResultWithNoData(self):
+    self.assertFalse(
+        layouttest_analyzer_helpers.FindLatestResult('test_data'))
 
 
 if __name__ == '__main__':

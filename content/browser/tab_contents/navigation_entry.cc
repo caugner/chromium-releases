@@ -9,7 +9,7 @@
 #include "content/browser/content_browser_client.h"
 #include "content/browser/site_instance.h"
 #include "content/common/content_constants.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
 #include "ui/base/text/text_elider.h"
 
@@ -40,9 +40,10 @@ NavigationEntry::NavigationEntry()
       page_type_(NORMAL_PAGE),
       update_virtual_url_with_url_(false),
       page_id_(-1),
-      transition_type_(PageTransition::LINK),
+      transition_type_(content::PAGE_TRANSITION_LINK),
       has_post_data_(false),
-      restore_type_(RESTORE_NONE) {
+      restore_type_(RESTORE_NONE),
+      is_renderer_initiated_(false) {
 }
 
 NavigationEntry::NavigationEntry(SiteInstance* instance,
@@ -50,7 +51,8 @@ NavigationEntry::NavigationEntry(SiteInstance* instance,
                                  const GURL& url,
                                  const GURL& referrer,
                                  const string16& title,
-                                 PageTransition::Type transition_type)
+                                 content::PageTransition transition_type,
+                                 bool is_renderer_initiated)
     : unique_id_(GetUniqueID()),
       site_instance_(instance),
       page_type_(NORMAL_PAGE),
@@ -61,7 +63,8 @@ NavigationEntry::NavigationEntry(SiteInstance* instance,
       page_id_(page_id),
       transition_type_(transition_type),
       has_post_data_(false),
-      restore_type_(RESTORE_NONE) {
+      restore_type_(RESTORE_NONE),
+      is_renderer_initiated_(is_renderer_initiated) {
 }
 
 NavigationEntry::~NavigationEntry() {

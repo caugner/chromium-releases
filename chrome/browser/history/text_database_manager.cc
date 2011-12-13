@@ -4,6 +4,7 @@
 
 #include "chrome/browser/history/text_database_manager.h"
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/metrics/histogram.h"
@@ -85,7 +86,7 @@ TextDatabaseManager::TextDatabaseManager(const FilePath& dir,
       transaction_nesting_(0),
       db_cache_(DBCache::NO_AUTO_EVICT),
       present_databases_loaded_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       history_publisher_(NULL) {
 }
 
@@ -283,16 +284,20 @@ bool TextDatabaseManager::AddPageData(const GURL& url,
   VisitVector visits;
   visit_database_->GetIndexedVisitsForURL(url_id, &visits);
   for (size_t i = 0; i < visits.size(); i++) {
-      visits[i].is_indexed = false;
-      visit_database_->UpdateVisitRow(visits[i]);
-      DeletePageData(visits[i].visit_time, url, NULL);
+    visits[i].is_indexed = false;
+    visit_database_->UpdateVisitRow(visits[i]);
+    DeletePageData(visits[i].visit_time, url, NULL);
   }
 
   if (visit_id) {
     // We're supposed to update the visit database, so load the visit.
     VisitRow row;
     if (!visit_database_->GetRowForVisit(visit_id, &row)) {
-      NOTREACHED() << "Could not find requested visit #" << visit_id;
+      // This situation can occur if Chrome's history is in the process of
+      // being updated, and then the browsing history is deleted before all
+      // updates have been completely performed.  In this case, a stale update
+      // to the database is attempted, leading to the warning below.
+      DLOG(WARNING) << "Could not find requested visit #" << visit_id;
       return false;
     }
 
@@ -371,6 +376,9 @@ void TextDatabaseManager::DeleteAll() {
   DCHECK_EQ(0, transaction_nesting_) << "Calling deleteAll in a transaction.";
 
   InitDBList();
+
+  // Delete uncommitted entries.
+  recent_changes_.Clear();
 
   // Close all open databases.
   db_cache_.Clear();
@@ -525,9 +533,11 @@ TextDatabase* TextDatabaseManager::GetDBForTime(Time time,
 }
 
 void TextDatabaseManager::ScheduleFlushOldChanges() {
-  factory_.RevokeAll();
-  MessageLoop::current()->PostDelayedTask(FROM_HERE, factory_.NewRunnableMethod(
-          &TextDatabaseManager::FlushOldChanges),
+  weak_factory_.InvalidateWeakPtrs();
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&TextDatabaseManager::FlushOldChanges,
+                 weak_factory_.GetWeakPtr()),
       kExpirationSec * Time::kMillisecondsPerSecond);
 }
 

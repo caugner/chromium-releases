@@ -44,6 +44,14 @@ void GpuChannelManager::RemoveRoute(int32 routing_id) {
   gpu_child_thread_->RemoveRoute(routing_id);
 }
 
+GpuChannel* GpuChannelManager::LookupChannel(int32 renderer_id) {
+  GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
+  if (iter == gpu_channels_.end())
+    return NULL;
+  else
+    return iter->second;
+}
+
 bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
   bool msg_is_ok = true;
   bool handled = true;
@@ -55,12 +63,6 @@ bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_VisibilityChanged, OnVisibilityChanged)
 #if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
     IPC_MESSAGE_HANDLER(GpuMsg_ResizeViewACK, OnResizeViewACK);
-#endif
-#if defined(OS_MACOSX)
-    IPC_MESSAGE_HANDLER(GpuMsg_AcceleratedSurfaceBuffersSwappedACK,
-                        OnAcceleratedSurfaceBuffersSwappedACK)
-    IPC_MESSAGE_HANDLER(GpuMsg_DestroyCommandBuffer,
-                        OnDestroyCommandBuffer)
 #endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
@@ -94,9 +96,9 @@ void GpuChannelManager::OnEstablishChannel(int renderer_id) {
 #if defined(OS_POSIX)
     // On POSIX, pass the renderer-side FD. Also mark it as auto-close so
     // that it gets closed after it has been sent.
-    int renderer_fd = channel->GetRendererFileDescriptor();
+    int renderer_fd = channel->TakeRendererFileDescriptor();
     DCHECK_NE(-1, renderer_fd);
-    channel_handle.socket = base::FileDescriptor(dup(renderer_fd), true);
+    channel_handle.socket = base::FileDescriptor(renderer_fd, true);
 #endif
   }
 
@@ -144,26 +146,6 @@ void GpuChannelManager::OnResizeViewACK(int32 renderer_id,
 
   channel->ViewResized(command_buffer_route_id);
 }
-
-#if defined(OS_MACOSX)
-void GpuChannelManager::OnAcceleratedSurfaceBuffersSwappedACK(
-    int renderer_id, int32 route_id, uint64 swap_buffers_count) {
-  GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
-  if (iter == gpu_channels_.end())
-    return;
-  scoped_refptr<GpuChannel> channel = iter->second;
-  channel->AcceleratedSurfaceBuffersSwapped(route_id, swap_buffers_count);
-}
-
-void GpuChannelManager::OnDestroyCommandBuffer(
-    int renderer_id, int32 renderer_view_id) {
-  GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
-  if (iter == gpu_channels_.end())
-    return;
-  scoped_refptr<GpuChannel> channel = iter->second;
-  channel->DestroyCommandBufferByViewId(renderer_view_id);
-}
-#endif
 
 void GpuChannelManager::LoseAllContexts() {
   MessageLoop::current()->PostTask(

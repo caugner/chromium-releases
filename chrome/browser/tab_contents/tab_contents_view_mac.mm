@@ -8,27 +8,26 @@
 
 #include <string>
 
-#include "chrome/browser/global_keyboard_shortcuts_mac.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
-#include "chrome/browser/tab_contents/popup_menu_helper_mac.h"
+#include "chrome/browser/browser_shutdown.h"
+#import "chrome/browser/renderer_host/chrome_render_widget_host_view_mac_delegate.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_mac.h"
-#import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/focus_tracker.h"
 #import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
 #import "chrome/browser/ui/cocoa/tab_contents/web_drag_source.h"
 #import "chrome/browser/ui/cocoa/tab_contents/web_drop_target.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
-#include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host.h"
+#include "content/browser/renderer_host/render_widget_host_view_mac.h"
+#include "content/browser/tab_contents/popup_menu_helper_mac.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #import "content/common/chrome_application_mac.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_source.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/notification_types.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 
@@ -57,6 +56,7 @@ COMPILE_ASSERT_MATCHING_ENUM(DragOperationEvery);
                         image:(NSImage*)image
                        offset:(NSPoint)offset;
 - (void)cancelDeferredClose;
+- (void)clearTabContentsView;
 - (void)closeTabAfterEvent;
 - (void)viewDidBecomeFirstResponder:(NSNotification*)notification;
 @end
@@ -80,6 +80,7 @@ TabContentsViewMac::~TabContentsViewMac() {
   // close.  In that case, the Cocoa view outlives the
   // TabContentsViewMac instance due to Cocoa retain count.
   [cocoa_view_ cancelDeferredClose];
+  [cocoa_view_ clearTabContentsView];
 }
 
 void TabContentsViewMac::CreateView(const gfx::Size& initial_size) {
@@ -103,6 +104,12 @@ RenderWidgetHostView* TabContentsViewMac::CreateViewForWidget(
 
   RenderWidgetHostViewMac* view =
       new RenderWidgetHostViewMac(render_widget_host);
+
+  // TODO(avi): Find a better place to do this.
+  ChromeRenderWidgetHostViewMacDelegate* rw_delegate =
+      [[ChromeRenderWidgetHostViewMacDelegate alloc]
+          initWithRenderWidgetHost:render_widget_host];
+  view->SetDelegate((RenderWidgetHostViewMacDelegate*)rw_delegate);
 
   // Fancy layout comes later; for now just make it our size and resize it
   // with us. In case there are other siblings of the content area, we want
@@ -170,16 +177,21 @@ void TabContentsViewMac::RenderViewCreated(RenderViewHost* host) {
   // We want updates whenever the intrinsic width of the webpage changes.
   // Put the RenderView into that mode. The preferred width is used for example
   // when the "zoom" button in the browser window is clicked.
-  host->Send(new ViewMsg_EnablePreferredSizeChangedMode(
-      host->routing_id(), kPreferredSizeWidth));
+  host->EnablePreferredSizeMode(kPreferredSizeWidth);
 }
 
-void TabContentsViewMac::SetPageTitle(const std::wstring& title) {
+void TabContentsViewMac::SetPageTitle(const string16& title) {
   // Meaningless on the Mac; widgets don't have a "title" attribute
 }
 
 void TabContentsViewMac::OnTabCrashed(base::TerminationStatus /* status */,
                                       int /* error_code */) {
+  // Only show the sad tab if we're not in browser shutdown, so that TabContents
+  // objects that are not in a browser (e.g., HTML dialogs) and thus are
+  // visible do not flash a sad tab page.
+  if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
+    return;
+
   if (!sad_tab_.get()) {
     DCHECK(tab_contents_);
     if (tab_contents_) {
@@ -379,7 +391,7 @@ void TabContentsViewMac::CloseTabAfterEventTracking() {
 }
 
 void TabContentsViewMac::GetViewBounds(gfx::Rect* out) const {
-  // This method is noth currently used on mac.
+  // This method is not currently used on mac.
   NOTIMPLEMENTED();
 }
 
@@ -449,12 +461,14 @@ void TabContentsViewMac::Observe(int type,
 }
 
 - (TabContents*)tabContents {
+  if (tabContentsView_ == NULL)
+    return NULL;
   return tabContentsView_->tab_contents();
 }
 
 - (void)mouseEvent:(NSEvent *)theEvent {
   TabContents* tabContents = [self tabContents];
-  if (tabContents->delegate()) {
+  if (tabContents && tabContents->delegate()) {
     NSPoint location = [NSEvent mouseLocation];
     if ([theEvent type] == NSMouseMoved)
       tabContents->delegate()->ContentsMouseEvent(
@@ -558,6 +572,10 @@ void TabContentsViewMac::Observe(int type,
   [NSObject cancelPreviousPerformRequestsWithTarget:self
                                            selector:aSel
                                              object:nil];
+}
+
+- (void)clearTabContentsView {
+  tabContentsView_ = NULL;
 }
 
 - (void)closeTabAfterEvent {

@@ -11,7 +11,6 @@
 #include "ppapi/cpp/point.h"
 #include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/size.h"
-#include "remoting/base/tracer.h"
 #include "remoting/base/util.h"
 #include "remoting/client/chromoting_stats.h"
 #include "remoting/client/client_context.h"
@@ -19,6 +18,28 @@
 #include "remoting/client/plugin/pepper_util.h"
 
 namespace remoting {
+
+namespace {
+
+ChromotingScriptableObject::ConnectionError ConvertConnectionError(
+    protocol::ConnectionToHost::Error error) {
+  switch (error) {
+    case protocol::ConnectionToHost::OK:
+      return ChromotingScriptableObject::ERROR_NONE;
+    case protocol::ConnectionToHost::HOST_IS_OFFLINE:
+      return ChromotingScriptableObject::ERROR_HOST_IS_OFFLINE;
+    case protocol::ConnectionToHost::SESSION_REJECTED:
+      return ChromotingScriptableObject::ERROR_SESSION_REJECTED;
+    case protocol::ConnectionToHost::INCOMPATIBLE_PROTOCOL:
+      return ChromotingScriptableObject::ERROR_INCOMPATIBLE_PROTOCOL;
+    case protocol::ConnectionToHost::NETWORK_FAILURE:
+      return ChromotingScriptableObject::ERROR_NETWORK_FAILURE;
+  }
+  DLOG(FATAL) << "Unknown error code" << error;
+  return  ChromotingScriptableObject::ERROR_NONE;
+}
+
+}  // namespace
 
 PepperView::PepperView(ChromotingInstance* instance, ClientContext* context)
   : instance_(instance),
@@ -45,10 +66,8 @@ void PepperView::TearDown() {
 void PepperView::Paint() {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  TraceContext::tracer()->PrintString("Start Paint.");
-
   if (is_static_fill_) {
-    LOG(INFO) << "Static filling " << static_fill_color_;
+    VLOG(1) << "Static filling " << static_fill_color_;
     pp::ImageData image(instance_, pp::ImageData::GetNativeImageDataFormat(),
                         pp::Size(graphics2d_.size().width(),
                                  graphics2d_.size().height()),
@@ -75,10 +94,9 @@ void PepperView::Paint() {
     // that has the data here which can be redrawn.
     return;
   }
-  TraceContext::tracer()->PrintString("End Paint.");
 }
 
-void PepperView::SetHostSize(const gfx::Size& host_size) {
+void PepperView::SetHostSize(const SkISize& host_size) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   if (host_size_ == host_size)
@@ -91,12 +109,10 @@ void PepperView::SetHostSize(const gfx::Size& host_size) {
       host_size.width(), host_size.height());
 }
 
-void PepperView::PaintFrame(media::VideoFrame* frame, UpdatedRects* rects) {
+void PepperView::PaintFrame(media::VideoFrame* frame, RectVector* rects) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  TraceContext::tracer()->PrintString("Start Paint Frame.");
-
-  SetHostSize(gfx::Size(frame->width(), frame->height()));
+  SetHostSize(SkISize::Make(frame->width(), frame->height()));
 
   if (!backing_store_.get() || backing_store_->is_null()) {
     LOG(ERROR) << "Backing store is not available.";
@@ -112,30 +128,28 @@ void PepperView::PaintFrame(media::VideoFrame* frame, UpdatedRects* rects) {
 
   if (changes_made)
     FlushGraphics(start_time);
-
-  TraceContext::tracer()->PrintString("End Paint Frame.");
 }
 
-bool PepperView::PaintRect(media::VideoFrame* frame, const gfx::Rect& r) {
+bool PepperView::PaintRect(media::VideoFrame* frame, const SkIRect& r) {
   const uint8* frame_data = frame->data(media::VideoFrame::kRGBPlane);
   const int kFrameStride = frame->stride(media::VideoFrame::kRGBPlane);
   const int kBytesPerPixel = GetBytesPerPixel(media::VideoFrame::RGB32);
 
   pp::Size backing_store_size = backing_store_->size();
-  gfx::Rect rect = r.Intersect(gfx::Rect(0, 0, backing_store_size.width(),
-                                         backing_store_size.height()));
-
-  if (rect.IsEmpty())
+  SkIRect rect(r);
+  if (!rect.intersect(SkIRect::MakeWH(backing_store_size.width(),
+                                      backing_store_size.height()))) {
     return false;
+  }
 
   const uint8* in =
       frame_data +
-      kFrameStride * rect.y() +   // Y offset.
-      kBytesPerPixel * rect.x();  // X offset.
+      kFrameStride * rect.fTop +   // Y offset.
+      kBytesPerPixel * rect.fLeft;  // X offset.
   uint8* out =
       reinterpret_cast<uint8*>(backing_store_->data()) +
-      backing_store_->stride() * rect.y() +  // Y offset.
-      kBytesPerPixel * rect.x();  // X offset.
+      backing_store_->stride() * rect.fTop +  // Y offset.
+      kBytesPerPixel * rect.fLeft;  // X offset.
 
   // TODO(hclam): We really should eliminate this memory copy.
   for (int j = 0; j < rect.height(); ++j) {
@@ -149,7 +163,7 @@ bool PepperView::PaintRect(media::VideoFrame* frame, const gfx::Rect& r) {
   graphics2d_.PaintImageData(
       *backing_store_.get(),
       pp::Point(0, 0),
-      pp::Rect(rect.x(), rect.y(), rect.width(), rect.height()));
+      pp::Rect(rect.fLeft, rect.fTop, rect.width(), rect.height()));
   return true;
 }
 
@@ -208,30 +222,40 @@ void PepperView::UnsetSolidFill() {
   is_static_fill_ = false;
 }
 
-void PepperView::SetConnectionState(ConnectionState state) {
+void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
+                                    protocol::ConnectionToHost::Error error) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   // TODO(hclam): Re-consider the way we communicate with Javascript.
   ChromotingScriptableObject* scriptable_obj = instance_->GetScriptableObject();
   switch (state) {
-    case CREATED:
+    case protocol::ConnectionToHost::CONNECTING:
       SetSolidFill(kCreatedColor);
-      scriptable_obj->SetConnectionInfo(STATUS_CONNECTING, QUALITY_UNKNOWN);
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_CONNECTING,
+          ConvertConnectionError(error));
       break;
 
-    case CONNECTED:
-      UnsetSolidFill();
+    case protocol::ConnectionToHost::CONNECTED:
       scriptable_obj->SignalLoginChallenge();
       break;
 
-    case DISCONNECTED:
-      SetSolidFill(kDisconnectedColor);
-      scriptable_obj->SetConnectionInfo(STATUS_CLOSED, QUALITY_UNKNOWN);
+    case protocol::ConnectionToHost::AUTHENTICATED:
+      UnsetSolidFill();
       break;
 
-    case FAILED:
+    case protocol::ConnectionToHost::CLOSED:
+      SetSolidFill(kDisconnectedColor);
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_CLOSED,
+          ConvertConnectionError(error));
+      break;
+
+    case protocol::ConnectionToHost::FAILED:
       SetSolidFill(kFailedColor);
-      scriptable_obj->SetConnectionInfo(STATUS_FAILED, QUALITY_UNKNOWN);
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_FAILED,
+          ConvertConnectionError(error));
       break;
   }
 }
@@ -241,13 +265,16 @@ void PepperView::UpdateLoginStatus(bool success, const std::string& info) {
 
   // TODO(hclam): Re-consider the way we communicate with Javascript.
   ChromotingScriptableObject* scriptable_obj = instance_->GetScriptableObject();
-  if (success)
-    scriptable_obj->SetConnectionInfo(STATUS_CONNECTED, QUALITY_UNKNOWN);
-  else
+  if (success) {
+    scriptable_obj->SetConnectionStatus(
+        ChromotingScriptableObject::STATUS_CONNECTED,
+        ChromotingScriptableObject::ERROR_NONE);
+  } else {
     scriptable_obj->SignalLoginChallenge();
+  }
 }
 
-bool PepperView::SetPluginSize(const gfx::Size& plugin_size) {
+bool PepperView::SetPluginSize(const SkISize& plugin_size) {
   if (plugin_size_ == plugin_size)
     return false;
   plugin_size_ = plugin_size;
@@ -260,14 +287,14 @@ bool PepperView::SetPluginSize(const gfx::Size& plugin_size) {
     return false;
   }
 
-  if (plugin_size.IsEmpty())
+  if (plugin_size.isEmpty())
     return false;
 
   // Allocate the backing store to save the desktop image.
   if ((backing_store_.get() == NULL) ||
       (backing_store_->size() != pp_size)) {
-    LOG(INFO) << "Allocate backing store: "
-              << plugin_size.width() << " x " << plugin_size.height();
+    VLOG(1) << "Allocate backing store: "
+            << plugin_size.width() << " x " << plugin_size.height();
     backing_store_.reset(
         new pp::ImageData(instance_, pp::ImageData::GetNativeImageDataFormat(),
                           pp_size, false));
@@ -279,7 +306,7 @@ bool PepperView::SetPluginSize(const gfx::Size& plugin_size) {
 
 double PepperView::GetHorizontalScaleRatio() const {
   if (instance_->DoScaling()) {
-    DCHECK(!host_size_.IsEmpty());
+    DCHECK(!host_size_.isEmpty());
     return 1.0 * plugin_size_.width() / host_size_.width();
   }
   return 1.0;
@@ -287,7 +314,7 @@ double PepperView::GetHorizontalScaleRatio() const {
 
 double PepperView::GetVerticalScaleRatio() const {
   if (instance_->DoScaling()) {
-    DCHECK(!host_size_.IsEmpty());
+    DCHECK(!host_size_.isEmpty());
     return 1.0 * plugin_size_.height() / host_size_.height();
   }
   return 1.0;
@@ -314,18 +341,15 @@ void PepperView::AllocateFrame(media::VideoFrame::Format format,
 void PepperView::ReleaseFrame(media::VideoFrame* frame) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  if (frame) {
-    LOG(WARNING) << "Frame released.";
+  if (frame)
     frame->Release();
-  }
 }
 
 void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
-                                      UpdatedRects* rects,
+                                      RectVector* rects,
                                       Task* done) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  TraceContext::tracer()->PrintString("Calling PaintFrame");
   // TODO(ajwong): Clean up this API to be async so we don't need to use a
   // member variable as a hack.
   PaintFrame(frame, rects);
@@ -335,7 +359,6 @@ void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
 
 void PepperView::OnPaintDone(base::Time paint_start) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
-  TraceContext::tracer()->PrintString("Paint flushed");
   instance_->GetStats()->video_paint_ms()->Record(
       (base::Time::Now() - paint_start).InMilliseconds());
 

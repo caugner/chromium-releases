@@ -37,7 +37,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
 #endif
 #include "ui/gfx/gl/gl_context.h"
@@ -46,6 +46,7 @@
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/glue/media/video_renderer_impl.h"
 #include "webkit/glue/webkit_constants.h"
+#include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
 #include "webkit/glue/webmediaplayer_impl.h"
@@ -117,13 +118,20 @@ void InitLogging(bool enable_gp_fault_error_box) {
 
 class TestEnvironment {
  public:
+#if defined(OS_ANDROID)
+  // Android UI message loop goes through Java, so don't use it in tests.
+  typedef MessageLoop MessageLoopType;
+#else
+  typedef MessageLoopForUI MessageLoopType;
+#endif
+
   explicit TestEnvironment(bool unit_test_mode) {
     if (!unit_test_mode) {
       at_exit_manager_.reset(new base::AtExitManager);
       InitLogging(false);
     }
-    main_message_loop_.reset(new MessageLoopForUI);
-    // TestWebKitPlatformSupport must be instantiated after MessageLoopForUI.
+    main_message_loop_.reset(new MessageLoopType);
+    // TestWebKitPlatformSupport must be instantiated after MessageLoopType.
     webkit_platform_support_.reset(
       new TestWebKitPlatformSupport(unit_test_mode));
   }
@@ -149,7 +157,7 @@ class TestEnvironment {
 
  private:
   scoped_ptr<base::AtExitManager> at_exit_manager_;
-  scoped_ptr<MessageLoopForUI> main_message_loop_;
+  scoped_ptr<MessageLoopType> main_message_loop_;
   scoped_ptr<TestWebKitPlatformSupport> webkit_platform_support_;
 };
 
@@ -160,11 +168,9 @@ class WebPluginImplWithPageDelegate
  public:
   WebPluginImplWithPageDelegate(WebFrame* frame,
                                 const WebPluginParams& params,
-                                const FilePath& path,
-                                const std::string& mime_type)
+                                const FilePath& path)
       : webkit_support::TestWebPluginPageDelegate(),
-        webkit::npapi::WebPluginImpl(
-            frame, params, path, mime_type, AsWeakPtr()) {}
+        webkit::npapi::WebPluginImpl(frame, params, path, AsWeakPtr()) {}
   virtual ~WebPluginImplWithPageDelegate() {}
  private:
   DISALLOW_COPY_AND_ASSIGN(WebPluginImplWithPageDelegate);
@@ -249,14 +255,16 @@ static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
   // Otherwise crash may happend when different threads try to create a GURL
   // at same time.
   url_util::Initialize();
-  webkit_support::BeforeInitialize(unit_test_mode);
-  webkit_support::test_environment = new TestEnvironment(unit_test_mode);
-  webkit_support::AfterInitialize(unit_test_mode);
+  BeforeInitialize(unit_test_mode);
+  test_environment = new TestEnvironment(unit_test_mode);
+  AfterInitialize(unit_test_mode);
   if (!unit_test_mode) {
     // Load ICU data tables.  This has to run after TestEnvironment is created
     // because on Linux, we need base::AtExitManager.
     icu_util::Initialize();
   }
+  webkit_glue::SetUserAgent(webkit_glue::BuildUserAgentFromProduct(
+      "DumpRenderTree/0.0.0.0"), false);
 }
 
 void SetUpTestEnvironment() {
@@ -296,8 +304,10 @@ WebPlugin* CreateWebPlugin(WebFrame* frame,
   if (plugins.empty())
     return NULL;
 
+  WebPluginParams new_params = params;
+  new_params.mimeType = WebString::fromUTF8(mime_types.front());
   return new WebPluginImplWithPageDelegate(
-      frame, params, plugins.front().path, mime_types.front());
+      frame, new_params, plugins.front().path);
 }
 
 WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
@@ -621,7 +631,7 @@ void OpenFileSystem(WebFrame* frame, WebFileSystem::Type type,
 }
 
 // Keyboard code
-#if defined(OS_LINUX)
+#if defined(TOOLKIT_USES_GTK)
 int NativeKeyCodeForWindowsKeyCode(int keycode, bool shift) {
   ui::KeyboardCode code = static_cast<ui::KeyboardCode>(keycode);
   return ui::GdkNativeKeyCodeForWindowsKeyCode(code, shift);

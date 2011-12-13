@@ -8,7 +8,8 @@
 #include <map>
 #include <string>
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
@@ -485,9 +486,11 @@ void MobileSetupHandler::Init(TabContents* contents) {
 
 void MobileSetupHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback(kJsApiStartActivation,
-      NewCallback(this, &MobileSetupHandler::HandleStartActivation));
+      base::Bind(&MobileSetupHandler::HandleStartActivation,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback(kJsApiSetTransactionStatus,
-      NewCallback(this, &MobileSetupHandler::HandleSetTransactionStatus));
+      base::Bind(&MobileSetupHandler::HandleSetTransactionStatus,
+                 base::Unretained(this)));
 }
 
 void MobileSetupHandler::OnNetworkManagerChanged(
@@ -524,13 +527,13 @@ void MobileSetupHandler::HandleSetTransactionStatus(const ListValue* args) {
     return;
   scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), status);
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(task.get(), &TaskProxy::HandleSetTransactionStatus));
+      base::Bind(&TaskProxy::HandleSetTransactionStatus, task.get()));
 }
 
 void MobileSetupHandler::InitiateActivation() {
   scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), 0);
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(task.get(), &TaskProxy::HandleStartActivation));
+      base::Bind(&TaskProxy::HandleStartActivation, task.get()));
 }
 
 void MobileSetupHandler::StartActivation() {
@@ -681,8 +684,7 @@ bool MobileSetupHandler::ConnectToNetwork(
     scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(),
                                                   delay);
     BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(task.get(), &TaskProxy::ContinueConnecting),
-        delay);
+        base::Bind(&TaskProxy::ContinueConnecting, task.get()), delay);
     return false;
   }
   chromeos::CrosLibrary::Get()->GetNetworkLibrary()->
@@ -706,8 +708,7 @@ void MobileSetupHandler::ForceReconnect(
   scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(),
                                                 delay);
   BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(task.get(), &TaskProxy::ContinueConnecting),
-      delay);
+      base::Bind(&TaskProxy::ContinueConnecting, task.get()), delay);
 }
 
 bool MobileSetupHandler::ConnectionTimeout() {
@@ -1101,8 +1102,7 @@ void MobileSetupHandler::ChangeState(chromeos::CellularNetwork* network,
       UMA_HISTOGRAM_COUNTS("Cellular.RetryOTASP", 1);
       scoped_refptr<TaskProxy> task = new TaskProxy(AsWeakPtr(), 0);
       BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(task.get(), &TaskProxy::RetryOTASP),
-          kOTASPRetryDelay);
+          base::Bind(&TaskProxy::RetryOTASP, task.get()), kOTASPRetryDelay);
       break;
     }
     case PLAN_ACTIVATION_INITIATING_ACTIVATION:
@@ -1271,6 +1271,9 @@ void MobileSetupHandler::GetDeviceInfo(chromeos::CellularNetwork* network,
     return;
   value->SetString("carrier", network->name());
   value->SetString("payment_url", network->payment_url());
+  if (network->using_post() && network->post_data().length())
+    value->SetString("post_data", network->post_data());
+
   const chromeos::NetworkDevice* device =
       cros->FindNetworkDeviceByPath(network->device_path());
   if (device) {

@@ -22,8 +22,7 @@ def _CheckNoInterfacesInBase(input_api, output_api):
   pattern = input_api.re.compile(r'^\s*@interface', input_api.re.MULTILINE)
   files = []
   for f in input_api.AffectedSourceFiles(input_api.FilterSourceFile):
-    if (f.LocalPath().find('base/') != -1 and
-        f.LocalPath().find('base/test/') == -1 and
+    if (f.LocalPath().startswith('base/') and
         not f.LocalPath().endswith('_unittest.mm')):
       contents = input_api.ReadFile(f)
       if pattern.search(contents):
@@ -49,8 +48,9 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   # calls to such functions without a proper C++ parser.
   source_extensions = r'\.(cc|cpp|cxx|mm)$'
   file_inclusion_pattern = r'.+%s' % source_extensions
-  file_exclusion_pattern = (r'.+(_test_support|_(unit|browser|ui|perf)test)%s' %
-                            source_extensions)
+  file_exclusion_pattern = (
+    r'(.*/(test_|mock_).+|.+(_test_support|profile_sync_service_harness|'
+    r'_(api|browser|perf|unit|ui)?test))%s' % source_extensions)
   path_exclusion_pattern = r'.*[/\\](test|tool(s)?)[/\\].*'
 
   base_function_pattern = r'ForTest(ing)?|for_test(ing)?'
@@ -110,6 +110,25 @@ def _CheckNoIOStreamInHeaders(input_api, output_api):
   return []
 
 
+def _CheckNoNewWStrings(input_api, output_api):
+  """Checks to make sure we don't introduce use of wstrings."""
+  problems = []
+  for f in input_api.AffectedFiles():
+    for line_num, line in f.ChangedContents():
+      if (not f.LocalPath().endswith(('.cc', '.h')) or
+          f.LocalPath().endswith('test.cc')):
+        continue
+
+      if 'wstring' in line:
+        problems.append('    %s:%d' % (f.LocalPath(), line_num))
+
+  if not problems:
+    return []
+  return [output_api.PresubmitPromptWarning('New code should not use wstrings.'
+      '  If you are calling an API that accepts a wstring, fix the API.\n' +
+      '\n'.join(problems))]
+
+
 def _CommonChecks(input_api, output_api):
   """Checks common to both upload and commit."""
   results = []
@@ -120,6 +139,7 @@ def _CommonChecks(input_api, output_api):
   results.extend(
     _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api))
   results.extend(_CheckNoIOStreamInHeaders(input_api, output_api))
+  results.extend(_CheckNoNewWStrings(input_api, output_api))
   return results
 
 
@@ -226,5 +246,9 @@ def CheckChangeOnCommit(input_api, output_api):
   return results
 
 
-def GetPreferredTrySlaves():
+def GetPreferredTrySlaves(project, change):
+  only_objc_files = all(
+      f.LocalPath().endswith(('.mm', '.m')) for f in change.AffectedFiles())
+  if only_objc_files:
+    return ['mac']
   return ['win', 'linux', 'mac']

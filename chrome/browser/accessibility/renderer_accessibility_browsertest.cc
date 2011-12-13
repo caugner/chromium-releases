@@ -15,7 +15,7 @@
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
+#include "content/public/browser/notification_types.h"
 
 #if defined(OS_WIN)
 #include <atlbase.h>
@@ -33,15 +33,17 @@ class RendererAccessibilityBrowserTest : public InProcessBrowserTest {
   // Tell the renderer to send an accessibility tree, then wait for the
   // notification that it's been received.
   const WebAccessibility& GetWebAccessibilityTree() {
+    ui_test_utils::WindowedNotificationObserver tree_updated_observer(
+        content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
+        NotificationService::AllSources());
     RenderWidgetHostView* host_view =
         browser()->GetSelectedTabContents()->GetRenderWidgetHostView();
     RenderWidgetHost* host = host_view->GetRenderWidgetHost();
     RenderViewHost* view_host = static_cast<RenderViewHost*>(host);
     view_host->set_save_accessibility_tree_for_testing(true);
     view_host->EnableRendererAccessibility();
-    ui_test_utils::WaitForNotification(
-        content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED);
-    return view_host->accessibility_tree();
+    tree_updated_observer.Wait();
+    return view_host->accessibility_tree_for_testing();
   }
 
   // Make sure each node in the tree has an unique id.
@@ -62,13 +64,17 @@ class RendererAccessibilityBrowserTest : public InProcessBrowserTest {
                       const WebAccessibility::StringAttribute attr);
   int GetIntAttr(const WebAccessibility& node,
                  const WebAccessibility::IntAttribute attr);
+  bool GetBoolAttr(const WebAccessibility& node,
+                   const WebAccessibility::BoolAttribute attr);
 };
 
 void RendererAccessibilityBrowserTest::SetUpInProcessBrowserTestFixture() {
 #if defined(OS_WIN)
-  // ATL needs a pointer to a COM module.
-  static CComModule module;
-  _pAtlModule = &module;
+  // ATL might need a pointer to a COM module, depending on the build config.
+  if (!_pAtlModule) {
+    static CComModule module;
+    _pAtlModule = &module;
+  }
 
   // Make sure COM is initialized for this thread; it's safe to call twice.
   ::CoInitialize(NULL);
@@ -107,6 +113,19 @@ int RendererAccessibilityBrowserTest::GetIntAttr(
     return -1;
 }
 
+// Convenience method to get the value of a particular WebAccessibility
+// node boolean attribute.
+bool RendererAccessibilityBrowserTest::GetBoolAttr(
+    const WebAccessibility& node,
+    const WebAccessibility::BoolAttribute attr) {
+  std::map<WebAccessibility::BoolAttribute, bool>::const_iterator iter =
+      node.bool_attributes.find(attr);
+  if (iter != node.bool_attributes.end())
+    return iter->second;
+  else
+    return false;
+}
+
 IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
                        CrossPlatformWebpageAccessibility) {
   // Create a data url and load it.
@@ -117,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<body><input type='button' value='push' /><input type='checkbox' />"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
   const WebAccessibility& tree = GetWebAccessibilityTree();
 
   // Check properties of the root element of the tree.
@@ -130,7 +149,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
   EXPECT_STREQ(
       "text/html", GetAttr(tree, WebAccessibility::ATTR_DOC_MIMETYPE).c_str());
   EXPECT_STREQ("Accessibility Test", UTF16ToUTF8(tree.name).c_str());
-  EXPECT_EQ(WebAccessibility::ROLE_WEB_AREA, tree.role);
+  EXPECT_EQ(WebAccessibility::ROLE_ROOT_WEB_AREA, tree.role);
 
   // Check properites of the BODY element.
   ASSERT_EQ(1U, tree.children.size());
@@ -179,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<input value=\"Hello, world.\"/>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -208,7 +227,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<input value=\"Hello, world.\"/>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -235,7 +254,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<!doctype html>"
       "<table border=1><tr><td>1</td><td>2</td></tr></table>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -274,7 +293,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "  }, 1);\n"
       "</script>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   base::hash_set<int> ids;
@@ -294,7 +313,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<button>Button 3</button>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -340,7 +359,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<!doctype html>"
       "<em><code ><h4 ></em>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   base::hash_set<int> ids;
@@ -367,7 +386,7 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       " </tr>"
       "</table>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, PageTransition::TYPED);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   const WebAccessibility& table = tree.children[0];
@@ -414,6 +433,25 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
                           WebAccessibility::ATTR_TABLE_CELL_COLUMN_INDEX));
   EXPECT_EQ(2, GetIntAttr(cell4,
                           WebAccessibility::ATTR_TABLE_CELL_COLUMN_SPAN));
+}
+
+IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
+                       CrossPlatformWritableElement) {
+  const char url_str[] =
+      "data:text/html,"
+      "<!doctype html>"
+      "<div role='textbox' tabindex=0>"
+      " Some text"
+      "</div>";
+  GURL url(url_str);
+  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  const WebAccessibility& tree = GetWebAccessibilityTree();
+
+  ASSERT_EQ(1U, tree.children.size());
+  const WebAccessibility& textbox = tree.children[0];
+
+  EXPECT_EQ(
+      true, GetBoolAttr(textbox, WebAccessibility::ATTR_CAN_SET_VALUE));
 }
 
 }  // namespace

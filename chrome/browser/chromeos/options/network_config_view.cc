@@ -61,11 +61,11 @@ gfx::NativeWindow NetworkConfigView::GetNativeWindow() const {
   return GetWidget()->GetNativeWindow();
 }
 
-std::wstring NetworkConfigView::GetDialogButtonLabel(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
-    return UTF16ToWide(l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONNECT));
-  return std::wstring();
+string16 NetworkConfigView::GetDialogButtonLabel(
+    ui::MessageBoxFlags::DialogButton button) const {
+  if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
+    return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONNECT);
+  return string16();
 }
 
 bool NetworkConfigView::IsDialogButtonEnabled(
@@ -105,8 +105,8 @@ views::View* NetworkConfigView::GetContentsView() {
   return this;
 }
 
-std::wstring NetworkConfigView::GetWindowTitle() const {
-  return UTF16ToWide(child_config_view_->GetTitle());
+string16 NetworkConfigView::GetWindowTitle() const {
+  return child_config_view_->GetTitle();
 }
 
 void NetworkConfigView::GetAccessibleState(ui::AccessibleViewState* state) {

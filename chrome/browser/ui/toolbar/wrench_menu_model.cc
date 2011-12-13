@@ -19,10 +19,14 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/browser/sync/sync_global_error.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/global_error.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/browser/ui/toolbar/encoding_menu_controller.h"
 #include "chrome/browser/upgrade_detector.h"
 #include "chrome/common/chrome_paths.h"
@@ -30,15 +34,17 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_notification_types.h"
+#include "content/browser/user_metrics.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/button_menu_item_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include <gtk/gtk.h>
@@ -175,39 +181,17 @@ void ToolsMenuModel::Build(Browser* browser) {
   AddSubMenuWithStringId(IDC_ENCODING_MENU, IDS_ENCODING_MENU,
                          encoding_menu_model_.get());
   AddItemWithStringId(IDC_VIEW_SOURCE, IDS_VIEW_SOURCE);
+#if !defined(TOUCH_UI)
+  // Disable dev-tools/console since it isn't touch-friendly yet.
   AddItemWithStringId(IDC_DEV_TOOLS, IDS_DEV_TOOLS);
   AddItemWithStringId(IDC_DEV_TOOLS_CONSOLE, IDS_DEV_TOOLS_CONSOLE);
+#endif
 
 #if defined(ENABLE_PROFILING) && !defined(NO_TCMALLOC)
   AddSeparator();
   AddCheckItemWithStringId(IDC_PROFILING_ENABLED, IDS_PROFILING_ENABLED);
 #endif
 }
-
-////////////////////////////////////////////////////////////////////////////////
-// BookmarkSubMenuModel
-
-BookmarkSubMenuModel::BookmarkSubMenuModel(
-    ui::SimpleMenuModel::Delegate* delegate, Browser* browser)
-    : SimpleMenuModel(delegate) {
-  Build(browser);
-}
-
-BookmarkSubMenuModel::~BookmarkSubMenuModel() {}
-
-void BookmarkSubMenuModel::Build(Browser* browser) {
-  AddCheckItemWithStringId(IDC_SHOW_BOOKMARK_BAR, IDS_SHOW_BOOKMARK_BAR);
-  AddItemWithStringId(IDC_SHOW_BOOKMARK_MANAGER, IDS_BOOKMARK_MANAGER);
-#if !defined(OS_CHROMEOS)
-  AddItemWithStringId(IDC_IMPORT_SETTINGS, IDS_IMPORT_SETTINGS_MENU_LABEL);
-#endif
-#if defined(OS_MACOSX)
-  AddSeparator();
-#else
-  // TODO: add submenu for bookmarks themselves, restore separator.
-#endif
-}
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // WrenchMenuModel
@@ -283,6 +267,9 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
     case IDC_SHOW_SYNC_SETUP: {
       ProfileSyncService* service =
           browser_->GetProfile()->GetOriginalProfile()->GetProfileSyncService();
+      SyncGlobalError* error = service->sync_global_error();
+      if (error && error->HasCustomizedSyncMenuItem())
+        return error->MenuItemLabel();
       if (service->HasSyncSetupCompleted()) {
         std::string username = browser_->GetProfile()->GetPrefs()->GetString(
             prefs::kGoogleServicesUsername);
@@ -311,6 +298,20 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
                 UpgradeDetector::UPGRADE_ICON_TYPE_MENU_ICON));
         return true;
       }
+      return false;
+    }
+    case IDC_SHOW_SYNC_SETUP: {
+      ProfileSyncService* service =
+          browser_->GetProfile()->GetOriginalProfile()->GetProfileSyncService();
+      SyncGlobalError* error = service->sync_global_error();
+      if (error && error->HasCustomizedSyncMenuItem()) {
+        int icon_id = error->MenuItemIconResourceID();
+        if (icon_id) {
+          *icon = rb.GetNativeImageNamed(icon_id);
+          return true;
+        }
+      }
+      return false;
     }
     default:
       break;
@@ -319,6 +320,26 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
 }
 
 void WrenchMenuModel::ExecuteCommand(int command_id) {
+  GlobalError* error = GlobalErrorServiceFactory::GetForProfile(
+      browser_->profile())->GetGlobalErrorByMenuItemCommandID(command_id);
+  if (error) {
+    error->ExecuteMenuItem(browser_);
+    return;
+  }
+
+  if (command_id == IDC_SHOW_SYNC_SETUP) {
+    ProfileSyncService* service =
+        browser_->GetProfile()->GetOriginalProfile()->GetProfileSyncService();
+    SyncGlobalError* error = service->sync_global_error();
+    if (error && error->HasCustomizedSyncMenuItem()) {
+      error->ExecuteMenuItem(browser_);
+      return;
+    }
+  }
+
+  if (command_id == IDC_HELP_PAGE)
+    UserMetrics::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
+
   browser_->ExecuteCommand(command_id);
 }
 
@@ -333,6 +354,11 @@ bool WrenchMenuModel::IsCommandIdChecked(int command_id) const {
 }
 
 bool WrenchMenuModel::IsCommandIdEnabled(int command_id) const {
+  GlobalError* error = GlobalErrorServiceFactory::GetForProfile(
+      browser_->profile())->GetGlobalErrorByMenuItemCommandID(command_id);
+  if (error)
+    return true;
+
   return browser_->command_updater()->IsCommandEnabled(command_id);
 }
 
@@ -474,7 +500,13 @@ void WrenchMenuModel::Build() {
     AddSeparator();
   }
 
-#if defined(OS_MACOSX)
+#if defined(USE_AURA)
+#if defined(OS_WIN)
+  AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
+#else
+  AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
+#endif
+#elif defined(OS_MACOSX)
   AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
 #elif defined(TOOLKIT_USES_GTK)
   string16 preferences = gtk_util::GetStockPreferencesMenuLabel();
@@ -505,12 +537,37 @@ void WrenchMenuModel::Build() {
 
   AddItemWithStringId(IDC_HELP_PAGE, IDS_HELP_PAGE);
 
+  AddGlobalErrorMenuItems();
+
   if (browser_defaults::kShowExitMenuItem) {
     AddSeparator();
     AddItemWithStringId(IDC_EXIT, IDS_EXIT);
   }
 }
 #endif // !OS_CHROMEOS
+
+void WrenchMenuModel::AddGlobalErrorMenuItems() {
+  // TODO(sail): Currently we only build the wrench menu once per browser
+  // window. This means that if a new error is added after the menu is built
+  // it won't show in the existing wrench menu. To fix this we need to some
+  // how update the menu if new errors are added.
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  const std::vector<GlobalError*>& errors =
+      GlobalErrorServiceFactory::GetForProfile(browser_->profile())->errors();
+  for (std::vector<GlobalError*>::const_iterator
+       it = errors.begin(); it != errors.end(); ++it) {
+    GlobalError* error = *it;
+    if (error->HasMenuItem()) {
+      AddItem(error->MenuItemCommandID(), error->MenuItemLabel());
+      int icon_id = error->MenuItemIconResourceID();
+      if (icon_id) {
+        gfx::Image& image = rb.GetImageNamed(icon_id);
+        SetIcon(GetIndexOfCommandId(error->MenuItemCommandID()),
+                *image.ToSkBitmap());
+      }
+    }
+  }
+}
 
 void WrenchMenuModel::CreateCutCopyPaste() {
   // WARNING: views/wrench_menu assumes these items are added in this order. If

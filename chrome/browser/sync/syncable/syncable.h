@@ -8,8 +8,10 @@
 
 #include <algorithm>
 #include <bitset>
+#include <cstddef>
 #include <iosfwd>
 #include <limits>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -18,12 +20,12 @@
 #include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/synchronization/lock.h"
 #include "base/time.h"
-#include "base/tracked.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/syncable/blob.h"
 #include "chrome/browser/sync/syncable/dir_open_result.h"
@@ -31,6 +33,8 @@
 #include "chrome/browser/sync/syncable/syncable_id.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/dbgq.h"
+#include "chrome/browser/sync/util/immutable.h"
+#include "chrome/browser/sync/util/time.h"
 
 struct PurgeInfo;
 
@@ -56,8 +60,14 @@ class DirectoryBackingStore;
 
 static const int64 kInvalidMetaHandle = 0;
 
-// Update syncable_enum_conversions{.h,.cc,_unittest.cc} if you change
-// any fields in this file.
+// Things you need to update if you change any of the fields below:
+//  - EntryKernel struct in syncable.h (this file)
+//  - syncable_columns.h
+//  - syncable_enum_conversions{.h,.cc,_unittest.cc}
+//  - EntryKernel::EntryKernel(), EntryKernel::ToValue(), operator<<
+//    for Entry in syncable.cc
+//  - BindFields() and UnpackEntry() in directory_backing_store.cc
+//  - TestSimpleFieldsPreservedDuringSaveChanges in syncable_unittest.cc
 
 enum {
   BEGIN_FIELDS = 0,
@@ -78,10 +88,6 @@ enum BaseVersion {
 
 enum Int64Field {
   SERVER_VERSION = BASE_VERSION + 1,
-  MTIME,
-  SERVER_MTIME,
-  CTIME,
-  SERVER_CTIME,
 
   // A numeric position value that indicates the relative ordering of
   // this object among its siblings.
@@ -94,8 +100,21 @@ enum Int64Field {
 };
 
 enum {
-  INT64_FIELDS_COUNT = INT64_FIELDS_END,
-  ID_FIELDS_BEGIN = INT64_FIELDS_END,
+  INT64_FIELDS_COUNT = INT64_FIELDS_END - INT64_FIELDS_BEGIN,
+  TIME_FIELDS_BEGIN = INT64_FIELDS_END,
+};
+
+enum TimeField {
+  MTIME = TIME_FIELDS_BEGIN,
+  SERVER_MTIME,
+  CTIME,
+  SERVER_CTIME,
+  TIME_FIELDS_END,
+};
+
+enum {
+  TIME_FIELDS_COUNT = TIME_FIELDS_END - TIME_FIELDS_BEGIN,
+  ID_FIELDS_BEGIN = TIME_FIELDS_END,
 };
 
 enum IdField {
@@ -223,6 +242,8 @@ enum CreateNewUpdateItem {
 
 typedef std::set<int64> MetahandleSet;
 
+// TODO(akalin): Move EntryKernel and related into its own header file.
+
 // Why the singular enums?  So the code compile-time dispatches instead of
 // runtime dispatches as it would with a single enum and an if() statement.
 
@@ -232,6 +253,7 @@ struct EntryKernel {
   std::string string_fields[STRING_FIELDS_COUNT];
   sync_pb::EntitySpecifics specifics_fields[PROTO_FIELDS_COUNT];
   int64 int64_fields[INT64_FIELDS_COUNT];
+  base::Time time_fields[TIME_FIELDS_COUNT];
   Id id_fields[ID_FIELDS_COUNT];
   std::bitset<BIT_FIELDS_COUNT> bit_fields;
   std::bitset<BIT_TEMPS_COUNT> bit_temps;
@@ -273,6 +295,13 @@ struct EntryKernel {
   inline void put(Int64Field field, int64 value) {
     int64_fields[field - INT64_FIELDS_BEGIN] = value;
   }
+  inline void put(TimeField field, const base::Time& value) {
+    // Round-trip to proto time format and back so that we have
+    // consistent time resolutions (ms).
+    time_fields[field - TIME_FIELDS_BEGIN] =
+        browser_sync::ProtoTimeToTime(
+            browser_sync::TimeToProtoTime(value));
+  }
   inline void put(IdField field, const Id& value) {
     id_fields[field - ID_FIELDS_BEGIN] = value;
   }
@@ -304,6 +333,9 @@ struct EntryKernel {
   }
   inline int64 ref(Int64Field field) const {
     return int64_fields[field - INT64_FIELDS_BEGIN];
+  }
+  inline const base::Time& ref(TimeField field) const {
+    return time_fields[field - TIME_FIELDS_BEGIN];
   }
   inline const Id& ref(IdField field) const {
     return id_fields[field - ID_FIELDS_BEGIN];
@@ -384,6 +416,10 @@ class Entry {
     DCHECK(kernel_);
     return kernel_->ref(field);
   }
+  inline const base::Time& Get(TimeField field) const {
+    DCHECK(kernel_);
+    return kernel_->ref(field);
+  }
   inline int64 Get(BaseVersion field) const {
     DCHECK(kernel_);
     return kernel_->ref(field);
@@ -443,7 +479,7 @@ class Entry {
   friend class sync_api::ReadNode;
   void* operator new(size_t size) { return (::operator new)(size); }
 
-  inline Entry(BaseTransaction* trans)
+  inline explicit Entry(BaseTransaction* trans)
       : basetrans_(trans),
         kernel_(NULL) { }
 
@@ -485,6 +521,7 @@ class MutableEntry : public Entry {
   // that putting the value would have caused a duplicate in the index.
   // TODO(chron): Remove some of these unecessary return values.
   bool Put(Int64Field field, const int64& value);
+  bool Put(TimeField field, const base::Time& value);
   bool Put(IdField field, const Id& value);
 
   // Do a simple property-only update if the PARENT_ID field.  Use with caution.
@@ -557,21 +594,57 @@ typedef std::set<EntryKernel, EntryKernelLessByMetaHandle> EntryKernelSet;
 struct EntryKernelMutation {
   EntryKernel original, mutated;
 };
-class EntryKernelMutationLessByMetaHandle {
- public:
-  inline bool operator()(const EntryKernelMutation& a,
-                         const EntryKernelMutation& b) const {
-    DCHECK_EQ(a.original.ref(META_HANDLE), a.mutated.ref(META_HANDLE));
-    DCHECK_EQ(b.original.ref(META_HANDLE), b.mutated.ref(META_HANDLE));
-    return a.original.ref(META_HANDLE) < b.original.ref(META_HANDLE);
-  }
+typedef std::map<int64, EntryKernelMutation> EntryKernelMutationMap;
+
+typedef browser_sync::Immutable<EntryKernelMutationMap>
+    ImmutableEntryKernelMutationMap;
+
+// A WriteTransaction has a writer tag describing which body of code is doing
+// the write. This is defined up here since WriteTransactionInfo also contains
+// one.
+enum WriterTag {
+  INVALID,
+  SYNCER,
+  AUTHWATCHER,
+  UNITTEST,
+  VACUUM_AFTER_SAVE,
+  PURGE_ENTRIES,
+  SYNCAPI
 };
-typedef std::set<EntryKernelMutation, EntryKernelMutationLessByMetaHandle>
-    EntryKernelMutationSet;
+
+// Make sure to update this if you update WriterTag.
+std::string WriterTagToString(WriterTag writer_tag);
+
+struct WriteTransactionInfo {
+  WriteTransactionInfo(int64 id,
+                       tracked_objects::Location location,
+                       WriterTag writer,
+                       ImmutableEntryKernelMutationMap mutations);
+  WriteTransactionInfo();
+  ~WriteTransactionInfo();
+
+  // Caller owns the return value.
+  base::DictionaryValue* ToValue(size_t max_mutations_size) const;
+
+  int64 id;
+  // If tracked_objects::Location becomes assignable, we can use that
+  // instead.
+  std::string location_string;
+  WriterTag writer;
+  ImmutableEntryKernelMutationMap mutations;
+};
+
+typedef
+    browser_sync::Immutable<WriteTransactionInfo>
+    ImmutableWriteTransactionInfo;
 
 // Caller owns the return value.
-base::ListValue* EntryKernelMutationSetToValue(
-    const EntryKernelMutationSet& mutations);
+base::DictionaryValue* EntryKernelMutationToValue(
+    const EntryKernelMutation& mutation);
+
+// Caller owns the return value.
+base::ListValue* EntryKernelMutationMapToValue(
+    const EntryKernelMutationMap& mutations);
 
 // How syncable indices & Indexers work.
 //
@@ -642,22 +715,6 @@ template <typename Indexer>
 struct Index {
   typedef std::set<EntryKernel*, typename Indexer::Comparator> Set;
 };
-
-// a WriteTransaction has a writer tag describing which body of code is doing
-// the write. This is defined up here since DirectoryChangeEvent also contains
-// one.
-enum WriterTag {
-  INVALID,
-  SYNCER,
-  AUTHWATCHER,
-  UNITTEST,
-  VACUUM_AFTER_SAVE,
-  PURGE_ENTRIES,
-  SYNCAPI
-};
-
-// Make sure to update this if you update WriterTag.
-std::string WriterTagToString(WriterTag writer_tag);
 
 // The name Directory in this case means the entire directory
 // structure within a single user account.
@@ -915,7 +972,7 @@ class Directory {
                            bool full_scan);
 
   void CheckTreeInvariants(syncable::BaseTransaction* trans,
-                           const EntryKernelMutationSet& mutations);
+                           const EntryKernelMutationMap& mutations);
 
   void CheckTreeInvariants(syncable::BaseTransaction* trans,
                            const MetahandleSet& handles,
@@ -1002,6 +1059,9 @@ class Directory {
     // Implements ReadTransaction / WriteTransaction using a simple lock.
     base::Lock transaction_mutex;
 
+    // Protected by transaction_mutex.  Used by WriteTransactions.
+    int64 next_write_transaction_id;
+
     // The name of this directory.
     std::string const name;
 
@@ -1045,7 +1105,7 @@ class Directory {
 
     // A unique identifier for this account's cache db, used to generate
     // unique server IDs. No need to lock, only written at init time.
-    std::string cache_guid;
+    const std::string cache_guid;
 
     // It doesn't make sense for two threads to run SaveChanges at the same
     // time; this mutex protects that activity.
@@ -1169,28 +1229,25 @@ class WriteTransaction : public BaseTransaction {
       ModelTypeBitSet models_with_changes);
 
  private:
-  EntryKernelMutationSet RecordMutations();
+  // Clears |mutations_|.
+  ImmutableEntryKernelMutationMap RecordMutations();
 
-  void UnlockAndNotify(const EntryKernelMutationSet& mutations);
+  void UnlockAndNotify(const ImmutableEntryKernelMutationMap& mutations);
 
   ModelTypeBitSet NotifyTransactionChangingAndEnding(
-      const EntryKernelMutationSet& mutations);
+      const ImmutableEntryKernelMutationMap& mutations);
 
-  EntryKernelSet originals_;
+  // Only the original fields are filled in until |RecordMutations()|.
+  // We use a mutation map instead of a kernel set to avoid copying.
+  EntryKernelMutationMap mutations_;
 
   DISALLOW_COPY_AND_ASSIGN(WriteTransaction);
 };
 
 bool IsLegalNewParent(BaseTransaction* trans, const Id& id, const Id& parentid);
 
-int64 Now();
-
 // This function sets only the flags needed to get this entry to sync.
 void MarkForSyncing(syncable::MutableEntry* e);
-
-// This is not a reset.  It just sets the numeric fields which are not
-// initialized by the constructor to zero.
-void ZeroFields(EntryKernel* entry, int first_field);
 
 }  // namespace syncable
 

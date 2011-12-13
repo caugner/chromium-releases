@@ -9,13 +9,34 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Notifications) {
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, NotificationsNoPermission) {
 #if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
   // Notifications not supported on linux/views yet.
 #else
   ASSERT_TRUE(RunExtensionTest("notifications/has_not_permission")) << message_;
+#endif
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, NotificationsHasPermissionManifest) {
+#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
+  // Notifications not supported on linux/views yet.
+#else
   ASSERT_TRUE(RunExtensionTest("notifications/has_permission_manifest"))
       << message_;
+#endif
+}
+
+// http://crbug.com/98061
+#if defined(OS_MACOSX) || defined(OS_LINUX)
+#define MAYBE_NotificationsHasPermission DISABLED_NotificationsHasPermission
+#else
+#define MAYBE_NotificationsHasPermission NotificationsHasPermission
+#endif
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_NotificationsHasPermission) {
+#if defined(OS_LINUX) && defined(TOOLKIT_VIEWS)
+  // Notifications not supported on linux/views yet.
+#else
   DesktopNotificationServiceFactory::GetForProfile(browser()->profile())
       ->GrantPermission(GURL(
           "chrome-extension://peoadpeiejnhkmpaakpnompolbglelel"));

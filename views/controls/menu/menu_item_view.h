@@ -14,8 +14,6 @@
 #endif
 
 #include "base/logging.h"
-// TODO(avi): remove when not needed
-#include "base/utf_string_conversions.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "views/view.h"
 
@@ -111,8 +109,7 @@ class VIEWS_EXPORT MenuItemView : public View {
   explicit MenuItemView(MenuDelegate* delegate);
 
   // Overridden from View:
-  virtual bool GetTooltipText(const gfx::Point& p,
-                              std::wstring* tooltip) OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p, string16* tooltip) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
   // Returns the preferred height of menu items. This is only valid when the
@@ -225,12 +222,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns the parent menu item.
   MenuItemView* GetParentMenuItem() const { return parent_menu_item_; }
 
-  // Sets the title
+  // Sets/Gets the title.
   void SetTitle(const std::wstring& title);
-
-  // Returns the title.
-  // TODO(avi): switch back to returning a const reference.
-  const std::wstring GetTitle() const { return UTF16ToWideHack(title_); }
+  const string16& title() const { return title_; }
 
   // Returns the type of this menu.
   const Type& GetType() { return type_; }
@@ -243,7 +237,7 @@ class VIEWS_EXPORT MenuItemView : public View {
   bool IsSelected() const { return selected_; }
 
   // Sets the |tooltip| for a menu item view with |item_id| identifier.
-  void SetTooltip(const std::wstring& tooltip, int item_id);
+  void SetTooltip(const string16& tooltip, int item_id);
 
   // Sets the icon for the descendant identified by item_id.
   void SetIcon(const SkBitmap& icon, int item_id);

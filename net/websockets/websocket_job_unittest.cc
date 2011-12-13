@@ -88,7 +88,7 @@ class MockSocketStreamDelegate : public net::SocketStream::Delegate {
   }
 
   virtual int OnStartOpenConnection(net::SocketStream* socket,
-                                    net::CompletionCallback* callback) {
+                                    net::OldCompletionCallback* callback) {
     if (on_start_open_connection_.get())
       on_start_open_connection_->Run();
     return net::OK;
@@ -228,20 +228,20 @@ class MockSSLConfigService : public net::SSLConfigService {
 
 class MockURLRequestContext : public net::URLRequestContext {
  public:
-  explicit MockURLRequestContext(net::CookieStore* cookie_store) {
+  explicit MockURLRequestContext(net::CookieStore* cookie_store)
+      : transport_security_state_(std::string()) {
     set_cookie_store(cookie_store);
-    transport_security_state_ = new net::TransportSecurityState(std::string());
-    set_transport_security_state(transport_security_state_.get());
+    set_transport_security_state(&transport_security_state_);
     net::TransportSecurityState::DomainState state;
     state.expiry = base::Time::Now() + base::TimeDelta::FromSeconds(1000);
-    transport_security_state_->EnableHost("upgrademe.com", state);
+    transport_security_state_.EnableHost("upgrademe.com", state);
   }
 
  private:
   friend class base::RefCountedThreadSafe<MockURLRequestContext>;
   virtual ~MockURLRequestContext() {}
 
-  scoped_refptr<net::TransportSecurityState> transport_security_state_;
+  net::TransportSecurityState transport_security_state_;
 };
 
 class MockHttpTransactionFactory : public net::HttpTransactionFactory {
@@ -441,7 +441,7 @@ class WebSocketJobTest : public PlatformTest {
   scoped_refptr<SocketStream> socket_;
   scoped_ptr<MockClientSocketFactory> socket_factory_;
   scoped_refptr<OrderedSocketData> data_;
-  TestCompletionCallback sync_callback_;
+  TestOldCompletionCallback sync_callback_;
   scoped_refptr<MockSSLConfigService> ssl_config_service_;
   scoped_ptr<net::ProxyService> proxy_service_;
   scoped_ptr<net::MockHostResolver> host_resolver_;

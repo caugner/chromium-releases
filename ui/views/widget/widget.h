@@ -7,9 +7,9 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
+#include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/point.h"
-#include "ui/views/native_types.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/native_widget_listener.h"
 
@@ -136,7 +136,7 @@ class Widget : public internal::NativeWidgetListener {
 
   // Handles closing the Widget after a return to the message loop to allow the
   // stack to unwind.
-  ScopedRunnableMethodFactory<Widget> close_widget_factory_;
+  base::WeakPtrFactory<Widget> close_widget_factory_;
 
   // True if the Widget should be automatically deleted when it is destroyed.
   bool delete_on_destroy_;

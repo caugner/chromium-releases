@@ -1,12 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 
 #include "chrome/browser/extensions/extension_host.h"
-#include "chrome/browser/renderer_host/render_widget_host_view_mac.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_widget_host_view_mac.h"
 
 // The minimum/maximum dimensions of the popup.
 const CGFloat ExtensionViewMac::kMinWidth = 25.0;
@@ -16,8 +16,7 @@ const CGFloat ExtensionViewMac::kMaxHeight = 600.0;
 
 ExtensionViewMac::ExtensionViewMac(ExtensionHost* extension_host,
                                    Browser* browser)
-    : is_toolstrip_(true),
-      browser_(browser),
+    : browser_(browser),
       extension_host_(extension_host),
       render_widget_host_view_(NULL) {
   DCHECK(extension_host_);

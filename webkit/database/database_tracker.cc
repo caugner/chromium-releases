@@ -214,7 +214,7 @@ void DatabaseTracker::DeleteDatabaseIfNeeded(const string16& origin_identifier,
     if (dbs_to_be_deleted_[origin_identifier].empty())
       dbs_to_be_deleted_.erase(origin_identifier);
 
-    std::vector<net::CompletionCallback*> to_be_deleted;
+    std::vector<net::OldCompletionCallback*> to_be_deleted;
     for (PendingCompletionMap::iterator callback = deletion_callbacks_.begin();
          callback != deletion_callbacks_.end(); ++callback) {
       DatabaseSet::iterator found_origin =
@@ -225,14 +225,14 @@ void DatabaseTracker::DeleteDatabaseIfNeeded(const string16& origin_identifier,
         if (databases.empty()) {
           callback->second.erase(found_origin);
           if (callback->second.empty()) {
-            net::CompletionCallback* cb = callback->first;
+            net::OldCompletionCallback* cb = callback->first;
             cb->Run(net::OK);
             to_be_deleted.push_back(cb);
           }
         }
       }
     }
-    for (std::vector<net::CompletionCallback*>::iterator cb =
+    for (std::vector<net::OldCompletionCallback*>::iterator cb =
          to_be_deleted.begin(); cb != to_be_deleted.end(); ++cb)
       deletion_callbacks_.erase(*cb);
   }
@@ -629,7 +629,7 @@ void DatabaseTracker::ScheduleDatabaseForDeletion(
 
 void DatabaseTracker::ScheduleDatabasesForDeletion(
     const DatabaseSet& databases,
-    net::CompletionCallback* callback) {
+    net::OldCompletionCallback* callback) {
   DCHECK(!callback ||
          deletion_callbacks_.find(callback) == deletion_callbacks_.end());
   DCHECK(!databases.empty());
@@ -645,7 +645,7 @@ void DatabaseTracker::ScheduleDatabasesForDeletion(
 
 int DatabaseTracker::DeleteDatabase(const string16& origin_identifier,
                                     const string16& database_name,
-                                    net::CompletionCallback* callback) {
+                                    net::OldCompletionCallback* callback) {
   if (!LazyInit())
     return net::ERR_FAILED;
 
@@ -665,7 +665,7 @@ int DatabaseTracker::DeleteDatabase(const string16& origin_identifier,
 
 int DatabaseTracker::DeleteDataModifiedSince(
     const base::Time& cutoff,
-    net::CompletionCallback* callback) {
+    net::OldCompletionCallback* callback) {
   if (!LazyInit())
     return net::ERR_FAILED;
 
@@ -715,7 +715,7 @@ int DatabaseTracker::DeleteDataModifiedSince(
 }
 
 int DatabaseTracker::DeleteDataForOrigin(const string16& origin,
-                                         net::CompletionCallback* callback) {
+                                         net::OldCompletionCallback* callback) {
   if (!LazyInit())
     return net::ERR_FAILED;
 
@@ -797,17 +797,33 @@ void DatabaseTracker::DeleteIncognitoDBDirectory() {
     file_util::Delete(incognito_db_dir, true);
 }
 
-void DatabaseTracker::ClearLocalState() {
+void DatabaseTracker::ClearLocalState(bool clear_all_databases) {
   shutting_down_ = true;
+
+  bool has_session_only_databases =
+      special_storage_policy_.get() &&
+      special_storage_policy_->HasSessionOnlyOrigins();
+
+  // Clearning only session-only databases, and there are none.
+  if (!clear_all_databases && !has_session_only_databases)
+    return;
+
+  if (!LazyInit())
+    return;
 
   std::vector<string16> origin_identifiers;
   GetAllOriginIdentifiers(&origin_identifiers);
 
   for (std::vector<string16>::iterator origin = origin_identifiers.begin();
        origin != origin_identifiers.end(); ++origin) {
+    GURL origin_url =
+        webkit_database::DatabaseUtil::GetOriginFromIdentifier(*origin);
+    if (!clear_all_databases &&
+        !special_storage_policy_->IsStorageSessionOnly(origin_url)) {
+      continue;
+    }
     if (special_storage_policy_.get() &&
-        special_storage_policy_->IsStorageProtected(
-            webkit_database::DatabaseUtil::GetOriginFromIdentifier(*origin))) {
+        special_storage_policy_->IsStorageProtected(origin_url)) {
       continue;
     }
     webkit_database::OriginInfo origin_info;
@@ -840,8 +856,8 @@ void DatabaseTracker::Shutdown() {
   }
   if (is_incognito_)
     DeleteIncognitoDBDirectory();
-  else if (clear_local_state_on_exit_ && LazyInit())
-    ClearLocalState();
+  else
+    ClearLocalState(clear_local_state_on_exit_);
 }
 
 void DatabaseTracker::SetClearLocalStateOnExit(bool clear_local_state_on_exit) {

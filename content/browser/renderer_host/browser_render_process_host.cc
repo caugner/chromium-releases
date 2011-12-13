@@ -62,6 +62,7 @@
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
 #include "content/browser/renderer_host/socket_stream_dispatcher_host.h"
+#include "content/browser/renderer_host/text_input_client_message_filter.h"
 #include "content/browser/resolve_proxy_msg_helper.h"
 #include "content/browser/speech/speech_input_dispatcher_host.h"
 #include "content/browser/trace_message_filter.h"
@@ -69,15 +70,15 @@
 #include "content/browser/worker_host/worker_message_filter.h"
 #include "content/common/child_process_info.h"
 #include "content/common/child_process_messages.h"
-#include "content/common/content_switches.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/notification_service.h"
 #include "content/common/process_watcher.h"
 #include "content/common/resource_messages.h"
 #include "content/common/result_codes.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/content_switches.h"
 #include "content/renderer/render_process_impl.h"
-#include "content/renderer/render_thread.h"
+#include "content/renderer/render_thread_impl.h"
 #include "ipc/ipc_logging.h"
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_switches.h"
@@ -92,14 +93,11 @@
 
 #if defined(OS_WIN)
 #include <objbase.h>
+#include "base/synchronization/waitable_event.h"
 #include "content/common/section_util_win.h"
 #endif
 
 #include "third_party/skia/include/core/SkBitmap.h"
-
-// TODO(mpcomplete): Remove this after fixing
-// http://code.google.com/p/chromium/issues/detail?id=53991
-bool g_log_bug53991 = false;
 
 // This class creates the IO thread for the renderer when running in
 // single-process mode.  It's not used in multi-process mode.
@@ -122,13 +120,7 @@ class RendererMainThread : public base::Thread {
 #endif
 
     render_process_ = new RenderProcessImpl();
-    render_process_->set_main_thread(new RenderThread(channel_id_));
-    // It's a little lame to manually set this flag.  But the single process
-    // RendererThread will receive the WM_QUIT.  We don't need to assert on
-    // this thread, so just force the flag manually.
-    // If we want to avoid this, we could create the InProcRendererThread
-    // directly with _beginthreadex() rather than using the Thread class.
-    base::Thread::SetThreadWasQuitProperly(true);
+    render_process_->set_main_thread(new RenderThreadImpl(channel_id_));
   }
 
   virtual void CleanUp() {
@@ -137,6 +129,16 @@ class RendererMainThread : public base::Thread {
 #if defined(OS_WIN)
     CoUninitialize();
 #endif
+    // It's a little lame to manually set this flag.  But the single process
+    // RendererThread will receive the WM_QUIT.  We don't need to assert on
+    // this thread, so just force the flag manually.
+    // If we want to avoid this, we could create the InProcRendererThread
+    // directly with _beginthreadex() rather than using the Thread class.
+    // We used to set this flag in the Init function above. However there
+    // other threads like WebThread which are created by this thread
+    // which resets this flag. Please see Thread::StartWithOptions. Setting
+    // this flag to true in Cleanup works around these problems.
+    base::Thread::SetThreadWasQuitProperly(true);
   }
 
  private:
@@ -235,8 +237,6 @@ BrowserRenderProcessHost::BrowserRenderProcessHost(
 }
 
 BrowserRenderProcessHost::~BrowserRenderProcessHost() {
-  VLOG_IF(1, g_log_bug53991) << "~BrowserRenderProcessHost: " << this;
-
   ChildProcessSecurityPolicy::GetInstance()->Remove(id());
 
   // We may have some unsent messages at this point, but that's OK.
@@ -334,7 +334,7 @@ bool BrowserRenderProcessHost::Init(bool is_accessibility_enabled) {
 #elif defined(OS_POSIX)
         renderer_prefix.empty(),
         base::environment_vector(),
-        channel_->GetClientFileDescriptor(),
+        channel_->TakeClientFileDescriptor(),
 #endif
         cmd_line,
         this));
@@ -363,10 +363,12 @@ void BrowserRenderProcessHost::CreateMessageFilters() {
       content::GetContentClient()->browser()->GetResourceDispatcherHost());
 
   channel_->AddFilter(resource_message_filter);
-  channel_->AddFilter(new AudioInputRendererHost());
+  channel_->AddFilter(new AudioInputRendererHost(
+      &browser_context()->GetResourceContext()));
   channel_->AddFilter(
       new AudioRendererHost(&browser_context()->GetResourceContext()));
-  channel_->AddFilter(new VideoCaptureHost());
+  channel_->AddFilter(
+      new VideoCaptureHost(&browser_context()->GetResourceContext()));
   channel_->AddFilter(
       new AppCacheDispatcherHost(browser_context()->GetAppCacheService(),
                                  id()));
@@ -379,11 +381,14 @@ void BrowserRenderProcessHost::CreateMessageFilters() {
       GeolocationDispatcherHost::New(
           id(), browser_context()->GetGeolocationPermissionContext()));
   channel_->AddFilter(new GpuMessageFilter(id(), widget_helper_.get()));
-  channel_->AddFilter(new media_stream::MediaStreamDispatcherHost(id()));
+  channel_->AddFilter(new media_stream::MediaStreamDispatcherHost(
+      &browser_context()->GetResourceContext(), id()));
   channel_->AddFilter(new PepperFileMessageFilter(id(), browser_context()));
   channel_->AddFilter(
       new PepperMessageFilter(&browser_context()->GetResourceContext()));
-  channel_->AddFilter(new speech_input::SpeechInputDispatcherHost(id()));
+  channel_->AddFilter(new speech_input::SpeechInputDispatcherHost(
+      id(), browser_context()->GetRequestContext(),
+      browser_context()->GetSpeechInputPreferences()));
   channel_->AddFilter(
       new FileSystemDispatcherHost(browser_context()->GetRequestContext(),
                                    browser_context()->GetFileSystemContext()));
@@ -394,6 +399,9 @@ void BrowserRenderProcessHost::CreateMessageFilters() {
   channel_->AddFilter(new MimeRegistryMessageFilter());
   channel_->AddFilter(new DatabaseMessageFilter(
       browser_context()->GetDatabaseTracker()));
+#if defined(OS_MACOSX)
+  channel_->AddFilter(new TextInputClientMessageFilter(id()));
+#endif
 
   SocketStreamDispatcherHost* socket_stream_dispatcher_host =
       new SocketStreamDispatcherHost(
@@ -486,11 +494,8 @@ int BrowserRenderProcessHost::VisibleWidgetCount() const {
 void BrowserRenderProcessHost::AppendRendererCommandLine(
     CommandLine* command_line) const {
   // Pass the process type first, so it shows first in process listings.
-  // Extensions use a special pseudo-process type to make them distinguishable,
-  // even though they're just renderers.
   command_line->AppendSwitchASCII(switches::kProcessType,
-      is_extension_process_ ? switches::kExtensionProcess :
-                              switches::kRendererProcess);
+                                  switches::kRendererProcess);
 
   if (accessibility_enabled_)
     command_line->AppendSwitch(switches::kEnableAccessibility);
@@ -531,6 +536,8 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
   static const char* const kSwitchNames[] = {
     // We propagate the Chrome Frame command line here as well in case the
     // renderer is not run in the sandbox.
+    switches::kAuditAllHandles,
+    switches::kAuditHandles,
     switches::kChromeFrame,
     switches::kDisable3DAPIs,
     switches::kDisableAcceleratedCompositing,
@@ -545,6 +552,7 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableGeolocation,
     switches::kDisableGLMultisampling,
     switches::kDisableGLSLTranslator,
+    switches::kDisableGpuDriverBugWorkarounds,
     switches::kDisableGpuVsync,
     switches::kDisableIndexedDatabase,
     switches::kDisableJavaScriptI18NAPI,
@@ -557,8 +565,6 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kDisableWebAudio,
     switches::kDisableWebSockets,
     switches::kEnableAccessibilityLogging,
-    switches::kEnableAdaptive,
-    switches::kEnableBenchmarking,
     switches::kEnableDCHECK,
     switches::kEnableGPUServiceLogging,
     switches::kEnableGPUClientLogging,
@@ -572,8 +578,10 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
 #endif
     switches::kEnableSeccompSandbox,
     switches::kEnableStatsTable,
+    switches::kEnableThreadedCompositing,
     switches::kEnableVideoFullscreen,
     switches::kEnableVideoLogging,
+    switches::kEnableVideoTrack,
     switches::kFullMemoryCrashReport,
 #if !defined (GOOGLE_CHROME_BUILD)
     // These are unsupported and not fully tested modes, so don't enable them
@@ -583,7 +591,7 @@ void BrowserRenderProcessHost::PropagateBrowserCommandLineToRenderer(
     switches::kInProcessWebGL,
     switches::kJavaScriptFlags,
     switches::kLoggingLevel,
-    switches::kLowLatencyAudio,
+    switches::kHighLatencyAudio,
     switches::kNoJsRandomness,
     switches::kNoReferrers,
     switches::kNoSandbox,
@@ -653,8 +661,18 @@ bool BrowserRenderProcessHost::FastShutdownIfPossible() {
     return false;
 
   child_process_launcher_.reset();
+  ProcessDied(base::TERMINATION_STATUS_NORMAL_TERMINATION, 0, false);
   fast_shutdown_started_ = true;
   return true;
+}
+
+void BrowserRenderProcessHost::DumpHandles() {
+#if defined(OS_WIN)
+  Send(new ChildProcessMsg_DumpHandles());
+  return;
+#endif
+
+  NOTIMPLEMENTED();
 }
 
 // This is a platform specific function for mapping a transport DIB given its id
@@ -744,9 +762,10 @@ bool BrowserRenderProcessHost::Send(IPC::Message* msg) {
 }
 
 bool BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
-  // If we're about to be deleted, we can no longer trust that our browser
-  // context is valid, so we ignore incoming messages.
-  if (deleting_soon_)
+  // If we're about to be deleted, or have initiated the fast shutdown sequence,
+  // we ignore incoming messages.
+
+  if (deleting_soon_ || fast_shutdown_started_)
     return false;
 
   mark_child_process_activity_time();
@@ -756,6 +775,8 @@ bool BrowserRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {
     IPC_BEGIN_MESSAGE_MAP_EX(BrowserRenderProcessHost, msg, msg_is_ok)
       IPC_MESSAGE_HANDLER(ChildProcessHostMsg_ShutdownRequest,
                           OnShutdownRequest)
+      IPC_MESSAGE_HANDLER(ChildProcessHostMsg_DumpHandlesDone,
+                          OnDumpHandlesDone)
       IPC_MESSAGE_HANDLER(ViewHostMsg_SuddenTerminationChanged,
                           SuddenTerminationChanged)
       IPC_MESSAGE_HANDLER(ViewHostMsg_UserMetricsRecordAction,
@@ -802,11 +823,6 @@ void BrowserRenderProcessHost::OnChannelConnected(int32 peer_pid) {
 }
 
 void BrowserRenderProcessHost::OnChannelError() {
-  // Our child process has died.  If we didn't expect it, it's a crash.
-  // In any case, we need to let everyone know it's gone.
-  // The OnChannelError notification can fire multiple times due to nested sync
-  // calls to a renderer. If we don't have a valid channel here it means we
-  // already handled the error.
   if (!channel_.get())
     return;
 
@@ -818,18 +834,40 @@ void BrowserRenderProcessHost::OnChannelError() {
       child_process_launcher_->GetChildTerminationStatus(&exit_code) :
       base::TERMINATION_STATUS_NORMAL_TERMINATION;
 
-  if (status == base::TERMINATION_STATUS_PROCESS_CRASHED ||
-      status == base::TERMINATION_STATUS_ABNORMAL_TERMINATION) {
-    UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildCrashes",
-                             is_extension_process_ ? 2 : 1);
+#if defined(OS_WIN)
+  if (!run_renderer_in_process()) {
+    if (status == base::TERMINATION_STATUS_STILL_RUNNING) {
+      HANDLE process = child_process_launcher_->GetHandle();
+      child_process_watcher_.StartWatching(
+          new base::WaitableEvent(process), this);
+      return;
+    }
   }
+#endif
+  ProcessDied(status, exit_code, false);
+}
 
-  if (status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED) {
-    UMA_HISTOGRAM_PERCENTAGE("BrowserRenderProcessHost.ChildKills",
-                             is_extension_process_ ? 2 : 1);
-  }
+// Called when the renderer process handle has been signaled.
+void BrowserRenderProcessHost::OnWaitableEventSignaled(
+    base::WaitableEvent* waitable_event) {
+#if defined (OS_WIN)
+  int exit_code = 0;
+  base::TerminationStatus status =
+      base::GetTerminationStatus(waitable_event->Release(), &exit_code);
+  delete waitable_event;
+  ProcessDied(status, exit_code, true);
+#endif
+}
 
-  RendererClosedDetails details(status, exit_code, is_extension_process_);
+void BrowserRenderProcessHost::ProcessDied(
+    base::TerminationStatus status, int exit_code, bool was_alive) {
+  // Our child process has died.  If we didn't expect it, it's a crash.
+  // In any case, we need to let everyone know it's gone.
+  // The OnChannelError notification can fire multiple times due to nested sync
+  // calls to a renderer. If we don't have a valid channel here it means we
+  // already handled the error.
+
+  RendererClosedDetails details(status, exit_code, was_alive);
   NotificationService::current()->Notify(
       content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
       Source<RenderProcessHost>(this),
@@ -867,6 +905,10 @@ void BrowserRenderProcessHost::OnShutdownRequest() {
   Send(new ChildProcessMsg_Shutdown());
 }
 
+void BrowserRenderProcessHost::OnDumpHandlesDone() {
+  Cleanup();
+}
+
 void BrowserRenderProcessHost::SuddenTerminationChanged(bool enabled) {
   set_sudden_termination_allowed(enabled);
 }
@@ -901,8 +943,14 @@ void BrowserRenderProcessHost::OnProcessLaunched() {
   if (deleting_soon_)
     return;
 
-  if (child_process_launcher_.get())
+  if (child_process_launcher_.get()) {
+    if (!child_process_launcher_->GetHandle()) {
+      OnChannelError();
+      return;
+    }
+
     child_process_launcher_->SetProcessBackgrounded(backgrounded_);
+  }
 
   if (max_page_id_ != -1)
     Send(new ViewMsg_SetNextPageID(max_page_id_ + 1));
@@ -935,7 +983,7 @@ void BrowserRenderProcessHost::OnRevealFolderInOS(const FilePath& path) {
     content::GetContentClient()->browser()->OpenItem(path);
 }
 
-void BrowserRenderProcessHost::OnSavedPageAsMHTML(int job_id, bool success) {
+void BrowserRenderProcessHost::OnSavedPageAsMHTML(int job_id, int64 data_size) {
   content::GetContentClient()->browser()->GetMHTMLGenerationManager()->
-      MHTMLGenerated(job_id, success);
+      MHTMLGenerated(job_id, data_size);
 }

@@ -12,8 +12,10 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
+#include "base/synchronization/waitable_event_watcher.h"
 #include "base/timer.h"
 #include "content/browser/child_process_launcher.h"
+#include "content/common/content_export.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "ui/gfx/surface/transport_dib.h"
 
@@ -23,6 +25,7 @@ class RenderWidgetHelper;
 
 namespace base {
 class SharedMemory;
+class WaitableEvent;
 }
 
 // Implements a concrete RenderProcessHost for the browser process for talking
@@ -39,8 +42,10 @@ class SharedMemory;
 // keeps a list of RenderView (renderer) and TabContents (browser) which
 // are correlated with IDs. This way, the Views and the corresponding ViewHosts
 // communicate through the two process objects.
-class BrowserRenderProcessHost : public RenderProcessHost,
-                                 public ChildProcessLauncher::Client {
+class CONTENT_EXPORT BrowserRenderProcessHost
+    : public RenderProcessHost,
+      public ChildProcessLauncher::Client,
+      public base::WaitableEventWatcher::Delegate {
  public:
   explicit BrowserRenderProcessHost(content::BrowserContext* browser_context);
   virtual ~BrowserRenderProcessHost();
@@ -59,6 +64,7 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   virtual void WidgetHidden();
   virtual int VisibleWidgetCount() const;
   virtual bool FastShutdownIfPossible();
+  virtual void DumpHandles();
   virtual base::ProcessHandle GetHandle();
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id);
   virtual void SetCompositingSurface(
@@ -76,6 +82,10 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // ChildProcessLauncher::Client implementation.
   virtual void OnProcessLaunched();
 
+  // base::WaitableEventWatcher::Delegate implementation.
+  virtual void OnWaitableEventSignaled(
+      base::WaitableEvent* waitable_event) OVERRIDE;
+
  private:
   friend class VisitRelayingRenderProcessHost;
 
@@ -84,10 +94,11 @@ class BrowserRenderProcessHost : public RenderProcessHost,
 
   // Control message handlers.
   void OnShutdownRequest();
+  void OnDumpHandlesDone();
   void SuddenTerminationChanged(bool enabled);
   void OnUserMetricsRecordAction(const std::string& action);
   void OnRevealFolderInOS(const FilePath& path);
-  void OnSavedPageAsMHTML(int job_id, bool success);
+  void OnSavedPageAsMHTML(int job_id, int64 mhtml_file_size);
 
   // Generates a command line to be used to spawn a renderer and appends the
   // results to |*command_line|.
@@ -101,6 +112,12 @@ class BrowserRenderProcessHost : public RenderProcessHost,
 
   // Callers can reduce the RenderProcess' priority.
   void SetBackgrounded(bool backgrounded);
+
+  // Handle termination of our process. |was_alive| indicates that when we
+  // tried to retrieve the exit code the process had not finished yet.
+  void ProcessDied(base::TerminationStatus status,
+                   int exit_code,
+                   bool was_alive);
 
   // The count of currently visible widgets.  Since the host can be a container
   // for multiple widgets, it uses this count to determine when it should be
@@ -146,6 +163,11 @@ class BrowserRenderProcessHost : public RenderProcessHost,
   // messages that are sent once the process handle is available.  This is
   // because the queued messages may have dependencies on the init messages.
   std::queue<IPC::Message*> queued_messages_;
+
+#if defined(OS_WIN)
+  // Used to wait until the renderer dies to get an accurrate exit code.
+  base::WaitableEventWatcher child_process_watcher_;
+#endif
 
   DISALLOW_COPY_AND_ASSIGN(BrowserRenderProcessHost);
 };

@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/webui/options/clear_browser_data_handler.h"
 
 #include "base/basictypes.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/string16.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -86,7 +88,8 @@ void ClearBrowserDataHandler::RegisterMessages() {
   // Setup handlers specific to this panel.
   DCHECK(web_ui_);
   web_ui_->RegisterMessageCallback("performClearBrowserData",
-      NewCallback(this, &ClearBrowserDataHandler::HandleClearBrowserData));
+      base::Bind(&ClearBrowserDataHandler::HandleClearBrowserData,
+                 base::Unretained(this)));
 }
 
 void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
@@ -100,8 +103,13 @@ void ClearBrowserDataHandler::HandleClearBrowserData(const ListValue* value) {
     remove_mask |= BrowsingDataRemover::REMOVE_DOWNLOADS;
   if (prefs->GetBoolean(prefs::kDeleteCache))
     remove_mask |= BrowsingDataRemover::REMOVE_CACHE;
-  if (prefs->GetBoolean(prefs::kDeleteCookies))
-    remove_mask |= BrowsingDataRemover::REMOVE_SITE_DATA;
+  if (prefs->GetBoolean(prefs::kDeleteCookies)) {
+    int site_data_mask = BrowsingDataRemover::REMOVE_SITE_DATA;
+    // Don't try to clear LSO data if it's not supported.
+    if (!*clear_plugin_lso_data_enabled_)
+      site_data_mask &= ~BrowsingDataRemover::REMOVE_LSO_DATA;
+    remove_mask |= site_data_mask;
+  }
   if (prefs->GetBoolean(prefs::kDeletePasswords))
     remove_mask |= BrowsingDataRemover::REMOVE_PASSWORDS;
   if (prefs->GetBoolean(prefs::kDeleteFormData))

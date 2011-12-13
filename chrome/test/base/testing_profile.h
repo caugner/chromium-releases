@@ -34,7 +34,6 @@ class SpecialStoragePolicy;
 class AutocompleteClassifier;
 class BookmarkModel;
 class CommandLine;
-class ExtensionSettings;
 class ExtensionPrefs;
 class ExtensionPrefStore;
 class ExtensionPrefValueMap;
@@ -47,6 +46,7 @@ class HostContentSettingsMap;
 class PrefService;
 class ProfileDependencyManager;
 class ProfileSyncService;
+class SpeechInputPreferences;
 class TemplateURLService;
 class TestingPrefService;
 class ThemeService;
@@ -166,7 +166,6 @@ class TestingProfile : public Profile {
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
   virtual ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy();
   virtual SSLHostState* GetSSLHostState();
-  virtual net::TransportSecurityState* GetTransportSecurityState();
   virtual FaviconService* GetFaviconService(ServiceAccessType access);
   virtual HistoryService* GetHistoryService(ServiceAccessType access);
   virtual HistoryService* GetHistoryServiceWithoutCreating();
@@ -189,11 +188,9 @@ class TestingProfile : public Profile {
   virtual history::TopSites* GetTopSites();
   virtual history::TopSites* GetTopSitesWithoutCreating();
   virtual DownloadManager* GetDownloadManager();
-  virtual PersonalDataManager* GetPersonalDataManager();
   virtual fileapi::FileSystemContext* GetFileSystemContext();
   virtual void SetQuotaManager(quota::QuotaManager* manager);
   virtual quota::QuotaManager* GetQuotaManager();
-  virtual bool HasCreatedDownloadManager() const;
 
   // Returns a testing ContextGetter (if one has been created via
   // CreateRequestContext) or NULL. This is not done on-demand for two reasons:
@@ -223,6 +220,7 @@ class TestingProfile : public Profile {
   virtual FindBarState* GetFindBarState();
   virtual HostContentSettingsMap* GetHostContentSettingsMap();
   virtual GeolocationPermissionContext* GetGeolocationPermissionContext();
+  virtual SpeechInputPreferences* GetSpeechInputPreferences();
   virtual HostZoomMap* GetHostZoomMap();
   virtual bool HasProfileSyncService() const;
   virtual std::wstring GetName();
@@ -279,7 +277,8 @@ class TestingProfile : public Profile {
   virtual ExtensionInfoMap* GetExtensionInfoMap();
   virtual PromoCounter* GetInstantPromoCounter();
   virtual ChromeURLDataManager* GetChromeURLDataManager();
-  virtual prerender::PrerenderManager* GetPrerenderManager();
+  virtual chrome_browser_net::Predictor* GetNetworkPredictor();
+  virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
   virtual PrefService* GetOffTheRecordPrefs();
 
   // TODO(jam): remove me once webkit_context_unittest.cc doesn't use Profile
@@ -308,7 +307,7 @@ class TestingProfile : public Profile {
   void CreateTestingPrefService();
 
   // The favicon service. Only created if CreateFaviconService is invoked.
-  scoped_refptr<FaviconService> favicon_service_;
+  scoped_ptr<FaviconService> favicon_service_;
 
   // The history service. Only created if CreateHistoryService is invoked.
   scoped_refptr<HistoryService> history_service_;
@@ -363,6 +362,8 @@ class TestingProfile : public Profile {
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
   scoped_refptr<GeolocationPermissionContext> geolocation_permission_context_;
 
+  scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
+
   // Find bar state.  Created lazily by GetFindBarState().
   scoped_ptr<FindBarState> find_bar_state_;
 
@@ -372,10 +373,6 @@ class TestingProfile : public Profile {
   // The Extension Preferences. Only created if CreateExtensionService is
   // invoked.
   scoped_ptr<ExtensionPrefs> extension_prefs_;
-
-  // The Extension settings. Only created if CreateExtensionService is
-  // invoked.
-  scoped_refptr<ExtensionSettings> extension_settings_;
 
   scoped_ptr<ExtensionService> extension_service_;
 
@@ -396,8 +393,6 @@ class TestingProfile : public Profile {
   FilePath profile_path_;
 
   scoped_ptr<ChromeURLDataManager> chrome_url_data_manager_;
-
-  scoped_ptr<prerender::PrerenderManager> prerender_manager_;
 
   // We keep a weak pointer to the dependency manager we want to notify on our
   // death. Defaults to the Singleton implementation but overridable for

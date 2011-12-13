@@ -4,15 +4,17 @@
 
 #include "content/renderer/render_widget_fullscreen_pepper.h"
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
 #include "content/renderer/pepper_platform_context_3d_impl.h"
-#include "content/renderer/render_thread.h"
+#include "content/renderer/render_thread_impl.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
+#include "ui/gfx/gl/gpu_preference.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
@@ -35,10 +37,8 @@ namespace {
 // WebWidget that simply wraps the pepper plugin.
 class PepperWidget : public WebWidget {
  public:
-  PepperWidget(webkit::ppapi::PluginInstance* plugin,
-               RenderWidgetFullscreenPepper* widget)
-      : plugin_(plugin),
-        widget_(widget) {
+  explicit PepperWidget(RenderWidgetFullscreenPepper* widget)
+      : widget_(widget) {
   }
 
   virtual ~PepperWidget() {}
@@ -56,36 +56,40 @@ class PepperWidget : public WebWidget {
   }
 
   virtual void resize(const WebSize& size) {
+    if (!widget_->plugin())
+      return;
+
     size_ = size;
     WebRect plugin_rect(0, 0, size_.width, size_.height);
-    plugin_->ViewChanged(plugin_rect, plugin_rect);
+    widget_->plugin()->ViewChanged(plugin_rect, plugin_rect);
     widget_->Invalidate();
   }
 
   virtual void willEndLiveResize() {
   }
 
-#ifndef WEBWIDGET_HAS_ANIMATE_CHANGES
-  virtual void animate() {
-  }
-#else
   virtual void animate(double frameBeginTime) {
   }
-#endif
 
   virtual void layout() {
   }
 
   virtual void paint(WebCanvas* canvas, const WebRect& rect) {
+    if (!widget_->plugin())
+      return;
+
     WebRect plugin_rect(0, 0, size_.width, size_.height);
-    plugin_->Paint(canvas, plugin_rect, rect);
+    widget_->plugin()->Paint(canvas, plugin_rect, rect);
   }
 
   virtual void composite(bool finish) {
+    if (!widget_->plugin())
+      return;
+
     RendererGLContext* context = widget_->context();
     DCHECK(context);
     gpu::gles2::GLES2Implementation* gl = context->GetImplementation();
-    unsigned int texture = plugin_->GetBackingTextureId();
+    unsigned int texture = widget_->plugin()->GetBackingTextureId();
     gl->BindTexture(GL_TEXTURE_2D, texture);
     gl->DrawArrays(GL_TRIANGLES, 0, 3);
     widget_->SwapBuffers();
@@ -96,10 +100,13 @@ class PepperWidget : public WebWidget {
   }
 
   virtual bool handleInputEvent(const WebInputEvent& event) {
+    if (!widget_->plugin())
+      return false;
+
     // This cursor info is ignored, we always set the cursor directly from
     // RenderWidgetFullscreenPepper::DidChangeCursor.
     WebCursorInfo cursor;
-    bool result = plugin_->HandleInputEvent(event, &cursor);
+    bool result = widget_->plugin()->HandleInputEvent(event, &cursor);
 
     // For normal web pages, WebViewImpl does input event translations and
     // generates context menu events. Since we don't have a WebView, we need to
@@ -128,7 +135,7 @@ class PepperWidget : public WebWidget {
       if (send_context_menu_event) {
         WebMouseEvent context_menu_event(mouse_event);
         context_menu_event.type = WebInputEvent::ContextMenu;
-        plugin_->HandleInputEvent(context_menu_event, &cursor);
+        widget_->plugin()->HandleInputEvent(context_menu_event, &cursor);
       }
     }
     return result;
@@ -183,11 +190,11 @@ class PepperWidget : public WebWidget {
   }
 
   virtual bool isAcceleratedCompositingActive() const {
-    return widget_->context() && (plugin_->GetBackingTextureId() != 0);
+    return widget_->context() && widget_->plugin() &&
+        (widget_->plugin()->GetBackingTextureId() != 0);
   }
 
  private:
-  scoped_refptr<webkit::ppapi::PluginInstance> plugin_;
   RenderWidgetFullscreenPepper* widget_;
   WebSize size_;
 
@@ -208,27 +215,25 @@ void DestroyContext(RendererGLContext* context, GLuint program, GLuint buffer) {
 
 // static
 RenderWidgetFullscreenPepper* RenderWidgetFullscreenPepper::Create(
-    int32 opener_id, RenderThreadBase* render_thread,
-    webkit::ppapi::PluginInstance* plugin,
+    int32 opener_id, webkit::ppapi::PluginInstance* plugin,
     const GURL& active_url) {
   DCHECK_NE(MSG_ROUTING_NONE, opener_id);
   scoped_refptr<RenderWidgetFullscreenPepper> widget(
-      new RenderWidgetFullscreenPepper(render_thread, plugin, active_url));
+      new RenderWidgetFullscreenPepper(plugin, active_url));
   widget->Init(opener_id);
   return widget.release();
 }
 
 RenderWidgetFullscreenPepper::RenderWidgetFullscreenPepper(
-    RenderThreadBase* render_thread,
     webkit::ppapi::PluginInstance* plugin,
     const GURL& active_url)
-    : RenderWidgetFullscreen(render_thread),
+    : RenderWidgetFullscreen(),
       active_url_(active_url),
       plugin_(plugin),
       context_(NULL),
       buffer_(0),
       program_(0),
-      method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 RenderWidgetFullscreenPepper::~RenderWidgetFullscreenPepper() {
@@ -272,12 +277,11 @@ void RenderWidgetFullscreenPepper::DidChangeCursor(
 
 webkit::ppapi::PluginDelegate::PlatformContext3D*
 RenderWidgetFullscreenPepper::CreateContext3D() {
-  if (!context_) {
-    CreateContext();
-  }
-  if (!context_)
-    return NULL;
-  return new PlatformContext3DImpl(context_);
+#ifdef ENABLE_GPU
+  return new PlatformContext3DImpl(this);
+#else
+  return NULL;
+#endif
 }
 
 void RenderWidgetFullscreenPepper::DidInitiatePaint() {
@@ -294,7 +298,7 @@ void RenderWidgetFullscreenPepper::Close() {
   // If the fullscreen window is closed (e.g. user pressed escape), reset to
   // normal mode.
   if (plugin_)
-    plugin_->SetFullscreen(false, false);
+    plugin_->FlashSetFullscreen(false, false);
 
   // Call Close on the base class to destroy the WebWidget instance.
   RenderWidget::Close();
@@ -314,17 +318,18 @@ RenderWidgetFullscreenPepper::GetBitmapForOptimizedPluginPaint(
 }
 
 void RenderWidgetFullscreenPepper::OnResize(const gfx::Size& size,
-                                            const gfx::Rect& resizer_rect) {
+                                            const gfx::Rect& resizer_rect,
+                                            bool is_fullscreen) {
   if (context_) {
     gpu::gles2::GLES2Implementation* gl = context_->GetImplementation();
     gl->ResizeCHROMIUM(size.width(), size.height());
     gl->Viewport(0, 0, size.width(), size.height());
   }
-  RenderWidget::OnResize(size, resizer_rect);
+  RenderWidget::OnResize(size, resizer_rect, is_fullscreen);
 }
 
 WebWidget* RenderWidgetFullscreenPepper::CreateWebWidget() {
-  return new PepperWidget(plugin_, this);
+  return new PepperWidget(this);
 }
 
 bool RenderWidgetFullscreenPepper::SupportsAsynchronousSwapBuffers() {
@@ -333,8 +338,7 @@ bool RenderWidgetFullscreenPepper::SupportsAsynchronousSwapBuffers() {
 
 void RenderWidgetFullscreenPepper::CreateContext() {
   DCHECK(!context_);
-  RenderThread* render_thread = RenderThread::current();
-  DCHECK(render_thread);
+  RenderThreadImpl* render_thread = RenderThreadImpl::current();
   GpuChannelHost* host = render_thread->EstablishGpuChannelSync(
     content::CAUSE_FOR_GPU_LAUNCH_RENDERWIDGETFULLSCREENPEPPER_CREATECONTEXT);
   if (!host)
@@ -355,7 +359,8 @@ void RenderWidgetFullscreenPepper::CreateContext() {
       NULL,
       "GL_OES_packed_depth_stencil GL_OES_depth24",
       attribs,
-      active_url_);
+      active_url_,
+      gfx::PreferIntegratedGpu);
   if (!context_)
     return;
 
@@ -365,7 +370,7 @@ void RenderWidgetFullscreenPepper::CreateContext() {
     return;
   }
   context_->SetContextLostCallback(
-      NewCallback(this, &RenderWidgetFullscreenPepper::OnLostContext));
+      base::Bind(&RenderWidgetFullscreenPepper::OnLostContext, this));
 }
 
 namespace {
@@ -465,8 +470,12 @@ bool RenderWidgetFullscreenPepper::InitContext() {
 bool RenderWidgetFullscreenPepper::CheckCompositing() {
   bool compositing =
       webwidget_ && webwidget_->isAcceleratedCompositingActive();
-  if (compositing != is_accelerated_compositing_active_)
-    didActivateAcceleratedCompositing(compositing);
+  if (compositing != is_accelerated_compositing_active_) {
+    if (compositing)
+      didActivateCompositor(-1);
+    else
+      didDeactivateCompositor();
+  }
   return compositing;
 }
 
@@ -474,8 +483,9 @@ void RenderWidgetFullscreenPepper::SwapBuffers() {
   DCHECK(context_);
   OnSwapBuffersPosted();
   context_->SwapBuffers();
-  context_->Echo(method_factory_.NewRunnableMethod(
-      &RenderWidgetFullscreenPepper::OnSwapBuffersCompleteByRendererGLContext));
+  context_->Echo(base::Bind(
+      &RenderWidgetFullscreenPepper::OnSwapBuffersCompleteByRendererGLContext,
+      weak_ptr_factory_.GetWeakPtr()));
 }
 
 void RenderWidgetFullscreenPepper::OnLostContext(
@@ -487,7 +497,7 @@ void RenderWidgetFullscreenPepper::OnLostContext(
   // created when the plugin recreates its own.
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      NewRunnableFunction(DestroyContext, context_, program_, buffer_));
+      base::Bind(DestroyContext, context_, program_, buffer_));
   context_ = NULL;
   program_ = 0;
   buffer_ = 0;
@@ -497,4 +507,14 @@ void RenderWidgetFullscreenPepper::OnLostContext(
 
 void RenderWidgetFullscreenPepper::OnSwapBuffersCompleteByRendererGLContext() {
   OnSwapBuffersComplete();
+}
+
+RendererGLContext*
+RenderWidgetFullscreenPepper::GetParentContextForPlatformContext3D() {
+  if (!context_) {
+    CreateContext();
+  }
+  if (!context_)
+    return NULL;
+  return context_;
 }

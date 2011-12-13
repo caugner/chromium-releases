@@ -53,15 +53,12 @@ class ExternalExtensionProviderImpl
   void SetPrefs(base::DictionaryValue* prefs);
 
   // ExternalExtensionProvider implementation:
-  virtual void VisitRegisteredExtension() const;
-
-  virtual bool HasExtension(const std::string& id) const;
-
+  virtual void ServiceShutdown() OVERRIDE;
+  virtual void VisitRegisteredExtension() const OVERRIDE;
+  virtual bool HasExtension(const std::string& id) const OVERRIDE;
   virtual bool GetExtensionDetails(const std::string& id,
                                    Extension::Location* location,
-                                   scoped_ptr<Version>* version) const;
-
-  virtual void ServiceShutdown();
+                                   scoped_ptr<Version>* version) const OVERRIDE;
 
   virtual bool IsReady();
 
@@ -72,6 +69,9 @@ class ExternalExtensionProviderImpl
   static const char kExternalUpdateUrl[];
   static const char kSupportedLocales[];
 
+ protected:
+  VisitorInterface* service() const { return service_; }
+
  private:
   // Location for external extensions that are provided by this provider from
   // local crx files.
@@ -81,7 +81,6 @@ class ExternalExtensionProviderImpl
   // update URLs.
   const Extension::Location download_location_;
 
- private:
   // Weak pointer to the object that consumes the external extensions.
   // This is zeroed out by: ServiceShutdown()
   VisitorInterface* service_;  // weak

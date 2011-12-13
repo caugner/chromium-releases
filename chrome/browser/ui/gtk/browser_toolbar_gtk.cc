@@ -20,8 +20,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/browser/ui/gtk/accelerators_gtk.h"
 #include "chrome/browser/ui/gtk/back_forward_button_gtk.h"
+#include "chrome/browser/ui/gtk/bookmark_sub_menu_model_gtk.h"
 #include "chrome/browser/ui/gtk/browser_actions_toolbar_gtk.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/cairo_cached_surface.h"
@@ -87,9 +90,11 @@ BrowserToolbarGtk::BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window)
     : toolbar_(NULL),
       location_bar_(new LocationBarViewGtk(browser)),
       model_(browser->toolbar_model()),
-      wrench_menu_model_(this, browser),
+      is_wrench_menu_model_valid_(true),
       browser_(browser),
       window_(window) {
+  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_));
+
   browser_->command_updater()->AddCommandObserver(IDC_BACK, this);
   browser_->command_updater()->AddCommandObserver(IDC_FORWARD, this);
   browser_->command_updater()->AddCommandObserver(IDC_HOME, this);
@@ -98,6 +103,9 @@ BrowserToolbarGtk::BrowserToolbarGtk(Browser* browser, BrowserWindowGtk* window)
   registrar_.Add(this,
                  chrome::NOTIFICATION_UPGRADE_RECOMMENDED,
                  NotificationService::AllSources());
+  registrar_.Add(this,
+                 chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
+                 Source<Profile>(browser_->profile()));
 }
 
 BrowserToolbarGtk::~BrowserToolbarGtk() {
@@ -215,7 +223,10 @@ void BrowserToolbarGtk::Init(GtkWindow* top_level_window) {
   gtk_container_add(GTK_CONTAINER(wrench_box), wrench_button);
   gtk_box_pack_start(GTK_BOX(toolbar_), wrench_box, FALSE, FALSE, 4);
 
-  wrench_menu_.reset(new MenuGtk(this, &wrench_menu_model_));
+  wrench_menu_.reset(new MenuGtk(this, wrench_menu_model_.get()));
+  // The bookmark menu model needs to be able to force the wrench menu to close.
+  wrench_menu_model_->bookmark_sub_menu_model()->SetMenuGtk(wrench_menu_.get());
+
   registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
       Source<HostZoomMap>(profile->GetHostZoomMap()));
 
@@ -273,6 +284,10 @@ void BrowserToolbarGtk::UpdateForBookmarkBarVisibility(
 
 void BrowserToolbarGtk::ShowAppMenu() {
   wrench_menu_->Cancel();
+
+  if (!is_wrench_menu_model_valid_)
+    RebuildWrenchMenu();
+
   wrench_menu_button_->SetPaintOverride(GTK_STATE_ACTIVE);
   UserMetrics::RecordAction(UserMetricsAction("ShowAppMenu"));
   wrench_menu_->PopupAsFromKeyEvent(wrench_menu_button_->widget());
@@ -323,7 +338,8 @@ GtkIconSet* BrowserToolbarGtk::GetIconSetForId(int idr) {
 // Always show images because we desire that some icons always show
 // regardless of the system setting.
 bool BrowserToolbarGtk::AlwaysShowIconForCmd(int command_id) const {
-  return command_id == IDC_UPGRADE_DIALOG;
+  return command_id == IDC_UPGRADE_DIALOG ||
+      BookmarkSubMenuModel::IsBookmarkItemCommandId(command_id);
 }
 
 // ui::AcceleratorProvider
@@ -380,6 +396,9 @@ void BrowserToolbarGtk::Observe(int type,
     UpdateRoundedness();
   } else if (type == chrome::NOTIFICATION_UPGRADE_RECOMMENDED) {
     // Redraw the wrench menu to update the badge.
+    gtk_widget_queue_draw(wrench_menu_button_->widget());
+  } else if (type == chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED) {
+    is_wrench_menu_model_valid_ = false;
     gtk_widget_queue_draw(wrench_menu_button_->widget());
   } else if (type == content::NOTIFICATION_ZOOM_LEVEL_CHANGED) {
     // If our zoom level changed, we need to tell the menu to update its state,
@@ -574,6 +593,9 @@ gboolean BrowserToolbarGtk::OnMenuButtonPressEvent(GtkWidget* button,
   if (event->button != 1)
     return FALSE;
 
+  if (!is_wrench_menu_model_valid_)
+    RebuildWrenchMenu();
+
   wrench_menu_button_->SetPaintOverride(GTK_STATE_ACTIVE);
   wrench_menu_->PopupForWidget(button, event->button, event->time);
 
@@ -617,18 +639,28 @@ bool BrowserToolbarGtk::ShouldOnlyShowLocation() const {
   return !browser_->is_type_tabbed();
 }
 
+void BrowserToolbarGtk::RebuildWrenchMenu() {
+  wrench_menu_model_.reset(new WrenchMenuModel(this, browser_));
+  wrench_menu_.reset(new MenuGtk(this, wrench_menu_model_.get()));
+  is_wrench_menu_model_valid_ = true;
+}
+
 gboolean BrowserToolbarGtk::OnWrenchMenuButtonExpose(GtkWidget* sender,
                                                      GdkEventExpose* expose) {
-  const SkBitmap* badge = NULL;
+  int resource_id = 0;
   if (UpgradeDetector::GetInstance()->notify_upgrade()) {
-    badge = theme_service_->GetBitmapNamed(
-        UpgradeDetector::GetInstance()->GetIconResourceID(
-            UpgradeDetector::UPGRADE_ICON_TYPE_BADGE));
+    resource_id = UpgradeDetector::GetInstance()->GetIconResourceID(
+            UpgradeDetector::UPGRADE_ICON_TYPE_BADGE);
   } else {
-    return FALSE;
+    resource_id = GlobalErrorServiceFactory::GetForProfile(
+        browser_->profile())->GetFirstBadgeResourceID();
   }
 
+  if (!resource_id)
+    return FALSE;
+
   // Draw the chrome app menu icon onto the canvas.
+  const SkBitmap* badge = theme_service_->GetBitmapNamed(resource_id);
   gfx::CanvasSkiaPaint canvas(expose, false);
   int x_offset = base::i18n::IsRTL() ? 0 :
       sender->allocation.width - badge->width();

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef VIEWS_EXAMPLES_SCROLL_BAR_EXAMPLE_H_
-#define VIEWS_EXAMPLES_SCROLL_BAR_EXAMPLE_H_
+#ifndef VIEWS_EXAMPLES_SCROLL_VIEW_EXAMPLE_H_
+#define VIEWS_EXAMPLES_SCROLL_VIEW_EXAMPLE_H_
 #pragma once
 
 #include <string>
@@ -23,7 +23,6 @@ class ScrollViewExample : public ExampleBase,
   virtual ~ScrollViewExample();
 
   // Overridden from ExampleBase:
-  virtual std::wstring GetExampleTitle() OVERRIDE;
   virtual void CreateExampleView(views::View* container) OVERRIDE;
 
  private:
@@ -51,4 +50,4 @@ class ScrollViewExample : public ExampleBase,
 
 }  // namespace examples
 
-#endif  // VIEWS_EXAMPLES_SCROLL_BAR_EXAMPLE_H_
+#endif  // VIEWS_EXAMPLES_SCROLL_VIEW_EXAMPLE_H_

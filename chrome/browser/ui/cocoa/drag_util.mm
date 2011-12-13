@@ -9,7 +9,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/browser/plugin_service.h"
-#include "content/common/url_constants.h"
+#include "content/public/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
@@ -84,14 +84,13 @@ static BOOL IsSupportedFileURL(Profile* profile, const GURL& url) {
   // TODO(bauerb): This possibly uses stale information, but it's guaranteed not
   // to do disk access.
   bool allow_wildcard = false;
-  bool stale = false;
   webkit::WebPluginInfo plugin;
   return PluginService::GetInstance()->GetPluginInfo(
       -1,                // process ID
       MSG_ROUTING_NONE,  // routing ID
       profile->GetResourceContext(),
       url, GURL(), mime_type, allow_wildcard,
-      &stale, &plugin, NULL);
+      NULL, &plugin, NULL);
 }
 
 BOOL IsUnsupportedDropData(Profile* profile, id<NSDraggingInfo> info) {

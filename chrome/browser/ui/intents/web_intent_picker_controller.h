@@ -8,20 +8,23 @@
 
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
+#include "webkit/glue/web_intent_data.h"
 
+class Browser;
 class FaviconService;
 class GURL;
 class SkBitmap;
-class TabContents;
+class TabContentsWrapper;
 class WebDataService;
 class WebIntentPicker;
 class WebIntentPickerFactory;
-struct WebIntentData;
+struct WebIntentServiceData;
 
 // Controls the creation of the WebIntentPicker UI and forwards the user's
 // intent handler choice back to the TabContents object.
@@ -29,13 +32,24 @@ class WebIntentPickerController : public NotificationObserver,
                                   public WebIntentPickerDelegate {
  public:
   // Takes ownership of |factory|.
-  WebIntentPickerController(TabContents* tab_contents,
+  WebIntentPickerController(TabContentsWrapper* wrapper,
                             WebIntentPickerFactory* factory);
   virtual ~WebIntentPickerController();
 
-  // Shows the web intent picker, given the intent |action| and mime-type
-  // |type|.
-  void ShowDialog(const string16& action, const string16& type);
+  // Sets the intent data for which this picker was created. The picker will
+  // copy and hold this data until the user has made a service selection.
+  // |routing_id| is the IPC routing ID of the source renderer.
+  // |intent| is the intent data as created by the client content.
+  // |intent_id| is the ID assigned by the source renderer.
+  void SetIntent(int routing_id,
+                 const webkit_glue::WebIntentData& intent,
+                 int intent_id);
+
+  // Shows the web intent picker for |browser|, given the intent |action| and
+  // MIME-type |type|.
+  void ShowDialog(Browser* browser,
+                  const string16& action,
+                  const string16& type);
 
  protected:
   // NotificationObserver implementation.
@@ -49,13 +63,15 @@ class WebIntentPickerController : public NotificationObserver,
 
  private:
   friend class WebIntentPickerControllerTest;
+  friend class WebIntentPickerControllerBrowserTest;
   class WebIntentDataFetcher;
   class FaviconFetcher;
 
   int pending_async_count() const { return pending_async_count_; }
 
   // Called from the WebIntentDataFetcher when intent data is available.
-  void OnWebIntentDataAvailable(const std::vector<WebIntentData>& intent_data);
+  void OnWebIntentDataAvailable(
+      const std::vector<WebIntentServiceData>& intent_data);
 
   // Called from the FaviconDataFetcher when a favicon is available.
   void OnFaviconDataAvailable(size_t index, const SkBitmap& icon_bitmap);
@@ -67,7 +83,7 @@ class WebIntentPickerController : public NotificationObserver,
   void ClosePicker();
 
   // A weak pointer to the tab contents that the picker is displayed on.
-  TabContents* tab_contents_;
+  TabContentsWrapper* wrapper_;
 
   // A notification registrar, listening for notifications when the tab closes
   // to close the picker ui.
@@ -90,6 +106,16 @@ class WebIntentPickerController : public NotificationObserver,
 
   // A count of the outstanding asynchronous calls.
   int pending_async_count_;
+
+  // The routing id of the renderer which launched the intent. Should be the
+  // renderer associated with the TabContents which owns this object.
+  int routing_id_;
+
+  // The intent data from the client.
+  webkit_glue::WebIntentData intent_;
+
+  // The intent ID assigned to this intent by the renderer.
+  int intent_id_;
 
   DISALLOW_COPY_AND_ASSIGN(WebIntentPickerController);
 };

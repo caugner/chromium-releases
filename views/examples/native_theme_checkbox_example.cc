@@ -5,6 +5,7 @@
 #include "views/examples/native_theme_checkbox_example.h"
 
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "views/controls/button/checkbox.h"
 #include "views/controls/button/radio_button.h"
 #include "views/layout/fill_layout.h"
@@ -12,19 +13,15 @@
 namespace examples {
 
 NativeThemeCheckboxExample::NativeThemeCheckboxExample(ExamplesMain* main)
-    : ExampleBase(main),
+    : ExampleBase(main, "Checkbox"),
       count_(0) {
 }
 
 NativeThemeCheckboxExample::~NativeThemeCheckboxExample() {
 }
 
-std::wstring NativeThemeCheckboxExample::GetExampleTitle() {
-  return L"Checkbox";
-}
-
 void NativeThemeCheckboxExample::CreateExampleView(views::View* container) {
-  button_ = new views::Checkbox(L"Checkbox");
+  button_ = new views::Checkbox(ASCIIToUTF16("Checkbox"));
   button_->set_listener(this);
   container->SetLayoutManager(new views::FillLayout);
   container->AddChildView(button_);
@@ -32,7 +29,7 @@ void NativeThemeCheckboxExample::CreateExampleView(views::View* container) {
 
 void NativeThemeCheckboxExample::ButtonPressed(views::Button* sender,
                                                const views::Event& event) {
-  PrintStatus(base::StringPrintf("Pressed! count:%d", ++count_).c_str());
+  PrintStatus(base::StringPrintf("Pressed! count: %d", ++count_).c_str());
 }
 
 }  // namespace examples

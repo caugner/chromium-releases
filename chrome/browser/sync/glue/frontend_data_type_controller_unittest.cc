@@ -10,6 +10,7 @@
 #include "base/task.h"
 #include "base/tracked_objects.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
+#include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/frontend_data_type_controller.h"
 #include "chrome/browser/sync/glue/frontend_data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
@@ -23,18 +24,13 @@ using browser_sync::DataTypeController;
 using browser_sync::FrontendDataTypeController;
 using browser_sync::FrontendDataTypeControllerMock;
 using browser_sync::ModelAssociatorMock;
+using browser_sync::StartCallback;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
 using testing::Return;
 using testing::SetArgumentPointee;
 using testing::StrictMock;
-
-class StartCallback {
- public:
-  MOCK_METHOD2(Run, void(DataTypeController::StartResult result,
-                         const tracked_objects::Location& from_here));
-};
 
 class FrontendDataTypeControllerFake : public FrontendDataTypeController {
  public:
@@ -193,7 +189,7 @@ TEST_F(FrontendDataTypeControllerTest, StartAssociationFailed) {
   // Set up association to fail with an association failed error.
   EXPECT_EQ(DataTypeController::NOT_RUNNING, frontend_dtc_->state());
   frontend_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
-  EXPECT_EQ(DataTypeController::NOT_RUNNING, frontend_dtc_->state());
+  EXPECT_EQ(DataTypeController::DISABLED, frontend_dtc_->state());
 }
 
 TEST_F(FrontendDataTypeControllerTest,

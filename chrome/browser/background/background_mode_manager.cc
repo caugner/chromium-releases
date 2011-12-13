@@ -15,6 +15,7 @@
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/status_icons/status_icon.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -22,10 +23,11 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -73,9 +75,9 @@ void BackgroundModeManager::BackgroundModeData::ExecuteCommand(int item) {
       // Do nothing. This is just a label.
       break;
     default:
-      Browser* browser = GetBrowserWindow();
+      // Launch the app associated with this item.
       const Extension* extension = applications_->GetExtension(item);
-      browser->OpenApplicationTab(profile_, extension, NEW_FOREGROUND_TAB);
+      BackgroundModeManager::LaunchBackgroundApplication(profile_, extension);
       break;
   }
 }
@@ -128,8 +130,11 @@ bool BackgroundModeManager::BackgroundModeData::BackgroundModeDataCompare(
 
 ///////////////////////////////////////////////////////////////////////////////
 //  BackgroundModeManager, public
-BackgroundModeManager::BackgroundModeManager(CommandLine* command_line)
-    : status_tray_(NULL),
+BackgroundModeManager::BackgroundModeManager(
+    CommandLine* command_line,
+    ProfileInfoCache* profile_cache)
+    : profile_cache_(profile_cache),
+      status_tray_(NULL),
       status_icon_(NULL),
       context_menu_(NULL),
       in_background_mode_(false),
@@ -228,6 +233,18 @@ void BackgroundModeManager::RegisterProfile(Profile* profile) {
     UpdateStatusTrayIconContextMenu();
 }
 
+// static
+void BackgroundModeManager::LaunchBackgroundApplication(
+    Profile* profile,
+    const Extension* extension) {
+  ExtensionService* service = profile->GetExtensionService();
+  extension_misc::LaunchContainer launch_container =
+      service->extension_prefs()->GetLaunchContainer(
+          extension, ExtensionPrefs::LAUNCH_REGULAR);
+  Browser::OpenApplication(profile, extension, launch_container,
+                           NEW_FOREGROUND_TAB);
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 //  BackgroundModeManager, NotificationObserver overrides
 void BackgroundModeManager::Observe(int type,
@@ -306,6 +323,15 @@ void BackgroundModeManager::OnApplicationListChanged(Profile* profile) {
 
   // Figure out what just happened based on the count of background apps.
   int count = GetBackgroundAppCount();
+
+  // Update the profile cache with the fact whether background apps are running
+  // for this profile.
+  size_t profile_index = profile_cache_->GetIndexOfProfileWithPath(
+      profile->GetPath());
+  if (profile_index != std::string::npos) {
+    profile_cache_->SetBackgroundStatusOfProfileAtIndex(
+        profile_index, GetBackgroundAppCountForProfile(profile) != 0);
+  }
 
   if (count == 0) {
     // We've uninstalled our last background app, make sure we exit background
@@ -406,7 +432,8 @@ void BackgroundModeManager::EndKeepAliveForStartup() {
 void BackgroundModeManager::StartBackgroundMode() {
   // Don't bother putting ourselves in background mode if we're already there
   // or if background mode is disabled.
-  if (in_background_mode_ || !IsBackgroundModePrefEnabled())
+  if (in_background_mode_ ||
+      (!IsBackgroundModePrefEnabled() && !keep_alive_for_test_))
     return;
 
   // Mark ourselves as running in background mode.
@@ -468,6 +495,12 @@ int BackgroundModeManager::GetBackgroundAppCount() const {
   }
   DCHECK(count >= 0);
   return count;
+}
+
+int BackgroundModeManager::GetBackgroundAppCountForProfile(
+    Profile* const profile) const {
+  BackgroundModeData* bmd = GetBackgroundModeData(profile);
+  return bmd->GetBackgroundAppCount();
 }
 
 void BackgroundModeManager::OnBackgroundAppInstalled(
@@ -592,9 +625,9 @@ void BackgroundModeManager::RemoveStatusTrayIcon() {
 }
 
 BackgroundModeManager::BackgroundModeData*
-BackgroundModeManager::GetBackgroundModeData(Profile* profile) {
+BackgroundModeManager::GetBackgroundModeData(Profile* const profile) const {
   DCHECK(background_mode_data_.find(profile) != background_mode_data_.end());
-  return background_mode_data_[profile].get();
+  return background_mode_data_.find(profile)->second.get();
 }
 
 // static
@@ -606,6 +639,8 @@ bool BackgroundModeManager::IsBackgroundModePermanentlyDisabled(
   // always disabled on chromeos since chrome is always running on that
   // platform, making it superfluous.
 #if defined(OS_CHROMEOS)
+  if (command_line->HasSwitch(switches::kKeepAliveForTest))
+      return false;
   return true;
 #else
   bool background_mode_disabled =

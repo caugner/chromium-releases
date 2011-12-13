@@ -26,7 +26,7 @@ SSLConfig::~SSLConfig() {
 }
 
 bool SSLConfig::IsAllowedBadCert(X509Certificate* cert,
-                                 int* cert_status) const {
+                                 CertStatus* cert_status) const {
   std::string der_cert;
   if (!cert->GetDEREncoded(&der_cert))
     return false;
@@ -34,7 +34,7 @@ bool SSLConfig::IsAllowedBadCert(X509Certificate* cert,
 }
 
 bool SSLConfig::IsAllowedBadCert(const base::StringPiece& der_cert,
-                                 int* cert_status) const {
+                                 CertStatus* cert_status) const {
   for (size_t i = 0; i < allowed_bad_certs.size(); ++i) {
     if (der_cert == allowed_bad_certs[i].der_cert) {
       if (cert_status)
@@ -52,7 +52,7 @@ SSLConfigService::SSLConfigService()
 // static
 bool SSLConfigService::IsKnownFalseStartIncompatibleServer(
     const std::string& hostname) {
-  return SSLFalseStartBlacklist::IsMember(hostname.c_str());
+  return SSLFalseStartBlacklist::IsMember(hostname);
 }
 
 static bool g_cached_info_enabled = false;
@@ -81,6 +81,17 @@ bool SSLConfigService::dns_cert_provenance_checking_enabled() {
 }
 
 // static
+void SSLConfigService::SetCRLSet(scoped_refptr<CRLSet> crl_set) {
+  // TODO(agl): not implemented yet.
+}
+
+// static
+scoped_refptr<CRLSet> SSLConfigService::GetCRLSet() {
+  // TODO(agl): not implemented yet.
+  scoped_refptr<CRLSet> ret;
+  return ret;
+}
+
 void SSLConfigService::EnableCachedInfo() {
   g_cached_info_enabled = true;
 }
@@ -126,12 +137,8 @@ void SSLConfigService::ProcessConfigUpdate(const SSLConfig& orig_config,
       (orig_config.rev_checking_enabled != new_config.rev_checking_enabled) ||
       (orig_config.ssl3_enabled != new_config.ssl3_enabled) ||
       (orig_config.tls1_enabled != new_config.tls1_enabled) ||
-      (orig_config.disabled_cipher_suites.size() !=
-       new_config.disabled_cipher_suites.size());
-  if (!config_changed) {
-    config_changed = (orig_config.disabled_cipher_suites !=
-        new_config.disabled_cipher_suites);
-  }
+      (orig_config.disabled_cipher_suites !=
+       new_config.disabled_cipher_suites);
 
   if (config_changed)
     FOR_EACH_OBSERVER(Observer, observer_list_, OnSSLConfigChanged());

@@ -11,6 +11,7 @@
 
 #include "base/command_line.h"
 #include "base/i18n/case_conversion.h"
+#include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/timer.h"
 #include "base/utf_string_conversions.h"
@@ -22,6 +23,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
+#include "chrome/browser/ui/constrained_window_tab_helper.h"
+#include "chrome/browser/ui/constrained_window_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper_delegate.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -36,14 +39,13 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_details.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/page_transition_types.h"
 #include "content/common/renderer_preferences.h"
+#include "content/public/browser/notification_types.h"
 #include "net/http/http_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -57,6 +59,23 @@ const int kUpdateBoundsDelayMS = 1000;
 
 // If this status code is seen instant is disabled for the specified host.
 const int kHostBlacklistStatusCode = 403;
+
+enum PreviewUsageType {
+  PREVIEW_CREATED,
+  PREVIEW_DELETED,
+  PREVIEW_LOADED,
+  PREVIEW_SHOWN,
+  PREVIEW_COMMITTED,
+  PREVIEW_NUM_TYPES,
+};
+
+void AddPreviewUsageForHistogram(TemplateURLID template_url_id,
+                                 PreviewUsageType usage) {
+  DCHECK(0 <= usage && usage < PREVIEW_NUM_TYPES);
+  // Only track the histogram for the instant loaders, for now.
+  if (template_url_id)
+    UMA_HISTOGRAM_ENUMERATION("Instant.Previews", usage, PREVIEW_NUM_TYPES);
+}
 
 }  // namespace
 
@@ -146,6 +165,7 @@ void InstantLoader::FrameLoadObserver::Observe(
 class InstantLoader::TabContentsDelegateImpl
     : public TabContentsDelegate,
       public TabContentsWrapperDelegate,
+      public ConstrainedWindowTabHelperDelegate,
       public NotificationObserver,
       public TabContentsObserver {
  public:
@@ -184,8 +204,6 @@ class InstantLoader::TabContentsDelegateImpl
                                       unsigned changed_flags) OVERRIDE;
   virtual void AddNavigationHeaders(const GURL& url,
                                     std::string* headers) OVERRIDE;
-  virtual bool ShouldFocusConstrainedWindow() OVERRIDE;
-  virtual void WillShowConstrainedWindow(TabContents* source) OVERRIDE;
   virtual bool ShouldSuppressDialogs() OVERRIDE;
   virtual void BeforeUnloadFired(TabContents* tab,
                                  bool proceed,
@@ -203,11 +221,15 @@ class InstantLoader::TabContentsDelegateImpl
   virtual bool OnGoToEntryOffset(int offset) OVERRIDE;
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
-      NavigationType::Type navigation_type) OVERRIDE;
+      content::NavigationType navigation_type) OVERRIDE;
 
   // TabContentsWrapperDelegate:
   virtual void SwapTabContents(TabContentsWrapper* old_tc,
                                TabContentsWrapper* new_tc) OVERRIDE;
+
+  // ConstrainedWindowTabHelperDelegate:
+  virtual void WillShowConstrainedWindow(TabContentsWrapper* source) OVERRIDE;
+  virtual bool ShouldFocusConstrainedWindow() OVERRIDE;
 
   // TabContentsObserver:
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -421,23 +443,6 @@ void InstantLoader::TabContentsDelegateImpl::AddNavigationHeaders(
                                        headers);
 }
 
-bool InstantLoader::TabContentsDelegateImpl::ShouldFocusConstrainedWindow() {
-  // Return false so that constrained windows are not initially focused. If
-  // we did otherwise the preview would prematurely get committed when focus
-  // goes to the constrained window.
-  return false;
-}
-
-void InstantLoader::TabContentsDelegateImpl::WillShowConstrainedWindow(
-    TabContents* source) {
-  if (!loader_->ready()) {
-    // A constrained window shown for an auth may not paint. Show the preview
-    // contents.
-    UnregisterForPaintNotifications();
-    loader_->ShowPreview();
-  }
-}
-
 bool InstantLoader::TabContentsDelegateImpl::ShouldSuppressDialogs() {
   // Any message shown during instant cancels instant, so we suppress them.
   return true;
@@ -485,9 +490,11 @@ bool InstantLoader::TabContentsDelegateImpl::OnGoToEntryOffset(int offset) {
 
 bool InstantLoader::TabContentsDelegateImpl::ShouldAddNavigationToHistory(
     const history::HistoryAddPageArgs& add_page_args,
-    NavigationType::Type navigation_type) {
-  if (waiting_for_new_page_ && navigation_type == NavigationType::NEW_PAGE)
+    content::NavigationType navigation_type) {
+  if (waiting_for_new_page_ &&
+      navigation_type == content::NAVIGATION_TYPE_NEW_PAGE) {
     waiting_for_new_page_ = false;
+  }
 
   if (!waiting_for_new_page_) {
     add_page_vector_.push_back(
@@ -504,6 +511,22 @@ void InstantLoader::TabContentsDelegateImpl::SwapTabContents(
   loader_->ReplacePreviewContents(old_tc, new_tc);
 }
 
+bool InstantLoader::TabContentsDelegateImpl::ShouldFocusConstrainedWindow() {
+  // Return false so that constrained windows are not initially focused. If
+  // we did otherwise the preview would prematurely get committed when focus
+  // goes to the constrained window.
+  return false;
+}
+
+void InstantLoader::TabContentsDelegateImpl::WillShowConstrainedWindow(
+    TabContentsWrapper* source) {
+  if (!loader_->ready()) {
+    // A constrained window shown for an auth may not paint. Show the preview
+    // contents.
+    UnregisterForPaintNotifications();
+    loader_->ShowPreview();
+  }
+}
 
 bool InstantLoader::TabContentsDelegateImpl::OnMessageReceived(
     const IPC::Message& message) {
@@ -550,6 +573,8 @@ void InstantLoader::TabContentsDelegateImpl::OnInstantSupportDetermined(
     loader_->PageFinishedLoading();
   else
     loader_->PageDoesntSupportInstant(user_typed_before_load_);
+
+  AddPreviewUsageForHistogram(loader_->template_url_id(), PREVIEW_LOADED);
 }
 
 void InstantLoader::TabContentsDelegateImpl
@@ -567,7 +592,7 @@ InstantLoader::InstantLoader(InstantLoaderDelegate* delegate, TemplateURLID id)
       template_url_id_(id),
       ready_(false),
       http_status_ok_(true),
-      last_transition_type_(PageTransition::LINK),
+      last_transition_type_(content::PAGE_TRANSITION_LINK),
       verbatim_(false),
       needs_reload_(false) {
 }
@@ -577,13 +602,15 @@ InstantLoader::~InstantLoader() {
 
   // Delete the TabContents before the delegate as the TabContents holds a
   // reference to the delegate.
+  if (preview_contents())
+    AddPreviewUsageForHistogram(template_url_id_, PREVIEW_DELETED);
   preview_contents_.reset();
 }
 
 bool InstantLoader::Update(TabContentsWrapper* tab_contents,
                            const TemplateURL* template_url,
                            const GURL& url,
-                           PageTransition::Type transition_type,
+                           content::PageTransition transition_type,
                            const string16& user_text,
                            bool verbatim,
                            string16* suggested_text) {
@@ -630,7 +657,7 @@ bool InstantLoader::Update(TabContentsWrapper* tab_contents,
   if (template_url) {
     DCHECK(template_url_id_ == template_url->id());
     if (!created_preview_contents) {
-      if (is_waiting_for_load()) {
+      if (is_determining_if_page_supports_instant()) {
         // The page hasn't loaded yet. We'll send the script down when it does.
         frame_load_observer_->set_text(user_text_);
         frame_load_observer_->set_verbatim(verbatim);
@@ -661,7 +688,8 @@ bool InstantLoader::Update(TabContentsWrapper* tab_contents,
     DCHECK(template_url_id_ == 0);
     preview_tab_contents_delegate_->PrepareForNewLoad();
     frame_load_observer_.reset(NULL);
-    preview_contents_->controller().LoadURL(url_, GURL(), transition_type);
+    preview_contents_->controller().LoadURL(url_, GURL(), transition_type,
+                                            std::string());
   }
   return true;
 }
@@ -676,7 +704,7 @@ void InstantLoader::SetOmniboxBounds(const gfx::Rect& bounds) {
 
   omnibox_bounds_ = bounds;
   if (preview_contents_.get() && is_showing_instant() &&
-      !is_waiting_for_load()) {
+      !is_determining_if_page_supports_instant()) {
     // Updating the bounds is rather expensive, and because of the async nature
     // of the omnibox the bounds can dance around a bit. Delay the update in
     // hopes of things settling down. To avoid hiding results we grow
@@ -746,6 +774,8 @@ TabContentsWrapper* InstantLoader::ReleasePreviewContents(
     ready_ = false;
   }
   update_bounds_timer_.Stop();
+  AddPreviewUsageForHistogram(template_url_id_,
+      type == INSTANT_COMMIT_DESTROY ? PREVIEW_DELETED : PREVIEW_COMMITTED);
   return preview_contents_.release();
 }
 
@@ -768,7 +798,7 @@ void InstantLoader::MaybeLoadInstantURL(TabContentsWrapper* tab_contents,
     return;
 
   CreatePreviewContents(tab_contents);
-  LoadInstantURL(tab_contents, template_url, PageTransition::GENERATED,
+  LoadInstantURL(tab_contents, template_url, content::PAGE_TRANSITION_GENERATED,
                  string16(), true);
 }
 
@@ -873,6 +903,7 @@ void InstantLoader::ShowPreview() {
   if (!ready_) {
     ready_ = true;
     delegate_->InstantStatusChanged(this);
+    AddPreviewUsageForHistogram(template_url_id_, PREVIEW_SHOWN);
   }
 }
 
@@ -926,7 +957,7 @@ void InstantLoader::SendBoundsToPage(bool force_if_waiting) {
     return;
 
   if (preview_contents_.get() && is_showing_instant() &&
-      (force_if_waiting || !is_waiting_for_load())) {
+      (force_if_waiting || !is_determining_if_page_supports_instant())) {
     last_omnibox_bounds_ = omnibox_bounds_;
     RenderViewHost* host = preview_contents_->render_view_host();
     host->Send(new ChromeViewMsg_SearchBoxResize(
@@ -946,6 +977,7 @@ void InstantLoader::ReplacePreviewContents(TabContentsWrapper* old_tc,
   SetupPreviewContents(old_tc);
 
   // Cleanup the old preview contents.
+  old_tc->constrained_window_tab_helper()->set_delegate(NULL);
   old_tc->tab_contents()->set_delegate(NULL);
   old_tc->set_delegate(NULL);
 
@@ -971,6 +1003,8 @@ void InstantLoader::SetupPreviewContents(TabContentsWrapper* tab_contents) {
   preview_contents_->tab_contents()->set_delegate(
       preview_tab_contents_delegate_.get());
   preview_contents_->blocked_content_tab_helper()->SetAllContentsBlocked(true);
+  preview_contents_->constrained_window_tab_helper()->set_delegate(
+      preview_tab_contents_delegate_.get());
 
   // Propagate the max page id. That way if we end up merging the two
   // NavigationControllers (which happens if we commit) none of the page ids
@@ -1008,6 +1042,7 @@ void InstantLoader::CreatePreviewContents(TabContentsWrapper* tab_contents) {
       new TabContents(
           tab_contents->profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
   preview_contents_.reset(new TabContentsWrapper(new_contents));
+  AddPreviewUsageForHistogram(template_url_id_, PREVIEW_CREATED);
   preview_tab_contents_delegate_.reset(new TabContentsDelegateImpl(this));
   SetupPreviewContents(tab_contents);
 
@@ -1016,7 +1051,7 @@ void InstantLoader::CreatePreviewContents(TabContentsWrapper* tab_contents) {
 
 void InstantLoader::LoadInstantURL(TabContentsWrapper* tab_contents,
                                    const TemplateURL* template_url,
-                                   PageTransition::Type transition_type,
+                                   content::PageTransition transition_type,
                                    const string16& user_text,
                                    bool verbatim) {
   preview_tab_contents_delegate_->PrepareForNewLoad();
@@ -1034,10 +1069,24 @@ void InstantLoader::LoadInstantURL(TabContentsWrapper* tab_contents,
   CommandLine* cl = CommandLine::ForCurrentProcess();
   if (cl->HasSwitch(switches::kInstantURL))
     instant_url = GURL(cl->GetSwitchValueASCII(switches::kInstantURL));
-  preview_contents_->controller().LoadURL(instant_url, GURL(), transition_type);
+  preview_contents_->controller().LoadURL(instant_url, GURL(), transition_type,
+                                          std::string());
   RenderViewHost* host = preview_contents_->render_view_host();
-  host->Send(new ChromeViewMsg_SearchBoxChange(
-      host->routing_id(), user_text, verbatim, 0, 0));
+
+  // If user_text is empty, this must be a preload of the search homepage. In
+  // that case, send down a SearchBoxResize message, which will switch the page
+  // to "search results" UI. This avoids flicker when the page is shown with
+  // results. In addition, we don't want the page accidentally causing the
+  // preloaded page to be displayed yet (by calling setSuggestions), so don't
+  // send a SearchBoxChange message.
+  if (user_text.empty()) {
+    host->Send(new ChromeViewMsg_SearchBoxResize(
+        host->routing_id(), GetOmniboxBoundsInTermsOfPreview()));
+  } else {
+    host->Send(new ChromeViewMsg_SearchBoxChange(
+        host->routing_id(), user_text, verbatim, 0, 0));
+  }
+
   frame_load_observer_.reset(new FrameLoadObserver(
       this, preview_contents()->tab_contents(), user_text, verbatim));
 }

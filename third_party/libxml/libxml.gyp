@@ -1,4 +1,4 @@
-# Copyright (c) 2009 The Chromium Authors. All rights reserved.
+# Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -20,7 +20,7 @@
       'target_name': 'libxml',
       'conditions': [
         ['os_posix == 1 and OS != "mac" and use_system_libxml', {
-          'type': 'settings',
+          'type': 'none',
           'direct_dependent_settings': {
             'cflags': [
               '<!@(pkg-config --cflags libxml-2.0)',
@@ -186,7 +186,7 @@
                 ],
               },
             }],
-            ['OS=="mac"', {'defines': ['_REENTRANT']}],
+            ['OS=="mac" or OS=="android"', {'defines': ['_REENTRANT']}],
             ['OS=="win"', {
               'product_name': 'libxml2',
             }, {  # else: OS!="win"

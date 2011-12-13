@@ -10,14 +10,15 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "content/renderer/render_view_observer.h"
+#include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
+
+class RenderViewImpl;
+struct DevToolsMessageData;
 
 namespace WebKit {
 class WebDevToolsAgent;
 }
-
-struct DevToolsMessageData;
 
 typedef std::map<std::string, std::string> DevToolsRuntimeProperties;
 
@@ -25,10 +26,10 @@ typedef std::map<std::string, std::string> DevToolsRuntimeProperties;
 // agents with the communication capabilities. All messages from/to Glue's
 // agents infrastructure are flowing through this communication agent.
 // There is a corresponding DevToolsClient object on the client side.
-class DevToolsAgent : public RenderViewObserver,
+class DevToolsAgent : public content::RenderViewObserver,
                       public WebKit::WebDevToolsAgentClient {
  public:
-  explicit DevToolsAgent(RenderView* render_view);
+  explicit DevToolsAgent(RenderViewImpl* render_view);
   virtual ~DevToolsAgent();
 
   // Returns agent instance for its host id.
@@ -49,17 +50,15 @@ class DevToolsAgent : public RenderViewObserver,
   virtual void sendDebuggerOutput(const WebKit::WebString& data);
 
   virtual int hostIdentifier();
-  virtual void runtimeFeatureStateChanged(const WebKit::WebString& feature,
-                                          bool enabled);
-  virtual void runtimePropertyChanged(const WebKit::WebString& name,
-                                      const WebKit::WebString& value);
+  virtual void saveAgentRuntimeState(const WebKit::WebString& state);
   virtual WebKit::WebDevToolsAgentClient::WebKitClientMessageLoop*
       createClientMessageLoop();
   virtual bool exposeV8DebuggerProtocol();
   virtual void clearBrowserCache();
   virtual void clearBrowserCookies();
 
-  void OnAttach(const DevToolsRuntimeProperties& runtime_properties);
+  void OnAttach();
+  void OnReattach(const std::string& agent_state);
   void OnDetach();
   void OnFrontendLoaded();
   void OnDispatchOnInspectorBackend(const std::string& message);

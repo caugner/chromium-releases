@@ -8,13 +8,9 @@
 #include "base/file_util.h"
 #include "content/browser/content_browser_client.h"
 #include "content/common/notification_service.h"
+#include "content/public/browser/notification_types.h"
 #include "net/base/net_errors.h"
-#include "webkit/appcache/appcache_thread.h"
 #include "webkit/quota/quota_manager.h"
-
-static bool has_initialized_thread_ids;
-
-// ----------------------------------------------------------------------------
 
 ChromeAppCacheService::ChromeAppCacheService(
     quota::QuotaManagerProxy* quota_manager_proxy)
@@ -28,11 +24,6 @@ void ChromeAppCacheService::InitializeOnIOThread(
     scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (!has_initialized_thread_ids) {
-    has_initialized_thread_ids = true;
-    appcache::AppCacheThread::Init(BrowserThread::DB, BrowserThread::IO);
-  }
-
   cache_path_ = cache_path;
   resource_context_ = resource_context;
   registrar_.Add(
@@ -41,6 +32,7 @@ void ChromeAppCacheService::InitializeOnIOThread(
 
   // Init our base class.
   Initialize(cache_path_,
+             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
              BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
   set_appcache_policy(this);
   set_special_storage_policy(special_storage_policy);
@@ -49,18 +41,19 @@ void ChromeAppCacheService::InitializeOnIOThread(
 ChromeAppCacheService::~ChromeAppCacheService() {
 }
 
-bool ChromeAppCacheService::CanLoadAppCache(const GURL& manifest_url) {
+bool ChromeAppCacheService::CanLoadAppCache(const GURL& manifest_url,
+                                            const GURL& first_party) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   // We don't prompt for read access.
   return content::GetContentClient()->browser()->AllowAppCache(
-      manifest_url, *resource_context_);
+      manifest_url, first_party, *resource_context_);
 }
 
-int ChromeAppCacheService::CanCreateAppCache(
-    const GURL& manifest_url, net::CompletionCallback* callback) {
+bool ChromeAppCacheService::CanCreateAppCache(
+    const GURL& manifest_url, const GURL& first_party) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   return content::GetContentClient()->browser()->AllowAppCache(
-      manifest_url, *resource_context_) ? net::OK : net::ERR_ACCESS_DENIED;
+      manifest_url, first_party, *resource_context_);
 }
 
 void ChromeAppCacheService::Observe(int type,
@@ -70,28 +63,3 @@ void ChromeAppCacheService::Observe(int type,
   DCHECK(type == content::NOTIFICATION_PURGE_MEMORY);
   PurgeMemory();
 }
-
-// ----------------------------------------------------------------------------
-
-static BrowserThread::ID ToBrowserThreadID(int id) {
-  DCHECK(has_initialized_thread_ids);
-  DCHECK(id == BrowserThread::DB || id == BrowserThread::IO);
-  return static_cast<BrowserThread::ID>(id);
-}
-
-namespace appcache {
-
-// An impl of AppCacheThread we need to provide to the appcache lib.
-
-bool AppCacheThread::PostTask(
-    int id,
-    const tracked_objects::Location& from_here,
-    Task* task) {
-  return BrowserThread::PostTask(ToBrowserThreadID(id), from_here, task);
-}
-
-bool AppCacheThread::CurrentlyOn(int id) {
-  return BrowserThread::CurrentlyOn(ToBrowserThreadID(id));
-}
-
-}  // namespace appcache

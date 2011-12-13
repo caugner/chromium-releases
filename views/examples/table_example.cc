@@ -6,31 +6,35 @@
 
 #include <vector>
 
+#include "base/utf_string_conversions.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "views/controls/button/checkbox.h"
 #include "views/layout/grid_layout.h"
 
 namespace examples {
 
-TableExample::TableExample(ExamplesMain* main) : ExampleBase(main) {}
+TableExample::TableExample(ExamplesMain* main)
+    : ExampleBase(main, "Table") {
+}
 
-TableExample::~TableExample() {}
-
-std::wstring TableExample::GetExampleTitle() {
-  return L"Table";
+TableExample::~TableExample() {
 }
 
 void TableExample::CreateExampleView(views::View* container) {
-  column1_visible_checkbox_ = new views::Checkbox(L"Fruit column visible");
+  column1_visible_checkbox_ = new views::Checkbox(
+      ASCIIToUTF16("Fruit column visible"));
   column1_visible_checkbox_->SetChecked(true);
   column1_visible_checkbox_->set_listener(this);
-  column2_visible_checkbox_ = new views::Checkbox(L"Color column visible");
+  column2_visible_checkbox_ = new views::Checkbox(
+      ASCIIToUTF16("Color column visible"));
   column2_visible_checkbox_->SetChecked(true);
   column2_visible_checkbox_->set_listener(this);
-  column3_visible_checkbox_ = new views::Checkbox(L"Origin column visible");
+  column3_visible_checkbox_ = new views::Checkbox(
+      ASCIIToUTF16("Origin column visible"));
   column3_visible_checkbox_->SetChecked(true);
   column3_visible_checkbox_->set_listener(this);
-  column4_visible_checkbox_ = new views::Checkbox(L"Price column visible");
+  column4_visible_checkbox_ = new views::Checkbox(
+      ASCIIToUTF16("Price column visible"));
   column4_visible_checkbox_->SetChecked(true);
   column4_visible_checkbox_->set_listener(this);
 
@@ -83,15 +87,15 @@ int TableExample::RowCount() {
   return 10;
 }
 
-std::wstring TableExample::GetText(int row, int column_id) {
-  std::wstring cells[5][5] = {
-    { L"Orange", L"Orange", L"South america", L"$5" },
-    { L"Apple", L"Green", L"Canada", L"$3" },
-    { L"Blue berries", L"Blue", L"Mexico", L"$10.3" },
-    { L"Strawberries", L"Red", L"California", L"$7" },
-    { L"Cantaloupe", L"Orange", L"South america", L"$5" },
+string16 TableExample::GetText(int row, int column_id) {
+  const char* const cells[5][4] = {
+    { "Orange", "Orange", "South america", "$5" },
+    { "Apple", "Green", "Canada", "$3" },
+    { "Blue berries", "Blue", "Mexico", "$10.3" },
+    { "Strawberries", "Red", "California", "$7" },
+    { "Cantaloupe", "Orange", "South america", "$5" },
   };
-  return cells[row % 5][column_id];
+  return ASCIIToUTF16(cells[row % 5][column_id]);
 }
 
 SkBitmap TableExample::GetIcon(int row) {

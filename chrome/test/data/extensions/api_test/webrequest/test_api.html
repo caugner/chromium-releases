@@ -7,6 +7,8 @@ chrome.test.runTests([
         function(details) {});
     chrome.experimental.webRequest.onSendHeaders.addListener(
         function(details) {});
+    chrome.experimental.webRequest.onHeadersReceived.addListener(
+        function(details) {});
     chrome.experimental.webRequest.onBeforeRedirect.addListener(
         function(details) {});
     chrome.experimental.webRequest.onResponseStarted.addListener(
@@ -15,6 +17,30 @@ chrome.test.runTests([
         function(details) {});
     chrome.experimental.webRequest.onErrorOccurred.addListener(
         function(details) {});
+    chrome.experimental.webRequest.onAuthRequired.addListener(
+        function(details) {});
+    chrome.test.succeed();
+  },
+
+  // Tests that we can remove a listener and it goes away.
+  // http://crbug.com/96755
+  function removeListeners() {
+    function newCallback(value) {
+      return function(details) { console.log(value); };
+    }
+    var cb1 = newCallback(1);
+    var cb2 = newCallback(2);
+    var event = chrome.experimental.webRequest.onBeforeRequest;
+    event.addListener(cb1);
+    event.addListener(cb2);
+    chrome.test.assertTrue(event.hasListener(cb1));
+    chrome.test.assertTrue(event.hasListener(cb2));
+    event.removeListener(cb1);
+    chrome.test.assertFalse(event.hasListener(cb1));
+    chrome.test.assertTrue(event.hasListener(cb2));
+    event.removeListener(cb2);
+    chrome.test.assertFalse(event.hasListener(cb1));
+    chrome.test.assertFalse(event.hasListener(cb2));
     chrome.test.succeed();
   },
 

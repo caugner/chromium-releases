@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
 #include "base/time.h"
+#include "content/common/content_export.h"
 
 class DOMStorageArea;
 class DOMStorageMessageFilter;
@@ -31,7 +32,7 @@ class SpecialStoragePolicy;
 // on the WebKit thread unless noted otherwise.
 //
 // NOTE: Virtual methods facilitate mocking functions for testing.
-class DOMStorageContext {
+class CONTENT_EXPORT DOMStorageContext {
  public:
   DOMStorageContext(WebKitContext* webkit_context,
                     quota::SpecialStoragePolicy* special_storage_policy);
@@ -108,10 +109,9 @@ class DOMStorageContext {
     clear_local_state_on_exit_ = clear_local_state;
   }
 
-#ifdef UNIT_TEST
-  // For unit tests allow to override the |data_path_|.
-  void set_data_path(const FilePath& data_path) { data_path_ = data_path; }
-#endif
+  void set_data_path_for_testing(const FilePath& data_path) {
+    data_path_ = data_path;
+  }
 
  private:
 

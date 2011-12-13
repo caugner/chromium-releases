@@ -78,7 +78,8 @@ pp::Var TestingInstance::GetInstanceObject() {
 #endif
 
 void TestingInstance::HandleMessage(const pp::Var& message_data) {
-  current_case_->HandleMessage(message_data);
+  if (current_case_)
+    current_case_->HandleMessage(message_data);
 }
 
 void TestingInstance::DidChangeView(const pp::Rect& position,
@@ -89,6 +90,14 @@ void TestingInstance::DidChangeView(const pp::Rect& position,
         0,
         callback_factory_.NewCallback(&TestingInstance::ExecuteTests));
   }
+  if (current_case_)
+    current_case_->DidChangeView(position, clip);
+}
+
+bool TestingInstance::HandleInputEvent(const pp::InputEvent& event) {
+  if (current_case_)
+    return current_case_->HandleInputEvent(event);
+  return false;
 }
 
 void TestingInstance::LogTest(const std::string& test_name,

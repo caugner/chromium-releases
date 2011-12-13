@@ -4,9 +4,15 @@
 
 #include "chrome/browser/ui/webui/gpu_internals_ui.h"
 
+#include <string>
+
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback_old.h"
 #include "base/command_line.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
+#include "base/sys_info.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
@@ -18,6 +24,7 @@
 #include "content/browser/webui/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
+#include "third_party/angle/src/common/version.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -63,12 +70,12 @@ class GpuMessageHandler
                               const Value* value);
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GpuMessageHandler);
-
   // Cache the Singleton for efficiency.
   GpuDataManager* gpu_data_manager_;
 
   Callback0::Type* gpu_info_update_callback_;
+
+  DISALLOW_COPY_AND_ASSIGN(GpuMessageHandler);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -100,12 +107,12 @@ WebUIMessageHandler* GpuMessageHandler::Attach(WebUI* web_ui) {
 void GpuMessageHandler::RegisterMessages() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  web_ui_->RegisterMessageCallback(
-      "browserBridgeInitialized",
-      NewCallback(this, &GpuMessageHandler::OnBrowserBridgeInitialized));
-  web_ui_->RegisterMessageCallback(
-      "callAsync",
-      NewCallback(this, &GpuMessageHandler::OnCallAsync));
+  web_ui_->RegisterMessageCallback("browserBridgeInitialized",
+      base::Bind(&GpuMessageHandler::OnBrowserBridgeInitialized,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("callAsync",
+      base::Bind(&GpuMessageHandler::OnCallAsync,
+                 base::Unretained(this)));
 }
 
 void GpuMessageHandler::OnCallAsync(const ListValue* args) {
@@ -199,6 +206,10 @@ Value* GpuMessageHandler::OnRequestClientInfo(const ListValue* list) {
         CommandLine::ForCurrentProcess()->GetCommandLineString());
   }
 
+  dict->SetString("operating_system",
+                  base::SysInfo::OperatingSystemName() + " " +
+                  base::SysInfo::OperatingSystemVersion());
+  dict->SetString("angle_revision", base::UintToString(BUILD_REVISION));
   dict->SetString("blacklist_version",
       GpuDataManager::GetInstance()->GetBlacklistVersion());
 

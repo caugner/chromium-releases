@@ -13,43 +13,21 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/in_memory_database.h"
+#include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 
 namespace {
 
-  const float kConfidenceCutoff[NetworkActionPredictor::LAST_PREDICT_ACTION] = {
-    0.8f,
-    0.5f
-  };
+const float kConfidenceCutoff[] = {
+  0.8f,
+  0.5f
+};
 
-}
+COMPILE_ASSERT(arraysize(kConfidenceCutoff) ==
+               NetworkActionPredictor::LAST_PREDICT_ACTION,
+               ConfidenceCutoff_count_mismatch);
 
-NetworkActionPredictor::NetworkActionPredictor(Profile* profile)
-  : profile_(profile) {
-}
-
-NetworkActionPredictor::~NetworkActionPredictor() {
-}
-
-// Given a match, return a recommended action.
-NetworkActionPredictor::Action
-    NetworkActionPredictor::RecommendAction(
-        const string16& user_text, const AutocompleteMatch& match) const {
-  HistoryService* history_service =
-      profile_->GetHistoryService(Profile::EXPLICIT_ACCESS);
-  if (!history_service)
-    return ACTION_NONE;
-
-  history::URLDatabase* url_db = history_service->InMemoryDatabase();
-  if (!url_db)
-    return ACTION_NONE;
-
-  history::URLRow url_row;
-  history::URLID url_id = url_db->GetRowForURL(match.destination_url, &url_row);
-
-  if (url_id == 0)
-    return ACTION_NONE;
-
+double OriginalAlgorithm(const history::URLRow& url_row) {
   const double base_score = 1.0;
 
   // This constant is ln(1/0.65) so we end up decaying to 65% of the base score
@@ -68,16 +46,97 @@ NetworkActionPredictor::Action
       (url_row.typed_count() + kNumUsesPerDecaySpeedDivisorIncrement - 1) /
           kNumUsesPerDecaySpeedDivisorIncrement);
 
-  const double confidence = base_score / exp(decay_exponent / decay_divisor);
+  return base_score / exp(decay_exponent / decay_divisor);
+}
+
+double ConservativeAlgorithm(const history::URLRow& url_row) {
+  const double normalized_typed_count =
+      std::min(url_row.typed_count() / 5.0, 1.0);
+  const double base_score = atan(10 * normalized_typed_count) / atan(10.0);
+
+  // This constant is ln(1/0.65) so we end up decaying to 65% of the base score
+  // for each week that passes.
+  const double kLnDecayPercent = 0.43078291609245;
+  base::TimeDelta time_passed = base::Time::Now() - url_row.last_visit();
+
+  const double decay_exponent = std::max(0.0,
+      kLnDecayPercent * static_cast<double>(time_passed.InMicroseconds()) /
+          base::Time::kMicrosecondsPerWeek);
+
+  return base_score / exp(decay_exponent);
+}
+
+bool GetURLRowForAutocompleteMatch(Profile* profile,
+                                   const AutocompleteMatch& match,
+                                   history::URLRow* url_row) {
+  DCHECK(url_row);
+
+  HistoryService* history_service =
+      profile->GetHistoryService(Profile::EXPLICIT_ACCESS);
+  if (!history_service)
+    return false;
+
+  history::URLDatabase* url_db = history_service->InMemoryDatabase();
+  return url_db && (url_db->GetRowForURL(match.destination_url, url_row) != 0);
+}
+
+}
+
+NetworkActionPredictor::NetworkActionPredictor(Profile* profile)
+  : profile_(profile) {
+}
+
+NetworkActionPredictor::~NetworkActionPredictor() {
+}
+
+// Given a match, return a recommended action.
+NetworkActionPredictor::Action NetworkActionPredictor::RecommendAction(
+    const string16& user_text,
+    const AutocompleteMatch& match) const {
+  double confidence = 0.0;
+
+  switch (prerender::GetOmniboxHeuristicToUse()) {
+    case prerender::OMNIBOX_HEURISTIC_ORIGINAL: {
+      history::URLRow url_row;
+      if (GetURLRowForAutocompleteMatch(profile_, match, &url_row))
+        confidence = OriginalAlgorithm(url_row);
+      break;
+    }
+    case prerender::OMNIBOX_HEURISTIC_CONSERVATIVE: {
+      history::URLRow url_row;
+      if (GetURLRowForAutocompleteMatch(profile_, match, &url_row))
+        confidence = ConservativeAlgorithm(url_row);
+      break;
+    }
+    default:
+      NOTREACHED();
+      break;
+  };
+
   CHECK(confidence >= 0.0 && confidence <= 1.0);
 
-  UMA_HISTOGRAM_COUNTS_100("NetworkActionPredictor.Confidence",
+  UMA_HISTOGRAM_COUNTS_100("NetworkActionPredictor.Confidence_" +
+                           prerender::GetOmniboxHistogramSuffix(),
                            confidence * 100);
 
-  for (int i = 0; i < LAST_PREDICT_ACTION; ++i)
-    if (confidence >= kConfidenceCutoff[i])
-      return static_cast<Action>(i);
-  return ACTION_NONE;
+  // Map the confidence to an action.
+  Action action = ACTION_NONE;
+  for (int i = 0; i < LAST_PREDICT_ACTION; ++i) {
+    if (confidence >= kConfidenceCutoff[i]) {
+      action = static_cast<Action>(i);
+      break;
+    }
+  }
+
+  // Downgrade prerender to preconnect if this is a search match.
+  if (action == ACTION_PRERENDER &&
+      (match.type == AutocompleteMatch::SEARCH_WHAT_YOU_TYPED ||
+       match.type == AutocompleteMatch::SEARCH_SUGGEST ||
+       match.type == AutocompleteMatch::SEARCH_OTHER_ENGINE)) {
+    action = ACTION_PRECONNECT;
+  }
+
+  return action;
 }
 
 // Return true if the suggestion type warrants a TCP/IP preconnection.

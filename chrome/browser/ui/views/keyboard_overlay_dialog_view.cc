@@ -4,14 +4,16 @@
 
 #include "chrome/browser/ui/views/keyboard_overlay_dialog_view.h"
 
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/frame/bubble_window.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/views/accelerator_table_gtk.h"
+#include "chrome/browser/ui/views/accelerator_table_linux.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/keyboard_overlay_delegate.h"
 #include "chrome/browser/ui/views/window.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/native_web_keyboard_event.h"
+#include "content/public/browser/native_web_keyboard_event.h"
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -81,6 +83,9 @@ bool KeyboardOverlayDialogView::AcceleratorPressed(
 
 void KeyboardOverlayDialogView::ShowDialog(
     gfx::NativeWindow owning_window, BrowserView* parent_view) {
+  // Temporarily disable Shift+Alt. crosbug.com/17208.
+  chromeos::input_method::InputMethodManager::GetInstance()->RemoveHotkeys();
+
   KeyboardOverlayDelegate* delegate = new KeyboardOverlayDelegate(
       UTF16ToWide(l10n_util::GetStringUTF16(IDS_KEYBOARD_OVERLAY_TITLE)));
   KeyboardOverlayDialogView* html_view =
@@ -90,7 +95,7 @@ void KeyboardOverlayDialogView::ShowDialog(
   delegate->set_view(html_view);
   html_view->InitDialog();
   chromeos::BubbleWindow::Create(owning_window,
-                                 chromeos::STYLE_XSHAPE,
+                                 chromeos::STYLE_FLUSH,
                                  html_view);
   html_view->GetWidget()->Show();
 }

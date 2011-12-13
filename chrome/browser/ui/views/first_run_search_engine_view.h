@@ -14,16 +14,15 @@
 #include "views/view.h"
 #include "views/widget/widget_delegate.h"
 
-namespace views {
-class ButtonListener;
-class ImageView;
-class Label;
-class Separator;
-}
-
 class Profile;
 class TemplateURL;
 class TemplateURLService;
+class ThemeService;
+
+namespace views {
+class ImageView;
+class Label;
+}
 
 // This class holds the logo and TemplateURL for a search engine and serves
 // as its button in the search engine selection view.
@@ -75,10 +74,9 @@ class SearchEngineChoice : public views::NativeTextButton {
 
 // This class displays a large search engine choice dialog view during
 // initial first run import.
-class FirstRunSearchEngineView
-    : public views::ButtonListener,
-      public views::WidgetDelegateView,
-      public TemplateURLServiceObserver {
+class FirstRunSearchEngineView : public views::WidgetDelegateView,
+                                 public views::ButtonListener,
+                                 public TemplateURLServiceObserver {
  public:
   // |profile| allows us to get the set of imported search engines.
   // |randomize| is true if logos are to be displayed in random order.
@@ -86,25 +84,23 @@ class FirstRunSearchEngineView
 
   virtual ~FirstRunSearchEngineView();
 
-  bool IsAlwaysOnTop() const { return true; }
-  bool HasAlwaysOnTopMenu() const { return false; }
+  // Overridden from views::WidgetDelegateView:
+  virtual string16 GetWindowTitle() const OVERRIDE;
+  virtual views::View* GetContentsView() OVERRIDE { return this; }
+
+  // Overridden from views::ButtonListener:
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add,
+                                    View* parent,
+                                    View* child) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
-  // Overridden from views::WidgetDelegate:
-  virtual std::wstring GetWindowTitle() const OVERRIDE;
-  views::View* GetContentsView() OVERRIDE { return this; }
-  bool CanResize() const OVERRIDE{ return false; }
-  bool CanMaximize() const OVERRIDE { return false; }
-
-  // Overridden from views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event)
-      OVERRIDE;
-
-  // Override from View so we can draw the gray background at dialog top.
+  // Override from views::View so we can draw the gray background at dialog top.
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 
   // Overridden from TemplateURLServiceObserver. When the search engines have
@@ -113,11 +109,9 @@ class FirstRunSearchEngineView
   virtual void OnTemplateURLServiceChanged() OVERRIDE;
 
  private:
-  // Initializes the labels and controls in the view.
-  void SetupControls();
-
-  // Owned by the profile_.
-  TemplateURLService* search_engines_model_;
+  // Once the TemplateURLService has loaded and we're in a View hierarchy, it's
+  // OK to add the search engines from the TemplateURLService.
+  void AddSearchEnginesIfPossible();
 
   // One for each search engine choice offered, either three or four.
   std::vector<SearchEngineChoice*> search_engine_choices_;
@@ -125,10 +119,14 @@ class FirstRunSearchEngineView
   // If logos are to be displayed in random order. Used for UX testing.
   bool randomize_;
 
-  // The profile associated with this import process.
-  Profile* profile_;
+  // Services associated with the current profile.
+  TemplateURLService* template_url_service_;
+  ThemeService* theme_service_;
 
   bool text_direction_is_rtl_;
+
+  bool template_url_service_loaded_;
+  bool added_to_view_hierarchy_;
 
   // Image of browser search box with grey background and bubble arrow.
   views::ImageView* background_image_;

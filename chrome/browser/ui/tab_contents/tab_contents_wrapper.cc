@@ -12,7 +12,6 @@
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/automation/automation_tab_helper.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/download/download_request_limiter_observer.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
@@ -43,8 +42,9 @@
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
+#include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/intents/web_intent_constrained_dialog_factory.h"
+#include "chrome/browser/ui/intents/web_intent_picker_factory_impl.h"
 #include "chrome/browser/ui/intents/web_intent_picker_controller.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper_delegate.h"
@@ -55,7 +55,6 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/notification_service.h"
-#include "content/common/view_messages.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/platform_locale_settings.h"
@@ -157,6 +156,32 @@ const PerScriptFontDefault kPerScriptFontDefaults[] = {
     IDS_SERIF_FONT_FAMILY_TRADITIONAL_HAN, "zh-TW" },
   { prefs::kWebKitSansSerifFontFamilyTraditionalHan,
     IDS_SANS_SERIF_FONT_FAMILY_TRADITIONAL_HAN, "zh-TW" }
+#elif defined(OS_MACOSX)
+  { prefs::kWebKitStandardFontFamilyJapanese,
+    IDS_STANDARD_FONT_FAMILY_JAPANESE, "ja" },
+  { prefs::kWebKitFixedFontFamilyJapanese, IDS_FIXED_FONT_FAMILY_JAPANESE,
+    "ja" },
+  { prefs::kWebKitSerifFontFamilyJapanese, IDS_SERIF_FONT_FAMILY_JAPANESE,
+    "ja" },
+  { prefs::kWebKitSansSerifFontFamilyJapanese,
+    IDS_SANS_SERIF_FONT_FAMILY_JAPANESE, "ja" },
+  { prefs::kWebKitStandardFontFamilyKorean, IDS_STANDARD_FONT_FAMILY_KOREAN,
+    "ko" },
+  { prefs::kWebKitSerifFontFamilyKorean, IDS_SERIF_FONT_FAMILY_KOREAN, "ko" },
+  { prefs::kWebKitSansSerifFontFamilyKorean,
+    IDS_SANS_SERIF_FONT_FAMILY_KOREAN, "ko" },
+  { prefs::kWebKitStandardFontFamilySimplifiedHan,
+    IDS_STANDARD_FONT_FAMILY_SIMPLIFIED_HAN, "zh-CN" },
+  { prefs::kWebKitSerifFontFamilySimplifiedHan,
+    IDS_SERIF_FONT_FAMILY_SIMPLIFIED_HAN, "zh-CN" },
+  { prefs::kWebKitSansSerifFontFamilySimplifiedHan,
+    IDS_SANS_SERIF_FONT_FAMILY_SIMPLIFIED_HAN, "zh-CN" },
+  { prefs::kWebKitStandardFontFamilyTraditionalHan,
+    IDS_STANDARD_FONT_FAMILY_TRADITIONAL_HAN, "zh-TW" },
+  { prefs::kWebKitSerifFontFamilyTraditionalHan,
+    IDS_SERIF_FONT_FAMILY_TRADITIONAL_HAN, "zh-TW" },
+  { prefs::kWebKitSansSerifFontFamilyTraditionalHan,
+    IDS_SANS_SERIF_FONT_FAMILY_TRADITIONAL_HAN, "zh-TW" }
 #elif defined(OS_WIN)
   { prefs::kWebKitStandardFontFamilyJapanese,
     IDS_STANDARD_FONT_FAMILY_JAPANESE, "ja" },
@@ -193,7 +218,7 @@ const PerScriptFontDefault kPerScriptFontDefaults[] = {
 #endif
 };
 
-#if defined(OS_CHROMEOS) || defined(OS_WIN)
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN)
 // To avoid Clang warning, only define kPerScriptFontDefaultsLength when it is
 // non-zero.  When it is zero, code like
 //  for (size_t i = 0; i < kPerScriptFontDefaultsLength; ++i)
@@ -225,11 +250,12 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
   automation_tab_helper_.reset(new AutomationTabHelper(contents));
   blocked_content_tab_helper_.reset(new BlockedContentTabHelper(this));
   bookmark_tab_helper_.reset(new BookmarkTabHelper(this));
+  constrained_window_tab_helper_.reset(new ConstrainedWindowTabHelper(this));
   extension_tab_helper_.reset(new ExtensionTabHelper(this));
   favicon_tab_helper_.reset(new FaviconTabHelper(contents));
   find_tab_helper_.reset(new FindTabHelper(contents));
   history_tab_helper_.reset(new HistoryTabHelper(contents));
-  infobar_tab_helper_.reset(new InfoBarTabHelper(this));
+  infobar_tab_helper_.reset(new InfoBarTabHelper(contents));
   password_manager_delegate_.reset(new PasswordManagerDelegateImpl(this));
   password_manager_.reset(
       new PasswordManager(contents, password_manager_delegate_.get()));
@@ -248,8 +274,7 @@ TabContentsWrapper::TabContentsWrapper(TabContents* contents)
   content_settings_.reset(new TabSpecificContentSettings(contents));
   translate_tab_helper_.reset(new TranslateTabHelper(contents));
   web_intent_picker_controller_.reset(new WebIntentPickerController(
-        contents,
-        new WebIntentConstrainedDialogFactory()));
+      this, new WebIntentPickerFactoryImpl()));
 
   // Create the per-tab observers.
   download_request_limiter_observer_.reset(
@@ -303,6 +328,7 @@ PropertyAccessor<TabContentsWrapper*>* TabContentsWrapper::property_accessor() {
   return g_tab_contents_wrapper_property_accessor.Pointer();
 }
 
+// static
 void TabContentsWrapper::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterBooleanPref(prefs::kAlternateErrorPagesEnabled,
                              true,
@@ -382,7 +408,7 @@ void TabContentsWrapper::RegisterUserPrefs(PrefService* prefs) {
                                      PrefService::UNSYNCABLE_PREF);
 
   // Register per-script font prefs that have defaults.
-#if defined(OS_CHROMEOS) || defined(OS_WIN)
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN)
   // As explained by its definition, kPerScriptFontDefaultsLength is only
   // defined for platforms where it would be non-zero.
   std::string locale = g_browser_process->GetApplicationLocale();
@@ -520,17 +546,6 @@ void TabContentsWrapper::RenderViewCreated(RenderViewHost* render_view_host) {
   UpdateAlternateErrorPageURL(render_view_host);
 }
 
-void TabContentsWrapper::RenderViewGone() {
-  // Tell the view that we've crashed so it can prepare the sad tab page.
-  // Only do this if we're not in browser shutdown, so that TabContents
-  // objects that are not in a browser (e.g., HTML dialogs) and thus are
-  // visible do not flash a sad tab page.
-  if (browser_shutdown::GetShutdownType() == browser_shutdown::NOT_VALID) {
-    tab_contents()->view()->OnTabCrashed(
-        tab_contents()->crashed_status(), tab_contents()->crashed_error_code());
-  }
-}
-
 void TabContentsWrapper::DidBecomeSelected() {
   WebCacheManager::GetInstance()->ObserveActivity(
       tab_contents()->GetRenderProcessHost()->id());
@@ -579,8 +594,8 @@ void TabContentsWrapper::Observe(int type,
                  StartsWithASCII(*pref_name_in, "webkit.webprefs.", true)) {
         UpdateWebPreferences();
       } else if (*pref_name_in == prefs::kDefaultZoomLevel) {
-        Send(new ViewMsg_SetZoomLevel(
-            routing_id(), tab_contents()->GetZoomLevel()));
+        tab_contents()->render_view_host()->SetZoomLevel(
+            tab_contents()->GetZoomLevel());
       } else if (*pref_name_in == prefs::kEnableReferrers) {
         UpdateRendererPreferences();
       } else if (*pref_name_in == prefs::kSafeBrowsingEnabled) {
@@ -625,13 +640,13 @@ GURL TabContentsWrapper::GetAlternateErrorPageURL() const {
 }
 
 void TabContentsWrapper::UpdateAlternateErrorPageURL(RenderViewHost* rvh) {
-  rvh->Send(new ViewMsg_SetAltErrorPageURL(
-      rvh->routing_id(), GetAlternateErrorPageURL()));
+  rvh->SetAltErrorPageURL(GetAlternateErrorPageURL());
 }
 
 void TabContentsWrapper::UpdateWebPreferences() {
   RenderViewHostDelegate* rvhd = tab_contents();
-  Send(new ViewMsg_UpdateWebPreferences(routing_id(), rvhd->GetWebkitPrefs()));
+  tab_contents()->render_view_host()->UpdateWebkitPreferences(
+      rvhd->GetWebkitPrefs());
 }
 
 void TabContentsWrapper::UpdateRendererPreferences() {
@@ -660,5 +675,6 @@ void TabContentsWrapper::UpdateSafebrowsingDetectionHost() {
 }
 
 void TabContentsWrapper::ExitFullscreenMode() {
-  Send(new ViewMsg_ExitFullscreen(routing_id()));
+  if (tab_contents() && render_view_host())
+    tab_contents()->render_view_host()->ExitFullscreen();
 }

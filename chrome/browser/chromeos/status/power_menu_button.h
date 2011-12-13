@@ -34,7 +34,7 @@ class PowerMenuButton : public StatusAreaButton,
   virtual ~PowerMenuButton();
 
   // views::MenuDelegate implementation.
-  virtual std::wstring GetLabel(int id) const;
+  virtual string16 GetLabel(int id) const;
   virtual bool IsCommandEnabled(int id) const;
 
   // PowerLibrary::Observer implementation.
@@ -56,7 +56,6 @@ class PowerMenuButton : public StatusAreaButton,
   virtual void RunMenu(views::View* source, const gfx::Point& pt);
 
   // Format strings with power status
-  string16 GetBatteryPercentageText() const;
   string16 GetBatteryIsChargedText() const;
 
   // Update the power icon and menu label info depending on the power status.
@@ -71,7 +70,6 @@ class PowerMenuButton : public StatusAreaButton,
   bool battery_is_present_;
   bool line_power_on_;
   double battery_percentage_;
-  string16 percentage_text_;
   int battery_index_;
   base::TimeDelta battery_time_to_full_;
   base::TimeDelta battery_time_to_empty_;

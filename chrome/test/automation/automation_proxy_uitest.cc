@@ -9,6 +9,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/i18n/rtl.h"
+#include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
@@ -31,7 +32,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
 #include "content/browser/net/url_request_slow_http_job.h"
-#include "content/common/json_value_serializer.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
@@ -97,7 +97,7 @@ TEST_F(AutomationProxyTest, GetBrowserWindowCount) {
   int window_count = 0;
   EXPECT_TRUE(automation()->GetBrowserWindowCount(&window_count));
   EXPECT_EQ(1, window_count);
-#ifdef NDEBUG
+#if defined(NDEBUG) && !defined(DCHECK_ALWAYS_ON)
   ASSERT_FALSE(automation()->GetBrowserWindowCount(NULL));
 #endif
 }
@@ -410,7 +410,13 @@ TEST_F(AutomationProxyTest2, GetActiveTabIndex) {
   ASSERT_EQ(1, active_tab_index);
 }
 
-TEST_F(AutomationProxyTest2, GetTabTitle) {
+// http://crbug.com/98071
+#if defined(OS_MACOSX)
+#define MAYBE_GetTabTitle FLAKY_GetTabTitle
+#else
+#define MAYBE_GetTabTitle GetTabTitle
+#endif
+TEST_F(AutomationProxyTest2, MAYBE_GetTabTitle) {
   scoped_refptr<BrowserProxy> window(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(window.get());
   scoped_refptr<TabProxy> tab(window->GetTab(0));
@@ -513,7 +519,7 @@ TEST_F(AutomationProxyTest, AcceleratorExtensions) {
 
   ASSERT_TRUE(window->RunCommand(IDC_MANAGE_EXTENSIONS));
 
-  EXPECT_EQ("chrome://settings/extensionSettings", GetActiveTabURL().spec());
+  EXPECT_EQ("chrome://settings/extensions", GetActiveTabURL().spec());
 }
 
 TEST_F(AutomationProxyTest, AcceleratorHistory) {

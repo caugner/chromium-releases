@@ -40,10 +40,6 @@ class ContextGroupTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    // we must release the ContextGroup before we clear out the GL interface.
-    // since its destructor uses GL.
-    group_->set_have_context(false);
-    group_ = NULL;
     ::gfx::GLInterface::SetGLInterface(NULL);
     gl_.reset();
   }
@@ -71,8 +67,8 @@ TEST_F(ContextGroupTest, Basic) {
 
 TEST_F(ContextGroupTest, InitializeNoExtensions) {
   TestHelper::SetupContextGroupInitExpectations(gl_.get(),
-      DisallowedExtensions(), "");
-  group_->Initialize(DisallowedExtensions(), "");
+      DisallowedFeatures(), "");
+  group_->Initialize(DisallowedFeatures(), "");
   EXPECT_EQ(static_cast<uint32>(TestHelper::kNumVertexAttribs),
             group_->max_vertex_attribs());
   EXPECT_EQ(static_cast<uint32>(TestHelper::kNumTextureUnits),
@@ -93,6 +89,46 @@ TEST_F(ContextGroupTest, InitializeNoExtensions) {
   EXPECT_TRUE(group_->texture_manager() != NULL);
   EXPECT_TRUE(group_->program_manager() != NULL);
   EXPECT_TRUE(group_->shader_manager() != NULL);
+
+  group_->Destroy(false);
+  EXPECT_TRUE(group_->buffer_manager() == NULL);
+  EXPECT_TRUE(group_->framebuffer_manager() == NULL);
+  EXPECT_TRUE(group_->renderbuffer_manager() == NULL);
+  EXPECT_TRUE(group_->texture_manager() == NULL);
+  EXPECT_TRUE(group_->program_manager() == NULL);
+  EXPECT_TRUE(group_->shader_manager() == NULL);
+}
+
+TEST_F(ContextGroupTest, MultipleContexts) {
+  TestHelper::SetupContextGroupInitExpectations(gl_.get(),
+      DisallowedFeatures(), "");
+  group_->Initialize(DisallowedFeatures(), "");
+  group_->Initialize(DisallowedFeatures(), "");
+
+  EXPECT_TRUE(group_->buffer_manager() != NULL);
+  EXPECT_TRUE(group_->framebuffer_manager() != NULL);
+  EXPECT_TRUE(group_->renderbuffer_manager() != NULL);
+  EXPECT_TRUE(group_->texture_manager() != NULL);
+  EXPECT_TRUE(group_->program_manager() != NULL);
+  EXPECT_TRUE(group_->shader_manager() != NULL);
+
+  group_->Destroy(false);
+
+  EXPECT_TRUE(group_->buffer_manager() != NULL);
+  EXPECT_TRUE(group_->framebuffer_manager() != NULL);
+  EXPECT_TRUE(group_->renderbuffer_manager() != NULL);
+  EXPECT_TRUE(group_->texture_manager() != NULL);
+  EXPECT_TRUE(group_->program_manager() != NULL);
+  EXPECT_TRUE(group_->shader_manager() != NULL);
+
+  group_->Destroy(false);
+
+  EXPECT_TRUE(group_->buffer_manager() == NULL);
+  EXPECT_TRUE(group_->framebuffer_manager() == NULL);
+  EXPECT_TRUE(group_->renderbuffer_manager() == NULL);
+  EXPECT_TRUE(group_->texture_manager() == NULL);
+  EXPECT_TRUE(group_->program_manager() == NULL);
+  EXPECT_TRUE(group_->shader_manager() == NULL);
 }
 
 }  // namespace gles2

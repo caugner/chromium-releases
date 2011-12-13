@@ -42,8 +42,13 @@ const char kPrefManifest[] = "manifest";
 // The version number.
 const char kPrefVersion[] = "manifest.version";
 
-// Indicates if an extension is blacklisted:
+// Indicates whether an extension is blacklisted.
 const char kPrefBlacklist[] = "blacklist";
+
+// Indicates whether the user has acknowledged various types of extensions.
+const char kPrefExternalAcknowledged[] = "ack_external";
+const char kPrefBlacklistAcknowledged[] = "ack_blacklist";
+const char kPrefOrphanAcknowledged[] = "ack_orphan";
 
 // Indicates whether to show an install warning when the user enables.
 const char kExtensionDidEscalatePermissions[] = "install_warning_on_enable";
@@ -83,6 +88,12 @@ const char kPrefAllowFileAccess[] = "newAllowFileAccess";
 // extension file access by renaming the pref. We should eventually clean up
 // the old flag and possibly go back to that name.
 // const char kPrefAllowFileAccessOld[] = "allowFileAccess";
+
+// A preference indicating that the extension wants to delay network requests
+// on browser launch until it indicates it's ready. For example, an extension
+// using the webRequest API might want to ensure that no requests are sent
+// before it has registered its event handlers.
+const char kPrefDelayNetworkRequests[] = "delayNetworkRequests";
 
 // A preference set by the web store to indicate login information for
 // purchased apps.
@@ -232,14 +243,17 @@ ExtensionPrefs::ExtensionPrefs(
       install_directory_(root_dir),
       extension_pref_value_map_(extension_pref_value_map),
       content_settings_store_(new ExtensionContentSettingsStore()) {
-  MakePathsRelative();
-
-  InitPrefStore();
-
-  content_settings_store_->AddObserver(this);
 }
 
 ExtensionPrefs::~ExtensionPrefs() {
+}
+
+void ExtensionPrefs::Init(bool extensions_disabled) {
+  MakePathsRelative();
+
+  InitPrefStore(extensions_disabled);
+
+  content_settings_store_->AddObserver(this);
 }
 
 // static
@@ -519,6 +533,57 @@ bool ExtensionPrefs::IsBlacklistBitSet(DictionaryValue* ext) {
 
 bool ExtensionPrefs::IsExtensionBlacklisted(const std::string& extension_id) {
   return ReadExtensionPrefBoolean(extension_id, kPrefBlacklist);
+}
+
+bool ExtensionPrefs::IsExtensionOrphaned(const std::string& extension_id) {
+  // TODO(miket): we believe that this test will hinge on the number of
+  // consecutive times that an update check has returned a certain response
+  // versus a success response. For now nobody is orphaned.
+  return false;
+}
+
+bool ExtensionPrefs::IsExternalExtensionAcknowledged(
+    const std::string& extension_id) {
+  return ReadExtensionPrefBoolean(extension_id, kPrefExternalAcknowledged);
+}
+
+void ExtensionPrefs::AcknowledgeExternalExtension(
+    const std::string& extension_id) {
+  DCHECK(Extension::IdIsValid(extension_id));
+  UpdateExtensionPref(extension_id, kPrefExternalAcknowledged,
+                      Value::CreateBooleanValue(true));
+}
+
+bool ExtensionPrefs::IsBlacklistedExtensionAcknowledged(
+    const std::string& extension_id) {
+  return ReadExtensionPrefBoolean(extension_id, kPrefBlacklistAcknowledged);
+}
+
+void ExtensionPrefs::AcknowledgeBlacklistedExtension(
+    const std::string& extension_id) {
+  DCHECK(Extension::IdIsValid(extension_id));
+  UpdateExtensionPref(extension_id, kPrefBlacklistAcknowledged,
+                      Value::CreateBooleanValue(true));
+}
+
+bool ExtensionPrefs::IsOrphanedExtensionAcknowledged(
+    const std::string& extension_id) {
+  return ReadExtensionPrefBoolean(extension_id, kPrefOrphanAcknowledged);
+}
+
+void ExtensionPrefs::AcknowledgeOrphanedExtension(
+    const std::string& extension_id) {
+  DCHECK(Extension::IdIsValid(extension_id));
+  UpdateExtensionPref(extension_id, kPrefOrphanAcknowledged,
+                      Value::CreateBooleanValue(true));
+}
+
+bool ExtensionPrefs::SetAlertSystemFirstRun() {
+  if (prefs_->GetBoolean(prefs::kExtensionAlertsInitializedPref)) {
+    return true;
+  }
+  prefs_->SetBoolean(prefs::kExtensionAlertsInitializedPref, true);
+  return false;
 }
 
 bool ExtensionPrefs::IsExtensionAllowedByPolicy(
@@ -816,6 +881,21 @@ bool ExtensionPrefs::HasAllowFileAccessSetting(
     const std::string& extension_id) const {
   const DictionaryValue* ext = GetExtensionPref(extension_id);
   return ext && ext->HasKey(kPrefAllowFileAccess);
+}
+
+void ExtensionPrefs::SetDelaysNetworkRequests(const std::string& extension_id,
+                                              bool does_delay) {
+  if (does_delay) {
+    UpdateExtensionPref(extension_id, kPrefDelayNetworkRequests,
+                        Value::CreateBooleanValue(true));
+  } else {
+    // Remove the pref.
+    UpdateExtensionPref(extension_id, kPrefDelayNetworkRequests, NULL);
+  }
+}
+
+bool ExtensionPrefs::DelaysNetworkRequests(const std::string& extension_id) {
+  return ReadExtensionPrefBoolean(extension_id, kPrefDelayNetworkRequests);
 }
 
 ExtensionPrefs::LaunchType ExtensionPrefs::GetLaunchType(
@@ -1395,6 +1475,10 @@ void ExtensionPrefs::SetPageIndex(const std::string& extension_id, int index) {
                       Value::CreateIntegerValue(index));
 }
 
+void ExtensionPrefs::ClearPageIndex(const std::string& extension_id) {
+  UpdateExtensionPref(extension_id, kPrefPageIndex, NULL);
+}
+
 bool ExtensionPrefs::WasAppDraggedByUser(const std::string& extension_id) {
   return ReadExtensionPrefBoolean(extension_id, kPrefUserDraggedApp);
 }
@@ -1519,7 +1603,12 @@ const DictionaryValue* ExtensionPrefs::GetExtensionControlledPrefs(
   return preferences;
 }
 
-void ExtensionPrefs::InitPrefStore() {
+void ExtensionPrefs::InitPrefStore(bool extensions_disabled) {
+  if (extensions_disabled) {
+    extension_pref_value_map_->NotifyInitializationCompleted();
+    return;
+  }
+
   // When this is called, the PrefService is initialized and provides access
   // to the user preferences stored in a JSON file.
   ExtensionIdSet extension_ids;
@@ -1573,6 +1662,7 @@ void ExtensionPrefs::InitPrefStore() {
           value->DeepCopy());
     }
 
+    // Set content settings.
     const DictionaryValue* extension_prefs = GetExtensionPref(*ext_id);
     DCHECK(extension_prefs);
     ListValue* content_settings = NULL;

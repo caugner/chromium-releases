@@ -4,6 +4,7 @@
 
 #include "chrome/browser/automation/automation_provider.h"
 
+#include "base/callback.h"
 #include "base/debug/trace_event.h"
 #include "base/json/json_reader.h"
 #include "base/utf_string_conversions.h"
@@ -211,7 +212,7 @@ void AutomationProvider::WindowSimulateDrag(
            ui::EF_SHIFT_DOWN),
           ((flags & ui::EF_ALT_DOWN) == ui::EF_ALT_DOWN),
           false,
-          new MessageLoop::QuitTask());
+          MessageLoop::QuitClosure());
       MessageLoopForUI* loop = MessageLoopForUI::current();
       bool did_allow_task_nesting = loop->NestableTasksAllowed();
       loop->SetNestableTasksAllowed(true);
@@ -436,7 +437,7 @@ void AutomationProvider::NavigateInExternalTab(
 
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
-    tab->LoadURL(url, referrer, PageTransition::TYPED);
+    tab->LoadURL(url, referrer, content::PAGE_TRANSITION_TYPED, std::string());
     *status = AUTOMATION_MSG_NAVIGATION_SUCCESS;
   }
 }
@@ -467,7 +468,7 @@ void AutomationProvider::OnSetZoomLevel(int handle, int zoom_level) {
     if (tab->tab_contents() && tab->tab_contents()->render_view_host()) {
       RenderViewHost* host = tab->tab_contents()->render_view_host();
       PageZoom::Function zoom = static_cast<PageZoom::Function>(zoom_level);
-      host->Send(new ViewMsg_Zoom(host->routing_id(), zoom));
+      host->Zoom(zoom);
     }
   }
 }

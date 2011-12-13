@@ -12,6 +12,7 @@
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas_skia.h"
+#include "ui/gfx/compositor/layer.h"
 #include "views/focus/view_storage.h"
 #include "views/layout/fill_layout.h"
 #include "views/touchui/gesture_manager.h"
@@ -155,15 +156,14 @@ std::string RootView::GetClassName() const {
 }
 
 void RootView::SchedulePaintInRect(const gfx::Rect& rect) {
-  MarkLayerDirty();
-  SchedulePaintInternal(rect);
-}
-
-void RootView::SchedulePaintInternal(const gfx::Rect& rect) {
-  gfx::Rect xrect = ConvertRectToParent(rect);
-  gfx::Rect invalid_rect = GetLocalBounds().Intersect(xrect);
-  if (!invalid_rect.IsEmpty())
-    widget_->SchedulePaintInRect(invalid_rect);
+  if (layer()) {
+    layer()->SchedulePaint(rect);
+  } else {
+    gfx::Rect xrect = ConvertRectToParent(rect);
+    gfx::Rect invalid_rect = GetLocalBounds().Intersect(xrect);
+    if (!invalid_rect.IsEmpty())
+      widget_->SchedulePaintInRect(invalid_rect);
+  }
 }
 
 bool RootView::OnMousePressed(const MouseEvent& event) {
@@ -306,7 +306,7 @@ void RootView::OnMouseMoved(const MouseEvent& event) {
       widget_->SetCursor(mouse_move_handler_->GetCursor(moved_event));
   } else if (mouse_move_handler_ != NULL) {
     mouse_move_handler_->OnMouseExited(e);
-    widget_->SetCursor(NULL);
+    widget_->SetCursor(gfx::kNullCursor);
   }
 }
 
@@ -418,29 +418,21 @@ void RootView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
 
 void RootView::OnPaint(gfx::Canvas* canvas) {
 #if !defined(TOUCH_UI)
-  canvas->AsCanvasSkia()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+  canvas->GetSkCanvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
 #endif
-}
 
-const ui::Compositor* RootView::GetCompositor() const {
-  return widget_->GetCompositor();
-}
-
-ui::Compositor* RootView::GetCompositor() {
-  return widget_->GetCompositor();
-}
-
-void RootView::MarkLayerDirty() {
-  View::MarkLayerDirty();
-  if (!layer())
-    widget_->MarkLayerDirty();
+  // TODO (pkotwicz): Remove this once we switch over to Aura desktop.
+  // This is needed so that we can set the background behind the RWHV when the
+  // RWHV is not visible. Not needed once there is a view between the RootView
+  // and RWHV.
+  View::OnPaint(canvas);
 }
 
 void RootView::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor) {
-  View::CalculateOffsetToAncestorWithLayer(offset, ancestor);
+                                                  ui::Layer** layer_parent) {
+  View::CalculateOffsetToAncestorWithLayer(offset, layer_parent);
   if (!layer())
-    widget_->CalculateOffsetToAncestorWithLayer(offset, ancestor);
+    widget_->CalculateOffsetToAncestorWithLayer(offset, layer_parent);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

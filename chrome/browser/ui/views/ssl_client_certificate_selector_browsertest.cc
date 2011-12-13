@@ -45,7 +45,7 @@ class SSLClientCertificateSelectorTest : public InProcessBrowserTest {
 
     ui_test_utils::WaitForLoadStop(browser()->GetSelectedTabContents());
     selector_ = new SSLClientCertificateSelector(
-        browser()->GetSelectedTabContents(),
+        browser()->GetSelectedTabContentsWrapper(),
         cert_request_info_,
         auth_handler_);
     selector_->Init();
@@ -93,8 +93,8 @@ class SSLClientCertificateSelectorMultiTabTest
     auth_handler_2_ = new StrictMock<SSLClientAuthHandlerMock>(
         static_cast<net::URLRequest*>(NULL), cert_request_info_2_);
 
-    AddTabAtIndex(1, GURL("about:blank"), PageTransition::LINK);
-    AddTabAtIndex(2, GURL("about:blank"), PageTransition::LINK);
+    AddTabAtIndex(1, GURL("about:blank"), content::PAGE_TRANSITION_LINK);
+    AddTabAtIndex(2, GURL("about:blank"), content::PAGE_TRANSITION_LINK);
     ASSERT_TRUE(NULL != browser()->GetTabContentsAt(0));
     ASSERT_TRUE(NULL != browser()->GetTabContentsAt(1));
     ASSERT_TRUE(NULL != browser()->GetTabContentsAt(2));
@@ -102,12 +102,12 @@ class SSLClientCertificateSelectorMultiTabTest
     ui_test_utils::WaitForLoadStop(browser()->GetTabContentsAt(2));
 
     selector_1_ = new SSLClientCertificateSelector(
-        browser()->GetTabContentsAt(1),
+        browser()->GetTabContentsWrapperAt(1),
         cert_request_info_1_,
         auth_handler_1_);
     selector_1_->Init();
     selector_2_ = new SSLClientCertificateSelector(
-        browser()->GetTabContentsAt(2),
+        browser()->GetTabContentsWrapperAt(2),
         cert_request_info_2_,
         auth_handler_2_);
     selector_2_->Init();

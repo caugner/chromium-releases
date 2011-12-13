@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "content/common/content_switches.h"
+#include "content/public/common/content_switches.h"
 
 void SandboxInitWrapper::SetServices(sandbox::SandboxInterfaceInfo* info) {
   if (!info)
@@ -33,7 +33,6 @@ bool SandboxInitWrapper::InitializeSandbox(const CommandLine& command_line,
   if (command_line.HasSwitch(switches::kNoSandbox))
     return true;
   if ((process_type == switches::kRendererProcess) ||
-      (process_type == switches::kExtensionProcess) ||
       (process_type == switches::kWorkerProcess) ||
       (process_type == switches::kNaClLoaderProcess) ||
       (process_type == switches::kUtilityProcess)) {

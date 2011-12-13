@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/i18n/time_formatting.h"
 #include "base/logging.h"
 #include "base/utf_string_conversions.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/ui/crypto_module_password_dialog.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/net/x509_certificate_model.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/ssl/ssl_client_auth_handler.h"
@@ -41,7 +43,7 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
                                      public ConstrainedWindowGtkDelegate {
  public:
   explicit SSLClientCertificateSelector(
-      TabContents* parent,
+      TabContentsWrapper* parent,
       net::SSLCertRequestInfo* cert_request_info,
       SSLClientAuthHandler* delegate);
   ~SSLClientCertificateSelector();
@@ -90,20 +92,20 @@ class SSLClientCertificateSelector : public SSLClientAuthObserver,
   // Hold on to the select button to focus it.
   GtkWidget* select_button_;
 
-  TabContents* parent_;
+  TabContentsWrapper* wrapper_;
   ConstrainedWindow* window_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLClientCertificateSelector);
 };
 
 SSLClientCertificateSelector::SSLClientCertificateSelector(
-    TabContents* parent,
+    TabContentsWrapper* wrapper,
     net::SSLCertRequestInfo* cert_request_info,
     SSLClientAuthHandler* delegate)
     : SSLClientAuthObserver(cert_request_info, delegate),
       cert_request_info_(cert_request_info),
       delegate_(delegate),
-      parent_(parent),
+      wrapper_(wrapper),
       window_(NULL) {
   root_widget_.Own(gtk_vbox_new(FALSE, ui::kControlSpacing));
 
@@ -196,7 +198,7 @@ SSLClientCertificateSelector::~SSLClientCertificateSelector() {
 
 void SSLClientCertificateSelector::Show() {
   DCHECK(!window_);
-  window_ = new ConstrainedWindowGtk(parent_, this);
+  window_ = new ConstrainedWindowGtk(wrapper_, this);
 }
 
 void SSLClientCertificateSelector::OnCertSelectedByNotification() {
@@ -345,11 +347,14 @@ void SSLClientCertificateSelector::OnComboBoxChanged(GtkWidget* combo_box) {
 }
 
 void SSLClientCertificateSelector::OnViewClicked(GtkWidget* button) {
+#if !defined(USE_AURA)
+  // TODO(saintlou): need to port to Views.
   net::X509Certificate* cert = GetSelectedCert();
   if (cert) {
     GtkWidget* toplevel = gtk_widget_get_toplevel(root_widget_.get());
     ShowCertificateViewer(GTK_WINDOW(toplevel), cert);
   }
+#endif
 }
 
 void SSLClientCertificateSelector::OnCancelClicked(GtkWidget* button) {
@@ -372,7 +377,8 @@ void SSLClientCertificateSelector::OnOkClicked(GtkWidget* button) {
       cert,
       browser::kCryptoModulePasswordClientAuth,
       cert_request_info_->host_and_port,
-      NewCallback(this, &SSLClientCertificateSelector::Unlocked));
+      base::Bind(&SSLClientCertificateSelector::Unlocked,
+                 base::Unretained(this)));
 }
 
 void SSLClientCertificateSelector::OnPromptShown(GtkWidget* widget,
@@ -392,11 +398,11 @@ void SSLClientCertificateSelector::OnPromptShown(GtkWidget* widget,
 namespace browser {
 
 void ShowSSLClientCertificateSelector(
-    TabContents* parent,
+    TabContentsWrapper* wrapper,
     net::SSLCertRequestInfo* cert_request_info,
     SSLClientAuthHandler* delegate) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  (new SSLClientCertificateSelector(parent,
+  (new SSLClientCertificateSelector(wrapper,
                                     cert_request_info,
                                     delegate))->Show();
 }

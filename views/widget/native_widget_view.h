@@ -41,10 +41,14 @@ class VIEWS_EXPORT NativeWidgetView : public View {
   void set_cursor(gfx::NativeCursor cursor) { cursor_ = cursor; }
 
   // Overridden from View:
-  virtual void SchedulePaintInternal(const gfx::Rect& r) OVERRIDE;
-  virtual void MarkLayerDirty() OVERRIDE;
-  virtual void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                  View** ancestor) OVERRIDE;
+  virtual void CalculateOffsetToAncestorWithLayer(
+      gfx::Point* offset,
+      ui::Layer** layer_parent) OVERRIDE;
+  virtual void ReorderLayers() OVERRIDE;
+
+#if !defined(NDEBUG)
+  virtual std::string PrintViewGraph(bool first) OVERRIDE;
+#endif
 
  private:
   // Overridden from View:
@@ -71,10 +75,8 @@ class VIEWS_EXPORT NativeWidgetView : public View {
   virtual std::string GetClassName() const OVERRIDE;
   virtual void MoveLayerToParent(ui::Layer* parent_layer,
                                  const gfx::Point& point) OVERRIDE;
-  virtual void DestroyLayerRecurse() OVERRIDE;
-  virtual void UpdateLayerBounds(const gfx::Point& offset) OVERRIDE;
-  virtual void PaintToLayer(const gfx::Rect& dirty_rect) OVERRIDE;
-  virtual void PaintComposite() OVERRIDE;
+  virtual void UpdateChildLayerBounds(const gfx::Point& offset) OVERRIDE;
+  virtual void ReorderChildLayers(ui::Layer* parent_layer) OVERRIDE;
 
   internal::NativeWidgetDelegate* delegate() {
     return native_widget_->delegate();

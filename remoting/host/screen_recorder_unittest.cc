@@ -48,8 +48,7 @@ ACTION(FinishEncode) {
 }
 
 ACTION(FinishSend) {
-  arg1->Run();
-  delete arg1;
+  arg1.Run();
 }
 
 // Helper method to quit the main message loop.
@@ -112,7 +111,7 @@ TEST_F(ScreenRecorderTest, OneRecordCycle) {
     planes.data[i] = reinterpret_cast<uint8*>(i);
     planes.strides[i] = kWidth * 4;
   }
-  gfx::Size size(kWidth, kHeight);
+  SkISize size(SkISize::Make(kWidth, kHeight));
   scoped_refptr<CaptureData> data(new CaptureData(planes, size, kFormat));
   EXPECT_CALL(capturer_, InvalidateFullScreen());
 
@@ -131,7 +130,7 @@ TEST_F(ScreenRecorderTest, OneRecordCycle) {
   // Expect the client be notified.
   EXPECT_CALL(video_stub, ProcessVideoPacket(_, _))
       .Times(1)
-      .WillOnce(DoAll(DeleteArg<0>(), DeleteArg<1>()));
+      .WillOnce(DeleteArg<0>());
   EXPECT_CALL(video_stub, GetPendingPackets())
       .Times(AtLeast(0))
       .WillRepeatedly(Return(0));
@@ -161,7 +160,7 @@ TEST_F(ScreenRecorderTest, StartAndStop) {
     planes.strides[i] = kWidth * 4;
   }
 
-  gfx::Size size(kWidth, kHeight);
+  SkISize size(SkISize::Make(kWidth, kHeight));
   scoped_refptr<CaptureData> data(new CaptureData(planes, size, kFormat));
   EXPECT_CALL(capturer_, InvalidateFullScreen());
 

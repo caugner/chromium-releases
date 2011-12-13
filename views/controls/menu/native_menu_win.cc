@@ -6,6 +6,7 @@
 
 #include <Windowsx.h>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
@@ -23,6 +24,7 @@
 #include "views/accelerator.h"
 #include "views/controls/menu/menu_2.h"
 #include "views/controls/menu/menu_config.h"
+#include "views/controls/menu/menu_listener.h"
 
 using gfx::NativeTheme;
 
@@ -216,7 +218,6 @@ class NativeMenuWin::MenuHostWindow {
       gfx::Font font;
       HGDIOBJ old_font =
           static_cast<HFONT>(SelectObject(dc, font.GetNativeFont()));
-      int fontsize = font.GetFontSize();
 
       // If an accelerator is specified (with a tab delimiting the rest of the
       // label from the accelerator), we have to justify the fist part on the
@@ -248,10 +249,11 @@ class NativeMenuWin::MenuHostWindow {
         // We currently don't support items with both icons and checkboxes.
         DCHECK(type != ui::MenuModel::TYPE_CHECK);
         gfx::CanvasSkia canvas(icon.width(), icon.height(), false);
-        canvas.drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
+        canvas.sk_canvas()->drawColor(SK_ColorBLACK, SkXfermode::kClear_Mode);
         canvas.DrawBitmapInt(icon, 0, 0);
         skia::DrawToNativeContext(
-            &canvas, dc, draw_item_struct->rcItem.left + kItemLeftMargin,
+            canvas.sk_canvas(), dc,
+            draw_item_struct->rcItem.left + kItemLeftMargin,
             draw_item_struct->rcItem.top + (draw_item_struct->rcItem.bottom -
                 draw_item_struct->rcItem.top - icon.height()) / 2, NULL);
       } else if (type == ui::MenuModel::TYPE_CHECK &&
@@ -278,12 +280,13 @@ class NativeMenuWin::MenuHostWindow {
 
         // Draw the background and the check.
         NativeTheme::instance()->Paint(
-            &canvas, NativeTheme::kMenuCheckBackground, state, bounds, extra);
+            canvas.sk_canvas(), NativeTheme::kMenuCheckBackground,
+            state, bounds, extra);
         NativeTheme::instance()->Paint(
-            &canvas, NativeTheme::kMenuCheck, state, bounds, extra);
+            canvas.sk_canvas(), NativeTheme::kMenuCheck, state, bounds, extra);
 
         // Draw checkbox to menu.
-        skia::DrawToNativeContext(&canvas, dc,
+        skia::DrawToNativeContext(canvas.sk_canvas(), dc,
             draw_item_struct->rcItem.left + kItemLeftMargin,
             draw_item_struct->rcItem.top + (draw_item_struct->rcItem.bottom -
                 draw_item_struct->rcItem.top - config.check_height) / 2, NULL);
@@ -420,7 +423,7 @@ void NativeMenuWin::RunMenuAt(const gfx::Point& point, int alignment) {
   HWND hwnd = host_window_->hwnd();
   menu_to_select_ = NULL;
   position_to_select_ = -1;
-  menu_to_select_factory_.RevokeAll();
+  menu_to_select_factory_.InvalidateWeakPtrs();
   bool destroyed = false;
   destroyed_flag_ = &destroyed;
   model_->MenuWillShow();
@@ -436,11 +439,11 @@ void NativeMenuWin::RunMenuAt(const gfx::Point& point, int alignment) {
     // the delegate can cause destruction leaving the stack in a weird
     // state. Instead post a task, then notify. This mirrors what WM_MENUCOMMAND
     // does.
-    menu_to_select_factory_.RevokeAll();
+    menu_to_select_factory_.InvalidateWeakPtrs();
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        menu_to_select_factory_.NewRunnableMethod(
-            &NativeMenuWin::DelayedSelect));
+        base::Bind(&NativeMenuWin::DelayedSelect,
+                   menu_to_select_factory_.GetWeakPtr()));
     menu_action_ = MENU_ACTION_SELECTED;
   }
   // Send MenuClosed after we schedule the select, otherwise MenuClosed is
@@ -496,18 +499,11 @@ NativeMenuWin::MenuAction NativeMenuWin::GetMenuAction() const {
 }
 
 void NativeMenuWin::AddMenuListener(MenuListener* listener) {
-  listeners_.push_back(listener);
+  listeners_.AddObserver(listener);
 }
 
 void NativeMenuWin::RemoveMenuListener(MenuListener* listener) {
-  for (std::vector<MenuListener*>::iterator iter = listeners_.begin();
-    iter != listeners_.end();
-    ++iter) {
-      if (*iter == listener) {
-        listeners_.erase(iter);
-        return;
-      }
-  }
+  listeners_.RemoveObserver(listener);
 }
 
 void NativeMenuWin::SetMinimumWidth(int width) {
@@ -560,9 +556,7 @@ LRESULT CALLBACK NativeMenuWin::MenuMessageHook(
   // The first time this hook is called, that means the menu has successfully
   // opened, so call the callback function on all of our listeners.
   if (!this_ptr->listeners_called_) {
-    for (unsigned int i = 0; i < this_ptr->listeners_.size(); ++i) {
-      this_ptr->listeners_[i]->OnMenuOpened();
-    }
+    FOR_EACH_OBSERVER(MenuListener, this_ptr->listeners_, OnMenuOpened());
     this_ptr->listeners_called_ = true;
   }
 

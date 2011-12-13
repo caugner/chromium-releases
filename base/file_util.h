@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 
+#include <set>
 #include <stack>
 #include <string>
 #include <vector>
@@ -376,6 +377,35 @@ BASE_EXPORT bool GetCurrentDirectory(FilePath* path);
 
 // Sets the current working directory for the process.
 BASE_EXPORT bool SetCurrentDirectory(const FilePath& path);
+
+#if defined(OS_POSIX)
+// Test that |path| can only be changed by a given user and members of
+// a given set of groups.
+// Specifically, test that all parts of |path| under (and including) |base|:
+// * Exist.
+// * Are owned by a specific user.
+// * Are not writable by all users.
+// * Are owned by a memeber of a given set of groups, or are not writable by
+//   their group.
+// * Are not symbolic links.
+// This is useful for checking that a config file is administrator-controlled.
+// |base| must contain |path|.
+BASE_EXPORT bool VerifyPathControlledByUser(const FilePath& base,
+                                            const FilePath& path,
+                                            uid_t owner_uid,
+                                            const std::set<gid_t>& group_gids);
+#endif  // defined(OS_POSIX)
+
+#if defined(OS_MACOSX)
+// Is |path| writable only by a user with administrator privileges?
+// This function uses Mac OS conventions.  The super user is assumed to have
+// uid 0, and the administrator group is assumed to be named "admin".
+// Testing that |path|, and every parent directory including the root of
+// the filesystem, are owned by the superuser, controlled by the group
+// "admin", are not writable by all users, and contain no symbolic links.
+// Will return false if |path| does not exist.
+BASE_EXPORT bool VerifyPathControlledByAdmin(const FilePath& path);
+#endif  // defined(OS_MACOSX)
 
 // A class to handle auto-closing of FILE*'s.
 class ScopedFILEClose {

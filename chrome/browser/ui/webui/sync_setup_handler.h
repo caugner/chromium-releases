@@ -5,15 +5,21 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_SYNC_SETUP_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_SYNC_SETUP_HANDLER_H_
 
+#include "base/memory/scoped_ptr.h"
+#include "chrome/browser/net/gaia/gaia_oauth_consumer.h"
+#include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
 #include "chrome/browser/sync/sync_setup_flow_handler.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 
 class SyncSetupFlow;
+class ProfileManager;
 
-class SyncSetupHandler : public OptionsPageUIHandler,
+class SyncSetupHandler : public GaiaOAuthConsumer,
+                         public OptionsPageUIHandler,
                          public SyncSetupFlowHandler {
  public:
-  SyncSetupHandler();
+  // Constructs a new SyncSetupHandler. |profile_manager| may be NULL.
+  explicit SyncSetupHandler(ProfileManager* profile_manager);
   virtual ~SyncSetupHandler();
 
   // OptionsPageUIHandler implementation.
@@ -33,6 +39,11 @@ class SyncSetupHandler : public OptionsPageUIHandler,
   virtual void ShowSetupDone(const std::wstring& user) OVERRIDE;
   virtual void SetFlow(SyncSetupFlow* flow) OVERRIDE;
   virtual void Focus() OVERRIDE;
+
+  // GaiaOAuthConsumer implementation.
+  virtual void OnGetOAuthTokenSuccess(const std::string& oauth_token) OVERRIDE;
+  virtual void OnGetOAuthTokenFailure(
+      const GoogleServiceAuthError& error) OVERRIDE;
 
   static void GetStaticLocalizedValues(
       base::DictionaryValue* localized_strings);
@@ -74,8 +85,20 @@ class SyncSetupHandler : public OptionsPageUIHandler,
   virtual void ShowSetupUI() = 0;
 
  private:
+  // Returns true if the given login data is valid, false otherwise. If the
+  // login data is not valid then on return |error_message| will be set to  a
+  // localized error message. Note, |error_message| must not be NULL.
+  bool IsLoginAuthDataValid(const std::string& username,
+                            string16* error_message);
+
+  // Displays the given error message in the login UI.
+  void ShowLoginErrorMessage(const string16& error_message);
+
   // Weak reference.
   SyncSetupFlow* flow_;
+  scoped_ptr<GaiaOAuthFetcher> oauth_login_;
+  // Weak reference to the profile manager.
+  ProfileManager* const profile_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncSetupHandler);
 };

@@ -119,6 +119,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
       TYPE_MENU,        // An undecorated Window, with transient properties
                         // specialized to menus.
       TYPE_TOOLTIP,
+      TYPE_BUBBLE,
     };
     enum Ownership {
       // Default. Creator is not responsible for managing the lifetime of the
@@ -159,7 +160,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     NativeWidget* native_widget;
     bool top_level;
   };
-  static InitParams WindowInitParams();
 
   Widget();
   virtual ~Widget();
@@ -507,8 +507,11 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   ui::Compositor* GetCompositor();
 
   // Invokes method of same name on the NativeWidget.
-  void MarkLayerDirty();
-  void CalculateOffsetToAncestorWithLayer(gfx::Point* offset, View** ancestor);
+  void CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
+                                          ui::Layer** layer_parent);
+
+  // Invokes method of same name on the NativeWidget.
+  void ReorderLayers();
 
   // Notifies assistive technology that an accessibility event has
   // occurred on |view|, such as when the view is focused or when its
@@ -563,10 +566,13 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual View* GetChildViewParent();
 
   // True if the widget is considered top level widget. Top level widget
-  // is a widget of TYPE_WINDOW, TYPE_WINDOW_FRAMELESS, POPUP or MENU, and
-  // has a focus manager and input method object associated with it.
+  // is a widget of TYPE_WINDOW, TYPE_WINDOW_FRAMELESS, BUBBLE, POPUP or MENU,
+  // and has a focus manager and input method object associated with it.
   // TYPE_CONTROL and TYPE_TOOLTIP is not considered top level.
   bool is_top_level() const { return is_top_level_; }
+
+  // Returns the bounds of work area in the screen that Widget belongs to.
+  gfx::Rect GetWorkAreaBoundsInScreen() const;
 
   // Overridden from NativeWidgetDelegate:
   virtual bool IsModal() const OVERRIDE;
@@ -605,9 +611,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   virtual View* GetFocusTraversableParentView() OVERRIDE;
 
  protected:
-  // TODO(beng): Remove NativeWidgetGtk's dependence on the mouse state flags.
-  friend class NativeWidgetGtk;
-
   // Creates the RootView to be used within this Widget. Subclasses may override
   // to create custom RootViews that do specialized event processing.
   // TODO(beng): Investigate whether or not this is needed.
@@ -618,20 +621,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // TODO(beng): remove once we fold those objects onto this one.
   void DestroyRootView();
 
-  // TODO(beng): Remove NativeWidgetGtk's dependence on these:
-  // TODO(msw): Make this mouse state member private.
-  // If true, the mouse is currently down.
-  bool is_mouse_button_pressed_;
-
-  // TODO(beng): Remove NativeWidgetGtk's dependence on these:
-  // TODO(msw): Make these mouse state members private.
-  // The following are used to detect duplicate mouse move events and not
-  // deliver them. Displaying a window may result in the system generating
-  // duplicate move events even though the mouse hasn't moved.
-  bool last_mouse_event_was_move_;
-  gfx::Point last_mouse_event_position_;
-
  private:
+  // TODO(beng): Remove NativeWidgetGtk's dependence on the mouse state flags.
+  friend class NativeWidgetGtk;
+
   friend class NativeTextfieldViewsTest;
   friend class NativeComboboxViewsTest;
   friend class ScopedEvent;
@@ -716,7 +709,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // |saved_show_state_| is maximized.
   gfx::Rect initial_restored_bounds_;
 
-  // The smallest size the window can be.
+  // The smallest size the user can resize the window.
   gfx::Size minimum_size_;
 
   // Focus is automatically set to the view provided by the delegate
@@ -726,7 +719,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   scoped_ptr<InputMethod> input_method_;
 
-  // See |is_top_leve()| accessor.
+  // See |is_top_level()| accessor.
   bool is_top_level_;
 
   // Factory used to create Compositors. Settable by tests.
@@ -734,6 +727,17 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   // Tracks whether native widget has been initialized.
   bool native_widget_initialized_;
+
+  // TODO(beng): Remove NativeWidgetGtk's dependence on these:
+  // If true, the mouse is currently down.
+  bool is_mouse_button_pressed_;
+
+  // TODO(beng): Remove NativeWidgetGtk's dependence on these:
+  // The following are used to detect duplicate mouse move events and not
+  // deliver them. Displaying a window may result in the system generating
+  // duplicate move events even though the mouse hasn't moved.
+  bool last_mouse_event_was_move_;
+  gfx::Point last_mouse_event_position_;
 
   DISALLOW_COPY_AND_ASSIGN(Widget);
 };

@@ -45,13 +45,17 @@ class PanelBrowserView : public BrowserView,
  private:
   friend class NativePanelTestingWin;
   friend class PanelBrowserViewTest;
-  FRIEND_TEST_ALL_PREFIXES(PanelBrowserViewTest, CreatePanel);
-  FRIEND_TEST_ALL_PREFIXES(PanelBrowserViewTest, ShowOrHideSettingsButton);
-  FRIEND_TEST_ALL_PREFIXES(PanelBrowserViewTest, SetBoundsAnimation);
+
+  enum MouseDraggingState {
+    NO_DRAGGING,
+    DRAGGING_STARTED,
+    DRAGGING_ENDED
+  };
 
   // Overridden from BrowserView:
   virtual void Init() OVERRIDE;
   virtual void Close() OVERRIDE;
+  virtual void Deactivate() OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
@@ -76,19 +80,20 @@ class PanelBrowserView : public BrowserView,
   virtual void ShowPanelInactive() OVERRIDE;
   virtual gfx::Rect GetPanelBounds() const OVERRIDE;
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
-  virtual void OnPanelExpansionStateChanged(
-      Panel::ExpansionState expansion_state) OVERRIDE;
-  virtual bool ShouldBringUpPanelTitlebar(int mouse_x,
-                                          int mouse_y) const OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
   virtual void DeactivatePanel() OVERRIDE;
   virtual bool IsPanelActive() const OVERRIDE;
   virtual gfx::NativeWindow GetNativePanelHandle() OVERRIDE;
   virtual void UpdatePanelTitleBar() OVERRIDE;
+  virtual void UpdatePanelLoadingAnimations(bool should_animate) OVERRIDE;
   virtual void ShowTaskManagerForPanel() OVERRIDE;
   virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
+  virtual void PanelTabContentsFocused(TabContents* tab_contents) OVERRIDE;
+  virtual void PanelCut() OVERRIDE;
+  virtual void PanelCopy() OVERRIDE;
+  virtual void PanelPaste() OVERRIDE;
   virtual void DrawAttention() OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
   virtual bool PreHandlePanelKeyboardEvent(
@@ -96,13 +101,16 @@ class PanelBrowserView : public BrowserView,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual gfx::Size GetNonClientAreaExtent() const OVERRIDE;
-  virtual int GetRestoredHeight() const OVERRIDE;
-  virtual void SetRestoredHeight(int height) OVERRIDE;
+  virtual gfx::Size WindowSizeFromContentSize(
+      const gfx::Size& content_size) const OVERRIDE;
+  virtual gfx::Size ContentSizeFromWindowSize(
+      const gfx::Size& window_size) const OVERRIDE;
+  virtual int TitleOnlyHeight() const OVERRIDE;
   virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
 
   // Overridden from AnimationDelegate:
+  virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   bool EndDragging(bool cancelled);
@@ -111,10 +119,6 @@ class PanelBrowserView : public BrowserView,
 
   scoped_ptr<Panel> panel_;
   gfx::Rect bounds_;
-
-  // Stores the full height of the panel so we can restore it after it's
-  // been minimized.
-  int restored_height_;
 
   // Is the panel being closed? Do not use it when it is closed.
   bool closed_;
@@ -128,9 +132,12 @@ class PanelBrowserView : public BrowserView,
   // Location the mouse was pressed at. Used to detect drag and drop.
   gfx::Point mouse_pressed_point_;
 
+  // Timestamp when the mouse was pressed. Used to detect long click.
+  base::TimeTicks mouse_pressed_time_;
+
   // Is the titlebar currently being dragged?  That is, has the cursor
   // moved more than kDragThreshold away from its starting position?
-  bool mouse_dragging_;
+  MouseDraggingState mouse_dragging_state_;
 
   // Used to animate the bounds change.
   scoped_ptr<ui::SlideAnimation> bounds_animator_;
@@ -142,6 +149,10 @@ class PanelBrowserView : public BrowserView,
   // Timestamp to prevent minimizing the panel when the user clicks the titlebar
   // to clear the attension state.
   base::TimeTicks attention_cleared_time_;
+
+  // The last view that had focus in the panel. This is saved so that focus can
+  // be restored properly when a drag ends.
+  views::View* old_focused_view_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserView);
 };

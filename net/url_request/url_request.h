@@ -17,10 +17,12 @@
 #include "base/string16.h"
 #include "base/threading/non_thread_safe.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/auth.h"
 #include "net/base/completion_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
+#include "net/base/network_delegate.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_info.h"
@@ -36,6 +38,7 @@ class ResourceDispatcherHostTest;
 class TestAutomationProvider;
 class URLRequestAutomationJob;
 class UserScriptListenerTest;
+class NetworkDelayListenerTest;
 
 // Temporary layering violation to allow existing users of a deprecated
 // interface.
@@ -83,6 +86,7 @@ class CookieOptions;
 class HostPortPair;
 class IOBuffer;
 class SSLCertRequestInfo;
+class SSLInfo;
 class UploadData;
 class URLRequestContext;
 class URLRequestJob;
@@ -172,13 +176,13 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
     friend class ::ResourceDispatcherHostTest;
     friend class ::TestAutomationProvider;
     friend class ::UserScriptListenerTest;
+    friend class ::NetworkDelayListenerTest;
     friend class ::URLRequestAutomationJob;
     friend class TestInterceptor;
     friend class URLRequestFilter;
     friend class appcache::AppCacheInterceptor;
     friend class appcache::AppCacheRequestHandlerTest;
     friend class appcache::AppCacheURLRequestJobTest;
-    friend class chrome_browser_net::ConnectInterceptor;
     friend class fileapi::FileSystemDirURLRequestJobTest;
     friend class fileapi::FileSystemOperationWriteTest;
     friend class fileapi::FileSystemURLRequestJobTest;
@@ -267,9 +271,12 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
     // safe thing and Cancel() the request or decide to proceed by calling
     // ContinueDespiteLastError().  cert_error is a ERR_* error code
     // indicating what's wrong with the certificate.
+    // If |is_hsts_host| is true then the host in question is an HSTS host
+    // which demands a higher level of security. In this case, errors must not
+    // be bypassable by the user.
     virtual void OnSSLCertificateError(URLRequest* request,
-                                       int cert_error,
-                                       X509Certificate* cert);
+                                       const SSLInfo& ssl_info,
+                                       bool is_hsts_host);
 
     // Called when reading cookies to allow the delegate to block access to the
     // cookie. This method will never be invoked when LOAD_DO_NOT_SEND_COOKIES
@@ -548,15 +555,15 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // during the call to Cancel itself.
   void Cancel();
 
-  // Cancels the request and sets the error to |os_error| (see net_error_list.h
+  // Cancels the request and sets the error to |error| (see net_error_list.h
   // for values).
-  void SimulateError(int os_error);
+  void SimulateError(int error);
 
-  // Cancels the request and sets the error to |os_error| (see net_error_list.h
+  // Cancels the request and sets the error to |error| (see net_error_list.h
   // for values) and attaches |ssl_info| as the SSLInfo for that request.  This
   // is useful to attach a certificate and certificate error to a canceled
   // request.
-  void SimulateSSLError(int os_error, const SSLInfo& ssl_info);
+  void SimulateSSLError(int error, const SSLInfo& ssl_info);
 
   // Read initiates an asynchronous read from the response, and must only
   // be called after the OnResponseStarted callback is received with a
@@ -696,7 +703,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
 
   // Cancels the request and set the error and ssl info for this request to the
   // passed values.
-  void DoCancel(int os_error, const SSLInfo& ssl_info);
+  void DoCancel(int error, const SSLInfo& ssl_info);
 
   // Notifies the network delegate that the request has been completed.
   // This does not imply a successful completion. Also a canceled request is
@@ -713,8 +720,10 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // |delegate_| is not NULL. See URLRequest::Delegate for the meaning
   // of these functions.
   void NotifyAuthRequired(AuthChallengeInfo* auth_info);
+  void NotifyAuthRequiredComplete(NetworkDelegate::AuthRequiredResponse result);
   void NotifyCertificateRequested(SSLCertRequestInfo* cert_request_info);
-  void NotifySSLCertificateError(int cert_error, X509Certificate* cert);
+  void NotifySSLCertificateError(const SSLInfo& ssl_info,
+                                 bool is_hsts_host);
   bool CanGetCookies(const CookieList& cookie_list) const;
   bool CanSetCookie(const std::string& cookie_line,
                     CookieOptions* options) const;
@@ -797,12 +806,19 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
 
   // Callback passed to the network delegate to notify us when a blocked request
   // is ready to be resumed or canceled.
-  CompletionCallbackImpl<URLRequest> before_request_callback_;
+  OldCompletionCallbackImpl<URLRequest> before_request_callback_;
 
   // Safe-guard to ensure that we do not send multiple "I am completed"
   // messages to network delegate.
   // TODO(battre): Remove this. http://crbug.com/89049
   bool has_notified_completion_;
+
+  // Authentication data used by the NetworkDelegate for this request,
+  // if one is present. |auth_credentials_| may be filled in when calling
+  // |NotifyAuthRequired| on the NetworkDelegate. |auth_info_| holds
+  // the authentication challenge being handled by |NotifyAuthRequired|.
+  AuthCredentials auth_credentials_;
+  scoped_refptr<AuthChallengeInfo> auth_info_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };

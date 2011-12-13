@@ -12,6 +12,8 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
 #include "chrome/common/url_constants.h"
+#include "views/view.h"
+#include "views/widget/widget.h"
 
 namespace {
 
@@ -54,9 +56,9 @@ void SimDialogDelegate::ShowDialog(gfx::NativeWindow owning_window,
   HtmlDialogView* html_view =
       new HtmlDialogView(profile, new SimDialogDelegate(mode));
   html_view->InitDialog();
-  chromeos::BubbleWindow::Create(owning_window,
-                                 chromeos::STYLE_GENERIC,
-                                 html_view);
+  BubbleWindow::Create(owning_window,
+                       STYLE_FLUSH,
+                       html_view);
   html_view->GetWidget()->Show();
 }
 

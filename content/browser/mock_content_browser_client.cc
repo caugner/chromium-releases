@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/logging.h"
 #include "base/file_path.h"
 #include "content/browser/webui/empty_web_ui_factory.h"
 #include "content/test/test_tab_contents_view.h"
@@ -16,11 +17,19 @@
 
 namespace content {
 
+MockContentBrowserClient::MockContentBrowserClient() {
+}
+
 MockContentBrowserClient::~MockContentBrowserClient() {
 }
 
 BrowserMainParts* MockContentBrowserClient::CreateBrowserMainParts(
     const MainFunctionParams& parameters) {
+  return NULL;
+}
+
+RenderWidgetHostView* MockContentBrowserClient::CreateViewForWidget(
+    RenderWidgetHost* widget) {
   return NULL;
 }
 
@@ -64,6 +73,18 @@ bool MockContentBrowserClient::IsURLSameAsAnySiteInstance(const GURL& url) {
   return false;
 }
 
+bool MockContentBrowserClient::IsSuitableHost(
+    RenderProcessHost* process_host,
+    const GURL& site_url) {
+  return true;
+}
+
+bool MockContentBrowserClient::ShouldSwapProcessesForNavigation(
+    const GURL& current_url,
+    const GURL& new_url) {
+  return false;
+}
+
 std::string MockContentBrowserClient::GetCanonicalEncodingNameByAliasName(
     const std::string& alias_name) {
   return std::string();
@@ -87,7 +108,8 @@ SkBitmap* MockContentBrowserClient::GetDefaultFavicon() {
 }
 
 bool MockContentBrowserClient::AllowAppCache(
-    const GURL& manifest_url, const content::ResourceContext& context) {
+    const GURL& manifest_url, const GURL& first_party,
+    const content::ResourceContext& context) {
   return true;
 }
 
@@ -136,7 +158,7 @@ void MockContentBrowserClient::ShowItemInFolder(const FilePath& path) {
 void MockContentBrowserClient::AllowCertificateError(
     SSLCertErrorHandler* handler,
     bool overridable,
-    Callback2<SSLCertErrorHandler*, bool>::Type* callback) {
+    const base::Callback<void(SSLCertErrorHandler*, bool)>& callback) {
 }
 
 void MockContentBrowserClient::SelectClientCertificate(
@@ -183,7 +205,7 @@ bool MockContentBrowserClient::CanCreateWindow(
     const GURL& source_url,
     WindowContainerType container_type,
     const content::ResourceContext& context) {
-  return false;
+  return true;
 }
 
 std::string MockContentBrowserClient::GetWorkerProcessTitle(
@@ -249,22 +271,16 @@ void MockContentBrowserClient::ClearCookies(RenderViewHost* rvh) {
 }
 
 FilePath MockContentBrowserClient::GetDefaultDownloadDirectory() {
-  return FilePath();
-}
-
-net::URLRequestContextGetter*
-MockContentBrowserClient::GetDefaultRequestContextDeprecatedCrBug64339() {
-  return NULL;
-}
-
-net::URLRequestContextGetter*
-MockContentBrowserClient::GetSystemRequestContext() {
-  return NULL;
+  if (!download_dir_.IsValid()) {
+    bool result = download_dir_.CreateUniqueTempDir();
+    CHECK(result);
+  }
+  return download_dir_.path();
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 int MockContentBrowserClient::GetCrashSignalFD(
-    const std::string& process_type) {
+    const CommandLine& command_line) {
   return -1;
 }
 #endif

@@ -127,19 +127,19 @@ class FaviconHandler {
       const GURL& icon_url,
       history::IconType icon_type,
       CancelableRequestConsumerBase* consumer,
-      FaviconService::FaviconDataCallback* callback);
+      const FaviconService::FaviconDataCallback& callback);
 
   virtual void GetFavicon(
       const GURL& icon_url,
       history::IconType icon_type,
       CancelableRequestConsumerBase* consumer,
-      FaviconService::FaviconDataCallback* callback);
+      const FaviconService::FaviconDataCallback& callback);
 
   virtual void GetFaviconForURL(
       const GURL& page_url,
       int icon_types,
       CancelableRequestConsumerBase* consumer,
-      FaviconService::FaviconDataCallback* callback);
+      const FaviconService::FaviconDataCallback& callback);
 
   virtual void SetHistoryFavicon(const GURL& page_url,
                                  const GURL& icon_url,
@@ -222,7 +222,7 @@ class FaviconHandler {
   // Returns the preferred_icon_size according icon_types_, 0 means no
   // preference.
   int preferred_icon_size() {
-    return icon_types_ == history::FAVICON ? kFaviconSize : 0;
+    return icon_types_ == history::FAVICON ? gfx::kFaviconSize : 0;
   }
 
   // Used for history requests.

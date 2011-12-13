@@ -476,7 +476,7 @@ void FocusTraversalTest::InitContentView() {
   content_view_->set_background(
       Background::CreateSolidBackground(SK_ColorWHITE));
 
-  Checkbox* cb = new Checkbox(L"This is a checkbox");
+  Checkbox* cb = new Checkbox(ASCIIToUTF16("This is a checkbox"));
   content_view_->AddChildView(cb);
   // In this fast paced world, who really has time for non hard-coded layout?
   cb->SetBounds(10, 10, 200, 20);
@@ -497,7 +497,7 @@ void FocusTraversalTest::InitContentView() {
   int y = 10;
   int gap_between_labels = 10;
 
-  Label* label = new Label(L"Apple:");
+  Label* label = new Label(ASCIIToUTF16("Apple:"));
   label->set_id(kAppleLabelID);
   left_container_->AddChildView(label);
   label->SetBounds(label_x, y, label_width, label_height);
@@ -510,7 +510,7 @@ void FocusTraversalTest::InitContentView() {
 
   y += label_height + gap_between_labels;
 
-  label = new Label(L"Orange:");
+  label = new Label(ASCIIToUTF16("Orange:"));
   label->set_id(kOrangeLabelID);
   left_container_->AddChildView(label);
   label->SetBounds(label_x, y, label_width, label_height);
@@ -523,7 +523,7 @@ void FocusTraversalTest::InitContentView() {
 
   y += label_height + gap_between_labels;
 
-  label = new Label(L"Banana:");
+  label = new Label(ASCIIToUTF16("Banana:"));
   label->set_id(kBananaLabelID);
   left_container_->AddChildView(label);
   label->SetBounds(label_x, y, label_width, label_height);
@@ -536,7 +536,7 @@ void FocusTraversalTest::InitContentView() {
 
   y += label_height + gap_between_labels;
 
-  label = new Label(L"Kiwi:");
+  label = new Label(ASCIIToUTF16("Kiwi:"));
   label->set_id(kKiwiLabelID);
   left_container_->AddChildView(label);
   label->SetBounds(label_x, y, label_width, label_height);
@@ -555,7 +555,7 @@ void FocusTraversalTest::InitContentView() {
   left_container_->AddChildView(button);
   y += 40;
 
-  cb =  new Checkbox(L"This is another check box");
+  cb =  new Checkbox(ASCIIToUTF16("This is another check box"));
   cb->SetBounds(label_x + label_width + 5, y, 180, 20);
   cb->set_id(kFruitCheckBoxID);
   left_container_->AddChildView(cb);
@@ -577,20 +577,20 @@ void FocusTraversalTest::InitContentView() {
   y = 10;
   int radio_button_height = 18;
   int gap_between_radio_buttons = 10;
-  RadioButton* radio_button = new RadioButton(L"Asparagus", 1);
+  RadioButton* radio_button = new RadioButton(ASCIIToUTF16("Asparagus"), 1);
   radio_button->set_id(kAsparagusButtonID);
   right_container_->AddChildView(radio_button);
   radio_button->SetBounds(5, y, 70, radio_button_height);
   radio_button->SetGroup(1);
   y += radio_button_height + gap_between_radio_buttons;
-  radio_button = new RadioButton(L"Broccoli", 1);
+  radio_button = new RadioButton(ASCIIToUTF16("Broccoli"), 1);
   radio_button->set_id(kBroccoliButtonID);
   right_container_->AddChildView(radio_button);
   radio_button->SetBounds(5, y, 70, radio_button_height);
   radio_button->SetGroup(1);
   RadioButton* radio_button_to_check = radio_button;
   y += radio_button_height + gap_between_radio_buttons;
-  radio_button = new RadioButton(L"Cauliflower", 1);
+  radio_button = new RadioButton(ASCIIToUTF16("Cauliflower"), 1);
   radio_button->set_id(kCauliflowerButtonID);
   right_container_->AddChildView(radio_button);
   radio_button->SetBounds(5, y, 70, radio_button_height);
@@ -616,11 +616,11 @@ void FocusTraversalTest::InitContentView() {
       Background::CreateSolidBackground(200, 200, 200));
   scroll_view->SetContents(scroll_content);
 
-  static const wchar_t* const kTitles[] = {
-      L"Rosetta", L"Stupeur et tremblement", L"The diner game",
-      L"Ridicule", L"Le placard", L"Les Visiteurs", L"Amelie",
-      L"Joyeux Noel", L"Camping", L"Brice de Nice",
-      L"Taxi", L"Asterix"
+  static const char* const kTitles[] = {
+      "Rosetta", "Stupeur et tremblement", "The diner game",
+      "Ridicule", "Le placard", "Les Visiteurs", "Amelie",
+      "Joyeux Noel", "Camping", "Brice de Nice",
+      "Taxi", "Asterix"
   };
 
   static const int kIDs[] = {
@@ -634,7 +634,7 @@ void FocusTraversalTest::InitContentView() {
 
   y = 5;
   for (size_t i = 0; i < arraysize(kTitles); ++i) {
-    Link* link = new Link(kTitles[i]);
+    Link* link = new Link(ASCIIToUTF16(kTitles[i]));
     link->SetHorizontalAlignment(Label::ALIGN_LEFT);
     link->set_id(kIDs[i]);
     scroll_content->AddChildView(link);
@@ -666,22 +666,22 @@ void FocusTraversalTest::InitContentView() {
   // Left bottom box with style checkboxes.
   View* contents = new View();
   contents->set_background(Background::CreateSolidBackground(SK_ColorWHITE));
-  cb = new Checkbox(L"Bold");
+  cb = new Checkbox(ASCIIToUTF16("Bold"));
   contents->AddChildView(cb);
   cb->SetBounds(10, 10, 50, 20);
   cb->set_id(kBoldCheckBoxID);
 
-  cb = new Checkbox(L"Italic");
+  cb = new Checkbox(ASCIIToUTF16("Italic"));
   contents->AddChildView(cb);
   cb->SetBounds(70, 10, 50, 20);
   cb->set_id(kItalicCheckBoxID);
 
-  cb = new Checkbox(L"Underlined");
+  cb = new Checkbox(ASCIIToUTF16("Underlined"));
   contents->AddChildView(cb);
   cb->SetBounds(130, 10, 70, 20);
   cb->set_id(kUnderlinedCheckBoxID);
 
-  Link* link = new Link(L"Help");
+  Link* link = new Link(ASCIIToUTF16("Help"));
   contents->AddChildView(link);
   link->SetBounds(10, 35, 70, 10);
   link->set_id(kStyleHelpLinkID);
@@ -695,8 +695,8 @@ void FocusTraversalTest::InitContentView() {
   style_tab_->set_id(kStyleContainerID);
   content_view_->AddChildView(style_tab_);
   style_tab_->SetBounds(10, y, 210, 100);
-  style_tab_->AddTab(L"Style", contents);
-  style_tab_->AddTab(L"Other", new View());
+  style_tab_->AddTab(ASCIIToUTF16("Style"), contents);
+  style_tab_->AddTab(ASCIIToUTF16("Other"), new View());
 
   // Right bottom box with search.
   contents = new View();
@@ -711,7 +711,7 @@ void FocusTraversalTest::InitContentView() {
   button->SetBounds(112, 5, 60, 30);
   button->set_id(kSearchButtonID);
 
-  link = new Link(L"Help");
+  link = new Link(ASCIIToUTF16("Help"));
   link->SetHorizontalAlignment(Label::ALIGN_LEFT);
   link->set_id(kHelpLinkID);
   contents->AddChildView(link);
@@ -878,7 +878,7 @@ class TestNativeButton : public NativeTextButton {
 
 class TestCheckbox : public Checkbox {
  public:
-  explicit TestCheckbox(const std::wstring& text) : Checkbox(text) {
+  explicit TestCheckbox(const string16& text) : Checkbox(text) {
   };
   virtual gfx::NativeView TestGetNativeControlView() {
     return GetWidget()->GetNativeView();
@@ -887,7 +887,7 @@ class TestCheckbox : public Checkbox {
 
 class TestRadioButton : public RadioButton {
  public:
-  explicit TestRadioButton(const std::wstring& text)
+  explicit TestRadioButton(const string16& text)
       : RadioButton(text, 1) {
   }
   virtual gfx::NativeView TestGetNativeControlView() {
@@ -938,7 +938,7 @@ TEST_F(FocusManagerTest, FAILS_FocusNativeControls) {
   content_view_->AddChildView(textfield);
   content_view_->AddChildView(tabbed_pane);
 
-  tabbed_pane->AddTab(L"Awesome textfield", textfield2);
+  tabbed_pane->AddTab(ASCIIToUTF16("Awesome textfield"), textfield2);
 
   // Simulate the native view getting the native focus (such as by user click).
   FocusNativeView(textfield->TestGetNativeControlView());
@@ -1049,8 +1049,8 @@ TEST_F(FocusManagerTest, ContainsView) {
   content_view_->AddChildView(tabbed_pane);
   // Adding a View inside a TabbedPane to test the case of nested root view.
 
-  tabbed_pane->AddTab(L"Awesome tab", nested_tabbed_pane);
-  nested_tabbed_pane->AddTab(L"Awesomer tab", tab_button);
+  tabbed_pane->AddTab(ASCIIToUTF16("Awesome tab"), nested_tabbed_pane);
+  nested_tabbed_pane->AddTab(ASCIIToUTF16("Awesomer tab"), tab_button);
 
   EXPECT_TRUE(GetFocusManager()->ContainsView(view));
   EXPECT_TRUE(GetFocusManager()->ContainsView(tabbed_pane));
@@ -1283,7 +1283,6 @@ TEST_F(FocusTraversalTest, PaneTraversal) {
         EXPECT_EQ(kRightTraversalIDs[j], focused_view->id());
     }
   }
-
 }
 
 // Counts accelerator calls.
@@ -1451,7 +1450,7 @@ TEST_F(FocusManagerTest, CallsSelfDeletingAcceleratorTarget) {
 class MessageTrackingView : public View {
  public:
   MessageTrackingView() : accelerator_pressed_(false) {
- }
+  }
 
   virtual bool OnKeyPressed(const KeyEvent& e) {
     keys_pressed_.push_back(e.key_code());
@@ -1664,7 +1663,7 @@ class FocusManagerDtorTest : public FocusManagerTest {
 
   class TestFocusManagerFactory : public FocusManagerFactory {
    public:
-    TestFocusManagerFactory(DtorTrackVector* dtor_tracker)
+    explicit TestFocusManagerFactory(DtorTrackVector* dtor_tracker)
         : dtor_tracker_(dtor_tracker) {
     }
 
@@ -1693,7 +1692,7 @@ class FocusManagerDtorTest : public FocusManagerTest {
 
   class WindowDtorTracked : public Widget {
    public:
-    WindowDtorTracked(DtorTrackVector* dtor_tracker)
+    explicit WindowDtorTracked(DtorTrackVector* dtor_tracker)
         : dtor_tracker_(dtor_tracker) {
     }
 
@@ -1739,7 +1738,7 @@ TEST_F(FocusManagerDtorTest, FocusManagerDestructedLast) {
 
   NativeButtonDtorTracked* button = new NativeButtonDtorTracked(L"button",
                                                                 &dtor_tracker_);
-  tabbed_pane->AddTab(L"Awesome tab", button);
+  tabbed_pane->AddTab(ASCIIToUTF16("Awesome tab"), button);
 
   // Close the window.
   window_->Close();

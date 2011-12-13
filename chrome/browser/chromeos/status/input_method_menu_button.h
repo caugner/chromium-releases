@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/status/input_method_menu.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
 #include "views/controls/menu/view_menu_delegate.h"
@@ -32,8 +33,8 @@ class InputMethodMenuButton : public StatusAreaButton,
 
   // InputMethodMenu implementation.
   virtual void UpdateUI(const std::string& input_method_id,
-                        const std::wstring& name,
-                        const std::wstring& tooltip,
+                        const string16& name,
+                        const string16& tooltip,
                         size_t num_active_input_methods);
   virtual bool ShouldSupportConfigUI();
   virtual void OpenConfigUI();

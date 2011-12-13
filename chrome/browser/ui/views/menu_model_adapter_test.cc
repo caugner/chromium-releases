@@ -2,6 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/callback.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/test/base/view_event_test_base.h"
 #include "ui/base/models/menu_model.h"
@@ -36,19 +38,18 @@ class TestViewsDelegate : public views::ViewsDelegate {
     return NULL;
   }
 
-  virtual views::View* GetDefaultParentView() OVERRIDE
-  {
+  virtual views::View* GetDefaultParentView() OVERRIDE {
     return NULL;
   }
 
   virtual void SaveWindowPlacement(const views::Widget* widget,
-                                   const std::wstring& window_name,
+                                   const std::string& window_name,
                                    const gfx::Rect& bounds,
                                    ui::WindowShowState show_state) OVERRIDE {
   }
 
   virtual bool GetSavedWindowPlacement(
-      const std::wstring& window_name,
+      const std::string& window_name,
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const OVERRIDE {
     return false;
@@ -58,17 +59,15 @@ class TestViewsDelegate : public views::ViewsDelegate {
       views::View* view, ui::AccessibilityTypes::Event event_type) OVERRIDE {
   }
 
-  virtual void NotifyMenuItemFocused(
-      const std::wstring& menu_name,
-      const std::wstring& menu_item_name,
-      int item_index,
-      int item_count,
-      bool has_submenu) OVERRIDE {
+  virtual void NotifyMenuItemFocused(const string16& menu_name,
+                                     const string16& menu_item_name,
+                                     int item_index,
+                                     int item_count,
+                                     bool has_submenu) OVERRIDE {
   }
 
 #if defined(OS_WIN)
-  virtual HICON GetDefaultWindowIcon() const OVERRIDE
-  {
+  virtual HICON GetDefaultWindowIcon() const OVERRIDE {
     return NULL;
   }
 #endif
@@ -88,7 +87,7 @@ class TestViewsDelegate : public views::ViewsDelegate {
   DISALLOW_COPY_AND_ASSIGN(TestViewsDelegate);
 };
 
-// Implement most of the ui::MenuModel pure virtuals for subclasses
+// Implement most of the ui::MenuModel pure virtual methods for subclasses
 //
 // Exceptions:
 //  virtual int GetItemCount() const = 0;
@@ -261,7 +260,8 @@ class MenuModelAdapterTest : public ViewEventTestBase,
   // ViewEventTestBase implementation.
 
   virtual void SetUp() OVERRIDE {
-    button_ = new views::MenuButton(NULL, L"Menu Adapter Test", this, true);
+    button_ = new views::MenuButton(
+        NULL, ASCIIToUTF16("Menu Adapter Test"), this, true);
 
     menu_ = menu_model_adapter_.CreateMenu();
     menu_runner_.reset(new views::MenuRunner(menu_));
@@ -352,7 +352,7 @@ class MenuModelAdapterTest : public ViewEventTestBase,
 
  private:
   // Generate a mouse click on the specified view and post a new task.
-  virtual void Click(views::View* view, Task* next) {
+  virtual void Click(views::View* view, const base::Closure& next) {
     ui_controls::MoveMouseToCenterAndPress(
         view,
         ui_controls::LEFT,

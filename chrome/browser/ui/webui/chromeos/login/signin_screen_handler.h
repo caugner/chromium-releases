@@ -9,9 +9,11 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/task.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
+#include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "content/browser/webui/web_ui.h"
 
@@ -82,7 +84,8 @@ class SigninScreenHandlerDelegate {
 // and LoginDisplay.
 class SigninScreenHandler : public BaseScreenHandler,
                             public LoginDisplayWebUIHandler,
-                            public BrowsingDataRemover::Observer {
+                            public BrowsingDataRemover::Observer,
+                            public SystemKeyEventListener::CapsLockObserver {
  public:
   SigninScreenHandler();
   virtual ~SigninScreenHandler();
@@ -115,6 +118,9 @@ class SigninScreenHandler : public BaseScreenHandler,
 
   // BrowsingDataRemover::Observer overrides.
   virtual void OnBrowsingDataRemoverDone() OVERRIDE;
+
+  // SystemKeyEventListener::CapsLockObserver overrides.
+  virtual void OnCapsLockChange(bool enabled) OVERRIDE;
 
   // Shows signin screen after dns cache and cookie cleanup operations finish.
   void ShowSigninScreenIfReady();
@@ -200,7 +206,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;
 
-  // Network state infromer used to keep offline message screen up.
+  // Network state informer used to keep offline message screen up.
   scoped_ptr<NetworkStateInformer> network_state_informer_;
 
   // Email to pre-populate with.
@@ -212,7 +218,10 @@ class SigninScreenHandler : public BaseScreenHandler,
 
   BrowsingDataRemover* cookie_remover_;
 
-  ScopedRunnableMethodFactory<SigninScreenHandler> method_factory_;
+  base::WeakPtrFactory<SigninScreenHandler> weak_factory_;
+
+  // CapsLock state change notifier instance;
+  SystemKeyEventListener* key_event_listener_;
 
   DISALLOW_COPY_AND_ASSIGN(SigninScreenHandler);
 };

@@ -10,9 +10,8 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/common/child_process.h"
 #include "content/common/content_client.h"
-#include "content/common/content_switches.h"
+#include "content/public/common/content_switches.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 
 namespace {
@@ -89,22 +88,12 @@ webkit::WebPluginInfo PepperPluginInfo::ToWebPluginInfo() const {
   info.desc = ASCIIToUTF16(description);
   info.mime_types = mime_types;
 
-  webkit::WebPluginInfo::EnabledStates enabled_state =
-      webkit::WebPluginInfo::USER_ENABLED_POLICY_UNMANAGED;
-
-  if (!enabled) {
-    enabled_state =
-        webkit::WebPluginInfo::USER_DISABLED_POLICY_UNMANAGED;
-  }
-
-  info.enabled = enabled_state;
   return info;
 }
 
 PepperPluginInfo::PepperPluginInfo()
     : is_internal(false),
-      is_out_of_process(false),
-      enabled(true) {
+      is_out_of_process(false) {
 }
 
 PepperPluginInfo::~PepperPluginInfo() {
@@ -119,7 +108,6 @@ bool MakePepperPluginInfo(const webkit::WebPluginInfo& webplugin_info,
       webplugin_info.type ==
           webkit::WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS;
 
-  pepper_info->enabled =  webkit::IsPluginEnabled(webplugin_info);
   pepper_info->path = FilePath(webplugin_info.path);
   pepper_info->name = UTF16ToASCII(webplugin_info.name);
   pepper_info->description = UTF16ToASCII(webplugin_info.desc);
@@ -250,13 +238,3 @@ PepperPluginRegistry::PepperPluginRegistry() {
   }
 }
 
-base::MessageLoopProxy* PepperPluginRegistry::GetIPCMessageLoop() {
-  // This is called only in the renderer so we know we have a child process.
-  DCHECK(ChildProcess::current()) << "Must be in the renderer.";
-  return ChildProcess::current()->io_message_loop_proxy();
-}
-
-base::WaitableEvent* PepperPluginRegistry::GetShutdownEvent() {
-  DCHECK(ChildProcess::current()) << "Must be in the renderer.";
-  return ChildProcess::current()->GetShutDownEvent();
-}

@@ -6,6 +6,8 @@
 
 #include "base/auto_reset.h"
 #include "base/command_line.h"
+// TODO(alicet): clean up dependencies on defaults.h and max tab count.
+#include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
@@ -71,9 +73,7 @@ class BrowserTabStripController::TabContextMenuContents
 
   // Overridden from ui::SimpleMenuModel::Delegate:
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE {
-    return controller_->IsCommandCheckedForTab(
-        static_cast<TabStripModel::ContextMenuCommand>(command_id),
-        tab_);
+    return false;
   }
   virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE {
     return controller_->IsCommandEnabledForTab(
@@ -97,8 +97,7 @@ class BrowserTabStripController::TabContextMenuContents
   }
   virtual void ExecuteCommand(int command_id) OVERRIDE {
     // Executing the command destroys |this|, and can also end up destroying
-    // |controller_| (e.g. for |CommandUseVerticalTabs|). So stop the highlights
-    // before executing the command.
+    // |controller_|. So stop the highlights before executing the command.
     controller_->tabstrip_->StopAllHighlighting();
     controller_->ExecuteCommandForTab(
         static_cast<TabStripModel::ContextMenuCommand>(command_id),
@@ -168,14 +167,6 @@ bool BrowserTabStripController::IsCommandEnabledForTab(
   int model_index = tabstrip_->GetModelIndexOfBaseTab(tab);
   return model_->ContainsIndex(model_index) ?
       model_->IsContextMenuCommandEnabled(model_index, command_id) : false;
-}
-
-bool BrowserTabStripController::IsCommandCheckedForTab(
-    TabStripModel::ContextMenuCommand command_id,
-    BaseTab* tab) const {
-  int model_index = tabstrip_->GetModelIndexOfBaseTab(tab);
-  return model_->ContainsIndex(model_index) ?
-      model_->IsContextMenuCommandChecked(model_index, command_id) : false;
 }
 
 void BrowserTabStripController::ExecuteCommandForTab(
@@ -287,7 +278,8 @@ void BrowserTabStripController::OnDropIndexUpdate(int index,
 void BrowserTabStripController::PerformDrop(bool drop_before,
                                             int index,
                                             const GURL& url) {
-  browser::NavigateParams params(browser_, url, PageTransition::LINK);
+  browser::NavigateParams params(
+      browser_, url, content::PAGE_TRANSITION_LINK);
   params.tabstrip_index = index;
 
   if (drop_before) {
@@ -310,7 +302,6 @@ bool BrowserTabStripController::IsCompatibleWith(BaseTabStrip* other) const {
 
 void BrowserTabStripController::CreateNewTab() {
   UserMetrics::RecordAction(UserMetricsAction("NewTab_Button"));
-
   model_->delegate()->AddBlankTab(true);
 }
 
@@ -347,6 +338,7 @@ void BrowserTabStripController::TabDetachedAt(TabContentsWrapper* contents,
 }
 
 void BrowserTabStripController::TabSelectionChanged(
+    TabStripModel* tab_strip_model,
     const TabStripSelectionModel& old_model) {
   tabstrip_->SetSelection(old_model, model_->selection_model());
 }

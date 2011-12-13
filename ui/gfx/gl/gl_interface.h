@@ -39,6 +39,10 @@ class GL_EXPORT GLInterface {
                                               GLuint index,
                                               const char* name) = 0;
 
+  virtual void BindFragDataLocation(GLuint program,
+                                    GLuint colorNumber,
+                                    const char* name) = 0;
+
   virtual void BindFramebufferEXT(GLenum target, GLuint framebuffer) = 0;
 
   virtual void BindRenderbufferEXT(GLenum target, GLuint renderbuffer) = 0;
@@ -301,6 +305,11 @@ class GL_EXPORT GLInterface {
   virtual void GetTexParameteriv(GLenum target,
                                  GLenum pname,
                                  GLint* params) = 0;
+
+  virtual void GetTranslatedShaderSourceANGLE(GLuint shader,
+                                              GLsizei bufsize,
+                                              GLsizei* length,
+                                              char* source) = 0;
 
   virtual void GetUniformfv(GLuint program,
                             GLint location,

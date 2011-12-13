@@ -6,8 +6,6 @@
 
 #include <algorithm>
 
-#include <gdk/gdk.h>
-
 #include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
@@ -59,6 +57,10 @@ namespace chromeos {
 // TODO(glotov): remove this in favor of enabling Bubble class act
 // without |parent| specified. crosbug.com/4025
 static views::Widget* GetToplevelWidget() {
+#if defined(USE_AURA)
+  // TODO(saintlou): Need to fix in PureViews.
+  return WebUILoginDisplay::GetLoginWindow();
+#else
   GtkWindow* window = NULL;
 
   // We just use the default profile here -- this gets overridden as needed
@@ -80,6 +82,7 @@ static views::Widget* GetToplevelWidget() {
     return views::Widget::GetWidgetForNativeWindow(window);
   else
     return WebUILoginDisplay::GetLoginWindow();
+#endif
 }
 
 SettingLevelBubble::SettingLevelBubble(SkBitmap* increase_icon,
@@ -122,7 +125,7 @@ void SettingLevelBubble::ShowBubble(double percent, bool enabled) {
     // specifies the center of the bubble).
     const gfx::Rect monitor_area =
         gfx::Screen::GetMonitorAreaNearestWindow(
-            GTK_WIDGET(parent_widget->GetNativeWindow()));
+            parent_widget->GetNativeView());
     const gfx::Size view_size = view_->GetPreferredSize();
     const gfx::Rect position_relative_to(
         monitor_area.x() + kBubbleXRatio * monitor_area.width(),

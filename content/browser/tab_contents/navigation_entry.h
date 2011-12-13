@@ -10,10 +10,12 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "content/common/page_transition_types.h"
+#include "content/common/content_export.h"
 #include "content/common/page_type.h"
 #include "content/common/security_style.h"
+#include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/cert_status_flags.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class SiteInstance;
@@ -28,7 +30,7 @@ class SiteInstance;
 // URL which is used for our user interface.
 //
 ////////////////////////////////////////////////////////////////////////////////
-class NavigationEntry {
+class CONTENT_EXPORT NavigationEntry {
  public:
   // SSL -----------------------------------------------------------------------
 
@@ -50,7 +52,7 @@ class NavigationEntry {
       RAN_INSECURE_CONTENT       = 1 << 1,
     };
 
-    SSLStatus();
+    CONTENT_EXPORT SSLStatus();
 
     bool Equals(const SSLStatus& status) const {
       return security_style_ == status.security_style_ &&
@@ -74,10 +76,10 @@ class NavigationEntry {
       return cert_id_;
     }
 
-    void set_cert_status(int ssl_cert_status) {
+    void set_cert_status(net::CertStatus ssl_cert_status) {
       cert_status_ = ssl_cert_status;
     }
-    int cert_status() const {
+    net::CertStatus cert_status() const {
       return cert_status_;
     }
 
@@ -124,7 +126,7 @@ class NavigationEntry {
     // See the accessors above for descriptions.
     SecurityStyle security_style_;
     int cert_id_;
-    int cert_status_;
+    net::CertStatus cert_status_;
     int security_bits_;
     int connection_status_;
     int content_status_;
@@ -184,7 +186,8 @@ class NavigationEntry {
                   const GURL& url,
                   const GURL& referrer,
                   const string16& title,
-                  PageTransition::Type transition_type);
+                  content::PageTransition transition_type,
+                  bool is_renderer_initiated);
   ~NavigationEntry();
 
   // Page-related stuff --------------------------------------------------------
@@ -342,11 +345,20 @@ class NavigationEntry {
 
   // The transition type indicates what the user did to move to this page from
   // the previous page.
-  void set_transition_type(PageTransition::Type transition_type) {
+  void set_transition_type(content::PageTransition transition_type) {
     transition_type_ = transition_type;
   }
-  PageTransition::Type transition_type() const {
+  content::PageTransition transition_type() const {
     return transition_type_;
+  }
+
+  // Whether this (pending) navigation is renderer-initiated.  Resets to false
+  // for all types of navigations after commit.
+  void set_is_renderer_initiated(bool is_renderer_initiated) {
+    is_renderer_initiated_ = is_renderer_initiated;
+  }
+  bool is_renderer_initiated() const {
+    return is_renderer_initiated_;
   }
 
   // The user typed URL was the URL that the user initiated the navigation
@@ -420,13 +432,18 @@ class NavigationEntry {
   std::string content_state_;
   int32 page_id_;
   SSLStatus ssl_;
-  PageTransition::Type transition_type_;
+  content::PageTransition transition_type_;
   GURL user_typed_url_;
   bool has_post_data_;
   RestoreType restore_type_;
 
   // This member is not persisted with sesssion restore.
   std::string extra_headers_;
+
+  // Whether the entry, while loading, was created for a renderer-initiated
+  // navigation.  This dictates whether the URL should be displayed before the
+  // navigation commits.  It is cleared on commit and not persisted.
+  bool is_renderer_initiated_;
 
   // This is a cached version of the result of GetTitleForDisplay. It prevents
   // us from having to do URL formatting on the URL every time the title is

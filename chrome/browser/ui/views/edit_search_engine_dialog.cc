@@ -77,10 +77,10 @@ bool EditSearchEngineDialog::IsModal() const {
   return true;
 }
 
-std::wstring EditSearchEngineDialog::GetWindowTitle() const {
-  return UTF16ToWide(l10n_util::GetStringUTF16(controller_->template_url() ?
+string16 EditSearchEngineDialog::GetWindowTitle() const {
+  return l10n_util::GetStringUTF16(controller_->template_url() ?
       IDS_SEARCH_ENGINES_EDITOR_EDIT_WINDOW_TITLE :
-      IDS_SEARCH_ENGINES_EDITOR_NEW_WINDOW_TITLE));
+      IDS_SEARCH_ENGINES_EDITOR_NEW_WINDOW_TITLE);
 }
 
 bool EditSearchEngineDialog::IsDialogButtonEnabled(
@@ -226,7 +226,7 @@ void EditSearchEngineDialog::Init() {
 
 views::Label* EditSearchEngineDialog::CreateLabel(int message_id) {
   views::Label* label =
-      new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(message_id)));
+      new views::Label(l10n_util::GetStringUTF16(message_id));
   label->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   return label;
 }
@@ -255,13 +255,12 @@ void EditSearchEngineDialog::UpdateImageView(ImageView* image_view,
                                              bool is_valid,
                                              int invalid_message_id) {
   if (is_valid) {
-    image_view->SetTooltipText(std::wstring());
+    image_view->SetTooltipText(string16());
     image_view->SetImage(
         ResourceBundle::GetSharedInstance().GetBitmapNamed(
             IDR_INPUT_GOOD));
   } else {
-    image_view->SetTooltipText(
-        UTF16ToWide(l10n_util::GetStringUTF16(invalid_message_id)));
+    image_view->SetTooltipText(l10n_util::GetStringUTF16(invalid_message_id));
     image_view->SetImage(
         ResourceBundle::GetSharedInstance().GetBitmapNamed(
             IDR_INPUT_ALERT));

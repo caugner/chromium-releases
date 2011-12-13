@@ -631,6 +631,9 @@ SyncDataList TemplateURLService::GetAllSyncData(
     // We don't sync extension keywords.
     if ((*iter)->IsExtensionKeyword())
       continue;
+    // We don't sync keywords managed by policy.
+    if ((*iter)->created_by_policy())
+      continue;
     current_data.push_back(CreateSyncDataFromTemplateURL(**iter));
   }
 
@@ -729,7 +732,13 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
     DCHECK(sync_turl.get());
     const TemplateURL* local_turl = GetTemplateURLForGUID(iter->first);
 
-    if (local_turl) {
+    if (sync_turl->sync_guid().empty()) {
+      // Due to a bug, older search engine entries with no sync GUID
+      // may have been uploaded to the server.  This is bad data, so
+      // just delete it.
+      new_changes.push_back(
+          SyncChange(SyncChange::ACTION_DELETE, iter->second));
+    } else if (local_turl) {
       // This local search engine is already synced. If the timestamp differs
       // from Sync, we need to update locally or to the cloud. Note that if the
       // timestamps are equal, we touch neither.
@@ -813,46 +822,16 @@ void TemplateURLService::ProcessTemplateURLChange(
   if (turl->IsExtensionKeyword())
     return;
 
+  // Avoid syncing keywords managed by policy.
+  if (turl->created_by_policy())
+    return;
+
   SyncChangeList changes;
 
   SyncData sync_data = CreateSyncDataFromTemplateURL(*turl);
   changes.push_back(SyncChange(type, sync_data));
 
   sync_processor_->ProcessSyncChanges(FROM_HERE, changes);
-}
-
-// static
-void TemplateURLService::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterBooleanPref(prefs::kDefaultSearchProviderEnabled,
-                             true,
-                             PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderName,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderID,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderPrepopulateID,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderSuggestURL,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderSearchURL,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderInstantURL,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderKeyword,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderIconURL,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
-  prefs->RegisterStringPref(prefs::kDefaultSearchProviderEncodings,
-                            std::string(),
-                            PrefService::UNSYNCABLE_PREF);
 }
 
 // static
@@ -874,7 +853,6 @@ SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
       turl.suggestions_url()->url() : std::string());
   se_specifics->set_prepopulate_id(turl.prepopulate_id());
   se_specifics->set_autogenerate_keyword(turl.autogenerate_keyword());
-  se_specifics->set_created_by_policy(turl.created_by_policy());
   se_specifics->set_instant_url(turl.instant_url() ?
       turl.instant_url()->url() : std::string());
   se_specifics->set_last_modified(turl.last_modified().ToInternalValue());
@@ -905,7 +883,6 @@ TemplateURL* TemplateURLService::CreateTemplateURLFromSyncData(
   turl->SetSuggestionsURL(specifics.suggestions_url(), 0, 0);
   turl->SetPrepopulateId(specifics.prepopulate_id());
   turl->set_autogenerate_keyword(specifics.autogenerate_keyword());
-  turl->set_created_by_policy(specifics.created_by_policy());
   turl->SetInstantURL(specifics.instant_url(), 0, 0);
   turl->set_last_modified(
       base::Time::FromInternalValue(specifics.last_modified()));
@@ -1290,8 +1267,8 @@ void TemplateURLService::UpdateKeywordSearchTermsForURL(
       }
       built_terms = true;
 
-      if (PageTransition::StripQualifier(details.transition) ==
-          PageTransition::KEYWORD) {
+      if (content::PageTransitionStripQualifier(details.transition) ==
+          content::PAGE_TRANSITION_KEYWORD) {
         // The visit is the result of the user entering a keyword, generate a
         // KEYWORD_GENERATED visit for the KEYWORD so that the keyword typed
         // count is boosted.
@@ -1334,7 +1311,7 @@ void TemplateURLService::AddTabToSearchVisit(const TemplateURL& t_url) {
   // Synthesize a visit for the keyword. This ensures the url for the keyword is
   // autocompleted even if the user doesn't type the url in directly.
   history->AddPage(url, NULL, 0, GURL(),
-                   PageTransition::KEYWORD_GENERATED,
+                   content::PAGE_TRANSITION_KEYWORD_GENERATED,
                    history::RedirectList(), history::SOURCE_BROWSED, false);
 }
 
@@ -1684,7 +1661,8 @@ bool TemplateURLService::ResolveSyncKeywordConflict(
   if (!existing_turl)
     return false;
 
-  if (existing_turl->last_modified() > sync_turl->last_modified())  {
+  if (existing_turl->last_modified() > sync_turl->last_modified() ||
+      existing_turl->created_by_policy()) {
     string16 new_keyword = UniquifyKeyword(*sync_turl);
     DCHECK(!GetTemplateURLForKeyword(new_keyword));
     sync_turl->set_keyword(new_keyword);

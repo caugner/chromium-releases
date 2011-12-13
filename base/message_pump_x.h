@@ -7,34 +7,19 @@
 
 #include "base/message_pump.h"
 #include "base/message_pump_glib.h"
+#include "base/message_pump_observer.h"
 
 #include <bitset>
 
 #include <glib.h>
-#include <gtk/gtk.h>
 
-typedef union _XEvent XEvent;
+#if defined(TOOLKIT_USES_GTK)
+#include <gtk/gtk.h>
+#endif
+
 typedef struct _XDisplay Display;
 
 namespace base {
-
-// The documentation for this class is in message_pump_glib.h
-class BASE_EXPORT MessagePumpObserver {
- public:
-   enum EventStatus {
-     EVENT_CONTINUE,    // The event should be dispatched as normal.
-     EVENT_HANDLED      // The event should not be processed any farther.
-   };
-
-  // This method is called before processing an XEvent. If the method returns
-  // EVENT_HANDLED, it indicates the event has already been handled, so the
-  // event is not processed any farther. If the method returns EVENT_CONTINUE,
-  // the event dispatching proceeds as normal.
-  virtual EventStatus WillProcessXEvent(XEvent* xevent);
-
- protected:
-  virtual ~MessagePumpObserver() {}
-};
 
 // The documentation for this class is in message_pump_glib.h
 //
@@ -64,16 +49,8 @@ class BASE_EXPORT MessagePumpX : public MessagePumpGlib {
   MessagePumpX();
   virtual ~MessagePumpX();
 
-  // Indicates whether a GDK event was injected by chrome (when |true|) or if it
-  // was captured and being processed by GDK (when |false|).
-  bool IsDispatchingEvent(void) { return dispatching_event_; }
-
   // Overridden from MessagePumpGlib:
   virtual bool RunOnce(GMainContext* context, bool block) OVERRIDE;
-
-  // Disables Gtk/Gdk event pumping. This will be used when
-  // NativeWidgetX is enabled.
-  static void DisableGtkMessagePump();
 
   // Returns default X Display.
   static Display* GetDefaultXDisplay();
@@ -82,15 +59,8 @@ class BASE_EXPORT MessagePumpX : public MessagePumpGlib {
   static bool HasXInput2();
 
  private:
-  // Some XEvent's can't be directly read from X event queue and will go
-  // through GDK's dispatching process and may get discarded. This function
-  // sets up a filter to intercept those XEvent's we are interested in
-  // and dispatches them so that they won't get lost.
-  static GdkFilterReturn GdkEventFilter(GdkXEvent* gxevent,
-                                        GdkEvent* gevent,
-                                        gpointer data);
-
-  static void EventDispatcherX(GdkEvent* event, gpointer data);
+  // Initializes the glib event source for X.
+  void InitXSource();
 
   // Decides whether we are interested in processing this XEvent.
   bool ShouldCaptureXEvent(XEvent* event);
@@ -103,14 +73,25 @@ class BASE_EXPORT MessagePumpX : public MessagePumpGlib {
   // not send the event to any other observers and returns true. Returns false
   // if no observer returns true.
   bool WillProcessXEvent(XEvent* xevent);
+  void DidProcessXEvent(XEvent* xevent);
+#if defined(TOOLKIT_USES_GTK)
+  // Some XEvent's can't be directly read from X event queue and will go
+  // through GDK's dispatching process and may get discarded. This function
+  // sets up a filter to intercept those XEvent's we are interested in
+  // and dispatches them so that they won't get lost.
+  static GdkFilterReturn GdkEventFilter(GdkXEvent* gxevent,
+                                        GdkEvent* gevent,
+                                        gpointer data);
+
+  static void EventDispatcherX(GdkEvent* event, gpointer data);
+
+  // Indicates whether a GDK event was injected by chrome (when |true|) or if it
+  // was captured and being processed by GDK (when |false|).
+  bool IsDispatchingEvent(void) { return dispatching_event_; }
 
   // Update the lookup table and flag the events that should be captured and
   // processed so that GDK doesn't get to them.
   void InitializeEventsToCapture(void);
-
-  // The event source for X events (used only when GTK event processing is
-  // disabled).
-  GSource* x_source_;
 
   // The event source for GDK events.
   GSource* gdksource_;
@@ -140,6 +121,11 @@ class BASE_EXPORT MessagePumpX : public MessagePumpGlib {
   // it should be passed on to the default GDK handler.
   std::bitset<XLASTEvent> capture_x_events_;
   std::bitset<GDK_EVENT_LAST> capture_gdk_events_;
+#endif  // defined(TOOLKIT_USES_GTK)
+
+  // The event source for X events (used only when GTK event processing is
+  // disabled).
+  GSource* x_source_;
 
   DISALLOW_COPY_AND_ASSIGN(MessagePumpX);
 };

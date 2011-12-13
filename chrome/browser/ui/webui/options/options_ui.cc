@@ -17,6 +17,7 @@
 #include "base/time.h"
 #include "base/values.h"
 #include "chrome/browser/browser_about_handler.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/options/advanced_options_handler.h"
 #include "chrome/browser/ui/webui/options/autofill_options_handler.h"
@@ -29,7 +30,7 @@
 #include "chrome/browser/ui/webui/options/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/options/font_settings_handler.h"
 #include "chrome/browser/ui/webui/options/import_data_handler.h"
-#include "chrome/browser/ui/webui/options/intents_settings_handler.h"
+#include "chrome/browser/ui/webui/options/web_intents_settings_handler.h"
 #include "chrome/browser/ui/webui/options/language_options_handler.h"
 #include "chrome/browser/ui/webui/options/manage_profile_handler.h"
 #include "chrome/browser/ui/webui/options/options_sync_setup_handler.h"
@@ -47,7 +48,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_notification_types.h"
+#include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -214,7 +215,7 @@ OptionsUI::OptionsUI(TabContents* contents)
   AddOptionsPageUIHandler(localized_strings, new CookiesViewHandler());
   AddOptionsPageUIHandler(localized_strings, new ExtensionSettingsHandler());
   AddOptionsPageUIHandler(localized_strings, new FontSettingsHandler());
-  AddOptionsPageUIHandler(localized_strings, new IntentsSettingsHandler());
+  AddOptionsPageUIHandler(localized_strings, new WebIntentsSettingsHandler());
 #if defined(OS_CHROMEOS)
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::CrosLanguageOptionsHandler());
@@ -228,7 +229,8 @@ OptionsUI::OptionsUI(TabContents* contents)
   AddOptionsPageUIHandler(localized_strings, new SearchEngineManagerHandler());
   AddOptionsPageUIHandler(localized_strings, new ImportDataHandler());
   AddOptionsPageUIHandler(localized_strings, new StopSyncingHandler());
-  AddOptionsPageUIHandler(localized_strings, new OptionsSyncSetupHandler());
+  AddOptionsPageUIHandler(localized_strings, new OptionsSyncSetupHandler(
+      g_browser_process->profile_manager()));
 #if defined(OS_CHROMEOS)
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::AboutPageHandler());

@@ -10,8 +10,10 @@
 #include <fcntl.h>
 #endif
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/chrome_paths.h"
@@ -55,7 +57,7 @@ NaClProcessHost::NaClProcessHost(const std::wstring& url)
       reply_msg_(NULL),
       internal_(new NaClInternal()),
       running_on_wow64_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(callback_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   set_name(WideToUTF16Hack(url));
 #if defined(OS_WIN)
   running_on_wow64_ = (base::win::OSInfo::GetInstance()->wow64_status() ==
@@ -169,8 +171,9 @@ bool NaClProcessHost::LaunchSelLdr() {
 
   cmd_line->AppendSwitchASCII(switches::kProcessType,
                               switches::kNaClLoaderProcess);
-
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id());
+  if (logging::DialogsAreSuppressed())
+    cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
   if (!nacl_loader_prefix.empty())
     cmd_line->PrependWrapper(nacl_loader_prefix);
@@ -205,6 +208,17 @@ base::TerminationStatus NaClProcessHost::GetChildTerminationStatus(
 }
 
 void NaClProcessHost::OnChildDied() {
+  int exit_code;
+  GetChildTerminationStatus(&exit_code);
+  std::string message =
+    base::StringPrintf("NaCl process exited with status %i (0x%x)",
+                       exit_code, exit_code);
+  if (exit_code == 0) {
+    LOG(INFO) << message;
+  } else {
+    LOG(ERROR) << message;
+  }
+
 #if defined(OS_WIN)
   NaClBrokerService::GetInstance()->OnLoaderDied();
 #endif
@@ -250,8 +264,8 @@ void NaClProcessHost::OnProcessLaunched() {
     irt_path = plugin_dir.Append(GetIrtLibraryFilename());
   }
 
-  base::FileUtilProxy::CreateOrOpenCallback* callback =
-      callback_factory_.NewCallback(&NaClProcessHost::OpenIrtFileDone);
+  base::FileUtilProxy::CreateOrOpenCallback callback =
+      base::Bind(&NaClProcessHost::OpenIrtFileDone, weak_factory_.GetWeakPtr());
   if (!base::FileUtilProxy::CreateOrOpen(
            BrowserThread::GetMessageLoopProxyForThread(BrowserThread::FILE),
            irt_path,

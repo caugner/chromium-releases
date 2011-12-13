@@ -23,6 +23,7 @@ using objdump, we can disassemble those functions and dump all symbols that
 they reference.
 """
 
+import optparse
 import re
 import subprocess
 import sys
@@ -73,6 +74,10 @@ def ExtractSymbolReferences(binary, start, end):
 
   refs = set()
   for line in objdump.stdout:
+    if '__static_initialization_and_destruction' in line:
+      raise RuntimeError, ('code mentions '
+                           '__static_initialization_and_destruction; '
+                           'did you accidentally run this on a Debug binary?')
     match = disassembly_re.search(line)
     if match:
       (ref,) = match.groups()
@@ -84,30 +89,48 @@ def ExtractSymbolReferences(binary, start, end):
         continue
       refs.add(ref)
       continue
-    if '__static_initialization_and_destruction' in line:
-      raise RuntimeError, ('code mentions '
-                           '__static_initialization_and_destruction; '
-                           'did you accidentally use a Debug binary?')
 
   for ref in sorted(refs):
     yield ref
 
 
-(binary,) = sys.argv[1:]
-demangler = Demangler()
-for addr, size, filename in ParseNm(binary):
-  if size == 2:
-    # gcc generates a two-byte 'repz retq' initializer when there is nothing
-    # to do.  jyasskin tells me this is fixed in gcc 4.6.
-    # Two bytes is too small to do anything, so just ignore it.
-    continue
+def main():
+  parser = optparse.OptionParser(usage='%prog filename')
+  parser.add_option('-i', '--instances', dest='calculate_instances',
+                    action='store_true', default=False,
+                    help='Only print out the number of static initializers')
+  opts, args = parser.parse_args()
+  if len(args) != 1:
+    parser.error('missing filename argument')
+    return 1
+  binary = args[0]
 
-  print '%s (0x%x 0x%x)' % (filename, addr, addr+size)
-  for ref in ExtractSymbolReferences(binary, addr, addr+size):
-    ref = demangler.Demangle(ref)
-    if ref in NOTES:
-      print ' ', '%s [%s]' % (ref, NOTES[ref])
-    else:
-      print ' ', ref
-  print
+  demangler = Demangler()
+  static_initializers_count = 0
+  for addr, size, filename in ParseNm(binary):
+    if size == 2:
+      # gcc generates a two-byte 'repz retq' initializer when there is nothing
+      # to do.  jyasskin tells me this is fixed in gcc 4.6.
+      # Two bytes is too small to do anything, so just ignore it.
+      continue
 
+    if (opts.calculate_instances):
+      static_initializers_count += 1
+      continue
+
+    print '%s (initializer offset 0x%x size 0x%x)' % (filename, addr, size)
+    for ref in ExtractSymbolReferences(binary, addr, addr+size):
+      ref = demangler.Demangle(ref)
+      if ref in NOTES:
+        print ' ', '%s [%s]' % (ref, NOTES[ref])
+      else:
+        print ' ', ref
+    print
+
+  if opts.calculate_instances:
+    print static_initializers_count
+  return 0
+
+
+if '__main__' == __name__:
+  sys.exit(main())

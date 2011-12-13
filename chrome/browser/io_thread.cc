@@ -24,16 +24,17 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/passive_log_collector.h"
-#include "chrome/browser/net/predictor_api.h"
 #include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/net/proxy_service_factory.h"
+#include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/in_process_webkit/indexed_db_key_utility_client.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/content_client.h"
+#include "content/common/net/url_fetcher.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/default_origin_bound_cert_store.h"
@@ -44,17 +45,18 @@
 #include "net/base/mapped_host_resolver.h"
 #include "net/base/net_util.h"
 #include "net/base/origin_bound_cert_service.h"
+#include "net/base/sdch_manager.h"
 #include "net/dns/async_host_resolver.h"
 #include "net/ftp/ftp_network_layer.h"
 #include "net/http/http_auth_filter.h"
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_network_session.h"
+#include "net/http/http_server_properties_impl.h"
 #include "net/proxy/proxy_config_service.h"
 #include "net/proxy/proxy_script_fetcher_impl.h"
 #include "net/proxy/proxy_service.h"
 #include "net/socket/dns_cert_provenance_checker.h"
-#include "webkit/glue/webkit_glue.h"
 
 #if defined(USE_NSS)
 #include "net/ocsp/nss_ocsp.h"
@@ -69,7 +71,7 @@ class URLRequestContextWithUserAgent : public net::URLRequestContext {
  public:
   virtual const std::string& GetUserAgent(
       const GURL& url) const OVERRIDE {
-    return webkit_glue::GetUserAgent(url);
+    return content::GetUserAgent(url);
   }
 };
 
@@ -259,6 +261,9 @@ ConstructProxyScriptFetcherContext(IOThread::Globals* globals,
   context->set_origin_bound_cert_service(
       globals->system_origin_bound_cert_service.get());
   context->set_network_delegate(globals->system_network_delegate.get());
+  // TODO(rtenneti): We should probably use HttpServerPropertiesManager for the
+  // system URLRequestContext too. There's no reason this should be tied to a
+  // profile.
   return context;
 }
 
@@ -344,8 +349,7 @@ IOThread::IOThread(
       net_log_(net_log),
       extension_event_router_forwarder_(extension_event_router_forwarder),
       globals_(NULL),
-      speculative_interceptor_(NULL),
-      predictor_(NULL),
+      sdch_manager_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
   // We call RegisterPrefs() here (instead of inside browser_prefs.cc) to make
   // sure that everything is initialized in the right order.
@@ -387,48 +391,12 @@ ChromeNetLog* IOThread::net_log() {
   return net_log_;
 }
 
-void IOThread::InitNetworkPredictor(
-    bool prefetching_enabled,
-    base::TimeDelta max_dns_queue_delay,
-    size_t max_speculative_parallel_resolves,
-    const chrome_common_net::UrlList& startup_urls,
-    ListValue* referral_list,
-    bool preconnect_enabled) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &IOThread::InitNetworkPredictorOnIOThread,
-          prefetching_enabled, max_dns_queue_delay,
-          max_speculative_parallel_resolves,
-          startup_urls, referral_list, preconnect_enabled));
-}
-
-void IOThread::ChangedToOnTheRecord() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &IOThread::ChangedToOnTheRecordOnIOThread));
-}
-
 net::URLRequestContextGetter* IOThread::system_url_request_context_getter() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!system_url_request_context_getter_) {
     InitSystemRequestContext();
   }
   return system_url_request_context_getter_;
-}
-
-void IOThread::ClearNetworkingHistory() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  ClearHostCache();
-  // Discard acrued data used to speculate in the future.
-  chrome_browser_net::DiscardInitialNavigationHistory();
-  if (predictor_)
-    predictor_->DiscardAllResults();
 }
 
 void IOThread::Init() {
@@ -470,6 +438,7 @@ void IOThread::Init() {
   globals_->ssl_config_service = GetSSLConfigService();
   globals_->http_auth_handler_factory.reset(CreateDefaultAuthHandlerFactory(
       globals_->host_resolver.get()));
+  globals_->http_server_properties.reset(new net::HttpServerPropertiesImpl);
   // For the ProxyScriptFetcher, we use a direct ProxyService.
   globals_->proxy_script_fetcher_proxy_service.reset(
       net::ProxyService::CreateDirectWithNetLog(net_log_));
@@ -489,6 +458,11 @@ void IOThread::Init() {
   session_params.http_auth_handler_factory =
       globals_->http_auth_handler_factory.get();
   session_params.network_delegate = globals_->system_network_delegate.get();
+  // TODO(rtenneti): We should probably use HttpServerPropertiesManager for the
+  // system URLRequestContext too. There's no reason this should be tied to a
+  // profile.
+  session_params.http_server_properties =
+      globals_->http_server_properties.get();
   session_params.net_log = net_log_;
   session_params.ssl_config_service = globals_->ssl_config_service;
   scoped_refptr<net::HttpNetworkSession> network_session(
@@ -500,9 +474,15 @@ void IOThread::Init() {
 
   globals_->proxy_script_fetcher_context =
       ConstructProxyScriptFetcherContext(globals_, net_log_);
+
+  sdch_manager_ = new net::SdchManager();
+  sdch_manager_->set_sdch_fetcher(new SdchDictionaryFetcher);
 }
 
 void IOThread::CleanUp() {
+  delete sdch_manager_;
+  sdch_manager_ = NULL;
+
   // Step 1: Kill all things that might be holding onto
   // net::URLRequest/net::URLRequestContexts.
 
@@ -527,21 +507,6 @@ void IOThread::CleanUp() {
 
   // This must be reset before the ChromeNetLog is destroyed.
   network_change_observer_.reset();
-
-  // Not initialized in Init().  May not be initialized.
-  if (predictor_) {
-    predictor_->Shutdown();
-
-    // TODO(willchan): Stop reference counting Predictor.  It's owned by
-    // IOThread now.
-    predictor_->Release();
-    predictor_ = NULL;
-    chrome_browser_net::FreePredictorResources();
-  }
-
-  // Deletion will unregister this interceptor.
-  delete speculative_interceptor_;
-  speculative_interceptor_ = NULL;
 
   system_proxy_config_service_.reset();
 
@@ -599,60 +564,12 @@ net::HttpAuthHandlerFactory* IOThread::CreateDefaultAuthHandlerFactory(
       negotiate_enable_port_);
 }
 
-void IOThread::InitNetworkPredictorOnIOThread(
-    bool prefetching_enabled,
-    base::TimeDelta max_dns_queue_delay,
-    size_t max_speculative_parallel_resolves,
-    const chrome_common_net::UrlList& startup_urls,
-    ListValue* referral_list,
-    bool preconnect_enabled) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  CHECK(!predictor_);
-
-  chrome_browser_net::EnablePredictor(prefetching_enabled);
-
-  predictor_ = new chrome_browser_net::Predictor(
-      globals_->host_resolver.get(),
-      max_dns_queue_delay,
-      max_speculative_parallel_resolves,
-      preconnect_enabled);
-  predictor_->AddRef();
-
-  // Speculative_interceptor_ is used to predict subresource usage.
-  DCHECK(!speculative_interceptor_);
-  speculative_interceptor_ = new chrome_browser_net::ConnectInterceptor;
-
-  FinalizePredictorInitialization(predictor_, startup_urls, referral_list);
-}
-
-void IOThread::ChangedToOnTheRecordOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-
-  if (predictor_) {
-    // Destroy all evidence of our OTR session.
-    // Note: OTR mode never saves InitialNavigationHistory data.
-    predictor_->Predictor::DiscardAllResults();
-  }
-
-  // Clear the host cache to avoid showing entries from the OTR session
-  // in about:net-internals.
-  ClearHostCache();
-
-  // Clear all of the passively logged data.
-  // TODO(eroman): this is a bit heavy handed, really all we need to do is
-  //               clear the data pertaining to incognito context.
-  net_log_->ClearAllPassivelyCapturedEvents();
-}
-
 void IOThread::ClearHostCache() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
-  if (globals_->host_resolver->GetAsHostResolverImpl()) {
-    net::HostCache* host_cache =
-        globals_->host_resolver.get()->GetAsHostResolverImpl()->cache();
-    if (host_cache)
-      host_cache->clear();
-  }
+  net::HostCache* host_cache = globals_->host_resolver->GetHostCache();
+  if (host_cache)
+    host_cache->clear();
 }
 
 net::SSLConfigService* IOThread::GetSSLConfigService() {
@@ -701,6 +618,7 @@ void IOThread::InitSystemRequestContextOnIOThread() {
   system_params.ssl_config_service = globals_->ssl_config_service.get();
   system_params.http_auth_handler_factory =
       globals_->http_auth_handler_factory.get();
+  system_params.http_server_properties = globals_->http_server_properties.get();
   system_params.network_delegate = globals_->system_network_delegate.get();
   system_params.net_log = net_log_;
   globals_->system_http_transaction_factory.reset(

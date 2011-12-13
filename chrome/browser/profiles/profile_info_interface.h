@@ -26,7 +26,14 @@ class ProfileInfoInterface {
 
   virtual FilePath GetPathOfProfileAtIndex(size_t index) const = 0;
 
+  virtual string16 GetUserNameOfProfileAtIndex(size_t index) const = 0;
+
   virtual const gfx::Image& GetAvatarIconOfProfileAtIndex(
+      size_t index) const = 0;
+
+  // Returns true if the profile at the given index is currently running any
+  // background apps.
+  virtual bool GetBackgroundStatusOfProfileAtIndex(
       size_t index) const = 0;
 
  protected:

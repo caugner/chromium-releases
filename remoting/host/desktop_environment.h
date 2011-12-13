@@ -11,6 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
+#include "remoting/base/scoped_thread_proxy.h"
 
 namespace remoting {
 
@@ -22,7 +23,6 @@ class Curtain;
 class DisconnectWindow;
 class EventExecutor;
 class LocalInputMonitor;
-class UIThreadProxy;
 
 class DesktopEnvironment {
  public:
@@ -58,11 +58,7 @@ class DesktopEnvironment {
   void OnPause(bool pause);
 
  private:
-  enum ContinueTimerState {
-    INACTIVE,      // The timer is not running or has been cancelled.
-    SHOW_DIALOG,   // Show the continue dialog when the timer expires.
-    SHUTDOWN_HOST  // Shutdown the Chromoting host when the timer expires.
-  };
+  class TimerTask;
 
   void ProcessOnConnect(const std::string& username);
   void ProcessOnLastDisconnect();
@@ -79,7 +75,8 @@ class DesktopEnvironment {
 
   void StartContinueWindowTimer(bool start);
 
-  void ContinueWindowTimerFunc();
+  void OnContinueWindowTimer();
+  void OnShutdownHostTimer();
 
   // The host that owns this DesktopEnvironment.
   ChromotingHost* host_;
@@ -111,10 +108,9 @@ class DesktopEnvironment {
   bool is_monitoring_local_inputs_;
 
   // Timer controlling the "continue session" dialog.
-  ContinueTimerState continue_timer_state_;
-  base::Time continue_timer_target_time_;
+  scoped_ptr<TimerTask> timer_task_;
 
-  scoped_refptr<UIThreadProxy> proxy_;
+  ScopedThreadProxy ui_thread_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopEnvironment);
 };

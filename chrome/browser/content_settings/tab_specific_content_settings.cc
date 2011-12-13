@@ -6,6 +6,7 @@
 
 #include <list>
 
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_appcache_helper.h"
@@ -19,6 +20,7 @@
 #include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
@@ -84,6 +86,7 @@ TabSpecificContentSettings* TabSpecificContentSettings::Get(
   return NULL;
 }
 
+// static
 void TabSpecificContentSettings::CookiesRead(int render_process_id,
                                              int render_view_id,
                                              const GURL& url,
@@ -94,6 +97,7 @@ void TabSpecificContentSettings::CookiesRead(int render_process_id,
     settings->OnCookiesRead(url, cookie_list, blocked_by_policy);
 }
 
+// static
 void TabSpecificContentSettings::CookieChanged(
     int render_process_id,
     int render_view_id,
@@ -106,6 +110,7 @@ void TabSpecificContentSettings::CookieChanged(
     settings->OnCookieChanged(url, cookie_line, options, blocked_by_policy);
 }
 
+// static
 void TabSpecificContentSettings::WebDatabaseAccessed(
     int render_process_id,
     int render_view_id,
@@ -118,6 +123,7 @@ void TabSpecificContentSettings::WebDatabaseAccessed(
     settings->OnWebDatabaseAccessed(url, name, display_name, blocked_by_policy);
 }
 
+// static
 void TabSpecificContentSettings::DOMStorageAccessed(int render_process_id,
                                                     int render_view_id,
                                                     const GURL& url,
@@ -128,6 +134,7 @@ void TabSpecificContentSettings::DOMStorageAccessed(int render_process_id,
     settings->OnLocalStorageAccessed(url, storage_type, blocked_by_policy);
 }
 
+// static
 void TabSpecificContentSettings::IndexedDBAccessed(int render_process_id,
                                                    int render_view_id,
                                                    const GURL& url,
@@ -138,6 +145,7 @@ void TabSpecificContentSettings::IndexedDBAccessed(int render_process_id,
     settings->OnIndexedDBAccessed(url, description, blocked_by_policy);
 }
 
+// static
 void TabSpecificContentSettings::FileSystemAccessed(int render_process_id,
                                                     int render_view_id,
                                                     const GURL& url,
@@ -209,8 +217,17 @@ void TabSpecificContentSettings::OnContentBlocked(
   DCHECK(type != CONTENT_SETTINGS_TYPE_GEOLOCATION)
       << "Geolocation settings handled by OnGeolocationPermissionSet";
   content_accessed_[type] = true;
-  if (!resource_identifier.empty())
-    AddBlockedResource(type, resource_identifier);
+  // Unless UI for resource content settings is enabled, ignore the resource
+  // identifier.
+  // TODO(bauerb): The UI to unblock content should be disabled if the content
+  // setting was not set by the user.
+  std::string identifier;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableResourceContentSettings)) {
+    identifier = resource_identifier;
+  }
+  if (!identifier.empty())
+    AddBlockedResource(type, identifier);
   if (!content_blocked_[type]) {
     content_blocked_[type] = true;
     // TODO: it would be nice to have a way of mocking this in tests.
@@ -314,17 +331,6 @@ void TabSpecificContentSettings::OnWebDatabaseAccessed(
   }
 }
 
-void TabSpecificContentSettings::OnAppCacheAccessed(
-    const GURL& manifest_url, bool blocked_by_policy) {
-  if (blocked_by_policy) {
-    blocked_local_shared_objects_.appcaches()->AddAppCache(manifest_url);
-    OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES, std::string());
-  } else {
-    allowed_local_shared_objects_.appcaches()->AddAppCache(manifest_url);
-    OnContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES);
-  }
-}
-
 void TabSpecificContentSettings::OnFileSystemAccessed(
     const GURL& url,
     bool blocked_by_policy) {
@@ -408,7 +414,6 @@ bool TabSpecificContentSettings::OnMessageReceived(
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(TabSpecificContentSettings, message)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ContentBlocked, OnContentBlocked)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_AppCacheAccessed, OnAppCacheAccessed)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -448,6 +453,17 @@ void TabSpecificContentSettings::DidStartProvisionalLoadForFrame(
   if (!is_error_page)
     ClearCookieSpecificContentSettings();
   ClearGeolocationContentSettings();
+}
+
+void TabSpecificContentSettings::AppCacheAccessed(const GURL& manifest_url,
+                                                  bool blocked_by_policy) {
+  if (blocked_by_policy) {
+    blocked_local_shared_objects_.appcaches()->AddAppCache(manifest_url);
+    OnContentBlocked(CONTENT_SETTINGS_TYPE_COOKIES, std::string());
+  } else {
+    allowed_local_shared_objects_.appcaches()->AddAppCache(manifest_url);
+    OnContentAccessed(CONTENT_SETTINGS_TYPE_COOKIES);
+  }
 }
 
 void TabSpecificContentSettings::Observe(int type,

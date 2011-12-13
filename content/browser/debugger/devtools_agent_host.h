@@ -6,14 +6,21 @@
 #define CONTENT_BROWSER_DEBUGGER_DEVTOOLS_AGENT_HOST_H_
 #pragma once
 
+#include <map>
+#include <string>
+
+#include "content/common/content_export.h"
+
 namespace IPC {
 class Message;
 }
 
+typedef std::map<std::string, std::string> DevToolsRuntimeProperties;
+
 // Describes interface for managing devtools agents from the browser process.
-class DevToolsAgentHost {
+class CONTENT_EXPORT DevToolsAgentHost {
  public:
-  class CloseListener {
+  class CONTENT_EXPORT CloseListener {
    public:
     virtual void AgentHostClosing(DevToolsAgentHost*) = 0;
    protected:
@@ -22,6 +29,9 @@ class DevToolsAgentHost {
 
   // Sends the message to the devtools agent hosted by this object.
   virtual void SendMessageToAgent(IPC::Message* msg) = 0;
+  virtual void Attach();
+  virtual void Reattach(const std::string& saved_agent_state);
+  virtual void Detach();
 
   // TODO(yurys): get rid of this method
   virtual void NotifyClientClosing() = 0;

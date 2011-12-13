@@ -7,11 +7,12 @@
 #include <algorithm>
 #include <cstring>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/rand_util.h"
-#include "base/tracked.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/protocol/proto_enum_conversions.h"
@@ -174,7 +175,10 @@ bool IsConfigRelatedUpdateSourceValue(
 SyncScheduler::SyncScheduler(const std::string& name,
                              sessions::SyncSessionContext* context,
                              Syncer* syncer)
-    : method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+    : weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      weak_ptr_factory_for_weak_handle_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
+      weak_handle_this_(MakeWeakHandle(
+          weak_ptr_factory_for_weak_handle_.GetWeakPtr())),
       name_(name),
       sync_loop_(MessageLoop::current()),
       started_(false),
@@ -194,7 +198,7 @@ SyncScheduler::SyncScheduler(const std::string& name,
 
 SyncScheduler::~SyncScheduler() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  Stop();
+  StopImpl(base::Closure());
 }
 
 void SyncScheduler::CheckServerConnectionManagerStatus(
@@ -229,7 +233,7 @@ void SyncScheduler::CheckServerConnectionManagerStatus(
   }
 }
 
-void SyncScheduler::Start(Mode mode, ModeChangeCallback* callback) {
+void SyncScheduler::Start(Mode mode, const base::Closure& callback) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   std::string thread_name = MessageLoop::current()->thread_name();
   if (thread_name.empty())
@@ -237,17 +241,15 @@ void SyncScheduler::Start(Mode mode, ModeChangeCallback* callback) {
   SVLOG(2) << "Start called from thread "
            << thread_name << " with mode " << GetModeString(mode);
   if (!started_) {
+    started_ = true;
     WatchConnectionManager();
     PostTask(FROM_HERE, "SendInitialSnapshot",
-             method_factory_.NewRunnableMethod(
-                 &SyncScheduler::SendInitialSnapshot));
+             base::Bind(&SyncScheduler::SendInitialSnapshot,
+                        weak_ptr_factory_.GetWeakPtr()));
   }
-  started_ = true;
-  // TODO(sync): This will leak if StartImpl is never run.  Fix this.
-  // Might be easiest to just use base::Callback.
   PostTask(FROM_HERE, "StartImpl",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::StartImpl, mode, callback));
+           base::Bind(&SyncScheduler::StartImpl,
+                      weak_ptr_factory_.GetWeakPtr(), mode, callback));
 }
 
 void SyncScheduler::SendInitialSnapshot() {
@@ -265,25 +267,24 @@ void SyncScheduler::WatchConnectionManager() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   ServerConnectionManager* scm = session_context_->connection_manager();
   PostTask(FROM_HERE, "CheckServerConnectionManagerStatus",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::CheckServerConnectionManagerStatus,
-               scm->server_status()));
+           base::Bind(&SyncScheduler::CheckServerConnectionManagerStatus,
+                      weak_ptr_factory_.GetWeakPtr(),
+                      scm->server_status()));
   scm->AddListener(this);
 }
 
-void SyncScheduler::StartImpl(Mode mode, ModeChangeCallback* callback) {
+void SyncScheduler::StartImpl(Mode mode, const base::Closure& callback) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   SVLOG(2) << "In StartImpl with mode " << GetModeString(mode);
 
-  scoped_ptr<ModeChangeCallback> scoped_callback(callback);
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   DCHECK(!session_context_->account_name().empty());
   DCHECK(syncer_.get());
   Mode old_mode = mode_;
   mode_ = mode;
   AdjustPolling(NULL);  // Will kick start poll timer if needed.
-  if (scoped_callback.get())
-    scoped_callback->Run();
+  if (!callback.is_null())
+    callback.Run();
 
   if (old_mode != mode_) {
     // We just changed our mode. See if there are any pending jobs that we could
@@ -389,6 +390,8 @@ void SyncScheduler::InitOrCoalescePendingJob(const SyncSessionJob& job) {
 
 bool SyncScheduler::ShouldRunJob(const SyncSessionJob& job) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  DCHECK(started_);
+
   JobProcessDecision decision = DecideOnJob(job);
   SVLOG(2) << "Should run "
            << SyncSessionJob::GetPurposeString(job.purpose)
@@ -441,8 +444,8 @@ struct ModelSafeWorkerGroupIs {
 void SyncScheduler::ScheduleClearUserData() {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   PostTask(FROM_HERE, "ScheduleClearUserDataImpl",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::ScheduleClearUserDataImpl));
+           base::Bind(&SyncScheduler::ScheduleClearUserDataImpl,
+                      weak_ptr_factory_.GetWeakPtr()));
 }
 
 // TODO(sync): Remove the *Impl methods for the other Schedule*
@@ -467,10 +470,13 @@ void SyncScheduler::ScheduleNudge(
   ModelTypePayloadMap types_with_payloads =
       syncable::ModelTypePayloadMapFromBitSet(types, std::string());
   PostTask(nudge_location, "ScheduleNudgeImpl",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::ScheduleNudgeImpl, delay,
-               GetUpdatesFromNudgeSource(source), types_with_payloads, false,
-               nudge_location));
+           base::Bind(&SyncScheduler::ScheduleNudgeImpl,
+                      weak_ptr_factory_.GetWeakPtr(),
+                      delay,
+                      GetUpdatesFromNudgeSource(source),
+                      types_with_payloads,
+                      false,
+                      nudge_location));
 }
 
 void SyncScheduler::ScheduleNudgeWithPayloads(
@@ -485,10 +491,13 @@ void SyncScheduler::ScheduleNudgeWithPayloads(
       << syncable::ModelTypePayloadMapToString(types_with_payloads);
 
   PostTask(nudge_location, "ScheduleNudgeImpl",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::ScheduleNudgeImpl, delay,
-               GetUpdatesFromNudgeSource(source), types_with_payloads, false,
-               nudge_location));
+           base::Bind(&SyncScheduler::ScheduleNudgeImpl,
+                      weak_ptr_factory_.GetWeakPtr(),
+                      delay,
+                      GetUpdatesFromNudgeSource(source),
+                      types_with_payloads,
+                      false,
+                      nudge_location));
 }
 
 void SyncScheduler::ScheduleClearUserDataImpl() {
@@ -608,8 +617,11 @@ void SyncScheduler::ScheduleConfig(
                              &routes, &workers);
 
   PostTask(FROM_HERE, "ScheduleConfigImpl",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::ScheduleConfigImpl, routes, workers, source));
+           base::Bind(&SyncScheduler::ScheduleConfigImpl,
+                      weak_ptr_factory_.GetWeakPtr(),
+                      routes,
+                      workers,
+                      source));
 }
 
 void SyncScheduler::ScheduleConfigImpl(
@@ -626,7 +638,7 @@ void SyncScheduler::ScheduleConfigImpl(
               routing_info, std::string())),
       routing_info, workers);
   ScheduleSyncSessionJob(TimeDelta::FromSeconds(0),
-    SyncSessionJob::CONFIGURATION, session, FROM_HERE);
+      SyncSessionJob::CONFIGURATION, session, FROM_HERE);
 }
 
 const char* SyncScheduler::GetModeString(SyncScheduler::Mode mode) {
@@ -649,16 +661,26 @@ const char* SyncScheduler::GetDecisionString(
 
 void SyncScheduler::PostTask(
     const tracked_objects::Location& from_here,
-    const char* name, Task* task) {
+    const char* name, const base::Closure& task) {
   SVLOG_LOC(from_here, 3) << "Posting " << name << " task";
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  if (!started_) {
+    SVLOG(1) << "Not posting task as scheduler is stopped.";
+    return;
+  }
   sync_loop_->PostTask(from_here, task);
 }
 
 void SyncScheduler::PostDelayedTask(
     const tracked_objects::Location& from_here,
-    const char* name, Task* task, int64 delay_ms) {
+    const char* name, const base::Closure& task, int64 delay_ms) {
   SVLOG_LOC(from_here, 3) << "Posting " << name << " task with "
                           << delay_ms << " ms delay";
+  DCHECK_EQ(MessageLoop::current(), sync_loop_);
+  if (!started_) {
+    SVLOG(1) << "Not posting task as scheduler is stopped.";
+    return;
+  }
   sync_loop_->PostDelayedTask(from_here, task, delay_ms);
 }
 
@@ -681,8 +703,9 @@ void SyncScheduler::ScheduleSyncSessionJob(
     pending_nudge_.reset(new SyncSessionJob(job));
   }
   PostDelayedTask(from_here, "DoSyncSessionJob",
-                  method_factory_.NewRunnableMethod(
-                      &SyncScheduler::DoSyncSessionJob, job),
+                  base::Bind(&SyncScheduler::DoSyncSessionJob,
+                             weak_ptr_factory_.GetWeakPtr(),
+                             job),
                   delay.InMilliseconds());
 }
 
@@ -973,20 +996,29 @@ TimeDelta SyncScheduler::GetRecommendedDelay(const TimeDelta& last_delay) {
   return TimeDelta::FromSeconds(backoff_s);
 }
 
-void SyncScheduler::RequestEarlyExit() {
+void SyncScheduler::RequestStop(const base::Closure& callback) {
   syncer_->RequestEarlyExit();  // Safe to call from any thread.
+  DCHECK(weak_handle_this_.IsInitialized());
+  SVLOG(3) << "Posting StopImpl";
+  weak_handle_this_.Call(FROM_HERE,
+                         &SyncScheduler::StopImpl,
+                         callback);
 }
 
-void SyncScheduler::Stop() {
+void SyncScheduler::StopImpl(const base::Closure& callback) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
-  SVLOG(2) << "Stop called";
-  method_factory_.RevokeAll();
+  SVLOG(2) << "StopImpl called";
+
+  // Kill any in-flight method calls.
+  weak_ptr_factory_.InvalidateWeakPtrs();
   wait_interval_.reset();
   poll_timer_.Stop();
   if (started_) {
     session_context_->connection_manager()->RemoveListener(this);
     started_ = false;
   }
+  if (!callback.is_null())
+    callback.Run();
 }
 
 void SyncScheduler::DoCanaryJob() {
@@ -1138,9 +1170,9 @@ void SyncScheduler::OnServerConnectionEvent(
     const ServerConnectionEvent& event) {
   DCHECK_EQ(MessageLoop::current(), sync_loop_);
   PostTask(FROM_HERE, "CheckServerConnectionManagerStatus",
-           method_factory_.NewRunnableMethod(
-               &SyncScheduler::CheckServerConnectionManagerStatus,
-               event.connection_code));
+           base::Bind(&SyncScheduler::CheckServerConnectionManagerStatus,
+                      weak_ptr_factory_.GetWeakPtr(),
+                      event.connection_code));
 }
 
 void SyncScheduler::set_notifications_enabled(bool notifications_enabled) {

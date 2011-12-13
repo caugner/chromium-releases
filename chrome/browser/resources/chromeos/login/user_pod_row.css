@@ -17,6 +17,7 @@ podrow {
 .pod {
   -webkit-transition: all .23s ease;
   border-radius: 2px;
+  cursor: pointer;
   margin: 0 10px;
   outline: none;
   padding: 10px;
@@ -24,7 +25,7 @@ podrow {
   width: 170px;
 }
 
-.pod img {
+.pod .user-image {
   -webkit-box-shadow: 0 3px 12px #ccc;
   -webkit-transition: all .14s ease;
   background-color: #fff;
@@ -38,13 +39,14 @@ podrow {
 
 .pod.focused {
   background-color: #ebebeb;
+  cursor: default;
 }
 
 .pod.faded {
   opacity: .75;
 }
 
-.pod.focused img {
+.pod.focused .user-image {
   -webkit-box-shadow: 0 6px 16px #a4a4a4;
   -webkit-transform: translateY(-1px);
 }
@@ -139,6 +141,44 @@ podrow {
 .pod.focused .enter-guest-button,
 .pod.focused .signin-button {
   opacity: 1;
+  visibility: visible;
+}
+
+.pod .password-hint {
+  cursor: text;
+  height: 14px;
+  opacity: 0.3;
+  overflow: hidden;
+  padding: 4px 8px;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: 194px;
+  visibility: hidden;
+  white-space: nowrap;
+  width: 154px;
+  z-index: 1;
+}
+
+.pod.focused input[type='password']:not([hidden]).empty + .password-hint {
+  visibility: visible;
+}
+
+.pod .capslock-hint {
+  cursor: text;
+  padding: 4px 8px;
+  position: absolute;
+  right: 10px;
+  top: 194px;
+  z-index: 1;
+  visibility: hidden;
+}
+
+html[dir=rtl] .pod .capslock-hint {
+  left: 10px;
+  right: auto;
+}
+
+.capslock-on .pod.focused input[type='password']:not([hidden]) ~ .capslock-hint {
   visibility: visible;
 }
 

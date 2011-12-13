@@ -2,10 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
+
+#include <cmath>
+
 #include "base/mac/mac_util.h"
 #import "chrome/browser/themes/theme_service.h"
 #import "chrome/browser/ui/cocoa/menu_controller.h"
-#import "chrome/browser/ui/cocoa/tabs/tab_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_view.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -67,7 +70,7 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 + (CGFloat)minTabWidth { return 31; }
 + (CGFloat)minSelectedTabWidth { return 46; }
 + (CGFloat)maxTabWidth { return 220; }
-+ (CGFloat)miniTabWidth { return 53; }
++ (CGFloat)miniTabWidth { return 61; }
 + (CGFloat)appTabWidth { return 66; }
 
 - (TabView*)tabView {
@@ -185,13 +188,17 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 - (void)setIconView:(NSView*)iconView {
   [iconView_ removeFromSuperview];
   iconView_ = iconView;
-  if ([self app]) {
+  if ([self app] || [self mini]) {
     NSRect appIconFrame = [iconView frame];
     appIconFrame.origin = originalIconFrame_.origin;
+
+    const CGFloat tabWidth = [self app] ? [TabController appTabWidth]
+                                        : [TabController miniTabWidth];
+
     // Center the icon.
-    appIconFrame.origin.x = ([TabController appTabWidth] -
-        NSWidth(appIconFrame)) / 2.0;
-    [iconView setFrame:appIconFrame];
+    appIconFrame.origin.x =
+        std::floor((tabWidth - NSWidth(appIconFrame)) / 2.0);
+    [iconView_ setFrame:appIconFrame];
   } else {
     [iconView_ setFrame:originalIconFrame_];
   }
@@ -327,14 +334,6 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
 - (void)maybeStartDrag:(NSEvent*)event forTab:(TabController*)tab {
   [[target_ dragController] maybeStartDrag:event forTab:tab];
-}
-
-- (void)continueDrag:(NSEvent*)event {
-  [[target_ dragController] continueDrag:event];
-}
-
-- (void)endDrag:(NSEvent*)event {
-  [[target_ dragController] endDrag:event];
 }
 
 @end

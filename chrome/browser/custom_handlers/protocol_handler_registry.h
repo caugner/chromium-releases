@@ -96,6 +96,15 @@ class ProtocolHandlerRegistry
   // given protocol handler again.
   void OnIgnoreRegisterProtocolHandler(const ProtocolHandler& handler);
 
+  // Removes all handlers that have the same origin and protocol as the given
+  // one and installs the given handler. Returns true if any protocol handlers
+  // were replaced.
+  bool AttemptReplace(const ProtocolHandler& handler);
+
+  // Returns a list of protocol handlers that can be replaced by the given
+  // handler.
+  ProtocolHandlerList GetReplacedHandlers(const ProtocolHandler& handler) const;
+
   // Clears the default for the provided protocol.
   void ClearDefault(const std::string& scheme);
 
@@ -126,8 +135,14 @@ class ProtocolHandlerRegistry
   // Returns true if an identical protocol handler has already been registered.
   bool IsRegistered(const ProtocolHandler& handler) const;
 
-  // Returns true if the protocol handler is being ignored.
+  // Returns true if an identical protocol handler is being ignored.
   bool IsIgnored(const ProtocolHandler& handler) const;
+
+  // Returns true if an equivalent protocol handler has already been registered.
+  bool HasRegisteredEquivalent(const ProtocolHandler& handler) const;
+
+  // Returns true if an equivalent protocol handler is being ignored.
+  bool HasIgnoredEquivalent(const ProtocolHandler& handler) const;
 
   // Causes the given protocol handler to not be ignored anymore.
   void RemoveIgnoredHandler(const ProtocolHandler& handler);

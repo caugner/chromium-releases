@@ -53,23 +53,33 @@ PPB_FileSystem_API* PPB_FileSystem_Impl::AsPPB_FileSystem_API() {
 
 int32_t PPB_FileSystem_Impl::Open(int64_t expected_size,
                                   PP_CompletionCallback callback) {
+  if (!callback.func)
+    return PP_ERROR_BLOCKS_MAIN_THREAD;
+
   // Should not allow multiple opens.
   if (called_open_)
     return PP_ERROR_INPROGRESS;
   called_open_ = true;
 
-  if (type_ != PP_FILESYSTEMTYPE_LOCALPERSISTENT &&
-      type_ != PP_FILESYSTEMTYPE_LOCALTEMPORARY)
-    return PP_ERROR_FAILED;
+  fileapi::FileSystemType file_system_type;
+  switch (type_) {
+    case PP_FILESYSTEMTYPE_LOCALTEMPORARY:
+      file_system_type = fileapi::kFileSystemTypeTemporary;
+      break;
+    case PP_FILESYSTEMTYPE_LOCALPERSISTENT:
+      file_system_type = fileapi::kFileSystemTypePersistent;
+      break;
+    case PP_FILESYSTEMTYPE_EXTERNAL:
+      file_system_type = fileapi::kFileSystemTypeExternal;
+      break;
+    default:
+      return PP_ERROR_FAILED;
+  }
 
-  PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
+ PluginInstance* plugin_instance = ResourceHelper::GetPluginInstance(this);
   if (!plugin_instance)
     return PP_ERROR_FAILED;
 
-  fileapi::FileSystemType file_system_type =
-      (type_ == PP_FILESYSTEMTYPE_LOCALTEMPORARY ?
-       fileapi::kFileSystemTypeTemporary :
-       fileapi::kFileSystemTypePersistent);
   if (!plugin_instance->delegate()->OpenFileSystem(
           plugin_instance->container()->element().document().url(),
           file_system_type, expected_size,

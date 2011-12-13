@@ -11,8 +11,11 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "content/common/content_export.h"
+#include "content/browser/download/interrupt_reasons.h"
 
 namespace base {
+class Time;
 class TimeTicks;
 }
 
@@ -57,20 +60,56 @@ enum DownloadCountTypes {
   // Downloads that were interrupted by the OS.
   INTERRUPTED_COUNT,
 
+  // Write sizes for downloads.
+  WRITE_SIZE_COUNT,
+
+  // Counts iterations of the BaseFile::AppendDataToFile() loop.
+  WRITE_LOOP_COUNT,
+
+  // Counts interruptions that happened at the end of the download.
+  INTERRUPTED_AT_END_COUNT,
+
   DOWNLOAD_COUNT_TYPES_LAST_ENTRY
 };
 
 // Increment one of the above counts.
-void RecordDownloadCount(DownloadCountTypes type);
+CONTENT_EXPORT void RecordDownloadCount(DownloadCountTypes type);
 
 // Record COMPLETED_COUNT and how long the download took.
-void RecordDownloadCompleted(const base::TimeTicks& start);
+void RecordDownloadCompleted(const base::TimeTicks& start, int64 download_len);
 
-// Record INTERRUPTED_COUNT, |error|, |received| and |total| bytes.
-void RecordDownloadInterrupted(int error, int64 received, int64 total);
+// Record INTERRUPTED_COUNT, |reason|, |received| and |total| bytes.
+void RecordDownloadInterrupted(InterruptReason reason,
+                               int64 received,
+                               int64 total);
 
 // Records the mime type of the download.
 void RecordDownloadMimeType(const std::string& mime_type);
+
+// Record WRITE_SIZE_COUNT and data_len.
+void RecordDownloadWriteSize(size_t data_len);
+
+// Record WRITE_LOOP_COUNT and number of loops.
+void RecordDownloadWriteLoopCount(int count);
+
+// Record the time of both the first open and all subsequent opens since the
+// download completed.
+void RecordOpen(const base::Time& end, bool first);
+
+// Record the number of items that are in the history at the time that a
+// new download is added to the history.
+void RecordHistorySize(int size);
+
+// Record the total number of items and the number of in-progress items showing
+// in the shelf when it closes.  Set |autoclose| to true when the shelf is
+// closing itself, false when the user explicitly closed it.
+void RecordShelfClose(int size, int in_progress, bool autoclose);
+
+// Record the number of downloads removed by ClearAll.
+void RecordClearAllSize(int size);
+
+// Record the number of completed unopened downloads when a download is opened.
+void RecordOpensOutstanding(int size);
 
 }  // namespace download_stats
 

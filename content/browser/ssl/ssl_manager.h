@@ -11,9 +11,11 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/ssl/ssl_policy_backend.h"
+#include "content/common/content_export.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/cert_status_flags.h"
 #include "net/base/net_errors.h"
 
 class LoadFromMemoryCacheDetails;
@@ -26,6 +28,7 @@ class ResourceRequestDetails;
 class SSLPolicy;
 
 namespace net {
+class SSLInfo;
 class URLRequest;
 }  // namespace net
 
@@ -47,8 +50,8 @@ class SSLManager : public NotificationObserver {
   // Called on the IO thread.
   static void OnSSLCertificateError(ResourceDispatcherHost* resource_dispatcher,
                                     net::URLRequest* request,
-                                    int cert_error,
-                                    net::X509Certificate* cert);
+                                    const net::SSLInfo& ssl_info,
+                                    bool is_hsts_host);
 
   // Called when SSL state for a host or tab changes.  Broadcasts the
   // SSL_INTERNAL_STATE_CHANGED notification.
@@ -56,14 +59,15 @@ class SSLManager : public NotificationObserver {
 
   // Convenience methods for serializing/deserializing the security info.
   static std::string SerializeSecurityInfo(int cert_id,
-                                           int cert_status,
+                                           net::CertStatus cert_status,
                                            int security_bits,
                                            int connection_status);
-  static bool DeserializeSecurityInfo(const std::string& state,
-                                      int* cert_id,
-                                      int* cert_status,
-                                      int* security_bits,
-                                      int* connection_status);
+  CONTENT_EXPORT static bool DeserializeSecurityInfo(
+      const std::string& state,
+      int* cert_id,
+      net::CertStatus* cert_status,
+      int* security_bits,
+      int* connection_status);
 
   // Construct an SSLManager for the specified tab.
   // If |delegate| is NULL, SSLPolicy::GetDefaultPolicy() is used.
@@ -86,7 +90,7 @@ class SSLManager : public NotificationObserver {
   void DidRunInsecureContent(const std::string& security_origin);
 
   // Called to determine if there were any processed SSL errors from request.
-  bool ProcessedSSLErrorFromRequest() const;
+  CONTENT_EXPORT bool ProcessedSSLErrorFromRequest() const;
 
   // Entry point for navigation.  This function begins the process of updating
   // the security UI when the main frame navigates to a new URL.

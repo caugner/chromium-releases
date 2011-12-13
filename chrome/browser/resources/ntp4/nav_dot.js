@@ -33,12 +33,9 @@ cr.define('ntp4', function() {
 
     initialize: function(page, title, titleIsEditable, animate) {
       this.className = 'dot';
-      this.setAttribute('tabindex', 0);
       this.setAttribute('role', 'button');
 
       this.page_ = page;
-      this.title_ = title;
-      this.titleIsEditable_ = titleIsEditable;
 
       var selectionBar = this.ownerDocument.createElement('div');
       selectionBar.className = 'selection-bar';
@@ -52,6 +49,10 @@ cr.define('ntp4', function() {
       this.input_.disabled = true;
       this.appendChild(this.input_);
 
+      this.displayTitle = title;
+      this.titleIsEditable_ = titleIsEditable;
+
+      this.addEventListener('keydown', this.onKeyDown_);
       this.addEventListener('click', this.onClick_);
       this.addEventListener('dblclick', this.onDoubleClick_);
       this.dragWrapper_ = new DragWrapper(this, this);
@@ -80,6 +81,17 @@ cr.define('ntp4', function() {
     },
 
     /**
+     * Sets/gets the display title.
+     * @type {String} title The display name for this nav dot.
+     */
+    get displayTitle() {
+      return this.title;
+    },
+    set displayTitle(title) {
+      this.title = this.input_.value = title;
+    },
+
+    /**
      * Removes the dot from the page after transitioning to 0 width.
      */
     animateRemove: function() {
@@ -91,6 +103,17 @@ cr.define('ntp4', function() {
      */
     switchToPage: function() {
       ntp4.getCardSlider().selectCardByValue(this.page_, true);
+    },
+
+    /**
+     * Handler for keydown event on the dot.
+     * @param {Event} e The KeyboardEvent.
+     */
+    onKeyDown_: function(e) {
+      if (e.keyIdentifier == 'Enter') {
+        this.onClick_(e);
+        e.stopPropagation();
+      }
     },
 
     /**
@@ -140,7 +163,7 @@ cr.define('ntp4', function() {
     onInputKeyDown_: function(e) {
       switch (e.keyIdentifier) {
         case 'U+001B':  // Escape cancels edits.
-          this.input_.value = this.title_;
+          this.input_.value = this.displayTitle;
         case 'Enter':  // Fall through.
           this.input_.blur();
           break;
@@ -154,8 +177,8 @@ cr.define('ntp4', function() {
      */
     onInputBlur_: function(e) {
       window.getSelection().removeAllRanges();
-      this.title_ = this.input_.value;
-      ntp4.saveAppPageName(this.page_, this.title_);
+      this.displayTitle = this.input_.value;
+      ntp4.saveAppPageName(this.page_, this.displayTitle);
       this.input_.disabled = true;
     },
 
@@ -191,7 +214,7 @@ cr.define('ntp4', function() {
       e.preventDefault();
 
       if (!this.dragWrapper_.isCurrentDragTarget)
-        e.dataTransfer.dropEffect = 'none';
+        ntp4.setCurrentDropEffect(e.dataTransfer, 'none');
       else
         this.page_.setDropEffect(e.dataTransfer);
     },

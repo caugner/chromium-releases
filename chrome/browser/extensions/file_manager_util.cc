@@ -3,13 +3,13 @@
 // found in the LICENSE file.
 #include "chrome/browser/extensions/file_manager_util.h"
 
+#include "base/bind.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/media/media_player.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/simple_message_box.h"
 #include "chrome/browser/ui/browser.h"
@@ -23,6 +23,10 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
 #include "webkit/fileapi/file_system_util.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/media/media_player.h"
+#endif
 
 #define FILEBROWSER_DOMAIN "hhaomjibdihmijegdhdafkllkbggdgoj"
 const char kFileBrowserDomain[] = FILEBROWSER_DOMAIN;
@@ -229,26 +233,36 @@ void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
     if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
       bool result = BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableFunction(&ViewItem, full_path, enqueue));
+          base::Bind(&ViewItem, full_path, enqueue));
       DCHECK(result);
       return;
     }
     Browser* browser = BrowserList::GetLastActive();
     if (browser)
-      browser->AddSelectedTabWithURL(GURL(path), PageTransition::LINK);
+      browser->AddSelectedTabWithURL(GURL(path), content::PAGE_TRANSITION_LINK);
     return;
   }
+#if defined(OS_CHROMEOS)
   if (IsSupportedAVExtension(ext.data())) {
     Browser* browser = BrowserList::GetLastActive();
     if (!browser)
       return;
     MediaPlayer* mediaplayer = MediaPlayer::GetInstance();
-    if (enqueue)
-      mediaplayer->EnqueueMediaFile(browser->profile(), full_path, NULL);
-    else
-      mediaplayer->ForcePlayMediaFile(browser->profile(), full_path, NULL);
+
+    if (mediaplayer->GetPlaylist().empty())
+      enqueue = false;  // Force to start playback if current playlist is
+                        // empty.
+
+    if (enqueue) {
+      mediaplayer->PopupPlaylist(browser);
+      mediaplayer->EnqueueMediaFile(browser->profile(), full_path);
+    } else {
+      mediaplayer->PopupMediaPlayer(browser);
+      mediaplayer->ForcePlayMediaFile(browser->profile(), full_path);
+    }
     return;
   }
+#endif  // OS_CHROMEOS
 
   // Unknown file type. Record UMA and show an error message.
   size_t extension_index = UMAExtensionIndex(ext.data(),
@@ -260,12 +274,14 @@ void FileManagerUtil::ViewItem(const FilePath& full_path, bool enqueue) {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(
+      base::Bind(
           &browser::ShowErrorBox,
           static_cast<gfx::NativeWindow>(NULL),
-          l10n_util::GetStringUTF16(IDS_FILEBROWSER_ERROR_TITLE),
-          l10n_util::GetStringFUTF16(IDS_FILEBROWSER_ERROR_UNKNOWN_FILE_TYPE,
-                                     UTF8ToUTF16(full_path.BaseName().value()))
+          l10n_util::GetStringFUTF16(
+              IDS_FILEBROWSER_ERROR_VIEWING_FILE_TITLE,
+              UTF8ToUTF16(full_path.BaseName().value())),
+          l10n_util::GetStringUTF16(
+              IDS_FILEBROWSER_ERROR_VIEWING_FILE)
           ));
 }
 

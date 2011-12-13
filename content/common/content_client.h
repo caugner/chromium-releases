@@ -12,6 +12,7 @@
 #include "base/basictypes.h"
 #include "base/string16.h"
 #include "build/build_config.h"
+#include "content/common/content_export.h"
 
 class CommandLine;
 class GURL;
@@ -40,11 +41,21 @@ class ContentUtilityClient;
 
 // Setter and getter for the client.  The client should be set early, before any
 // content code is called.
-void SetContentClient(ContentClient* client);
-ContentClient* GetContentClient();
+CONTENT_EXPORT void SetContentClient(ContentClient* client);
+CONTENT_EXPORT ContentClient* GetContentClient();
+
+// Returns the user agent string being used by the browser. SetContentClient()
+// must be called prior to calling this, and this routine must be used
+// instead of webkit_glue::GetUserAgent() in order to ensure that we use
+// the same user agent string everywhere.
+// TODO(dpranke): This is caused by webkit_glue being a library that can
+// get linked into multiple linkable objects, causing us to have multiple
+// static values of the user agent. This will be fixed when we clean up
+// webkit_glue.
+CONTENT_EXPORT const std::string& GetUserAgent(const GURL& url);
 
 // Interface that the embedder implements.
-class ContentClient {
+class CONTENT_EXPORT ContentClient {
  public:
   ContentClient();
   virtual ~ContentClient();
@@ -75,10 +86,10 @@ class ContentClient {
   // behalf of a swapped out renderer.
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) = 0;
 
-  // Returns the user agent. If mimic_windows is true then the embedder can
-  // return a fake Windows user agent. This is a workaround for broken
-  // websites.
-  virtual std::string GetUserAgent(bool mimic_windows) const = 0;
+  // Returns the user agent and a flag indicating whether the returned
+  // string should always be used (if false, callers may override the
+  // value as needed to work around various user agent sniffing bugs).
+  virtual std::string GetUserAgent(bool *overriding) const = 0;
 
   // Returns a string resource given its id.
   virtual string16 GetLocalizedString(int message_id) const = 0;

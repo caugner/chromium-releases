@@ -16,7 +16,7 @@
 #include "views/widget/widget.h"
 #include "views/window/client_view.h"
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/chromeos/wm_ipc.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #endif
@@ -41,8 +41,8 @@ const SkColor Bubble::kBackgroundColor = SK_ColorWHITE;
 
 // BubbleDelegate ---------------------------------------------------------
 
-std::wstring BubbleDelegate::accessible_name() {
-  return L"";
+string16 BubbleDelegate::GetAccessibleName() {
+  return string16();
 }
 
 // Bubble -----------------------------------------------------------------
@@ -111,6 +111,7 @@ void Bubble::AnimationProgressed(const ui::Animation* animation) {
       animation_->GetCurrentValue() * 255);
 #if defined(USE_AURA)
   // TODO(beng):
+  (void)opacity;
   NOTIMPLEMENTED();
 #elif defined(OS_WIN)
   SetLayeredWindowAttributes(GetNativeView(), 0,
@@ -132,6 +133,8 @@ Bubble::Bubble()
       views::NativeWidgetAura(new views::Widget),
 #elif defined(OS_WIN)
       views::NativeWidgetWin(new views::Widget),
+#elif defined(TOUCH_UI)
+      views::NativeWidgetViews(new views::Widget),
 #elif defined(TOOLKIT_USES_GTK)
       views::NativeWidgetGtk(new views::Widget),
 #endif
@@ -144,6 +147,7 @@ Bubble::Bubble()
       delegate_(NULL),
       show_status_(kOpen),
       fade_away_on_close_(false),
+      close_on_deactivate_(true),
 #if defined(TOOLKIT_USES_GTK)
       type_(views::Widget::InitParams::TYPE_WINDOW_FRAMELESS),
 #endif
@@ -158,8 +162,16 @@ Bubble::Bubble()
 #if defined(OS_CHROMEOS)
 Bubble::Bubble(views::Widget::InitParams::Type type,
                bool show_while_screen_is_locked)
+#if defined(USE_AURA)
+    : views::NativeWidgetAura(new views::Widget),
+#elif defined(TOUCH_UI)
+    : views::NativeWidgetViews(new views::Widget),
+#else
     : views::NativeWidgetGtk(new views::Widget),
+#endif
+#if defined(TOOLKIT_USES_GTK)
       border_contents_(NULL),
+#endif
       delegate_(NULL),
       show_status_(kOpen),
       fade_away_on_close_(false),
@@ -217,7 +229,7 @@ void Bubble::InitBubble(views::Widget* parent,
     border_->SetOpacity(0);
     GetWidget()->SetOpacity(0);
   }
-  SetWindowText(GetNativeView(), delegate_->accessible_name().c_str());
+  SetWindowText(GetNativeView(), delegate_->GetAccessibleName().c_str());
 #elif defined(TOOLKIT_USES_GTK)
   views::Widget::InitParams params(type_);
   params.transparent = true;
@@ -226,7 +238,7 @@ void Bubble::InitBubble(views::Widget* parent,
   GetWidget()->Init(params);
   if (fade_in)
     SetOpacity(0);
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && defined(TOOLKIT_USES_GTK)
   {
     vector<int> params;
     params.push_back(show_while_screen_is_locked_ ? 1 : 0);
@@ -351,11 +363,16 @@ void Bubble::SizeToContents() {
 void Bubble::OnActivate(UINT action, BOOL minimized, HWND window) {
   // The popup should close when it is deactivated.
   if (action == WA_INACTIVE) {
-    GetWidget()->Close();
+    if (close_on_deactivate_)
+      GetWidget()->Close();
   } else if (action == WA_ACTIVE) {
     DCHECK(GetWidget()->GetRootView()->has_children());
     GetWidget()->GetRootView()->child_at(0)->RequestFocus();
   }
+}
+#elif defined(TOUCH_UI)
+void Bubble::Deactivate() {
+  GetWidget()->Close();
 }
 #elif defined(TOOLKIT_USES_GTK)
 void Bubble::OnActiveChanged() {
@@ -372,6 +389,7 @@ void Bubble::DoClose(bool closed_by_escape) {
     UnregisterEscapeAccelerator();
   if (delegate_)
     delegate_->BubbleClosing(this, closed_by_escape);
+  FOR_EACH_OBSERVER(Observer, observer_list_, OnBubbleClosing());
   show_status_ = kClosed;
 #if defined(USE_AURA)
   // TODO(beng):
@@ -384,6 +402,8 @@ void Bubble::DoClose(bool closed_by_escape) {
   NOTIMPLEMENTED();
 #elif defined(OS_WIN)
   NativeWidgetWin::Close();
+#elif defined(TOUCH_UI)
+  NativeWidgetViews::Close();
 #elif defined(TOOLKIT_USES_GTK)
   NativeWidgetGtk::Close();
 #endif

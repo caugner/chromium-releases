@@ -5,13 +5,13 @@
 #include "webkit/blob/view_blob_internals_job.h"
 
 #include "base/compiler_specific.h"
-#include "base/logging.h"
 #include "base/format_macros.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/time_formatting.h"
+#include "base/logging.h"
 #include "base/message_loop.h"
-#include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request.h"
@@ -55,7 +55,7 @@ void EndHTML(std::string* out) {
 
 void AddHTMLBoldText(const std::string& text, std::string* out) {
   out->append("<b>");
-  out->append(EscapeForHTML(text));
+  out->append(net::EscapeForHTML(text));
   out->append("</b>");
 }
 
@@ -73,7 +73,7 @@ void AddHTMLListItem(const std::string& element_title,
   out->append("<li>");
   // No need to escape element_title since constant string is passed.
   out->append(element_title);
-  out->append(EscapeForHTML(element_data));
+  out->append(net::EscapeForHTML(element_data));
   out->append("</li>");
 }
 
@@ -81,7 +81,7 @@ void AddHTMLButton(const std::string& title,
                    const std::string& command,
                    std::string* out) {
   // No need to escape title since constant string is passed.
-  std::string escaped_command = EscapeForHTML(command.c_str());
+  std::string escaped_command = net::EscapeForHTML(command.c_str());
   base::StringAppendF(out,
                       "<form action=\"\" method=\"GET\">\n"
                       "<input type=\"hidden\" name=\"remove\" value=\"%s\">\n"
@@ -133,9 +133,9 @@ void ViewBlobInternalsJob::DoWorkAsync() {
   if (request_->url().has_query() &&
       StartsWithASCII(request_->url().query(), "remove=", true)) {
     std::string blob_url = request_->url().query().substr(strlen("remove="));
-    blob_url = UnescapeURLComponent(blob_url,
+    blob_url = net::UnescapeURLComponent(blob_url,
         UnescapeRule::NORMAL | UnescapeRule::URL_SPECIAL_CHARS);
-    blob_storage_controller_->UnregisterBlobUrl(GURL(blob_url));
+    blob_storage_controller_->RemoveBlob(GURL(blob_url));
   }
 
   StartAsync();
@@ -190,37 +190,38 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(const BlobData& blob_data,
     }
     const BlobData::Item& item = blob_data.items().at(i);
 
-    switch (item.type()) {
+    switch (item.type) {
       case BlobData::TYPE_DATA:
+      case BlobData::TYPE_DATA_EXTERNAL:
         AddHTMLListItem(kType, "data", out);
         break;
       case BlobData::TYPE_FILE:
         AddHTMLListItem(kType, "file", out);
         AddHTMLListItem(kPath,
 #if defined(OS_WIN)
-                 EscapeForHTML(WideToUTF8(item.file_path().value())),
+                 net::EscapeForHTML(WideToUTF8(item.file_path.value())),
 #else
-                 EscapeForHTML(item.file_path().value()),
+                 net::EscapeForHTML(item.file_path.value()),
 #endif
                  out);
-        if (!item.expected_modification_time().is_null()) {
+        if (!item.expected_modification_time.is_null()) {
           AddHTMLListItem(kModificationTime, UTF16ToUTF8(
-              TimeFormatFriendlyDateAndTime(item.expected_modification_time())),
+              TimeFormatFriendlyDateAndTime(item.expected_modification_time)),
               out);
         }
         break;
       case BlobData::TYPE_BLOB:
         AddHTMLListItem(kType, "blob", out);
-        AddHTMLListItem(kURL, item.blob_url().spec(), out);
+        AddHTMLListItem(kURL, item.blob_url.spec(), out);
         break;
     }
-    if (item.offset()) {
+    if (item.offset) {
       AddHTMLListItem(kOffset, UTF16ToUTF8(base::FormatNumber(
-          static_cast<int64>(item.offset()))), out);
+          static_cast<int64>(item.offset))), out);
     }
-    if (static_cast<int64>(item.length()) != -1) {
+    if (static_cast<int64>(item.length) != -1) {
       AddHTMLListItem(kLength, UTF16ToUTF8(base::FormatNumber(
-          static_cast<int64>(item.length()))), out);
+          static_cast<int64>(item.length))), out);
     }
 
     if (has_multi_items)

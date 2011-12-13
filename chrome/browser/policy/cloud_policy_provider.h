@@ -7,10 +7,11 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "chrome/browser/policy/cloud_policy_cache_base.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
 namespace policy {
+
+class CloudPolicyCacheBase;
 
 // A policy provider having multiple backend caches, combining their relevant
 // PolicyMaps and keeping the result cached. The underlying caches are kept as
@@ -24,8 +25,7 @@ namespace policy {
 //   AppendCache(cache):  adds |cache| to the back (i.e. least important cache).
 class CloudPolicyProvider : public ConfigurationPolicyProvider {
  public:
-  explicit CloudPolicyProvider(
-      const ConfigurationPolicyProvider::PolicyDefinitionList* policy_list);
+  explicit CloudPolicyProvider(const PolicyDefinitionList* policy_list);
   virtual ~CloudPolicyProvider();
 
   // Adds a new instance of CloudPolicyCacheBase to the end of |caches_|.

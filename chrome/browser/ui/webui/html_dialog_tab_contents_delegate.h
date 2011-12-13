@@ -36,11 +36,12 @@ class HtmlDialogTabContentsDelegate : public TabContentsDelegate {
 
   // Deprecated. Use two-arguments variant instead.
   // TODO(adriansc): Remove this method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const GURL& url,
-                                      const GURL& referrer,
-                                      WindowOpenDisposition disposition,
-                                      PageTransition::Type transition) OVERRIDE;
+  virtual TabContents* OpenURLFromTab(
+      TabContents* source,
+      const GURL& url,
+      const GURL& referrer,
+      WindowOpenDisposition disposition,
+      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
 
@@ -52,7 +53,7 @@ class HtmlDialogTabContentsDelegate : public TabContentsDelegate {
   virtual bool IsPopup(const TabContents* source) const;
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
-      NavigationType::Type navigation_type);
+      content::NavigationType navigation_type);
 
  private:
   Profile* profile_;  // Weak pointer.  Always an original profile.

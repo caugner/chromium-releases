@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -34,6 +35,10 @@
 
 #if defined(OS_LINUX)
 #include "ui/gfx/gtk_util.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ui/aura/cursor.h"
 #endif
 
 namespace {
@@ -216,18 +221,22 @@ int NativeTextfieldViews::OnPerformDrop(const DropTargetEvent& event) {
   bool move = initiating_drag_ && !event.IsControlDown() &&
               event.source_operations() & ui::DragDropTypes::DRAG_MOVE;
   if (move) {
-    ui::Range selected_range;
-    model_->GetSelectedRange(&selected_range);
+    gfx::SelectionModel selected;
+    model_->GetSelectionModel(&selected);
     // Adjust the drop destination if it is on or after the current selection.
-    if (selected_range.GetMax() <= drop_destination.selection_end())
-      drop_destination.set_selection_end(
-          drop_destination.selection_end() - selected_range.length());
-    else if (selected_range.GetMin() <= drop_destination.selection_end())
-      drop_destination.set_selection_end(selected_range.GetMin());
-    model_->DeleteSelectionAndInsertTextAt(text,
-                                           drop_destination.selection_end());
+    size_t max_of_selected_range = std::max(selected.selection_start(),
+                                            selected.selection_end());
+    size_t min_of_selected_range = std::min(selected.selection_start(),
+                                            selected.selection_end());
+    size_t selected_range_length = max_of_selected_range -
+                                   min_of_selected_range;
+    size_t drop_destination_end = drop_destination.selection_end();
+    if (max_of_selected_range <= drop_destination_end)
+      drop_destination_end -= selected_range_length;
+    else if (min_of_selected_range <= drop_destination_end)
+      drop_destination_end = min_of_selected_range;
+    model_->DeleteSelectionAndInsertTextAt(text, drop_destination_end);
   } else {
-    drop_destination.set_selection_start(drop_destination.selection_end());
     model_->MoveCursorTo(drop_destination);
     // Drop always inserts text even if the textfield is not in insert mode.
     model_->InsertText(text);
@@ -271,9 +280,11 @@ void NativeTextfieldViews::SelectRect(const gfx::Point& start,
   // Merge selection models of "start_pos" and "end_pos" so that
   // selection start is the value from "start_pos", while selection end,
   // caret position, and caret placement are values from "end_pos".
-  gfx::SelectionModel sel(end_pos);
-  sel.set_selection_start(start_pos.selection_start());
-  model_->SelectSelectionModel(sel);
+  if (start_pos.selection_start() == end_pos.selection_end())
+    model_->SelectSelectionModel(end_pos);
+  else
+    model_->SelectRange(ui::Range(start_pos.selection_start(),
+                                  end_pos.selection_end()));
 
   OnCaretBoundsChanged();
   SchedulePaint();
@@ -284,7 +295,9 @@ gfx::NativeCursor NativeTextfieldViews::GetCursor(const MouseEvent& event) {
   bool in_selection = GetRenderText()->IsPointInSelection(event.location());
   bool drag_event = event.type() == ui::ET_MOUSE_DRAGGED;
   bool text_cursor = !initiating_drag_ && (drag_event || !in_selection);
-#if defined(OS_WIN)
+#if defined(USE_AURA)
+  return text_cursor ? aura::kCursorIBeam : aura::kCursorNull;
+#elif defined(OS_WIN)
   static HCURSOR ibeam = LoadCursor(NULL, IDC_IBEAM);
   static HCURSOR arrow = LoadCursor(NULL, IDC_ARROW);
   return text_cursor ? ibeam : arrow;
@@ -489,6 +502,17 @@ void NativeTextfieldViews::SelectRange(const ui::Range& range) {
   SchedulePaint();
 }
 
+void NativeTextfieldViews::GetSelectionModel(gfx::SelectionModel* sel) const {
+  model_->GetSelectionModel(sel);
+}
+
+void NativeTextfieldViews::SelectSelectionModel(
+    const gfx::SelectionModel& sel) {
+  model_->SelectSelectionModel(sel);
+  OnCaretBoundsChanged();
+  SchedulePaint();
+}
+
 size_t NativeTextfieldViews::GetCursorPosition() const {
   return model_->GetCursorPosition();
 }
@@ -513,14 +537,15 @@ void NativeTextfieldViews::HandleFocus() {
   // Start blinking cursor.
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      cursor_timer_.NewRunnableMethod(&NativeTextfieldViews::UpdateCursor),
+      base::Bind(&NativeTextfieldViews::UpdateCursor,
+                 cursor_timer_.GetWeakPtr()),
       kCursorVisibleTimeMs);
 }
 
 void NativeTextfieldViews::HandleBlur() {
   GetRenderText()->set_focused(false);
   // Stop blinking cursor.
-  cursor_timer_.RevokeAll();
+  cursor_timer_.InvalidateWeakPtrs();
   if (is_cursor_visible_) {
     is_cursor_visible_ = false;
     RepaintCursor();
@@ -699,7 +724,7 @@ void NativeTextfieldViews::InsertChar(char16 ch, int flags) {
   OnAfterUserAction();
 }
 
-ui::TextInputType NativeTextfieldViews::GetTextInputType() {
+ui::TextInputType NativeTextfieldViews::GetTextInputType() const {
   return textfield_->GetTextInputType();
 }
 
@@ -733,7 +758,10 @@ bool NativeTextfieldViews::GetSelectionRange(ui::Range* range) {
   if (GetTextInputType() != ui::TEXT_INPUT_TYPE_TEXT)
     return false;
 
-  model_->GetSelectedRange(range);
+  gfx::SelectionModel sel;
+  model_->GetSelectionModel(&sel);
+  range->set_start(sel.selection_start());
+  range->set_end(sel.selection_end());
   return true;
 }
 
@@ -801,7 +829,8 @@ void NativeTextfieldViews::UpdateCursor() {
   RepaintCursor();
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      cursor_timer_.NewRunnableMethod(&NativeTextfieldViews::UpdateCursor),
+      base::Bind(&NativeTextfieldViews::UpdateCursor,
+                 cursor_timer_.GetWeakPtr()),
       is_cursor_visible_ ? kCursorVisibleTimeMs : kCursorInvisibleTimeMs);
 }
 
@@ -998,10 +1027,10 @@ void NativeTextfieldViews::OnCaretBoundsChanged() {
     return;
   gfx::RenderText* render_text = GetRenderText();
   const gfx::SelectionModel& sel = render_text->selection_model();
-  gfx::SelectionModel start_sel(sel.selection_start(), sel.selection_start(),
-      sel.selection_start(), gfx::SelectionModel::LEADING);
-  gfx::Rect start_cursor = render_text->GetCursorBounds(start_sel, false);
-  gfx::Rect end_cursor = render_text->GetCursorBounds(sel, false);
+  gfx::SelectionModel start_sel =
+      render_text->GetSelectionModelForSelectionStart();
+  gfx::Rect start_cursor = render_text->GetCursorBounds(start_sel, true);
+  gfx::Rect end_cursor = render_text->GetCursorBounds(sel, true);
   gfx::Point start(start_cursor.x(), start_cursor.bottom() - 1);
   gfx::Point end(end_cursor.x(), end_cursor.bottom() - 1);
   touch_selection_controller_->SelectionChanged(start, end);

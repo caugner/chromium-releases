@@ -8,6 +8,7 @@
 
 #include "chrome/browser/ui/browser_window.h"
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
@@ -34,14 +35,21 @@ class Panel : public BrowserWindow, public NotificationObserver {
    EXPANDED,
    // The panel is shown with the title-bar only.
    TITLE_ONLY,
-   // The panel is shown with 3-pxiel line.
+   // The panel is shown with 3-pixel line.
    MINIMIZED
   };
+
+  // The panel can be minimized to 3-pixel lines.
+  static const int kMinimizedPanelHeight = 3;
 
   virtual ~Panel();
 
   // Returns the PanelManager associated with this panel.
   PanelManager* manager() const;
+
+  // Gets the extension that a panel is created from.
+  // Returns NULL if it cannot be found.
+  const Extension* GetExtension() const;
 
   void SetExpansionState(ExpansionState new_expansion_state);
 
@@ -77,7 +85,12 @@ class Panel : public BrowserWindow, public NotificationObserver {
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
-  virtual void SetFullscreen(bool fullscreen) OVERRIDE;
+  virtual void EnterFullscreen(
+      const GURL& url, FullscreenExitBubbleType type) OVERRIDE;
+  virtual void ExitFullscreen() OVERRIDE;
+  virtual void UpdateFullscreenExitBubbleContent(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual bool IsFullscreenBubbleVisible() const OVERRIDE;
   virtual LocationBar* GetLocationBar() const OVERRIDE;
@@ -95,10 +108,9 @@ class Panel : public BrowserWindow, public NotificationObserver {
   virtual bool IsTabStripEditable() const OVERRIDE;
   virtual bool IsToolbarVisible() const OVERRIDE;
   virtual void DisableInactiveFrame() OVERRIDE;
-  virtual void ConfirmSetDefaultSearchProvider(
-      TabContents* tab_contents,
-      TemplateURL* template_url,
-      TemplateURLService* template_url_service) OVERRIDE;
+  virtual void ConfirmSetDefaultSearchProvider(TabContents* tab_contents,
+                                               TemplateURL* template_url,
+                                               Profile* profile) OVERRIDE;
   virtual void ConfirmAddSearchProvider(const TemplateURL* template_url,
                                         Profile* profile) OVERRIDE;
   virtual void ToggleBookmarkBar() OVERRIDE;
@@ -114,9 +126,6 @@ class Panel : public BrowserWindow, public NotificationObserver {
   virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) OVERRIDE;
   virtual void ShowThemeInstallBubble() OVERRIDE;
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
-  virtual gfx::NativeWindow ShowHTMLDialog(
-      HtmlDialogUIDelegate* delegate,
-      gfx::NativeWindow parent_window) OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
   virtual void TabContentsFocused(TabContents* tab_contents) OVERRIDE;
@@ -134,19 +143,19 @@ class Panel : public BrowserWindow, public NotificationObserver {
       TabContentsWrapper* tab_contents) OVERRIDE;
   virtual void ShowCreateChromeAppShortcutsDialog(
       Profile* profile, const Extension* app) OVERRIDE;
-  virtual void ToggleUseCompactNavigationBar();
   virtual void Cut() OVERRIDE;
   virtual void Copy() OVERRIDE;
   virtual void Paste() OVERRIDE;
-  virtual void ToggleTabStripMode() OVERRIDE;
 #if defined(OS_MACOSX)
   virtual void OpenTabpose() OVERRIDE;
-  virtual void SetPresentationMode(bool presentation_mode) OVERRIDE;
+  virtual void EnterPresentationMode(
+      const GURL& url,
+      FullscreenExitBubbleType bubble_type) OVERRIDE;
+  virtual void ExitPresentationMode() OVERRIDE;
   virtual bool InPresentationMode() OVERRIDE;
 #endif
-  virtual void PrepareForInstant() OVERRIDE;
   virtual void ShowInstant(TabContentsWrapper* preview) OVERRIDE;
-  virtual void HideInstant(bool instant_is_active) OVERRIDE;
+  virtual void HideInstant() OVERRIDE;
   virtual gfx::Rect GetInstantBounds() OVERRIDE;
   virtual WindowOpenDisposition GetDispositionForPopupBounds(
       const gfx::Rect& bounds) OVERRIDE;
@@ -156,6 +165,8 @@ class Panel : public BrowserWindow, public NotificationObserver {
 #endif
   virtual void UpdatePreferredSize(TabContents* tab_contents,
                                    const gfx::Size& pref_size) OVERRIDE;
+  virtual void ShowAvatarBubble(TabContents* tab_contents,
+                                const gfx::Rect& rect) OVERRIDE;
 
   // NotificationObserver overrides.
   virtual void Observe(int type,
@@ -170,7 +181,11 @@ class Panel : public BrowserWindow, public NotificationObserver {
 
   // Gets the extension from the browser that a panel is created from.
   // Returns NULL if it cannot be found.
-  static const Extension* GetExtension(Browser* browser);
+  static const Extension* GetExtensionFromBrowser(Browser* browser);
+
+  // Used on platforms where the panel cannot determine its window size
+  // until the window has been created. (e.g. GTK)
+  void OnWindowSizeAvailable();
 
   NativePanel* native_panel() { return native_panel_; }
   Browser* browser() const;
@@ -183,6 +198,8 @@ class Panel : public BrowserWindow, public NotificationObserver {
 
  private:
   friend class PanelManager;
+  friend class PanelBrowserTest;
+  FRIEND_TEST_ALL_PREFIXES(PanelBrowserTest, RestoredBounds);
 
   // Panel can only be created using PanelManager::CreatePanel().
   Panel(Browser* browser, const gfx::Rect& bounds);
@@ -216,6 +233,10 @@ class Panel : public BrowserWindow, public NotificationObserver {
   NativePanel* native_panel_;  // Weak, owns us.
 
   ExpansionState expansion_state_;
+
+  // Stores the full height of the panel so we can restore it after it's
+  // been minimized.
+  int restored_height_;
 
   NotificationRegistrar registrar_;
 

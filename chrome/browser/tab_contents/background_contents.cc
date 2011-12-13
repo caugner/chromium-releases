@@ -12,6 +12,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/chrome_view_types.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
@@ -73,15 +74,15 @@ const GURL& BackgroundContents::GetURL() const {
   return url_;
 }
 
-ViewType::Type BackgroundContents::GetRenderViewType() const {
-  return ViewType::BACKGROUND_CONTENTS;
+content::ViewType BackgroundContents::GetRenderViewType() const {
+  return chrome::VIEW_TYPE_BACKGROUND_CONTENTS;
 }
 
 void BackgroundContents::DidNavigate(
     RenderViewHost* render_view_host,
     const ViewHostMsg_FrameNavigate_Params& params) {
   // We only care when the outer frame changes.
-  if (!PageTransition::IsMainFrame(params.transition))
+  if (!content::PageTransitionIsMainFrame(params.transition))
     return;
 
   // Note: because BackgroundContents are only available to extension apps,

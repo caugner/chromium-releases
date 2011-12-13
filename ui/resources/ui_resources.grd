@@ -13,6 +13,7 @@
       <include name="IDR_BROWSER_ACTION_BADGE_CENTER" file="browser_action_badge_center.png" type="BINDATA" />
       <include name="IDR_BROWSER_ACTION_BADGE_LEFT" file="browser_action_badge_left.png" type="BINDATA" />
       <include name="IDR_BROWSER_ACTION_BADGE_RIGHT" file="browser_action_badge_right.png" type="BINDATA" />
+      <include name="IDR_CHECKMARK" file="checkmark.png" type="BINDATA" />
       <if expr="pp_ifdef('toolkit_views')">
         <include name="IDR_CLOSE" file="close.png" type="BINDATA" />
         <include name="IDR_CLOSE_H" file="close_h.png" type="BINDATA" />
@@ -28,13 +29,8 @@
       <include name="IDR_CONTENT_BOTTOM_RIGHT_CORNER" file="content_bottom_right_corner.png" type="BINDATA" />
       <include name="IDR_CONTENT_LEFT_SIDE" file="content_left_side.png" type="BINDATA" />
       <include name="IDR_CONTENT_RIGHT_SIDE" file="content_right_side.png" type="BINDATA" />
-      <if expr="not pp_ifdef('touchui')">
-        <include name="IDR_DEFAULT_FAVICON" file="default_favicon.png" type="BINDATA" />
-        <include name="IDR_DEFAULT_LARGE_FAVICON" file="default_large_favicon.png" type="BINDATA" />
-      </if>
-      <if expr="pp_ifdef('touchui')">
-        <include name="IDR_DEFAULT_FAVICON" file="default_large_favicon.png" type="BINDATA" />
-      </if>
+      <include name="IDR_DEFAULT_FAVICON" file="default_favicon.png" type="BINDATA" />
+      <include name="IDR_DEFAULT_LARGE_FAVICON" file="default_large_favicon.png" type="BINDATA" />
       <include name="IDR_FOLDER_CLOSED" file="folder_closed.png" type="BINDATA" />
       <include name="IDR_FOLDER_CLOSED_RTL" file="folder_closed_rtl.png" type="BINDATA" />
       <include name="IDR_FOLDER_OPEN" file="folder_open.png" type="BINDATA" />
@@ -42,7 +38,6 @@
       <include name="IDR_FRAME" file="frame_default.png" type="BINDATA" />
       <include name="IDR_FRAME_APP_PANEL" file="frame_app_panel_default.png" type="BINDATA" />
       <include name="IDR_FRAME_INACTIVE" file="frame_default_inactive.png" type="BINDATA" />
-      <include name="IDR_INPUT_GOOD" file="input_good.png" type="BINDATA" />
       <if expr="pp_ifdef('toolkit_views')">
         <include name="IDR_MAXIMIZE" file="maximize.png" type="BINDATA" />
         <include name="IDR_MAXIMIZE_H" file="maximize_h.png" type="BINDATA" />
@@ -117,6 +112,17 @@
         <include name="IDR_CLOSE_SA_P" file="close_sa_p.png" type="BINDATA" />
         <include name="IDR_MENU_ARROW" file="menu_arrow.png" type="BINDATA" />
         <include name="IDR_MENU_CHECK" file="menu_check.png" type="BINDATA" />
+      </if>
+
+      <!-- Images only used by Aura. -->
+      <if expr="pp_ifdef('use_aura')">
+        <include name="IDR_AURA_LAUNCHER_ICON_CHROME" file="aura/chromium-32.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_TABBED_BROWSER" file="aura/browser_instance.png" type="BINDATA" />
+        <include name="IDR_AURA_LAUNCHER_ICON_APPLIST" file="aura/applist.png" type="BINDATA" />
+        <include name="IDR_AURA_STATUS_MOCK" file="aura/statusbar.png" type="BINDATA" />
+        <include name="IDR_AURA_WALLPAPER" file="aura/damask.png" type="BINDATA" />
+        <include name="IDR_AURA_WINDOW_CLOSE_ICON" file="aura/slab_close.png" type="BINDATA" />
+        <include name="IDR_AURA_WINDOW_ZOOM_ICON" file="aura/slab_zoom.png" type="BINDATA" />
       </if>
     </includes>
   </release>

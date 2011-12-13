@@ -5,6 +5,7 @@
 #ifndef MEDIA_AUDIO_AUDIO_OUTPUT_CONTROLLER_H_
 #define MEDIA_AUDIO_AUDIO_OUTPUT_CONTROLLER_H_
 
+#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
@@ -15,7 +16,6 @@
 #include "media/audio/simple_sources.h"
 
 class MessageLoop;
-class Task;
 
 // An AudioOutputController controls an AudioOutputStream and provides data
 // to this output stream. It has an important function that it executes
@@ -47,6 +47,8 @@ class Task;
 //   In this mode a DataSource object is given to the AudioOutputController
 //   and AudioOutputController reads from it synchronously.
 //
+#include "media/base/media_export.h"
+
 namespace media {
 
 class MEDIA_EXPORT AudioOutputController
@@ -69,7 +71,7 @@ class MEDIA_EXPORT AudioOutputController
 
   // An event handler that receives events from the AudioOutputController. The
   // following methods are called on the audio controller thread.
-  class EventHandler {
+  class MEDIA_EXPORT EventHandler {
    public:
     virtual ~EventHandler() {}
     virtual void OnCreated(AudioOutputController* controller) = 0;
@@ -101,6 +103,13 @@ class MEDIA_EXPORT AudioOutputController
 
     // Close this synchronous reader.
     virtual void Close() = 0;
+
+    // Poll if data is ready.
+    // Not reliable, as there is no guarantee that renderer is "new-style"
+    // renderer that writes metadata into buffer. After several unsuccessful
+    // attempts caller should assume the data is ready even if that function
+    // returns false.
+    virtual bool DataReady() = 0;
   };
 
   virtual ~AudioOutputController();
@@ -142,7 +151,7 @@ class MEDIA_EXPORT AudioOutputController
   //
   // It is safe to call this method more than once. Calls after the first one
   // will have no effect.
-  void Close(Task* closed_task);
+  void Close(const base::Closure& closed_task);
 
   // Sets the volume of the audio output stream.
   void SetVolume(double volume);
@@ -161,20 +170,28 @@ class MEDIA_EXPORT AudioOutputController
   virtual void OnError(AudioOutputStream* stream, int code);
 
  private:
+  // We are polling sync reader if data became available.
+  static const int kPollNumAttempts;
+  static const int kPollPauseInMilliseconds;
+
   AudioOutputController(EventHandler* handler,
                         uint32 capacity, SyncReader* sync_reader);
 
   // The following methods are executed on the audio controller thread.
   void DoCreate(const AudioParameters& params);
   void DoPlay();
+  void PollAndStartIfDataReady();
   void DoPause();
   void DoFlush();
-  void DoClose(Task* closed_task);
+  void DoClose(const base::Closure& closed_task);
   void DoSetVolume(double volume);
   void DoReportError(int code);
 
   // Helper method to submit a OnMoreData() call to the event handler.
   void SubmitOnMoreData_Locked();
+
+  // Helper method that starts physical stream.
+  void StartStream();
 
   // |handler_| may be called only if |state_| is not kClosed.
   EventHandler* handler_;
@@ -202,6 +219,10 @@ class MEDIA_EXPORT AudioOutputController
 
   // The message loop of audio thread that this object runs on.
   MessageLoop* message_loop_;
+
+  // When starting stream we wait for data to become available.
+  // Number of times left.
+  int number_polling_attempts_left_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioOutputController);
 };

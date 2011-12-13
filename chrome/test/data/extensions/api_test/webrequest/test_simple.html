@@ -10,6 +10,12 @@ function getURLHttpSimpleLoadRedirect() {
   return getServerURL('server-redirect?'+getURLHttpSimpleLoad());
 }
 
+// A URL from b.com, which we don't have permission to access.
+function getURLNotVisible() {
+  return getServerURL('files/extensions/api_test/webrequest/simpleLoad/b.html',
+                      'b.com');
+}
+
 runTests([
   // Navigates to a blank page.
   function simpleLoad() {
@@ -18,9 +24,6 @@ runTests([
         { label: "a-onBeforeRequest",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
-            type: "main_frame",
             url: getURL("simpleLoad/a.html"),
             frameUrl: getURL("simpleLoad/a.html")
           }
@@ -30,7 +33,8 @@ runTests([
           details: {
             url: getURL("simpleLoad/a.html"),
             statusCode: 200,
-            fromCache: false
+            fromCache: false,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
@@ -39,7 +43,8 @@ runTests([
           details: {
             url: getURL("simpleLoad/a.html"),
             statusCode: 200,
-            fromCache: false
+            fromCache: false,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
@@ -57,9 +62,6 @@ runTests([
         { label: "onBeforeRequest-1",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
-            type: "main_frame",
             url: getURLHttpSimpleLoadRedirect(),
             frameUrl: getURLHttpSimpleLoadRedirect()
           }
@@ -78,6 +80,14 @@ runTests([
             requestHeadersValid: true
           }
         },
+        { label: "onHeadersReceived-1",
+          event: "onHeadersReceived",
+          details: {
+            url: getURLHttpSimpleLoadRedirect(),
+            responseHeadersExist: true,
+            statusLine: "HTTP/1.0 301 Moved Permanently"
+          }
+        },
         { label: "onBeforeRedirect",
           event: "onBeforeRedirect",
           details: {
@@ -93,9 +103,6 @@ runTests([
         { label: "onBeforeRequest-2",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
-            type: "main_frame",
             url: getURLHttpSimpleLoad(),
             frameUrl: getURLHttpSimpleLoad()
           }
@@ -112,6 +119,14 @@ runTests([
           details: {
             url: getURLHttpSimpleLoad(),
             requestHeadersValid: true
+          }
+        },
+        { label: "onHeadersReceived-2",
+          event: "onHeadersReceived",
+          details: {
+            url: getURLHttpSimpleLoad(),
+            responseHeadersExist: true,
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onResponseStarted",
@@ -139,11 +154,11 @@ runTests([
       ],
       [  // event order
         ["onBeforeRequest-1", "onBeforeSendHeaders-1", "onSendHeaders-1",
-         "onBeforeRedirect",
+         "onHeadersReceived-1", "onBeforeRedirect",
          "onBeforeRequest-2", "onBeforeSendHeaders-2", "onSendHeaders-2",
-         "onResponseStarted", "onCompleted"] ],
+         "onHeadersReceived-2", "onResponseStarted", "onCompleted"] ],
       {},  // filter
-      ["requestHeaders", "responseHeaders", "statusLine"]);
+      ["requestHeaders", "responseHeaders"]);
     navigateAndWait(getURLHttpSimpleLoadRedirect());
   },
 
@@ -154,9 +169,6 @@ runTests([
         { label: "onBeforeRequest",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
-            type: "main_frame",
             url: getURL("does_not_exist.html"),
             frameUrl: getURL("does_not_exist.html")
           }
@@ -174,6 +186,46 @@ runTests([
       [  // event order
         ["onBeforeRequest", "onErrorOccurred"] ]);
     navigateAndWait(getURL("does_not_exist.html"));
+  },
+
+  // Navigates to a page that we don't have access to, then a blank page.
+  // We should not see the first navigation.
+  function simpleLoadNonVisible() {
+    expect(
+      [  // events
+        { label: "a-onBeforeRequest",
+          event: "onBeforeRequest",
+          details: {
+            url: getURL("simpleLoad/a.html"),
+            frameUrl: getURL("simpleLoad/a.html")
+          }
+        },
+        { label: "a-onResponseStarted",
+          event: "onResponseStarted",
+          details: {
+            url: getURL("simpleLoad/a.html"),
+            statusCode: 200,
+            fromCache: false,
+            statusLine: "HTTP/1.1 200 OK",
+            // Request to chrome-extension:// url has no IP.
+          }
+        },
+        { label: "a-onCompleted",
+          event: "onCompleted",
+          details: {
+            url: getURL("simpleLoad/a.html"),
+            statusCode: 200,
+            fromCache: false,
+            statusLine: "HTTP/1.1 200 OK",
+            // Request to chrome-extension:// url has no IP.
+          }
+        },
+      ],
+      [  // event order
+      ["a-onBeforeRequest", "a-onResponseStarted", "a-onCompleted"] ]);
+    navigateAndWait(getURLNotVisible(), function() {
+      navigateAndWait(getURL("simpleLoad/a.html"));
+    });
   },
 ]);
 </script>

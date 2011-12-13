@@ -1,10 +1,6 @@
 <script src="framework.js">
 </script>
 <script>
-// Constants as functions, not to be called until after runTests.
-function getURLAuthRequired() {
-  return getServerURL('auth-basic');
-}
 function getURLHttpXHR() {
   return getServerURL('files/extensions/api_test/webrequest/xhr/a.html');
 }
@@ -20,8 +16,6 @@ runTests([
         { label: "a.html-onBeforeRequest",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
             type: "main_frame",
             url: getURL("complexLoad/a.html"),
             frameUrl: getURL("complexLoad/a.html")
@@ -30,8 +24,6 @@ runTests([
         { label: "b.html-onBeforeRequest",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
             type: "sub_frame",
             url: getURL("complexLoad/b.html"),
             frameUrl: getURL("complexLoad/b.html")
@@ -40,8 +32,6 @@ runTests([
         { label: "b.jpg-onBeforeRequest",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
             type: "image",
             url: getURL("complexLoad/b.jpg"),
             frameUrl: getURL("complexLoad/b.html")
@@ -50,54 +40,66 @@ runTests([
         { label: "a.html-onResponseStarted",
           event: "onResponseStarted",
           details: {
+            type: "main_frame",
             url: getURL("complexLoad/a.html"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "b.html-onResponseStarted",
           event: "onResponseStarted",
           details: {
+            type: "sub_frame",
             url: getURL("complexLoad/b.html"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "b.jpg-onResponseStarted",
           event: "onResponseStarted",
           details: {
+            type: "image",
             url: getURL("complexLoad/b.jpg"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "a.html-onCompleted",
           event: "onCompleted",
           details: {
+            type: "main_frame",
             url: getURL("complexLoad/a.html"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "b.html-onCompleted",
           event: "onCompleted",
           details: {
+            type: "sub_frame",
             url: getURL("complexLoad/b.html"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "b.jpg-onCompleted",
           event: "onCompleted",
           details: {
+            type: "image",
             url: getURL("complexLoad/b.jpg"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
@@ -121,8 +123,6 @@ runTests([
         { label: "a-onBeforeRequest",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
             type: "main_frame",
             url: getURL("complexLoad/a.html"),
             frameUrl: getURL("complexLoad/a.html")
@@ -131,8 +131,6 @@ runTests([
         { label: "b-onBeforeRequest",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
             type: "image",
             url: getURL("complexLoad/b.jpg"),
             // As we do not listed to sub-frames we do not know the frameUrl.
@@ -142,36 +140,44 @@ runTests([
         { label: "a-onResponseStarted",
           event: "onResponseStarted",
           details: {
+            type: "main_frame",
             url: getURL("complexLoad/a.html"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "b-onResponseStarted",
           event: "onResponseStarted",
           details: {
+            type: "image",
             url: getURL("complexLoad/b.jpg"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "a-onCompleted",
           event: "onCompleted",
           details: {
+            type: "main_frame",
             url: getURL("complexLoad/a.html"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
         { label: "b-onCompleted",
           event: "onCompleted",
           details: {
+            type: "image",
             url: getURL("complexLoad/b.jpg"),
             fromCache: false,
-            statusCode: 200
+            statusCode: 200,
+            statusLine: "HTTP/1.1 200 OK",
             // Request to chrome-extension:// url has no IP.
           }
         },
@@ -193,69 +199,6 @@ runTests([
     });
   },
 
-  // Loads a testserver page that requires authentication.
-  function authRequired() {
-    expect(
-      [  // events
-        { label: "onBeforeRequest",
-          event: "onBeforeRequest",
-          details: {
-            method: "GET",
-            tabId: tabId,
-            type: "main_frame",
-            url: getURLAuthRequired(),
-            frameUrl: getURLAuthRequired()
-          }
-        },
-        { label: "onBeforeSendHeaders",
-          event: "onBeforeSendHeaders",
-          details: {
-            url: getURLAuthRequired(),
-            // Note: no requestHeaders because we don't ask for them.
-          },
-        },
-        { label: "onSendHeaders",
-          event: "onSendHeaders",
-          details: {
-            url: getURLAuthRequired(),
-          }
-        },
-        { label: "onAuthRequired",
-          event: "onAuthRequired",
-          details: {
-            url: getURLAuthRequired(),
-            isProxy: false,
-            scheme: "basic",
-            realm: "testrealm",
-          }
-        },
-        { label: "onResponseStarted",
-          event: "onResponseStarted",
-          details: {
-            url: getURLAuthRequired(),
-            fromCache: false,
-            statusCode: 401,
-            ip: "127.0.0.1"
-          }
-        },
-        { label: "onCompleted",
-          event: "onCompleted",
-          details: {
-            url: getURLAuthRequired(),
-            fromCache: false,
-            statusCode: 401,
-            ip: "127.0.0.1"
-          }
-        },
-      ],
-      [  // event order
-        ["onBeforeRequest", "onBeforeSendHeaders", "onSendHeaders",
-         "onAuthRequired", "onResponseStarted", "onCompleted"]
-      ],
-      {}, []);
-    navigateAndWait(getURLAuthRequired());
-  },
-
   // Navigates to a page to generates an XHR.
   function xhrLoad() {
     expect(
@@ -263,8 +206,6 @@ runTests([
         { label: "onBeforeRequest-1",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
             type: "main_frame",
             url: getURLHttpXHR(),
             frameUrl: getURLHttpXHR()
@@ -273,38 +214,50 @@ runTests([
         { label: "onBeforeSendHeaders-1",
           event: "onBeforeSendHeaders",
           details: {
+            type: "main_frame",
             url: getURLHttpXHR(),
           }
         },
         { label: "onSendHeaders-1",
           event: "onSendHeaders",
           details: {
+            type: "main_frame",
             url: getURLHttpXHR(),
+          }
+        },
+        { label: "onHeadersReceived-1",
+          event: "onHeadersReceived",
+          details: {
+            type: "main_frame",
+            url: getURLHttpXHR(),
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onResponseStarted-1",
           event: "onResponseStarted",
           details: {
+            type: "main_frame",
             url: getURLHttpXHR(),
             statusCode: 200,
             ip: "127.0.0.1",
             fromCache: false,
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onCompleted-1",
           event: "onCompleted",
           details: {
+            type: "main_frame",
             url: getURLHttpXHR(),
             statusCode: 200,
             ip: "127.0.0.1",
             fromCache: false,
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onBeforeRequest-2",
           event: "onBeforeRequest",
           details: {
-            method: "GET",
-            tabId: tabId,
             type: "xmlhttprequest",
             url: getURLHttpXHRData(),
             frameUrl: getURLHttpXHR()
@@ -313,39 +266,53 @@ runTests([
         { label: "onBeforeSendHeaders-2",
           event: "onBeforeSendHeaders",
           details: {
+            type: "xmlhttprequest",
             url: getURLHttpXHRData(),
           }
         },
         { label: "onSendHeaders-2",
           event: "onSendHeaders",
           details: {
+            type: "xmlhttprequest",
             url: getURLHttpXHRData(),
+          }
+        },
+        { label: "onHeadersReceived-2",
+          event: "onHeadersReceived",
+          details: {
+            type: "xmlhttprequest",
+            url: getURLHttpXHRData(),
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onResponseStarted-2",
           event: "onResponseStarted",
           details: {
+            type: "xmlhttprequest",
             url: getURLHttpXHRData(),
             statusCode: 200,
             ip: "127.0.0.1",
             fromCache: false,
+            statusLine: "HTTP/1.0 200 OK",
           }
         },
         { label: "onCompleted-2",
           event: "onCompleted",
           details: {
+            type: "xmlhttprequest",
             url: getURLHttpXHRData(),
             statusCode: 200,
             ip: "127.0.0.1",
             fromCache: false,
+            statusLine: "HTTP/1.0 200 OK",
           }
         }
       ],
       [  // event order
         ["onBeforeRequest-1", "onBeforeSendHeaders-1", "onSendHeaders-1",
-         "onResponseStarted-1", "onCompleted-1",
+         "onHeadersReceived-1", "onResponseStarted-1", "onCompleted-1",
          "onBeforeRequest-2", "onBeforeSendHeaders-2", "onSendHeaders-2",
-         "onResponseStarted-2", "onCompleted-2"] ],
+         "onHeadersReceived-2", "onResponseStarted-2", "onCompleted-2"] ],
       {}, []);
     navigateAndWait(getURLHttpXHR());
   },

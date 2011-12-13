@@ -6,10 +6,6 @@
 
 #include <objidl.h>
 #include <winspool.h>
-#if defined(_WIN32_WINNT)
-#undef _WIN32_WINNT
-#endif  // defined(_WIN32_WINNT)
-#define _WIN32_WINNT _WIN32_WINNT_WIN7
 #include <xpsprint.h>
 
 #include "base/file_path.h"
@@ -28,6 +24,7 @@
 #include "printing/backend/win_helper.h"
 #include "printing/emf_win.h"
 #include "printing/page_range.h"
+#include "printing/pdf_render_settings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
 
@@ -135,6 +132,7 @@ class PrintSystemWatcherWin : public base::win::ObjectWatcher::Delegate {
 
   class Delegate {
    public:
+    virtual ~Delegate() {}
     virtual void OnPrinterAdded() = 0;
     virtual void OnPrinterDeleted() = 0;
     virtual void OnPrinterChanged() = 0;
@@ -367,6 +365,7 @@ class PrintSystemWin : public PrintSystem {
                           print_data_mime_type, printer_name, job_title,
                           delegate);
     }
+
    private:
     // We use a Core class because we want a separate RefCountedThreadSafe
     // implementation for ServiceUtilityProcessHost::Client.
@@ -421,9 +420,18 @@ class PrintSystemWin : public PrintSystem {
 
           printer_dc_.Set(dc);
           int printer_dpi = ::GetDeviceCaps(printer_dc_.Get(), LOGPIXELSX);
+          int offset_x = ::GetDeviceCaps(printer_dc_.Get(), PHYSICALOFFSETX);
+          int offset_y = ::GetDeviceCaps(printer_dc_.Get(), PHYSICALOFFSETY);
           saved_dc_ = SaveDC(printer_dc_.Get());
           SetGraphicsMode(printer_dc_.Get(), GM_ADVANCED);
+
+          // Setup the matrix to translate and scale to the right place. Take in
+          // account the actual shrinking factor.
+          // Note that the printing output is relative to printable area of
+          // the page. That is 0,0 is offset by PHYSICALOFFSETX/Y from the page.
           XFORM xform = {0};
+          xform.eDx = static_cast<float>(-offset_x);
+          xform.eDy = static_cast<float>(-offset_y);
           xform.eM11 = xform.eM22 = static_cast<float>(printer_dpi) /
               static_cast<float>(GetDeviceCaps(GetDC(NULL), LOGPIXELSX));
           ModifyWorldTransform(printer_dc_.Get(), &xform, MWT_LEFTMULTIPLY);
@@ -543,10 +551,15 @@ class PrintSystemWin : public PrintSystem {
             BelongsToCurrentThread());
         scoped_ptr<ServiceUtilityProcessHost> utility_host(
             new ServiceUtilityProcessHost(this, client_message_loop_proxy));
-        if (utility_host->StartRenderPDFPagesToMetafile(pdf_path,
-                                                        render_area,
-                                                        render_dpi,
-                                                        page_ranges)) {
+        // TODO(gene): For now we disabling autorotation for CloudPrinting.
+        // Landscape/Portrait setting is passed in the print ticket and
+        // server is generating portrait PDF always.
+        // We should enable autorotation once server will be able to generate
+        // PDF that matches paper size and orientation.
+        if (utility_host->StartRenderPDFPagesToMetafile(
+                pdf_path,
+                printing::PdfRenderSettings(render_area, render_dpi, false),
+                page_ranges)) {
           // The object will self-destruct when the child process dies.
           utility_host.release();
         }
@@ -622,7 +635,7 @@ class PrintSystemWin : public PrintSystem {
       PlatformJobId job_id_;
       PrintSystem::JobSpooler::Delegate* delegate_;
       int saved_dc_;
-      base::win::ScopedHDC printer_dc_;
+      base::win::ScopedCreateDC printer_dc_;
       FilePath print_data_file_path_;
       base::win::ScopedHandle job_progress_event_;
       base::win::ObjectWatcher job_progress_watcher_;
@@ -670,6 +683,7 @@ class PrintSystemWin : public PrintSystem {
       callback_.reset();
       Release();
     }
+
    private:
       // Called on the service process IO thread.
     void GetPrinterCapsAndDefaultsImpl(
@@ -799,7 +813,7 @@ bool PrintSystemWin::GetJobDetails(const std::string& printer_name,
     if (ERROR_INVALID_PARAMETER != last_error) {
       // ERROR_INVALID_PARAMETER normally means that the job id is not valid.
       DCHECK(last_error == ERROR_INSUFFICIENT_BUFFER);
-      scoped_ptr<BYTE> job_info_buffer(new BYTE[bytes_needed]);
+      scoped_array<BYTE> job_info_buffer(new BYTE[bytes_needed]);
       if (GetJob(printer_handle, job_id, 1, job_info_buffer.get(), bytes_needed,
                 &bytes_needed)) {
         JOB_INFO_1 *job_info =

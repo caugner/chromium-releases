@@ -7,24 +7,24 @@
 #include <algorithm>
 
 #include <cairo/cairo.h>
-#include <gtk/gtk.h>
 #include <pango/pango.h>
 #include <pango/pangocairo.h>
 
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
-#include "base/utf_string_conversions.h"
 #include "ui/gfx/font.h"
-#include "ui/gfx/gtk_util.h"
-#include "ui/gfx/platform_font_gtk.h"
+#include "ui/gfx/pango_util.h"
+#include "ui/gfx/platform_font_pango.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
+
+#if defined(TOOLKIT_USES_GTK)
+#include <gdk/gdk.h>
+#endif
 
 using std::max;
 
 namespace {
-
-const gunichar kAcceleratorChar = '&';
 
 // Multiply by the text height to determine how much text should be faded
 // when elliding.
@@ -35,159 +35,6 @@ const double kFadeFinalAlpha = 0.15;
 
 // Width of the border drawn around haloed text.
 const double kTextHaloWidth = 1.0;
-
-// Font settings that we initialize once and then use when drawing text in
-// DrawStringInt().
-cairo_font_options_t* cairo_font_options = NULL;
-
-// Update |cairo_font_options| based on GtkSettings, allocating it if needed.
-void UpdateCairoFontOptions() {
-  if (!cairo_font_options)
-    cairo_font_options = cairo_font_options_create();
-
-  gint antialias = 0;
-  gint hinting = 0;
-  gchar* hint_style = NULL;
-  gchar* rgba_style = NULL;
-
-#if !defined(USE_WAYLAND)
-  GtkSettings* gtk_settings = gtk_settings_get_default();
-  g_object_get(gtk_settings,
-               "gtk-xft-antialias", &antialias,
-               "gtk-xft-hinting", &hinting,
-               "gtk-xft-hintstyle", &hint_style,
-               "gtk-xft-rgba", &rgba_style,
-               NULL);
-#endif
-
-  // g_object_get() doesn't tell us whether the properties were present or not,
-  // but if they aren't (because gnome-settings-daemon isn't running), we'll get
-  // NULL values for the strings.
-  if (hint_style && rgba_style) {
-    if (!antialias) {
-      cairo_font_options_set_antialias(cairo_font_options,
-                                       CAIRO_ANTIALIAS_NONE);
-    } else if (strcmp(rgba_style, "none") == 0) {
-      cairo_font_options_set_antialias(cairo_font_options,
-                                       CAIRO_ANTIALIAS_GRAY);
-    } else {
-      cairo_font_options_set_antialias(cairo_font_options,
-                                       CAIRO_ANTIALIAS_SUBPIXEL);
-      cairo_subpixel_order_t cairo_subpixel_order =
-          CAIRO_SUBPIXEL_ORDER_DEFAULT;
-      if (strcmp(rgba_style, "rgb") == 0) {
-        cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_RGB;
-      } else if (strcmp(rgba_style, "bgr") == 0) {
-        cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_BGR;
-      } else if (strcmp(rgba_style, "vrgb") == 0) {
-        cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_VRGB;
-      } else if (strcmp(rgba_style, "vbgr") == 0) {
-        cairo_subpixel_order = CAIRO_SUBPIXEL_ORDER_VBGR;
-      }
-      cairo_font_options_set_subpixel_order(cairo_font_options,
-                                            cairo_subpixel_order);
-    }
-
-    cairo_hint_style_t cairo_hint_style = CAIRO_HINT_STYLE_DEFAULT;
-    if (hinting == 0 || strcmp(hint_style, "hintnone") == 0) {
-      cairo_hint_style = CAIRO_HINT_STYLE_NONE;
-    } else if (strcmp(hint_style, "hintslight") == 0) {
-      cairo_hint_style = CAIRO_HINT_STYLE_SLIGHT;
-    } else if (strcmp(hint_style, "hintmedium") == 0) {
-      cairo_hint_style = CAIRO_HINT_STYLE_MEDIUM;
-    } else if (strcmp(hint_style, "hintfull") == 0) {
-      cairo_hint_style = CAIRO_HINT_STYLE_FULL;
-    }
-    cairo_font_options_set_hint_style(cairo_font_options, cairo_hint_style);
-  }
-
-  if (hint_style)
-    g_free(hint_style);
-  if (rgba_style)
-    g_free(rgba_style);
-}
-
-// Pass a width > 0 to force wrapping and elliding.
-void SetupPangoLayout(PangoLayout* layout,
-                      const string16& text,
-                      const gfx::Font& font,
-                      int width,
-                      base::i18n::TextDirection text_direction,
-                      int flags) {
-  if (!cairo_font_options)
-    UpdateCairoFontOptions();
-  // This needs to be done early on; it has no effect when called just before
-  // pango_cairo_show_layout().
-  pango_cairo_context_set_font_options(
-      pango_layout_get_context(layout), cairo_font_options);
-
-  // Callers of DrawStringInt handle RTL layout themselves, so tell pango to not
-  // scope out RTL characters.
-  pango_layout_set_auto_dir(layout, FALSE);
-
-  if (width > 0)
-    pango_layout_set_width(layout, width * PANGO_SCALE);
-
-  if (flags & gfx::Canvas::TEXT_ALIGN_CENTER) {
-    // We don't support center aligned w/ eliding.
-    DCHECK(gfx::Canvas::NO_ELLIPSIS);
-    pango_layout_set_alignment(layout, PANGO_ALIGN_CENTER);
-  } else if (flags & gfx::Canvas::TEXT_ALIGN_RIGHT) {
-    pango_layout_set_alignment(layout, PANGO_ALIGN_RIGHT);
-  }
-
-  if (flags & gfx::Canvas::NO_ELLIPSIS) {
-    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
-    if (flags & gfx::Canvas::MULTI_LINE) {
-      pango_layout_set_wrap(layout,
-          (flags & gfx::Canvas::CHARACTER_BREAK) ?
-              PANGO_WRAP_WORD_CHAR : PANGO_WRAP_WORD);
-    }
-  } else if (text_direction == base::i18n::RIGHT_TO_LEFT){
-    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
-  } else {
-    // Fading the text will be handled in the draw operation.
-    // that the text is only on one line.
-    pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_NONE);
-    pango_layout_set_width(layout, -1);
-  }
-
-  // Set the resolution to match that used by Gtk. If we don't set the
-  // resolution and the resolution differs from the default, Gtk and Chrome end
-  // up drawing at different sizes.
-  double resolution = gfx::GetPangoResolution();
-  if (resolution > 0) {
-    pango_cairo_context_set_resolution(pango_layout_get_context(layout),
-                                       resolution);
-  }
-
-  PangoFontDescription* desc = font.GetNativeFont();
-  pango_layout_set_font_description(layout, desc);
-  pango_font_description_free(desc);
-
-  // Set text and accelerator character if needed.
-  std::string utf8 = UTF16ToUTF8(text);
-  if (flags & gfx::Canvas::SHOW_PREFIX) {
-    // Escape the text string to be used as markup.
-    gchar* escaped_text = g_markup_escape_text(utf8.c_str(), utf8.size());
-    pango_layout_set_markup_with_accel(layout,
-                                       escaped_text,
-                                       strlen(escaped_text),
-                                       kAcceleratorChar, NULL);
-    g_free(escaped_text);
-  } else if (flags & gfx::Canvas::HIDE_PREFIX) {
-    // Remove the ampersand character.  A double ampersand is output as
-    // a single ampersand.
-    DCHECK_EQ(1, g_unichar_to_utf8(kAcceleratorChar, NULL));
-    const std::string accelerator_removed =
-        gfx::RemoveAcceleratorChar(utf8, static_cast<char>(kAcceleratorChar));
-
-    pango_layout_set_text(layout,
-        accelerator_removed.data(), accelerator_removed.size());
-  } else {
-    pango_layout_set_text(layout, utf8.data(), utf8.size());
-  }
-}
 
 // A class to encapsulate string drawing params and operations.
 class DrawStringContext {
@@ -246,10 +93,10 @@ DrawStringContext::DrawStringContext(gfx::CanvasSkia* canvas,
       text_direction_(base::i18n::GetFirstStrongCharacterDirection(text)) {
   DCHECK(!bounds_.IsEmpty());
 
-  cr_ = skia::BeginPlatformPaint(canvas_);
+  cr_ = skia::BeginPlatformPaint(canvas_->sk_canvas());
   layout_ = pango_cairo_create_layout(cr_);
 
-  SetupPangoLayout(
+  gfx::SetupPangoLayout(
       layout_, text, font, bounds_.width(), text_direction_, flags_);
 
   pango_layout_set_height(layout_, bounds_.height() * PANGO_SCALE);
@@ -273,7 +120,7 @@ DrawStringContext::DrawStringContext(gfx::CanvasSkia* canvas,
 
 DrawStringContext::~DrawStringContext() {
   cairo_restore(cr_);
-  skia::EndPlatformPaint(canvas_);
+  skia::EndPlatformPaint(canvas_->sk_canvas());
   g_object_unref(layout_);
   // NOTE: BeginPlatformPaint returned its surface, we shouldn't destroy it.
 }
@@ -329,7 +176,7 @@ void DrawStringContext::DrawWithHalo(const SkColor& text_color,
       0, 0, bounds_.width() + 2, bounds_.height() + 2);
 
   {
-    skia::ScopedPlatformPaint scoped_platform_paint(&text_canvas);
+    skia::ScopedPlatformPaint scoped_platform_paint(text_canvas.sk_canvas());
     cairo_t* text_cr = scoped_platform_paint.GetPlatformSurface();
 
     // TODO: The current approach (stroking the text path to generate the halo
@@ -369,13 +216,13 @@ void DrawStringContext::DrawWithHalo(const SkColor& text_color,
   }
 
   const SkBitmap& text_bitmap = const_cast<SkBitmap&>(
-      skia::GetTopDevice(text_canvas)->accessBitmap(false));
+      skia::GetTopDevice(*text_canvas.sk_canvas())->accessBitmap(false));
   canvas_->DrawBitmapInt(text_bitmap, text_x_ - 1, text_y_ - 1);
 }
 
 void DrawStringContext::DrawUnderline(cairo_t* cr, double extra_edge_width) {
-  gfx::PlatformFontGtk* platform_font =
-      static_cast<gfx::PlatformFontGtk*>(font_.platform_font());
+  gfx::PlatformFontPango* platform_font =
+      static_cast<gfx::PlatformFontPango*>(font_.platform_font());
   const double underline_y =
       static_cast<double>(text_y_) + text_height_ +
       platform_font->underline_position();
@@ -389,16 +236,6 @@ void DrawStringContext::DrawUnderline(cairo_t* cr, double extra_edge_width) {
 }  // namespace
 
 namespace gfx {
-
-CanvasSkia::CanvasSkia(int width, int height, bool is_opaque)
-    : skia::PlatformCanvas(width, height, is_opaque) {
-}
-
-CanvasSkia::CanvasSkia() : skia::PlatformCanvas() {
-}
-
-CanvasSkia::~CanvasSkia() {
-}
 
 // static
 void CanvasSkia::SizeStringInt(const string16& text,
@@ -422,8 +259,8 @@ void CanvasSkia::SizeStringInt(const string16& text,
   pango_layout_get_pixel_size(layout, width, height);
 
   if (font.GetStyle() & gfx::Font::UNDERLINED) {
-    gfx::PlatformFontGtk* platform_font =
-        static_cast<gfx::PlatformFontGtk*>(font.platform_font());
+    gfx::PlatformFontPango* platform_font =
+        static_cast<gfx::PlatformFontPango*>(font.platform_font());
     *height += max(platform_font->underline_position() +
                    platform_font->underline_thickness(), 0.0);
   }
@@ -484,17 +321,19 @@ void CanvasSkia::DrawStringInt(const string16& text,
   context.Draw(color);
 }
 
+#if defined(TOOLKIT_USES_GTK)
 void CanvasSkia::DrawGdkPixbuf(GdkPixbuf* pixbuf, int x, int y) {
   if (!pixbuf) {
     NOTREACHED();
     return;
   }
 
-  skia::ScopedPlatformPaint scoped_platform_paint(this);
+  skia::ScopedPlatformPaint scoped_platform_paint(canvas_);
   cairo_t* cr = scoped_platform_paint.GetPlatformSurface();
   gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
   cairo_paint(cr);
 }
+#endif  // defined(TOOLKIT_USES_GTK)
 
 ui::TextureID CanvasSkia::GetTextureID() {
   // TODO(wjmaclean)

@@ -4,6 +4,7 @@
 
 #include "webkit/fileapi/file_writer_delegate.h"
 
+#include "base/bind.h"
 #include "base/file_util_proxy.h"
 #include "base/message_loop.h"
 #include "base/threading/thread_restrictions.h"
@@ -94,8 +95,6 @@ FileWriterDelegate::FileWriterDelegate(
       total_bytes_written_(0),
       allowed_bytes_to_write_(0),
       io_buffer_(new net::IOBufferWithSize(kReadBufSize)),
-      io_callback_(ALLOW_THIS_IN_INITIALIZER_LIST(this),
-                   &FileWriterDelegate::OnDataWritten),
       method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
@@ -112,19 +111,12 @@ void FileWriterDelegate::OnGetFileInfoAndCallStartUpdate(
   }
   int64 allowed_bytes_growth =
       file_system_operation_context()->allowed_bytes_growth();
-  if (allowed_bytes_growth == QuotaFileUtil::kNoLimit ||
-      file_system_operation_->file_system_context()->IsStorageUnlimited(
-          file_system_operation_context()->src_origin_url())) {
-    // TODO(kinuko): kNoLimit is kint64max therefore all the calculation/
-    // comparison with the value should just work, but we should drop
-    // such implicit assumption and should use an explicit boolean flag
-    // or something.
-    allowed_bytes_to_write_ = QuotaFileUtil::kNoLimit;
-  } else {
-    if (allowed_bytes_growth < 0)
-      allowed_bytes_growth = 0;
-    allowed_bytes_to_write_ = file_info.size - offset_ + allowed_bytes_growth;
-  }
+  if (allowed_bytes_growth < 0)
+    allowed_bytes_growth = 0;
+  int64 overlap = file_info.size - offset_;
+  allowed_bytes_to_write_ = allowed_bytes_growth;
+  if (kint64max - overlap > allowed_bytes_growth)
+    allowed_bytes_to_write_ += overlap;
   size_ = file_info.size;
   file_stream_.reset(new net::FileStream(file_,
       base::PLATFORM_FILE_OPEN | base::PLATFORM_FILE_WRITE |
@@ -144,26 +136,29 @@ void FileWriterDelegate::Start(base::PlatformFile file,
   relay->Start(proxy_, FROM_HERE);
 }
 
-void FileWriterDelegate::OnReceivedRedirect(
-    net::URLRequest* request, const GURL& new_url, bool* defer_redirect) {
+void FileWriterDelegate::OnReceivedRedirect(net::URLRequest* request,
+                                            const GURL& new_url,
+                                            bool* defer_redirect) {
   NOTREACHED();
   OnError(base::PLATFORM_FILE_ERROR_SECURITY);
 }
 
-void FileWriterDelegate::OnAuthRequired(
-    net::URLRequest* request, net::AuthChallengeInfo* auth_info) {
+void FileWriterDelegate::OnAuthRequired(net::URLRequest* request,
+                                        net::AuthChallengeInfo* auth_info) {
   NOTREACHED();
   OnError(base::PLATFORM_FILE_ERROR_SECURITY);
 }
 
 void FileWriterDelegate::OnCertificateRequested(
-    net::URLRequest* request, net::SSLCertRequestInfo* cert_request_info) {
+    net::URLRequest* request,
+    net::SSLCertRequestInfo* cert_request_info) {
   NOTREACHED();
   OnError(base::PLATFORM_FILE_ERROR_SECURITY);
 }
 
-void FileWriterDelegate::OnSSLCertificateError(
-    net::URLRequest* request, int cert_error, net::X509Certificate* cert) {
+void FileWriterDelegate::OnSSLCertificateError(net::URLRequest* request,
+                                               const net::SSLInfo& ssl_info,
+                                               bool is_hsts_host) {
   NOTREACHED();
   OnError(base::PLATFORM_FILE_ERROR_SECURITY);
 }
@@ -236,9 +231,11 @@ void FileWriterDelegate::Write() {
   if (bytes_to_write > allowed_bytes_to_write_ - total_bytes_written_)
     bytes_to_write = allowed_bytes_to_write_ - total_bytes_written_;
 
-  int write_response = file_stream_->Write(io_buffer_->data() + bytes_written_,
-                                           static_cast<int>(bytes_to_write),
-                                           &io_callback_);
+  int write_response =
+      file_stream_->Write(io_buffer_->data() + bytes_written_,
+                          static_cast<int>(bytes_to_write),
+                          base::Bind(&FileWriterDelegate::OnDataWritten,
+                                     base::Unretained(this)));
   if (write_response > 0)
     MessageLoop::current()->PostTask(
         FROM_HERE,

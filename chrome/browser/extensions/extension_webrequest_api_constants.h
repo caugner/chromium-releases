@@ -11,11 +11,14 @@
 namespace extension_webrequest_api_constants {
 
 // Keys.
+extern const char kChallengerKey[];
 extern const char kErrorKey[];
 extern const char kFrameIdKey[];
 extern const char kFromCache[];
+extern const char kHostKey[];
 extern const char kIpKey[];
 extern const char kMethodKey[];
+extern const char kPortKey[];
 extern const char kRedirectUrlKey[];
 extern const char kRequestIdKey[];
 extern const char kStatusCodeKey[];
@@ -32,6 +35,9 @@ extern const char kHeaderValueKey[];
 extern const char kIsProxyKey[];
 extern const char kSchemeKey[];
 extern const char kRealmKey[];
+extern const char kAuthCredentialsKey[];
+extern const char kUsernameKey[];
+extern const char kPasswordKey[];
 
 // Events.
 extern const char kOnAuthRequired[];
@@ -40,6 +46,7 @@ extern const char kOnBeforeRequest[];
 extern const char kOnBeforeSendHeaders[];
 extern const char kOnCompleted[];
 extern const char kOnErrorOccurred[];
+extern const char kOnHeadersReceived[];
 extern const char kOnResponseStarted[];
 extern const char kOnSendHeaders[];
 

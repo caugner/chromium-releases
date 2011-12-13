@@ -5,7 +5,10 @@
 #include "chrome/browser/ui/webui/sessions_ui.h"
 
 #include <algorithm>
+#include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/session_model_associator.h"
 #include "chrome/browser/sync/glue/synced_session.h"
@@ -14,7 +17,6 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/chrome_version_info.h"
-#include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/web_ui.h"
@@ -78,8 +80,9 @@ class SessionsDOMHandler : public WebUIMessageHandler {
   void GetTabList(const std::vector<SessionTab*>& tabs, ListValue* tab_list);
 
   // Appends each entry in |windows| to |window_list| as a DictonaryValue.
-  void GetWindowList(const std::vector<SessionWindow*>& windows,
-                     ListValue* window_list);
+  void GetWindowList(
+      const browser_sync::SyncedSession::SyncedWindowMap& windows,
+      ListValue* window_list);
 
   // Appends each entry in |sessions| to |session_list| as a DictonaryValue.
   void GetSessionList(
@@ -111,7 +114,8 @@ WebUIMessageHandler* SessionsDOMHandler::Attach(WebUI* web_ui) {
 
 void SessionsDOMHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("requestSessionList",
-      NewCallback(this, &SessionsDOMHandler::HandleRequestSessions));
+      base::Bind(&SessionsDOMHandler::HandleRequestSessions,
+                 base::Unretained(this)));
 }
 
 void SessionsDOMHandler::HandleRequestSessions(const ListValue* args) {
@@ -156,10 +160,11 @@ void SessionsDOMHandler::GetTabList(
 }
 
 void SessionsDOMHandler::GetWindowList(
-    const std::vector<SessionWindow*>& windows, ListValue* window_list) {
-  for (std::vector<SessionWindow*>::const_iterator it =
+    const browser_sync::SyncedSession::SyncedWindowMap& windows,
+    ListValue* window_list) {
+  for (browser_sync::SyncedSession::SyncedWindowMap::const_iterator it =
       windows.begin(); it != windows.end(); ++it) {
-    const SessionWindow* window = *it;
+    const SessionWindow* window = it->second;
     scoped_ptr<DictionaryValue> window_data(new DictionaryValue());
     window_data->SetInteger("id", window->window_id.id());
     window_data->SetDouble("timestamp",
@@ -190,9 +195,12 @@ void SessionsDOMHandler::GetAllTabs(
     const std::vector<const browser_sync::SyncedSession*>& sessions,
     std::vector<SessionTab*>* all_tabs) {
   for (size_t i = 0; i < sessions.size(); i++) {
-    const std::vector<SessionWindow*>& windows = sessions[i]->windows;
-    for (size_t j = 0; j < windows.size(); j++) {
-      const std::vector<SessionTab*>& tabs = windows[j]->tabs;
+    const browser_sync::SyncedSession::SyncedWindowMap& windows =
+        sessions[i]->windows;
+    for (browser_sync::SyncedSession::SyncedWindowMap::const_iterator iter =
+             windows.begin();
+         iter != windows.end(); ++iter) {
+      const std::vector<SessionTab*>& tabs = iter->second->tabs;
       all_tabs->insert(all_tabs->end(), tabs.begin(), tabs.end());
     }
   }

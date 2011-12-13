@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/webui/chromeos/keyboard_overlay_ui.h"
 
-#include "base/callback.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
@@ -156,6 +157,9 @@ struct I18nContentToMessage {
     IDS_KEYBOARD_OVERLAY_TOGGLE_ACCESSIBILITY_FEATURES },
   { "keyboardOverlayToggleBookmarkBar",
     IDS_KEYBOARD_OVERLAY_TOGGLE_BOOKMARK_BAR },
+  { "keyboardOverlayToggleCapsLock", IDS_KEYBOARD_OVERLAY_TOGGLE_CAPS_LOCK },
+  { "keyboardOverlayToggleSpeechInput",
+    IDS_KEYBOARD_OVERLAY_TOGGLE_SPEECH_INPUT },
   { "keyboardOverlayUndo", IDS_KEYBOARD_OVERLAY_UNDO },
   { "keyboardOverlayViewKeyboardOverlay",
     IDS_KEYBOARD_OVERLAY_VIEW_KEYBOARD_OVERLAY },
@@ -271,9 +275,11 @@ WebUIMessageHandler* KeyboardOverlayHandler::Attach(WebUI* web_ui) {
 void KeyboardOverlayHandler::RegisterMessages() {
   DCHECK(web_ui_);
   web_ui_->RegisterMessageCallback("getInputMethodId",
-      NewCallback(this, &KeyboardOverlayHandler::GetInputMethodId));
+      base::Bind(&KeyboardOverlayHandler::GetInputMethodId,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("getLabelMap",
-      NewCallback(this, &KeyboardOverlayHandler::GetLabelMap));
+      base::Bind(&KeyboardOverlayHandler::GetLabelMap,
+                 base::Unretained(this)));
 }
 
 void KeyboardOverlayHandler::GetInputMethodId(const ListValue* args) {

@@ -55,9 +55,7 @@ class ProviderTypeComboboxModel : public ui::ComboboxModel {
   ProviderTypeComboboxModel() {}
   virtual ~ProviderTypeComboboxModel() {}
   virtual int GetItemCount() {
-    // TODO(stevenjb): Include OpenVPN option once enabled.
-    return PROVIDER_TYPE_L2TP_IPSEC_USER_CERT + 1;
-    // return VirtualNetwork::PROVIDER_TYPE_MAX;
+    return chromeos::PROVIDER_TYPE_MAX;
   }
   virtual string16 GetItemAt(int index) {
     ProviderType type = static_cast<ProviderType>(index);
@@ -89,6 +87,7 @@ class ServerCACertComboboxModel : public ui::ComboboxModel {
     int cert_index = combo_index - 1;
     return cert_library_->GetCACertificates().GetDisplayStringAt(cert_index);
   }
+
  private:
   CertLibrary* cert_library_;
   DISALLOW_COPY_AND_ASSIGN(ServerCACertComboboxModel);
@@ -117,6 +116,7 @@ class UserCertComboboxModel : public ui::ComboboxModel {
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_USER_CERT_NONE_INSTALLED);
     return cert_library_->GetUserCertificates().GetDisplayStringAt(combo_index);
   }
+
  private:
   CertLibrary* cert_library_;
   DISALLOW_COPY_AND_ASSIGN(UserCertComboboxModel);
@@ -140,7 +140,10 @@ VPNConfigView::~VPNConfigView() {
 }
 
 string16 VPNConfigView::GetTitle() {
-  return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_ADD_VPN);
+  if (service_path_.empty())
+    return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_ADD_VPN);
+  else
+    return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_JOIN_VPN);
 }
 
 bool VPNConfigView::CanLogin() {
@@ -217,30 +220,34 @@ void VPNConfigView::OnCertificatesLoaded(bool initial_load) {
 bool VPNConfigView::Login() {
   NetworkLibrary* cros = CrosLibrary::Get()->GetNetworkLibrary();
   if (service_path_.empty()) {
+    NetworkLibrary::VPNConfigData config_data;
     switch (provider_type_) {
       case PROVIDER_TYPE_L2TP_IPSEC_PSK:
-        cros->ConnectToVirtualNetworkPSK(GetService(),
-                                         GetServer(),
-                                         GetPSKPassphrase(),
-                                         GetUsername(),
-                                         GetUserPassphrase());
+        config_data.psk = GetPSKPassphrase();
+        config_data.username = GetUsername();
+        config_data.user_passphrase = GetUserPassphrase();
+        config_data.group_name = GetGroupName();
         break;
       case PROVIDER_TYPE_L2TP_IPSEC_USER_CERT: {
-        cros->ConnectToVirtualNetworkCert(GetService(),
-                                          GetServer(),
-                                          GetServerCACertNssNickname(),
-                                          GetUserCertID(),
-                                          GetUsername(),
-                                          GetUserPassphrase());
+        config_data.server_ca_cert_nss_nickname = GetServerCACertNssNickname();
+        config_data.client_cert_pkcs11_id = GetUserCertID();
+        config_data.username = GetUsername();
+        config_data.user_passphrase = GetUserPassphrase();
+        config_data.group_name = GetGroupName();
         break;
       }
       case PROVIDER_TYPE_OPEN_VPN:
-        // TODO(stevenjb): Add support for OpenVPN.
-        LOG(WARNING) << "Unsupported provider type: " << provider_type_;
+        config_data.server_ca_cert_nss_nickname = GetServerCACertNssNickname();
+        config_data.client_cert_pkcs11_id = GetUserCertID();
+        config_data.username = GetUsername();
+        config_data.user_passphrase = GetUserPassphrase();
+        config_data.otp = GetOTP();
         break;
       case PROVIDER_TYPE_MAX:
         break;
     }
+    cros->ConnectToUnconfiguredVirtualNetwork(
+        GetService(), GetServer(), provider_type_, config_data);
   } else {
     VirtualNetwork* vpn = cros->FindVirtualNetworkByPath(service_path_);
     if (!vpn) {
@@ -250,22 +257,28 @@ bool VPNConfigView::Login() {
     }
     switch (provider_type_) {
       case PROVIDER_TYPE_L2TP_IPSEC_PSK:
-        vpn->SetPSKPassphrase(GetPSKPassphrase());
+        vpn->SetL2TPIPsecPSKCredentials(GetPSKPassphrase(),
+                                        GetUsername(),
+                                        GetUserPassphrase(),
+                                        GetGroupName());
         break;
       case PROVIDER_TYPE_L2TP_IPSEC_USER_CERT: {
-        vpn->SetClientCertID(GetUserCertID());
+        vpn->SetL2TPIPsecCertCredentials(GetUserCertID(),
+                                         GetUsername(),
+                                         GetUserPassphrase(),
+                                         GetGroupName());
         break;
       }
       case PROVIDER_TYPE_OPEN_VPN: {
-        LOG(WARNING) << "OpenVPN not yet supported.";
+        vpn->SetOpenVPNCredentials(GetUserCertID(),
+                                   GetUsername(),
+                                   GetUserPassphrase(),
+                                   GetOTP());
         break;
       }
       case PROVIDER_TYPE_MAX:
         break;
     }
-    vpn->SetUsername(GetUsername());
-    vpn->SetUserPassphrase(GetUserPassphrase());
-
     cros->ConnectToVirtualNetwork(vpn);
   }
   // Connection failures are responsible for updating the UI, including
@@ -305,7 +318,8 @@ const std::string VPNConfigView::GetServer() const {
 }
 
 const std::string VPNConfigView::GetPSKPassphrase() const {
-  if (psk_passphrase_textfield_->IsEnabled() &&
+  if (psk_passphrase_textfield_ &&
+      psk_passphrase_textfield_->IsEnabled() &&
       psk_passphrase_textfield_->IsVisible())
     return GetTextFromField(psk_passphrase_textfield_, false);
   return std::string();
@@ -319,29 +333,37 @@ const std::string VPNConfigView::GetUserPassphrase() const {
   return GetTextFromField(user_passphrase_textfield_, false);
 }
 
+const std::string VPNConfigView::GetGroupName() const {
+  return GetTextFromField(group_name_textfield_, false);
+}
+
+const std::string VPNConfigView::GetOTP() const {
+  return GetTextFromField(otp_textfield_, true);
+}
+
 const std::string VPNConfigView::GetServerCACertNssNickname() const {
-  DCHECK(server_ca_cert_combobox_);
   DCHECK(cert_library_);
-  int selected = server_ca_cert_combobox_->selected_item();
+  int selected =
+      server_ca_cert_combobox_ ? server_ca_cert_combobox_->selected_item() : 0;
   if (selected == 0) {
     // First item is "Default".
     return std::string();
   } else {
     DCHECK(cert_library_);
-    DCHECK(cert_library_->GetCACertificates().Size() > 0);
+    DCHECK_GT(cert_library_->GetCACertificates().Size(), 0);
     int cert_index = selected - 1;
     return cert_library_->GetCACertificates().GetNicknameAt(cert_index);
   }
 }
 
 const std::string VPNConfigView::GetUserCertID() const {
-  DCHECK(user_cert_combobox_);
   DCHECK(cert_library_);
   if (!HaveUserCerts()) {
     return std::string();  // "None installed"
   } else {
     // Certificates are listed in the order they appear in the model.
-    int selected = user_cert_combobox_->selected_item();
+    int selected =
+        user_cert_combobox_ ? user_cert_combobox_->selected_item() : 0;
     return cert_library_->GetUserCertificates().GetPkcs11IdAt(selected);
   }
 }
@@ -369,39 +391,47 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
 
   // Initialize members.
   service_text_modified_ = false;
-  provider_type_ = vpn ?
-      vpn->provider_type() :
-      chromeos::PROVIDER_TYPE_L2TP_IPSEC_PSK;
+  if (vpn) {
+    provider_type_ = vpn->provider_type();
+    // Sets enable_* based on the provider type which we use to control
+    // which controls to make visible.
+    UpdateControlsToEnable();
+  } else {
+    // Set the default provider type.
+    provider_type_ = chromeos::PROVIDER_TYPE_L2TP_IPSEC_PSK;
+    // Provider Type is user selectable, so enable all controls during init.
+    enable_psk_passphrase_ = true;
+    enable_user_cert_ = true;
+    enable_server_ca_cert_ = true;
+    enable_otp_ = true;
+    enable_group_name_ = true;
+  }
 
   // Server label and input.
-  layout->StartRow(0, column_view_set_id);
-  layout->AddView(new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_SERVER_HOSTNAME))));
+  // Only provide Server name when configuring a new VPN.
   if (!vpn) {
+    layout->StartRow(0, column_view_set_id);
+    layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_SERVER_HOSTNAME)));
     server_textfield_ = new views::Textfield(views::Textfield::STYLE_DEFAULT);
     server_textfield_->SetController(this);
     layout->AddView(server_textfield_);
-    server_text_ = NULL;
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
   } else {
-    server_hostname_ = vpn->server_hostname();
-    server_text_ = new views::Label(UTF8ToWide(server_hostname_));
-    server_text_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-    layout->AddView(server_text_);
     server_textfield_ = NULL;
   }
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   // Service label and name or input.
   layout->StartRow(0, column_view_set_id);
-  layout->AddView(new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_SERVICE_NAME))));
+  layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_SERVICE_NAME)));
   if (!vpn) {
     service_textfield_ = new views::Textfield(views::Textfield::STYLE_DEFAULT);
     service_textfield_->SetController(this);
     layout->AddView(service_textfield_);
     service_text_ = NULL;
   } else {
-    service_text_ = new views::Label(ASCIIToWide(vpn->name()));
+    service_text_ = new views::Label(ASCIIToUTF16(vpn->name()));
     service_text_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     layout->AddView(service_text_);
     service_textfield_ = NULL;
@@ -410,8 +440,8 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
 
   // Provider type label and select.
   layout->StartRow(0, column_view_set_id);
-  layout->AddView(new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PROVIDER_TYPE))));
+  layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PROVIDER_TYPE)));
   if (!vpn) {
     provider_type_combobox_ =
         new views::Combobox(new ProviderTypeComboboxModel());
@@ -420,7 +450,7 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
     provider_type_text_label_ = NULL;
   } else {
     provider_type_text_label_ =
-        new views::Label(UTF16ToWide(ProviderTypeToString(provider_type_)));
+        new views::Label(ProviderTypeToString(provider_type_));
     provider_type_text_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
     layout->AddView(provider_type_text_label_);
     provider_type_combobox_ = NULL;
@@ -428,47 +458,62 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   // PSK passphrase label, input and visible button.
-  layout->StartRow(0, column_view_set_id);
-  psk_passphrase_label_ =  new views::Label(UTF16ToWide(
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PSK_PASSPHRASE)));
-  layout->AddView(psk_passphrase_label_);
-  psk_passphrase_textfield_ = new views::Textfield(
-      views::Textfield::STYLE_PASSWORD);
-  psk_passphrase_textfield_->SetController(this);
-  if (vpn && !vpn->psk_passphrase().empty())
-    psk_passphrase_textfield_->SetText(UTF8ToUTF16(vpn->psk_passphrase()));
-  layout->AddView(psk_passphrase_textfield_);
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  if (enable_psk_passphrase_) {
+    layout->StartRow(0, column_view_set_id);
+    psk_passphrase_label_ =  new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PSK_PASSPHRASE));
+    layout->AddView(psk_passphrase_label_);
+    psk_passphrase_textfield_ = new views::Textfield(
+        views::Textfield::STYLE_PASSWORD);
+    psk_passphrase_textfield_->SetController(this);
+    if (vpn && !vpn->psk_passphrase().empty())
+      psk_passphrase_textfield_->SetText(UTF8ToUTF16(vpn->psk_passphrase()));
+    layout->AddView(psk_passphrase_textfield_);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  } else {
+    psk_passphrase_label_ = NULL;
+    psk_passphrase_textfield_ = NULL;
+  }
 
   // Server CA certificate
-  layout->StartRow(0, column_view_set_id);
-  server_ca_cert_label_ =
-      new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_SERVER_CA)));
-  layout->AddView(server_ca_cert_label_);
-  ServerCACertComboboxModel* server_ca_cert_model =
-      new ServerCACertComboboxModel(cert_library_);
-  server_ca_cert_combobox_ = new views::Combobox(server_ca_cert_model);
-  layout->AddView(server_ca_cert_combobox_);
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  // Only provide Server CA when configuring a new VPN.
+  if (!vpn) {
+    layout->StartRow(0, column_view_set_id);
+    server_ca_cert_label_ =
+        new views::Label(l10n_util::GetStringUTF16(
+            IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_CERT_SERVER_CA));
+    layout->AddView(server_ca_cert_label_);
+    ServerCACertComboboxModel* server_ca_cert_model =
+        new ServerCACertComboboxModel(cert_library_);
+    server_ca_cert_combobox_ = new views::Combobox(server_ca_cert_model);
+    layout->AddView(server_ca_cert_combobox_);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  } else {
+    server_ca_cert_label_ = NULL;
+    server_ca_cert_combobox_ = NULL;
+  }
 
   // User certificate label and input.
-  layout->StartRow(0, column_view_set_id);
-  user_cert_label_ = new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_USER_CERT)));
-  layout->AddView(user_cert_label_);
-  UserCertComboboxModel* user_cert_model =
-      new UserCertComboboxModel(cert_library_);
-  user_cert_combobox_ = new views::Combobox(user_cert_model);
-  user_cert_combobox_->set_listener(this);
-  layout->AddView(user_cert_combobox_);
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  if (enable_user_cert_) {
+    layout->StartRow(0, column_view_set_id);
+    user_cert_label_ = new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_USER_CERT));
+    layout->AddView(user_cert_label_);
+    UserCertComboboxModel* user_cert_model =
+        new UserCertComboboxModel(cert_library_);
+    user_cert_combobox_ = new views::Combobox(user_cert_model);
+    user_cert_combobox_->set_listener(this);
+    layout->AddView(user_cert_combobox_);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  } else {
+    user_cert_label_ = NULL;
+    user_cert_combobox_ = NULL;
+  }
 
   // Username label and input.
   layout->StartRow(0, column_view_set_id);
-  layout->AddView(new views::Label(UTF16ToWide(l10n_util::GetStringUTF16(
-      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_USERNAME))));
+  layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_USERNAME)));
   username_textfield_ = new views::Textfield(views::Textfield::STYLE_DEFAULT);
   username_textfield_->SetController(this);
   if (vpn && !vpn->username().empty())
@@ -478,9 +523,8 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
 
   // User passphrase label, input and visble button.
   layout->StartRow(0, column_view_set_id);
-  layout->AddView(new views::Label(UTF16ToWide(
-      l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_USER_PASSPHRASE))));
+  layout->AddView(new views::Label(l10n_util::GetStringUTF16(
+      IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_USER_PASSPHRASE)));
   user_passphrase_textfield_ = new views::Textfield(
       views::Textfield::STYLE_PASSWORD);
   user_passphrase_textfield_->SetController(this);
@@ -489,12 +533,50 @@ void VPNConfigView::Init(VirtualNetwork* vpn) {
   layout->AddView(user_passphrase_textfield_);
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
+  // OTP label and input.
+  if (enable_otp_) {
+    layout->StartRow(0, column_view_set_id);
+    otp_label_ = new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_OTP));
+    layout->AddView(otp_label_);
+    otp_textfield_ = new views::Textfield(views::Textfield::STYLE_DEFAULT);
+    otp_textfield_->SetController(this);
+    layout->AddView(otp_textfield_);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  } else {
+    otp_label_ = NULL;
+    otp_textfield_ = NULL;
+  }
+
+  // This is not currently implemented with no immediate plans to do so.
+  // TODO(stevenjb,kmixter): Remove 'false &&' below if we implement this.
+  // See http://crosbug.com/19252.
+  const bool show_group_name = false && enable_group_name_;
+
+  // Group Name label and input.
+  if (show_group_name) {
+    layout->StartRow(0, column_view_set_id);
+    group_name_label_ = new views::Label(l10n_util::GetStringUTF16(
+        IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_GROUP_NAME));
+    layout->AddView(group_name_label_);
+    group_name_textfield_ =
+        new views::Textfield(views::Textfield::STYLE_DEFAULT);
+    group_name_textfield_->SetController(this);
+    if (vpn && !vpn->group_name().empty())
+      group_name_textfield_->SetText(UTF8ToUTF16(vpn->group_name()));
+    layout->AddView(group_name_textfield_);
+    layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
+  } else {
+    group_name_label_ = NULL;
+    group_name_textfield_ = NULL;
+  }
+
   // Error label.
   layout->StartRow(0, column_view_set_id);
   layout->SkipColumns(1);
   error_label_ = new views::Label();
   error_label_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  error_label_->SetColor(SK_ColorRED);
+  error_label_->SetEnabledColor(SK_ColorRED);
   layout->AddView(error_label_);
 
   // Set or hide the UI, update comboboxes and error labels.
@@ -508,71 +590,97 @@ void VPNConfigView::Refresh() {
 
   // Set certificate combo boxes.
   VirtualNetwork* vpn = cros->FindVirtualNetworkByPath(service_path_);
-  server_ca_cert_combobox_->ModelChanged();
-  if (server_ca_cert_combobox_->IsEnabled() &&
-      (vpn && !vpn->ca_cert_nss().empty())) {
-    // Select the current server CA certificate in the combobox.
-    int cert_index = cert_library_->GetCACertificates().FindCertByNickname(
-        vpn->ca_cert_nss());
-    if (cert_index >= 0) {
-      // Skip item for "Default"
-      server_ca_cert_combobox_->SetSelectedItem(1 + cert_index);
+  if (server_ca_cert_combobox_) {
+    server_ca_cert_combobox_->ModelChanged();
+    if (server_ca_cert_combobox_->IsEnabled() &&
+        (vpn && !vpn->ca_cert_nss().empty())) {
+      // Select the current server CA certificate in the combobox.
+      int cert_index = cert_library_->GetCACertificates().FindCertByNickname(
+          vpn->ca_cert_nss());
+      if (cert_index >= 0) {
+        // Skip item for "Default"
+        server_ca_cert_combobox_->SetSelectedItem(1 + cert_index);
+      } else {
+        server_ca_cert_combobox_->SetSelectedItem(0);
+      }
     } else {
       server_ca_cert_combobox_->SetSelectedItem(0);
     }
-  } else {
-      server_ca_cert_combobox_->SetSelectedItem(0);
   }
 
-  user_cert_combobox_->ModelChanged();
-  if (user_cert_combobox_->IsEnabled() &&
-      (vpn && !vpn->client_cert_id().empty())) {
-    int cert_index = cert_library_->GetUserCertificates().FindCertByPkcs11Id(
-        vpn->client_cert_id());
-    if (cert_index >= 0)
-      user_cert_combobox_->SetSelectedItem(cert_index);
-    else
+  if (user_cert_combobox_) {
+    user_cert_combobox_->ModelChanged();
+    if (user_cert_combobox_->IsEnabled() &&
+        (vpn && !vpn->client_cert_id().empty())) {
+      int cert_index = cert_library_->GetUserCertificates().FindCertByPkcs11Id(
+          vpn->client_cert_id());
+      if (cert_index >= 0)
+        user_cert_combobox_->SetSelectedItem(cert_index);
+      else
+        user_cert_combobox_->SetSelectedItem(0);
+    } else {
       user_cert_combobox_->SetSelectedItem(0);
-  } else {
-    user_cert_combobox_->SetSelectedItem(0);
+    }
   }
 
   UpdateErrorLabel();
 }
 
-void VPNConfigView::UpdateControls() {
-  // Enable controls.
+void VPNConfigView::UpdateControlsToEnable() {
+  // Set which controls are enabled.
+  enable_psk_passphrase_ = false;
+  enable_user_cert_ = false;
+  enable_server_ca_cert_ = false;
+  enable_otp_ = false;
+  enable_group_name_ = false;
   switch (provider_type_) {
     case PROVIDER_TYPE_L2TP_IPSEC_PSK:
-      psk_passphrase_label_->SetEnabled(true);
-      psk_passphrase_textfield_->SetEnabled(true);
-      server_ca_cert_label_->SetEnabled(false);
-      server_ca_cert_combobox_->SetEnabled(false);
-      user_cert_label_->SetEnabled(false);
-      user_cert_combobox_->SetEnabled(false);
+      enable_psk_passphrase_ = true;
+      enable_group_name_ = true;
       break;
     case PROVIDER_TYPE_L2TP_IPSEC_USER_CERT:
-      psk_passphrase_label_->SetEnabled(false);
-      psk_passphrase_textfield_->SetEnabled(false);
-      server_ca_cert_label_->SetEnabled(true);
-      server_ca_cert_combobox_->SetEnabled(true);
-      user_cert_label_->SetEnabled(true);
-      // Only enable the combobox if the user actually has a cert to select.
-      user_cert_combobox_->SetEnabled(HaveUserCerts());
+      enable_server_ca_cert_ = true;
+      enable_user_cert_ = HaveUserCerts();
+      enable_group_name_ = true;
       break;
     case PROVIDER_TYPE_OPEN_VPN:
-      psk_passphrase_label_->SetEnabled(false);
-      psk_passphrase_textfield_->SetEnabled(false);
-      server_ca_cert_label_->SetEnabled(false);
-      server_ca_cert_combobox_->SetEnabled(false);
-      user_cert_label_->SetEnabled(true);
-      // Only enable the combobox if the user actually has a cert to select.
-      user_cert_combobox_->SetEnabled(HaveUserCerts());
+      enable_server_ca_cert_ = true;
+      enable_user_cert_ = HaveUserCerts();
+      enable_otp_ = true;
       break;
     default:
       NOTREACHED();
       break;
   }
+}
+
+void VPNConfigView::UpdateControls() {
+  UpdateControlsToEnable();
+
+  if (psk_passphrase_label_)
+    psk_passphrase_label_->SetEnabled(enable_psk_passphrase_);
+  if (psk_passphrase_textfield_)
+    psk_passphrase_textfield_->SetEnabled(enable_psk_passphrase_);
+
+  if (user_cert_label_)
+    user_cert_label_->SetEnabled(enable_user_cert_);
+  if (user_cert_combobox_)
+    user_cert_combobox_->SetEnabled(enable_user_cert_);
+
+  if (server_ca_cert_label_)
+    server_ca_cert_label_->SetEnabled(enable_server_ca_cert_);
+  if (server_ca_cert_combobox_)
+    server_ca_cert_combobox_->SetEnabled(enable_server_ca_cert_);
+
+  if (otp_label_)
+    otp_label_->SetEnabled(enable_otp_);
+  if (otp_textfield_)
+    otp_textfield_->SetEnabled(enable_otp_);
+
+  if (group_name_label_)
+    group_name_label_->SetEnabled(enable_group_name_);
+  if (group_name_textfield_)
+    group_name_textfield_->SetEnabled(enable_group_name_);
 }
 
 void VPNConfigView::UpdateErrorLabel() {
@@ -602,7 +710,7 @@ void VPNConfigView::UpdateErrorLabel() {
     }
   }
   if (!error_msg.empty()) {
-    error_label_->SetText(UTF8ToWide(error_msg));
+    error_label_->SetText(UTF8ToUTF16(error_msg));
     error_label_->SetVisible(true);
   } else {
     error_label_->SetVisible(false);
@@ -637,6 +745,8 @@ bool VPNConfigView::IsUserCertValid() const {
 
 const std::string VPNConfigView::GetTextFromField(
     views::Textfield* textfield, bool trim_whitespace) const {
+  if (!textfield)
+    return std::string();
   std::string untrimmed = UTF16ToUTF8(textfield->text());
   if (!trim_whitespace)
     return untrimmed;

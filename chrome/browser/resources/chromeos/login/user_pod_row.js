@@ -58,9 +58,32 @@ cr.define('login', function() {
      */
     initialize: function() {
       if (!this.isGuest) {
+        this.passwordEmpty = true;
         this.passwordElement.addEventListener('keydown',
             this.parentNode.handleKeyDown.bind(this.parentNode));
+        this.passwordElement.addEventListener('keypress',
+            this.handlePasswordKeyPress_.bind(this));
+        this.passwordElement.addEventListener('keyup',
+            this.handlePasswordKeyUp_.bind(this));
       }
+    },
+
+    /**
+     * Handles keyup event on password input.
+     * @param {Event} e Keyup Event object.
+     * @private
+     */
+    handlePasswordKeyUp_: function(e) {
+      this.passwordEmpty = !e.target.value;
+    },
+
+    /**
+     * Handles keypress event (i.e. any textual input) on password input.
+     * @param {Event} e Keypress Event object.
+     * @private
+     */
+    handlePasswordKeyPress_: function(e) {
+      this.passwordEmpty = false;
     },
 
     /**
@@ -88,11 +111,27 @@ cr.define('login', function() {
     },
 
     /**
+     * Gets password hint label.
+     * @type {!HTMLDivElement}
+     */
+    get passwordHintElement() {
+      return this.passwordElement.nextElementSibling;
+    },
+
+    /**
+     * Gets Caps Lock hint image.
+     * @type {!HTMLImageElement}
+     */
+    get capslockHintElement() {
+      return this.enterButtonElement.previousElementSibling;
+    },
+
+    /**
      * Gets guest enter button.
      * @type {!HTMLInputElement}
      */
     get enterButtonElement() {
-      return this.passwordElement.nextElementSibling;
+      return this.signinButtonElement.previousElementSibling;
     },
 
     /**
@@ -100,7 +139,7 @@ cr.define('login', function() {
      * @type {!HTMLInputElement}
      */
     get signinButtonElement() {
-      return this.enterButtonElement.nextElementSibling;
+      return this.removeUserButtonElement.previousElementSibling;
     },
 
     /**
@@ -136,7 +175,10 @@ cr.define('login', function() {
         this.imageElement.title = userDict.emailAddress;
         this.enterButtonElement.hidden = true;
         this.passwordElement.hidden = needSignin;
-        this.passwordElement.setAttribute('aria-label', userDict.emailAddress);
+        this.passwordElement.setAttribute('aria-label',
+                                          localStrings.getStringF(
+                                              'passwordFieldAccessibleName',
+                                              userDict.emailAddress));
         this.signinButtonElement.hidden = !needSignin;
       }
     },
@@ -191,6 +233,14 @@ cr.define('login', function() {
         this.removeUserButtonElement.classList.remove('active');
         this.removeUserButtonElement.textContent = '';
       }
+    },
+
+    /**
+     * Whether the password field is empty.
+     * @type {boolean}
+     */
+    set passwordEmpty(empty) {
+      this.passwordElement.classList[empty ? 'add' : 'remove']('empty');
     },
 
     /**
@@ -253,9 +303,9 @@ cr.define('login', function() {
     },
 
     /**
-     * Handles mousedown on remove user button.
+     * Handles a click event on remove user button.
      */
-    handleRemoevButtonMouseDown_: function(e) {
+    handleRemoveButtonClick_: function(e) {
       if (this.activeRemoveButton)
         chrome.send('removeUser', [this.user.emailAddress]);
       else
@@ -270,7 +320,7 @@ cr.define('login', function() {
         return;
       var handled = false;
       if (e.target == this.removeUserButtonElement) {
-        this.handleRemoevButtonMouseDown_(e);
+        this.handleRemoveButtonClick_(e);
         handled = true;
       } else if (!this.signinButtonElement.hidden) {
         this.parentNode.showSigninUI(this.user.emailAddress);

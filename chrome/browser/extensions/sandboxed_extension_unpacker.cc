@@ -6,14 +6,15 @@
 
 #include <set>
 
+#include "base/bind.h"
 #include "base/base64.h"
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
+#include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_handle.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"  // TODO(viettrungluu): delete me.
 #include "crypto/signature_verifier.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -27,7 +28,6 @@
 #include "chrome/common/extensions/extension_unpacker.h"
 #include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/common/json_value_serializer.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -206,9 +206,9 @@ void SandboxedExtensionUnpacker::Start() {
 
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            this,
+        base::Bind(
             &SandboxedExtensionUnpacker::StartProcessOnIOThread,
+            this,
             link_free_crx_path));
   } else {
     // Otherwise, unpack the extension in this process.
@@ -225,9 +225,7 @@ void SandboxedExtensionUnpacker::Start() {
 SandboxedExtensionUnpacker::~SandboxedExtensionUnpacker() {
   base::FileUtilProxy::Delete(
       BrowserThread::GetMessageLoopProxyForThread(thread_identifier_),
-      temp_dir_.Take(),
-      true,
-      NULL);
+      temp_dir_.Take(), true, base::FileUtilProxy::StatusCallback());
 }
 
 bool SandboxedExtensionUnpacker::OnMessageReceived(

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "content/browser/renderer_host/render_process_host.h"
+#include "content/common/content_export.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -51,8 +52,8 @@ class BrowserContext;
 // tabs with no NavigationEntries or in NavigationEntries in the history.
 //
 ///////////////////////////////////////////////////////////////////////////////
-class SiteInstance : public base::RefCounted<SiteInstance>,
-                     public NotificationObserver {
+class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance>,
+                                    public NotificationObserver {
  public:
   // Returns a unique ID for this SiteInstance.
   int32 id() { return id_; }
@@ -147,9 +148,6 @@ class SiteInstance : public base::RefCounted<SiteInstance>,
   static bool IsSameWebSite(content::BrowserContext* browser_context,
                             const GURL& url1, const GURL& url2);
 
-  // Returns the renderer type for this URL.
-  static RenderProcessHost::Type RendererTypeForURL(const GURL& url);
-
  protected:
   friend class base::RefCounted<SiteInstance>;
   friend class BrowsingInstance;
@@ -165,10 +163,6 @@ class SiteInstance : public base::RefCounted<SiteInstance>,
   // Get the effective URL for the given actual URL.
   static GURL GetEffectiveURL(content::BrowserContext* browser_context,
                               const GURL& url);
-
-  // Returns the type of renderer process this instance belongs in, for grouping
-  // purposes.
-  RenderProcessHost::Type GetRendererType();
 
  private:
   // NotificationObserver implementation.

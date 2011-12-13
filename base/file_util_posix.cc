@@ -8,6 +8,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <grp.h>
 #include <libgen.h>
 #include <limits.h>
 #include <stdio.h>
@@ -37,6 +38,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
+#include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "base/sys_string_conversions.h"
@@ -52,6 +54,30 @@ namespace file_util {
 
 namespace {
 
+#if defined(OS_OPENBSD) || defined(OS_FREEBSD) || \
+    (defined(OS_MACOSX) && \
+     MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5)
+typedef struct stat stat_wrapper_t;
+static int CallStat(const char *path, stat_wrapper_t *sb) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return stat(path, sb);
+}
+static int CallLstat(const char *path, stat_wrapper_t *sb) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return lstat(path, sb);
+}
+#else
+typedef struct stat64 stat_wrapper_t;
+static int CallStat(const char *path, stat_wrapper_t *sb) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return stat64(path, sb);
+}
+static int CallLstat(const char *path, stat_wrapper_t *sb) {
+  base::ThreadRestrictions::AssertIOAllowed();
+  return lstat64(path, sb);
+}
+#endif
+
 // Helper for NormalizeFilePath(), defined below.
 bool RealPath(const FilePath& path, FilePath* real_path) {
   base::ThreadRestrictions::AssertIOAllowed();  // For realpath().
@@ -63,23 +89,46 @@ bool RealPath(const FilePath& path, FilePath* real_path) {
   return true;
 }
 
-}  // namespace
+// Helper for VerifyPathControlledByUser.
+bool VerifySpecificPathControlledByUser(const FilePath& path,
+                                        uid_t owner_uid,
+                                        const std::set<gid_t>& group_gids) {
+  stat_wrapper_t stat_info;
+  if (CallLstat(path.value().c_str(), &stat_info) != 0) {
+    PLOG(ERROR) << "Failed to get information on path "
+                << path.value();
+    return false;
+  }
 
-#if defined(OS_OPENBSD) || defined(OS_FREEBSD) || \
-    (defined(OS_MACOSX) && \
-     MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_10_5)
-typedef struct stat stat_wrapper_t;
-static int CallStat(const char *path, stat_wrapper_t *sb) {
-  base::ThreadRestrictions::AssertIOAllowed();
-  return stat(path, sb);
+  if (S_ISLNK(stat_info.st_mode)) {
+    LOG(ERROR) << "Path " << path.value()
+               << " is a symbolic link.";
+    return false;
+  }
+
+  if (stat_info.st_uid != owner_uid) {
+    LOG(ERROR) << "Path " << path.value()
+               << " is owned by the wrong user.";
+    return false;
+  }
+
+  if ((stat_info.st_mode & S_IWGRP) &&
+      !ContainsKey(group_gids, stat_info.st_gid)) {
+    LOG(ERROR) << "Path " << path.value()
+               << " is writable by an unprivileged group.";
+    return false;
+  }
+
+  if (stat_info.st_mode & S_IWOTH) {
+    LOG(ERROR) << "Path " << path.value()
+               << " is writable by any user.";
+    return false;
+  }
+
+  return true;
 }
-#else
-typedef struct stat64 stat_wrapper_t;
-static int CallStat(const char *path, stat_wrapper_t *sb) {
-  base::ThreadRestrictions::AssertIOAllowed();
-  return stat64(path, sb);
-}
-#endif
+
+}  // namespace
 
 static std::string TempFileName() {
 #if defined(OS_MACOSX)
@@ -937,6 +986,76 @@ bool CopyFile(const FilePath& from_path, const FilePath& to_path) {
     result = false;
 
   return result;
+}
+#endif  // defined(OS_MACOSX)
+
+bool VerifyPathControlledByUser(const FilePath& base,
+                                const FilePath& path,
+                                uid_t owner_uid,
+                                const std::set<gid_t>& group_gids) {
+  if (base != path && !base.IsParent(path)) {
+     LOG(ERROR) << "|base| must be a subdirectory of |path|.  base = \""
+                << base.value() << "\", path = \"" << path.value() << "\"";
+     return false;
+  }
+
+  std::vector<FilePath::StringType> base_components;
+  std::vector<FilePath::StringType> path_components;
+
+  base.GetComponents(&base_components);
+  path.GetComponents(&path_components);
+
+  std::vector<FilePath::StringType>::const_iterator ib, ip;
+  for (ib = base_components.begin(), ip = path_components.begin();
+       ib != base_components.end(); ++ib, ++ip) {
+    // |base| must be a subpath of |path|, so all components should match.
+    // If these CHECKs fail, look at the test that base is a parent of
+    // path at the top of this function.
+    CHECK(ip != path_components.end());
+    CHECK(*ip == *ib);
+  }
+
+  FilePath current_path = base;
+  if (!VerifySpecificPathControlledByUser(current_path, owner_uid, group_gids))
+    return false;
+
+  for (; ip != path_components.end(); ++ip) {
+    current_path = current_path.Append(*ip);
+    if (!VerifySpecificPathControlledByUser(
+            current_path, owner_uid, group_gids))
+      return false;
+  }
+  return true;
+}
+
+#if defined(OS_MACOSX)
+bool VerifyPathControlledByAdmin(const FilePath& path) {
+  const unsigned kRootUid = 0;
+  const FilePath kFileSystemRoot("/");
+
+  // The name of the administrator group on mac os.
+  const char* const kAdminGroupNames[] = {
+    "admin",
+    "wheel"
+  };
+
+  // Reading the groups database may touch the file system.
+  base::ThreadRestrictions::AssertIOAllowed();
+
+  std::set<gid_t> allowed_group_ids;
+  for (int i = 0, ie = arraysize(kAdminGroupNames); i < ie; ++i) {
+    struct group *group_record = getgrnam(kAdminGroupNames[i]);
+    if (!group_record) {
+      PLOG(ERROR) << "Could not get the group ID of group \""
+                  << kAdminGroupNames[i] << "\".";
+      continue;
+    }
+
+    allowed_group_ids.insert(group_record->gr_gid);
+  }
+
+  return VerifyPathControlledByUser(
+      kFileSystemRoot, path, kRootUid, allowed_group_ids);
 }
 #endif  // defined(OS_MACOSX)
 

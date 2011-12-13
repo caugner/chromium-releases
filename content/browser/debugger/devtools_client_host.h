@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "content/common/content_export.h"
 
 namespace IPC {
 class Message;
@@ -21,9 +22,9 @@ class TabContents;
 // Describes interface for managing devtools clients from browser process. There
 // are currently two types of clients: devtools windows and TCP socket
 // debuggers.
-class DevToolsClientHost {
+class CONTENT_EXPORT DevToolsClientHost {
  public:
-  class CloseListener {
+  class CONTENT_EXPORT CloseListener {
    public:
     CloseListener() {}
     virtual ~CloseListener() {}
@@ -61,6 +62,8 @@ class DevToolsClientHost {
 
  protected:
   DevToolsClientHost();
+
+  void ForwardToDevToolsAgent(const IPC::Message& message);
 
   // Should be called when the devtools client is going to die and this
   // DevToolsClientHost should not be used anymore.

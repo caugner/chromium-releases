@@ -6,17 +6,17 @@
 
 #include "base/command_line.h"
 #include "base/message_loop.h"
-#include "content/common/content_switches.h"
 #include "content/common/file_system/file_system_dispatcher.h"
 #include "content/common/file_system/webfilesystem_callback_dispatcher.h"
 #include "content/common/webmessageportchannel_impl.h"
 #include "content/common/worker_messages.h"
+#include "content/public/common/content_switches.h"
 // TODO(jam): uncomment this and WebWorkerClientProxy::createWorker when the
 // renderer worker code moves to content. This code isn't used now since we
 // don't support nested workers anyways.
 //#include "content/renderer/webworker_proxy.h"
+#include "content/worker/shared_worker_devtools_agent.h"
 #include "content/worker/webworker_stub_base.h"
-#include "content/worker/worker_devtools_agent.h"
 #include "content/worker/worker_thread.h"
 #include "content/worker/worker_webapplicationcachehost_impl.h"
 #include "ipc/ipc_logging.h"
@@ -182,6 +182,12 @@ void WebWorkerClientProxy::openFileSystem(
 void WebWorkerClientProxy::dispatchDevToolsMessage(const WebString& message) {
   if (devtools_agent_)
     devtools_agent_->SendDevToolsMessage(message);
+}
+
+void WebWorkerClientProxy::saveDevToolsAgentState(
+    const WebKit::WebString& state) {
+  if (devtools_agent_)
+    devtools_agent_->SaveDevToolsAgentState(state);
 }
 
 bool WebWorkerClientProxy::Send(IPC::Message* message) {

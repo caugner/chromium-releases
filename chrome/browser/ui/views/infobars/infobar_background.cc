@@ -4,10 +4,11 @@
 
 #include "chrome/browser/ui/views/infobars/infobar_background.h"
 
-#include "chrome/browser/tab_contents/infobar.h"
+#include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia_paint.h"
+#include "ui/gfx/color_utils.h"
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "views/view.h"
 
@@ -15,6 +16,8 @@ InfoBarBackground::InfoBarBackground(InfoBarDelegate::Type infobar_type)
     : separator_color_(SK_ColorBLACK),
       top_color_(GetInfoBarTopColor(infobar_type)),
       bottom_color_(GetInfoBarBottomColor(infobar_type)) {
+  SetNativeControlColor(
+      color_utils::AlphaBlend(top_color_, bottom_color_, 128));
 }
 
 InfoBarBackground::~InfoBarBackground() {
@@ -39,7 +42,7 @@ void InfoBarBackground::Paint(gfx::Canvas* canvas, views::View* view) const {
   gradient_shader->unref();
 
   InfoBarView* infobar = static_cast<InfoBarView*>(view);
-  gfx::CanvasSkia* canvas_skia = canvas->AsCanvasSkia();
+  SkCanvas* canvas_skia = canvas->GetSkCanvas();
   canvas_skia->drawPath(infobar->fill_path(), paint);
 
   paint.setShader(NULL);

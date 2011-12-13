@@ -11,6 +11,8 @@
 #include "chrome/browser/sync/profile_sync_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+class ExtensionSettingsBackend;
+
 namespace browser_sync {
 class AssociatorInterface;
 class ChangeProcessor;
@@ -20,8 +22,8 @@ class ProfileSyncFactoryMock : public ProfileSyncFactory {
  public:
   ProfileSyncFactoryMock();
   ProfileSyncFactoryMock(
-      browser_sync::AssociatorInterface* bookmark_model_associator,
-      browser_sync::ChangeProcessor* bookmark_change_processor);
+      browser_sync::AssociatorInterface* model_associator,
+      browser_sync::ChangeProcessor* change_processor);
   virtual ~ProfileSyncFactoryMock();
 
   MOCK_METHOD1(CreateProfileSyncService,
@@ -31,26 +33,33 @@ class ProfileSyncFactoryMock : public ProfileSyncFactory {
                browser_sync::DataTypeManager*(
                    browser_sync::SyncBackendHost*,
                    const browser_sync::DataTypeController::TypeMap*));
+  MOCK_METHOD3(CreateGenericChangeProcessor,
+      browser_sync::GenericChangeProcessor*(
+          ProfileSyncService* profile_sync_service,
+          browser_sync::UnrecoverableErrorHandler* error_handler,
+          const base::WeakPtr<SyncableService>& local_service));
+  MOCK_METHOD0(CreateSharedChangeProcessor,
+      browser_sync::SharedChangeProcessor*());
   MOCK_METHOD2(CreateAppSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,
                      browser_sync::UnrecoverableErrorHandler* error_handler));
-  MOCK_METHOD4(CreateAutofillSyncComponents,
+  MOCK_METHOD3(CreateAutofillSyncComponents,
                SyncComponents(
                    ProfileSyncService* profile_sync_service,
                    WebDatabase* web_database,
-                   PersonalDataManager* personal_data,
                    browser_sync::UnrecoverableErrorHandler* error_handler));
-  MOCK_METHOD4(CreateAutofillProfileSyncComponents,
-               SyncComponents(
-                   ProfileSyncService* profile_sync_service,
-                   WebDatabase* web_database,
-                   PersonalDataManager* personal_data,
-                   browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_CONST_METHOD1(GetAutofillProfileSyncableService,
+                     base::WeakPtr<SyncableService>(
+                         WebDataService* web_data_service));
   MOCK_METHOD2(CreateBookmarkSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,
                      browser_sync::UnrecoverableErrorHandler* error_handler));
   MOCK_METHOD2(CreateExtensionSyncComponents,
       SyncComponents(ProfileSyncService* profile_sync_service,
+                     browser_sync::UnrecoverableErrorHandler* error_handler));
+  MOCK_METHOD3(CreateExtensionSettingSyncComponents,
+      SyncComponents(ExtensionSettingsBackend* extension_settings_backend,
+                     ProfileSyncService* profile_sync_service,
                      browser_sync::UnrecoverableErrorHandler* error_handler));
   MOCK_METHOD3(CreatePasswordSyncComponents,
                SyncComponents(
@@ -77,10 +86,10 @@ class ProfileSyncFactoryMock : public ProfileSyncFactory {
                    browser_sync::UnrecoverableErrorHandler* error_handler));
 
  private:
-  SyncComponents MakeBookmarkSyncComponents();
+  SyncComponents MakeSyncComponents();
 
-  scoped_ptr<browser_sync::AssociatorInterface> bookmark_model_associator_;
-  scoped_ptr<browser_sync::ChangeProcessor> bookmark_change_processor_;
+  scoped_ptr<browser_sync::AssociatorInterface> model_associator_;
+  scoped_ptr<browser_sync::ChangeProcessor> change_processor_;
 };
 
 #endif  // CHROME_BROWSER_SYNC_PROFILE_SYNC_FACTORY_MOCK_H__

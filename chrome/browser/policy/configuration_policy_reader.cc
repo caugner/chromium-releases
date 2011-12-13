@@ -7,27 +7,26 @@
 #include <map>
 #include <vector>
 
+#include "base/logging.h"
 #include "base/stl_util.h"
+#include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/policy/configuration_policy_pref_store.h"
-#include "chrome/browser/policy/configuration_policy_store_interface.h"
+#include "chrome/browser/policy/policy_map.h"
+#include "policy/policy_constants.h"
 
 namespace policy {
 
 // This class functions as a container for policy status information used by the
 // ConfigurationPolicyReader class. It obtains policy values from a
 // ConfigurationPolicyProvider and maps them to their status information.
-class ConfigurationPolicyStatusKeeper
-    : public ConfigurationPolicyStoreInterface {
+class ConfigurationPolicyStatusKeeper {
  public:
   ConfigurationPolicyStatusKeeper(ConfigurationPolicyProvider* provider,
                                   PolicyStatusInfo::PolicyLevel policy_level);
   virtual ~ConfigurationPolicyStatusKeeper();
-
-  // ConfigurationPolicyStoreInterface methods.
-  virtual void Apply(ConfigurationPolicyType policy, base::Value* value);
 
   // Returns a pointer to a DictionaryValue containing the status information
   // of the policy |policy|. The caller acquires ownership of the returned
@@ -36,9 +35,9 @@ class ConfigurationPolicyStatusKeeper
 
  private:
   typedef std::map<ConfigurationPolicyType, PolicyStatusInfo*> PolicyStatusMap;
-  typedef std::map<ConfigurationPolicyType, string16> PolicyNameMap;
-  typedef ConfigurationPolicyProvider::PolicyDefinitionList
-      PolicyDefinitionList;
+
+  // Calls Provide() on the passed in |provider| to get policy values.
+  void GetPoliciesFromProvider(ConfigurationPolicyProvider* provider);
 
   // Mapping from ConfigurationPolicyType to PolicyStatusInfo.
   PolicyStatusMap policy_map_;
@@ -54,34 +53,12 @@ class ConfigurationPolicyStatusKeeper
 ConfigurationPolicyStatusKeeper::ConfigurationPolicyStatusKeeper(
     ConfigurationPolicyProvider* provider,
     PolicyStatusInfo::PolicyLevel policy_level) : policy_level_(policy_level) {
-
-  if (!provider->Provide(this))
-    LOG(WARNING) << "Failed to get policy from provider.";
+  GetPoliciesFromProvider(provider);
 }
 
 ConfigurationPolicyStatusKeeper::~ConfigurationPolicyStatusKeeper() {
   STLDeleteContainerPairSecondPointers(policy_map_.begin(), policy_map_.end());
   policy_map_.clear();
-}
-
-void ConfigurationPolicyStatusKeeper::Apply(
-    ConfigurationPolicyType policy, base::Value* value) {
-  string16 name = PolicyStatus::GetPolicyName(policy);
-
-  if (name == string16()) {
-    NOTREACHED();
-  }
-
-  // TODO(simo) actually determine whether the policy is a user or a device one
-  // and whether the policy could be enforced or not once this information
-  // is available.
-  PolicyStatusInfo* info = new PolicyStatusInfo(name,
-                                                PolicyStatusInfo::USER,
-                                                policy_level_,
-                                                value,
-                                                PolicyStatusInfo::ENFORCED,
-                                                string16());
-  policy_map_[policy] = info;
 }
 
 DictionaryValue* ConfigurationPolicyStatusKeeper::GetPolicyStatus(
@@ -91,7 +68,43 @@ DictionaryValue* ConfigurationPolicyStatusKeeper::GetPolicyStatus(
       (entry->second)->GetDictionaryValue() : NULL;
 }
 
+void ConfigurationPolicyStatusKeeper::GetPoliciesFromProvider(
+    ConfigurationPolicyProvider* provider) {
+  scoped_ptr<PolicyMap> policies(new PolicyMap());
+  if (!provider->Provide(policies.get()))
+    LOG(WARNING) << "Failed to get policy from provider.";
+
+  PolicyMap::const_iterator policy = policies->begin();
+  for ( ; policy != policies->end(); ++policy) {
+    string16 name = ASCIIToUTF16(GetPolicyName(policy->first));
+
+    // TODO(simo) actually determine whether the policy is a user or a device
+    // one and whether the policy could be enforced or not once this information
+    // is available.
+    PolicyStatusInfo* info = new PolicyStatusInfo(name,
+                                                  PolicyStatusInfo::USER,
+                                                  policy_level_,
+                                                  policy->second->DeepCopy(),
+                                                  PolicyStatusInfo::ENFORCED,
+                                                  string16());
+    policy_map_[policy->first] = info;
+  }
+}
+
 // ConfigurationPolicyReader
+ConfigurationPolicyReader::ConfigurationPolicyReader(
+    ConfigurationPolicyProvider* provider,
+    PolicyStatusInfo::PolicyLevel policy_level)
+    : provider_(provider),
+      policy_level_(policy_level) {
+  if (provider_) {
+    // Read initial policy.
+    policy_keeper_.reset(
+        new ConfigurationPolicyStatusKeeper(provider_, policy_level));
+    registrar_.Init(provider_, this);
+  }
+}
+
 ConfigurationPolicyReader::~ConfigurationPolicyReader() {
 }
 
@@ -101,6 +114,14 @@ void ConfigurationPolicyReader::OnUpdatePolicy() {
 
 void ConfigurationPolicyReader::OnProviderGoingAway() {
   provider_ = NULL;
+}
+
+void ConfigurationPolicyReader::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void ConfigurationPolicyReader::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
 }
 
 // static
@@ -128,7 +149,7 @@ ConfigurationPolicyReader*
       g_browser_process->browser_policy_connector();
   return new ConfigurationPolicyReader(
       connector->GetRecommendedPlatformProvider(),
-          PolicyStatusInfo::RECOMMENDED);
+      PolicyStatusInfo::RECOMMENDED);
 }
 
 // static
@@ -142,20 +163,9 @@ ConfigurationPolicyReader*
 
 DictionaryValue* ConfigurationPolicyReader::GetPolicyStatus(
     ConfigurationPolicyType policy) const {
-  return policy_keeper_->GetPolicyStatus(policy);
-}
-
-ConfigurationPolicyReader::ConfigurationPolicyReader(
-    ConfigurationPolicyProvider* provider,
-    PolicyStatusInfo::PolicyLevel policy_level)
-    : provider_(provider),
-      policy_level_(policy_level) {
-  if (provider_) {
-    // Read initial policy.
-    policy_keeper_.reset(
-        new ConfigurationPolicyStatusKeeper(provider, policy_level));
-    registrar_.Init(provider_, this);
-  }
+  if (policy_keeper_.get())
+    return policy_keeper_->GetPolicyStatus(policy);
+  return NULL;
 }
 
 ConfigurationPolicyReader::ConfigurationPolicyReader()
@@ -168,10 +178,10 @@ void ConfigurationPolicyReader::Refresh() {
   if (!provider_)
     return;
 
-  // Read policy state into a new keeper and swap out old keeper.
-  scoped_ptr<ConfigurationPolicyStatusKeeper> new_keeper(
+  policy_keeper_.reset(
       new ConfigurationPolicyStatusKeeper(provider_, policy_level_));
-  policy_keeper_.reset(new_keeper.release());
+
+  FOR_EACH_OBSERVER(Observer, observers_, OnPolicyValuesChanged());
 }
 
 // PolicyStatus
@@ -188,13 +198,27 @@ PolicyStatus::PolicyStatus(ConfigurationPolicyReader* managed_platform,
 PolicyStatus::~PolicyStatus() {
 }
 
-ListValue* PolicyStatus::GetPolicyStatusList(bool* any_policies_sent) const {
+void PolicyStatus::AddObserver(Observer* observer) const {
+  managed_platform_->AddObserver(observer);
+  managed_cloud_->AddObserver(observer);
+  recommended_platform_->AddObserver(observer);
+  recommended_cloud_->AddObserver(observer);
+}
+
+void PolicyStatus::RemoveObserver(Observer* observer) const {
+  managed_platform_->RemoveObserver(observer);
+  managed_cloud_->RemoveObserver(observer);
+  recommended_platform_->RemoveObserver(observer);
+  recommended_cloud_->RemoveObserver(observer);
+}
+
+ListValue* PolicyStatus::GetPolicyStatusList(bool* any_policies_set) const {
   ListValue* result = new ListValue();
   std::vector<DictionaryValue*> unsent_policies;
 
-  *any_policies_sent = false;
+  *any_policies_set = false;
   const PolicyDefinitionList* supported_policies =
-      ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList();
+      GetChromePolicyDefinitionList();
   const PolicyDefinitionList::Entry* policy = supported_policies->begin;
   for ( ; policy != supported_policies->end; ++policy) {
     if (!AddPolicyFromReaders(policy->policy_type, result)) {
@@ -206,7 +230,7 @@ ListValue* PolicyStatus::GetPolicyStatusList(bool* any_policies_sent) const {
                             string16());
       unsent_policies.push_back(info.GetDictionaryValue());
     } else {
-      *any_policies_sent = true;
+      *any_policies_set = true;
     }
   }
 
@@ -216,32 +240,6 @@ ListValue* PolicyStatus::GetPolicyStatusList(bool* any_policies_sent) const {
     result->Append(*info);
 
   return result;
-}
-
-// static
-string16 PolicyStatus::GetPolicyName(ConfigurationPolicyType policy_type) {
-  static std::map<ConfigurationPolicyType, string16> name_map;
-  static const ConfigurationPolicyProvider::PolicyDefinitionList*
-      supported_policies;
-
-  if (!supported_policies) {
-    supported_policies =
-        ConfigurationPolicyPrefStore::GetChromePolicyDefinitionList();
-
-    // Create mapping from ConfigurationPolicyTypes to actual policy names.
-    const ConfigurationPolicyProvider::PolicyDefinitionList::Entry* entry =
-        supported_policies->begin;
-    for ( ; entry != supported_policies->end; ++entry)
-      name_map[entry->policy_type] = ASCIIToUTF16(entry->name);
-  }
-
-  std::map<ConfigurationPolicyType, string16>::const_iterator entry =
-      name_map.find(policy_type);
-
-  if (entry == name_map.end())
-    return string16();
-
-  return entry->second;
 }
 
 bool PolicyStatus::AddPolicyFromReaders(

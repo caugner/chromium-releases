@@ -9,6 +9,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/string_util.h"
 #include "base/system_monitor/system_monitor.h"
 #include "base/win/scoped_gdi_object.h"
@@ -371,7 +372,7 @@ class NativeWidgetWin::ScopedRedrawLock {
 
 NativeWidgetWin::NativeWidgetWin(internal::NativeWidgetDelegate* delegate)
     : delegate_(delegate),
-      close_widget_factory_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(close_widget_factory_(this)),
       active_mouse_tracking_flags_(0),
       use_layered_buffer_(false),
       layered_alpha_(255),
@@ -387,7 +388,7 @@ NativeWidgetWin::NativeWidgetWin(internal::NativeWidgetDelegate* delegate)
       lock_updates_count_(0),
       saved_window_style_(0),
       ignore_window_pos_changes_(false),
-      ignore_pos_changes_factory_(this),
+      ALLOW_THIS_IN_INITIALIZER_LIST(ignore_pos_changes_factory_(this)),
       last_monitor_(NULL),
       is_right_mouse_pressed_on_caption_(false),
       restored_enabled_(false),
@@ -484,6 +485,15 @@ void NativeWidgetWin::PopForceHidden() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
+// NativeWidgetWin, CompositorDelegate implementation:
+
+void NativeWidgetWin::ScheduleDraw() {
+  RECT rect;
+  ::GetClientRect(GetNativeView(), &rect);
+  InvalidateRect(GetNativeView(), &rect, FALSE);
+}
+
+////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetWin, NativeWidget implementation:
 
 void NativeWidgetWin::InitNativeWidget(const Widget::InitParams& params) {
@@ -570,11 +580,12 @@ ui::Compositor* NativeWidgetWin::GetCompositor() {
   return compositor_.get();
 }
 
-void NativeWidgetWin::MarkLayerDirty() {
+void NativeWidgetWin::CalculateOffsetToAncestorWithLayer(
+    gfx::Point* offset,
+    ui::Layer** layer_parent) {
 }
 
-void NativeWidgetWin::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
-                                                         View** ancestor) {
+void NativeWidgetWin::ReorderLayers() {
 }
 
 void NativeWidgetWin::ViewRemoved(View* view) {
@@ -681,7 +692,7 @@ void NativeWidgetWin::GetWindowPlacement(
   }
 }
 
-void NativeWidgetWin::SetWindowTitle(const std::wstring& title) {
+void NativeWidgetWin::SetWindowTitle(const string16& title) {
   SetWindowText(GetNativeView(), title.c_str());
   SetAccessibleName(title);
 }
@@ -708,7 +719,7 @@ void NativeWidgetWin::SetWindowIcons(const SkBitmap& window_icon,
   }
 }
 
-void NativeWidgetWin::SetAccessibleName(const std::wstring& name) {
+void NativeWidgetWin::SetAccessibleName(const string16& name) {
   base::win::ScopedComPtr<IAccPropServices> pAccPropServices;
   HRESULT hr = CoCreateInstance(CLSID_AccPropServices, NULL, CLSCTX_SERVER,
       IID_IAccPropServices, reinterpret_cast<void**>(&pAccPropServices));
@@ -824,14 +835,15 @@ void NativeWidgetWin::Close() {
   // Let's hide ourselves right away.
   Hide();
 
-  if (close_widget_factory_.empty()) {
+  if (!close_widget_factory_.HasWeakPtrs()) {
     // And we delay the close so that if we are called from an ATL callback,
     // we don't destroy the window before the callback returned (as the caller
     // may delete ourselves on destroy and the ATL callback would still
     // dereference us when the callback returns).
-    MessageLoop::current()->PostTask(FROM_HERE,
-        close_widget_factory_.NewRunnableMethod(
-            &NativeWidgetWin::CloseNow));
+    MessageLoop::current()->PostTask(
+        FROM_HERE,
+        base::Bind(&NativeWidgetWin::CloseNow,
+                   close_widget_factory_.GetWeakPtr()));
   }
 
   // If the user activates another app after opening us, then comes back and
@@ -1070,10 +1082,11 @@ void NativeWidgetWin::SchedulePaintInRect(const gfx::Rect& rect) {
     // receive calls to DidProcessMessage(). This only seems to affect layered
     // windows, so we schedule a redraw manually using a task, since those never
     // seem to be starved. Also, wtf.
-    if (paint_layered_window_factory_.empty()) {
-      MessageLoop::current()->PostTask(FROM_HERE,
-          paint_layered_window_factory_.NewRunnableMethod(
-          &NativeWidgetWin::RedrawLayeredWindowContents));
+    if (!paint_layered_window_factory_.HasWeakPtrs()) {
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&NativeWidgetWin::RedrawLayeredWindowContents,
+                     paint_layered_window_factory_.GetWeakPtr()));
     }
   } else {
     // InvalidateRect() expects client coordinates.
@@ -1107,13 +1120,19 @@ bool NativeWidgetWin::ConvertPointFromAncestor(
   return false;
 }
 
+gfx::Rect NativeWidgetWin::GetWorkAreaBoundsInScreen() const {
+  return gfx::Screen::GetMonitorWorkAreaNearestWindow(GetNativeView());
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeWidgetWin, MessageLoop::Observer implementation:
 
-void NativeWidgetWin::WillProcessMessage(const MSG& msg) {
+base::EventStatus NativeWidgetWin::WillProcessEvent(
+    const base::NativeEvent& event) {
+  return base::EVENT_CONTINUE;
 }
 
-void NativeWidgetWin::DidProcessMessage(const MSG& msg) {
+void NativeWidgetWin::DidProcessEvent(const base::NativeEvent& event) {
   RedrawInvalidRect();
 }
 
@@ -1185,9 +1204,14 @@ LRESULT NativeWidgetWin::OnAppCommand(HWND window,
                                       int keystate) {
   // We treat APPCOMMAND ids as an extension of our command namespace, and just
   // let the delegate figure out what to do...
-  SetMsgHandled(GetWidget()->widget_delegate() &&
-      GetWidget()->widget_delegate()->ExecuteWindowsCommand(app_command));
-  return 0;
+  BOOL is_handled = (GetWidget()->widget_delegate() &&
+      GetWidget()->widget_delegate()->ExecuteWindowsCommand(app_command)) ?
+      TRUE : FALSE;
+  SetMsgHandled(is_handled);
+  // Make sure to return TRUE if the event was handled or in some cases the
+  // system will execute the default handler which can cause bugs like going
+  // forward or back two pages instead of one.
+  return is_handled;
 }
 
 void NativeWidgetWin::OnCancelMode() {
@@ -1271,12 +1295,14 @@ LRESULT NativeWidgetWin::OnCreate(CREATESTRUCT* create_struct) {
     } else {
       CRect window_rect;
       GetClientRect(&window_rect);
-      compositor_ = ui::Compositor::Create(
+      compositor_ = ui::Compositor::Create(this,
           hwnd(),
           gfx::Size(window_rect.Width(), window_rect.Height()));
     }
-    if (compositor_.get())
+    if (compositor_.get()) {
       delegate_->AsWidget()->GetRootView()->SetPaintToLayer(true);
+      compositor_->SetRootLayer(delegate_->AsWidget()->GetRootView()->layer());
+    }
   }
 #endif
 
@@ -2042,10 +2068,11 @@ void NativeWidgetWin::OnWindowPosChanging(WINDOWPOS* window_pos) {
         // likes to (incorrectly) recalculate what our position/size should be
         // and send us further updates.
         ignore_window_pos_changes_ = true;
-        DCHECK(ignore_pos_changes_factory_.empty());
-        MessageLoop::current()->PostTask(FROM_HERE,
-            ignore_pos_changes_factory_.NewRunnableMethod(
-            &NativeWidgetWin::StopIgnoringPosChanges));
+        DCHECK(!ignore_pos_changes_factory_.HasWeakPtrs());
+        MessageLoop::current()->PostTask(
+            FROM_HERE,
+            base::Bind(&NativeWidgetWin::StopIgnoringPosChanges,
+                       ignore_pos_changes_factory_.GetWeakPtr()));
       }
       last_monitor_ = monitor;
       last_monitor_rect_ = monitor_rect;
@@ -2257,6 +2284,10 @@ void NativeWidgetWin::SetInitParams(const Widget::InitParams& params) {
     case Widget::InitParams::TYPE_WINDOW_FRAMELESS:
       style |= WS_POPUP;
       break;
+    case Widget::InitParams::TYPE_BUBBLE:
+      style |= WS_POPUP;
+      style |= WS_CLIPCHILDREN;
+      break;
     case Widget::InitParams::TYPE_POPUP:
       style |= WS_POPUP;
       ex_style |= WS_EX_TOOLWINDOW;
@@ -2290,25 +2321,25 @@ void NativeWidgetWin::RedrawLayeredWindowContents() {
     return;
 
   // We need to clip to the dirty rect ourselves.
-  layered_window_contents_->save(SkCanvas::kClip_SaveFlag);
+  layered_window_contents_->sk_canvas()->save(SkCanvas::kClip_SaveFlag);
   layered_window_contents_->ClipRectInt(invalid_rect_.x(),
                                         invalid_rect_.y(),
                                         invalid_rect_.width(),
                                         invalid_rect_.height());
   GetWidget()->GetRootView()->Paint(layered_window_contents_.get());
-  layered_window_contents_->restore();
+  layered_window_contents_->sk_canvas()->restore();
 
   RECT wr;
   GetWindowRect(&wr);
   SIZE size = {wr.right - wr.left, wr.bottom - wr.top};
   POINT position = {wr.left, wr.top};
-  HDC dib_dc = skia::BeginPlatformPaint(layered_window_contents_.get());
+  HDC dib_dc = skia::BeginPlatformPaint(layered_window_contents_->sk_canvas());
   POINT zero = {0, 0};
   BLENDFUNCTION blend = {AC_SRC_OVER, 0, layered_alpha_, AC_SRC_ALPHA};
   UpdateLayeredWindow(hwnd(), NULL, &position, &size, dib_dc, &zero,
                       RGB(0xFF, 0xFF, 0xFF), &blend, ULW_ALPHA);
   invalid_rect_.SetRect(0, 0, 0, 0);
-  skia::EndPlatformPaint(layered_window_contents_.get());
+  skia::EndPlatformPaint(layered_window_contents_->sk_canvas());
 }
 
 void NativeWidgetWin::LockUpdates() {

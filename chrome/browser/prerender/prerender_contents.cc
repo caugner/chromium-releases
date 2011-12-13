@@ -70,6 +70,15 @@ class PrerenderContentsFactoryImpl : public PrerenderContents::Factory {
   }
 };
 
+PrerenderContents::PendingPrerenderData::PendingPrerenderData(
+    Origin origin,
+    const GURL& url,
+    const GURL& referrer)
+    : origin(origin),
+      url(url),
+      referrer(referrer) {
+}
+
 // TabContentsDelegateImpl -----------------------------------------------------
 
 class PrerenderContents::TabContentsDelegateImpl
@@ -82,7 +91,7 @@ class PrerenderContents::TabContentsDelegateImpl
   // TabContentsDelegate implementation:
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
-      NavigationType::Type navigation_type) OVERRIDE {
+      content::NavigationType navigation_type) OVERRIDE {
     add_page_vector_.push_back(
         scoped_refptr<history::HistoryAddPageArgs>(add_page_args.Clone()));
     return false;
@@ -109,6 +118,14 @@ class PrerenderContents::TabContentsDelegateImpl
     return false;
   }
 
+  virtual void JSOutOfMemory(TabContents* tab) OVERRIDE {
+    prerender_contents_->OnJSOutOfMemory();
+  }
+
+  virtual bool ShouldSuppressDialogs() OVERRIDE {
+    return prerender_contents_->ShouldSuppressDialogs();
+  }
+
   // Commits the History of Pages to the given TabContents.
   void CommitHistory(TabContentsWrapper* tab) {
     for (size_t i = 0; i < add_page_vector_.size(); ++i)
@@ -125,6 +142,37 @@ class PrerenderContents::TabContentsDelegateImpl
 
   PrerenderContents* prerender_contents_;
 };
+
+void PrerenderContents::AddPendingPrerender(Origin origin,
+                                            const GURL& url,
+                                            const GURL& referrer) {
+  pending_prerender_list_.push_back(
+      PendingPrerenderData(origin, url, referrer));
+}
+
+bool PrerenderContents::IsPendingEntry(const GURL& url) const {
+  for (PendingPrerenderList::const_iterator it =
+           pending_prerender_list_.begin();
+       it != pending_prerender_list_.end();
+       ++it) {
+    if (it->url == url)
+      return true;
+  }
+  return false;
+}
+
+void PrerenderContents::StartPendingPrerenders() {
+  PendingPrerenderList pending_prerender_list;
+  pending_prerender_list.swap(pending_prerender_list_);
+  for (PendingPrerenderList::iterator it = pending_prerender_list.begin();
+       it != pending_prerender_list.end();
+       ++it) {
+    prerender_manager_->AddPrerender(it->origin,
+                                     std::make_pair(child_id_, route_id_),
+                                     it->url,
+                                     it->referrer);
+  }
+}
 
 PrerenderContents::PrerenderContents(PrerenderManager* prerender_manager,
                                      PrerenderTracker* prerender_tracker,
@@ -205,7 +253,7 @@ void PrerenderContents::StartPrerendering(
     // Try to get the active tab of the active browser and use that for tab
     // bounds. If the browser has never been active, we will fail to get a size
     // but we shouldn't be prerendering in that case anyway.
-    Browser* active_browser = BrowserList::GetLastActive();
+    Browser* active_browser = BrowserList::GetLastActiveWithProfile(profile_);
     if (active_browser) {
       TabContents* active_tab_contents = active_browser->GetTabContentsAt(
           active_browser->active_index());
@@ -271,8 +319,13 @@ void PrerenderContents::StartPrerendering(
   DCHECK(load_start_time_.is_null());
   load_start_time_ = base::TimeTicks::Now();
 
-  new_contents->controller().LoadURL(prerender_url_,
-                                     referrer_, PageTransition::LINK);
+  content::PageTransition transition = content::PAGE_TRANSITION_LINK;
+  if (origin_ == ORIGIN_OMNIBOX_ORIGINAL ||
+      origin_ == ORIGIN_OMNIBOX_CONSERVATIVE) {
+    transition = content::PAGE_TRANSITION_TYPED;
+  }
+  new_contents->controller().LoadURL(prerender_url_, referrer_, transition,
+                                     std::string());
 }
 
 bool PrerenderContents::GetChildId(int* child_id) const {
@@ -409,23 +462,6 @@ void PrerenderContents::OnRenderViewHostCreated(
     RenderViewHost* new_render_view_host) {
 }
 
-void PrerenderContents::OnDidStartProvisionalLoadForFrame(int64 frame_id,
-                                                          bool is_main_frame,
-                                                          bool has_opener_set,
-                                                          const GURL& url) {
-  if (is_main_frame) {
-    if (!AddAliasURL(url))
-      return;
-
-    // Usually, this event fires if the user clicks or enters a new URL.
-    // Neither of these can happen in the case of an invisible prerender.
-    // So the cause is: Some JavaScript caused a new URL to be loaded.  In that
-    // case, the spinner would start again in the browser, so we must reset
-    // has_stopped_loading_ so that the spinner won't be stopped.
-    has_stopped_loading_ = false;
-  }
-}
-
 void PrerenderContents::OnUpdateFaviconURL(
     int32 page_id,
     const std::vector<FaviconURL>& urls) {
@@ -478,27 +514,40 @@ void PrerenderContents::OnJSOutOfMemory() {
   Destroy(FINAL_STATUS_JS_OUT_OF_MEMORY);
 }
 
-void PrerenderContents::OnRunJavaScriptMessage(
-    const string16& message,
-    const string16& default_prompt,
-    const GURL& frame_url,
-    const int flags,
-    bool* did_suppress_message,
-    string16* prompt_field) {
-  // Always suppress JavaScript messages if they're triggered by a page being
-  // prerendered.
-  *did_suppress_message = true;
-  // We still want to show the user the message when they navigate to this
-  // page, so cancel this prerender.
-  Destroy(FINAL_STATUS_JAVASCRIPT_ALERT);
-}
-
-void PrerenderContents::OnRenderViewGone(int status, int exit_code) {
+void PrerenderContents::RenderViewGone() {
   Destroy(FINAL_STATUS_RENDERER_CRASHED);
 }
 
 void PrerenderContents::DidStopLoading() {
   has_stopped_loading_ = true;
+}
+
+void PrerenderContents::DidStartProvisionalLoadForFrame(
+    int64 frame_id,
+    bool is_main_frame,
+    const GURL& validated_url,
+    bool is_error_page,
+    RenderViewHost* render_view_host) {
+  if (is_main_frame) {
+    if (!AddAliasURL(validated_url))
+      return;
+
+    // Usually, this event fires if the user clicks or enters a new URL.
+    // Neither of these can happen in the case of an invisible prerender.
+    // So the cause is: Some JavaScript caused a new URL to be loaded.  In that
+    // case, the spinner would start again in the browser, so we must reset
+    // has_stopped_loading_ so that the spinner won't be stopped.
+    has_stopped_loading_ = false;
+  }
+}
+
+bool PrerenderContents::ShouldSuppressDialogs() {
+  // Always suppress JavaScript messages if they're triggered by a page being
+  // prerendered.
+  // We still want to show the user the message when they navigate to this
+  // page, so cancel this prerender.
+  Destroy(FINAL_STATUS_JAVASCRIPT_ALERT);
+  return true;
 }
 
 void PrerenderContents::Destroy(FinalStatus final_status) {

@@ -3,6 +3,8 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/cloud_print_signin_dialog.h"
+
+#include "base/bind.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profiles/profile.h"
@@ -15,10 +17,10 @@
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_registrar.h"
 #include "content/common/notification_source.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/notification_types.h"
 
 // This module implements a sign in dialog for cloud print.
 // it is based heavily off "chrome/browser/printing/print_dialog_cloud.cc".
@@ -30,6 +32,8 @@ namespace cloud_print_signin_dialog {
 // and closes the dialog when sign in is complete.
 class CloudPrintSigninFlowHandler : public WebUIMessageHandler,
                                     public NotificationObserver {
+ public:
+  explicit CloudPrintSigninFlowHandler(TabContents* parent_tab);
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
@@ -41,7 +45,12 @@ class CloudPrintSigninFlowHandler : public WebUIMessageHandler,
   // Records the final size of the dialog in prefs.
   void StoreDialogSize();
   NotificationRegistrar registrar_;
+  TabContents* parent_tab_;
 };
+
+CloudPrintSigninFlowHandler::CloudPrintSigninFlowHandler(
+    TabContents* parent_tab) : parent_tab_(parent_tab) {
+}
 
 void CloudPrintSigninFlowHandler::RegisterMessages() {
   if (web_ui_ && web_ui_->tab_contents()) {
@@ -67,6 +76,7 @@ void CloudPrintSigninFlowHandler::Observe(int type,
         url.scheme() == dialog_url.scheme()) {
       StoreDialogSize();
       web_ui_->tab_contents()->render_view_host()->ClosePage();
+      parent_tab_->controller().Reload(false);
     }
   }
 }
@@ -106,11 +116,7 @@ CloudPrintSigninDelegate::CloudPrintSigninDelegate(TabContents* parent_tab)
 }
 
 bool CloudPrintSigninDelegate::IsDialogModal() const {
-  // TODO(abodenha@chromium.org) We want this to be modal, but calling
-  // ClosePage from the flow handler on a modal dialog results in the
-  // browser window never responding to input again.  Figure out why.
-  // http://code.google.com/p/chromium/issues/detail?id=93992
-  return false;
+  return true;
 }
 
 string16 CloudPrintSigninDelegate::GetDialogTitle() const {
@@ -123,7 +129,7 @@ GURL CloudPrintSigninDelegate::GetDialogContentURL() const {
 
 void CloudPrintSigninDelegate::GetWebUIMessageHandlers(
       std::vector<WebUIMessageHandler*>* handlers) const {
-  handlers->push_back(new CloudPrintSigninFlowHandler());
+  handlers->push_back(new CloudPrintSigninFlowHandler(parent_tab_));
 }
 
 void CloudPrintSigninDelegate::GetDialogSize(gfx::Size* size) const {
@@ -151,7 +157,6 @@ std::string CloudPrintSigninDelegate::GetDialogArgs() const {
 }
 
 void CloudPrintSigninDelegate::OnDialogClosed(const std::string& json_retval) {
-  parent_tab_->controller().Reload(false);
 }
 
 void CloudPrintSigninDelegate::OnCloseContents(TabContents* source,
@@ -176,8 +181,7 @@ void CreateCloudPrintSigninDialog(TabContents* parent_tab) {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(CreateCloudPrintSigninDialogImpl,
-                          parent_tab));
+      base::Bind(&CreateCloudPrintSigninDialogImpl, parent_tab));
 }
 }  // namespace cloud_print_signin_dialog
 

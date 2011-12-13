@@ -10,6 +10,7 @@
 #include "base/base64.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/json/json_value_serializer.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
@@ -19,7 +20,6 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/extensions/user_script.h"
-#include "content/common/json_value_serializer.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 
@@ -73,10 +73,10 @@ scoped_refptr<Extension> ConvertUserScriptToExtension(
   // identity is its namespace+name, so we hash that to create a public key.
   // There will be no corresponding private key, which means user scripts cannot
   // be auto-updated, or claimed in the gallery.
-  char raw[crypto::SHA256_LENGTH] = {0};
+  char raw[crypto::kSHA256Length] = {0};
   std::string key;
-  crypto::SHA256HashString(script_name, raw, crypto::SHA256_LENGTH);
-  base::Base64Encode(std::string(raw, crypto::SHA256_LENGTH), &key);
+  crypto::SHA256HashString(script_name, raw, crypto::kSHA256Length);
+  base::Base64Encode(std::string(raw, crypto::kSHA256Length), &key);
 
   // The script may not have a name field, but we need one for an extension. If
   // it is missing, use the filename of the original URL.

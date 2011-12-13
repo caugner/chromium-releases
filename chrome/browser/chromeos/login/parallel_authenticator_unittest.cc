@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
@@ -25,7 +26,7 @@
 #include "chrome/common/net/gaia/gaia_auth_fetcher_unittest.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread.h"
-#include "content/common/url_fetcher.h"
+#include "content/common/net/url_fetcher.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_status.h"
@@ -155,9 +156,7 @@ class ParallelAuthenticatorTest : public testing::Test {
                             const std::string& filename) {
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(auth,
-                          &ParallelAuthenticator::LoadLocalaccount,
-                          filename));
+        base::Bind(&ParallelAuthenticator::LoadLocalaccount, auth, filename));
     file_thread_.Stop();
     file_thread_.Start();
   }
@@ -214,7 +213,7 @@ class ParallelAuthenticatorTest : public testing::Test {
   void RunResolve(ParallelAuthenticator* auth, MessageLoop* loop) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(auth, &ParallelAuthenticator::Resolve));
+        base::Bind(&ParallelAuthenticator::Resolve, auth));
     loop->Run();
   }
 

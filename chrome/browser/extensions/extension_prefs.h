@@ -67,11 +67,16 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
     LAUNCH_DEFAULT = LAUNCH_REGULAR
   };
 
-  // Does not assume ownership of |prefs| and |incognito_prefs|.
+  // Does not assume ownership of |prefs| and |extension_pref_value_map|.
+  // Note that you must call Init() to finalize construction.
   ExtensionPrefs(PrefService* prefs,
                  const FilePath& root_dir,
                  ExtensionPrefValueMap* extension_pref_value_map);
   virtual ~ExtensionPrefs();
+
+  // If |extensions_disabled| is true, extension controlled preferences and
+  // content settings do not become effective.
+  void Init(bool extensions_disabled);
 
   // Returns a copy of the Extensions prefs.
   // TODO(erikkay) Remove this so that external consumers don't need to be
@@ -86,13 +91,6 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   // the extension, this will return false. Generally you should use
   // ExtensionService::IsExtensionEnabled instead.
   bool IsExtensionDisabled(const std::string& id) const;
-
-  // Get the order that toolstrip URLs appear in the shelf.
-  typedef std::vector<GURL> URLList;
-  URLList GetShelfToolstripOrder();
-
-  // Sets the order that toolstrip URLs appear in the shelf.
-  void SetShelfToolstripOrder(const URLList& urls);
 
   // Get the order that the browser actions appear in the toolbar.
   std::vector<std::string> GetToolbarOrder();
@@ -149,6 +147,29 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
 
   // Based on extension id, checks prefs to see if it is blacklisted.
   bool IsExtensionBlacklisted(const std::string& id);
+
+  // Based on extension id, checks prefs to see if it is orphaned.
+  bool IsExtensionOrphaned(const std::string& id);
+
+  // Whether the user has acknowledged an external extension.
+  bool IsExternalExtensionAcknowledged(const std::string& extension_id);
+  void AcknowledgeExternalExtension(const std::string& extension_id);
+
+  // Whether the user has acknowledged a blacklisted extension.
+  bool IsBlacklistedExtensionAcknowledged(const std::string& extension_id);
+  void AcknowledgeBlacklistedExtension(const std::string& extension_id);
+
+  // Whether the user has acknowledged an orphaned extension.
+  bool IsOrphanedExtensionAcknowledged(const std::string& extension_id);
+  void AcknowledgeOrphanedExtension(const std::string& extension_id);
+
+  // Returns true if the extension notification code has already run for the
+  // first time for this profile. Currently we use this flag to mean that any
+  // extensions that would trigger notifications should get silently
+  // acknowledged. This is a fuse. Calling it the first time returns false.
+  // Subsequent calls return true. It's not possible through an API to ever
+  // reset it. Don't call it unless you mean it!
+  bool SetAlertSystemFirstRun();
 
   // Is the extension with |extension_id| allowed by policy (checking both
   // whitelist and blacklist).
@@ -211,6 +232,15 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   void SetAllowFileAccess(const std::string& extension_id, bool allow);
   bool HasAllowFileAccessSetting(const std::string& extension_id) const;
 
+  // Sets the extension preference indicating that an extension wants to delay
+  // network requests on browser startup.
+  void SetDelaysNetworkRequests(const std::string& extension_id,
+                                bool does_delay);
+
+  // Returns true if an extension has registered to delay network requests on
+  // browser startup.
+  bool DelaysNetworkRequests(const std::string& extension_id);
+
   // Get the launch type preference.  If no preference is set, return
   // |default_pref_value|.
   LaunchType GetLaunchType(const std::string& extension_id,
@@ -224,7 +254,6 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   extension_misc::LaunchContainer GetLaunchContainer(
       const Extension* extension,
       LaunchType default_pref_value);
-
 
   // Saves ExtensionInfo for each installed extension with the path to the
   // version directory and the location. Blacklisted extensions won't be saved
@@ -292,6 +321,9 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
 
   // Sets a specific page index for an extension with |extension_id|.
   void SetPageIndex(const std::string& extension_id, int index);
+
+  // Removes the page index for an extension.
+  void ClearPageIndex(const std::string& extension_id);
 
   // Returns true if the user repositioned the app on the app launcher via drag
   // and drop.
@@ -466,8 +498,8 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   void FixMissingPrefs(const ExtensionIdSet& extension_ids);
 
   // Installs the persistent extension preferences into |prefs_|'s extension
-  // pref store.
-  void InitPrefStore();
+  // pref store. Does nothing if |extensions_disabled| is true.
+  void InitPrefStore(bool extensions_disabled);
 
   // Migrates the permissions data in the pref store.
   void MigratePermissions(const ExtensionIdSet& extension_ids);
@@ -487,9 +519,6 @@ class ExtensionPrefs : public ExtensionContentSettingsStore::Observer {
   ExtensionPrefValueMap* extension_pref_value_map_;
 
   scoped_refptr<ExtensionContentSettingsStore> content_settings_store_;
-
-  // The URLs of all of the toolstrips.
-  URLList shelf_order_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPrefs);
 };

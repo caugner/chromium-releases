@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -23,7 +23,7 @@
 #include "content/browser/cancelable_request.h"
 #include "content/common/notification_observer.h"
 #include "content/common/notification_registrar.h"
-#include "content/common/page_transition_types.h"
+#include "content/public/common/page_transition_types.h"
 #include "sql/init_status.h"
 
 class BookmarkService;
@@ -189,7 +189,7 @@ class HistoryService : public CancelableRequestProvider,
                const void* id_scope,
                int32 page_id,
                const GURL& referrer,
-               PageTransition::Type transition,
+               content::PageTransition transition,
                const history::RedirectList& redirects,
                history::VisitSource visit_source,
                bool did_replace_entry);
@@ -201,14 +201,14 @@ class HistoryService : public CancelableRequestProvider,
                const void* id_scope,
                int32 page_id,
                const GURL& referrer,
-               PageTransition::Type transition,
+               content::PageTransition transition,
                const history::RedirectList& redirects,
                history::VisitSource visit_source,
                bool did_replace_entry);
 
   // For adding pages to history where no tracking information can be done.
   void AddPage(const GURL& url, history::VisitSource visit_source) {
-    AddPage(url, NULL, 0, GURL(), PageTransition::LINK,
+    AddPage(url, NULL, 0, GURL(), content::PAGE_TRANSITION_LINK,
             history::RedirectList(), visit_source, false);
   }
 
@@ -266,11 +266,11 @@ class HistoryService : public CancelableRequestProvider,
   // empty.
   //
   // If success is false, neither the row nor the vector will be valid.
-  typedef Callback4<Handle,
-                    bool,  // Success flag, when false, nothing else is valid.
-                    const history::URLRow*,
-                    history::VisitVector*>::Type
-      QueryURLCallback;
+  typedef base::Callback<void(
+      Handle,
+      bool,  // Success flag, when false, nothing else is valid.
+      const history::URLRow*,
+      history::VisitVector*)> QueryURLCallback;
 
   // Queries the basic information about the URL in the history database. If
   // the caller is interested in the visits (each time the URL is visited),
@@ -279,12 +279,12 @@ class HistoryService : public CancelableRequestProvider,
   Handle QueryURL(const GURL& url,
                   bool want_visits,
                   CancelableRequestConsumerBase* consumer,
-                  QueryURLCallback* callback);
+                  const QueryURLCallback& callback);
 
   // Provides the result of a query. See QueryResults in history_types.h.
   // The common use will be to use QueryResults.Swap to suck the contents of
   // the results out of the passed in parameter and take ownership of them.
-  typedef Callback2<Handle, history::QueryResults*>::Type
+  typedef base::Callback<void(Handle, history::QueryResults*)>
       QueryHistoryCallback;
 
   // Queries all history with the given options (see QueryOptions in
@@ -297,7 +297,7 @@ class HistoryService : public CancelableRequestProvider,
   Handle QueryHistory(const string16& text_query,
                       const history::QueryOptions& options,
                       CancelableRequestConsumerBase* consumer,
-                      QueryHistoryCallback* callback);
+                      const QueryHistoryCallback& callback);
 
   // Called when the results of QueryRedirectsFrom are available.
   // The given vector will contain a list of all redirects, not counting
@@ -308,30 +308,30 @@ class HistoryService : public CancelableRequestProvider,
   // redirect, the vector will be empty. If the history system failed for
   // some reason, success will additionally be false. If the given page
   // has redirected to multiple destinations, this will pick a random one.
-  typedef Callback4<Handle,
-                    GURL,  // from_url
-                    bool,  // success
-                    history::RedirectList*>::Type
-      QueryRedirectsCallback;
+  typedef base::Callback<void(Handle,
+                              GURL,  // from_url
+                              bool,  // success
+                              history::RedirectList*)> QueryRedirectsCallback;
 
   // Schedules a query for the most recent redirect coming out of the given
   // URL. See the RedirectQuerySource above, which is guaranteed to be called
   // if the request is not canceled.
   Handle QueryRedirectsFrom(const GURL& from_url,
                             CancelableRequestConsumerBase* consumer,
-                            QueryRedirectsCallback* callback);
+                            const QueryRedirectsCallback& callback);
 
   // Schedules a query to get the most recent redirects ending at the given
   // URL.
   Handle QueryRedirectsTo(const GURL& to_url,
                           CancelableRequestConsumerBase* consumer,
-                          QueryRedirectsCallback* callback);
+                          const QueryRedirectsCallback& callback);
 
-  typedef Callback4<Handle,
-                    bool,        // Were we able to determine the # of visits?
-                    int,         // Number of visits.
-                    base::Time>::Type  // Time of first visit. Only set if bool
-                                       // is true and int is > 0.
+  typedef base::Callback<
+      void(Handle,
+           bool,        // Were we able to determine the # of visits?
+           int,         // Number of visits.
+           base::Time)> // Time of first visit. Only set if bool
+                        // is true and int is > 0.
       GetVisibleVisitCountToHostCallback;
 
   // Requests the number of user-visible visits (i.e. no redirects or subframes)
@@ -340,35 +340,37 @@ class HistoryService : public CancelableRequestProvider,
   Handle GetVisibleVisitCountToHost(
       const GURL& url,
       CancelableRequestConsumerBase* consumer,
-      GetVisibleVisitCountToHostCallback* callback);
+      const GetVisibleVisitCountToHostCallback& callback);
 
   // Called when QueryTopURLsAndRedirects completes. The vector contains a list
   // of the top |result_count| URLs.  For each of these URLs, there is an entry
   // in the map containing redirects from the URL.  For example, if we have the
   // redirect chain A -> B -> C and A is a top visited URL, then A will be in
   // the vector and "A => {B -> C}" will be in the map.
-  typedef Callback4<Handle,
-                    bool,  // Did we get the top urls and redirects?
-                    std::vector<GURL>*,  // List of top URLs.
-                    history::RedirectMap*>::Type  // Redirects for top URLs.
+  typedef base::Callback<
+      void(Handle,
+           bool,  // Did we get the top urls and redirects?
+           std::vector<GURL>*,  // List of top URLs.
+           history::RedirectMap*)>  // Redirects for top URLs.
       QueryTopURLsAndRedirectsCallback;
 
   // Request the top |result_count| most visited URLs and the chain of redirects
   // leading to each of these URLs.
   // TODO(Nik): remove this. Use QueryMostVisitedURLs instead.
-  Handle QueryTopURLsAndRedirects(int result_count,
-                                  CancelableRequestConsumerBase* consumer,
-                                  QueryTopURLsAndRedirectsCallback* callback);
+  Handle QueryTopURLsAndRedirects(
+      int result_count,
+      CancelableRequestConsumerBase* consumer,
+      const QueryTopURLsAndRedirectsCallback& callback);
 
-  typedef Callback2<Handle, history::MostVisitedURLList>::Type
-                    QueryMostVisitedURLsCallback;
+  typedef base::Callback<void(Handle, history::MostVisitedURLList)>
+      QueryMostVisitedURLsCallback;
 
   // Request the |result_count| most visited URLs and the chain of
   // redirects leading to each of these URLs. |days_back| is the
   // number of days of history to use. Used by TopSites.
   Handle QueryMostVisitedURLs(int result_count, int days_back,
                               CancelableRequestConsumerBase* consumer,
-                              QueryMostVisitedURLsCallback* callback);
+                              const QueryMostVisitedURLsCallback& callback);
 
   // Thumbnails ----------------------------------------------------------------
 
@@ -378,22 +380,18 @@ class HistoryService : public CancelableRequestProvider,
   //
   // This function will be called even on error conditions or if there is no
   // thumbnail for that page. In these cases, the data pointer will be NULL.
-  typedef Callback2<Handle, scoped_refptr<RefCountedBytes> >::Type
+  typedef base::Callback<void(Handle, scoped_refptr<RefCountedBytes>)>
       ThumbnailDataCallback;
 
   // Requests a page thumbnail. See ThumbnailDataCallback definition above.
   Handle GetPageThumbnail(const GURL& page_url,
                           CancelableRequestConsumerBase* consumer,
-                          ThumbnailDataCallback* callback);
+                          const ThumbnailDataCallback& callback);
 
   // Database management operations --------------------------------------------
 
   // Delete all the information related to a single url.
   void DeleteURL(const GURL& url);
-
-  // Implemented by the caller of ExpireHistoryBetween, and
-  // is called when the history service has deleted the history.
-  typedef Callback0::Type ExpireHistoryCallback;
 
   // Removes all visits in the selected time range (including the start time),
   // updating the URLs accordingly. This deletes the associated data, including
@@ -406,14 +404,13 @@ class HistoryService : public CancelableRequestProvider,
   void ExpireHistoryBetween(const std::set<GURL>& restrict_urls,
                             base::Time begin_time, base::Time end_time,
                             CancelableRequestConsumerBase* consumer,
-                            ExpireHistoryCallback* callback);
+                            const base::Closure& callback);
 
   // Downloads -----------------------------------------------------------------
 
   // Implemented by the caller of 'CreateDownload' below, and is called when the
   // history service has created a new entry for a download in the history db.
-  typedef Callback2<int32, int64>::Type
-      DownloadCreateCallback;
+  typedef base::Callback<void(int32, int64)> DownloadCreateCallback;
 
   // Begins a history request to create a new persistent entry for a download.
   // 'info' contains all the download's creation state, and 'callback' runs
@@ -421,11 +418,18 @@ class HistoryService : public CancelableRequestProvider,
   Handle CreateDownload(int32 id,
                         const DownloadPersistentStoreInfo& info,
                         CancelableRequestConsumerBase* consumer,
-                        DownloadCreateCallback* callback);
+                        const DownloadCreateCallback& callback);
+
+  // Implemented by the caller of 'GetNextDownloadId' below.
+  typedef base::Callback<void(int)> DownloadNextIdCallback;
+
+  // Runs the callback with the next available download id.
+  Handle GetNextDownloadId(CancelableRequestConsumerBase* consumer,
+                           const DownloadNextIdCallback& callback);
 
   // Implemented by the caller of 'QueryDownloads' below, and is called when the
   // history service has retrieved a list of all download state. The call
-  typedef Callback1<std::vector<DownloadPersistentStoreInfo>*>::Type
+  typedef base::Callback<void(std::vector<DownloadPersistentStoreInfo>*)>
       DownloadQueryCallback;
 
   // Begins a history request to retrieve the state of all downloads in the
@@ -433,7 +437,7 @@ class HistoryService : public CancelableRequestProvider,
   // at which point 'info' contains an array of DownloadPersistentStoreInfo, one
   // per download.
   Handle QueryDownloads(CancelableRequestConsumerBase* consumer,
-                        DownloadQueryCallback* callback);
+                        const DownloadQueryCallback& callback);
 
   // Begins a request to clean up entries that has been corrupted (because of
   // the crash, for example).
@@ -442,7 +446,7 @@ class HistoryService : public CancelableRequestProvider,
   // Called to update the history service about the current state of a download.
   // This is a 'fire and forget' query, so just pass the relevant state info to
   // the database with no need for a callback.
-  void UpdateDownload(int64 received_bytes, int32 state, int64 db_handle);
+  void UpdateDownload(const DownloadPersistentStoreInfo& data);
 
   // Called to update the history service about the path of a download.
   // This is a 'fire and forget' query.
@@ -461,7 +465,7 @@ class HistoryService : public CancelableRequestProvider,
 
   // Visit Segments ------------------------------------------------------------
 
-  typedef Callback2<Handle, std::vector<PageUsageData*>*>::Type
+  typedef base::Callback<void(Handle, std::vector<PageUsageData*>*)>
       SegmentQueryCallback;
 
   // Query usage data for all visit segments since the provided time.
@@ -480,7 +484,7 @@ class HistoryService : public CancelableRequestProvider,
   Handle QuerySegmentUsageSince(CancelableRequestConsumerBase* consumer,
                                 const base::Time from_time,
                                 int max_result_count,
-                                SegmentQueryCallback* callback);
+                                const SegmentQueryCallback& callback);
 
   // Set the presentation index for the segment identified by |segment_id|.
   void SetSegmentPresentationIndex(int64 segment_id, int index);
@@ -496,8 +500,9 @@ class HistoryService : public CancelableRequestProvider,
   // Deletes all search terms for the specified keyword.
   void DeleteAllSearchTermsForKeyword(TemplateURLID keyword_id);
 
-  typedef Callback2<Handle, std::vector<history::KeywordSearchTermVisit>*>::Type
-      GetMostRecentKeywordSearchTermsCallback;
+  typedef base::Callback<
+      void(Handle, std::vector<history::KeywordSearchTermVisit>*)>
+          GetMostRecentKeywordSearchTermsCallback;
 
   // Returns up to max_count of the most recent search terms starting with the
   // specified text. The matching is case insensitive. The results are ordered
@@ -508,7 +513,7 @@ class HistoryService : public CancelableRequestProvider,
       const string16& prefix,
       int max_count,
       CancelableRequestConsumerBase* consumer,
-      GetMostRecentKeywordSearchTermsCallback* callback);
+      const GetMostRecentKeywordSearchTermsCallback& callback);
 
   // Bookmarks -----------------------------------------------------------------
 
@@ -517,12 +522,10 @@ class HistoryService : public CancelableRequestProvider,
 
   // Generic Stuff -------------------------------------------------------------
 
-  typedef Callback0::Type HistoryDBTaskCallback;
-
   // Schedules a HistoryDBTask for running on the history backend thread. See
   // HistoryDBTask for details on what this does.
-  virtual Handle ScheduleDBTask(HistoryDBTask* task,
-                                CancelableRequestConsumerBase* consumer);
+  virtual void ScheduleDBTask(HistoryDBTask* task,
+                              CancelableRequestConsumerBase* consumer);
 
   // Returns true if top sites needs to be migrated out of history into its own
   // db.
@@ -566,7 +569,7 @@ class HistoryService : public CancelableRequestProvider,
 
   // Starts the TopSites migration in the HistoryThread. Called by the
   // BackendDelegate.
-  void StartTopSitesMigration();
+  void StartTopSitesMigration(int backend_id);
 
   // Called by TopSites after the thumbnails were read and it is safe
   // to delete the thumbnails DB.
@@ -634,7 +637,7 @@ class HistoryService : public CancelableRequestProvider,
 
   // Notification from the backend that it has finished loading. Sends
   // notification (NOTIFY_HISTORY_LOADED) and sets backend_loaded_ to true.
-  void OnDBLoaded();
+  void OnDBLoaded(int backend_id);
 
   // Favicon -------------------------------------------------------------------
 
@@ -679,14 +682,15 @@ class HistoryService : public CancelableRequestProvider,
 
   // Sets the in-memory URL database. This is called by the backend once the
   // database is loaded to make it available.
-  void SetInMemoryBackend(history::InMemoryHistoryBackend* mem_backend);
+  void SetInMemoryBackend(int backend_id,
+                          history::InMemoryHistoryBackend* mem_backend);
 
   // Called by our BackendDelegate when there is a problem reading the database.
-  void NotifyProfileError(sql::InitStatus init_status);
+  void NotifyProfileError(int backend_id, sql::InitStatus init_status);
 
   // Call to schedule a given task for running on the history thread with the
   // specified priority. The task will have ownership taken.
-  void ScheduleTask(SchedulePriority priority, Task* task);
+  void ScheduleTask(SchedulePriority priority, const base::Closure& task);
 
   // Schedule ------------------------------------------------------------------
   //
@@ -704,8 +708,8 @@ class HistoryService : public CancelableRequestProvider,
     if (consumer)
       AddRequest(request, consumer);
     ScheduleTask(priority,
-                 NewRunnableMethod(history_backend_.get(), func,
-                                   scoped_refptr<RequestType>(request)));
+                 base::Bind(func, history_backend_.get(),
+                            scoped_refptr<RequestType>(request)));
     return request->handle();
   }
 
@@ -720,9 +724,8 @@ class HistoryService : public CancelableRequestProvider,
     if (consumer)
       AddRequest(request, consumer);
     ScheduleTask(priority,
-                 NewRunnableMethod(history_backend_.get(), func,
-                                   scoped_refptr<RequestType>(request),
-                                   a));
+                 base::Bind(func, history_backend_.get(),
+                            scoped_refptr<RequestType>(request), a));
     return request->handle();
   }
 
@@ -741,9 +744,8 @@ class HistoryService : public CancelableRequestProvider,
     if (consumer)
       AddRequest(request, consumer);
     ScheduleTask(priority,
-                 NewRunnableMethod(history_backend_.get(), func,
-                                   scoped_refptr<RequestType>(request),
-                                   a, b));
+                 base::Bind(func, history_backend_.get(),
+                            scoped_refptr<RequestType>(request), a, b));
     return request->handle();
   }
 
@@ -764,9 +766,8 @@ class HistoryService : public CancelableRequestProvider,
     if (consumer)
       AddRequest(request, consumer);
     ScheduleTask(priority,
-                 NewRunnableMethod(history_backend_.get(), func,
-                                   scoped_refptr<RequestType>(request),
-                                   a, b, c));
+                 base::Bind(func, history_backend_.get(),
+                            scoped_refptr<RequestType>(request), a, b, c));
     return request->handle();
   }
 
@@ -780,7 +781,7 @@ class HistoryService : public CancelableRequestProvider,
                          BackendFunc func) {  // Function to call on backend.
     DCHECK(thread_) << "History service being called after cleanup";
     LoadBackendIfNecessary();
-    ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func));
+    ScheduleTask(priority, base::Bind(func, history_backend_.get()));
   }
 
   template<typename BackendFunc, typename ArgA>
@@ -789,7 +790,7 @@ class HistoryService : public CancelableRequestProvider,
                          const ArgA& a) {
     DCHECK(thread_) << "History service being called after cleanup";
     LoadBackendIfNecessary();
-    ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func, a));
+    ScheduleTask(priority, base::Bind(func, history_backend_.get(), a));
   }
 
   template<typename BackendFunc, typename ArgA, typename ArgB>
@@ -799,8 +800,7 @@ class HistoryService : public CancelableRequestProvider,
                          const ArgB& b) {
     DCHECK(thread_) << "History service being called after cleanup";
     LoadBackendIfNecessary();
-    ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func,
-                                             a, b));
+    ScheduleTask(priority, base::Bind(func, history_backend_.get(), a, b));
   }
 
   template<typename BackendFunc, typename ArgA, typename ArgB, typename ArgC>
@@ -811,8 +811,7 @@ class HistoryService : public CancelableRequestProvider,
                          const ArgC& c) {
     DCHECK(thread_) << "History service being called after cleanup";
     LoadBackendIfNecessary();
-    ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func,
-                                             a, b, c));
+    ScheduleTask(priority, base::Bind(func, history_backend_.get(), a, b, c));
   }
 
   template<typename BackendFunc,
@@ -828,8 +827,8 @@ class HistoryService : public CancelableRequestProvider,
                          const ArgD& d) {
     DCHECK(thread_) << "History service being called after cleanup";
     LoadBackendIfNecessary();
-    ScheduleTask(priority, NewRunnableMethod(history_backend_.get(), func,
-                                             a, b, c, d));
+    ScheduleTask(priority, base::Bind(func, history_backend_.get(),
+                                      a, b, c, d));
   }
 
   NotificationRegistrar registrar_;
@@ -861,6 +860,10 @@ class HistoryService : public CancelableRequestProvider,
   // Has the backend finished loading? The backend is loaded once Init has
   // completed.
   bool backend_loaded_;
+
+  // The id of the current backend. This is only valid when history_backend_
+  // is not NULL.
+  int current_backend_id_;
 
   // Cached values from Init(), used whenever we need to reload the backend.
   FilePath history_dir_;

@@ -4,6 +4,8 @@
 
 #include "chrome/browser/tabs/tab_finder.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/stl_util.h"
 #include "chrome/browser/history/history.h"
@@ -16,11 +18,11 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/content_notification_types.h"
 #include "content/common/notification_service.h"
 #include "content/common/notification_source.h"
-#include "content/common/page_transition_types.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/notification_types.h"
+#include "content/public/common/page_transition_types.h"
 
 class TabFinder::TabContentsObserverImpl : public TabContentsObserver {
  public:
@@ -134,7 +136,7 @@ void TabFinder::DidNavigateAnyFramePostCommit(
     const ViewHostMsg_FrameNavigate_Params& params) {
   CancelRequestsFor(source);
 
-  if (PageTransition::IsRedirect(params.transition)) {
+  if (content::PageTransitionIsRedirect(params.transition)) {
     // If this is a redirect, we need to go to the db to get the start.
     FetchRedirectStart(source);
   } else if (params.redirects.size() > 1 ||
@@ -216,7 +218,8 @@ void TabFinder::FetchRedirectStart(TabContents* tab) {
         history->QueryRedirectsTo(
             committed_entry->url(),
             &callback_consumer_,
-            NewCallback(this, &TabFinder::QueryRedirectsToComplete));
+            base::Bind(&TabFinder::QueryRedirectsToComplete,
+                       base::Unretained(this)));
     callback_consumer_.SetClientData(history, request_handle, tab);
   }
 }

@@ -22,6 +22,7 @@
 #include "base/message_loop.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/histogram.h"
+#include "base/synchronization/lock.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "gpu/command_buffer/common/constants.h"
@@ -31,7 +32,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_share_group.h"
+#include "ui/gfx/gl/gl_surface.h"
 #include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
 
 using gpu::Buffer;
@@ -100,7 +103,8 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
       GLInProcessContext* context_group,
       const char* allowed_extensions,
       const int32* attrib_list,
-      const GURL& active_arl);
+      const GURL& active_url,
+      gfx::GpuPreference gpu_preference);
 
   // Create a GLInProcessContext that renders to an offscreen frame buffer. If
   // parent is not NULL, that GLInProcessContext can access a copy of the
@@ -116,7 +120,8 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
       GLInProcessContext* context_group,
       const char* allowed_extensions,
       const int32* attrib_list,
-      const GURL& active_url);
+      const GURL& active_url,
+      gfx::GpuPreference gpu_preference);
 
   // For an offscreen frame buffer GLInProcessContext, return the texture ID
   // with respect to the parent GLInProcessContext. Returns zero if
@@ -170,7 +175,8 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
                   GLInProcessContext* context_group,
                   const char* allowed_extensions,
                   const int32* attrib_list,
-                  const GURL& active_url);
+                  const GURL& active_url,
+                  gfx::GpuPreference gpu_preference);
   void Destroy();
 
   void OnSwapBuffers();
@@ -181,10 +187,13 @@ class GLInProcessContext : public base::SupportsWeakPtr<GLInProcessContext> {
   scoped_ptr<Callback0::Type> context_lost_callback_;
   uint32 parent_texture_id_;
   scoped_ptr<CommandBufferService> command_buffer_;
-  GpuScheduler* gpu_scheduler_;
-  GLES2CmdHelper* gles2_helper_;
+  scoped_ptr< ::gpu::GpuScheduler> gpu_scheduler_;
+  scoped_ptr< ::gpu::gles2::GLES2Decoder> decoder_;
+  scoped_refptr<gfx::GLContext> context_;
+  scoped_refptr<gfx::GLSurface> surface_;
+  scoped_ptr<GLES2CmdHelper> gles2_helper_;
   int32 transfer_buffer_id_;
-  GLES2Implementation* gles2_implementation_;
+  scoped_ptr<GLES2Implementation> gles2_implementation_;
   Error last_error_;
 
   DISALLOW_COPY_AND_ASSIGN(GLInProcessContext);
@@ -200,6 +209,8 @@ const int32 kTransferBufferSize = 1024 * 1024;
 static base::LazyInstance<
     std::set<WebGraphicsContext3DInProcessCommandBufferImpl*> >
         g_all_shared_contexts(base::LINKER_INITIALIZED);
+static base::LazyInstance<base::Lock>
+    g_all_shared_contexts_lock(base::LINKER_INITIALIZED);
 
 // Singleton used to initialize and terminate the gles2 library.
 class GLES2Initializer {
@@ -232,7 +243,8 @@ GLInProcessContext* GLInProcessContext::CreateViewContext(
     GLInProcessContext* context_group,
     const char* allowed_extensions,
     const int32* attrib_list,
-    const GURL& active_url) {
+    const GURL& active_url,
+    gfx::GpuPreference gpu_preference) {
 #if defined(ENABLE_GPU)
   scoped_ptr<GLInProcessContext> context(new GLInProcessContext(NULL));
   if (!context->Initialize(
@@ -242,7 +254,8 @@ GLInProcessContext* GLInProcessContext::CreateViewContext(
       context_group,
       allowed_extensions,
       attrib_list,
-      active_url))
+      active_url,
+      gpu_preference))
     return NULL;
 
   return context.release();
@@ -257,7 +270,8 @@ GLInProcessContext* GLInProcessContext::CreateOffscreenContext(
     GLInProcessContext* context_group,
     const char* allowed_extensions,
     const int32* attrib_list,
-    const GURL& active_url) {
+    const GURL& active_url,
+    gfx::GpuPreference gpu_preference) {
 #if defined(ENABLE_GPU)
   scoped_ptr<GLInProcessContext> context(new GLInProcessContext(parent));
   if (!context->Initialize(
@@ -267,7 +281,8 @@ GLInProcessContext* GLInProcessContext::CreateOffscreenContext(
       context_group,
       allowed_extensions,
       attrib_list,
-      active_url))
+      active_url,
+      gpu_preference))
     return NULL;
 
   return context.release();
@@ -276,7 +291,17 @@ GLInProcessContext* GLInProcessContext::CreateOffscreenContext(
 #endif
 }
 
+// In the normal command buffer implementation, all commands are passed over IPC
+// to the gpu process where they are fed to the GLES2Decoder from a single
+// thread. In layout tests, any thread could call this function. GLES2Decoder,
+// and in particular the GL implementations behind it, are not generally
+// threadsafe, so we guard entry points with a mutex.
+static base::LazyInstance<base::Lock>
+    g_decoder_lock(base::LINKER_INITIALIZED);
+
 void GLInProcessContext::PumpCommands() {
+  base::AutoLock lock(g_decoder_lock.Get());
+  decoder_->MakeCurrent();
   gpu_scheduler_->PutChanged();
   ::gpu::CommandBuffer::State state = command_buffer_->GetState();
   CHECK(state.error == ::gpu::error::kNoError);
@@ -307,7 +332,7 @@ void GLInProcessContext::SetContextLostCallback(Callback0::Type* callback) {
 
 bool GLInProcessContext::MakeCurrent(GLInProcessContext* context) {
   if (context) {
-    gles2::SetGLContext(context->gles2_implementation_);
+    gles2::SetGLContext(context->gles2_implementation_.get());
 
     // Don't request latest error status from service. Just use the locally
     // cached information from the last flush.
@@ -362,17 +387,14 @@ void GLInProcessContext::DisableShaderTranslation() {
 }
 
 GLES2Implementation* GLInProcessContext::GetImplementation() {
-  return gles2_implementation_;
+  return gles2_implementation_.get();
 }
 
 GLInProcessContext::GLInProcessContext(GLInProcessContext* parent)
     : parent_(parent ?
           parent->AsWeakPtr() : base::WeakPtr<GLInProcessContext>()),
       parent_texture_id_(0),
-      gpu_scheduler_(NULL),
-      gles2_helper_(NULL),
       transfer_buffer_id_(-1),
-      gles2_implementation_(NULL),
       last_error_(SUCCESS) {
 }
 
@@ -382,7 +404,8 @@ bool GLInProcessContext::Initialize(bool onscreen,
                                     GLInProcessContext* context_group,
                                     const char* allowed_extensions,
                                     const int32* attrib_list,
-                                    const GURL& active_url) {
+                                    const GURL& active_url,
+                                    gfx::GpuPreference gpu_preference) {
   // Use one share group for all contexts.
   static scoped_refptr<gfx::GLShareGroup> share_group(new gfx::GLShareGroup);
 
@@ -429,52 +452,66 @@ bool GLInProcessContext::Initialize(bool onscreen,
   }
 
   command_buffer_.reset(new CommandBufferService);
-  if (!command_buffer_->Initialize(kCommandBufferSize))
+  if (!command_buffer_->Initialize(kCommandBufferSize)) {
+    LOG(ERROR) << "Could not initialize command buffer.";
+    Destroy();
     return false;
+  }
 
   // TODO(gman): This needs to be true if this is Pepper.
   bool bind_generates_resource = false;
-  gpu_scheduler_ = GpuScheduler::Create(
-      command_buffer_.get(),
-      context_group ?
-          context_group->gpu_scheduler_->decoder()->GetContextGroup() :
-              new ::gpu::gles2::ContextGroup(bind_generates_resource));
+  decoder_.reset(::gpu::gles2::GLES2Decoder::Create(context_group ?
+      context_group->decoder_->GetContextGroup() :
+          new ::gpu::gles2::ContextGroup(bind_generates_resource)));
+
+  gpu_scheduler_.reset(new GpuScheduler(command_buffer_.get(),
+                                        decoder_.get(),
+                                        NULL));
+
+  decoder_->set_engine(gpu_scheduler_.get());
 
   if (onscreen) {
     if (render_surface == gfx::kNullPluginWindow) {
       LOG(ERROR) << "Invalid surface handle for onscreen context.";
       command_buffer_.reset();
     } else {
-      if (!gpu_scheduler_->Initialize(render_surface,
-                                      gfx::Size(),
-                                      false,
-                                      ::gpu::gles2::DisallowedExtensions(),
-                                      allowed_extensions,
-                                      attribs,
-                                      share_group.get())) {
-        LOG(ERROR) << "Could not initialize GpuScheduler.";
-        command_buffer_.reset();
-      }
+      surface_ = gfx::GLSurface::CreateViewGLSurface(false, render_surface);
     }
   } else {
-    if (!gpu_scheduler_->Initialize(render_surface,
-                                    size,
-                                    false,
-                                    ::gpu::gles2::DisallowedExtensions(),
-                                    allowed_extensions,
-                                    attribs,
-                                    share_group.get())) {
-      LOG(ERROR) << "Could not initialize offscreen GpuScheduler.";
-      command_buffer_.reset();
-    }
+    surface_ = gfx::GLSurface::CreateOffscreenGLSurface(false,
+                                                        gfx::Size(1, 1));
   }
-  if (!command_buffer_.get()) {
+
+  if (!surface_.get()) {
+    LOG(ERROR) << "Could not create GLSurface.";
     Destroy();
     return false;
   }
 
-  if (!gpu_scheduler_->SetParent(parent_.get() ? parent_->gpu_scheduler_ : NULL,
-                                 parent_texture_id_)) {
+  context_ = gfx::GLContext::CreateGLContext(share_group.get(),
+                                             surface_.get(),
+                                             gpu_preference);
+  if (!context_.get()) {
+    LOG(ERROR) << "Could not create GLContext.";
+    Destroy();
+    return false;
+  }
+
+  if (!decoder_->Initialize(surface_.get(),
+                            context_.get(),
+                            size,
+                            ::gpu::gles2::DisallowedFeatures(),
+                            allowed_extensions,
+                            attribs)) {
+    LOG(ERROR) << "Could not initialize decoder.";
+    Destroy();
+    return false;
+  }
+
+  if (!decoder_->SetParent(
+      parent_.get() ? parent_->decoder_.get() : NULL,
+      parent_texture_id_)) {
+    LOG(ERROR) << "Could not set parent.";
     Destroy();
     return false;
   }
@@ -483,7 +520,7 @@ bool GLInProcessContext::Initialize(bool onscreen,
       NewCallback(this, &GLInProcessContext::PumpCommands));
 
   // Create the GLES2 helper, which writes the command buffer protocol.
-  gles2_helper_ = new GLES2CmdHelper(command_buffer_.get());
+  gles2_helper_.reset(new GLES2CmdHelper(command_buffer_.get()));
   if (!gles2_helper_->Initialize(kCommandBufferSize)) {
     Destroy();
     return false;
@@ -507,13 +544,13 @@ bool GLInProcessContext::Initialize(bool onscreen,
   }
 
   // Create the object exposing the OpenGL API.
-  gles2_implementation_ = new GLES2Implementation(
-      gles2_helper_,
+  gles2_implementation_.reset(new GLES2Implementation(
+      gles2_helper_.get(),
       transfer_buffer.size,
       transfer_buffer.ptr,
       transfer_buffer_id_,
       true,
-      false);
+      false));
 
   return true;
 }
@@ -524,7 +561,7 @@ void GLInProcessContext::Destroy() {
     parent_texture_id_ = 0;
   }
 
-  if (gles2_implementation_) {
+  if (gles2_implementation_.get()) {
     // First flush the context to ensure that any pending frees of resources
     // are completed. Otherwise, if this context is part of a share group,
     // those resources might leak. Also, any remaining side effects of commands
@@ -532,8 +569,7 @@ void GLInProcessContext::Destroy() {
     // share group.
     gles2_implementation_->Flush();
 
-    delete gles2_implementation_;
-    gles2_implementation_ = NULL;
+    gles2_implementation_.reset();
   }
 
   if (command_buffer_.get() && transfer_buffer_id_ != -1) {
@@ -541,8 +577,7 @@ void GLInProcessContext::Destroy() {
     transfer_buffer_id_ = -1;
   }
 
-  delete gles2_helper_;
-  gles2_helper_ = NULL;
+  gles2_helper_.reset();
 
   command_buffer_.reset();
 }
@@ -574,22 +609,14 @@ WebGraphicsContext3DInProcessCommandBufferImpl::
 
 WebGraphicsContext3DInProcessCommandBufferImpl::
     ~WebGraphicsContext3DInProcessCommandBufferImpl() {
+  base::AutoLock a(g_all_shared_contexts_lock.Get());
   g_all_shared_contexts.Pointer()->erase(this);
 }
-
-// This string should only be passed for WebGL contexts. Nothing ELSE!!!
-// Compositor contexts, Canvas2D contexts, Pepper Contexts, nor any other use of
-// a context should not pass this string.
-static const char* kWebGLPreferredGLExtensions =
-    "GL_OES_packed_depth_stencil "
-    "GL_OES_depth24 "
-    "GL_CHROMIUM_webglsl";
 
 bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
     WebGraphicsContext3D::Attributes attributes,
     WebKit::WebView* web_view,
     bool render_directly_to_web_view) {
-
   // Convert WebGL context creation attributes into GLInProcessContext / EGL
   // size requests.
   const int alpha_size = attributes.alpha ? 8 : 0;
@@ -606,8 +633,14 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
     GLInProcessContext::NONE,
   };
 
-  const char* preferred_extensions = attributes.noExtensions ?
-      kWebGLPreferredGLExtensions : "*";
+  const char* preferred_extensions = "*";
+
+  // TODO(kbr): More work will be needed in this implementation to
+  // properly support GPU switching. Like in the out-of-process
+  // command buffer implementation, all previously created contexts
+  // will need to be lost either when the first context requesting the
+  // discrete GPU is created, or the last one is destroyed.
+  gfx::GpuPreference gpu_preference = gfx::PreferDiscreteGpu;
 
   GURL active_url;
   if (web_view && web_view->mainFrame())
@@ -626,6 +659,7 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
   }
 
   WebGraphicsContext3DInProcessCommandBufferImpl* context_group = NULL;
+  base::AutoLock lock(g_all_shared_contexts_lock.Get());
   if (attributes.shareResources)
     context_group = g_all_shared_contexts.Pointer()->empty() ?
         NULL : *g_all_shared_contexts.Pointer()->begin();
@@ -636,13 +670,18 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::initialize(
       context_group ? context_group->context_ : NULL,
       preferred_extensions,
       attribs,
-      active_url);
+      active_url,
+      gpu_preference);
   web_view_ = NULL;
 
   if (!context_)
     return false;
 
   gl_ = context_->GetImplementation();
+
+  if (gl_ && attributes.noExtensions)
+    gl_->EnableFeatureCHROMIUM("webgl_enable_glsl_webgl_validation");
+
   context_->SetContextLostCallback(
       NewCallback(
           this,
@@ -824,7 +863,7 @@ bool WebGraphicsContext3DInProcessCommandBufferImpl::readBackFramebuffer(
 
 void WebGraphicsContext3DInProcessCommandBufferImpl::synthesizeGLError(
     WGC3Denum error) {
-  if (find(synthetic_errors_.begin(), synthetic_errors_.end(), error) ==
+  if (std::find(synthetic_errors_.begin(), synthetic_errors_.end(), error) ==
       synthetic_errors_.end()) {
     synthetic_errors_.push_back(error);
   }
@@ -1269,6 +1308,30 @@ WebKit::WebString WebGraphicsContext3DInProcessCommandBufferImpl::
   GLsizei returnedLogLength = 0;
   gl_->GetShaderSource(
       shader, logLength, &returnedLogLength, log.get());
+  if (!returnedLogLength)
+    return WebKit::WebString();
+  DCHECK_EQ(logLength, returnedLogLength + 1);
+  WebKit::WebString res =
+      WebKit::WebString::fromUTF8(log.get(), returnedLogLength);
+  return res;
+}
+
+WebKit::WebString WebGraphicsContext3DInProcessCommandBufferImpl::
+    getTranslatedShaderSourceANGLE(WebGLId shader) {
+  ClearContext();
+  GLint logLength = 0;
+  gl_->GetShaderiv(
+      shader, GL_TRANSLATED_SHADER_SOURCE_LENGTH_ANGLE, &logLength);
+  if (!logLength)
+    return WebKit::WebString();
+  scoped_array<GLchar> log(new GLchar[logLength]);
+  if (!log.get())
+    return WebKit::WebString();
+  GLsizei returnedLogLength = 0;
+  gl_->GetTranslatedShaderSourceANGLE(
+      shader, logLength, &returnedLogLength, log.get());
+  if (!returnedLogLength)
+    return WebKit::WebString();
   DCHECK_EQ(logLength, returnedLogLength + 1);
   WebKit::WebString res =
       WebKit::WebString::fromUTF8(log.get(), returnedLogLength);

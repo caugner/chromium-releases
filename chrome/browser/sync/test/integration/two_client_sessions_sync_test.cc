@@ -10,9 +10,12 @@
 #include "chrome/browser/sync/test/integration/sessions_helper.h"
 
 using sessions_helper::CheckInitialState;
+using sessions_helper::DeleteForeignSession;
 using sessions_helper::GetLocalWindows;
 using sessions_helper::GetSessionData;
 using sessions_helper::OpenTabAndGetLocalWindows;
+using sessions_helper::ScopedWindowMap;
+using sessions_helper::SyncedSessionVector;
 using sessions_helper::WindowsMatch;
 
 class TwoClientSessionsSyncTest : public SyncTest {
@@ -38,8 +41,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest, SingleClientChanged) {
   ASSERT_TRUE(CheckInitialState(0));
   ASSERT_TRUE(CheckInitialState(1));
 
-  ScopedVector<SessionWindow> client0_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1), client0_windows.get()));
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1),
+      client0_windows.GetMutable()));
 
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
 
@@ -49,7 +53,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest, SingleClientChanged) {
 
   // Verify client 1's foreign session matches client 0 current window.
   ASSERT_EQ(1U, sessions1.size());
-  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, client0_windows.get()));
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
@@ -77,8 +81,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(CheckInitialState(0));
   ASSERT_TRUE(CheckInitialState(1));
 
-  ScopedVector<SessionWindow> client0_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1), client0_windows.get()));
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1),
+      client0_windows.GetMutable()));
   ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
 
@@ -89,7 +94,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
 
   // Verify client 1's foreign session matches client 0 current window.
   ASSERT_EQ(1U, sessions1.size());
-  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, client0_windows.get()));
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
@@ -113,10 +118,12 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest, BothChanged) {
   ASSERT_TRUE(CheckInitialState(1));
 
   // Open tabs on both clients and retain window information.
-  ScopedVector<SessionWindow> client0_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL2), client0_windows.get()));
-  ScopedVector<SessionWindow> client1_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL1), client1_windows.get()));
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL2),
+      client0_windows.GetMutable()));
+  ScopedWindowMap client1_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL1),
+      client1_windows.GetMutable()));
 
   // Wait for sync.
   ASSERT_TRUE(AwaitQuiescence());
@@ -131,8 +138,8 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest, BothChanged) {
   // vice versa.
   ASSERT_EQ(1U, sessions0.size());
   ASSERT_EQ(1U, sessions1.size());
-  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, client0_windows.get()));
-  ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, client1_windows.get()));
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
+  ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, *client1_windows.Get()));
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
@@ -142,8 +149,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(CheckInitialState(0));
   ASSERT_TRUE(CheckInitialState(1));
 
-  ScopedVector<SessionWindow> client0_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1), client0_windows.get()));
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1),
+      client0_windows.GetMutable()));
 
   ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
   GetClient(0)->service()->SetPassphrase(kValidPassphrase, true);
@@ -153,8 +161,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_blocking_conflicting_updates);
   // We have 6 non-blocking conflicts due to the two meta nodes (one for each
-  // client), the one tab node, and the three basic preference/themes.
-  ASSERT_EQ(6, GetClient(1)->GetLastSessionSnapshot()->
+  // client), the one tab node, and the six basic preference/themes/search
+  // engines.
+  ASSERT_EQ(9, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
   GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
@@ -170,7 +179,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   // Verify client 1's foreign session matches client 0's current window and
   // vice versa.
   ASSERT_EQ(1U, sessions1.size());
-  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, client0_windows.get()));
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
 }
 
 // Flaky (number of conflicting nodes is off). http://crbug.com/89604.
@@ -188,17 +197,18 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(GetClient(1)->AwaitPassphraseRequired());
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_blocking_conflicting_updates);
-  // We have five non-blocking conflicts due to the two meta nodes (one for each
-  // client), and the 3 basic preference/themes nodes.
-  ASSERT_EQ(5, GetClient(1)->GetLastSessionSnapshot()->
+  // We have eight non-blocking conflicts due to the two meta nodes (one for
+  // each client), and the 6 basic preference/themes/search engines nodes.
+  ASSERT_EQ(8, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
-  ScopedVector<SessionWindow> client0_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1), client0_windows.get()));
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1),
+      client0_windows.GetMutable()));
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_blocking_conflicting_updates);
-  ASSERT_EQ(6, GetClient(1)->GetLastSessionSnapshot()->
+  ASSERT_EQ(9, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
   GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
@@ -214,7 +224,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   // Verify client 1's foreign session matches client 0's current window and
   // vice versa.
   ASSERT_EQ(1U, sessions1.size());
-  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, client0_windows.get()));
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
@@ -232,18 +242,19 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_blocking_conflicting_updates);
   // We have two non-blocking conflicts due to the two meta nodes (one for each
-  // client), and the 3 basic preference/themes nodes..
-  ASSERT_EQ(5, GetClient(1)->GetLastSessionSnapshot()->
+  // client), and the 6 basic preference/themes/search engines nodes.
+  ASSERT_EQ(8, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
   // These changes are either made with the old passphrase or not encrypted at
   // all depending on when client 0's changes are propagated.
-  ScopedVector<SessionWindow> client1_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL1), client1_windows.get()));
+  ScopedWindowMap client1_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL1),
+      client1_windows.GetMutable()));
   ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_blocking_conflicting_updates);
-  ASSERT_EQ(5, GetClient(1)->GetLastSessionSnapshot()->
+  ASSERT_EQ(8, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The same encrypted nodes.
 
   // At this point we enter the passphrase, triggering a resync, in which the
@@ -271,8 +282,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(CheckInitialState(1));
 
   // These changes are either made on client 1 without encryption.
-  ScopedVector<SessionWindow> client1_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL1), client1_windows.get()));
+  ScopedWindowMap client1_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL1),
+      client1_windows.GetMutable()));
   ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
 
   // Turn encryption on client 0. Client 1's foreign will be encrypted with the
@@ -285,8 +297,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_blocking_conflicting_updates);
   // We have three non-blocking conflicts due to the two meta nodes (one for
-  // each client), the one tab node, and the 3 basic preference/themes nodes.
-  ASSERT_GE(6, GetClient(1)->GetLastSessionSnapshot()->
+  // each client), the one tab node, and the 6 basic preference/themes/search
+  // engines nodes.
+  ASSERT_GE(9, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
   // At this point we enter the passphrase, triggering a resync.
@@ -303,7 +316,7 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(GetSessionData(0, &sessions0));
   ASSERT_FALSE(GetSessionData(1, &sessions1));
   ASSERT_EQ(1U, sessions0.size());
-  ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, client1_windows.get()));
+  ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, *client1_windows.Get()));
 }
 
 IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
@@ -320,15 +333,17 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
 
   // These changes will sync over to client 1, who will be unable to decrypt
   // them due to the missing passphrase.
-  ScopedVector<SessionWindow> client0_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1), client0_windows.get()));
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1),
+      client0_windows.GetMutable()));
   ASSERT_TRUE(EnableEncryption(0, syncable::SESSIONS));
   ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
   ASSERT_EQ(0, GetClient(1)->GetLastSessionSnapshot()->
       num_blocking_conflicting_updates);
   // We have three non-blocking conflicts due to the two meta nodes (one for
-  // each client), the one tab node, and the 3 basic preference/themes nodes.
-  ASSERT_EQ(6, GetClient(1)->GetLastSessionSnapshot()->
+  // each client), the one tab node, and the 6 basic preference/themes/search
+  // engines nodes.
+  ASSERT_EQ(9, GetClient(1)->GetLastSessionSnapshot()->
       num_conflicting_updates);  // The encrypted nodes.
 
   GetClient(1)->service()->SetPassphrase(kValidPassphrase, true);
@@ -337,8 +352,9 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   ASSERT_TRUE(GetClient(1)->WaitForTypeEncryption(syncable::SESSIONS));
 
   // Open windows on client 1, which should automatically be encrypted.
-  ScopedVector<SessionWindow> client1_windows;
-  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL2), client1_windows.get()));
+  ScopedWindowMap client1_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(1, GURL(kURL2),
+      client1_windows.GetMutable()));
   ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
 
   ASSERT_TRUE(IsEncrypted(0, syncable::SESSIONS));
@@ -353,6 +369,64 @@ IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest,
   // vice versa.
   ASSERT_EQ(1U, sessions0.size());
   ASSERT_EQ(1U, sessions1.size());
-  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, client0_windows.get()));
-  ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, client1_windows.get()));
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
+  ASSERT_TRUE(WindowsMatch(sessions0[0]->windows, *client1_windows.Get()));
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest, DeleteIdleSession) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  ASSERT_TRUE(CheckInitialState(0));
+  ASSERT_TRUE(CheckInitialState(1));
+
+  // Client 0 opened some tabs then went idle.
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1),
+      client0_windows.GetMutable()));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+
+  // Get foreign session data from client 1.
+  SyncedSessionVector sessions1;
+  ASSERT_TRUE(GetSessionData(1, &sessions1));
+
+  // Verify client 1's foreign session matches client 0 current window.
+  ASSERT_EQ(1U, sessions1.size());
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
+
+  // Client 1 now deletes client 0's tabs. This frees the memory of sessions1.
+  DeleteForeignSession(1, sessions1[0]->session_tag);
+  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_FALSE(GetSessionData(1, &sessions1));
+}
+
+IN_PROC_BROWSER_TEST_F(TwoClientSessionsSyncTest, DeleteActiveSession) {
+  ASSERT_TRUE(SetupSync()) << "SetupSync() failed.";
+
+  ASSERT_TRUE(CheckInitialState(0));
+  ASSERT_TRUE(CheckInitialState(1));
+
+  // Client 0 opened some tabs then went idle.
+  ScopedWindowMap client0_windows;
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL1),
+      client0_windows.GetMutable()));
+
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  SyncedSessionVector sessions1;
+  ASSERT_TRUE(GetSessionData(1, &sessions1));
+  ASSERT_EQ(1U, sessions1.size());
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
+
+  // Client 1 now deletes client 0's tabs. This frees the memory of sessions1.
+  DeleteForeignSession(1, sessions1[0]->session_tag);
+  ASSERT_TRUE(GetClient(1)->AwaitMutualSyncCycleCompletion(GetClient(0)));
+  ASSERT_FALSE(GetSessionData(1, &sessions1));
+
+  // Client 0 becomes active again with a new tab.
+  ASSERT_TRUE(OpenTabAndGetLocalWindows(0, GURL(kURL2),
+      client0_windows.GetMutable()));
+  ASSERT_TRUE(GetClient(0)->AwaitMutualSyncCycleCompletion(GetClient(1)));
+  ASSERT_TRUE(GetSessionData(1, &sessions1));
+  ASSERT_EQ(1U, sessions1.size());
+  ASSERT_TRUE(WindowsMatch(sessions1[0]->windows, *client0_windows.Get()));
 }

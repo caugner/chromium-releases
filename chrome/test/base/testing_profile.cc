@@ -19,7 +19,6 @@
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/extensions/extension_pref_value_map.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_settings.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/geolocation/chrome_geolocation_permission_context.h"
@@ -37,11 +36,13 @@
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/speech/chrome_speech_input_preferences.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/bookmark_load_observer.h"
 #include "chrome/test/base/test_url_request_context_getter.h"
@@ -201,8 +202,7 @@ TestingProfile::~TestingProfile() {
 }
 
 void TestingProfile::CreateFaviconService() {
-  favicon_service_ = NULL;
-  favicon_service_ = new FaviconService(this);
+  favicon_service_.reset(new FaviconService(this));
 }
 
 void TestingProfile::CreateHistoryService(bool delete_file, bool no_db) {
@@ -257,9 +257,7 @@ void TestingProfile::DestroyTopSites() {
 }
 
 void TestingProfile::DestroyFaviconService() {
-  if (!favicon_service_.get())
-    return;
-  favicon_service_ = NULL;
+  favicon_service_.reset();
 }
 
 void TestingProfile::CreateBookmarkModel(bool delete_file) {
@@ -316,10 +314,14 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
   DCHECK(bookmark_bar_model_->IsLoaded());
 }
 
+// TODO(phajdan.jr): Doesn't this hang if Top Sites are already loaded?
 void TestingProfile::BlockUntilTopSitesLoaded() {
+  ui_test_utils::WindowedNotificationObserver top_sites_loaded_observer(
+      chrome::NOTIFICATION_TOP_SITES_LOADED,
+      NotificationService::AllSources());
   if (!GetHistoryService(Profile::EXPLICIT_ACCESS))
     GetTopSites()->HistoryLoaded();
-  ui_test_utils::WaitForNotification(chrome::NOTIFICATION_TOP_SITES_LOADED);
+  top_sites_loaded_observer.Wait();
 }
 
 void TestingProfile::CreateTemplateURLFetcher() {
@@ -342,6 +344,10 @@ ExtensionService* TestingProfile::CreateExtensionService(
   // Extension pref store, created for use by |extension_prefs_|.
 
   extension_pref_value_map_.reset(new ExtensionPrefValueMap);
+
+  bool extensions_disabled =
+      command_line && command_line->HasSwitch(switches::kDisableExtensions);
+
   // Note that the GetPrefs() creates a TestingPrefService, therefore
   // the extension controlled pref values set in extension_prefs_
   // are not reflected in the pref service. One would need to
@@ -350,13 +356,11 @@ ExtensionService* TestingProfile::CreateExtensionService(
       new ExtensionPrefs(GetPrefs(),
                          install_directory,
                          extension_pref_value_map_.get()));
-  extension_settings_ =
-      new ExtensionSettings(GetPath().AppendASCII("Extension Settings"));
+  extension_prefs_->Init(extensions_disabled);
   extension_service_.reset(new ExtensionService(this,
                                                 command_line,
                                                 install_directory,
                                                 extension_prefs_.get(),
-                                                extension_settings_.get(),
                                                 autoupdate_enabled,
                                                 true));
   return extension_service_.get();
@@ -463,10 +467,6 @@ SSLHostState* TestingProfile::GetSSLHostState() {
   return NULL;
 }
 
-net::TransportSecurityState* TestingProfile::GetTransportSecurityState() {
-  return NULL;
-}
-
 FaviconService* TestingProfile::GetFaviconService(ServiceAccessType access) {
   return favicon_service_.get();
 }
@@ -542,10 +542,6 @@ DownloadManager* TestingProfile::GetDownloadManager() {
   return NULL;
 }
 
-PersonalDataManager* TestingProfile::GetPersonalDataManager() {
-  return NULL;
-}
-
 fileapi::FileSystemContext* TestingProfile::GetFileSystemContext() {
   if (!file_system_context_) {
     file_system_context_ = new fileapi::FileSystemContext(
@@ -556,7 +552,6 @@ fileapi::FileSystemContext* TestingProfile::GetFileSystemContext() {
       GetPath(),
       IsOffTheRecord(),
       true,  // Allow file access from files.
-      true,  // Unlimited quota.
       NULL);
   }
   return file_system_context_.get();
@@ -568,10 +563,6 @@ void TestingProfile::SetQuotaManager(quota::QuotaManager* manager) {
 
 quota::QuotaManager* TestingProfile::GetQuotaManager() {
   return quota_manager_.get();
-}
-
-bool TestingProfile::HasCreatedDownloadManager() const {
-  return false;
 }
 
 net::URLRequestContextGetter* TestingProfile::GetRequestContext() {
@@ -649,6 +640,12 @@ TestingProfile::GetGeolocationPermissionContext() {
         new ChromeGeolocationPermissionContext(this);
   }
   return geolocation_permission_context_.get();
+}
+
+SpeechInputPreferences* TestingProfile::GetSpeechInputPreferences() {
+  if (!speech_input_preferences_.get())
+    speech_input_preferences_ = new ChromeSpeechInputPreferences(GetPrefs());
+  return speech_input_preferences_.get();
 }
 
 HostZoomMap* TestingProfile::GetHostZoomMap() {
@@ -776,14 +773,12 @@ ChromeURLDataManager* TestingProfile::GetChromeURLDataManager() {
   return chrome_url_data_manager_.get();
 }
 
-prerender::PrerenderManager* TestingProfile::GetPrerenderManager() {
-  if (!prerender::PrerenderManager::IsPrerenderingPossible())
-    return NULL;
-  if (!prerender_manager_.get()) {
-    prerender_manager_.reset(new prerender::PrerenderManager(
-        this, g_browser_process->prerender_tracker()));
-  }
-  return prerender_manager_.get();
+chrome_browser_net::Predictor* TestingProfile::GetNetworkPredictor() {
+  return NULL;
+}
+
+void TestingProfile::ClearNetworkingHistorySince(base::Time time) {
+  NOTIMPLEMENTED();
 }
 
 PrefService* TestingProfile::GetOffTheRecordPrefs() {

@@ -8,18 +8,15 @@ include_rules = [
   # make use of it.
   "+chrome/test",
 
-  # The following directories have been refactored, so no new dependencies
-  # should be added from these directories.
-  "-chrome/browser/printing",
-  "-chrome/browser/extensions",
-  "-chrome/common/extensions",
-  "-chrome/renderer/extensions",
-
   # The subdirectories in content/ will manually allow their own include
   # directories in content/ so we disallow all of them.
   "-content",
   "+content/common",
+  "+content/public/common",
   "+content/test",
+
+  # TODO(ben): remove this
+  "+content/public/browser/native_web_keyboard_event.h",
 
   "+dbus",
   "+grit",
@@ -34,13 +31,17 @@ include_rules = [
   "-v8",
   "-tools",
 
+  # Allow inclusion of third-party code:
   "+third_party/gpsd",
+  "+third_party/mozilla",
   "+third_party/npapi/bindings",
   "+third_party/sqlite",
   "+third_party/tcmalloc",
   # Allow inclusion of WebKit API files.
   "+third_party/WebKit/Source/WebKit/chromium",
 
+  # Aura is analogous to Win32 or a Gtk, so it is allowed.
+  "+ui/aura",
   "+ui/base",
   "+ui/gfx",
   # Content knows about grd files, but the specifics of how to get a resource
@@ -54,6 +55,9 @@ include_rules = [
   # line, since the top level DEPS doesn't allow it, we add it to make this
   # explicit. 
   "-views",
+  
+  # Aura Shell consumes views, so it too is banned.
+  "-ui/aura_shell",
 
   "+webkit",
 ]
