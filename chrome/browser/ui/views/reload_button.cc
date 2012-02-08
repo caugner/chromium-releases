@@ -11,7 +11,7 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/metrics.h"
+#include "ui/views/metrics.h"
 
 // static
 const char ReloadButton::kViewClassName[] = "browser/ui/views/ReloadButton";
@@ -124,9 +124,10 @@ void ReloadButton::OnMouseExited(const views::MouseEvent& event) {
     SetState(BS_NORMAL);
 }
 
-bool ReloadButton::GetTooltipText(const gfx::Point& p, string16* tooltip) {
-  int text_id = visible_mode_ == MODE_RELOAD ? IDS_TOOLTIP_RELOAD
-                                             : IDS_TOOLTIP_STOP;
+bool ReloadButton::GetTooltipText(const gfx::Point& p,
+                                  string16* tooltip) const {
+  int text_id = (visible_mode_ == MODE_RELOAD) ?
+      IDS_TOOLTIP_RELOAD : IDS_TOOLTIP_STOP;
   tooltip->assign(l10n_util::GetStringUTF16(text_id));
   return true;
 }

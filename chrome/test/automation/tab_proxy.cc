@@ -84,7 +84,6 @@ int TabProxy::FindInPage(const std::wstring& search_string,
     return -1;
 
   AutomationMsg_Find_Params params;
-  params.unused = 0;
   params.search_string = WideToUTF16Hack(search_string);
   params.find_next = find_next;
   params.match_case = (match_case == CASE_SENSITIVE);
@@ -570,7 +569,7 @@ bool TabProxy::WaitForTabToBeRestored(uint32 timeout_ms) {
       succeeded;
 }
 
-bool TabProxy::GetSecurityState(SecurityStyle* security_style,
+bool TabProxy::GetSecurityState(content::SecurityStyle* security_style,
                                 net::CertStatus* ssl_cert_status,
                                 int* insecure_content_status) {
   DCHECK(security_style && ssl_cert_status && insecure_content_status);
@@ -587,7 +586,7 @@ bool TabProxy::GetSecurityState(SecurityStyle* security_style,
   return succeeded;
 }
 
-bool TabProxy::GetPageType(PageType* type) {
+bool TabProxy::GetPageType(content::PageType* type) {
   DCHECK(type);
 
   if (!is_valid())
@@ -738,7 +737,7 @@ bool TabProxy::CaptureEntirePageAsPNG(const FilePath& path) {
 void TabProxy::Reposition(HWND window, HWND window_insert_after, int left,
                           int top, int width, int height, int flags,
                           HWND parent_window) {
-  Reposition_Params params = {0};
+  Reposition_Params params;
   params.window = window;
   params.window_insert_after = window_insert_after;
   params.left = left;

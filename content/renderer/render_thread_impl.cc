@@ -16,11 +16,12 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/stats_table.h"
-#include "base/process_util.h"
 #include "base/shared_memory.h"
+#include "base/string_number_conversions.h"  // Temporary
 #include "base/task.h"
 #include "base/threading/thread_local.h"
 #include "base/values.h"
+#include "base/win/scoped_com_initializer.h"
 #include "content/common/appcache/appcache_dispatcher.h"
 #include "content/common/child_process_messages.h"
 #include "content/common/database_messages.h"
@@ -29,12 +30,12 @@
 #include "content/common/gpu/gpu_messages.h"
 #include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
-#include "content/common/renderer_preferences.h"
 #include "content/common/resource_dispatcher.h"
 #include "content/common/resource_messages.h"
 #include "content/common/view_messages.h"
 #include "content/common/web_database_observer_impl.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/renderer_preferences.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_process_observer.h"
 #include "content/public/renderer/render_view_visitor.h"
@@ -56,7 +57,8 @@
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "third_party/tcmalloc/chromium/src/google/malloc_extension.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebColor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebColor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
@@ -66,7 +68,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/ui_base_switches.h"
 #include "v8/include/v8.h"
@@ -99,16 +101,15 @@ using WebKit::WebView;
 using content::RenderProcessObserver;
 
 namespace {
-static const double kInitialIdleHandlerDelayS = 1.0 /* seconds */;
-
-#if defined(TOUCH_UI)
-static const int kPopupListBoxMinimumRowHeight = 60;
-#endif
+static const int64 kInitialIdleHandlerDelayMs = 1000;
+static const int64 kShortIdleHandlerDelayMs = 1000;
+static const int64 kLongIdleHandlerDelayMs = 30*1000;
+static const int kIdleCPUUsageThresholdInPercents = 3;
 
 // Keep the global RenderThreadImpl in a TLS slot so it is impossible to access
 // incorrectly from the wrong thread.
-static base::LazyInstance<base::ThreadLocalPointer<RenderThreadImpl> > lazy_tls(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<base::ThreadLocalPointer<RenderThreadImpl> >
+    lazy_tls = LAZY_INSTANCE_INITIALIZER;
 
 class RenderViewZoomer : public content::RenderViewVisitor {
  public:
@@ -182,7 +183,7 @@ void RenderThreadImpl::Init() {
   // If you are running plugins in this thread you need COM active but in
   // the normal case you don't.
   if (RenderProcessImpl::InProcessPlugins())
-    CoInitialize(0);
+    initialize_com_.reset(new base::win::ScopedCOMInitializer());
 #endif
 
   // In single process the single process is all there is.
@@ -191,7 +192,9 @@ void RenderThreadImpl::Init() {
   plugin_refresh_allowed_ = true;
   widget_count_ = 0;
   hidden_widget_count_ = 0;
-  idle_notification_delay_in_s_ = kInitialIdleHandlerDelayS;
+  idle_notification_delay_in_ms_ = kInitialIdleHandlerDelayMs;
+  idle_notifications_to_skip_ = 0;
+  compositor_initialized_ = false;
   task_factory_.reset(new ScopedRunnableMethodFactory<RenderThreadImpl>(this));
 
   appcache_dispatcher_.reset(new AppCacheDispatcher(Get()));
@@ -244,6 +247,12 @@ RenderThreadImpl::~RenderThreadImpl() {
   if (file_thread_.get())
     file_thread_->Stop();
 
+#ifdef WEBCOMPOSITOR_HAS_INITIALIZE
+  if (compositor_initialized_) {
+    WebKit::WebCompositor::shutdown();
+    compositor_initialized_ = false;
+  }
+#endif
   if (compositor_thread_.get()) {
     RemoveFilter(compositor_thread_->GetMessageFilter());
     compositor_thread_.reset();
@@ -258,9 +267,6 @@ RenderThreadImpl::~RenderThreadImpl() {
 #if defined(OS_WIN)
   // Clean up plugin channels before this thread goes away.
   NPChannelBase::CleanupChannels();
-  // Don't call COM if the renderer is in the sandbox.
-  if (RenderProcessImpl::InProcessPlugins())
-    CoUninitialize();
 #endif
 }
 
@@ -406,7 +412,7 @@ void RenderThreadImpl::WidgetHidden() {
   }
 
   if (widget_count_ && hidden_widget_count_ == widget_count_)
-    ScheduleIdleHandler(kInitialIdleHandlerDelayS);
+    ScheduleIdleHandler(kInitialIdleHandlerDelayMs);
 }
 
 void RenderThreadImpl::WidgetRestored() {
@@ -417,7 +423,7 @@ void RenderThreadImpl::WidgetRestored() {
     return;
   }
 
-  idle_timer_.Stop();
+  ScheduleIdleHandler(kLongIdleHandlerDelayMs);
 }
 
 void RenderThreadImpl::EnsureWebKitInitialized() {
@@ -431,8 +437,21 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   webkit_platform_support_.reset(new RendererWebKitPlatformSupportImpl);
   WebKit::initialize(webkit_platform_support_.get());
 
-  compositor_thread_.reset(new CompositorThread(this));
-  AddFilter(compositor_thread_->GetMessageFilter());
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableThreadedCompositing)) {
+    compositor_thread_.reset(new CompositorThread(this));
+    AddFilter(compositor_thread_->GetMessageFilter());
+#ifdef WEBCOMPOSITOR_HAS_INITIALIZE
+    WebKit::WebCompositor::initialize(compositor_thread_->GetWebThread());
+#else
+    WebKit::WebCompositor::setThread(compositor_thread_->GetWebThread());
+#endif
+  } else {
+#ifdef WEBCOMPOSITOR_HAS_INITIALIZE
+    WebKit::WebCompositor::initialize(NULL);
+#endif
+  }
+  compositor_initialized_ = true;
 
   WebScriptController::enableV8SingleThreadMode();
 
@@ -476,11 +495,17 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableGeolocation(
       !command_line.HasSwitch(switches::kDisableGeolocation));
 
+  WebKit::WebRuntimeFeatures::enableMediaSource(
+      command_line.HasSwitch(switches::kEnableMediaSource));
+
   WebKit::WebRuntimeFeatures::enableMediaStream(
       command_line.HasSwitch(switches::kEnableMediaStream));
 
   WebKit::WebRuntimeFeatures::enableFullScreenAPI(
       !command_line.HasSwitch(switches::kDisableFullScreen));
+
+  WebKit::WebRuntimeFeatures::enablePointerLock(
+      command_line.HasSwitch(switches::kEnablePointerLock));
 
   WebKit::WebRuntimeFeatures::enableVideoTrack(
       command_line.HasSwitch(switches::kEnableVideoTrack));
@@ -495,13 +520,7 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
 
   WebRuntimeFeatures::enablePushState(true);
 
-#ifdef TOUCH_UI
-  WebRuntimeFeatures::enableTouch(true);
-  WebKit::WebPopupMenu::setMinimumRowHeight(kPopupListBoxMinimumRowHeight);
-#else
-  // TODO(saintlou): in the future touch should always be enabled
   WebRuntimeFeatures::enableTouch(false);
-#endif
 
   WebRuntimeFeatures::enableDeviceMotion(
       command_line.HasSwitch(switches::kEnableDeviceMotion));
@@ -518,9 +537,17 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableJavaScriptI18NAPI(
       !command_line.HasSwitch(switches::kDisableJavaScriptI18NAPI));
 
+  WebRuntimeFeatures::enableGamepad(
+      command_line.HasSwitch(switches::kEnableGamepad));
+
   WebRuntimeFeatures::enableQuota(true);
 
   FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
+
+  if (content::GetContentClient()->renderer()->
+         RunIdleHandlerWhenWidgetsHidden()) {
+    ScheduleIdleHandler(kLongIdleHandlerDelayMs);
+  }
 }
 
 void RenderThreadImpl::RecordUserMetrics(const std::string& action) {
@@ -545,41 +572,78 @@ bool RenderThreadImpl::IsRegisteredExtension(
   return v8_extensions_.find(v8_extension_name) != v8_extensions_.end();
 }
 
-void RenderThreadImpl::ScheduleIdleHandler(double initial_delay_s) {
-  idle_notification_delay_in_s_ = initial_delay_s;
+void RenderThreadImpl::ScheduleIdleHandler(int64 initial_delay_ms) {
+  idle_notification_delay_in_ms_ = initial_delay_ms;
   idle_timer_.Stop();
   idle_timer_.Start(FROM_HERE,
-      base::TimeDelta::FromSeconds(static_cast<int64>(initial_delay_s)),
+      base::TimeDelta::FromMilliseconds(initial_delay_ms),
       this, &RenderThreadImpl::IdleHandler);
 }
 
 void RenderThreadImpl::IdleHandler() {
-  #if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
+  bool run_in_foreground_tab = (widget_count_ > hidden_widget_count_) &&
+                               content::GetContentClient()->renderer()->
+                                   RunIdleHandlerWhenWidgetsHidden();
+  if (run_in_foreground_tab) {
+    IdleHandlerInForegroundTab();
+    return;
+  }
+#if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
   MallocExtension::instance()->ReleaseFreeMemory();
 #endif
 
   v8::V8::IdleNotification();
 
   // Schedule next invocation.
-  // Dampen the delay using the algorithm:
+  // Dampen the delay using the algorithm (if delay is in seconds):
   //    delay = delay + 1 / (delay + 2)
   // Using floor(delay) has a dampening effect such as:
   //    1s, 1, 1, 2, 2, 2, 2, 3, 3, ...
-  // Note that idle_notification_delay_in_s_ would be reset to
-  // kInitialIdleHandlerDelayS in RenderThreadImpl::WidgetHidden.
-  ScheduleIdleHandler(idle_notification_delay_in_s_ +
-                      1.0 / (idle_notification_delay_in_s_ + 2.0));
+  // If the delay is in milliseconds, the above formula is equivalent to:
+  //    delay_ms / 1000 = delay_ms / 1000 + 1 / (delay_ms / 1000 + 2)
+  // which is equivalent to
+  //    delay_ms = delay_ms + 1000*1000 / (delay_ms + 2000).
+  // Note that idle_notification_delay_in_ms_ would be reset to
+  // kInitialIdleHandlerDelayMs in RenderThreadImpl::WidgetHidden.
+  ScheduleIdleHandler(idle_notification_delay_in_ms_ +
+                      1000000 / (idle_notification_delay_in_ms_ + 2000));
 
   FOR_EACH_OBSERVER(RenderProcessObserver, observers_, IdleNotification());
 }
 
-double RenderThreadImpl::GetIdleNotificationDelayInS() const {
-  return idle_notification_delay_in_s_;
+void RenderThreadImpl::IdleHandlerInForegroundTab() {
+  // Increase the delay in the same way as in IdleHandler,
+  // but make it periodic by reseting it once it is too big.
+  int64 new_delay_ms = idle_notification_delay_in_ms_ +
+                       1000000 / (idle_notification_delay_in_ms_ + 2000);
+  if (new_delay_ms >= kLongIdleHandlerDelayMs)
+    new_delay_ms = kShortIdleHandlerDelayMs;
+
+  if (idle_notifications_to_skip_ > 0) {
+    idle_notifications_to_skip_--;
+  } else  {
+    int cpu_usage;
+    Send(new ViewHostMsg_GetCPUUsage(&cpu_usage));
+    if (cpu_usage < kIdleCPUUsageThresholdInPercents &&
+        v8::V8::IdleNotification()) {
+      // V8 finished collecting garbage.
+      new_delay_ms = kLongIdleHandlerDelayMs;
+    }
+  }
+  ScheduleIdleHandler(new_delay_ms);
 }
 
-void RenderThreadImpl::SetIdleNotificationDelayInS(
-    double idle_notification_delay_in_s) {
-  idle_notification_delay_in_s_ = idle_notification_delay_in_s;
+int64 RenderThreadImpl::GetIdleNotificationDelayInMs() const {
+  return idle_notification_delay_in_ms_;
+}
+
+void RenderThreadImpl::SetIdleNotificationDelayInMs(
+    int64 idle_notification_delay_in_ms) {
+  idle_notification_delay_in_ms_ = idle_notification_delay_in_ms;
+}
+
+void RenderThreadImpl::PostponeIdleNotification() {
+  idle_notifications_to_skip_ = 2;
 }
 
 #if defined(OS_WIN)
@@ -624,8 +688,10 @@ void RenderThreadImpl::OnSetZoomLevelForCurrentURL(const GURL& url,
 
 void RenderThreadImpl::OnDOMStorageEvent(
     const DOMStorageMsg_Event_Params& params) {
-  if (!dom_storage_event_dispatcher_.get())
+  if (!dom_storage_event_dispatcher_.get()) {
+    EnsureWebKitInitialized();
     dom_storage_event_dispatcher_.reset(WebStorageEventDispatcher::create());
+  }
   dom_storage_event_dispatcher_->dispatchStorageEvent(params.key,
       params.old_value, params.new_value, params.origin, params.url,
       params.storage_type == DOM_STORAGE_LOCAL);
@@ -657,14 +723,17 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(ViewMsg_PurgePluginListCache, OnPurgePluginListCache)
     IPC_MESSAGE_HANDLER(ViewMsg_NetworkStateChanged, OnNetworkStateChanged)
     IPC_MESSAGE_HANDLER(DOMStorageMsg_Event, OnDOMStorageEvent)
+    IPC_MESSAGE_HANDLER(ViewMsg_TempCrashWithData, OnTempCrashWithData)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
 void RenderThreadImpl::OnSetNextPageID(int32 next_page_id) {
-  // This should only be called at process initialization time, so we shouldn't
-  // have to worry about thread-safety.
+  // This is called at process initialization time or when this process is
+  // being re-used for a new RenderView.  It is ok if another RenderView
+  // has identical page_ids or inflates next_page_id_ just before this arrives,
+  // as long as we ensure next_page_id_ is at least this large.
   RenderViewImpl::SetNextPageID(next_page_id);
 }
 
@@ -723,7 +792,7 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
   // Ask the browser for the channel name.
   IPC::ChannelHandle channel_handle;
   base::ProcessHandle renderer_process_for_gpu;
-  GPUInfo gpu_info;
+  content::GPUInfo gpu_info;
   if (!Send(new GpuHostMsg_EstablishGpuChannel(cause_for_gpu_launch,
                                                &channel_handle,
                                                &renderer_process_for_gpu,
@@ -734,6 +803,12 @@ GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
     gpu_channel_ = NULL;
     return NULL;
   }
+
+#if defined(OS_POSIX)
+  // Check the validity of fd for bug investigation.  Replace with normal error
+  // handling (see above) after bug fixed. See for details: crbug.com/95732.
+  CHECK_NE(-1, channel_handle.socket.fd);
+#endif
 
   gpu_channel_->set_gpu_info(gpu_info);
   content::GetContentClient()->SetGpuInfo(gpu_info);
@@ -768,6 +843,16 @@ void RenderThreadImpl::OnPurgePluginListCache(bool reload_pages) {
 void RenderThreadImpl::OnNetworkStateChanged(bool online) {
   EnsureWebKitInitialized();
   WebNetworkStateNotifier::setOnLine(online);
+}
+
+void RenderThreadImpl::OnTempCrashWithData(const GURL& data) {
+  // Append next_page_id_ to the data from the browser.
+  std::string temp = data.spec();
+  temp.append("#next");
+  temp.append(base::IntToString(RenderViewImpl::next_page_id()));
+
+  content::GetContentClient()->SetActiveURL(GURL(temp));
+  CHECK(false);
 }
 
 scoped_refptr<base::MessageLoopProxy>

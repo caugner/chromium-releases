@@ -18,10 +18,13 @@
 #include "content/common/gpu/gpu_feature_flags.h"
 
 class Version;
-struct GPUInfo;
 
 namespace base {
 class DictionaryValue;
+}
+
+namespace content {
+struct GPUInfo;
 }
 
 class CONTENT_EXPORT GpuBlacklist {
@@ -42,7 +45,7 @@ class CONTENT_EXPORT GpuBlacklist {
     kAllOs
   };
 
-  explicit GpuBlacklist(const std::string& browser_info_string);
+  explicit GpuBlacklist(const std::string& browser_version_string);
   ~GpuBlacklist();
 
   // Loads blacklist information from a json file.
@@ -57,7 +60,7 @@ class CONTENT_EXPORT GpuBlacklist {
   // current OS version.
   GpuFeatureFlags DetermineGpuFeatureFlags(OsType os,
                                            Version* os_version,
-                                           const GPUInfo& gpu_info);
+                                           const content::GPUInfo& gpu_info);
 
   // Collects the active entries that set the "feature" flag from the last
   // DetermineGpuFeatureFlags() call.  This tells which entries are responsible
@@ -105,14 +108,6 @@ class CONTENT_EXPORT GpuBlacklist {
     kSupported,
     kUnsupported,
     kMalformed
-  };
-
-  enum BrowserChannel {
-    kStable,
-    kBeta,
-    kDev,
-    kCanary,
-    kUnknown
   };
 
   class VersionInfo {
@@ -211,8 +206,7 @@ class CONTENT_EXPORT GpuBlacklist {
     // Determines if a given os/gc/driver is included in the Entry set.
     bool Contains(OsType os_type,
                   const Version& os_version,
-                  BrowserChannel channel,
-                  const GPUInfo& gpu_info) const;
+                  const content::GPUInfo& gpu_info) const;
 
     // Returns the OsType.
     OsType GetOsType() const;
@@ -283,8 +277,6 @@ class CONTENT_EXPORT GpuBlacklist {
 
     void AddException(ScopedGpuBlacklistEntry exception);
 
-    void AddBrowserChannel(BrowserChannel channel);
-
     uint32 id_;
     bool disabled_;
     std::string description_;
@@ -300,7 +292,6 @@ class CONTENT_EXPORT GpuBlacklist {
     scoped_ptr<StringInfo> gl_renderer_info_;
     scoped_ptr<GpuFeatureFlags> feature_flags_;
     std::vector<ScopedGpuBlacklistEntry> exceptions_;
-    std::vector<BrowserChannel> browser_channels_;
     bool contains_unknown_fields_;
     bool contains_unknown_features_;
   };
@@ -322,17 +313,12 @@ class CONTENT_EXPORT GpuBlacklist {
   // Check if any entries contain unknown fields.  This is only for tests.
   bool contains_unknown_fields() const { return contains_unknown_fields_; }
 
-  // The browser_info_string's format is "version channel".
-  // For example, "13.0.123.4 canary".
-  void SetBrowserInfo(const std::string& browser_info_string);
-
-  static BrowserChannel StringToBrowserChannel(const std::string& value);
+  void SetBrowserVersion(const std::string& version_string);
 
   scoped_ptr<Version> version_;
   std::vector<ScopedGpuBlacklistEntry> blacklist_;
 
   scoped_ptr<Version> browser_version_;
-  BrowserChannel browser_channel_;
 
   // This records all the blacklist entries that are appliable to the current
   // user machine.  It is updated everytime DetermineGpuFeatureFlags() is

@@ -14,7 +14,7 @@
 #include "chrome/browser/history/url_database.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "ui/base/l10n/l10n_util.h"
 
 ExtensionAppProvider::ExtensionAppProvider(ACProviderListener* listener,
@@ -27,6 +27,33 @@ ExtensionAppProvider::ExtensionAppProvider(ACProviderListener* listener,
 void ExtensionAppProvider::AddExtensionAppForTesting(const string16& app_name,
                                                      const string16& url) {
   extension_apps_.push_back(std::make_pair(app_name, url));
+}
+
+AutocompleteMatch ExtensionAppProvider::CreateAutocompleteMatch(
+    const AutocompleteInput& input,
+    const string16& name,
+    const string16& url,
+    size_t name_match_index,
+    size_t url_match_index) {
+  // TODO(finnur): Figure out what type to return here, might want to have
+  // the extension icon/a generic icon show up in the Omnibox.
+  AutocompleteMatch match(this, 0, false,
+                          AutocompleteMatch::EXTENSION_APP);
+  match.fill_into_edit = url;
+  match.destination_url = GURL(url);
+  match.inline_autocomplete_offset = string16::npos;
+  match.contents = AutocompleteMatch::SanitizeString(name);
+  AutocompleteMatch::ClassifyLocationInString(name_match_index,
+      input.text().length(), name.length(), ACMatchClassification::NONE,
+      &match.contents_class);
+  match.description = url;
+  AutocompleteMatch::ClassifyLocationInString(url_match_index,
+      input.text().length(), url.length(), ACMatchClassification::URL,
+      &match.description_class);
+  match.relevance = CalculateRelevance(input.type(), input.text().length(),
+      (name_match_index != string16::npos ? name.length() : url.length()),
+      match.destination_url);
+  return match;
 }
 
 void ExtensionAppProvider::Start(const AutocompleteInput& input,
@@ -54,27 +81,11 @@ void ExtensionAppProvider::Start(const AutocompleteInput& input,
 
       if (matches_name || matches_url) {
         // We have a match, might be a partial match.
-        // TODO(finnur): Figure out what type to return here, might want to have
-        // the extension icon/a generic icon show up in the Omnibox.
-        AutocompleteMatch match(this, 0, false,
-                                AutocompleteMatch::EXTENSION_APP);
-        match.fill_into_edit = url;
-        match.destination_url = GURL(url);
-        match.inline_autocomplete_offset = string16::npos;
-        match.contents = name;
-        AutocompleteMatch::ClassifyLocationInString(matches_name ?
-            static_cast<size_t>(name_iter - name.begin()) : string16::npos,
-            input.text().length(), name.length(), ACMatchClassification::NONE,
-            &match.contents_class);
-        match.description = url;
-        AutocompleteMatch::ClassifyLocationInString(matches_url ?
-            static_cast<size_t>(url_iter - url.begin()) : string16::npos,
-            input.text().length(), url.length(), ACMatchClassification::URL,
-            &match.description_class);
-        match.relevance = CalculateRelevance(input.type(),
-            input.text().length(), matches_name ? name.length() : url.length(),
-            match.destination_url);
-        matches_.push_back(match);
+        matches_.push_back(CreateAutocompleteMatch(input, name, url,
+            matches_name ?
+                static_cast<size_t>(name_iter - name.begin()) : string16::npos,
+            matches_url ?
+                static_cast<size_t>(url_iter - url.begin()) : string16::npos));
       }
     }
   }
@@ -104,15 +115,18 @@ void ExtensionAppProvider::RefreshAppList() {
 }
 
 void ExtensionAppProvider::RegisterForNotifications() {
+  // Notifications of extensions loading and unloading always come from the
+  // non-incognito profile, but we need to see them regardless, as the incognito
+  // windows can be affected.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_->GetOriginalProfile()));
 }
 
 void ExtensionAppProvider::Observe(int type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
+                                   const content::NotificationSource& source,
+                                   const content::NotificationDetails& details) {
   RefreshAppList();
 }
 

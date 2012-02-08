@@ -16,20 +16,21 @@
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_node_data.h"
-#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/tab_contents/web_drag_source_win.h"
 #include "chrome/browser/tab_contents/web_drag_utils_win.h"
 #include "chrome/browser/tab_contents/web_drop_target_win.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_win.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/download/drag_download_file.h"
 #include "content/browser/download/drag_download_util.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "net/base/net_util.h"
-#include "views/drag_utils.h"
+#include "ui/views/drag_utils.h"
 #include "webkit/glue/webdropdata.h"
 
+using content::BrowserThread;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebDragOperationCopy;
 using WebKit::WebDragOperationLink;
@@ -141,14 +142,9 @@ void TabContentsDragWin::StartDragging(const WebDropData& drop_data,
   if (drag_drop_thread_->StartWithOptions(options)) {
     drag_drop_thread_->message_loop()->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &TabContentsDragWin::StartBackgroundDragging,
-                          drop_data,
-                          ops,
-                          page_url,
-                          page_encoding,
-                          image,
-                          image_offset));
+        base::Bind(&TabContentsDragWin::StartBackgroundDragging, this,
+                   drop_data, ops, page_url, page_encoding, image,
+                   image_offset));
   }
 
   // Install a hook procedure to monitor the messages so that we can forward
@@ -197,19 +193,22 @@ void TabContentsDragWin::PrepareDragForDownload(
                                                  &download_url))
     return;
 
-  // Generate the download filename.
-  FilePath generated_file_name;
-  download_util::GenerateFileNameFromSuggestedName(
-      download_url,
-      UTF16ToUTF8(file_name.value()),
-      UTF16ToUTF8(mime_type),
-      &generated_file_name);
+  // Generate the file name based on both mime type and proposed file name.
+  std::string default_name =
+      content::GetContentClient()->browser()->GetDefaultDownloadName();
+  FilePath generated_download_file_name =
+      net::GenerateFileName(download_url,
+                            std::string(),
+                            std::string(),
+                            UTF16ToUTF8(file_name.value()),
+                            UTF16ToUTF8(mime_type),
+                            default_name);
 
   // Provide the data as file (CF_HDROP). A temporary download file with the
   // Zone.Identifier ADS (Alternate Data Stream) attached will be created.
   linked_ptr<net::FileStream> empty_file_stream;
   scoped_refptr<DragDownloadFile> download_file =
-      new DragDownloadFile(generated_file_name,
+      new DragDownloadFile(generated_download_file_name,
                            empty_file_stream,
                            download_url,
                            page_url,
@@ -232,7 +231,8 @@ void TabContentsDragWin::PrepareDragForFileContents(
   if (file_name.value().empty()) {
     // Retrieve the name from the URL.
     file_name = FilePath(
-        net::GetSuggestedFilename(drop_data.url, "", "", "", "", string16()));
+        net::GetSuggestedFilename(drop_data.url, "", "", "", "",
+                                  std::string()));
     if (file_name.value().size() + drop_data.file_extension.size() + 1 >
         MAX_PATH) {
       file_name = FilePath(file_name.value().substr(

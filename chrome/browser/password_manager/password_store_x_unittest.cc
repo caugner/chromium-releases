@@ -4,6 +4,7 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_util.h"
 #include "base/platform_file.h"
 #include "base/scoped_temp_dir.h"
@@ -21,17 +22,18 @@
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/test/base/signaling_task.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_observer_mock.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/notification_observer_mock.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::WaitableEvent;
+using content::BrowserThread;
 using testing::_;
 using testing::DoAll;
 using testing::ElementsAreArray;
@@ -80,7 +82,7 @@ class DBThreadObserverHelper
     registrar_.RemoveAll();
   }
 
-  NotificationObserverMock& observer() {
+  content::NotificationObserverMock& observer() {
     return observer_;
   }
 
@@ -91,13 +93,13 @@ class DBThreadObserverHelper
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
     registrar_.Add(&observer_,
                    chrome::NOTIFICATION_LOGINS_CHANGED,
-                   Source<PasswordStore>(password_store));
+                   content::Source<PasswordStore>(password_store));
     done_event_.Signal();
   }
 
   WaitableEvent done_event_;
-  NotificationRegistrar registrar_;
-  NotificationObserverMock observer_;
+  content::NotificationRegistrar registrar_;
+  content::NotificationObserverMock observer_;
 };
 
 class FailingBackend : public PasswordStoreX::NativeBackend {
@@ -313,8 +315,9 @@ class PasswordStoreXTest : public testing::TestWithParam<BackendType> {
   }
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;  // PasswordStore, WDS schedule work on this thread.
+  content::TestBrowserThread ui_thread_;
+  // PasswordStore, WDS schedule work on this thread.
+  content::TestBrowserThread db_thread_;
 
   scoped_ptr<LoginDatabase> login_db_;
   scoped_ptr<TestingProfile> profile_;
@@ -357,7 +360,7 @@ TEST_P(PasswordStoreXTest, WDSMigration) {
   // task to notify us that it's safe to carry on with the test.
   WaitableEvent done(false, false);
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Initializing the PasswordStore should trigger a migration.
@@ -375,7 +378,7 @@ TEST_P(PasswordStoreXTest, WDSMigration) {
   // Again, the WDS schedules tasks to run on the DB thread, so schedule a task
   // to signal us when it is safe to continue.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Let the WDS callbacks proceed so the logins can be migrated.
@@ -420,7 +423,7 @@ TEST_P(PasswordStoreXTest, WDSMigration) {
 
   // Wait for the WDS methods to execute on the DB thread.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Handle the callback from the WDS.
@@ -434,7 +437,7 @@ TEST_P(PasswordStoreXTest, WDSMigration) {
 
   // Wait for the WDS methods to execute on the DB thread.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Handle the callback from the WDS.
@@ -477,7 +480,7 @@ TEST_P(PasswordStoreXTest, WDSMigrationAlreadyDone) {
   // task to notify us that it's safe to carry on with the test.
   WaitableEvent done(false, false);
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Pretend that the migration has already taken place.
@@ -549,11 +552,11 @@ TEST_P(PasswordStoreXTest, Notifications) {
   };
 
   EXPECT_CALL(helper->observer(),
-              Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
-                      Source<PasswordStore>(store),
-                      Property(&Details<const PasswordStoreChangeList>::ptr,
-                               Pointee(ElementsAreArray(
-                                   expected_add_changes)))));
+      Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
+              content::Source<PasswordStore>(store),
+              Property(&content::Details<const PasswordStoreChangeList>::ptr,
+                       Pointee(ElementsAreArray(
+                           expected_add_changes)))));
 
   // Adding a login should trigger a notification.
   store->AddLogin(*form);
@@ -562,7 +565,7 @@ TEST_P(PasswordStoreXTest, Notifications) {
   // yet another task to notify us that it's safe to carry on with the test.
   WaitableEvent done(false, false);
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Change the password.
@@ -573,18 +576,18 @@ TEST_P(PasswordStoreXTest, Notifications) {
   };
 
   EXPECT_CALL(helper->observer(),
-              Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
-                      Source<PasswordStore>(store),
-                      Property(&Details<const PasswordStoreChangeList>::ptr,
-                               Pointee(ElementsAreArray(
-                                   expected_update_changes)))));
+      Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
+              content::Source<PasswordStore>(store),
+              Property(&content::Details<const PasswordStoreChangeList>::ptr,
+                       Pointee(ElementsAreArray(
+                           expected_update_changes)))));
 
   // Updating the login with the new password should trigger a notification.
   store->UpdateLogin(*form);
 
   // Wait for PasswordStore to send the notification.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   const PasswordStoreChange expected_delete_changes[] = {
@@ -592,18 +595,18 @@ TEST_P(PasswordStoreXTest, Notifications) {
   };
 
   EXPECT_CALL(helper->observer(),
-              Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
-                      Source<PasswordStore>(store),
-                      Property(&Details<const PasswordStoreChangeList>::ptr,
-                               Pointee(ElementsAreArray(
-                                   expected_delete_changes)))));
+      Observe(int(chrome::NOTIFICATION_LOGINS_CHANGED),
+              content::Source<PasswordStore>(store),
+              Property(&content::Details<const PasswordStoreChangeList>::ptr,
+                       Pointee(ElementsAreArray(
+                           expected_delete_changes)))));
 
   // Deleting the login should trigger a notification.
   store->RemoveLogin(*form);
 
   // Wait for PasswordStore to send the notification.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Public in PasswordStore, protected in PasswordStoreX.
@@ -629,23 +632,23 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
   for (VectorOfForms::iterator it = expected_autofillable.begin();
        it != expected_autofillable.end(); ++it) {
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-                            base::IgnoreReturn(base::Callback<bool(void)>(
-                                base::Bind(&LoginDatabase::AddLogin,
-                                           base::Unretained(login_db), **it))));
+                            base::IgnoreReturn<bool>(base::Bind(
+                                &LoginDatabase::AddLogin,
+                                base::Unretained(login_db), **it)));
   }
   for (VectorOfForms::iterator it = expected_blacklisted.begin();
        it != expected_blacklisted.end(); ++it) {
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-                            base::IgnoreReturn(base::Callback<bool(void)>(
-                                base::Bind(&LoginDatabase::AddLogin,
-                                           base::Unretained(login_db), **it))));
+                            base::IgnoreReturn<bool>(base::Bind(
+                                &LoginDatabase::AddLogin,
+                                base::Unretained(login_db), **it)));
   }
 
   // Schedule another task on the DB thread to notify us that it's safe to
   // carry on with the test.
   WaitableEvent done(false, false);
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Get the new size of the login DB file. We expect it to be larger.
@@ -710,7 +713,7 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
 
   // Wait for the login DB methods to execute on the DB thread.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   if (GetParam() == WORKING_BACKEND) {
@@ -730,7 +733,7 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
 
   // Wait for the login DB methods to execute on the DB thread.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new SignalingTask(&done));
+      base::Bind(&WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   if (GetParam() == WORKING_BACKEND) {

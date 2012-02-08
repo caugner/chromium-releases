@@ -8,6 +8,8 @@ var expectedEventData;
 var capturedEventData;
 var expectedEventOrder;
 var tabId;
+var tabIdMap;
+var frameIdMap;
 var testServerPort;
 var testServer = "www.a.com";
 var eventsCaptured;
@@ -15,6 +17,8 @@ var eventsCaptured;
 function runTests(tests) {
   chrome.tabs.create({url: "about:blank"}, function(tab) {
     tabId = tab.id;
+    tabIdMap = {};
+    tabIdMap[tabId] = 0;
     chrome.test.getConfig(function(config) {
       testServerPort = config.testServer.port;
       chrome.test.runTests(tests);
@@ -63,17 +67,24 @@ function expect(data, order, filter, extraInfoSpec) {
   expectedEventOrder = order;
   eventsCaptured = chrome.test.callbackAdded();
   tabAndFrameUrls = {};  // Maps "{tabId}-{frameId}" to the URL of the frame.
+  frameIdMap = {"-1": -1};
   removeListeners();
-  initListeners(filter || {}, extraInfoSpec || []);
+  initListeners(filter || {urls: ["<all_urls>"]}, extraInfoSpec || []);
   // Fill in default values.
   for (var i = 0; i < expectedEventData.length; ++i) {
-    if (!expectedEventData[i].details.method) {
+    if (!('method' in expectedEventData[i].details)) {
       expectedEventData[i].details.method = "GET";
     }
-    if (!expectedEventData[i].details.tabId) {
-      expectedEventData[i].details.tabId = tabId;
+    if (!('tabId' in expectedEventData[i].details)) {
+      expectedEventData[i].details.tabId = tabIdMap[tabId];
     }
-    if (!expectedEventData[i].details.type) {
+    if (!('frameId' in expectedEventData[i].details)) {
+      expectedEventData[i].details.frameId = 0;
+    }
+    if (!('parentFrameId' in expectedEventData[i].details)) {
+      expectedEventData[i].details.parentFrameId = -1;
+    }
+    if (!('type' in expectedEventData[i].details)) {
       expectedEventData[i].details.type = "main_frame";
     }
   }
@@ -127,7 +138,7 @@ function checkUserAgent(headers) {
   return false;
 }
 
-function captureEvent(name, details) {
+function captureEvent(name, details, callback) {
   // Ignore system-level requests like safebrowsing updates and favicon fetches
   // since they are unpredictable.
   if (details.tabId == -1 || details.type == "other" ||
@@ -159,7 +170,24 @@ function captureEvent(name, details) {
     }
     details.frameUrl = tabAndFrameUrls[key] || "unknown frame URL";
   }
-  delete details.frameId;
+
+  // This assigns unique IDs to frames. The new IDs are only deterministic, if
+  // the frames documents are loaded in order. Don't write browser tests with
+  // more than one frame ID and rely on their numbers.
+  if (!(details.frameId in frameIdMap)) {
+    // Subtract one to discount for {"-1": -1} mapping that always exists.
+    // This gives the first frame the ID 0.
+    frameIdMap[details.frameId] = Object.keys(frameIdMap).length - 1;
+  }
+  details.frameId = frameIdMap[details.frameId];
+  details.parentFrameId = frameIdMap[details.parentFrameId];
+
+  // This assigns unique IDs to newly opened tabs. However, the new IDs are only
+  // deterministic, if the order in which the tabs are opened is deterministic.
+  if (!(details.tabId in tabIdMap)) {
+    tabIdMap[details.tabId] = Object.keys(tabIdMap).length;
+  }
+  details.tabId = tabIdMap[details.tabId];
 
   delete details.requestId;
   delete details.timeStamp;
@@ -187,13 +215,20 @@ function captureEvent(name, details) {
     }
   });
   if (!found) {
+    console.log("Expected events: " +
+        JSON.stringify(expectedEventData, null, 2));
     chrome.test.fail("Received unexpected event '" + name + "':" +
-        JSON.stringify(details));
+        JSON.stringify(details, null, 2));
   }
 
   capturedEventData.push({label: label, event: name, details: details});
   checkExpectations();
-  return retval;
+
+  if (callback) {
+    window.setTimeout(callback, 0, retval);
+  } else {
+    return retval;
+  }
 }
 
 // Simple array intersection. We use this to filter extraInfoSpec so
@@ -203,39 +238,40 @@ function intersect(array1, array2) {
 }
 
 function initListeners(filter, extraInfoSpec) {
-  chrome.experimental.webRequest.onBeforeRequest.addListener(
+  chrome.webRequest.onBeforeRequest.addListener(
       function(details) {
     return captureEvent("onBeforeRequest", details);
   }, filter, intersect(extraInfoSpec, ["blocking"]));
-  chrome.experimental.webRequest.onBeforeSendHeaders.addListener(
+  chrome.webRequest.onBeforeSendHeaders.addListener(
       function(details) {
     return captureEvent("onBeforeSendHeaders", details);
   }, filter, intersect(extraInfoSpec, ["blocking", "requestHeaders"]));
-  chrome.experimental.webRequest.onSendHeaders.addListener(
+  chrome.webRequest.onSendHeaders.addListener(
       function(details) {
     return captureEvent("onSendHeaders", details);
   }, filter, intersect(extraInfoSpec, ["requestHeaders"]));
-  chrome.experimental.webRequest.onHeadersReceived.addListener(
+  chrome.webRequest.onHeadersReceived.addListener(
       function(details) {
     return captureEvent("onHeadersReceived", details);
   }, filter, intersect(extraInfoSpec, ["blocking", "responseHeaders"]));
-  chrome.experimental.webRequest.onAuthRequired.addListener(
-      function(details) {
-    return captureEvent("onAuthRequired", details);
-  }, filter, intersect(extraInfoSpec, ["blocking", "responseHeaders"]));
-  chrome.experimental.webRequest.onResponseStarted.addListener(
+  chrome.webRequest.onAuthRequired.addListener(
+      function(details, callback) {
+    return captureEvent("onAuthRequired", details, callback);
+  }, filter, intersect(extraInfoSpec, ["asyncBlocking", "blocking",
+                                       "responseHeaders"]));
+  chrome.webRequest.onResponseStarted.addListener(
       function(details) {
     return captureEvent("onResponseStarted", details);
   }, filter, intersect(extraInfoSpec, ["responseHeaders"]));
-  chrome.experimental.webRequest.onBeforeRedirect.addListener(
+  chrome.webRequest.onBeforeRedirect.addListener(
       function(details) {
     return captureEvent("onBeforeRedirect", details);
   }, filter, intersect(extraInfoSpec, ["responseHeaders"]));
-  chrome.experimental.webRequest.onCompleted.addListener(
+  chrome.webRequest.onCompleted.addListener(
       function(details) {
     return captureEvent("onCompleted", details);
   }, filter, intersect(extraInfoSpec, ["responseHeaders"]));
-  chrome.experimental.webRequest.onErrorOccurred.addListener(
+  chrome.webRequest.onErrorOccurred.addListener(
       function(details) {
     return captureEvent("onErrorOccurred", details);
   }, filter);
@@ -251,13 +287,13 @@ function removeListeners() {
     }
     chrome.test.assertFalse(event.hasListeners());
   }
-  helper(chrome.experimental.webRequest.onBeforeRequest);
-  helper(chrome.experimental.webRequest.onBeforeSendHeaders);
-  helper(chrome.experimental.webRequest.onAuthRequired);
-  helper(chrome.experimental.webRequest.onSendHeaders);
-  helper(chrome.experimental.webRequest.onHeadersReceived);
-  helper(chrome.experimental.webRequest.onResponseStarted);
-  helper(chrome.experimental.webRequest.onBeforeRedirect);
-  helper(chrome.experimental.webRequest.onCompleted);
-  helper(chrome.experimental.webRequest.onErrorOccurred);
+  helper(chrome.webRequest.onBeforeRequest);
+  helper(chrome.webRequest.onBeforeSendHeaders);
+  helper(chrome.webRequest.onAuthRequired);
+  helper(chrome.webRequest.onSendHeaders);
+  helper(chrome.webRequest.onHeadersReceived);
+  helper(chrome.webRequest.onResponseStarted);
+  helper(chrome.webRequest.onBeforeRedirect);
+  helper(chrome.webRequest.onCompleted);
+  helper(chrome.webRequest.onErrorOccurred);
 }

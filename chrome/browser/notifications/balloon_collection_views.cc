@@ -31,6 +31,14 @@ int BalloonCollectionImpl::Layout::VerticalEdgeMargin() const {
   return 0;
 }
 
+bool BalloonCollectionImpl::Layout::NeedToMoveAboveLeftSidePanels() const {
+  return placement_ == VERTICALLY_FROM_BOTTOM_LEFT;
+}
+
+bool BalloonCollectionImpl::Layout::NeedToMoveAboveRightSidePanels() const {
+  return placement_ == VERTICALLY_FROM_BOTTOM_RIGHT;
+}
+
 void BalloonCollectionImpl::PositionBalloons(bool reposition) {
   PositionBalloonsInternal(reposition);
 }
@@ -47,6 +55,18 @@ void BalloonCollectionImpl::DidProcessEvent(const base::NativeEvent& event) {
     case WM_MOUSELEAVE:
     case WM_NCMOUSELEAVE:
       HandleMouseMoveEvent();
+      break;
+  }
+#elif defined(USE_AURA)
+  // This is deliberately used only in linux. For an aura build on windows, the
+  // above block of code is fine.
+  switch (ui::EventTypeFromNative(event)) {
+    case ui::ET_MOUSE_MOVED:
+    case ui::ET_MOUSE_DRAGGED:
+    case ui::ET_MOUSE_EXITED:
+      HandleMouseMoveEvent();
+      break;
+    default:
       break;
   }
 #else
@@ -84,6 +104,7 @@ void BalloonCollectionImpl::SetPositionPreference(
   else
     NOTREACHED();
 
+  layout_.ComputeOffsetToMoveAbovePanels(gfx::Rect());
   PositionBalloons(true);
 }
 

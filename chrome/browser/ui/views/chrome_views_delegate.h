@@ -10,18 +10,15 @@
 #include "base/compiler_specific.h"
 #include "build/build_config.h"
 #include "ui/base/accessibility/accessibility_types.h"
-#include "views/views_delegate.h"
+#include "ui/views/views_delegate.h"
 
 class ChromeViewsDelegate : public views::ViewsDelegate {
  public:
-  static views::View* default_parent_view;
-
   ChromeViewsDelegate() {}
   virtual ~ChromeViewsDelegate() {}
 
   // Overridden from views::ViewsDelegate:
   virtual ui::Clipboard* GetClipboard() const OVERRIDE;
-  virtual views::View* GetDefaultParentView() OVERRIDE;
   virtual void SaveWindowPlacement(const views::Widget* window,
                                    const std::string& window_name,
                                    const gfx::Rect& bounds,

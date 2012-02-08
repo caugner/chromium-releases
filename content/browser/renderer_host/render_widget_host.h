@@ -10,15 +10,16 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process_util.h"
+#include "base/property_bag.h"
 #include "base/string16.h"
 #include "base/timer.h"
 #include "content/common/content_export.h"
-#include "content/common/page_zoom.h"
-#include "content/common/property_bag.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/page_zoom.h"
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
@@ -27,6 +28,21 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/surface/transport_dib.h"
+
+class BackingStore;
+struct EditCommand;
+class RenderWidgetHostView;
+class TransportDIB;
+struct ViewHostMsg_UpdateRect_Params;
+class WebCursor;
+
+namespace base {
+class TimeTicks;
+}
+
+namespace content {
+class RenderProcessHost;
+}
 
 namespace gfx {
 class Rect;
@@ -42,17 +58,6 @@ class WebMouseEvent;
 struct WebCompositionUnderline;
 struct WebScreenInfo;
 }
-
-class BackingStore;
-class PaintObserver;
-class RenderProcessHost;
-class RenderWidgetHostView;
-class TransportDIB;
-class WebCursor;
-struct ViewHostMsg_UpdateRect_Params;
-struct WebPreferences;
-struct EditCommand;
-class GURL;
 
 // This class manages the browser side of a browser<->renderer HWND connection.
 // The HWND lives in the browser process, and windows events are sent over
@@ -142,7 +147,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
 
   // routing_id can be MSG_ROUTING_NONE, in which case the next available
   // routing id is taken from the RenderProcessHost.
-  RenderWidgetHost(RenderProcessHost* process, int routing_id);
+  RenderWidgetHost(content::RenderProcessHost* process, int routing_id);
   virtual ~RenderWidgetHost();
 
   // Gets/Sets the View of this RenderWidgetHost. Can be NULL, e.g. if the
@@ -152,15 +157,17 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   void SetView(RenderWidgetHostView* view);
   RenderWidgetHostView* view() const { return view_; }
 
-  RenderProcessHost* process() const { return process_; }
+  content::RenderProcessHost* process() const { return process_; }
   int routing_id() const { return routing_id_; }
   bool renderer_accessible() { return renderer_accessible_; }
+
+  bool empty() const { return current_size_.IsEmpty(); }
 
   // Returns the property bag for this widget, where callers can add extra data
   // they may wish to associate with it. Returns a pointer rather than a
   // reference since the PropertyAccessors expect this.
-  const PropertyBag* property_bag() const { return &property_bag_; }
-  PropertyBag* property_bag() { return &property_bag_; }
+  const base::PropertyBag* property_bag() const { return &property_bag_; }
+  base::PropertyBag* property_bag() { return &property_bag_; }
 
   // Called when a renderer object already been created for this host, and we
   // just need to be attached to it. Used for window.open, <select> dropdown
@@ -174,10 +181,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   virtual bool IsRenderView() const;
 
   // IPC::Channel::Listener
-  virtual bool OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // Sends a message to the corresponding object in the renderer.
-  virtual bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // Called to notify the RenderWidget that it has been hidden or restored from
   // having been hidden.
@@ -195,6 +202,12 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   void Focus();
   void Blur();
   virtual void LostCapture();
+
+  // Sets whether the renderer should show controls in an active state.  On all
+  // platforms except mac, that's the same as focused. On mac, the frontmost
+  // window will show active controls even if the focus is not in the web
+  // contents, but e.g. in the omnibox.
+  void SetActive(bool active);
 
   // Called to notify the RenderWidget that it has lost the mouse lock.
   virtual void LostMouseLock();
@@ -270,6 +283,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   void ForwardWheelEvent(const WebKit::WebMouseWheelEvent& wheel_event);
   void ForwardGestureEvent(const WebKit::WebGestureEvent& gesture_event);
   virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
+  virtual void ForwardNextKeyboardEvent();
   virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
 
 
@@ -400,6 +414,14 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // Relay a request from assistive technology to set focus to a given node.
   void AccessibilitySetFocus(int object_id);
 
+  // Relay a request from assistive technology to scroll.
+  void AccessibilityChangeScrollPosition(
+      int acc_obj_id, int scroll_x, int scroll_y);
+
+  // Relay a request from assistive technology to set text selection.
+  void AccessibilitySetTextSelection(
+      int acc_obj_id, int start_offset, int end_offset);
+
   // Executes the edit command on the RenderView.
   void ExecuteEditCommand(const std::string& command,
                           const std::string& value);
@@ -428,10 +450,16 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // locked.
   bool GotResponseToLockMouseRequest(bool allowed);
 
+#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
+  // Called by the view in response to AcceleratedSurfaceBuffersSwapped.
+  static void AcknowledgeSwapBuffers(int32 route_id, int gpu_host_id);
+  static void AcknowledgePostSubBuffer(int32 route_id, int gpu_host_id);
+#endif
+
  protected:
   // Internal implementation of the public Forward*Event() methods.
   void ForwardInputEvent(const WebKit::WebInputEvent& input_event,
-                         int event_size, bool is_keyboard_shortcut);
+                         int event_size);
 
   // Called when we receive a notification indicating that the renderer
   // process has gone. This will reset our state so that our state will be
@@ -447,7 +475,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   gfx::PluginWindowHandle GetCompositingSurface();
 
   // Called to handled a keyboard event before sending it to the renderer.
-  // This is overridden by RenderView to send upwards to its delegate.
+  // This is overridden by RenderViewHost to send upwards to its delegate.
   // Returns true if the event was handled, and then the keyboard event will
   // not be sent to the renderer anymore. Otherwise, if the |event| would
   // be handled in HandleKeyboardEvent() method as a normal keyboard shortcut,
@@ -455,26 +483,31 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut);
 
-  // Called when a keyboard event was not processed by the renderer. This is
-  // overridden by RenderView to send upwards to its delegate.
+  // "RenderWidgetHostDelegate" ------------------------------------------------
+  // There is no RenderWidgetHostDelegate but the following methods serve the
+  // same purpose. They are overridden by RenderViewHost to send upwards to its
+  // delegate.
+
+  // Called when a keyboard event was not processed by the renderer.
   virtual void UnhandledKeyboardEvent(const NativeWebKeyboardEvent& event) {}
 
-  // Called when a mousewheel event was not processed by the renderer. This is
-  // overridden by RenderView to send upwards to its delegate.
+  // Called when a mousewheel event was not processed by the renderer.
   virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) {}
 
   // Notification that the user has made some kind of input that could
-  // perform an action. The render view host overrides this to forward the
-  // information to its delegate (see corresponding function in
-  // RenderViewHostDelegate). The gestures that count are 1) any mouse down
+  // perform an action. The gestures that count are 1) any mouse down
   // event and 2) enter or space key presses.
   virtual void OnUserGesture() {}
 
   // Callbacks for notification when the renderer becomes unresponsive to user
-  // input events, and subsequently responsive again. RenderViewHost overrides
-  // these to tell its delegate to show the user a warning.
+  // input events, and subsequently responsive again.
   virtual void NotifyRendererUnresponsive() {}
   virtual void NotifyRendererResponsive() {}
+
+  // Called when auto-resize resulted in the renderer size changing.
+  virtual void OnRenderAutoResized(const gfx::Size& new_size) {}
+
+  // ---------------------------------------------------------------------------
 
   // RenderViewHost overrides this method to impose further restrictions on when
   // to allow mouse lock.
@@ -487,6 +520,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
 
   // RenderViewHost overrides this method to report when in fullscreen mode.
   virtual bool IsFullscreen() const;
+
+  // Indicates if the render widget host should track the render widget's size
+  // as opposed to visa versa.
+  void SetShouldAutoResize(bool enable);
 
  protected:
   // true if a renderer has once been valid. We use this flag to display a sad
@@ -537,7 +574,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgLockMouse();
   void OnMsgUnlockMouse();
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(USE_AURA)
   void OnMsgGetScreenInfo(gfx::NativeViewId view,
                           WebKit::WebScreenInfo* results);
   void OnMsgGetWindowRect(gfx::NativeViewId window_id, gfx::Rect* results);
@@ -566,11 +603,21 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   void OnMsgDestroyPluginContainer(gfx::PluginWindowHandle id);
 #endif
 
-  // Paints the given bitmap to the current backing store at the given location.
-  void PaintBackingStoreRect(TransportDIB::Id bitmap,
+  // Called (either immediately or asynchronously) after we're done with our
+  // BackingStore and can send an ACK to the renderer so it can paint onto it
+  // again.
+  void DidUpdateBackingStore(const ViewHostMsg_UpdateRect_Params& params,
+                             const base::TimeTicks& paint_start);
+
+  // Paints the given bitmap to the current backing store at the given
+  // location.  Returns true if the passed callback was asynchronously
+  // scheduled in the future (and thus the caller must manually synchronously
+  // call the callback function).
+  bool PaintBackingStoreRect(TransportDIB::Id bitmap,
                              const gfx::Rect& bitmap_rect,
                              const std::vector<gfx::Rect>& copy_rects,
-                             const gfx::Size& view_size);
+                             const gfx::Size& view_size,
+                             const base::Closure& completion_callback);
 
   // Scrolls the given |clip_rect| in the backing by the given dx/dy amount. The
   // |dib| and its corresponding location |bitmap_rect| in the backing store
@@ -600,10 +647,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // Created during construction but initialized during Init*(). Therefore, it
   // is guaranteed never to be NULL, but its channel may be NULL if the
   // renderer crashed, so you must always check that.
-  RenderProcessHost* process_;
+  content::RenderProcessHost* process_;
 
   // Stores random bits of data for others to associate with this object.
-  PropertyBag property_bag_;
+  base::PropertyBag property_bag_;
 
   // The ID of the corresponding object in the Renderer Instance.
   int routing_id_;
@@ -641,6 +688,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // is only updated once the resize message has been ack'd. This on the other
   // hand is updated when the resize message is sent.
   gfx::Rect in_flight_reserved_rect_;
+
+  // True if the render widget host should track the render widget's size as
+  // opposed to visa versa.
+  bool should_auto_resize_;
 
   // True if a mouse move event was sent to the render view and we are waiting
   // for a corresponding ViewHostMsg_HandleInputEvent_ACK message.
@@ -709,7 +760,14 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   base::TimeTicks repaint_start_time_;
 
   // Queue of keyboard events that we need to track.
-  typedef std::deque<NativeWebKeyboardEvent> KeyQueue;
+  struct Key {
+    Key(const NativeWebKeyboardEvent& event, bool is_shortcut)
+        : event(event), is_shortcut(is_shortcut) {
+    }
+    NativeWebKeyboardEvent event;
+    bool is_shortcut;
+  };
+  typedef std::deque<Key> KeyQueue;
 
   // A queue of keyboard events. We can't trust data from the renderer so we
   // stuff key events into a queue and pop them out on ACK, feeding our copy
@@ -729,19 +787,27 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   bool text_direction_canceled_;
 
   // Indicates if the next sequence of Char events should be suppressed or not.
-  // System may translate a RawKeyDown event into zero or more Char events,
+  //
+  // The system may translate a RawKeyDown event into zero or more Char events,
   // usually we send them to the renderer directly in sequence. However, If a
-  // RawKeyDown event was not handled by the renderer but was handled by
-  // our UnhandledKeyboardEvent() method, e.g. as an accelerator key, then we
-  // shall not send the following sequence of Char events, which was generated
-  // by this RawKeyDown event, to the renderer. Otherwise the renderer may
-  // handle the Char events and cause unexpected behavior.
-  // For example, pressing alt-2 may let the browser switch to the second tab,
-  // but the Char event generated by alt-2 may also activate a HTML element
-  // if its accesskey happens to be "2", then the user may get confused when
-  // switching back to the original tab, because the content may already be
-  // changed.
-  bool suppress_next_char_events_;
+  // RawKeyDown event was not handled by the renderer but was handled by our
+  // UnhandledKeyboardEvent() method, e.g. as an accelerator key, then we shall
+  // not send the following sequence of Char events, which was generated by
+  // this RawKeyDown event, to the renderer. Otherwise the renderer may handle
+  // the Char events and cause unexpected behavior.  For example, pressing
+  // alt-2 may let the browser switch to the second tab, but the Char event
+  // generated by alt-2 may also activate a HTML element if its accesskey
+  // happens to be "2", then the user may get confused when switching back to
+  // the original tab, because the content may already be changed.
+  //
+  // If true, suppress_incoming_char_events_ prevents Char events from being
+  // added to key_queue_.
+  //
+  // If true, suppress_outgoing_char_events_ prevents Char events from being
+  // removed from key_queue_ and forwarded to the renderer.
+  //
+  bool suppress_incoming_char_events_;
+  bool suppress_outgoing_char_events_;
 
   std::vector<gfx::PluginWindowHandle> deferred_plugin_handles_;
 
@@ -749,6 +815,8 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   gfx::Point last_scroll_offset_;
 
   bool pending_mouse_lock_request_;
+
+  base::WeakPtrFactory<RenderWidgetHost> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHost);
 };

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -61,7 +61,7 @@ class ExtensionsTest(pyauto.PyUITest):
       group_end = curr_extension + group_size
       for extension in extensions[curr_extension:group_end]:
         logging.debug('Installing extension: %s' % extension)
-        self.InstallExtension(extension, False)
+        self.InstallExtension(extension)
 
       for url in top_urls:
         self.NavigateToURL(url)
@@ -154,8 +154,7 @@ class ExtensionsTest(pyauto.PyUITest):
     """Test setting different extension states."""
     crx_file_path = os.path.abspath(
         os.path.join(self.DataDir(), 'extensions', 'google_talk.crx'))
-    ext_id = self.InstallExtension(crx_file_path, False);
-    self.assertTrue(ext_id, 'Failed to install extension.')
+    ext_id = self.InstallExtension(crx_file_path)
 
     # Verify extension is in default state.
     extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
@@ -182,14 +181,94 @@ class ExtensionsTest(pyauto.PyUITest):
     extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)
     self.assertFalse(extension['allowed_in_incognito'])
 
+  def testTriggerBrowserAction(self):
+    """Test triggering browser action."""
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'browser_action'))
+    ext_id = self.InstallExtension(dir_path)
+
+    self.NavigateToURL(self.GetFileURLForDataPath('simple.html'))
+
+    self.TriggerBrowserActionById(ext_id)
+
+    # Verify that the browser action turned the background red.
+    self.assertTrue(self.WaitUntil(
+        lambda: self.GetDOMValue('document.body.style.backgroundColor'),
+        expect_retval='red'),
+        msg='Browser action was not triggered.')
+
+  def testTriggerBrowserActionWithPopup(self):
+    """Test triggering browser action that shows a popup."""
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'browser_action_popup'))
+    ext_id = self.InstallExtension(dir_path)
+
+    self.TriggerBrowserActionById(ext_id)
+
+    # Verify that the extension popup is displayed.
+    popup = self.WaitUntilExtensionViewLoaded(
+        view_type='EXTENSION_POPUP')
+    self.assertTrue(popup,
+        msg='Browser action failed to display the popup (views=%s).' %
+        self.GetBrowserInfo()['extension_views'])
+
+  def testTriggerPageAction(self):
+    """Test triggering page action."""
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'page_action'))
+    ext_id = self.InstallExtension(dir_path)
+
+    # Page action icon is displayed when a tab is created.
+    self.NavigateToURL(self.GetFileURLForDataPath('simple.html'))
+    self.AppendTab(pyauto.GURL('chrome://newtab'))
+    self.ActivateTab(0)
+    self.assertTrue(self.WaitUntil(
+        lambda: ext_id in
+        self.GetBrowserInfo()['windows'][0]['visible_page_actions']),
+        msg='Page action icon is not visible.')
+
+    self.TriggerPageActionById(ext_id)
+
+    # Verify that page action turned the background red.
+    self.assertTrue(self.WaitUntil(
+        lambda: self.GetDOMValue('document.body.style.backgroundColor'),
+        expect_retval='red'),
+        msg='Page action was not triggered.')
+
+  def testTriggerPageActionWithPopup(self):
+    """Test triggering page action that shows a popup."""
+    dir_path = os.path.abspath(
+        os.path.join(self.DataDir(), 'extensions', 'trigger_actions',
+                     'page_action_popup'))
+    ext_id = self.InstallExtension(dir_path)
+
+    # Page action icon is displayed when a tab is created.
+    self.AppendTab(pyauto.GURL('chrome://newtab'))
+    self.ActivateTab(0)
+    self.assertTrue(self.WaitUntil(
+        lambda: ext_id in
+        self.GetBrowserInfo()['windows'][0]['visible_page_actions']),
+        msg='Page action icon is not visible.')
+
+    self.TriggerPageActionById(ext_id)
+
+    # Verify that the extension popup is displayed.
+    popup = self.WaitUntilExtensionViewLoaded(
+        view_type='EXTENSION_POPUP')
+    self.assertTrue(popup,
+        msg='Page action failed to display the popup (views=%s).' %
+        self.GetBrowserInfo()['extension_views'])
+
   def testAdblockExtensionCrash(self):
     """Test AdBlock extension successfully installed and enabled, and do not
     cause browser crash.
     """
     crx_file_path = os.path.abspath(
         os.path.join(self.DataDir(), 'extensions', 'adblock.crx'))
-    ext_id = self.InstallExtension(crx_file_path, False)
-    self.assertTrue(ext_id, msg='Failed to install extension.')
+    ext_id = self.InstallExtension(crx_file_path)
 
     self.RestartBrowser(clear_profile=False)
     extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)

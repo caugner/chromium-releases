@@ -154,7 +154,8 @@ static void NTAPI on_tls_callback(HINSTANCE h, DWORD dwReason, PVOID pv) {
 extern "C" {
 // This tells the linker to run these functions.
 #pragma data_seg(push, old_seg)
-#pragma data_seg(".CRT$XLB")
+  // Use CRT$XLY instead of CRT$XLB to ensure we're called LATER in sequence.
+#pragma data_seg(".CRT$XLY")
 void (NTAPI *p_thread_callback_tcmalloc)(
     HINSTANCE h, DWORD dwReason, PVOID pv) = on_tls_callback;
 #pragma data_seg(".CRT$XTU")
@@ -256,6 +257,31 @@ extern void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
   assert((reinterpret_cast<uintptr_t>(result) & (alignment - 1)) == 0);
 
   return result;
+}
+
+size_t TCMalloc_SystemAddGuard(void* start, size_t size) {
+  static size_t pagesize = 0;
+  if (pagesize == 0) {
+    SYSTEM_INFO system_info;
+    GetSystemInfo(&system_info);
+    pagesize = system_info.dwPageSize;
+  }
+
+  // We know that TCMalloc_SystemAlloc will give us a correct page alignment
+  // regardless, so we can just assert to detect erroneous callers.
+  assert(reinterpret_cast<size_t>(start) % pagesize == 0);
+
+  // Add a guard page to catch metadata corruption. We're using the
+  // PAGE_GUARD flag rather than NO_ACCESS because we want the unique
+  // exception in crash reports.
+  DWORD permissions = 0;
+  if (size > pagesize &&
+      VirtualProtect(start, pagesize, PAGE_READONLY | PAGE_GUARD,
+                     &permissions)) {
+    return pagesize;
+  }
+
+  return 0;
 }
 
 void TCMalloc_SystemRelease(void* start, size_t length) {

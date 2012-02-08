@@ -6,12 +6,12 @@
 
 #include "content/browser/tab_contents/popup_menu_helper_mac.h"
 
+#import "base/mac/scoped_sending_event.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/message_loop.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view_mac.h"
-#import "content/common/chrome_application_mac.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #import "ui/base/cocoa/base_view.h"
 #include "webkit/glue/webmenurunner_mac.h"
@@ -20,7 +20,7 @@ PopupMenuHelper::PopupMenuHelper(RenderViewHost* render_view_host)
     : render_view_host_(render_view_host) {
   notification_registrar_.Add(
       this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
-      Source<RenderWidgetHost>(render_view_host));
+      content::Source<RenderWidgetHost>(render_view_host));
 }
 
 void PopupMenuHelper::ShowPopupMenu(
@@ -54,7 +54,7 @@ void PopupMenuHelper::ShowPopupMenu(
     // setting flags in -[CrApplication sendEvent:], but since
     // web-content menus are initiated by IPC message the setup has to
     // be done manually.
-    chrome_application_mac::ScopedSendingEvent sendingEventScoper;
+    base::mac::ScopedSendingEvent sending_event_scoper;
 
     // Now run a SYNCHRONOUS NESTED EVENT LOOP until the pop-up is finished.
     [menu_runner runMenuInView:cocoa_view
@@ -78,10 +78,10 @@ void PopupMenuHelper::ShowPopupMenu(
 
 void PopupMenuHelper::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED);
-  DCHECK(Source<RenderWidgetHost>(source).ptr() == render_view_host_);
+  DCHECK(content::Source<RenderWidgetHost>(source).ptr() == render_view_host_);
   render_view_host_ = NULL;
 }
 

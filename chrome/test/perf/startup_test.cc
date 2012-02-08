@@ -11,6 +11,7 @@
 #include "base/string_util.h"
 #include "base/sys_info.h"
 #include "base/test/test_file_util.h"
+#include "base/test/test_timeouts.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_constants.h"
@@ -203,7 +204,11 @@ class StartupTest : public UIPerfTest {
             automation()->GetBrowserWindow(0));
         ASSERT_TRUE(browser_proxy.get());
 
-        if (browser_proxy->GetInitialLoadTimes(&min_start, &max_stop, &times) &&
+        if (browser_proxy->GetInitialLoadTimes(
+              TestTimeouts::action_max_timeout_ms(),
+              &min_start,
+              &max_stop,
+              &times) &&
             !times.empty()) {
           ASSERT_LT(nth_timed_tab, num_tabs);
           ASSERT_EQ(times.size(), static_cast<size_t>(num_tabs));
@@ -288,7 +293,14 @@ TEST_F(StartupTest, PerfReferenceWarm) {
 
 // TODO(mpcomplete): Should we have reference timings for all these?
 
-TEST_F(StartupTest, PerfCold) {
+// dominich: Disabling as per http://crbug.com/100900.
+#if defined(OS_WIN)
+#define MAYBE_PerfCold DISABLED_PerfCold
+#else
+#define MAYBE_PerfCold PerfCold
+#endif
+
+TEST_F(StartupTest, MAYBE_PerfCold) {
   RunStartupTest("cold", "t", COLD, NOT_IMPORTANT,
                  UITestBase::DEFAULT_THEME, 0, 0);
 }
@@ -329,7 +341,14 @@ void StartupTest::RunPerfTestWithManyTabs(const char* graph, const char* trace,
                  UITestBase::DEFAULT_THEME, tab_count, nth_timed_tab);
 }
 
-TEST_F(StartupTest, PerfFewTabs) {
+// http://crbug.com/101591
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_PerfFewTabs FLAKY_PerfFewTabs
+#else
+#define MAYBE_PerfFewTabs PerfFewTabs
+#endif
+
+TEST_F(StartupTest, MAYBE_PerfFewTabs) {
   RunPerfTestWithManyTabs("few_tabs", "cmdline", 5, 2, false);
 }
 
@@ -356,7 +375,12 @@ TEST_F(StartupTest, PerfRestoreFewTabsReference) {
 #define MAYBE_PerfExtensionContentScript50 FLAKY_PerfExtensionContentScript50
 #elif defined(OS_WIN)
 // http://crbug.com/46609
+#if !defined(NDEBUG)
+// http://crbug.com/102584
+#define MAYBE_PerfSeveralTabs DISABLED_PerfSeveralTabs
+#else
 #define MAYBE_PerfSeveralTabs FLAKY_PerfSeveralTabs
+#endif
 #define MAYBE_PerfSeveralTabsReference PerfSeveralTabsReference
 #define MAYBE_PerfRestoreSeveralTabs PerfRestoreSeveralTabs
 #define MAYBE_PerfExtensionContentScript50 PerfExtensionContentScript50

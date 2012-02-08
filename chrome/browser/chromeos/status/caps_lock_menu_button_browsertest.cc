@@ -13,6 +13,10 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "grit/theme_resources.h"
 
+#if defined(USE_AURA)
+#include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
+#endif
+
 namespace chromeos {
 
 class CapsLockMenuButtonTest : public CrosInProcessBrowserTest {
@@ -26,15 +30,20 @@ class CapsLockMenuButtonTest : public CrosInProcessBrowserTest {
     cros_mock_->SetStatusAreaMocksExpectations();
   }
 
-  CapsLockMenuButton* GetCapsLockMenuButton() {
-    BrowserView* view = static_cast<BrowserView*>(browser()->window());
-    return static_cast<StatusAreaView*>(view->
-        GetViewByID(VIEW_ID_STATUS_AREA))->caps_lock_view();
+  const CapsLockMenuButton* GetCapsLockMenuButton() {
+    const views::View* view =
+#if defined(USE_AURA)
+        ChromeShellDelegate::instance()->GetStatusArea();
+#else
+        static_cast<BrowserView*>(browser()->window());
+#endif
+    return static_cast<const CapsLockMenuButton*>(
+        view->GetViewByID(VIEW_ID_STATUS_BUTTON_CAPS_LOCK));
   }
 };
 
 IN_PROC_BROWSER_TEST_F(CapsLockMenuButtonTest, InitialIndicatorTest) {
-  CapsLockMenuButton* caps_lock = GetCapsLockMenuButton();
+  const CapsLockMenuButton* caps_lock = GetCapsLockMenuButton();
   ASSERT_TRUE(caps_lock != NULL);
 
   // By default, the indicator shouldn't be shown.

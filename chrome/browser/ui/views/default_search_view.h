@@ -9,14 +9,13 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
 class PrefService;
 class Profile;
 class TabContents;
 class TemplateURL;
 class TemplateURLService;
-class ThemeService;
 
 namespace gfx {
 class Canvas;
@@ -25,7 +24,6 @@ class Canvas;
 namespace views {
 class Button;
 class ImageView;
-class Label;
 class View;
 }
 

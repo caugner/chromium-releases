@@ -23,15 +23,15 @@
 #include "grit/locale_settings.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/background.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/label.h"
-#include "views/controls/menu/menu_2.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/focus/focus_manager.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/menu/menu_2.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 using views::GridLayout;
 
@@ -87,9 +87,14 @@ BookmarkEditorView::~BookmarkEditorView() {
   bb_model_->RemoveObserver(this);
 }
 
-bool BookmarkEditorView::IsDialogButtonEnabled(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK) {
+string16 BookmarkEditorView::GetDialogButtonLabel(
+      ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
+    return l10n_util::GetStringUTF16(IDS_SAVE);
+  return string16();
+}
+bool BookmarkEditorView::IsDialogButtonEnabled(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK) {
     if (details_.type == EditDetails::NEW_FOLDER)
       return !title_tf_.text().empty();
 
@@ -112,7 +117,7 @@ string16 BookmarkEditorView::GetWindowTitle() const {
 }
 
 bool BookmarkEditorView::Accept() {
-  if (!IsDialogButtonEnabled(MessageBoxFlags::DIALOGBUTTON_OK)) {
+  if (!IsDialogButtonEnabled(ui::DIALOG_BUTTON_OK)) {
     if (details_.type != EditDetails::NEW_FOLDER) {
       // The url is invalid, focus the url field.
       url_tf_->SelectAll();
@@ -125,8 +130,7 @@ bool BookmarkEditorView::Accept() {
   return true;
 }
 
-bool BookmarkEditorView::AreAcceleratorsEnabled(
-    MessageBoxFlags::DialogButton button) {
+bool BookmarkEditorView::AreAcceleratorsEnabled(ui::DialogButton button) {
   return !show_tree_ || !tree_view_->GetEditingNode();
 }
 
@@ -378,7 +382,7 @@ void BookmarkEditorView::Init() {
     // username/password, or unescape anything that changes the meaning.
     string16 url_text = net::FormatUrl(url, languages,
         net::kFormatUrlOmitAll & ~net::kFormatUrlOmitUsernamePassword,
-        UnescapeRule::SPACES, NULL, NULL, NULL);
+        net::UnescapeRule::SPACES, NULL, NULL, NULL);
 
     url_tf_ = new views::Textfield;
     url_tf_->SetText(UTF16ToWide(url_text));
@@ -468,7 +472,7 @@ GURL BookmarkEditorView::GetInputURL() const {
   return URLFixerUpper::FixupURL(UTF16ToUTF8(url_tf_->text()), std::string());
 }
 
-std::wstring BookmarkEditorView::GetInputTitle() const {
+string16 BookmarkEditorView::GetInputTitle() const {
   return title_tf_.text();
 }
 
@@ -534,9 +538,8 @@ BookmarkEditorView::EditorNode* BookmarkEditorView::CreateRootNode() {
   DCHECK(root_node->child_count() >= 2 && root_node->child_count() <= 3);
   DCHECK(bb_root_node->GetChild(0)->type() == BookmarkNode::BOOKMARK_BAR);
   DCHECK(bb_root_node->GetChild(1)->type() == BookmarkNode::OTHER_NODE);
-  if (root_node->child_count() == 3) {
-    DCHECK(bb_root_node->GetChild(2)->type() == BookmarkNode::SYNCED);
-  }
+  if (root_node->child_count() == 3)
+    DCHECK(bb_root_node->GetChild(2)->type() == BookmarkNode::MOBILE);
   return root_node;
 }
 
@@ -587,7 +590,7 @@ void BookmarkEditorView::ApplyEdits(EditorNode* parent) {
   bb_model_->RemoveObserver(this);
 
   GURL new_url(GetInputURL());
-  string16 new_title(WideToUTF16Hack(GetInputTitle()));
+  string16 new_title(GetInputTitle());
 
   if (!show_tree_) {
     bookmark_utils::ApplyEditsWithNoFolderChange(

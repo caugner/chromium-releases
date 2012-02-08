@@ -36,8 +36,14 @@
 #include "ui/gfx/image/image.h"
 
 #if !defined(OS_MACOSX)
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #endif
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/extensions/file_manager_util.h"
+#endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -51,7 +57,7 @@ class DownloadItemSorter : public std::binary_function<DownloadItem*,
                                                        bool> {
  public:
   bool operator()(const DownloadItem* lhs, const DownloadItem* rhs) {
-    return lhs->start_time() > rhs->start_time();
+    return lhs->GetStartTime() > rhs->GetStartTime();
   }
 };
 
@@ -118,7 +124,7 @@ DownloadsDOMHandler::DownloadsDOMHandler(DownloadManager* dlm)
       download_manager_(dlm),
       callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   // Create our fileicon data source.
-  Profile::FromBrowserContext(dlm->browser_context())->
+  Profile::FromBrowserContext(dlm->BrowserContext())->
       GetChromeURLDataManager()->AddDataSource(
 #if defined(OS_CHROMEOS)
       new FileIconSourceCros());
@@ -138,7 +144,7 @@ void DownloadsDOMHandler::Init() {
   download_manager_->AddObserver(this);
 
   Profile* profile =
-      Profile::FromBrowserContext(download_manager_->browser_context());
+      Profile::FromBrowserContext(download_manager_->BrowserContext());
   Profile* original_profile = profile->GetOriginalProfile();
   if (original_profile != profile) {
     original_download_manager_observer_.reset(
@@ -196,7 +202,7 @@ void DownloadsDOMHandler::OnDownloadUpdated(DownloadItem* download) {
   if (it == download_items_.end())
     return;
 
-  if (download->state() == DownloadItem::REMOVING) {
+  if (download->GetState() == DownloadItem::REMOVING) {
     (*it)->RemoveObserver(this);
     *it = NULL;
     // A later ModelChanged() notification will change the WebUI's
@@ -219,7 +225,7 @@ void DownloadsDOMHandler::ModelChanged() {
                                      &download_items_);
   // If we have a parent profile, let it add its downloads to the results.
   Profile* profile =
-      Profile::FromBrowserContext(download_manager_->browser_context());
+      Profile::FromBrowserContext(download_manager_->BrowserContext());
   if (profile->GetOriginalProfile() != profile) {
     DownloadServiceFactory::GetForProfile(
         profile->GetOriginalProfile())->GetDownloadManager()->SearchDownloads(
@@ -246,7 +252,7 @@ void DownloadsDOMHandler::ModelChanged() {
     // fixed.
     // We should never see anything that isn't already in the history.
     CHECK(*it);
-    CHECK_NE(DownloadItem::kUninitializedHandle, (*it)->db_handle());
+    CHECK_NE(DownloadItem::kUninitializedHandle, (*it)->GetDbHandle());
 
     (*it)->AddObserver(this);
   }
@@ -323,7 +329,7 @@ void DownloadsDOMHandler::HandleRemove(const ListValue* args) {
   DownloadItem* file = GetDownloadByValue(args);
   if (file) {
     // TODO(rdsmith): Change to DCHECK when http://crbug.com/85408 is fixed.
-    CHECK_NE(DownloadItem::kUninitializedHandle, file->db_handle());
+    CHECK_NE(DownloadItem::kUninitializedHandle, file->GetDbHandle());
     file->Remove();
   }
 }
@@ -340,7 +346,7 @@ void DownloadsDOMHandler::HandleClearAll(const ListValue* args) {
   download_manager_->RemoveAllDownloads();
 
   Profile* profile =
-      Profile::FromBrowserContext(download_manager_->browser_context());
+      Profile::FromBrowserContext(download_manager_->BrowserContext());
   // If this is an incognito downloader, clear All should clear main download
   // manager as well.
   if (profile->GetOriginalProfile() != profile)
@@ -351,17 +357,8 @@ void DownloadsDOMHandler::HandleClearAll(const ListValue* args) {
 
 void DownloadsDOMHandler::HandleOpenDownloadsFolder(const ListValue* args) {
   CountDownloadsDOMEvents(DOWNLOADS_DOM_EVENT_OPEN_FOLDER);
-  FilePath path = DownloadPrefs::FromDownloadManager(download_manager_)->
-      download_path();
-
-#if defined(OS_MACOSX)
-  // Must be called from the UI thread on Mac.
-  platform_util::OpenItem(path);
-#else
-  BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE,
-      base::Bind(&platform_util::OpenItem, path));
-#endif
+  platform_util::OpenItem(
+      DownloadPrefs::FromDownloadManager(download_manager_)->download_path());
 }
 
 // DownloadsDOMHandler, private: ----------------------------------------------

@@ -9,18 +9,15 @@
 #include "base/memory/ref_counted.h"
 #include "media/base/media_export.h"
 
-struct AVStream;
-
 namespace media {
 
 class AudioDecoderConfig;
 class Buffer;
+class VideoDecoderConfig;
 
 class MEDIA_EXPORT DemuxerStream
     : public base::RefCountedThreadSafe<DemuxerStream> {
  public:
-  typedef base::Callback<void(Buffer*)> ReadCallback;
-
   enum Type {
     UNKNOWN,
     AUDIO,
@@ -28,16 +25,19 @@ class MEDIA_EXPORT DemuxerStream
     NUM_TYPES,  // Always keep this entry as the last one!
   };
 
-  // Schedules a read.  When the |read_callback| is called, the downstream
-  // object takes ownership of the buffer by AddRef()'ing the buffer.
+  // Request a buffer to returned via the provided callback.
+  //
+  // Buffers will be non-NULL yet may be end of stream buffers.
+  typedef base::Callback<void(scoped_refptr<Buffer>)> ReadCallback;
   virtual void Read(const ReadCallback& read_callback) = 0;
-
-  // Returns an |AVStream*| if supported, or NULL.
-  virtual AVStream* GetAVStream();
 
   // Returns the audio decoder configuration. It is an error to call this method
   // if type() != AUDIO.
   virtual const AudioDecoderConfig& audio_decoder_config() = 0;
+
+  // Returns the video decoder configuration. It is an error to call this method
+  // if type() != VIDEO.
+  virtual const VideoDecoderConfig& video_decoder_config() = 0;
 
   // Returns the type of stream.
   virtual Type type() = 0;

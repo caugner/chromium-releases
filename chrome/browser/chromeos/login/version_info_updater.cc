@@ -15,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/system/runtime_environment.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_version_info.h"
@@ -27,7 +28,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 
 namespace chromeos {
@@ -43,18 +44,18 @@ VersionInfoUpdater::~VersionInfoUpdater() {
 }
 
 void VersionInfoUpdater::StartUpdate(bool is_official_build) {
-  if (CrosLibrary::Get()->EnsureLoaded()) {
+  if (system::runtime_environment::IsRunningOnChromeOS()) {
     version_loader_.GetVersion(
         &version_consumer_,
         base::Bind(&VersionInfoUpdater::OnVersion, base::Unretained(this)),
         is_official_build ?
             VersionLoader::VERSION_SHORT_WITH_DATE :
             VersionLoader::VERSION_FULL);
-    if (!is_official_build) {
-      boot_times_loader_.GetBootTimes(
-          &boot_times_consumer_,
-          NewCallback(this, &VersionInfoUpdater::OnBootTimes));
-    }
+    boot_times_loader_.GetBootTimes(
+        &boot_times_consumer_,
+        NewCallback(this, is_official_build ?
+            &VersionInfoUpdater::OnBootTimesNoop :
+            &VersionInfoUpdater::OnBootTimes));
   } else {
     UpdateVersionLabel();
   }
@@ -78,7 +79,7 @@ void VersionInfoUpdater::StartUpdate(bool is_official_build) {
 }
 
 void VersionInfoUpdater::UpdateVersionLabel() {
-  if (!CrosLibrary::Get()->EnsureLoaded()) {
+  if (!system::runtime_environment::IsRunningOnChromeOS()) {
     if (delegate_) {
       delegate_->OnOSVersionLabelTextUpdated(
           CrosLibrary::Get()->load_error_string());
@@ -164,6 +165,10 @@ void VersionInfoUpdater::OnVersion(
     VersionLoader::Handle handle, std::string version) {
   version_text_.swap(version);
   UpdateVersionLabel();
+}
+
+void VersionInfoUpdater::OnBootTimesNoop(
+    BootTimesLoader::Handle handle, BootTimesLoader::BootTimes boot_times) {
 }
 
 void VersionInfoUpdater::OnBootTimes(

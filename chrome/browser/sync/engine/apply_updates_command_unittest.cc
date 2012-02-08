@@ -17,6 +17,7 @@
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
+#include "chrome/browser/sync/test/engine/fake_model_worker.h"
 #include "chrome/browser/sync/test/engine/syncer_command_test.h"
 #include "chrome/browser/sync/test/engine/test_id_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -52,12 +53,15 @@ class ApplyUpdatesCommandTest : public SyncerCommandTest {
   virtual void SetUp() {
     workers()->clear();
     mutable_routing_info()->clear();
-    // GROUP_PASSIVE worker.
-    workers()->push_back(make_scoped_refptr(new ModelSafeWorker()));
-    (*mutable_routing_info())[syncable::BOOKMARKS] = GROUP_PASSIVE;
-    (*mutable_routing_info())[syncable::PASSWORDS] = GROUP_PASSIVE;
+    workers()->push_back(
+        make_scoped_refptr(new FakeModelWorker(GROUP_UI)));
+    workers()->push_back(
+        make_scoped_refptr(new FakeModelWorker(GROUP_PASSWORD)));
+    (*mutable_routing_info())[syncable::BOOKMARKS] = GROUP_UI;
+    (*mutable_routing_info())[syncable::PASSWORDS] = GROUP_PASSWORD;
     (*mutable_routing_info())[syncable::NIGORI] = GROUP_PASSIVE;
     SyncerCommandTest::SetUp();
+    ExpectNoGroupsToChange(apply_updates_command_);
   }
 
   // Create a new unapplied folder node with a parent.
@@ -113,7 +117,9 @@ class ApplyUpdatesCommandTest : public SyncerCommandTest {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
     WriteTransaction trans(FROM_HERE, UNITTEST, dir);
-    Id predecessor_id = dir->GetLastChildId(&trans, parent_id);
+    Id predecessor_id;
+    ASSERT_TRUE(
+        dir->GetLastChildIdForTest(&trans, parent_id, &predecessor_id));
     MutableEntry entry(&trans, syncable::CREATE, parent_id, name);
     ASSERT_TRUE(entry.good());
     entry.Put(syncable::ID, item_id);
@@ -153,16 +159,19 @@ TEST_F(ApplyUpdatesCommandTest, Simple) {
                                    DefaultBookmarkSpecifics(),
                                    "parent");
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_UI);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
+  sessions::StatusController* status = session()->mutable_status_controller();
 
-  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(2, status->update_progress().AppliedUpdatesSize())
+  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_UI);
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(2, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "Simple update shouldn't result in conflicts";
-  EXPECT_EQ(2, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(2, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "All items should have been successfully applied";
 }
 
@@ -186,15 +195,18 @@ TEST_F(ApplyUpdatesCommandTest, UpdateWithChildrenBeforeParents) {
                                    DefaultBookmarkSpecifics(),
                                    "parent");
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_UI);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
-  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(5, status->update_progress().AppliedUpdatesSize())
+  sessions::StatusController* status = session()->mutable_status_controller();
+  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_UI);
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(5, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "Simple update shouldn't result in conflicts, even if out-of-order";
-  EXPECT_EQ(5, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(5, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "All updates should have been successfully applied";
 }
 
@@ -207,15 +219,18 @@ TEST_F(ApplyUpdatesCommandTest, NestedItemsWithUnknownParent) {
                                    DefaultBookmarkSpecifics(),
                                    "some_item");
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_UI);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
-  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(2, status->update_progress().AppliedUpdatesSize())
+  sessions::StatusController* status = session()->mutable_status_controller();
+  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_UI);
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(2, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(2, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(2, status->conflict_progress()->ConflictingItemsSize())
       << "All updates with an unknown ancestors should be in conflict";
-  EXPECT_EQ(0, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(0, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "No item with an unknown ancestor should be applied";
 }
 
@@ -241,15 +256,18 @@ TEST_F(ApplyUpdatesCommandTest, ItemsBothKnownAndUnknown) {
                                    DefaultBookmarkSpecifics(),
                                    root_server_id);
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_UI);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
-  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(6, status->update_progress().AppliedUpdatesSize())
+  sessions::StatusController* status = session()->mutable_status_controller();
+  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_UI);
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(6, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(2, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(2, status->conflict_progress()->ConflictingItemsSize())
       << "The updates with unknown ancestors should be in conflict";
-  EXPECT_EQ(4, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(4, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "The updates with known ancestors should be successfully applied";
 }
 
@@ -277,15 +295,18 @@ TEST_F(ApplyUpdatesCommandTest, DecryptablePassword) {
       specifics.MutableExtension(sync_pb::password)->mutable_encrypted());
   CreateUnappliedNewItem("item", specifics, false);
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_PASSWORD);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
-  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(1, status->update_progress().AppliedUpdatesSize())
+  sessions::StatusController* status = session()->mutable_status_controller();
+  sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSWORD);
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(1, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "No update should be in conflict because they're all decryptable";
-  EXPECT_EQ(1, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(1, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "The updates that can be decrypted should be applied";
 }
 
@@ -303,23 +324,41 @@ TEST_F(ApplyUpdatesCommandTest, UndecryptableData) {
   encrypted_password.MutableExtension(sync_pb::password);
   CreateUnappliedNewItem("item3", encrypted_password, false);
 
+  ExpectGroupsToChange(apply_updates_command_, GROUP_UI, GROUP_PASSWORD);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
+  sessions::StatusController* status = session()->mutable_status_controller();
   EXPECT_TRUE(status->HasConflictingUpdates())
     << "Updates that can't be decrypted should trigger the syncer to have "
     << "conflicting updates.";
   {
-    sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-    EXPECT_EQ(3, status->update_progress().AppliedUpdatesSize())
+    sessions::ScopedModelSafeGroupRestriction r(status, GROUP_UI);
+    ASSERT_TRUE(status->update_progress());
+    EXPECT_EQ(2, status->update_progress()->AppliedUpdatesSize())
         << "All updates should have been attempted";
-    EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+    ASSERT_TRUE(status->conflict_progress());
+    EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
         << "The updates that can't be decrypted should not be in regular "
         << "conflict";
-    EXPECT_EQ(3, status->conflict_progress().NonblockingConflictingItemsSize())
+    EXPECT_EQ(2, status->conflict_progress()->NonblockingConflictingItemsSize())
         << "The updates that can't be decrypted should be in nonblocking "
         << "conflict";
-    EXPECT_EQ(0, status->update_progress().SuccessfullyAppliedUpdateCount())
+    EXPECT_EQ(0, status->update_progress()->SuccessfullyAppliedUpdateCount())
+        << "No update that can't be decrypted should be applied";
+  }
+  {
+    sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSWORD);
+    ASSERT_TRUE(status->update_progress());
+    EXPECT_EQ(1, status->update_progress()->AppliedUpdatesSize())
+        << "All updates should have been attempted";
+  ASSERT_TRUE(status->conflict_progress());
+    EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
+        << "The updates that can't be decrypted should not be in regular "
+        << "conflict";
+    EXPECT_EQ(1, status->conflict_progress()->NonblockingConflictingItemsSize())
+        << "The updates that can't be decrypted should be in nonblocking "
+        << "conflict";
+    EXPECT_EQ(0, status->update_progress()->SuccessfullyAppliedUpdateCount())
         << "No update that can't be decrypted should be applied";
   }
 }
@@ -360,23 +399,26 @@ TEST_F(ApplyUpdatesCommandTest, SomeUndecryptablePassword) {
     CreateUnappliedNewItem("item2", specifics, false);
   }
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_PASSWORD);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
+  sessions::StatusController* status = session()->mutable_status_controller();
   EXPECT_TRUE(status->HasConflictingUpdates())
     << "Updates that can't be decrypted should trigger the syncer to have "
     << "conflicting updates.";
   {
-    sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-    EXPECT_EQ(2, status->update_progress().AppliedUpdatesSize())
+    sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSWORD);
+    ASSERT_TRUE(status->update_progress());
+    EXPECT_EQ(2, status->update_progress()->AppliedUpdatesSize())
         << "All updates should have been attempted";
-    EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+    ASSERT_TRUE(status->conflict_progress());
+    EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
         << "The updates that can't be decrypted should not be in regular "
         << "conflict";
-    EXPECT_EQ(1, status->conflict_progress().NonblockingConflictingItemsSize())
+    EXPECT_EQ(1, status->conflict_progress()->NonblockingConflictingItemsSize())
         << "The updates that can't be decrypted should be in nonblocking "
         << "conflict";
-    EXPECT_EQ(1, status->update_progress().SuccessfullyAppliedUpdateCount())
+    EXPECT_EQ(1, status->update_progress()->SuccessfullyAppliedUpdateCount())
         << "The undecryptable password update shouldn't be applied";
   }
 }
@@ -412,15 +454,18 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdate) {
                          specifics, true);
   EXPECT_FALSE(cryptographer->has_pending_keys());
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_PASSIVE);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
+  sessions::StatusController* status = session()->mutable_status_controller();
   sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(1, status->update_progress().AppliedUpdatesSize())
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(1, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "The nigori update shouldn't be in conflict";
-  EXPECT_EQ(1, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(1, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "The nigori update should be applied";
 
   EXPECT_FALSE(cryptographer->is_ready());
@@ -461,15 +506,18 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
                          specifics, true);
   EXPECT_FALSE(cryptographer->has_pending_keys());
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_PASSIVE);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
+  sessions::StatusController* status = session()->mutable_status_controller();
   sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(1, status->update_progress().AppliedUpdatesSize())
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(1, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "The nigori update shouldn't be in conflict";
-  EXPECT_EQ(1, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(1, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "The nigori update should be applied";
 
   EXPECT_FALSE(cryptographer->is_ready());
@@ -546,17 +594,20 @@ TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
     EXPECT_EQ(2*batch_s+1, handles.size());
   }
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_PASSIVE);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
+  sessions::StatusController* status = session()->mutable_status_controller();
   sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(1, status->update_progress().AppliedUpdatesSize())
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(1, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "No updates should be in conflict";
-  EXPECT_EQ(0, status->conflict_progress().NonblockingConflictingItemsSize())
+  EXPECT_EQ(0, status->conflict_progress()->NonblockingConflictingItemsSize())
       << "No updates should be in conflict";
-  EXPECT_EQ(1, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(1, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "The nigori update should be applied";
   EXPECT_FALSE(cryptographer->has_pending_keys());
   EXPECT_TRUE(cryptographer->is_ready());
@@ -646,19 +697,22 @@ TEST_F(ApplyUpdatesCommandTest, CannotEncryptUnsyncedChanges) {
     EXPECT_EQ(2*batch_s+1, handles.size());
   }
 
+  ExpectGroupToChange(apply_updates_command_, GROUP_PASSIVE);
   apply_updates_command_.ExecuteImpl(session());
 
-  sessions::StatusController* status = session()->status_controller();
+  sessions::StatusController* status = session()->mutable_status_controller();
   sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-  EXPECT_EQ(1, status->update_progress().AppliedUpdatesSize())
+  ASSERT_TRUE(status->update_progress());
+  EXPECT_EQ(1, status->update_progress()->AppliedUpdatesSize())
       << "All updates should have been attempted";
-  EXPECT_EQ(0, status->conflict_progress().ConflictingItemsSize())
+  ASSERT_TRUE(status->conflict_progress());
+  EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "The unsynced changes don't trigger a blocking conflict with the "
       << "nigori update.";
-  EXPECT_EQ(1, status->conflict_progress().NonblockingConflictingItemsSize())
+  EXPECT_EQ(1, status->conflict_progress()->NonblockingConflictingItemsSize())
       << "The unsynced changes trigger a non-blocking conflict with the "
       << "nigori update.";
-  EXPECT_EQ(0, status->update_progress().SuccessfullyAppliedUpdateCount())
+  EXPECT_EQ(0, status->update_progress()->SuccessfullyAppliedUpdateCount())
       << "The nigori update should not be applied";
   EXPECT_FALSE(cryptographer->is_ready());
   EXPECT_TRUE(cryptographer->has_pending_keys());

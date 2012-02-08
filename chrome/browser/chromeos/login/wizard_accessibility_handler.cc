@@ -10,14 +10,14 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
-#include "chrome/browser/accessibility_events.h"
-#include "chrome/browser/chromeos/accessibility_util.h"
-#include "chrome/browser/extensions/extension_accessibility_api.h"
-#include "chrome/browser/extensions/extension_accessibility_api_constants.h"
+#include "chrome/browser/accessibility/accessibility_extension_api.h"
+#include "chrome/browser/accessibility/accessibility_extension_api_constants.h"
+#include "chrome/browser/accessibility/accessibility_events.h"
+#include "chrome/browser/chromeos/accessibility/accessibility_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -101,14 +101,14 @@ namespace chromeos {
 
 void WizardAccessibilityHandler::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   const AccessibilityControlInfo *control_info =
-      Details<const AccessibilityControlInfo>(details).ptr();
+      content::Details<const AccessibilityControlInfo>(details).ptr();
   std::string description;
   EarconType earcon = NO_EARCON;
   DescribeAccessibilityEvent(type, control_info, &description, &earcon);
-  accessibility::Speak(description.c_str(), false, true);
+  accessibility::Speak(description.c_str());
 }
 
 void WizardAccessibilityHandler::DescribeAccessibilityEvent(

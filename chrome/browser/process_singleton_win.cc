@@ -22,7 +22,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/installer/util/wmi.h"
-#include "content/common/result_codes.h"
+#include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -239,9 +239,13 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
   // If locked, it means we are not ready to process this message because
   // we are probably in a first run critical phase.
   if (locked_) {
+#if defined(USE_AURA)
+    NOTIMPLEMENTED();
+#else
     // Attempt to place ourselves in the foreground / flash the task bar.
     if (IsWindow(foreground_window_))
       SetForegroundWindow(foreground_window_);
+#endif
     return TRUE;
   }
 
@@ -307,18 +311,22 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
     PrefService* prefs = g_browser_process->local_state();
     DCHECK(prefs);
 
-    Profile* profile = ProfileManager::GetLastUsedProfile();
-    if (!profile) {
-      // We should only be able to get here if the profile already exists and
-      // has been created.
-      NOTREACHED();
-      return TRUE;
-    }
-
     // Handle the --uninstall-extension startup action. This needs to done here
     // in the process that is running with the target profile, otherwise the
     // uninstall will fail to unload and remove all components.
     if (parsed_command_line.HasSwitch(switches::kUninstallExtension)) {
+      // The uninstall extension switch can't be combined with the profile
+      // directory switch.
+      DCHECK(!parsed_command_line.HasSwitch(switches::kProfileDirectory));
+
+      Profile* profile = ProfileManager::GetLastUsedProfile();
+      if (!profile) {
+        // We should only be able to get here if the profile already exists and
+        // has been created.
+        NOTREACHED();
+        return TRUE;
+      }
+
       ExtensionsStartupUtil ext_startup_util;
       ext_startup_util.UninstallExtension(parsed_command_line, profile);
       return TRUE;
@@ -326,8 +334,7 @@ LRESULT ProcessSingleton::OnCopyData(HWND hwnd, const COPYDATASTRUCT* cds) {
 
     // Run the browser startup sequence again, with the command line of the
     // signalling process.
-    BrowserInit::ProcessCommandLine(parsed_command_line, cur_dir, false,
-                                    profile, NULL);
+    BrowserInit::ProcessCommandLineAlreadyRunning(parsed_command_line, cur_dir);
     return TRUE;
   }
   return TRUE;

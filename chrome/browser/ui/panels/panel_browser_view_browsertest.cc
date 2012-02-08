@@ -15,16 +15,17 @@
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "grit/generated_resources.h"
-#include "ui/base/l10n/l10n_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/animation/slide_animation.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/link.h"
-#include "views/controls/textfield/textfield.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/textfield/textfield.h"
 
 class PanelBrowserViewTest : public BasePanelBrowserTest {
  public:
@@ -49,7 +50,7 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
       MSG msg;
       msg.message = WM_MOUSEMOVE;
       DidProcessEvent(msg);
-#elif defined(TOUCH_UI) || defined(USE_AURA)
+#elif defined(USE_AURA)
       NOTIMPLEMENTED();
 #elif defined(TOOLKIT_USES_GTK)
       GdkEvent event;
@@ -161,13 +162,22 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
     }
   }
 
+  void ClosePanelAndWaitForNotification(Panel* panel) {
+    ui_test_utils::WindowedNotificationObserver signal(
+        chrome::NOTIFICATION_BROWSER_CLOSED,
+        content::Source<Browser>(panel->browser()));
+    panel->Close();
+    signal.Wait();
+  }
+
   // We put all the testing logic in this class instead of the test so that
   // we do not need to declare each new test as a friend of PanelBrowserView
   // for the purpose of accessing its private members.
   void TestMinimizeAndRestore(bool enable_auto_hiding) {
     PanelManager* panel_manager = PanelManager::GetInstance();
-    int expected_bottom_on_minimized = testing_work_area().height();
-    int expected_bottom_on_unminimized = expected_bottom_on_minimized;
+    int expected_bottom_on_expanded = testing_work_area().height();
+    int expected_bottom_on_title_only = expected_bottom_on_expanded;
+    int expected_bottom_on_minimized = expected_bottom_on_expanded;
 
     // Turn on auto-hiding if requested.
     static const int bottom_thickness = 40;
@@ -176,7 +186,7 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
         enable_auto_hiding,
         bottom_thickness);
     if (enable_auto_hiding)
-      expected_bottom_on_unminimized -= bottom_thickness;
+      expected_bottom_on_title_only -= bottom_thickness;
 
     // Create and test one panel first.
     Panel* panel1 = CreatePanel("PanelTest1");
@@ -201,7 +211,7 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
     panel1->SetExpansionState(Panel::TITLE_ONLY);
     EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
     EXPECT_EQ(titlebar_height, panel1->GetBounds().height());
-    EXPECT_EQ(expected_bottom_on_unminimized, panel1->GetBounds().bottom());
+    EXPECT_EQ(expected_bottom_on_title_only, panel1->GetBounds().bottom());
     EXPECT_EQ(1, panel_manager->minimized_panel_count());
     WaitTillBoundsAnimationFinished(panel1);
     EXPECT_TRUE(frame_view1->close_button_->IsVisible());
@@ -211,7 +221,7 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
     panel1->SetExpansionState(Panel::EXPANDED);
     EXPECT_EQ(Panel::EXPANDED, panel1->expansion_state());
     EXPECT_EQ(initial_height, panel1->GetBounds().height());
-    EXPECT_EQ(expected_bottom_on_unminimized, panel1->GetBounds().bottom());
+    EXPECT_EQ(expected_bottom_on_expanded, panel1->GetBounds().bottom());
     EXPECT_EQ(0, panel_manager->minimized_panel_count());
     WaitTillBoundsAnimationFinished(panel1);
     EXPECT_TRUE(frame_view1->close_button_->IsVisible());
@@ -228,7 +238,7 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
     panel1->SetExpansionState(Panel::TITLE_ONLY);
     EXPECT_EQ(Panel::TITLE_ONLY, panel1->expansion_state());
     EXPECT_EQ(titlebar_height, panel1->GetBounds().height());
-    EXPECT_EQ(expected_bottom_on_unminimized, panel1->GetBounds().bottom());
+    EXPECT_EQ(expected_bottom_on_title_only, panel1->GetBounds().bottom());
     EXPECT_EQ(1, panel_manager->minimized_panel_count());
 
     // Create 2 more panels for more testing.
@@ -284,9 +294,9 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
         0, 0));
     browser_view1->OnTitlebarMouseReleased();
 
-    panel1->Close();
-    panel2->Close();
-    panel3->Close();
+    ClosePanelAndWaitForNotification(panel1);
+    ClosePanelAndWaitForNotification(panel2);
+    ClosePanelAndWaitForNotification(panel3);
     EXPECT_EQ(0, panel_manager->minimized_panel_count());
   }
 
@@ -336,6 +346,7 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
 
     // Test that we cannot bring down the panel that is drawing the attention.
     PanelManager::GetInstance()->BringUpOrDownTitlebars(false);
+    MessageLoopForUI::current()->RunAllPending();
     EXPECT_EQ(Panel::TITLE_ONLY, panel->expansion_state());
 
     // Test that the attention is cleared.
@@ -349,41 +360,62 @@ class PanelBrowserViewTest : public BasePanelBrowserTest {
   }
 
   void TestChangeAutoHideTaskBarThickness() {
+    PanelManager* manager = PanelManager::GetInstance();
+    int initial_starting_right_position = manager->StartingRightPosition();
+
     int bottom_bar_thickness = 20;
     int right_bar_thickness = 30;
     mock_auto_hiding_desktop_bar()->EnableAutoHiding(
         AutoHidingDesktopBar::ALIGN_BOTTOM, true, bottom_bar_thickness);
     mock_auto_hiding_desktop_bar()->EnableAutoHiding(
         AutoHidingDesktopBar::ALIGN_RIGHT, true, right_bar_thickness);
+    EXPECT_EQ(
+        initial_starting_right_position - manager->StartingRightPosition(),
+        right_bar_thickness);
 
     Panel* panel = CreatePanel("PanelTest");
+    panel->SetExpansionState(Panel::TITLE_ONLY);
+    WaitTillBoundsAnimationFinished(panel);
+
     EXPECT_EQ(testing_work_area().height() - bottom_bar_thickness,
               panel->GetBounds().bottom());
-    EXPECT_EQ(testing_work_area().right() - right_bar_thickness,
+    EXPECT_GT(testing_work_area().right() - right_bar_thickness,
               panel->GetBounds().right());
 
-    bottom_bar_thickness += 10;
-    right_bar_thickness += 15;
+    initial_starting_right_position = manager->StartingRightPosition();
+    int bottom_bar_thickness_delta = 10;
+    bottom_bar_thickness += bottom_bar_thickness_delta;
+    int right_bar_thickness_delta = 15;
+    right_bar_thickness += right_bar_thickness_delta;
     mock_auto_hiding_desktop_bar()->SetThickness(
         AutoHidingDesktopBar::ALIGN_BOTTOM, bottom_bar_thickness);
     mock_auto_hiding_desktop_bar()->SetThickness(
         AutoHidingDesktopBar::ALIGN_RIGHT, right_bar_thickness);
     MessageLoopForUI::current()->RunAllPending();
+    EXPECT_EQ(
+        initial_starting_right_position - manager->StartingRightPosition(),
+        right_bar_thickness_delta);
     EXPECT_EQ(testing_work_area().height() - bottom_bar_thickness,
               panel->GetBounds().bottom());
-    EXPECT_EQ(testing_work_area().right() - right_bar_thickness,
+    EXPECT_GT(testing_work_area().right() - right_bar_thickness,
               panel->GetBounds().right());
 
-    bottom_bar_thickness -= 20;
-    right_bar_thickness -= 10;
+    initial_starting_right_position = manager->StartingRightPosition();
+    bottom_bar_thickness_delta = 20;
+    bottom_bar_thickness -= bottom_bar_thickness_delta;
+    right_bar_thickness_delta = 10;
+    right_bar_thickness -= right_bar_thickness_delta;
     mock_auto_hiding_desktop_bar()->SetThickness(
         AutoHidingDesktopBar::ALIGN_BOTTOM, bottom_bar_thickness);
     mock_auto_hiding_desktop_bar()->SetThickness(
         AutoHidingDesktopBar::ALIGN_RIGHT, right_bar_thickness);
     MessageLoopForUI::current()->RunAllPending();
+    EXPECT_EQ(
+        manager->StartingRightPosition() - initial_starting_right_position,
+        right_bar_thickness_delta);
     EXPECT_EQ(testing_work_area().height() - bottom_bar_thickness,
               panel->GetBounds().bottom());
-    EXPECT_EQ(testing_work_area().right() - right_bar_thickness,
+    EXPECT_GT(testing_work_area().right() - right_bar_thickness,
               panel->GetBounds().right());
 
     panel->Close();
@@ -398,7 +430,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest, CreatePanelBasic) {
   Panel* panel = CreatePanelWithParams(params);
 
   // Validate basic window properties.
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   HWND native_window = GetNativeWindow(panel);
 
   RECT window_rect;
@@ -422,7 +454,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest, CreatePanelActive) {
 
   // Validate window styles. We want to ensure that the window is created
   // with expected styles regardless of its active state.
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   HWND native_window = GetNativeWindow(panel);
 
   LONG styles = ::GetWindowLong(native_window, GWL_STYLE);
@@ -447,7 +479,7 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest, CreatePanelInactive) {
 
   // Validate window styles. We want to ensure that the window is created
   // with expected styles regardless of its active state.
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   HWND native_window = GetNativeWindow(panel);
 
   LONG styles = ::GetWindowLong(native_window, GWL_STYLE);
@@ -578,11 +610,13 @@ IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest,
 }
 
 // TODO(jianli): Investigate why this fails on win trunk build.
+// http://crbug.com/102734
 IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest, DISABLED_DrawAttention) {
   TestDrawAttention();
 }
 
-IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest, ChangeAutoHideTaskBarThickness) {
+IN_PROC_BROWSER_TEST_F(PanelBrowserViewTest,
+                       ChangeAutoHideTaskBarThickness) {
   TestChangeAutoHideTaskBarThickness();
 }
 #endif

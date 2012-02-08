@@ -13,7 +13,7 @@
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/gfx/font.h"
-#include "views/view.h"
+#include "ui/views/view.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditModel;
@@ -23,7 +23,6 @@ class Profile;
 
 namespace gfx {
 class CanvasSkia;
-class Insets;
 }
 
 namespace views {

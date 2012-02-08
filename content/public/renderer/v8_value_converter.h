@@ -9,8 +9,6 @@
 #include "v8/include/v8.h"
 
 namespace base {
-class DictionaryValue;
-class ListValue;
 class Value;
 }
 
@@ -32,7 +30,7 @@ class CONTENT_EXPORT V8ValueConverter {
   // If an array or object throws while setting a value, that property or item
   // is skipped, leaving a hole in the case of arrays.
   virtual v8::Handle<v8::Value> ToV8Value(
-      base::Value* value,
+      const base::Value* value,
       v8::Handle<v8::Context> context) const = 0;
 
   // Converts v8::Value to Value. Unsupported types are replaced with null.
@@ -44,4 +42,4 @@ class CONTENT_EXPORT V8ValueConverter {
 
 }  // namespace content
 
-#endif // CONTENT_PUBLIC_RENDERER_V8_VALUE_CONVERTER_H_
+#endif  // CONTENT_PUBLIC_RENDERER_V8_VALUE_CONVERTER_H_

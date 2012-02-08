@@ -16,10 +16,6 @@
 class Profile;
 class TermMatches;
 
-namespace history {
-class HistoryBackend;
-}  // namespace history
-
 // This class is an autocomplete provider (a pseudo-internal component of
 // the history system) which quickly (and synchronously) provides matching
 // results from recently or frequently visited sites in the profile's
@@ -37,9 +33,6 @@ class HistoryQuickProvider : public HistoryProvider {
 
   virtual void DeleteMatch(const AutocompleteMatch& match) OVERRIDE;
 
-  // Performs the autocomplete matching and scoring.
-  void DoAutocomplete();
-
   // Disable this provider. For unit testing purposes only. This is required
   // because this provider is closely associated with the HistoryURLProvider
   // and in order to properly test the latter the HistoryQuickProvider must
@@ -51,6 +44,9 @@ class HistoryQuickProvider : public HistoryProvider {
   friend class HistoryQuickProviderTest;
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Spans);
   FRIEND_TEST_ALL_PREFIXES(HistoryQuickProviderTest, Relevance);
+
+  // Performs the autocomplete matching and scoring.
+  void DoAutocomplete();
 
   // Creates an AutocompleteMatch from |history_match|. |max_match_score| gives
   // the maximum possible score for the match. |history_matches| is the full set
@@ -81,7 +77,10 @@ class HistoryQuickProvider : public HistoryProvider {
       bool is_url);
 
   // Only for use in unittests.  Takes ownership of |index|.
-  void SetIndexForTesting(history::InMemoryURLIndex* index);
+  void set_index(history::InMemoryURLIndex* index) {
+    index_for_testing_.reset(index);
+  }
+
   AutocompleteInput autocomplete_input_;
   std::string languages_;
 

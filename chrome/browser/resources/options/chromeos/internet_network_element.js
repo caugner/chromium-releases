@@ -27,6 +27,10 @@ cr.define('options.internet', function() {
   Constants.TYPE_BLUETOOTH = 4;
   Constants.TYPE_CELLULAR  = 5;
   Constants.TYPE_VPN       = 6;
+  // ONC sources:
+  Constants.ONC_SOURCE_USER_IMPORT   = 1;
+  Constants.ONC_SOURCE_DEVICE_POLICY = 2;
+  Constants.ONC_SOURCE_USER_POLICY   = 3;
 
   /**
    * Creates a new network list div.
@@ -112,19 +116,7 @@ cr.define('options.internet', function() {
    */
   function NetworkItem(network) {
     var el = cr.doc.createElement('div');
-    el.data = {
-      servicePath: network[0],
-      networkName: network[1],
-      networkStatus: network[2],
-      networkType: network[3],
-      connected: network[4],
-      connecting: network[5],
-      iconURL: network[6],
-      remembered: network[7],
-      activation_state: network[8],
-      needs_new_plan: network[9],
-      connectable: network[10]
-    };
+    el.data = network;
     NetworkItem.decorate(el);
     return el;
   }
@@ -150,6 +142,19 @@ cr.define('options.internet', function() {
       this.connecting = this.data.connecting;
       this.other = this.data.servicePath == '?';
       this.id = this.data.servicePath;
+
+      // Insert a div holding the policy-managed indicator.
+      var policyIndicator = this.ownerDocument.createElement('div');
+      policyIndicator.className = 'controlled-setting-indicator';
+      cr.ui.decorate(policyIndicator, options.ControlledSettingIndicator);
+
+      if (this.data.policyManaged) {
+        policyIndicator.controlledBy = 'policy';
+        policyIndicator.setAttribute('textPolicy',
+                                     localStrings.getString('managedNetwork'));
+      }
+      this.appendChild(policyIndicator);
+
       // textDiv holds icon, name and status text.
       var textDiv = this.ownerDocument.createElement('div');
       textDiv.className = 'network-item-text';
@@ -258,7 +263,7 @@ cr.define('options.internet', function() {
                                    self.data.servicePath,
                                    'forget']);
                      });
-
+        button.disabled = this.data.policyManaged;
         buttonsDiv.appendChild(button);
       }
       this.appendChild(buttonsDiv);

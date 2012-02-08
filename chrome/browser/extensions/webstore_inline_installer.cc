@@ -13,7 +13,6 @@
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_dialog.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_utility_messages.h"
 #include "chrome/common/extensions/extension.h"
@@ -21,9 +20,12 @@
 #include "chrome/common/extensions/url_pattern.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/utility_process_host.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
+
+using content::BrowserThread;
 
 const char kManifestKey[] = "manifest";
 const char kIconUrlKey[] = "icon_url";
@@ -167,26 +169,31 @@ void WebstoreInlineInstaller::BeginInstall() {
 
   GURL webstore_data_url(extension_urls::GetWebstoreItemJsonDataURL(id_));
 
-  webstore_data_url_fetcher_.reset(
-      new URLFetcher(webstore_data_url, URLFetcher::GET, this));
+  webstore_data_url_fetcher_.reset(content::URLFetcher::Create(
+      webstore_data_url, content::URLFetcher::GET, this));
   Profile* profile = Profile::FromBrowserContext(
       tab_contents()->browser_context());
-  webstore_data_url_fetcher_->set_request_context(
+  webstore_data_url_fetcher_->SetRequestContext(
       profile->GetRequestContext());
-  webstore_data_url_fetcher_->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES |
-                                             net::LOAD_DO_NOT_SAVE_COOKIES |
-                                             net::LOAD_DISABLE_CACHE);
+  // Use the requesting page as the referrer both since that is more correct
+  // (it is the page that caused this request to happen) and so that we can
+  // track top sites that trigger inline install requests.
+  webstore_data_url_fetcher_->SetReferrer(requestor_url_.spec());
+  webstore_data_url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                                           net::LOAD_DO_NOT_SAVE_COOKIES |
+                                           net::LOAD_DISABLE_CACHE);
   webstore_data_url_fetcher_->Start();
 }
 
-void WebstoreInlineInstaller::OnURLFetchComplete(const URLFetcher* source) {
+void WebstoreInlineInstaller::OnURLFetchComplete(
+    const content::URLFetcher* source) {
   CHECK_EQ(webstore_data_url_fetcher_.get(), source);
   // We shouldn't be getting UrlFetcher callbacks if the TabContents has gone
   // away; we stop any in in-progress fetches in TabContentsDestroyed.
   CHECK(tab_contents());
 
-  if (!webstore_data_url_fetcher_->status().is_success() ||
-      webstore_data_url_fetcher_->response_code() != 200) {
+  if (!webstore_data_url_fetcher_->GetStatus().is_success() ||
+      webstore_data_url_fetcher_->GetResponseCode() != 200) {
     CompleteInstall(kWebstoreRequestError);
     return;
   }
@@ -231,7 +238,8 @@ void WebstoreInlineInstaller::OnWebstoreResponseParseSuccess(
 
     tab_contents()->OpenURL(OpenURLParams(
         GURL(redirect_url),
-        tab_contents()->GetURL(),
+        content::Referrer(tab_contents()->GetURL(),
+                          WebKit::WebReferrerPolicyDefault),
         NEW_FOREGROUND_TAB,
         content::PAGE_TRANSITION_AUTO_BOOKMARK,
         false));
@@ -306,6 +314,7 @@ void WebstoreInlineInstaller::OnWebstoreResponseParseSuccess(
 
   scoped_refptr<WebstoreInstallHelper> helper = new WebstoreInstallHelper(
       this,
+      id_,
       manifest,
       "", // We don't have any icon data.
       icon_url,
@@ -322,6 +331,7 @@ void WebstoreInlineInstaller::OnWebstoreResponseParseFailure(
 }
 
 void WebstoreInlineInstaller::OnWebstoreParseSuccess(
+    const std::string& id,
     const SkBitmap& icon,
     base::DictionaryValue* manifest) {
   // Check if the tab has gone away in the meantime.
@@ -330,6 +340,7 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
     return;
   }
 
+  CHECK_EQ(id_, id);
   manifest_.reset(manifest);
   icon_ = icon;
 
@@ -358,6 +369,7 @@ void WebstoreInlineInstaller::OnWebstoreParseSuccess(
 }
 
 void WebstoreInlineInstaller::OnWebstoreParseFailure(
+    const std::string& id,
     InstallHelperResultCode result_code,
     const std::string& error_message) {
   CompleteInstall(error_message);
@@ -380,15 +392,10 @@ void WebstoreInlineInstaller::InstallUIProceed() {
   Profile* profile = Profile::FromBrowserContext(
       tab_contents()->browser_context());
 
-  WebstoreInstaller* installer =
-      profile->GetExtensionService()->webstore_installer();
-  installer->InstallExtension(id_, NULL,
-                              WebstoreInstaller::FLAG_INLINE_INSTALL);
-
-  // TODO(mihaip): the success message should happen later, when the extension
-  // is actually downloaded and installed (by using the callbacks on
-  // ExtensionInstaller::Delegate).
-  CompleteInstall("");
+  scoped_refptr<WebstoreInstaller> installer = new WebstoreInstaller(
+      profile, this, &(tab_contents()->controller()), id_,
+      WebstoreInstaller::FLAG_INLINE_INSTALL);
+  installer->Start();
 }
 
 void WebstoreInlineInstaller::InstallUIAbort(bool user_initiated) {
@@ -401,6 +408,17 @@ void WebstoreInlineInstaller::TabContentsDestroyed(TabContents* tab_contents) {
     webstore_data_url_fetcher_.reset();
     Release(); // Matches the AddRef in BeginInstall.
   }
+}
+
+void WebstoreInlineInstaller::OnExtensionInstallSuccess(const std::string& id) {
+  CHECK_EQ(id_, id);
+  CompleteInstall("");
+}
+
+void WebstoreInlineInstaller::OnExtensionInstallFailure(
+    const std::string& id, const std::string& error) {
+  CHECK_EQ(id_, id);
+  CompleteInstall(error);
 }
 
 void WebstoreInlineInstaller::CompleteInstall(const std::string& error) {

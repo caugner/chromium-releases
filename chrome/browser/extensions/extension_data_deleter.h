@@ -9,7 +9,7 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
 namespace webkit_database {
@@ -25,7 +25,6 @@ class URLRequestContextGetter;
 }
 
 class ChromeAppCacheService;
-class ExtensionSettingsBackend;
 class Profile;
 class WebKitContext;
 
@@ -33,8 +32,8 @@ class WebKitContext;
 // cookies for a given extension. This is used by
 // ExtensionService::ClearExtensionData() upon uninstalling an extension.
 class ExtensionDataDeleter
-  : public base::RefCountedThreadSafe<ExtensionDataDeleter,
-                                      BrowserThread::DeleteOnUIThread> {
+  : public base::RefCountedThreadSafe<
+        ExtensionDataDeleter, content::BrowserThread::DeleteOnUIThread> {
  public:
   // Starts removing data. The extension should not be running when this is
   // called. Cookies are deleted on the current thread, local storage and
@@ -47,7 +46,8 @@ class ExtensionDataDeleter
       bool is_storage_isolated);
 
  private:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
   friend class DeleteTask<ExtensionDataDeleter>;
 
   ExtensionDataDeleter(
@@ -80,10 +80,6 @@ class ExtensionDataDeleter
   // Deletes appcache files for the extension. May only be called on the IO
   // thread.
   void DeleteAppcachesOnIOThread();
-
-  // Deletes extension settings for the extension. Will be called on the FILE
-  // thread via the ExtensionSettingsFrontend.
-  void DeleteExtensionSettingsOnFileThread(ExtensionSettingsBackend* backend);
 
   // The ID of the extension being deleted.
   const std::string extension_id_;

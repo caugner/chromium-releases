@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "content/common/content_client.h"
+#include "content/public/common/content_client.h"
 
 namespace content {
 
@@ -18,7 +18,9 @@ class ShellContentClient : public ContentClient {
   virtual void SetActiveURL(const GURL& url) OVERRIDE;
   virtual void SetGpuInfo(const GPUInfo& gpu_info) OVERRIDE;
   virtual void AddPepperPlugins(
-      std::vector<PepperPluginInfo>* plugins) OVERRIDE;
+      std::vector<content::PepperPluginInfo>* plugins) OVERRIDE;
+  virtual void AddNPAPIPlugins(
+      webkit::npapi::PluginList* plugin_list) OVERRIDE;
   virtual bool CanSendWhileSwappedOut(const IPC::Message* msg) OVERRIDE;
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) OVERRIDE;
   virtual std::string GetUserAgent(bool* overriding) const OVERRIDE;
@@ -28,6 +30,12 @@ class ShellContentClient : public ContentClient {
 #if defined(OS_WIN)
   virtual bool SandboxPlugin(CommandLine* command_line,
                              sandbox::TargetPolicy* policy) OVERRIDE;
+#endif
+
+#if defined(OS_MACOSX)
+  virtual bool GetSandboxProfileForSandboxType(
+      int sandbox_type,
+      int* sandbox_profile_resource_id) const OVERRIDE;
 #endif
 };
 

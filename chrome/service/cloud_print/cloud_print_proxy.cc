@@ -4,6 +4,7 @@
 
 #include "chrome/service/cloud_print/cloud_print_proxy.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -158,7 +159,8 @@ bool CloudPrintProxy::CreateBackend() {
 
   GURL cloud_print_server_url(cloud_print_server_url_str.c_str());
   DCHECK(cloud_print_server_url.is_valid());
-  backend_.reset(new CloudPrintProxyBackend(this, cloud_print_server_url,
+  backend_.reset(new CloudPrintProxyBackend(this, proxy_id_,
+                                            cloud_print_server_url,
                                             print_system_settings,
                                             oauth_client_info,
                                             enable_job_poll));
@@ -169,10 +171,10 @@ void CloudPrintProxy::DisableForUser() {
   DCHECK(CalledOnValidThread());
   user_email_.clear();
   enabled_ = false;
-  Shutdown();
   if (client_) {
     client_->OnCloudPrintProxyDisabled(true);
   }
+  Shutdown();
 }
 
 void CloudPrintProxy::GetProxyInfo(cloud_print::CloudPrintProxyInfo* info) {
@@ -185,15 +187,6 @@ void CloudPrintProxy::GetProxyInfo(cloud_print::CloudPrintProxyInfo* info) {
   // value of proxy_id from prefs.
   if (info->proxy_id.empty())
     service_prefs_->GetString(prefs::kCloudPrintProxyId, &info->proxy_id);
-}
-
-// Notification methods from the backend. Called on UI thread.
-void CloudPrintProxy::OnPrinterListAvailable(
-    const printing::PrinterList& printer_list) {
-  DCHECK(CalledOnValidThread());
-  // We could potentially show UI here allowing the user to select which
-  // printers to register. For now, we just register all.
-  backend_->RegisterPrinters(printer_list);
 }
 
 void CloudPrintProxy::OnAuthenticated(
@@ -229,7 +222,7 @@ void CloudPrintProxy::OnAuthenticationFailed() {
   // expired (unless error dialogs are disabled).
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoErrorDialogs))
     g_service_process->io_thread()->message_loop_proxy()->PostTask(
-        FROM_HERE, NewRunnableFunction(&ShowTokenExpiredNotificationInBrowser));
+        FROM_HERE, base::Bind(&ShowTokenExpiredNotificationInBrowser));
 }
 
 void CloudPrintProxy::OnPrintSystemUnavailable() {

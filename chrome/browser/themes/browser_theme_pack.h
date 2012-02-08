@@ -13,7 +13,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/gfx/color_utils.h"
 
 class FilePath;
@@ -46,7 +46,7 @@ class DictionaryValue;
 // common case, they are backed by mmapped data and the unmmapping operation
 // will trip our IO on the UI thread detector.
 class BrowserThemePack : public base::RefCountedThreadSafe<
-    BrowserThemePack, BrowserThread::DeleteOnFileThread> {
+    BrowserThemePack, content::BrowserThread::DeleteOnFileThread> {
  public:
   // Builds the theme pack from all data from |extension|. This is often done
   // on a separate thread as it takes so long. This can fail and return NULL in
@@ -91,7 +91,8 @@ class BrowserThemePack : public base::RefCountedThreadSafe<
   bool HasCustomImage(int id) const;
 
  private:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::FILE>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::FILE>;
   friend class DeleteTask<BrowserThemePack>;
   friend class BrowserThemePackTest;
 

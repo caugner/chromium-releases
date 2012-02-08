@@ -4,6 +4,7 @@
 
 #include "content/common/gpu/gpu_channel_manager.h"
 
+#include "base/bind.h"
 #include "content/common/child_thread.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_messages.h"
@@ -12,7 +13,7 @@ GpuChannelManager::GpuChannelManager(ChildThread* gpu_child_thread,
                                      GpuWatchdog* watchdog,
                                      base::MessageLoopProxy* io_message_loop,
                                      base::WaitableEvent* shutdown_event)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       io_message_loop_(io_message_loop),
       shutdown_event_(shutdown_event),
       gpu_child_thread_(gpu_child_thread),
@@ -61,9 +62,6 @@ bool GpuChannelManager::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(GpuMsg_CreateViewCommandBuffer,
                         OnCreateViewCommandBuffer)
     IPC_MESSAGE_HANDLER(GpuMsg_VisibilityChanged, OnVisibilityChanged)
-#if defined(TOOLKIT_USES_GTK) && !defined(TOUCH_UI) || defined(OS_WIN)
-    IPC_MESSAGE_HANDLER(GpuMsg_ResizeViewACK, OnResizeViewACK);
-#endif
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
   return handled;
@@ -76,13 +74,16 @@ bool GpuChannelManager::Send(IPC::Message* msg) {
 void GpuChannelManager::OnEstablishChannel(int renderer_id) {
   scoped_refptr<GpuChannel> channel;
   IPC::ChannelHandle channel_handle;
-  GPUInfo gpu_info;
+  content::GPUInfo gpu_info;
 
   GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
-  if (iter == gpu_channels_.end())
+  if (iter == gpu_channels_.end()) {
     channel = new GpuChannel(this, watchdog_, renderer_id, false);
-  else
+  } else {
+    // TODO(xhwang): Added to investigate crbug.com/95732. Clean up after fixed.
+    CHECK(false);
     channel = iter->second;
+  }
 
   DCHECK(channel != NULL);
 
@@ -97,7 +98,9 @@ void GpuChannelManager::OnEstablishChannel(int renderer_id) {
     // On POSIX, pass the renderer-side FD. Also mark it as auto-close so
     // that it gets closed after it has been sent.
     int renderer_fd = channel->TakeRendererFileDescriptor();
-    DCHECK_NE(-1, renderer_fd);
+    // Check the validity of |renderer_fd| for bug investigation.  Replace with
+    // normal error handling after bug fixed. See for details: crbug.com/95732.
+    CHECK_NE(-1, renderer_fd);
     channel_handle.socket = base::FileDescriptor(renderer_fd, true);
 #endif
   }
@@ -126,6 +129,7 @@ void GpuChannelManager::OnCreateViewCommandBuffer(
     int32 render_view_id,
     int32 renderer_id,
     const GPUCreateCommandBufferConfig& init_params) {
+  DCHECK(render_view_id);
   int32 route_id = MSG_ROUTING_NONE;
 
   GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
@@ -137,20 +141,11 @@ void GpuChannelManager::OnCreateViewCommandBuffer(
   Send(new GpuHostMsg_CommandBufferCreated(route_id));
 }
 
-void GpuChannelManager::OnResizeViewACK(int32 renderer_id,
-                                        int32 command_buffer_route_id) {
-  GpuChannelMap::const_iterator iter = gpu_channels_.find(renderer_id);
-  if (iter == gpu_channels_.end())
-    return;
-  scoped_refptr<GpuChannel> channel = iter->second;
-
-  channel->ViewResized(command_buffer_route_id);
-}
-
 void GpuChannelManager::LoseAllContexts() {
   MessageLoop::current()->PostTask(
-      FROM_HERE, method_factory_.NewRunnableMethod(
-          &GpuChannelManager::OnLoseAllContexts));
+      FROM_HERE,
+      base::Bind(&GpuChannelManager::OnLoseAllContexts,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void GpuChannelManager::OnLoseAllContexts() {

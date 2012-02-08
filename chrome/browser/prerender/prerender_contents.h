@@ -15,22 +15,19 @@
 #include "base/values.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/common/referrer.h"
 
 class Profile;
 class RenderViewHost;
+class RenderViewHostDelegate;
+class SessionStorageNamespace;
 class TabContents;
 class TabContentsWrapper;
 struct FaviconURL;
-struct ViewHostMsg_FrameNavigate_Params;
 
 namespace base {
 class ProcessMetrics;
-}
-
-namespace gfx {
-class Rect;
 }
 
 namespace prerender {
@@ -44,7 +41,7 @@ class PrerenderTracker;
 // NavigationController because is has no facility for navigating (other than
 // programatically view window.location.href) or RenderViewHostManager because
 // it is never allowed to navigate across a SiteInstance boundary.
-class PrerenderContents : public NotificationObserver,
+class PrerenderContents : public content::NotificationObserver,
                           public TabContentsObserver {
  public:
   // PrerenderContents::Create uses the currently registered Factory to create
@@ -61,7 +58,7 @@ class PrerenderContents : public NotificationObserver,
         PrerenderTracker* prerender_tracker,
         Profile* profile,
         const GURL& url,
-        const GURL& referrer,
+        const content::Referrer& referrer,
         Origin origin,
         uint8 experiment_id) = 0;
 
@@ -71,11 +68,13 @@ class PrerenderContents : public NotificationObserver,
 
   // Information on pages that the prerendered page has tried to prerender.
   struct PendingPrerenderData {
-    PendingPrerenderData(Origin origin, const GURL& url, const GURL& referrer);
+    PendingPrerenderData(Origin origin,
+                         const GURL& url,
+                         const content::Referrer& referrer);
 
     Origin origin;
     GURL url;
-    GURL referrer;
+    content::Referrer referrer;
   };
   typedef std::list<PendingPrerenderData> PendingPrerenderList;
 
@@ -86,9 +85,10 @@ class PrerenderContents : public NotificationObserver,
   static Factory* CreateFactory();
 
   // |source_render_view_host| is the RenderViewHost that initiated
-  // prerendering.  It must be non-NULL and have its own view.  It is used
-  // solely to determine the window bounds while prerendering.
-  virtual void StartPrerendering(const RenderViewHost* source_render_view_host);
+  // prerendering.
+  virtual void StartPrerendering(
+      const RenderViewHost* source_render_view_host,
+      SessionStorageNamespace* session_storage_namespace);
 
   // Verifies that the prerendering is not using too many resources, and kills
   // it if not.
@@ -96,14 +96,11 @@ class PrerenderContents : public NotificationObserver,
 
   RenderViewHost* render_view_host_mutable();
   const RenderViewHost* render_view_host() const;
-
-  ViewHostMsg_FrameNavigate_Params* navigate_params() {
-    return navigate_params_.get();
-  }
   string16 title() const { return title_; }
   int32 page_id() const { return page_id_; }
   GURL icon_url() const { return icon_url_; }
   const GURL& prerender_url() const { return prerender_url_; }
+  const content::Referrer& referrer() const { return referrer_; }
   bool has_stopped_loading() const { return has_stopped_loading_; }
   bool prerendering_has_started() const { return prerendering_has_started_; }
 
@@ -122,6 +119,7 @@ class PrerenderContents : public NotificationObserver,
   FinalStatus final_status() const { return final_status_; }
 
   Origin origin() const { return origin_; }
+  uint8 experiment_id() const { return experiment_id_; }
 
   base::TimeTicks load_start_time() const { return load_start_time_; }
 
@@ -141,18 +139,21 @@ class PrerenderContents : public NotificationObserver,
       const GURL& validated_url,
       bool is_error_page,
       RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderViewGone() OVERRIDE;
+  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
 
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Adds an alias URL, for one of the many redirections. If the URL can not
   // be prerendered - for example, it's an ftp URL - |this| will be destroyed
   // and false is returned. Otherwise, true is returned and the alias is
   // remembered.
   virtual bool AddAliasURL(const GURL& url);
+
+  // Adds all alias URLs from another prerender.
+  void AddAliasURLsFromOtherPrerenderContents(PrerenderContents* other_pc);
 
   // The preview TabContents (may be null).
   TabContentsWrapper* prerender_contents() const {
@@ -181,7 +182,7 @@ class PrerenderContents : public NotificationObserver,
   // Adds a pending prerender to the list.
   virtual void AddPendingPrerender(Origin origin,
                                    const GURL& url,
-                                   const GURL& referrer);
+                                   const content::Referrer& referrer);
 
   // Returns true if |url| corresponds to a pending prerender.
   bool IsPendingEntry(const GURL& url) const;
@@ -195,7 +196,7 @@ class PrerenderContents : public NotificationObserver,
                     PrerenderTracker* prerender_tracker,
                     Profile* profile,
                     const GURL& url,
-                    const GURL& referrer,
+                    const content::Referrer& referrer,
                     Origin origin,
                     uint8 experiment_id);
 
@@ -203,7 +204,7 @@ class PrerenderContents : public NotificationObserver,
   // once the RenderViewHost has a RenderView and RenderWidgetHostView.
   virtual void OnRenderViewHostCreated(RenderViewHost* new_render_view_host);
 
-  NotificationRegistrar& notification_registrar() {
+  content::NotificationRegistrar& notification_registrar() {
     return notification_registrar_;
   }
 
@@ -238,10 +239,7 @@ class PrerenderContents : public NotificationObserver,
   GURL prerender_url_;
 
   // The referrer.
-  GURL referrer_;
-
-  // The NavigationParameters of the finished navigation.
-  scoped_ptr<ViewHostMsg_FrameNavigate_Params> navigate_params_;
+  content::Referrer referrer_;
 
   // The profile being used
   Profile* profile_;
@@ -255,7 +253,7 @@ class PrerenderContents : public NotificationObserver,
   int32 page_id_;
   GURL url_;
   GURL icon_url_;
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   // A vector of URLs that this prerendered page matches against.
   // This array can contain more than element as a result of redirects,

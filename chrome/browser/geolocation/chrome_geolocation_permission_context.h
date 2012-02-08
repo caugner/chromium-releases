@@ -26,18 +26,21 @@ class ChromeGeolocationPermissionContext : public GeolocationPermissionContext {
                            int render_view_id,
                            int bridge_id,
                            const GURL& requesting_frame,
+                           base::Callback<void(bool)> callback,
                            bool allowed);
 
-  // GeolocationPermissionContext
-  virtual void RequestGeolocationPermission(int render_process_id,
-                                            int render_view_id,
-                                            int bridge_id,
-                                            const GURL& requesting_frame);
-
-  virtual void CancelGeolocationPermissionRequest(int render_process_id,
-                                                  int render_view_id,
-                                                  int bridge_id,
-                                                  const GURL& requesting_frame);
+  // GeolocationPermissionContext implementation:
+  virtual void RequestGeolocationPermission(
+      int render_process_id,
+      int render_view_id,
+      int bridge_id,
+      const GURL& requesting_frame,
+      base::Callback<void(bool)> callback) OVERRIDE;
+  virtual void CancelGeolocationPermissionRequest(
+      int render_process_id,
+      int render_view_id,
+      int bridge_id,
+      const GURL& requesting_frame) OVERRIDE;
 
  private:
   virtual ~ChromeGeolocationPermissionContext();

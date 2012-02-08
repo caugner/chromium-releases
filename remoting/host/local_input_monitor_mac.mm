@@ -7,10 +7,12 @@
 #import <AppKit/AppKit.h>
 #include <set>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/mac/scoped_cftyperef.h"
+#include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "remoting/host/chromoting_host.h"
 #import "third_party/GTM/AppKit/GTMCarbonEvent.h"
@@ -20,13 +22,14 @@
 static const NSUInteger kEscKeyCode = 53;
 
 namespace {
-typedef std::set<remoting::ChromotingHost*> Hosts;
+typedef std::set<scoped_refptr<remoting::ChromotingHost> > Hosts;
 }
 
 @interface LocalInputMonitorImpl : NSObject {
  @private
   GTMCarbonHotKey* hotKey_;
   CFRunLoopSourceRef mouseRunLoopSource_;
+  base::mac::ScopedCFTypeRef<CFMachPortRef> mouseMachPort_;
   base::Lock hostsLock_;
   Hosts hosts_;
 }
@@ -53,9 +56,12 @@ typedef std::set<remoting::ChromotingHost*> Hosts;
 
 static CGEventRef LocalMouseMoved(CGEventTapProxy proxy, CGEventType type,
                                   CGEventRef event, void* context) {
-  CGPoint cgMousePos = CGEventGetLocation(event);
-  SkIPoint mousePos = SkIPoint::Make(cgMousePos.x, cgMousePos.y);
-  [static_cast<LocalInputMonitorImpl*>(context) localMouseMoved:mousePos];
+  int64_t pid = CGEventGetIntegerValueField(event, kCGEventSourceUnixProcessID);
+  if (pid == 0) {
+    CGPoint cgMousePos = CGEventGetLocation(event);
+    SkIPoint mousePos = SkIPoint::Make(cgMousePos.x, cgMousePos.y);
+    [static_cast<LocalInputMonitorImpl*>(context) localMouseMoved:mousePos];
+  }
   return NULL;
 }
 
@@ -74,18 +80,18 @@ static CGEventRef LocalMouseMoved(CGEventTapProxy proxy, CGEventType type,
     if (!hotKey_) {
       LOG(ERROR) << "registerHotKey failed.";
     }
-    base::mac::ScopedCFTypeRef<CFMachPortRef> mouseMachPort(CGEventTapCreate(
+    mouseMachPort_.reset(CGEventTapCreate(
         kCGSessionEventTap, kCGHeadInsertEventTap, kCGEventTapOptionListenOnly,
         1 << kCGEventMouseMoved, LocalMouseMoved, self));
-    if (mouseMachPort) {
+    if (mouseMachPort_) {
       mouseRunLoopSource_ = CFMachPortCreateRunLoopSource(
-          NULL, mouseMachPort, 0);
+          NULL, mouseMachPort_, 0);
       CFRunLoopAddSource(
           CFRunLoopGetMain(), mouseRunLoopSource_, kCFRunLoopCommonModes);
     } else {
       LOG(ERROR) << "CGEventTapCreate failed.";
     }
-    if (!hotKey_ && !mouseMachPort) {
+    if (!hotKey_ && !mouseMachPort_) {
       [self release];
       return nil;
     }
@@ -96,7 +102,7 @@ static CGEventRef LocalMouseMoved(CGEventTapProxy proxy, CGEventType type,
 - (void)hotKeyHit:(GTMCarbonHotKey*)hotKey {
   base::AutoLock lock(hostsLock_);
   for (Hosts::const_iterator i = hosts_.begin(); i != hosts_.end(); ++i) {
-    (*i)->Shutdown(NULL);
+    (*i)->Shutdown(base::Closure());
   }
 }
 
@@ -115,9 +121,11 @@ static CGEventRef LocalMouseMoved(CGEventTapProxy proxy, CGEventType type,
     hotKey_ = NULL;
   }
   if (mouseRunLoopSource_) {
+    CFMachPortInvalidate(mouseMachPort_);
     CFRunLoopRemoveSource(
         CFRunLoopGetMain(), mouseRunLoopSource_, kCFRunLoopCommonModes);
     CFRelease(mouseRunLoopSource_);
+    mouseMachPort_.reset(0);
     mouseRunLoopSource_ = NULL;
   }
 }
@@ -149,7 +157,9 @@ class LocalInputMonitorMac : public remoting::LocalInputMonitor {
   DISALLOW_COPY_AND_ASSIGN(LocalInputMonitorMac);
 };
 
-base::LazyInstance<base::Lock> monitor_lock(base::LINKER_INITIALIZED);
+base::LazyInstance<base::Lock,
+                   base::LeakyLazyInstanceTraits<base::Lock> >
+    monitor_lock = LAZY_INSTANCE_INITIALIZER;
 LocalInputMonitorImpl* local_input_monitor = NULL;
 
 }  // namespace

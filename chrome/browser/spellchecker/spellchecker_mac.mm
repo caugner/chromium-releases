@@ -11,16 +11,18 @@
 
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/sys_string_conversions.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "base/sys_string_conversions.h"
 #include "chrome/common/spellcheck_common.h"
 #include "chrome/common/spellcheck_messages.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/browser_message_filter.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextCheckingResult.h"
 
 using base::TimeTicks;
+using content::BrowserThread;
+
 namespace {
 // The number of characters in the first part of the language code.
 const unsigned int kShortLanguageCodeSize = 2;

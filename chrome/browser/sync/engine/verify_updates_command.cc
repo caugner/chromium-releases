@@ -4,6 +4,8 @@
 
 #include "chrome/browser/sync/engine/verify_updates_command.h"
 
+#include <string>
+
 #include "base/location.h"
 #include "chrome/browser/sync/engine/syncer.h"
 #include "chrome/browser/sync/engine/syncer_proto_util.h"
@@ -17,7 +19,6 @@
 namespace browser_sync {
 
 using syncable::ScopedDirLookup;
-using syncable::SyncName;
 using syncable::WriteTransaction;
 
 using syncable::GET_BY_ID;
@@ -26,9 +27,29 @@ using syncable::SYNCER;
 VerifyUpdatesCommand::VerifyUpdatesCommand() {}
 VerifyUpdatesCommand::~VerifyUpdatesCommand() {}
 
+bool VerifyUpdatesCommand::HasCustomGroupsToChange() const {
+  // TODO(akalin): Set to true.
+  return false;
+}
+
+std::set<ModelSafeGroup> VerifyUpdatesCommand::GetGroupsToChange(
+    const sessions::SyncSession& session) const {
+  std::set<ModelSafeGroup> groups_with_updates;
+
+  const GetUpdatesResponse& updates =
+      session.status_controller().updates_response().get_updates();
+  for (int i = 0; i < updates.entries().size(); i++) {
+    groups_with_updates.insert(
+        GetGroupForModelType(syncable::GetModelType(updates.entries(i)),
+                             session.routing_info()));
+  }
+
+  return groups_with_updates;
+}
+
 void VerifyUpdatesCommand::ModelChangingExecuteImpl(
     sessions::SyncSession* session) {
-  VLOG(1) << "Beginning Update Verification";
+  DVLOG(1) << "Beginning Update Verification";
   ScopedDirLookup dir(session->context()->directory_manager(),
                       session->context()->account_name());
   if (!dir.good()) {
@@ -36,11 +57,11 @@ void VerifyUpdatesCommand::ModelChangingExecuteImpl(
     return;
   }
   WriteTransaction trans(FROM_HERE, SYNCER, dir);
-  sessions::StatusController* status = session->status_controller();
+  sessions::StatusController* status = session->mutable_status_controller();
   const GetUpdatesResponse& updates = status->updates_response().get_updates();
   int update_count = updates.entries().size();
 
-  VLOG(1) << update_count << " entries to verify";
+  DVLOG(1) << update_count << " entries to verify";
   for (int i = 0; i < update_count; i++) {
     const SyncEntity& update =
         *reinterpret_cast<const SyncEntity *>(&(updates.entries(i)));

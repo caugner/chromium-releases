@@ -123,6 +123,7 @@
 //  +----------------------------------+
 //  |   Delta-Window-Size (32 bits)    |
 //  +----------------------------------+
+//
 namespace spdy {
 
 // This implementation of Spdy is version 2; It's like version 1, with some
@@ -166,6 +167,7 @@ enum SpdyControlType {
 enum SpdyDataFlags {
   DATA_FLAG_NONE = 0,
   DATA_FLAG_FIN = 1,
+  // TODO(hkhalil): Remove.
   DATA_FLAG_COMPRESSED = 2
 };
 
@@ -381,11 +383,11 @@ class SpdyFrame {
         kControlFlagMask;
   }
 
-  // Returns the size of the SpdyFrameBlock structure.
+  // The size of the SpdyFrameBlock structure.
   // Every SpdyFrame* class has a static size() method for accessing
   // the size of the data structure which will be sent over the wire.
   // Note:  this is not the same as sizeof(SpdyFrame).
-  static size_t size() { return sizeof(struct SpdyFrameBlock); }
+  enum { kHeaderSize = sizeof(struct SpdyFrameBlock) };
 
  protected:
   SpdyFrameBlock* frame_;
@@ -416,7 +418,7 @@ class SpdyDataFrame : public SpdyFrame {
 
   // Returns the size of the SpdyFrameBlock structure.
   // Note: this is not the size of the SpdyDataFrame class.
-  static size_t size() { return SpdyFrame::size(); }
+  static size_t size() { return SpdyFrame::kHeaderSize; }
 
   const char* payload() const {
     return reinterpret_cast<const char*>(frame_) + size();
@@ -520,7 +522,7 @@ class SpdySynStreamControlFrame : public SpdyControlFrame {
 
   // The number of bytes in the header block beyond the frame header length.
   int header_block_len() const {
-    return length() - (size() - SpdyFrame::size());
+    return length() - (size() - SpdyFrame::kHeaderSize);
   }
 
   const char* header_block() const {
@@ -557,7 +559,7 @@ class SpdySynReplyControlFrame : public SpdyControlFrame {
   }
 
   int header_block_len() const {
-    return length() - (size() - SpdyFrame::size());
+    return length() - (size() - SpdyFrame::kHeaderSize);
   }
 
   const char* header_block() const {
@@ -634,7 +636,7 @@ class SpdySettingsControlFrame : public SpdyControlFrame {
   }
 
   int header_block_len() const {
-    return length() - (size() - SpdyFrame::size());
+    return length() - (size() - SpdyFrame::kHeaderSize);
   }
 
   const char* header_block() const {
@@ -732,7 +734,7 @@ class SpdyHeadersControlFrame : public SpdyControlFrame {
 
   // The number of bytes in the header block beyond the frame header length.
   int header_block_len() const {
-    return length() - (size() - SpdyFrame::size());
+    return length() - (size() - SpdyFrame::kHeaderSize);
   }
 
   const char* header_block() const {

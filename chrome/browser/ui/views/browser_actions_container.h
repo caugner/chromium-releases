@@ -16,18 +16,17 @@
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
-#include "chrome/browser/ui/views/browser_bubble.h"
 #include "chrome/browser/ui/views/extensions/browser_action_overflow_menu_controller.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/tween.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/menu/view_menu_delegate.h"
-#include "views/controls/resize_area_delegate.h"
-#include "views/drag_controller.h"
-#include "views/view.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/resize_area_delegate.h"
+#include "ui/views/drag_controller.h"
+#include "ui/views/view.h"
 
 class Browser;
 class BrowserActionOverflowMenuController;
@@ -37,10 +36,6 @@ class ExtensionAction;
 class ExtensionPopup;
 class PrefService;
 class Profile;
-
-namespace gfx {
-class CanvasSkia;
-}
 
 namespace ui {
 class SlideAnimation;
@@ -60,7 +55,7 @@ class ResizeArea;
 class BrowserActionButton : public views::MenuButton,
                             public views::ButtonListener,
                             public ImageLoadingTracker::Observer,
-                            public NotificationObserver {
+                            public content::NotificationObserver {
  public:
   BrowserActionButton(const Extension* extension,
                       BrowserActionsContainer* panel);
@@ -90,10 +85,10 @@ class BrowserActionButton : public views::MenuButton,
                              const ExtensionResource& resource,
                              int index) OVERRIDE;
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // MenuButton behavior overrides.  These methods all default to TextButton
   // behavior unless this button is a popup.  In that case, it uses MenuButton
@@ -143,7 +138,7 @@ class BrowserActionButton : public views::MenuButton,
   // The context menu.  This member is non-NULL only when the menu is shown.
   views::MenuItemView* context_menu_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   friend class DeleteTask<BrowserActionButton>;
 
@@ -267,7 +262,7 @@ class BrowserActionsContainer
       public ExtensionToolbarModel::Observer,
       public BrowserActionOverflowMenuController::Observer,
       public ExtensionContextMenuModel::PopupDelegate,
-      public ExtensionPopup::Observer {
+      public views::Widget::Observer {
  public:
   BrowserActionsContainer(Browser* browser, views::View* owner_view);
   virtual ~BrowserActionsContainer();
@@ -283,6 +278,7 @@ class BrowserActionsContainer
   bool animating() const { return animation_target_size_ > 0; }
 
   // Returns the chevron, if any.
+  views::View* chevron() { return chevron_; }
   const views::View* chevron() const { return chevron_; }
 
   // Returns the profile this container is associated with.
@@ -361,8 +357,8 @@ class BrowserActionsContainer
   // Overridden from ExtensionContextMenuModel::PopupDelegate
   virtual void InspectPopup(ExtensionAction* action) OVERRIDE;
 
-  // Overriden from ExtensionPopup::Delegate
-  virtual void ExtensionPopupIsClosing(ExtensionPopup* popup) OVERRIDE;
+  // Overridden from views::Widget::Observer
+  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
 
   // Moves a browser action with |id| to |new_index|.
   void MoveBrowserAction(const std::string& extension_id, size_t new_index);
@@ -407,10 +403,12 @@ class BrowserActionsContainer
   static int IconHeight();
 
   // ExtensionToolbarModel::Observer implementation.
-  virtual void BrowserActionAdded(const Extension* extension, int index);
-  virtual void BrowserActionRemoved(const Extension* extension);
-  virtual void BrowserActionMoved(const Extension* extension, int index);
-  virtual void ModelLoaded();
+  virtual void BrowserActionAdded(const Extension* extension,
+                                  int index) OVERRIDE;
+  virtual void BrowserActionRemoved(const Extension* extension) OVERRIDE;
+  virtual void BrowserActionMoved(const Extension* extension,
+                                  int index) OVERRIDE;
+  virtual void ModelLoaded() OVERRIDE;
 
   void LoadImages();
 

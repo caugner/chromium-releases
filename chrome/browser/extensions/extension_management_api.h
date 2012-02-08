@@ -8,12 +8,18 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "chrome/browser/extensions/extension_install_ui.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class ExtensionService;
 
 class ExtensionManagementFunction : public SyncExtensionFunction {
+ protected:
+  ExtensionService* service();
+};
+
+class AsyncExtensionManagementFunction : public AsyncExtensionFunction {
  protected:
   ExtensionService* service();
 };
@@ -54,9 +60,24 @@ class LaunchAppFunction : public ExtensionManagementFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("management.launchApp");
 };
 
-class SetEnabledFunction : public ExtensionManagementFunction {
-  virtual ~SetEnabledFunction() {}
+class SetEnabledFunction : public AsyncExtensionManagementFunction,
+                           public ExtensionInstallUI::Delegate {
+ public:
+  SetEnabledFunction();
+  virtual ~SetEnabledFunction();
   virtual bool RunImpl() OVERRIDE;
+
+ protected:
+  // ExtensionInstalUI::Delegate.
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+
+ private:
+  std::string extension_id_;
+
+  // Used for prompting to re-enable items with permissions escalation updates.
+  scoped_ptr<ExtensionInstallUI> install_ui_;
+
   DECLARE_EXTENSION_FUNCTION_NAME("management.setEnabled");
 };
 
@@ -66,7 +87,7 @@ class UninstallFunction : public ExtensionManagementFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("management.uninstall");
 };
 
-class ExtensionManagementEventRouter : public NotificationObserver {
+class ExtensionManagementEventRouter : public content::NotificationObserver {
  public:
   explicit ExtensionManagementEventRouter(Profile* profile);
   virtual ~ExtensionManagementEventRouter();
@@ -74,12 +95,12 @@ class ExtensionManagementEventRouter : public NotificationObserver {
   void Init();
 
  private:
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   Profile* profile_;
 

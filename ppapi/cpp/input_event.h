@@ -160,9 +160,9 @@ class MouseInputEvent : public InputEvent {
   /// @return The change in position of the mouse, relative to the previous
   /// position.
   ///
-  /// TODO(yzshen): This feature hasn't been supported yet. The returned value
-  /// is always (0, 0) for system-generated mouse events (which are passed
-  /// through the <code>HandleInputEvent</code>).
+  /// TODO(yzshen): This feature hasn't been fully supported yet. For now,
+  /// movement information is provided only if the mouse is locked. If the mouse
+  /// is not locked, the returned value is (0, 0).
   Point GetMovement() const;
 };
 
@@ -176,7 +176,7 @@ class WheelInputEvent : public InputEvent {
   /// is_null() or is not a wheel input event, the wheel object will be
   /// is_null().
   ///
-  /// @param[in] A generic input event.
+  /// @param[in] event A generic input event.
   explicit WheelInputEvent(const InputEvent& event);
 
   /// Constructs a wheel input even from the given parameters.

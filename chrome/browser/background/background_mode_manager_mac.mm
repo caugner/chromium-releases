@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/mac/mac_util.h"
 #include "chrome/browser/background/background_mode_manager.h"
@@ -9,28 +10,15 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::BrowserThread;
+
 namespace {
 
-class DisableLaunchOnStartupTask : public Task {
- public:
-  virtual void Run();
-};
-
-class EnableLaunchOnStartupTask : public Task {
- public:
-  virtual void Run();
-};
-
-class SetUserCreatedLoginItemPrefTask : public Task {
- public:
-  virtual void Run();
-};
-
-void DisableLaunchOnStartupTask::Run() {
+void DisableLaunchOnStartupCallback() {
   // Check if Chrome is not a login Item, or is a Login Item but w/o 'hidden'
   // flag - most likely user has modified the setting, don't override it.
   bool is_hidden = false;
@@ -40,7 +28,12 @@ void DisableLaunchOnStartupTask::Run() {
   base::mac::RemoveFromLoginItems();
 }
 
-void EnableLaunchOnStartupTask::Run() {
+void SetUserCreatedLoginItemPrefCallback() {
+  PrefService* service = g_browser_process->local_state();
+  service->SetBoolean(prefs::kUserCreatedLoginItem, true);
+}
+
+void EnableLaunchOnStartupCallback() {
   // Return if Chrome is already a Login Item (avoid overriding user choice).
   if (base::mac::CheckLoginItemStatus(NULL)) {
     // Call back to the UI thread to set our preference so we don't delete the
@@ -49,16 +42,11 @@ void EnableLaunchOnStartupTask::Run() {
     // is run, but the user can manually disable "Open At Login" via the dock if
     // this happens.
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            new SetUserCreatedLoginItemPrefTask());
+                            base::Bind(SetUserCreatedLoginItemPrefCallback));
     return;
   }
 
   base::mac::AddToLoginItems(true);  // Hide on startup.
-}
-
-void SetUserCreatedLoginItemPrefTask::Run() {
-  PrefService* service = g_browser_process->local_state();
-  service->SetBoolean(prefs::kUserCreatedLoginItem, true);
 }
 
 }  // namespace
@@ -70,7 +58,7 @@ void BackgroundModeManager::EnableLaunchOnStartup(bool should_launch) {
 
   if (should_launch) {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                            new EnableLaunchOnStartupTask());
+                            base::Bind(EnableLaunchOnStartupCallback));
   } else {
     PrefService* service = g_browser_process->local_state();
     if (service->GetBoolean(prefs::kUserCreatedLoginItem)) {
@@ -81,7 +69,7 @@ void BackgroundModeManager::EnableLaunchOnStartup(bool should_launch) {
     // Call to the File thread to remove the login item since it requires
     // accessing the disk.
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                            new DisableLaunchOnStartupTask());
+                            base::Bind(DisableLaunchOnStartupCallback));
   }
 }
 

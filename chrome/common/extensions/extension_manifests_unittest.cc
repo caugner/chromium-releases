@@ -15,9 +15,9 @@
 #include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -55,7 +55,8 @@ class ExtensionManifestTest : public testing::Test {
     path = path.AppendASCII("extensions")
         .AppendASCII("manifest_tests")
         .AppendASCII(filename.c_str());
-    EXPECT_TRUE(file_util::PathExists(path));
+    EXPECT_TRUE(file_util::PathExists(path)) <<
+        "Couldn't find " << path.value();
 
     JSONFileValueSerializer serializer(path);
     return static_cast<DictionaryValue*>(serializer.Deserialize(NULL, error));
@@ -221,16 +222,16 @@ TEST_F(ExtensionManifestTest, InitFromValueValid) {
 
   // Test that an empty list of page actions does not stop a browser action
   // from being loaded.
-  extension = LoadAndExpectSuccess("init_valid_empty_page_actions.json");
+  LoadAndExpectSuccess("init_valid_empty_page_actions.json");
 
   // Test with a minimum_chrome_version.
-  extension = LoadAndExpectSuccess("init_valid_minimum_chrome.json");
+  LoadAndExpectSuccess("init_valid_minimum_chrome.json");
 
   // Test a hosted app with a minimum_chrome_version.
-  extension = LoadAndExpectSuccess("init_valid_app_minimum_chrome.json");
+  LoadAndExpectSuccess("init_valid_app_minimum_chrome.json");
 
   // Test a hosted app with a requirements section.
-  extension = LoadAndExpectSuccess("init_valid_app_requirements.json");
+  LoadAndExpectSuccess("init_valid_app_requirements.json");
 
   // Verify empty permission settings are considered valid.
   LoadAndExpectSuccess("init_valid_permissions_empty.json");
@@ -238,6 +239,13 @@ TEST_F(ExtensionManifestTest, InitFromValueValid) {
   // We allow unknown API permissions, so this will be valid until we better
   // distinguish between API and host permissions.
   LoadAndExpectSuccess("init_valid_permissions_unknown.json");
+}
+
+TEST_F(ExtensionManifestTest, PlatformApps) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePlatformApps);
+
+  // A minimal platform app.
+  LoadAndExpectSuccess("init_valid_platform_app.json");
 }
 
 TEST_F(ExtensionManifestTest, InitFromValueValidNameInRTL) {
@@ -372,6 +380,7 @@ TEST_F(ExtensionManifestTest, AppWebUrls) {
 
 TEST_F(ExtensionManifestTest, AppLaunchContainer) {
   scoped_refptr<Extension> extension;
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePlatformApps);
 
   extension = LoadAndExpectSuccess("launch_tab.json");
   EXPECT_EQ(extension_misc::LAUNCH_TAB, extension->launch_container());
@@ -392,6 +401,8 @@ TEST_F(ExtensionManifestTest, AppLaunchContainer) {
                      errors::kInvalidLaunchContainer);
   LoadAndExpectError("launch_container_invalid_type.json",
                      errors::kInvalidLaunchContainer);
+  LoadAndExpectError("launch_container_invalid_type_for_platform.json",
+                     errors::kInvalidLaunchContainerForPlatform);
   LoadAndExpectError("launch_container_invalid_value.json",
                      errors::kInvalidLaunchContainer);
   LoadAndExpectError("launch_container_without_launch_url.json",
@@ -526,11 +537,9 @@ TEST_F(ExtensionManifestTest, ExperimentalPermission) {
   LoadAndExpectSuccess("experimental.json", Extension::COMPONENT);
   LoadAndExpectSuccess("experimental.json", Extension::INTERNAL,
                        Extension::FROM_WEBSTORE);
-  CommandLine old_command_line = *CommandLine::ForCurrentProcess();
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
   LoadAndExpectSuccess("experimental.json");
-  *CommandLine::ForCurrentProcess() = old_command_line;
 }
 
 TEST_F(ExtensionManifestTest, DevToolsExtensions) {
@@ -539,24 +548,19 @@ TEST_F(ExtensionManifestTest, DevToolsExtensions) {
   LoadAndExpectError("devtools_extension_url_invalid_type.json",
       errors::kInvalidDevToolsPage);
 
-  CommandLine old_command_line = *CommandLine::ForCurrentProcess();
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
-
   scoped_refptr<Extension> extension;
   extension = LoadAndExpectSuccess("devtools_extension.json");
   EXPECT_EQ(extension->url().spec() + "devtools.html",
             extension->devtools_url().spec());
   EXPECT_TRUE(extension->HasEffectiveAccessToAllHosts());
-
-  *CommandLine::ForCurrentProcess() = old_command_line;
 }
 
 TEST_F(ExtensionManifestTest, Sidebar) {
   LoadAndExpectError("sidebar.json",
       errors::kExperimentalFlagRequired);
 
-  CommandLine old_command_line = *CommandLine::ForCurrentProcess();
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
 
@@ -582,16 +586,10 @@ TEST_F(ExtensionManifestTest, Sidebar) {
             "icon.png");
   EXPECT_EQ(extension->url().spec() + "sidebar.html",
             extension->sidebar_defaults()->default_page().spec());
-
-  *CommandLine::ForCurrentProcess() = old_command_line;
 }
 
-TEST_F(ExtensionManifestTest, DisallowHybridApps) {
-  LoadAndExpectError("disallow_hybrid_1.json",
-      ExtensionErrorUtils::FormatErrorMessage(
-          errors::kHostedAppsCannotIncludeExtensionFeatures,
-          keys::kBrowserAction));
-  LoadAndExpectError("disallow_hybrid_2.json",
+TEST_F(ExtensionManifestTest, BackgroundPermission) {
+  LoadAndExpectError("background_permission.json",
                      errors::kBackgroundPermissionNeeded);
 }
 
@@ -628,6 +626,7 @@ TEST_F(ExtensionManifestTest, HostedAppPermissions) {
   ListValue* permissions = NULL;
   ASSERT_TRUE(manifest->GetList("permissions", &permissions));
 
+  int platform_app = ExtensionAPIPermission::kTypePlatformApp;
   ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
   ExtensionAPIPermissionSet api_perms = info->GetAll();
   for (ExtensionAPIPermissionSet::iterator i = api_perms.begin();
@@ -640,18 +639,49 @@ TEST_F(ExtensionManifestTest, HostedAppPermissions) {
     StringValue* p = new StringValue(name);
     permissions->Clear();
     permissions->Append(p);
-    Extension::Location location = Extension::INTERNAL;
 
-    // Many permissions are not available to hosted apps.
-    if (!permission->is_hosted_app() || permission->is_component_only()) {
+    // Some permissions are only available to component hosted apps.
+    if (permission->is_component_only()) {
       LoadAndExpectError(Manifest(manifest.get(), name),
-                         errors::kPermissionNotAllowed);
+                         errors::kPermissionNotAllowed,
+                         Extension::INTERNAL);
+      scoped_refptr<Extension> extension(
+          LoadAndExpectSuccess(Manifest(manifest.get(), name),
+                               Extension::COMPONENT));
+      EXPECT_TRUE(extension->GetActivePermissions()->HasAPIPermission(
+          permission->id()));
 
-      // ... unless the hosted app is a component app.
-      location = Extension::COMPONENT;
+    } else if (permission->type_restrictions() == platform_app) {
+      LoadAndExpectError(Manifest(manifest.get(), name),
+                         errors::kPermissionNotAllowed,
+                         Extension::INTERNAL,
+                         Extension::STRICT_ERROR_CHECKS);
+    } else if (!permission->supports_hosted_apps()) {
+      // Most normal extension permissions also aren't available to hosted apps.
+      // For these, the error is only reported in strict mode for legacy
+      // reasons: crbug.com/101993.
+      LoadAndExpectError(Manifest(manifest.get(), name),
+                         errors::kPermissionNotAllowed,
+                         Extension::INTERNAL,
+                         Extension::STRICT_ERROR_CHECKS);
+      scoped_refptr<Extension> extension(
+          LoadAndExpectSuccess(Manifest(manifest.get(), name),
+                               Extension::INTERNAL));
+      EXPECT_FALSE(extension->GetActivePermissions()->HasAPIPermission(
+          permission->id()));
+
+      // These permissions are also allowed for component hosted apps.
+      extension = LoadAndExpectSuccess(Manifest(manifest.get(), name),
+                                       Extension::COMPONENT);
+      EXPECT_TRUE(extension->GetActivePermissions()->HasAPIPermission(
+          permission->id()));
+
+    } else {
+      scoped_refptr<Extension> extension(
+          LoadAndExpectSuccess(Manifest(manifest.get(), name)));
+      EXPECT_TRUE(extension->GetActivePermissions()->HasAPIPermission(
+          permission->id()));
     }
-
-    LoadAndExpectSuccess(Manifest(manifest.get(), name), location);
   }
 }
 
@@ -708,9 +738,7 @@ TEST_F(ExtensionManifestTest, NormalizeIconPaths) {
 }
 
 TEST_F(ExtensionManifestTest, DisallowMultipleUISurfaces) {
-  LoadAndExpectError("multiple_ui_surfaces_1.json", errors::kOneUISurfaceOnly);
-  LoadAndExpectError("multiple_ui_surfaces_2.json", errors::kOneUISurfaceOnly);
-  LoadAndExpectError("multiple_ui_surfaces_3.json", errors::kOneUISurfaceOnly);
+  LoadAndExpectError("multiple_ui_surfaces.json", errors::kOneUISurfaceOnly);
 }
 
 TEST_F(ExtensionManifestTest, ParseHomepageURLs) {
@@ -809,29 +837,31 @@ TEST_F(ExtensionManifestTest, WebIntents) {
       LoadAndExpectSuccess("intent_valid.json"));
   ASSERT_TRUE(extension.get() != NULL);
 
-  ASSERT_EQ(1u, extension->intents().size());
-  EXPECT_EQ("image/png", UTF16ToUTF8(extension->intents()[0].type));
+  ASSERT_EQ(1u, extension->intents_services().size());
+  EXPECT_EQ("image/png", UTF16ToUTF8(extension->intents_services()[0].type));
   EXPECT_EQ("http://webintents.org/share",
-            UTF16ToUTF8(extension->intents()[0].action));
-  EXPECT_EQ("chrome-extension", extension->intents()[0].service_url.scheme());
-  EXPECT_EQ("///services/share", extension->intents()[0].service_url.path());
+            UTF16ToUTF8(extension->intents_services()[0].action));
+  EXPECT_EQ("chrome-extension",
+            extension->intents_services()[0].service_url.scheme());
+  EXPECT_EQ("///services/share",
+            extension->intents_services()[0].service_url.path());
   EXPECT_EQ("Sample Sharing Intent",
-            UTF16ToUTF8(extension->intents()[0].title));
-  EXPECT_EQ(WebIntentServiceData::DISPOSITION_INLINE,
-            extension->intents()[0].disposition);
+            UTF16ToUTF8(extension->intents_services()[0].title));
+  EXPECT_EQ(webkit_glue::WebIntentServiceData::DISPOSITION_INLINE,
+            extension->intents_services()[0].disposition);
 
   // Verify that optional fields are filled with defaults.
   extension = LoadAndExpectSuccess("intent_valid_minimal.json");
   ASSERT_TRUE(extension.get() != NULL);
 
-  ASSERT_EQ(1u, extension->intents().size());
-  EXPECT_EQ("", UTF16ToUTF8(extension->intents()[0].type));
+  ASSERT_EQ(1u, extension->intents_services().size());
+  EXPECT_EQ("", UTF16ToUTF8(extension->intents_services()[0].type));
   EXPECT_EQ("http://webintents.org/share",
-            UTF16ToUTF8(extension->intents()[0].action));
-  EXPECT_TRUE(extension->intents()[0].service_url.is_empty());
-  EXPECT_EQ("", UTF16ToUTF8(extension->intents()[0].title));
-  EXPECT_EQ(WebIntentServiceData::DISPOSITION_WINDOW,
-            extension->intents()[0].disposition);
+            UTF16ToUTF8(extension->intents_services()[0].action));
+  EXPECT_TRUE(extension->intents_services()[0].service_url.is_empty());
+  EXPECT_EQ("", UTF16ToUTF8(extension->intents_services()[0].title));
+  EXPECT_EQ(webkit_glue::WebIntentServiceData::DISPOSITION_WINDOW,
+            extension->intents_services()[0].disposition);
 }
 
 TEST_F(ExtensionManifestTest, ForbidPortsInPermissions) {
@@ -851,13 +881,11 @@ TEST_F(ExtensionManifestTest, IsolatedApps) {
   LoadAndExpectError("isolated_app_valid.json",
                      errors::kExperimentalFlagRequired);
 
-  CommandLine old_command_line = *CommandLine::ForCurrentProcess();
   CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalExtensionApis);
   scoped_refptr<Extension> extension2(
       LoadAndExpectSuccess("isolated_app_valid.json"));
   EXPECT_TRUE(extension2->is_storage_isolated());
-  *CommandLine::ForCurrentProcess() = old_command_line;
 }
 
 
@@ -907,7 +935,7 @@ TEST_F(ExtensionManifestTest, FileManagerURLOverride) {
 #if defined(FILE_MANAGER_EXTENSION)
   EXPECT_EQ("", error);
 #else
-  EXPECT_EQ(errors::kInvalidChromeURLOverrides, error);
+  EXPECT_EQ(std::string(errors::kInvalidChromeURLOverrides), error);
 #endif
 
   // Extensions of other types can't ovverride chrome://files/ URL.
@@ -933,4 +961,37 @@ TEST_F(ExtensionManifestTest, OfflineEnabled) {
   scoped_refptr<Extension> extension_4(
       LoadAndExpectSuccess("offline_enabled_hosted_app.json"));
   EXPECT_TRUE(extension_4->offline_enabled());
+}
+
+TEST_F(ExtensionManifestTest, PlatformAppOnlyPermissions) {
+  ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+  ExtensionAPIPermissionSet private_perms;
+  private_perms.insert(ExtensionAPIPermission::kSocket);
+
+  ExtensionAPIPermissionSet perms = info->GetAll();
+  int count = 0;
+  int platform_app = ExtensionAPIPermission::kTypePlatformApp;
+  for (ExtensionAPIPermissionSet::iterator i = perms.begin();
+       i != perms.end(); ++i) {
+    count += private_perms.count(*i);
+    EXPECT_EQ(private_perms.count(*i) > 0,
+              info->GetByID(*i)->type_restrictions() == platform_app);
+  }
+  EXPECT_EQ(1, count);
+
+  // This guy should fail to load because he's requesting platform-app-only
+  // permissions.
+  LoadAndExpectError("evil_non_platform_app.json",
+                     errors::kPermissionNotAllowed,
+                     Extension::INTERNAL, Extension::STRICT_ERROR_CHECKS);
+
+  // This guy is identical to the previous but doesn't ask for any
+  // platform-app-only permissions. We should be able to load him and ask
+  // questions about his permissions.
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess("not_platform_app.json"));
+  ExtensionAPIPermissionSet apis = extension->GetActivePermissions()->apis();
+  for (ExtensionAPIPermissionSet::const_iterator i = apis.begin();
+       i != apis.end(); ++i)
+    EXPECT_NE(platform_app, info->GetByID(*i)->type_restrictions());
 }

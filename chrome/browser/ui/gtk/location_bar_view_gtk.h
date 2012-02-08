@@ -25,8 +25,8 @@
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
 #include "chrome/common/content_settings_types.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/animation/animation_delegate.h"
@@ -49,7 +49,7 @@ class ToolbarModel;
 class LocationBarViewGtk : public AutocompleteEditController,
                            public LocationBar,
                            public LocationBarTesting,
-                           public NotificationObserver {
+                           public content::NotificationObserver {
  public:
   explicit LocationBarViewGtk(Browser* browser);
   virtual ~LocationBarViewGtk();
@@ -134,10 +134,10 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual ExtensionAction* GetVisiblePageAction(size_t index) OVERRIDE;
   virtual void TestPageActionPressed(size_t index) OVERRIDE;
 
-  // Implement the NotificationObserver interface.
+  // Implement the content::NotificationObserver interface.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Edit background color.
   static const GdkColor kBackgroundColor;
@@ -156,9 +156,9 @@ class LocationBarViewGtk : public AutocompleteEditController,
     void UpdateFromTabContents(TabContents* tab_contents);
 
     // Overridden from ui::AnimationDelegate:
-    virtual void AnimationProgressed(const ui::Animation* animation);
-    virtual void AnimationEnded(const ui::Animation* animation);
-    virtual void AnimationCanceled(const ui::Animation* animation);
+    virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
+    virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
+    virtual void AnimationCanceled(const ui::Animation* animation) OVERRIDE;
 
    private:
     // Start the process of showing the label.
@@ -227,13 +227,13 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
     // A callback from ImageLoadingTracker for when the image has loaded.
     virtual void OnImageLoaded(
-        SkBitmap* image, const ExtensionResource& resource, int index);
+        SkBitmap* image, const ExtensionResource& resource, int index) OVERRIDE;
 
     // Simulate left mouse click on the page action button.
     void TestActivatePageAction();
 
     // Overridden from ExtensionContextMenuModel::PopupDelegate:
-    virtual void InspectPopup(ExtensionAction* action);
+    virtual void InspectPopup(ExtensionAction* action) OVERRIDE;
 
    private:
     // Show the popup for this page action. If |devtools| is true, show it
@@ -422,7 +422,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // Provides colors and rendering mode.
   GtkThemeService* theme_service_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Width of the main |hbox_|. Used to properly elide the EV certificate.
   int hbox_width_;

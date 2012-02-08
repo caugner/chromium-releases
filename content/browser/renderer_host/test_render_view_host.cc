@@ -9,9 +9,9 @@
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
-#include "content/common/content_client.h"
 #include "content/common/dom_storage_common.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/content_client.h"
 #include "content/test/test_browser_context.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/webkit_glue.h"
@@ -26,7 +26,7 @@ void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
                         content::PageTransition transition) {
   params->page_id = page_id;
   params->url = url;
-  params->referrer = GURL();
+  params->referrer = content::Referrer();
   params->transition = transition;
   params->redirects = std::vector<GURL>();
   params->should_update_history = false;
@@ -87,7 +87,7 @@ void TestRenderViewHost::SendNavigateWithTransition(
 
   params.page_id = page_id;
   params.url = url;
-  params.referrer = GURL();
+  params.referrer = content::Referrer();
   params.transition = transition;
   params.redirects = std::vector<GURL>();
   params.should_update_history = true;
@@ -146,7 +146,7 @@ gfx::NativeViewId TestRenderWidgetHostView::GetNativeViewId() const {
   return 0;
 }
 
-bool TestRenderWidgetHostView::HasFocus() {
+bool TestRenderWidgetHostView::HasFocus() const {
   return true;
 }
 
@@ -174,6 +174,19 @@ gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
 BackingStore* TestRenderWidgetHostView::AllocBackingStore(
     const gfx::Size& size) {
   return new TestBackingStore(rwh_, size);
+}
+
+void TestRenderWidgetHostView::OnAcceleratedCompositingStateChange() {
+}
+
+void TestRenderWidgetHostView::AcceleratedSurfaceBuffersSwapped(
+    const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
+    int gpu_host_id) {
+}
+
+void TestRenderWidgetHostView::AcceleratedSurfacePostSubBuffer(
+    const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
+    int gpu_host_id) {
 }
 
 #if defined(OS_MACOSX)
@@ -223,26 +236,13 @@ void TestRenderWidgetHostView::AcceleratedSurfaceSetTransportDIB(
     TransportDIB::Handle transport_dib) {
 }
 
-void TestRenderWidgetHostView::AcceleratedSurfaceBuffersSwapped(
-    gfx::PluginWindowHandle window,
-    uint64 surface_id,
-    int renderer_id,
-    int32 route_id,
-    int gpu_host_id) {
-}
-
-void TestRenderWidgetHostView::GpuRenderingStateDidChange() {
-}
-
-#elif defined(OS_WIN)
+#elif defined(OS_WIN) && !defined(USE_AURA)
 void TestRenderWidgetHostView::WillWmDestroy() {
 }
 
-void TestRenderWidgetHostView::ShowCompositorHostWindow(bool show) {
-}
 #endif
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(USE_AURA)
 gfx::Rect TestRenderWidgetHostView::GetRootWindowBounds() {
   return gfx::Rect();
 }
@@ -260,7 +260,7 @@ void TestRenderWidgetHostView::UnlockMouse() {
 }
 
 TestRenderViewHostFactory::TestRenderViewHostFactory(
-    RenderProcessHostFactory* rph_factory)
+    content::RenderProcessHostFactory* rph_factory)
     : render_process_host_factory_(rph_factory) {
   RenderViewHostFactory::RegisterFactory(this);
 }
@@ -270,7 +270,7 @@ TestRenderViewHostFactory::~TestRenderViewHostFactory() {
 }
 
 void TestRenderViewHostFactory::set_render_process_host_factory(
-    RenderProcessHostFactory* rph_factory) {
+    content::RenderProcessHostFactory* rph_factory) {
   render_process_host_factory_ = rph_factory;
 }
 

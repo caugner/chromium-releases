@@ -18,8 +18,10 @@
 namespace IPC {
 class Message;
 }
+
+namespace content {
+
 class DevToolsAgentHost;
-class WorkerDevToolsMessageFilter;
 
 // All methods are supposed to be called on the IO thread.
 class WorkerDevToolsManager : private WorkerServiceObserver {
@@ -28,22 +30,25 @@ class WorkerDevToolsManager : private WorkerServiceObserver {
   static WorkerDevToolsManager* GetInstance();
 
   // Called on the UI thread.
-  static CONTENT_EXPORT DevToolsAgentHost* GetDevToolsAgentHostForWorker(
+  static DevToolsAgentHost* GetDevToolsAgentHostForWorker(
       int worker_process_id,
       int worker_route_id);
 
   void ForwardToDevToolsClient(int worker_process_id,
                                int worker_route_id,
-                               const IPC::Message& message);
+                               const std::string& message);
   void SaveAgentRuntimeState(int worker_process_id,
                              int worker_route_id,
                              const std::string& state);
+
  private:
   friend struct DefaultSingletonTraits<WorkerDevToolsManager>;
   typedef std::pair<int, int> WorkerId;
   class AgentHosts;
   class DetachedClientHosts;
   class WorkerDevToolsAgentHost;
+  struct InspectedWorker;
+  typedef std::list<InspectedWorker> InspectedWorkersList;
 
   WorkerDevToolsManager();
   virtual ~WorkerDevToolsManager();
@@ -54,11 +59,12 @@ class WorkerDevToolsManager : private WorkerServiceObserver {
       const WorkerProcessHost::WorkerInstance& instance) OVERRIDE;
   virtual void WorkerDestroyed(
       WorkerProcessHost* process,
-      const WorkerProcessHost::WorkerInstance& instance) OVERRIDE;
+      int worker_route_id) OVERRIDE;
   virtual void WorkerContextStarted(WorkerProcessHost* process,
                                     int worker_route_id) OVERRIDE;
 
   void RemoveInspectedWorkerData(const WorkerId& id);
+  InspectedWorkersList::iterator FindInspectedWorker(int host_id, int route_id);
 
   void RegisterDevToolsAgentHostForWorker(int worker_process_id,
                                           int worker_route_id);
@@ -68,7 +74,7 @@ class WorkerDevToolsManager : private WorkerServiceObserver {
   static void ForwardToDevToolsClientOnUIThread(
       int worker_process_id,
       int worker_route_id,
-      const IPC::Message& message);
+      const std::string& message);
   static void SaveAgentRuntimeStateOnUIThread(
       int worker_process_id,
       int worker_route_id,
@@ -79,8 +85,7 @@ class WorkerDevToolsManager : private WorkerServiceObserver {
                                               int worker_route_id);
   static void SendResumeToWorker(const WorkerId& id);
 
-  class InspectedWorkersList;
-  scoped_ptr<InspectedWorkersList> inspected_workers_;
+  InspectedWorkersList inspected_workers_;
 
   struct TerminatedInspectedWorker;
   typedef std::list<TerminatedInspectedWorker> TerminatedInspectedWorkers;
@@ -106,5 +111,7 @@ class WorkerDevToolsManager : private WorkerServiceObserver {
 
   DISALLOW_COPY_AND_ASSIGN(WorkerDevToolsManager);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DEBUGGER_WORKER_DEVTOOLS_MANAGER_H_

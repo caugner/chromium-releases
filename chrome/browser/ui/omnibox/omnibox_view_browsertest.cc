@@ -32,7 +32,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/mock_host_resolver.h"
 #include "ui/base/events.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -43,9 +43,9 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
-#include "views/controls/textfield/native_textfield_views.h"
-#include "views/events/event.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/textfield/native_textfield_views.h"
+#include "ui/views/events/event.h"
+#include "ui/views/widget/widget.h"
 #endif
 
 using base::Time;
@@ -147,7 +147,7 @@ const int kCtrlOrCmdMask = ui::EF_CONTROL_DOWN;
 }  // namespace
 
 class OmniboxViewTest : public InProcessBrowserTest,
-                        public NotificationObserver {
+                        public content::NotificationObserver {
  protected:
   OmniboxViewTest() {
     set_show_window(true);
@@ -207,7 +207,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
                       ui::KeyboardCode key,
                       int modifiers,
                       int type,
-                      const NotificationSource& source) WARN_UNUSED_RESULT {
+                      const content::NotificationSource& source)
+                          WARN_UNUSED_RESULT {
     return ui_test_utils::SendKeyPressAndWait(
         browser, key,
         (modifiers & ui::EF_CONTROL_DOWN) != 0,
@@ -223,12 +224,12 @@ class OmniboxViewTest : public InProcessBrowserTest,
     if (tab_count == expected_tab_count)
       return;
 
-    NotificationRegistrar registrar;
+    content::NotificationRegistrar registrar;
     registrar.Add(this,
                   (tab_count < expected_tab_count ?
                    content::NOTIFICATION_TAB_PARENTED :
                    content::NOTIFICATION_TAB_CLOSED),
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
 
     while (!HasFailure() && browser->tab_count() != expected_tab_count)
       ui_test_utils::RunMessageLoop();
@@ -251,10 +252,10 @@ class OmniboxViewTest : public InProcessBrowserTest,
     if (controller->done())
       return;
 
-    NotificationRegistrar registrar;
+    content::NotificationRegistrar registrar;
     registrar.Add(this,
                   chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
-                  Source<AutocompleteController>(controller));
+                  content::Source<AutocompleteController>(controller));
 
     while (!HasFailure() && !controller->done())
       ui_test_utils::RunMessageLoop();
@@ -268,9 +269,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(model);
 
     if (!model->loaded()) {
-      NotificationRegistrar registrar;
+      content::NotificationRegistrar registrar;
       registrar.Add(this, chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
-                    Source<TemplateURLService>(model));
+                    content::Source<TemplateURLService>(model));
       model->Load();
       ui_test_utils::RunMessageLoop();
     }
@@ -300,9 +301,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(history_service);
 
     if (!history_service->BackendLoaded()) {
-      NotificationRegistrar registrar;
+      content::NotificationRegistrar registrar;
       registrar.Add(this, chrome::NOTIFICATION_HISTORY_LOADED,
-                    Source<Profile>(profile));
+                    content::Source<Profile>(profile));
       ui_test_utils::RunMessageLoop();
     }
 
@@ -310,9 +311,9 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_TRUE(bookmark_model);
 
     if (!bookmark_model->IsLoaded()) {
-      NotificationRegistrar registrar;
+      content::NotificationRegistrar registrar;
       registrar.Add(this, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
-                    Source<Profile>(profile));
+                    content::Source<Profile>(profile));
       ui_test_utils::RunMessageLoop();
     }
 
@@ -351,8 +352,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     switch (type) {
       case content::NOTIFICATION_TAB_PARENTED:
       case content::NOTIFICATION_TAB_CLOSED:
@@ -422,7 +423,8 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // Try alt-f4 to close the browser.
     ASSERT_TRUE(SendKeyAndWait(
         browser(), ui::VKEY_F4, ui::EF_ALT_DOWN,
-        chrome::NOTIFICATION_BROWSER_CLOSED, Source<Browser>(browser())));
+        chrome::NOTIFICATION_BROWSER_CLOSED,
+        content::Source<Browser>(browser())));
 #endif
   }
 
@@ -443,7 +445,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // No BROWSER_CLOSED notification will be sent.
     ASSERT_TRUE(SendKeyAndWait(
         popup, ui::VKEY_W, ui::EF_CONTROL_DOWN,
-        chrome::NOTIFICATION_BROWSER_CLOSED, Source<Browser>(popup)));
+        chrome::NOTIFICATION_BROWSER_CLOSED, content::Source<Browser>(popup)));
 
     // Create another popup.
     popup = CreateBrowserForPopup(browser()->profile());
@@ -471,7 +473,7 @@ class OmniboxViewTest : public InProcessBrowserTest,
     // Try alt-f4 to close the popup.
     ASSERT_TRUE(SendKeyAndWait(
         popup, ui::VKEY_F4, ui::EF_ALT_DOWN,
-        chrome::NOTIFICATION_BROWSER_CLOSED, Source<Browser>(popup)));
+        chrome::NOTIFICATION_BROWSER_CLOSED, content::Source<Browser>(popup)));
 #endif
   }
 
@@ -755,20 +757,10 @@ class OmniboxViewTest : public InProcessBrowserTest,
     ASSERT_EQ(text, omnibox_view->model()->keyword());
     ASSERT_EQ(text, omnibox_view->GetText());
 
-    // Keyword shouldn't be accepted by pasting.
-    // Simulate pasting a whitespace to the end of content.
-    omnibox_view->OnBeforePossibleChange();
-    omnibox_view->model()->on_paste();
-    omnibox_view->SetWindowTextAndCaretPos(
-        text + char16(' '), text.length() + 1);
-    omnibox_view->OnAfterPossibleChange();
-    // Should be still in keyword hint mode.
-    ASSERT_TRUE(omnibox_view->model()->is_keyword_hint());
-    ASSERT_EQ(text, omnibox_view->model()->keyword());
-    ASSERT_EQ(text + char16(' '), omnibox_view->GetText());
-
     // Keyword shouldn't be accepted by pressing space with a trailing
     // whitespace.
+    omnibox_view->SetWindowTextAndCaretPos(
+        text + char16(' '), text.length() + 1);
     ASSERT_NO_FATAL_FAILURE(SendKey(ui::VKEY_SPACE, 0));
     ASSERT_TRUE(omnibox_view->model()->is_keyword_hint());
     ASSERT_EQ(text, omnibox_view->model()->keyword());
@@ -1341,7 +1333,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewTest, FLAKY_PasteReplacingAll) {
 class OmniboxViewViewsTest : public OmniboxViewTest {
  public:
   OmniboxViewViewsTest() {
-    views::Widget::IsPureViews();
+    views::Widget::SetPureViews(true);
   }
 };
 

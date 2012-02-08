@@ -17,8 +17,8 @@
 #include "ui/gfx/rect.h"
 
 #if defined(TOOLKIT_VIEWS)
-#include "views/view.h"
-#include "views/widget/widget.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 #endif
 
 namespace {
@@ -42,18 +42,9 @@ class EventWaiter : public MessageLoopForUI::Observer {
   virtual ~EventWaiter() {
     MessageLoopForUI::current()->RemoveObserver(this);
   }
-#if defined(TOUCH_UI)
-  // MessageLoop::Observer implementation:
-  virtual base::EventStatus WillProcessEvent(const base::NativeEvent& event) {
-    NOTIMPLEMENTED();
-    return base::EVENT_CONTINUE;
-  }
 
-  virtual void DidProcessEvent(const base::NativeEvent& event) {
-  }
-#else
   // MessageLoop::Observer implementation:
-  virtual void WillProcessEvent(GdkEvent* event) {
+  virtual void WillProcessEvent(GdkEvent* event) OVERRIDE {
     if ((event->type == type_) && (--count_ == 0)) {
       // At the time we're invoked the event has not actually been processed.
       // Use PostTask to make sure the event has been processed before
@@ -66,10 +57,9 @@ class EventWaiter : public MessageLoopForUI::Observer {
     }
   }
 
-  virtual void DidProcessEvent(GdkEvent* event) {
+  virtual void DidProcessEvent(GdkEvent* event) OVERRIDE {
     // No-op.
   }
-#endif
 
  private:
   base::Closure task_;
@@ -88,7 +78,7 @@ void FakeAMouseMotionEvent(gint x, gint y) {
   if (grab_widget) {
     // If there is a grab, we need to target all events at it regardless of
     // what widget the mouse is over.
-    event->motion.window = grab_widget->window;
+    event->motion.window = gtk_widget_get_window(grab_widget);
   } else {
     event->motion.window = gdk_window_at_pointer(&x, &y);
   }
@@ -122,16 +112,16 @@ bool SendKeyPress(gfx::NativeWindow window,
   GtkWidget* grab_widget = gtk_grab_get_current();
   if (grab_widget) {
     // If there is a grab, send all events to the grabbed widget.
-    event_window = grab_widget->window;
+    event_window = gtk_widget_get_window(grab_widget);
   } else if (window) {
-    event_window = GTK_WIDGET(window)->window;
+    event_window = gtk_widget_get_window(GTK_WIDGET(window));
   } else {
     // No target was specified. Send the events to the active toplevel.
     GList* windows = gtk_window_list_toplevels();
     for (GList* element = windows; element; element = g_list_next(element)) {
       GtkWindow* this_window = GTK_WINDOW(element->data);
       if (gtk_window_is_active(this_window)) {
-        event_window = GTK_WIDGET(this_window)->window;
+        event_window = gtk_widget_get_window(GTK_WIDGET(this_window));
         break;
       }
     }
@@ -201,7 +191,7 @@ bool SendMouseEvents(MouseButton type, int state) {
   if (grab_widget) {
     // If there is a grab, we need to target all events at it regardless of
     // what widget the mouse is over.
-    event->button.window = grab_widget->window;
+    event->button.window = gtk_widget_get_window(grab_widget);
     gdk_window_get_pointer(event->button.window, &x, &y, NULL);
   } else {
     event->button.window = gdk_window_at_pointer(&x, &y);
@@ -240,7 +230,8 @@ bool SendMouseEvents(MouseButton type, int state) {
   return false;
 }
 
-bool SendMouseEventsNotifyWhenDone(MouseButton type, int state,
+bool SendMouseEventsNotifyWhenDone(MouseButton type,
+                                   int state,
                                    const base::Closure& task) {
   bool rv = SendMouseEvents(type, state);
   GdkEventType wait_type;
@@ -290,9 +281,11 @@ void SynchronizeWidgetSize(views::Widget* widget) {
 }
 #endif
 
-void MoveMouseToCenterAndPress(views::View* view, MouseButton button,
-                               int state, const base::Closure& task) {
-#if defined(OS_LINUX) && !defined(USE_AURA)
+void MoveMouseToCenterAndPress(views::View* view,
+                               MouseButton button,
+                               int state,
+                               const base::Closure& task) {
+#if defined(OS_LINUX)
   // X is asynchronous and we need to wait until the window gets
   // resized to desired size.
   SynchronizeWidgetSize(view->GetWidget());
@@ -302,7 +295,7 @@ void MoveMouseToCenterAndPress(views::View* view, MouseButton button,
   views::View::ConvertPointToScreen(view, &view_center);
   SendMouseMoveNotifyWhenDone(
       view_center.x(), view_center.y(),
-      base::Bind(&ui_controls::ClickTask, button, state, task));
+      base::Bind(&ui_controls::internal::ClickTask, button, state, task));
 }
 #else
 void MoveMouseToCenterAndPress(GtkWidget* widget,
@@ -313,7 +306,7 @@ void MoveMouseToCenterAndPress(GtkWidget* widget,
   SendMouseMoveNotifyWhenDone(
       bounds.x() + bounds.width() / 2,
       bounds.y() + bounds.height() / 2,
-      base::Bind(&ui_controls::ClickTask, button, state, task));
+      base::Bind(&ui_controls::internal::ClickTask, button, state, task));
 }
 #endif
 

@@ -28,10 +28,13 @@ class ProtobufVideoReader : public VideoReader {
   virtual void Init(protocol::Session* session,
                     VideoStub* video_stub,
                     const InitializedCallback& callback) OVERRIDE;
+  virtual bool is_connected() OVERRIDE;
 
  private:
   void OnChannelReady(net::StreamSocket* socket);
   void OnNewData(VideoPacket* packet, const base::Closure& done_task);
+
+  Session* session_;
 
   InitializedCallback initialized_callback_;
 

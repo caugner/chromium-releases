@@ -5,6 +5,7 @@
 #include <string>
 
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
@@ -21,10 +22,12 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/guid.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/test/test_browser_thread.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
+using content::BrowserThread;
 
 namespace {
 
@@ -128,7 +131,13 @@ void CreditCard32FromStatement(const sql::Statement& s,
 // |WebDatabase::MigrateOldVersionsAsNeeded()|.
 class WebDatabaseMigrationTest : public testing::Test {
  public:
-  WebDatabaseMigrationTest() {}
+  // In order to access the application locale -- which the tested functions do
+  // internally -- this test must run on the UI thread.
+  // TODO(isherman): The WebDatabase code should probably verify that it is
+  // running on the DB thread.  Once that verification is added, this code will
+  // need to be updated to create both threads.
+  WebDatabaseMigrationTest()
+      : ui_thread_(BrowserThread::UI, &message_loop_for_ui_) {}
   virtual ~WebDatabaseMigrationTest() {}
 
   virtual void SetUp() {
@@ -180,12 +189,14 @@ class WebDatabaseMigrationTest : public testing::Test {
   void MigrateVersion28Assertions();
 
  private:
+  MessageLoopForUI message_loop_for_ui_;
+  content::TestBrowserThread ui_thread_;
   ScopedTempDir temp_dir_;
 
   DISALLOW_COPY_AND_ASSIGN(WebDatabaseMigrationTest);
 };
 
-const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 40;
+const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 42;
 
 void WebDatabaseMigrationTest::LoadDatabase(const FilePath::StringType& file) {
   std::string contents;
@@ -1033,9 +1044,9 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     // Dave Smith.
     ASSERT_TRUE(s1.Step());
     EXPECT_EQ("4C74A9D8-7EEE-423E-F9C2-E7FA70ED1396", s1.ColumnString(0));
-    EXPECT_EQ(ASCIIToUTF16(""), s1.ColumnString16(1));
+    EXPECT_EQ(string16(), s1.ColumnString16(1));
     EXPECT_EQ(ASCIIToUTF16("2 Main Street"), s1.ColumnString16(2));
-    EXPECT_EQ(ASCIIToUTF16(""), s1.ColumnString16(3));
+    EXPECT_EQ(string16(), s1.ColumnString16(3));
     EXPECT_EQ(ASCIIToUTF16("Los Altos"), s1.ColumnString16(4));
     EXPECT_EQ(ASCIIToUTF16("CA"), s1.ColumnString16(5));
     EXPECT_EQ(ASCIIToUTF16("94022"), s1.ColumnString16(6));
@@ -1045,9 +1056,9 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     // Dave Smith (Part 2).
     ASSERT_TRUE(s1.Step());
     EXPECT_EQ("722DF5C4-F74A-294A-46F0-31FFDED0D635", s1.ColumnString(0));
-    EXPECT_EQ(ASCIIToUTF16(""), s1.ColumnString16(1));
+    EXPECT_EQ(string16(), s1.ColumnString16(1));
     EXPECT_EQ(ASCIIToUTF16("2 Main St"), s1.ColumnString16(2));
-    EXPECT_EQ(ASCIIToUTF16(""), s1.ColumnString16(3));
+    EXPECT_EQ(string16(), s1.ColumnString16(3));
     EXPECT_EQ(ASCIIToUTF16("Los Altos"), s1.ColumnString16(4));
     EXPECT_EQ(ASCIIToUTF16("CA"), s1.ColumnString16(5));
     EXPECT_EQ(ASCIIToUTF16("94022"), s1.ColumnString16(6));
@@ -1060,9 +1071,9 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     // 3 Main St.
     ASSERT_TRUE(s1.Step());
     EXPECT_EQ("9E5FE298-62C7-83DF-6293-381BC589183F", s1.ColumnString(0));
-    EXPECT_EQ(ASCIIToUTF16(""), s1.ColumnString16(1));
+    EXPECT_EQ(string16(), s1.ColumnString16(1));
     EXPECT_EQ(ASCIIToUTF16("3 Main St"), s1.ColumnString16(2));
-    EXPECT_EQ(ASCIIToUTF16(""), s1.ColumnString16(3));
+    EXPECT_EQ(string16(), s1.ColumnString16(3));
     EXPECT_EQ(ASCIIToUTF16("Los Altos"), s1.ColumnString16(4));
     EXPECT_EQ(ASCIIToUTF16("CA"), s1.ColumnString16(5));
     EXPECT_EQ(ASCIIToUTF16("94022"), s1.ColumnString16(6));
@@ -1081,7 +1092,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     ASSERT_TRUE(s2.Step());
     EXPECT_EQ("00580526-FF81-EE2A-0546-1AC593A32E2F", s2.ColumnString(0));
     EXPECT_EQ(ASCIIToUTF16("John"), s2.ColumnString16(1));
-    EXPECT_EQ(ASCIIToUTF16(""), s2.ColumnString16(2));
+    EXPECT_EQ(string16(), s2.ColumnString16(2));
     EXPECT_EQ(ASCIIToUTF16("Doe"), s2.ColumnString16(3));
 
     // John P. Doe.  Note same guid as above due to merging of multi-valued
@@ -1096,14 +1107,14 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     ASSERT_TRUE(s2.Step());
     EXPECT_EQ("4C74A9D8-7EEE-423E-F9C2-E7FA70ED1396", s2.ColumnString(0));
     EXPECT_EQ(ASCIIToUTF16("Dave"), s2.ColumnString16(1));
-    EXPECT_EQ(ASCIIToUTF16(""), s2.ColumnString16(2));
+    EXPECT_EQ(string16(), s2.ColumnString16(2));
     EXPECT_EQ(ASCIIToUTF16("Smith"), s2.ColumnString16(3));
 
     // Dave Smith (Part 2).
     ASSERT_TRUE(s2.Step());
     EXPECT_EQ("722DF5C4-F74A-294A-46F0-31FFDED0D635", s2.ColumnString(0));
     EXPECT_EQ(ASCIIToUTF16("Dave"), s2.ColumnString16(1));
-    EXPECT_EQ(ASCIIToUTF16(""), s2.ColumnString16(2));
+    EXPECT_EQ(string16(), s2.ColumnString16(2));
     EXPECT_EQ(ASCIIToUTF16("Smith"), s2.ColumnString16(3));
 
     // Alfred E Newman.
@@ -1112,9 +1123,9 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     // 3 Main St.
     ASSERT_TRUE(s2.Step());
     EXPECT_EQ("9E5FE298-62C7-83DF-6293-381BC589183F", s2.ColumnString(0));
-    EXPECT_EQ(ASCIIToUTF16(""), s2.ColumnString16(1));
-    EXPECT_EQ(ASCIIToUTF16(""), s2.ColumnString16(2));
-    EXPECT_EQ(ASCIIToUTF16(""), s2.ColumnString16(3));
+    EXPECT_EQ(string16(), s2.ColumnString16(1));
+    EXPECT_EQ(string16(), s2.ColumnString16(2));
+    EXPECT_EQ(string16(), s2.ColumnString16(3));
 
     // Should be all.
     EXPECT_FALSE(s2.Step());
@@ -1136,12 +1147,12 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     // 2 Main Street.
     ASSERT_TRUE(s3.Step());
     EXPECT_EQ("4C74A9D8-7EEE-423E-F9C2-E7FA70ED1396", s3.ColumnString(0));
-    EXPECT_EQ(ASCIIToUTF16(""), s3.ColumnString16(1));
+    EXPECT_EQ(string16(), s3.ColumnString16(1));
 
     // 2 Main St.
     ASSERT_TRUE(s3.Step());
     EXPECT_EQ("722DF5C4-F74A-294A-46F0-31FFDED0D635", s3.ColumnString(0));
-    EXPECT_EQ(ASCIIToUTF16(""), s3.ColumnString16(1));
+    EXPECT_EQ(string16(), s3.ColumnString16(1));
 
     // Alfred E Newman.
     // Gets culled during migration from 35 to 36 due to incomplete address.
@@ -1149,7 +1160,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     // 3 Main St.
     ASSERT_TRUE(s3.Step());
     EXPECT_EQ("9E5FE298-62C7-83DF-6293-381BC589183F", s3.ColumnString(0));
-    EXPECT_EQ(ASCIIToUTF16(""), s3.ColumnString16(1));
+    EXPECT_EQ(string16(), s3.ColumnString16(1));
 
     // Should be all.
     EXPECT_FALSE(s3.Step());
@@ -1180,7 +1191,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     ASSERT_TRUE(s4.Step());
     EXPECT_EQ("4C74A9D8-7EEE-423E-F9C2-E7FA70ED1396", s4.ColumnString(0));
     EXPECT_EQ(0, s4.ColumnInt(1));  // 0 means phone.
-    EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
+    EXPECT_EQ(string16(), s4.ColumnString16(2));
 
     // 2 Main Street fax.
     // Gets culled after fax type removed.
@@ -1189,7 +1200,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     ASSERT_TRUE(s4.Step());
     EXPECT_EQ("722DF5C4-F74A-294A-46F0-31FFDED0D635", s4.ColumnString(0));
     EXPECT_EQ(0, s4.ColumnInt(1));  // 0 means phone.
-    EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
+    EXPECT_EQ(string16(), s4.ColumnString16(2));
 
     // 2 Main St fax.
     // Gets culled after fax type removed.
@@ -1200,7 +1211,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion32ToCurrent) {
     ASSERT_TRUE(s4.Step());
     EXPECT_EQ("9E5FE298-62C7-83DF-6293-381BC589183F", s4.ColumnString(0));
     EXPECT_EQ(0, s4.ColumnInt(1));  // 0 means phone.
-    EXPECT_EQ(ASCIIToUTF16(""), s4.ColumnString16(2));
+    EXPECT_EQ(string16(), s4.ColumnString16(2));
 
     // 2 Main St fax.
     // Gets culled after fax type removed.
@@ -1495,7 +1506,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion38ToCurrent) {
 // Tests that the backup field for the default search provider gets added to
 // the meta table of a version 39 database.
 TEST_F(WebDatabaseMigrationTest, MigrateVersion39ToCurrent) {
-  // This schema is taken from a build prior to the addition of the defaul
+  // This schema is taken from a build prior to the addition of the default
   // search provider backup field to the meta table.
   ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_39.sql")));
 
@@ -1563,6 +1574,185 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion39ToCurrent) {
     EXPECT_TRUE(meta_table.GetValue(
         "Default Search Provider ID Backup Signature",
         &default_search_provider_id_backup_signature));
+  }
+}
+
+// Tests that the backup field for the default search provider is rewritten
+// despite any value in the old version.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion40ToCurrent) {
+  // This schema is taken from a build after the addition of the default
+  // search provider backup field to the meta table. Due to crbug.com/101815
+  // the signature was empty in all build between revisions 106214 and 108111.
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_40.sql")));
+
+  // Verify pre-conditions.  These are expectations for version 40 of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 40, 40));
+
+    int64 default_search_provider_id = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID",
+        &default_search_provider_id));
+
+    int64 default_search_provider_id_backup = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup",
+        &default_search_provider_id_backup));
+
+    std::string default_search_provider_id_backup_signature;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup Signature",
+        &default_search_provider_id_backup_signature));
+    EXPECT_TRUE(default_search_provider_id_backup_signature.empty());
+  }
+
+  // Load the database via the WebDatabase class and migrate the database to
+  // the current version.
+  {
+    WebDatabase db;
+    ASSERT_EQ(sql::INIT_OK, db.Init(GetDatabasePath()));
+  }
+
+  // Verify post-conditions.  These are expectations for current version of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(
+        &connection,
+        kCurrentTestedVersionNumber,
+        kCurrentTestedVersionNumber));
+
+    int64 default_search_provider_id = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID",
+        &default_search_provider_id));
+    EXPECT_NE(0, default_search_provider_id);
+
+    int64 default_search_provider_id_backup = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup",
+        &default_search_provider_id_backup));
+    EXPECT_EQ(default_search_provider_id, default_search_provider_id_backup);
+
+    std::string default_search_provider_id_backup_signature;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup Signature",
+        &default_search_provider_id_backup_signature));
+    EXPECT_FALSE(default_search_provider_id_backup_signature.empty());
+  }
+}
+
+// Tests that all keywords are backed up and signed.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion41ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_41.sql")));
+
+  // Verify pre-conditions.  These are expectations for version 40 of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 41, 41));
+
+    int64 default_search_provider_id = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID",
+        &default_search_provider_id));
+
+    int64 default_search_provider_id_backup = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup",
+        &default_search_provider_id_backup));
+
+    std::string default_search_provider_id_backup_signature;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup Signature",
+        &default_search_provider_id_backup_signature));
+    EXPECT_FALSE(default_search_provider_id_backup_signature.empty());
+
+    std::string default_search_provider_backup;
+    EXPECT_FALSE(meta_table.GetValue(
+        "Default Search Provider Backup",
+        &default_search_provider_backup));
+  }
+
+  // Load the database via the WebDatabase class and migrate the database to
+  // the current version.
+  {
+    WebDatabase db;
+    ASSERT_EQ(sql::INIT_OK, db.Init(GetDatabasePath()));
+  }
+
+  // Verify post-conditions.  These are expectations for current version of the
+  // database.
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(
+        &connection,
+        kCurrentTestedVersionNumber,
+        kCurrentTestedVersionNumber));
+
+    int64 default_search_provider_id = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID",
+        &default_search_provider_id));
+    EXPECT_NE(0, default_search_provider_id);
+
+    int64 default_search_provider_id_backup = 0;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup",
+        &default_search_provider_id_backup));
+    EXPECT_EQ(default_search_provider_id, default_search_provider_id_backup);
+
+    std::string default_search_provider_id_backup_signature;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider ID Backup Signature",
+        &default_search_provider_id_backup_signature));
+    EXPECT_FALSE(default_search_provider_id_backup_signature.empty());
+
+    std::string default_search_provider_backup;
+    EXPECT_TRUE(meta_table.GetValue(
+        "Default Search Provider Backup",
+        &default_search_provider_backup));
+    EXPECT_EQ("2"
+              "Google"
+              "google.com"
+              "http://www.google.com/favicon.ico"
+              "{google:baseURL}search?{google:RLZ}{google:acceptedSuggestion}"
+                  "{google:originalQueryForSuggestion}sourceid=chrome&"
+                  "ie={inputEncoding}&q={searchTerms}"
+              "100"
+              "UTF-8"
+              "1"
+              "{google:baseSuggestURL}search?client=chrome&hl={language}&"
+                  "q={searchTerms}"
+              "1162620"
+              "{google:baseURL}webhp?{google:RLZ}sourceid=chrome-instant&"
+                  "ie={inputEncoding}&ion=1{searchTerms}&nord=10"
+              "{1234-5678-90AB-CDEF}",
+              default_search_provider_backup);
   }
 }
 

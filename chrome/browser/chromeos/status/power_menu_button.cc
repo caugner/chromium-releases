@@ -11,7 +11,9 @@
 #include "base/stringprintf.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/status/status_area_bubble.h"
+#include "chrome/browser/chromeos/view_ids.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -19,10 +21,11 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/controls/menu/submenu_view.h"
-#include "views/widget/widget.h"
+#include "ui/gfx/image/image.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -54,19 +57,10 @@ const int kLargeImageWidth = 57, kLargeImageHeight = 35;
 // Number of different power states.
 const int kNumPowerImages = 20;
 
-// Constants for status displayed when user clicks button.
-// Padding around status.
-const int kPadLeftX = 10, kPadRightX = 10, kPadY = 5;
-// Padding between battery and text.
-const int kBatteryPadX = 10;
-// Spacing between lines of text.
-const int kEstimateSpacing = 3;
 // Color of text embedded within battery.
 const SkColor kPercentageColor = 0xFF333333;
 // Used for embossing text.
 const SkColor kPercentageShadowColor = 0x80ffffff;
-// Status text/
-const SkColor kEstimateColor = SK_ColorBLACK;
 // Size of percentage w/in battery.
 const int kBatteryFontSizeDelta = 3;
 
@@ -92,8 +86,8 @@ SkBitmap GetImage(ImageSize size, ImageType type, int index) {
     image_width = kLargeImageWidth;
     image_height = kLargeImageHeight;
   }
-  SkBitmap* all_images =
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(image_index);
+  const SkBitmap* all_images = ResourceBundle::GetSharedInstance().
+      GetImageNamed(image_index).ToSkBitmap();
   SkIRect subset =
       SkIRect::MakeXYWH(
           static_cast<int>(type) * image_width,
@@ -106,83 +100,76 @@ SkBitmap GetImage(ImageSize size, ImageType type, int index) {
   return image;
 }
 
-SkBitmap GetMissingImage(ImageSize size) {
-  return GetImage(size, DISCHARGING, kNumPowerImages);
+SkBitmap GetImageWithPercentage(ImageSize size, ImageType type,
+                                double battery_percentage) {
+  // Preserve the fully charged icon for 100% only.
+  int battery_index = 0;
+  if (battery_percentage >= 100) {
+    battery_index = kNumPowerImages - 1;
+  } else {
+    battery_index = static_cast<int> (
+        battery_percentage / 100.0 *
+        nextafter(static_cast<double>(kNumPowerImages - 1), 0));
+    battery_index =
+        std::max(std::min(battery_index, kNumPowerImages - 2), 0);
+  }
+  return GetImage(size, type, battery_index);
 }
 
 SkBitmap GetUnknownImage(ImageSize size) {
   return GetImage(size, CHARGING, kNumPowerImages);
 }
 
-}  // namespace
-
-namespace chromeos {
-
-using base::TimeDelta;
-
-class PowerMenuButton::StatusView : public View {
+class BatteryIconView : public views::View {
  public:
-  explicit StatusView(PowerMenuButton* menu_button)
-      : menu_button_(menu_button) {
-    estimate_font_ =
-        ResourceBundle::GetSharedInstance().GetFont(ResourceBundle::BaseFont);
-    percentage_font_ =
-        estimate_font_.DeriveFont(kBatteryFontSizeDelta, gfx::Font::BOLD);
+  BatteryIconView()
+      : battery_percentage_(0),
+        battery_is_present_(false),
+        line_power_on_(false),
+        percentage_font_(ResourceBundle::GetSharedInstance().
+                         GetFont(ResourceBundle::BaseFont).
+                         DeriveFont(kBatteryFontSizeDelta, gfx::Font::BOLD)) {
   }
 
-  gfx::Size GetPreferredSize() {
-    int estimate_w, estimate_h, charging_w, charging_h;
-    string16 estimate_text = menu_button_->GetBatteryIsChargedText();
-    string16 charging_text = l10n_util::GetStringUTF16(
-        menu_button_->line_power_on_ ?
-            IDS_STATUSBAR_BATTERY_CHARGING :
-            IDS_STATUSBAR_BATTERY_DISCHARGING);
-    gfx::CanvasSkia::SizeStringInt(
-        estimate_text, estimate_font_, &estimate_w, &estimate_h, 0);
-    gfx::CanvasSkia::SizeStringInt(
-        charging_text, estimate_font_, &charging_w, &charging_h, 0);
-    gfx::Size size = gfx::Size(
-        kPadLeftX + kLargeImageWidth + kBatteryPadX + kPadRightX +
-            std::max(charging_w, estimate_w),
-        (2 * kPadY) +
-            std::max(kLargeImageHeight,
-                     kEstimateSpacing + (2 * estimate_font_.GetHeight())));
-    return size;
+  virtual gfx::Size GetPreferredSize() OVERRIDE {
+    return gfx::Size(kLargeImageWidth, kLargeImageHeight);
   }
 
-  void Update() {
-    PreferredSizeChanged();
-    // Force a paint even if the size didn't change.
+  void set_battery_percentage(double battery_percentage) {
+    battery_percentage_ = battery_percentage;
+    SchedulePaint();
+  }
+
+  void set_battery_is_present(bool battery_is_present) {
+    battery_is_present_ = battery_is_present;
+    SchedulePaint();
+  }
+
+  void set_line_power_on(bool line_power_on) {
+    line_power_on_ = line_power_on;
     SchedulePaint();
   }
 
  protected:
-  void OnPaint(gfx::Canvas* canvas) {
+  virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     SkBitmap image;
-
-    bool draw_percentage_text = false;
-    bool battery_is_present = menu_button_->battery_is_present_;
-    if (!battery_is_present) {
-      image = GetMissingImage(LARGE);
+    if (battery_is_present_) {
+      image = GetImageWithPercentage(LARGE,
+                                     line_power_on_ ? CHARGING : DISCHARGING,
+                                     battery_percentage_);
     } else {
-      image = GetImage(
-          LARGE,
-          menu_button_->line_power_on_ ? CHARGING : DISCHARGING,
-          menu_button_->battery_index_);
-      if (menu_button_->battery_percentage_ < 100 ||
-          !menu_button_->line_power_on_) {
-        draw_percentage_text = true;
-      }
+      NOTREACHED();
+      return;
     }
-    int image_x = kPadLeftX, image_y = (height() - image.height()) / 2;
+    const int image_x = 0;
+    const int image_y = (height() - image.height()) / 2;
     canvas->DrawBitmapInt(image, image_x, image_y);
 
-    if (draw_percentage_text) {
-      string16 text = UTF8ToUTF16(base::StringPrintf(
-          "%d%%",
-          static_cast<int>(menu_button_->battery_percentage_)));
-      int text_h = percentage_font_.GetHeight();
-      int text_y = ((height() - text_h) / 2);
+    if (battery_is_present_ && (battery_percentage_ < 100 || !line_power_on_)) {
+      const string16 text = UTF8ToUTF16(base::StringPrintf(
+          "%d%%", static_cast<int>(battery_percentage_)));
+      const int text_h = percentage_font_.GetHeight();
+      const int text_y = ((height() - text_h) / 2);
       canvas->DrawStringInt(
           text, percentage_font_, kPercentageShadowColor,
           image_x, text_y + 1, image.width(), text_h,
@@ -191,84 +178,53 @@ class PowerMenuButton::StatusView : public View {
           text, percentage_font_, kPercentageColor,
           image_x, text_y, image.width(), text_h,
           gfx::Canvas::TEXT_ALIGN_CENTER | gfx::Canvas::NO_ELLIPSIS);
-      if (menu_button_->line_power_on_) {
-        image = GetImage(LARGE, BOLT, menu_button_->battery_index_);
-        canvas->DrawBitmapInt(image, image_x, image_y);
-      }
-    }
-    string16 charging_text;
-    if (battery_is_present) {
-      charging_text = l10n_util::GetStringUTF16(
-          menu_button_->line_power_on_ ?
-          IDS_STATUSBAR_BATTERY_CHARGING :
-          IDS_STATUSBAR_BATTERY_DISCHARGING);
-    } else {
-      charging_text = l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_BATTERY);
-    }
-    int text_h = estimate_font_.GetHeight();
-    int text_x = image_x + kLargeImageWidth + kBatteryPadX;
-    int charging_y = battery_is_present ?
-        (height() - (kEstimateSpacing + (2 * text_h))) / 2 :
-        (height() - (kEstimateSpacing + (1 * text_h))) / 2;
-    canvas->DrawStringInt(
-        charging_text, estimate_font_, kEstimateColor,
-        text_x, charging_y, width() - text_x, text_h,
-        gfx::Canvas::TEXT_ALIGN_LEFT);
-    if (battery_is_present) {
-      int estimate_y = charging_y + text_h + kEstimateSpacing;
-      string16 estimate_text = menu_button_->GetBatteryIsChargedText();
-      canvas->DrawStringInt(
-          estimate_text, estimate_font_, kEstimateColor,
-          text_x, estimate_y, width() - text_x, text_h,
-          gfx::Canvas::TEXT_ALIGN_LEFT);
-    }
-  }
-
-  bool OnMousePressed(const views::MouseEvent& event) {
-    return true;
-  }
-
-  void OnMouseReleased(const views::MouseEvent& event) {
-    if (event.IsLeftMouseButton()) {
-      DCHECK(menu_button_->menu_runner_.get());
-      menu_button_->menu_runner_->Cancel();
+      if (line_power_on_)
+        canvas->DrawBitmapInt(
+            GetImageWithPercentage(LARGE, BOLT, battery_percentage_),
+            image_x, image_y);
     }
   }
 
  private:
-  PowerMenuButton* menu_button_;
+  double battery_percentage_;
+  bool battery_is_present_;
+  bool line_power_on_;
   gfx::Font percentage_font_;
-  gfx::Font estimate_font_;
+
+  DISALLOW_COPY_AND_ASSIGN(BatteryIconView);
 };
+
+}  // namespace
+
+namespace chromeos {
+
+using base::TimeDelta;
 
 ////////////////////////////////////////////////////////////////////////////////
 // PowerMenuButton
 
-PowerMenuButton::PowerMenuButton(StatusAreaHost* host)
-    : StatusAreaButton(host, this),
+PowerMenuButton::PowerMenuButton(StatusAreaButton::Delegate* delegate)
+    : StatusAreaButton(delegate, this),
       battery_is_present_(false),
       line_power_on_(false),
       battery_percentage_(0.0),
-      battery_index_(-1),
       battery_time_to_full_(TimeDelta::FromMicroseconds(kInitialMS)),
       battery_time_to_empty_(TimeDelta::FromMicroseconds(kInitialMS)),
       status_(NULL) {
+  set_id(VIEW_ID_STATUS_BUTTON_POWER);
   UpdateIconAndLabelInfo();
-  CrosLibrary::Get()->GetPowerLibrary()->AddObserver(this);
+  DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
+  DBusThreadManager::Get()->GetPowerManagerClient()->RequestStatusUpdate();
 }
 
 PowerMenuButton::~PowerMenuButton() {
-  CrosLibrary::Get()->GetPowerLibrary()->RemoveObserver(this);
+  DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
 }
 
 // PowerMenuButton, views::MenuDelegate implementation:
 
 string16 PowerMenuButton::GetLabel(int id) const {
   return string16();
-}
-
-bool PowerMenuButton::IsCommandEnabled(int id) const {
-  return false;
 }
 
 string16 PowerMenuButton::GetBatteryIsChargedText() const {
@@ -319,16 +275,18 @@ void PowerMenuButton::OnLocaleChanged() {
 
 void PowerMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
   // Explicitly query the power status.
-  CrosLibrary::Get()->GetPowerLibrary()->RequestStatusUpdate();
+  DBusThreadManager::Get()->GetPowerManagerClient()->RequestStatusUpdate();
 
   views::MenuItemView* menu = new views::MenuItemView(this);
   // MenuRunner takes ownership of |menu|.
   menu_runner_.reset(new views::MenuRunner(menu));
   views::MenuItemView* submenu = menu->AppendMenuItem(
-          POWER_BATTERY_PERCENTAGE_ITEM,
-          std::wstring(),
-          views::MenuItemView::NORMAL);
-  status_ = new StatusView(this);
+      POWER_BATTERY_PERCENTAGE_ITEM,
+      string16(),
+      views::MenuItemView::NORMAL);
+  status_ = new StatusAreaBubbleContentView(source, new BatteryIconView,
+                                            string16());
+  UpdateStatusView();
   submenu->AddChildView(status_);
   menu->CreateSubmenu()->set_resize_open_menu(true);
   menu->SetMargins(0, 0);
@@ -348,9 +306,10 @@ void PowerMenuButton::RunMenu(views::View* source, const gfx::Point& pt) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// PowerMenuButton, PowerLibrary::Observer implementation:
+// PowerMenuButton, PowerManagerClient::Observer implementation:
 
-void PowerMenuButton::PowerChanged(PowerLibrary* obj) {
+void PowerMenuButton::PowerChanged(const PowerSupplyStatus& power_status) {
+  power_status_ = power_status;
   UpdateIconAndLabelInfo();
 }
 
@@ -358,52 +317,57 @@ void PowerMenuButton::PowerChanged(PowerLibrary* obj) {
 // PowerMenuButton, StatusAreaButton implementation:
 
 void PowerMenuButton::UpdateIconAndLabelInfo() {
-  PowerLibrary* power_lib = CrosLibrary::Get()->GetPowerLibrary();
+  battery_is_present_ = power_status_.battery_is_present;
+  line_power_on_ = power_status_.line_power_on;
 
-  battery_is_present_ = power_lib->IsBatteryPresent();
-  line_power_on_ = power_lib->IsLinePowerOn();
+  bool should_be_visible = battery_is_present_;
+  if (should_be_visible != IsVisible())
+    SetVisible(should_be_visible);
+
+  if (!should_be_visible)
+    return;
 
   // If fully charged, always show 100% even if internal number is a bit less.
-  if (power_lib->IsBatteryFullyCharged()) {
-    // We always call power_lib->GetBatteryPercentage() for test predictability.
-    power_lib->GetBatteryPercentage();
+  if (power_status_.battery_is_full)
     battery_percentage_ = 100.0;
-  } else {
-    battery_percentage_ = power_lib->GetBatteryPercentage();
-  }
+  else
+    battery_percentage_ = power_status_.battery_percentage;
 
-  UpdateBatteryTime(&battery_time_to_full_, power_lib->GetBatteryTimeToFull());
+  UpdateBatteryTime(&battery_time_to_full_,
+                    TimeDelta::FromSeconds(
+                        power_status_.battery_seconds_to_full));
   UpdateBatteryTime(&battery_time_to_empty_,
-                    power_lib->GetBatteryTimeToEmpty());
+                    TimeDelta::FromSeconds(
+                        power_status_.battery_seconds_to_empty));
 
-  string16 tooltip_text;
-  if (!battery_is_present_) {
-    battery_index_ = -1;
-    SetIcon(GetMissingImage(SMALL));
-    tooltip_text = l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_BATTERY);
-  } else {
-    // Preserve the fully charged icon for 100% only.
-    if (battery_percentage_ >= 100) {
-      battery_index_ = kNumPowerImages - 1;
-    } else {
-      battery_index_ =
-          static_cast<int>(battery_percentage_ / 100.0 *
-              nextafter(static_cast<float>(kNumPowerImages - 1), 0));
-      battery_index_ =
-          std::max(std::min(battery_index_, kNumPowerImages - 2), 0);
-    }
-    SetIcon(GetImage(
-        SMALL, line_power_on_ ? CHARGING : DISCHARGING, battery_index_));
-
-    tooltip_text =  l10n_util::GetStringFUTF16(
-        IDS_STATUSBAR_BATTERY_PERCENTAGE,
-        base::IntToString16(static_cast<int>(battery_percentage_)));
-  }
+  SetIcon(GetImageWithPercentage(
+      SMALL, line_power_on_ ? CHARGING : DISCHARGING, battery_percentage_));
+  const int message_id = line_power_on_ ?
+      IDS_STATUSBAR_BATTERY_CHARGING_PERCENTAGE :
+      IDS_STATUSBAR_BATTERY_USING_PERCENTAGE;
+  string16 tooltip_text =  l10n_util::GetStringFUTF16(
+       message_id, base::IntToString16(static_cast<int>(battery_percentage_)));
   SetTooltipText(tooltip_text);
   SetAccessibleName(tooltip_text);
   SchedulePaint();
-  if (status_)
-    status_->Update();
+  UpdateStatusView();
+}
+
+void PowerMenuButton::UpdateStatusView() {
+  if (status_) {
+    string16 charging_text;
+    if (battery_is_present_) {
+      charging_text = GetBatteryIsChargedText();
+    } else {
+      charging_text = l10n_util::GetStringUTF16(IDS_STATUSBAR_NO_BATTERY);
+    }
+    status_->SetMessage(charging_text);
+    BatteryIconView* battery_icon_view =
+        static_cast<BatteryIconView*>(status_->icon_view());
+    battery_icon_view->set_battery_percentage(battery_percentage_);
+    battery_icon_view->set_battery_is_present(battery_is_present_);
+    battery_icon_view->set_line_power_on(line_power_on_);
+  }
 }
 
 void PowerMenuButton::UpdateBatteryTime(TimeDelta* previous,

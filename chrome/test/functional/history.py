@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -314,13 +314,11 @@ class HistoryTest(pyauto.PyUITest):
     """Verify that submitting form adds target page to history list."""
     url1 = self.GetFileURLForDataPath('History', 'form.html')
     self.NavigateToURL(url1)
-    self.ExecuteJavascript('document.getElementById("form").submit();'
-                           'window.domAutomationController.send("done");')
+    self.assertTrue(self.SubmitForm('form'))
     url2 = self.GetFileURLForDataPath('History', 'target.html')
-
-    self.WaitUntil(
-        lambda: self.GetDOMValue('document.getElementById("result").innerHTML'),
-        expect_retval='SUCCESS')
+    self.assertEqual(
+        'SUCCESS',
+        self.GetDOMValue('document.getElementById("result").innerHTML'))
     self._CheckHistory('Target Page', url2, 2)
 
   def testOneHistoryTabPerWindow(self):

@@ -5,11 +5,14 @@
 #include <set>
 
 #include "base/logging.h"
+#include "base/message_loop.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace prerender {
 
@@ -70,8 +73,8 @@ class PrerenderTrackerTest : public testing::Test {
 
  private:
   MessageLoop message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
 
   scoped_ptr<TestPrerenderManager> prerender_manager_;
 };

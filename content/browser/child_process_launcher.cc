@@ -6,18 +6,19 @@
 
 #include <utility>  // For std::pair.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/process_util.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
 #include "content/common/chrome_descriptors.h"
-#include "content/common/process_watcher.h"
-#include "content/common/result_codes.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/result_codes.h"
 
 #if defined(OS_WIN)
 #include "base/file_path.h"
@@ -26,13 +27,15 @@
 #include "content/browser/mach_broker_mac.h"
 #elif defined(OS_POSIX)
 #include "base/memory/singleton.h"
-#include "content/browser/zygote_host_linux.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
+#include "content/browser/zygote_host_linux.h"
 #endif
 
 #if defined(OS_POSIX)
 #include "base/global_descriptors_posix.h"
 #endif
+
+using content::BrowserThread;
 
 // Having the functionality of ChildProcessLauncher be in an internal
 // ref counted object allows us to automatically terminate the process when the
@@ -69,7 +72,7 @@ class ChildProcessLauncher::Context
 
     BrowserThread::PostTask(
         BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-        NewRunnableFunction(
+        base::Bind(
             &Context::LaunchInternal,
             make_scoped_refptr(this),
             client_thread_id_,
@@ -203,9 +206,9 @@ class ChildProcessLauncher::Context
 
     BrowserThread::PostTask(
         client_thread_id, FROM_HERE,
-        NewRunnableMethod(
-            this_object.get(),
+        base::Bind(
             &Context::Notify,
+            this_object.get(),
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
             use_zygote,
 #endif
@@ -243,7 +246,7 @@ class ChildProcessLauncher::Context
     // don't this on the UI/IO threads.
     BrowserThread::PostTask(
         BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-        NewRunnableFunction(
+        base::Bind(
             &Context::TerminateInternal,
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
             zygote_,
@@ -277,7 +280,7 @@ class ChildProcessLauncher::Context
     } else
 #endif  // !OS_MACOSX
     {
-      ProcessWatcher::EnsureProcessTerminated(handle);
+      base::EnsureProcessTerminated(handle);
     }
 #endif  // OS_POSIX
     process.Close();
@@ -373,7 +376,7 @@ base::TerminationStatus ChildProcessLauncher::GetChildTerminationStatus(
 void ChildProcessLauncher::SetProcessBackgrounded(bool background) {
   BrowserThread::PostTask(
       BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-      NewRunnableFunction(
+      base::Bind(
           &ChildProcessLauncher::Context::SetProcessBackgrounded,
           GetHandle(), background));
 }

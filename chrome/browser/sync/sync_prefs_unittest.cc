@@ -4,6 +4,7 @@
 
 #include "chrome/browser/sync/sync_prefs.h"
 
+#include "base/message_loop.h"
 #include "base/time.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/test/base/testing_pref_service.h"
@@ -41,6 +42,8 @@ syncable::ModelTypeSet GetNonPassiveTypes() {
 syncable::ModelTypeSet GetUserVisibleTypes() {
   syncable::ModelTypeSet user_visible_types(GetNonPassiveTypes());
   user_visible_types.erase(syncable::AUTOFILL_PROFILE);
+  user_visible_types.erase(syncable::SEARCH_ENGINES);
+  user_visible_types.erase(syncable::APP_NOTIFICATIONS);
   return user_visible_types;
 }
 
@@ -108,6 +111,12 @@ TEST_F(SyncPrefsTest, PreferredTypesNotKeepEverythingSynced) {
     syncable::ModelTypeSet expected_preferred_types(preferred_types);
     if (*it == syncable::AUTOFILL) {
       expected_preferred_types.insert(syncable::AUTOFILL_PROFILE);
+    }
+    if (*it == syncable::PREFERENCES) {
+      expected_preferred_types.insert(syncable::SEARCH_ENGINES);
+    }
+    if (*it == syncable::APPS) {
+      expected_preferred_types.insert(syncable::APP_NOTIFICATIONS);
     }
     sync_prefs.SetPreferredDataTypes(non_passive_types, preferred_types);
     EXPECT_EQ(expected_preferred_types,

@@ -16,7 +16,7 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -136,8 +136,7 @@ void EulaScreenHandler::HandleOnExit(const base::ListValue* args) {
 
 void EulaScreenHandler::HandleOnLearnMore(const base::ListValue* args) {
   if (!help_app_.get()) {
-    views::Widget* login_window = WebUILoginDisplay::GetLoginWindow();
-    help_app_ = new HelpAppLauncher(login_window->GetNativeWindow());
+    help_app_ = new HelpAppLauncher(GetNativeWindow());
   }
   help_app_->ShowHelpTopic(HelpAppLauncher::HELP_STATS_USAGE);
 }

@@ -26,7 +26,7 @@
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/net/gaia/token_service.h"
-#include "chrome/browser/net/pref_proxy_config_service.h"
+#include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -48,10 +48,10 @@
 #include "chrome/test/base/test_url_request_context_getter.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/mock_resource_context.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -59,10 +59,15 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/fileapi/file_system_context.h"
-#include "webkit/quota/quota_manager.h"
 #include "webkit/quota/mock_quota_manager.h"
+#include "webkit/quota/quota_manager.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#endif  // defined(OS_CHROMEOS)
 
 using base::Time;
+using content::BrowserThread;
 using testing::NiceMock;
 using testing::Return;
 
@@ -127,7 +132,8 @@ TestingProfile::TestingProfile()
       testing_prefs_(NULL),
       incognito_(false),
       last_session_exited_cleanly_(true),
-      profile_dependency_manager_(ProfileDependencyManager::GetInstance()) {
+      profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
+      delegate_(NULL) {
   if (!temp_dir_.CreateUniqueTempDir()) {
     LOG(ERROR) << "Failed to create unique temporary directory.";
 
@@ -155,6 +161,7 @@ TestingProfile::TestingProfile()
   profile_path_ = temp_dir_.path();
 
   Init();
+  FinishInit();
 }
 
 TestingProfile::TestingProfile(const FilePath& path)
@@ -163,8 +170,29 @@ TestingProfile::TestingProfile(const FilePath& path)
       incognito_(false),
       last_session_exited_cleanly_(true),
       profile_path_(path),
-      profile_dependency_manager_(ProfileDependencyManager::GetInstance()) {
+      profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
+      delegate_(NULL) {
   Init();
+  FinishInit();
+}
+
+TestingProfile::TestingProfile(const FilePath& path,
+                               Delegate* delegate)
+    : start_time_(Time::Now()),
+      testing_prefs_(NULL),
+      incognito_(false),
+      last_session_exited_cleanly_(true),
+      profile_path_(path),
+      profile_dependency_manager_(ProfileDependencyManager::GetInstance()),
+      delegate_(delegate) {
+  Init();
+  if (delegate_) {
+    MessageLoop::current()->PostTask(FROM_HERE,
+                                     base::Bind(&TestingProfile::FinishInit,
+                                                base::Unretained(this)));
+  } else {
+    FinishInit();
+  }
 }
 
 void TestingProfile::Init() {
@@ -173,18 +201,23 @@ void TestingProfile::Init() {
   // Install profile keyed service factory hooks for dummy/test services
   DesktopNotificationServiceFactory::GetInstance()->SetTestingFactory(
       this, CreateTestDesktopNotificationService);
+}
 
-  NotificationService::current()->Notify(
+void TestingProfile::FinishInit() {
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PROFILE_CREATED,
-      Source<Profile>(static_cast<Profile*>(this)),
-      NotificationService::NoDetails());
+      content::Source<Profile>(static_cast<Profile*>(this)),
+      content::NotificationService::NoDetails());
+
+  if (delegate_)
+    delegate_->OnProfileCreated(this, true);
 }
 
 TestingProfile::~TestingProfile() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PROFILE_DESTROYED,
-      Source<Profile>(static_cast<Profile*>(this)),
-      NotificationService::NoDetails());
+      content::Source<Profile>(static_cast<Profile*>(this)),
+      content::NotificationService::NoDetails());
 
   profile_dependency_manager_->DestroyProfileServices(this);
 
@@ -199,6 +232,9 @@ TestingProfile::~TestingProfile() {
 
   if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
+
+  // Close the handles so that proper cleanup can be done.
+  db_tracker_ = NULL;
 }
 
 void TestingProfile::CreateFaviconService() {
@@ -318,7 +354,7 @@ void TestingProfile::BlockUntilBookmarkModelLoaded() {
 void TestingProfile::BlockUntilTopSitesLoaded() {
   ui_test_utils::WindowedNotificationObserver top_sites_loaded_observer(
       chrome::NOTIFICATION_TOP_SITES_LOADED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   if (!GetHistoryService(Profile::EXPLICIT_ACCESS))
     GetTopSites()->HistoryLoaded();
   top_sites_loaded_observer.Wait();
@@ -335,6 +371,23 @@ static ProfileKeyedService* BuildTemplateURLService(Profile* profile) {
 void TestingProfile::CreateTemplateURLService() {
   TemplateURLServiceFactory::GetInstance()->SetTestingFactoryAndUse(
       this, BuildTemplateURLService);
+}
+
+void TestingProfile::BlockUntilTemplateURLServiceLoaded() {
+  TemplateURLService* turl_model =
+      TemplateURLServiceFactory::GetForProfile(this);
+  if (turl_model->loaded())
+    return;
+
+  ui_test_utils::WindowedNotificationObserver turl_service_load_observer(
+      chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
+      content::NotificationService::AllSources());
+  turl_model->Load();
+  turl_service_load_observer.Wait();
+}
+
+void TestingProfile::CreateExtensionProcessManager() {
+  extension_process_manager_.reset(ExtensionProcessManager::Create(this));
 }
 
 ExtensionService* TestingProfile::CreateExtensionService(
@@ -397,6 +450,10 @@ Profile* TestingProfile::GetOffTheRecordProfile() {
   return incognito_profile_.get();
 }
 
+GAIAInfoUpdateService* TestingProfile::GetGAIAInfoUpdateService() {
+  return NULL;
+}
+
 bool TestingProfile::HasOffTheRecordProfile() {
   return incognito_profile_.get() != NULL;
 }
@@ -440,7 +497,7 @@ ExtensionDevToolsManager* TestingProfile::GetExtensionDevToolsManager() {
 }
 
 ExtensionProcessManager* TestingProfile::GetExtensionProcessManager() {
-  return NULL;
+  return extension_process_manager_.get();
 }
 
 ExtensionMessageService* TestingProfile::GetExtensionMessageService() {
@@ -715,10 +772,11 @@ void TestingProfile::set_last_selected_directory(const FilePath& path) {
 }
 
 PrefProxyConfigTracker* TestingProfile::GetProxyConfigTracker() {
-  if (!pref_proxy_config_tracker_)
-    pref_proxy_config_tracker_ = new PrefProxyConfigTracker(GetPrefs());
-
-  return pref_proxy_config_tracker_;
+  if (!pref_proxy_config_tracker_.get()) {
+    pref_proxy_config_tracker_.reset(
+        ProxyServiceFactory::CreatePrefProxyConfigTracker(GetPrefs()));
+  }
+  return pref_proxy_config_tracker_.get();
 }
 
 void TestingProfile::BlockUntilHistoryProcessesPendingRequests() {
@@ -779,6 +837,14 @@ chrome_browser_net::Predictor* TestingProfile::GetNetworkPredictor() {
 
 void TestingProfile::ClearNetworkingHistorySince(base::Time time) {
   NOTIMPLEMENTED();
+}
+
+GURL TestingProfile::GetHomePage() {
+  return GURL(chrome::kChromeUINewTabURL);
+}
+
+NetworkActionPredictor* TestingProfile::GetNetworkActionPredictor() {
+  return NULL;
 }
 
 PrefService* TestingProfile::GetOffTheRecordPrefs() {

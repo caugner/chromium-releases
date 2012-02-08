@@ -11,13 +11,15 @@
 #include <set>
 #include <vector>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/ui/gtk/tabs/drag_data.h"
 #include "chrome/browser/ui/tabs/dock_info.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/x/x11_util.h"
 
 class DraggedViewGtk;
@@ -26,7 +28,7 @@ class TabStripGtk;
 class TabStripModel;
 class TabContentsWrapper;
 
-class DraggedTabControllerGtk : public NotificationObserver,
+class DraggedTabControllerGtk : public content::NotificationObserver,
                                 public TabContentsDelegate {
  public:
   // |source_tabstrip| is the tabstrip where the tabs reside before any
@@ -83,32 +85,23 @@ class DraggedTabControllerGtk : public NotificationObserver,
   DraggedTabData InitDraggedTabData(TabGtk* tab);
 
   // Overridden from TabContentsDelegate:
-  // Deprecated. Please use the two-arguments variant instead.
-  // TODO(adriansc): Remove this method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(
-      TabContents* source,
-      const GURL& url,
-      const GURL& referrer,
-      WindowOpenDisposition disposition,
-      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
   virtual void NavigationStateChanged(const TabContents* source,
-                                      unsigned changed_flags);
+                                      unsigned changed_flags) OVERRIDE;
   virtual void AddNewContents(TabContents* source,
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture);
-  virtual void LoadingStateChanged(TabContents* source);
-  virtual bool IsPopup(const TabContents* source) const;
+                              bool user_gesture) OVERRIDE;
+  virtual void LoadingStateChanged(TabContents* source) OVERRIDE;
   virtual content::JavaScriptDialogCreator*
       GetJavaScriptDialogCreator() OVERRIDE;
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Returns the point where a detached window should be created given the
   // current mouse position.
@@ -221,7 +214,7 @@ class DraggedTabControllerGtk : public NotificationObserver,
   bool AreTabsConsecutive();
 
   // Handles registering for notifications.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // The tab strip |source_tab_| originated from.
   TabStripGtk* source_tabstrip_;

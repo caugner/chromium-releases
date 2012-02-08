@@ -24,7 +24,7 @@ class PepperInputHandler : public InputHandler {
                      PepperViewProxy* view);
   virtual ~PepperInputHandler();
 
-  virtual void Initialize();
+  virtual void Initialize() OVERRIDE;
 
   void HandleKeyEvent(bool keydown, const pp::KeyboardInputEvent& event);
   void HandleCharacterEvent(const pp::KeyboardInputEvent& event);
@@ -44,7 +44,5 @@ class PepperInputHandler : public InputHandler {
 };
 
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::PepperInputHandler);
 
 #endif  // REMOTING_CLIENT_PLUGIN_PEPPER_INPUT_HANDLER_H_

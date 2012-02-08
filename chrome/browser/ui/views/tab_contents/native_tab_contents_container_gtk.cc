@@ -5,14 +5,13 @@
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_gtk.h"
 
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/browser/ui/views/tab_contents/native_tab_contents_container_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "views/focus/focus_manager.h"
+#include "ui/views/focus/focus_manager.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsContainerGtk, public:
@@ -47,12 +46,19 @@ void NativeTabContentsContainerGtk::SetFastResize(bool fast_resize) {
   set_fast_resize(fast_resize);
 }
 
+bool NativeTabContentsContainerGtk::GetFastResize() const {
+  return fast_resize();
+}
+
+bool NativeTabContentsContainerGtk::FastResizeAtLastLayout() const {
+  return fast_resize_at_last_layout();
+}
+
 void NativeTabContentsContainerGtk::RenderViewHostChanged(
     RenderViewHost* old_host,
     RenderViewHost* new_host) {
   // If we are focused, we need to pass the focus to the new RenderViewHost.
-  views::FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager->GetFocusedView() == this)
+  if (GetFocusManager()->GetFocusedView() == this)
     OnFocus();
 }
 
@@ -142,7 +148,5 @@ void NativeTabContentsContainerGtk::GetAccessibleState(
 // static
 NativeTabContentsContainer* NativeTabContentsContainer::CreateNativeContainer(
     TabContentsContainer* container) {
-  if (views::Widget::IsPureViews())
-    return new NativeTabContentsContainerViews(container);
   return new NativeTabContentsContainerGtk(container);
 }

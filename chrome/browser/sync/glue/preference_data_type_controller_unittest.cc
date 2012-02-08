@@ -9,20 +9,21 @@
 #include "base/message_loop.h"
 #include "base/task.h"
 #include "base/tracked_objects.h"
-#include "chrome/browser/sync/glue/preference_data_type_controller.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/glue/preference_data_type_controller.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 
 using browser_sync::ChangeProcessorMock;
 using browser_sync::DataTypeController;
 using browser_sync::ModelAssociatorMock;
 using browser_sync::PreferenceDataTypeController;
 using browser_sync::StartCallback;
+using content::BrowserThread;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
@@ -35,7 +36,7 @@ class PreferenceDataTypeControllerTest : public testing::Test {
       : ui_thread_(BrowserThread::UI, &message_loop_) {}
 
   virtual void SetUp() {
-    profile_sync_factory_.reset(new ProfileSyncFactoryMock());
+    profile_sync_factory_.reset(new ProfileSyncComponentsFactoryMock());
     preference_dtc_ =
         new PreferenceDataTypeController(profile_sync_factory_.get(),
                                          &profile_,
@@ -48,7 +49,7 @@ class PreferenceDataTypeControllerTest : public testing::Test {
     change_processor_ = new ChangeProcessorMock();
     EXPECT_CALL(*profile_sync_factory_, CreatePreferenceSyncComponents(_, _)).
         WillOnce(Return(
-            ProfileSyncFactory::SyncComponents(model_associator_,
+            ProfileSyncComponentsFactory::SyncComponents(model_associator_,
                                                change_processor_)));
   }
 
@@ -70,10 +71,14 @@ class PreferenceDataTypeControllerTest : public testing::Test {
     EXPECT_CALL(*model_associator_, DisassociateModels(_));
   }
 
+  void PumpLoop() {
+    message_loop_.RunAllPending();
+  }
+
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
   scoped_refptr<PreferenceDataTypeController> preference_dtc_;
-  scoped_ptr<ProfileSyncFactoryMock> profile_sync_factory_;
+  scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   ProfileMock profile_;
   ProfileSyncServiceMock service_;
   ModelAssociatorMock* model_associator_;
@@ -167,4 +172,5 @@ TEST_F(PreferenceDataTypeControllerTest, OnUnrecoverableError) {
   preference_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
   // This should cause preference_dtc_->Stop() to be called.
   preference_dtc_->OnUnrecoverableError(FROM_HERE, "Test");
+  PumpLoop();
 }

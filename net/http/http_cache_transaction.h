@@ -11,7 +11,6 @@
 
 #include <string>
 
-#include "base/string16.h"
 #include "base/time.h"
 #include "net/base/net_log.h"
 #include "net/http/http_cache.h"
@@ -21,7 +20,6 @@
 
 namespace net {
 
-class HttpResponseHeaders;
 class PartialData;
 struct HttpRequestInfo;
 
@@ -58,7 +56,7 @@ class HttpCache::Transaction : public HttpTransaction {
     UPDATE          = READ_META | WRITE,  // READ_WRITE & ~READ_DATA
   };
 
-  Transaction(HttpCache* cache);
+  explicit Transaction(HttpCache* cache);
   virtual ~Transaction();
 
   Mode mode() const { return mode_; }
@@ -80,7 +78,9 @@ class HttpCache::Transaction : public HttpTransaction {
   // response (or response info) must be evaluated by the caller, for instance
   // to make sure that the response_time is as expected, before calling this
   // method.
-  int WriteMetadata(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
+  int WriteMetadata(IOBuffer* buf,
+                    int buf_len,
+                    OldCompletionCallback* callback);
 
   // This transaction is being deleted and we are not done writing to the cache.
   // We need to indicate that the response data was truncated.  Returns true on
@@ -99,20 +99,22 @@ class HttpCache::Transaction : public HttpTransaction {
 
   // HttpTransaction methods:
   virtual int Start(const HttpRequestInfo*, OldCompletionCallback*,
-                    const BoundNetLog&);
-  virtual int RestartIgnoringLastError(OldCompletionCallback* callback);
+                    const BoundNetLog&) OVERRIDE;
+  virtual int RestartIgnoringLastError(
+      OldCompletionCallback* callback) OVERRIDE;
   virtual int RestartWithCertificate(X509Certificate* client_cert,
-                                     OldCompletionCallback* callback);
-  virtual int RestartWithAuth(const string16& username,
-                              const string16& password,
-                              OldCompletionCallback* callback);
-  virtual bool IsReadyToRestartForAuth();
-  virtual int Read(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
-  virtual void StopCaching();
-  virtual void DoneReading();
-  virtual const HttpResponseInfo* GetResponseInfo() const;
-  virtual LoadState GetLoadState() const;
-  virtual uint64 GetUploadProgress(void) const;
+                                     OldCompletionCallback* callback) OVERRIDE;
+  virtual int RestartWithAuth(const AuthCredentials& credentials,
+                              OldCompletionCallback* callback) OVERRIDE;
+  virtual bool IsReadyToRestartForAuth() OVERRIDE;
+  virtual int Read(IOBuffer* buf,
+                   int buf_len,
+                   OldCompletionCallback* callback) OVERRIDE;
+  virtual void StopCaching() OVERRIDE;
+  virtual void DoneReading() OVERRIDE;
+  virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
+  virtual LoadState GetLoadState() const OVERRIDE;
+  virtual uint64 GetUploadProgress(void) const OVERRIDE;
 
  private:
   static const size_t kNumValidationHeaders = 2;
@@ -258,8 +260,7 @@ class HttpCache::Transaction : public HttpTransaction {
 
   // Called to restart a network transaction with authentication credentials.
   // Returns network error code.
-  int RestartNetworkRequestWithAuth(const string16& username,
-                                    const string16& password);
+  int RestartNetworkRequestWithAuth(const AuthCredentials& credentials);
 
   // Called to determine if we need to validate the cache entry before using it.
   bool RequiresValidation();

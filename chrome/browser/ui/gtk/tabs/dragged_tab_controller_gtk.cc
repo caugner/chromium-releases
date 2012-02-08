@@ -19,7 +19,7 @@
 #include "chrome/browser/ui/gtk/tabs/tab_strip_gtk.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/gfx/screen.h"
 
@@ -86,7 +86,8 @@ void DraggedTabControllerGtk::CaptureDragInfo(const gfx::Point& mouse_offset) {
 
 void DraggedTabControllerGtk::Drag() {
   if (!drag_data_->GetSourceTabData()->tab_ ||
-      !drag_data_->GetSourceTabContentsWrapper()) {
+      !drag_data_->GetSourceTabContentsWrapper() ||
+      !drag_data_->GetSourceTabContents()) {
     return;
   }
 
@@ -161,25 +162,12 @@ DraggedTabData DraggedTabControllerGtk::InitDraggedTabData(TabGtk* tab) {
   registrar_.Add(
       this,
       content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-      Source<TabContents>(dragged_tab_data.contents_->tab_contents()));
+      content::Source<TabContents>(dragged_tab_data.contents_->tab_contents()));
   return dragged_tab_data;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // DraggedTabControllerGtk, TabContentsDelegate implementation:
-
-// TODO(adriansc): Remove this method once refactoring has changed all call
-// sites.
-TabContents* DraggedTabControllerGtk::OpenURLFromTab(
-    TabContents* source,
-    const GURL& url,
-    const GURL& referrer,
-    WindowOpenDisposition disposition,
-    content::PageTransition transition) {
-  return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition,
-                                      false));
-}
 
 TabContents* DraggedTabControllerGtk::OpenURLFromTab(
     TabContents* source,
@@ -223,23 +211,20 @@ void DraggedTabControllerGtk::LoadingStateChanged(TabContents* source) {
     dragged_view_->Update();
 }
 
-bool DraggedTabControllerGtk::IsPopup(const TabContents* source) const {
-  return false;
-}
-
 content::JavaScriptDialogCreator*
 DraggedTabControllerGtk::GetJavaScriptDialogCreator() {
   return GetJavaScriptDialogCreatorInstance();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// DraggedTabControllerGtk, NotificationObserver implementation:
+// DraggedTabControllerGtk, content::NotificationObserver implementation:
 
-void DraggedTabControllerGtk::Observe(int type,
-                                      const NotificationSource& source,
-                                      const NotificationDetails& details) {
+void DraggedTabControllerGtk::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_DESTROYED);
-  TabContents* destroyed_contents = Source<TabContents>(source).ptr();
+  TabContents* destroyed_contents = content::Source<TabContents>(source).ptr();
   for (size_t i = 0; i < drag_data_->size(); ++i) {
     if (drag_data_->get(i)->contents_->tab_contents() == destroyed_contents) {
       // One of the tabs we're dragging has been destroyed. Cancel the drag.
@@ -861,7 +846,8 @@ void DraggedTabControllerGtk::CleanUpDraggedTabs() {
       if (drag_data_->get(i)->contents_) {
         registrar_.Remove(
             this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-            Source<TabContents>(drag_data_->get(i)->contents_->tab_contents()));
+            content::Source<TabContents>(
+                drag_data_->get(i)->contents_->tab_contents()));
       }
       source_tabstrip_->DestroyDraggedTab(drag_data_->get(i)->tab_);
       drag_data_->get(i)->tab_ = NULL;

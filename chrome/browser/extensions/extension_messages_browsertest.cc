@@ -9,10 +9,11 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
-#include "chrome/renderer/extensions/renderer_extension_bindings.h"
+#include "chrome/renderer/extensions/miscellaneous_bindings.h"
 #include "chrome/test/base/chrome_render_view_test.h"
-#include "content/common/view_messages.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using extensions::MiscellaneousBindings;
 
 namespace {
 
@@ -44,7 +45,7 @@ void DispatchOnDisconnect(const ChromeV8ContextSet& v8_context_set,
 // Tests that the bindings for opening a channel to an extension and sending
 // and receiving messages through that channel all works.
 //
-// TODO(aa): Refactor RendererProcessBindings to have fewer dependencies and
+// TODO(aa): Refactor MiscellaneousBindings to have fewer dependencies and
 // make this into a unit test. That will allow us to get rid of cruft like
 // SetTestExtensionId().
 TEST_F(ChromeRenderViewTest, ExtensionMessagesOpenChannel) {
@@ -80,19 +81,13 @@ TEST_F(ChromeRenderViewTest, ExtensionMessagesOpenChannel) {
   // Now simulate getting a message back from the other side.
   render_thread_->sink().ClearMessages();
   const int kPortId = 0;
-  RendererExtensionBindings::DeliverMessage(
+  MiscellaneousBindings::DeliverMessage(
       extension_dispatcher_->v8_context_set().GetAll(),
       kPortId, "{\"val\": 42}", NULL);
 
   // Verify that we got it.
-  const IPC::Message* alert_msg =
-      render_thread_->sink().GetUniqueMessageMatching(
-          ViewHostMsg_RunJavaScriptMessage::ID);
-  ASSERT_TRUE(alert_msg);
-  iter = IPC::SyncMessage::GetDataIterator(alert_msg);
-  ViewHostMsg_RunJavaScriptMessage::SendParam alert_param;
-  ASSERT_TRUE(IPC::ReadParam(alert_msg, &iter, &alert_param));
-  EXPECT_EQ(ASCIIToUTF16("content got: 42"), alert_param.a);
+  render_thread_->VerifyRunJavaScriptMessageSend(
+      ASCIIToUTF16("content got: 42"));
 }
 
 // Tests that the bindings for handling a new channel connection and channel
@@ -136,30 +131,18 @@ TEST_F(ChromeRenderViewTest, ExtensionMessagesOnConnect) {
 
   // Now simulate getting a message back from the channel opener.
   render_thread_->sink().ClearMessages();
-  RendererExtensionBindings::DeliverMessage(
+  MiscellaneousBindings::DeliverMessage(
       extension_dispatcher_->v8_context_set().GetAll(),
       kPortId, "{\"val\": 42}", NULL);
 
   // Verify that we got it.
-  const IPC::Message* alert_msg =
-      render_thread_->sink().GetUniqueMessageMatching(
-          ViewHostMsg_RunJavaScriptMessage::ID);
-  ASSERT_TRUE(alert_msg);
-  void* iter = IPC::SyncMessage::GetDataIterator(alert_msg);
-  ViewHostMsg_RunJavaScriptMessage::SendParam alert_param;
-  ASSERT_TRUE(IPC::ReadParam(alert_msg, &iter, &alert_param));
-  EXPECT_EQ(ASCIIToUTF16("got: 42"), alert_param.a);
+  render_thread_->VerifyRunJavaScriptMessageSend(ASCIIToUTF16("got: 42"));
 
   // Now simulate the channel closing.
   render_thread_->sink().ClearMessages();
   DispatchOnDisconnect(extension_dispatcher_->v8_context_set(), kPortId);
 
   // Verify that we got it.
-  alert_msg =
-      render_thread_->sink().GetUniqueMessageMatching(
-          ViewHostMsg_RunJavaScriptMessage::ID);
-  ASSERT_TRUE(alert_msg);
-  iter = IPC::SyncMessage::GetDataIterator(alert_msg);
-  ASSERT_TRUE(IPC::ReadParam(alert_msg, &iter, &alert_param));
-  EXPECT_EQ(ASCIIToUTF16("disconnected: 24"), alert_param.a);
+  render_thread_->VerifyRunJavaScriptMessageSend(
+      ASCIIToUTF16("disconnected: 24"));
 }

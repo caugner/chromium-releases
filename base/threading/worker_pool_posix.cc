@@ -15,6 +15,8 @@
 #include "base/threading/worker_pool.h"
 #include "base/tracked_objects.h"
 
+using tracked_objects::TrackedTime;
+
 namespace base {
 
 namespace {
@@ -57,7 +59,8 @@ void WorkerPoolImpl::PostTask(const tracked_objects::Location& from_here,
   pool_->PostTask(from_here, task);
 }
 
-base::LazyInstance<WorkerPoolImpl> g_lazy_worker_pool(base::LINKER_INITIALIZED);
+base::LazyInstance<WorkerPoolImpl> g_lazy_worker_pool =
+    LAZY_INSTANCE_INITIALIZER;
 
 class WorkerThread : public PlatformThread::Delegate {
  public:
@@ -78,24 +81,25 @@ class WorkerThread : public PlatformThread::Delegate {
 void WorkerThread::ThreadMain() {
   const std::string name = base::StringPrintf(
       "%s/%d", name_prefix_.c_str(), PlatformThread::CurrentId());
+  // Note |name.c_str()| must remain valid for for the whole life of the thread.
   PlatformThread::SetName(name.c_str());
 
   for (;;) {
-    PosixDynamicThreadPool::PendingTask pending_task = pool_->WaitForTask();
+    PendingTask pending_task = pool_->WaitForTask();
     if (pending_task.task.is_null())
       break;
     UNSHIPPED_TRACE_EVENT2("task", "WorkerThread::ThreadMain::Run",
         "src_file", pending_task.posted_from.file_name(),
         "src_func", pending_task.posted_from.function_name());
 
-#if defined(TRACK_ALL_TASK_OBJECTS)
-    TimeTicks start_of_run = tracked_objects::ThreadData::Now();
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
+    TrackedTime start_time =
+        tracked_objects::ThreadData::NowForStartOfRun();
+
     pending_task.task.Run();
-#if defined(TRACK_ALL_TASK_OBJECTS)
-    tracked_objects::ThreadData::TallyADeathIfActive(pending_task.post_births,
-        pending_task.time_posted, TimeTicks(), start_of_run);
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
+
+    tracked_objects::ThreadData::TallyRunOnWorkerThreadIfTracking(
+        pending_task.birth_tally, TrackedTime(pending_task.time_posted),
+        start_time, tracked_objects::ThreadData::NowForEndOfRun());
   }
 
   // The WorkerThread is non-joinable, so it deletes itself.
@@ -116,20 +120,6 @@ bool WorkerPool::PostTask(const tracked_objects::Location& from_here,
   return true;
 }
 
-PosixDynamicThreadPool::PendingTask::PendingTask(
-    const tracked_objects::Location& posted_from,
-    const base::Closure& task)
-    : posted_from(posted_from),
-      task(task) {
-#if defined(TRACK_ALL_TASK_OBJECTS)
-  post_births = tracked_objects::ThreadData::TallyABirthIfActive(posted_from);
-  time_posted = tracked_objects::ThreadData::Now();
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
-}
-
-PosixDynamicThreadPool::PendingTask::~PendingTask() {
-}
-
 PosixDynamicThreadPool::PosixDynamicThreadPool(
     const std::string& name_prefix,
     int idle_seconds_before_exit)
@@ -141,10 +131,8 @@ PosixDynamicThreadPool::PosixDynamicThreadPool(
       num_idle_threads_cv_(NULL) {}
 
 PosixDynamicThreadPool::~PosixDynamicThreadPool() {
-  while (!pending_tasks_.empty()) {
-    PendingTask pending_task = pending_tasks_.front();
+  while (!pending_tasks_.empty())
     pending_tasks_.pop();
-  }
 }
 
 void PosixDynamicThreadPool::Terminate() {
@@ -198,7 +186,7 @@ void PosixDynamicThreadPool::AddTask(PendingTask* pending_task) {
   }
 }
 
-PosixDynamicThreadPool::PendingTask PosixDynamicThreadPool::WaitForTask() {
+PendingTask PosixDynamicThreadPool::WaitForTask() {
   AutoLock locked(lock_);
 
   if (terminated_)

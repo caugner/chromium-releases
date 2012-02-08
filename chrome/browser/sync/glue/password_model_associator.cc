@@ -20,6 +20,8 @@
 #include "net/base/escape.h"
 #include "webkit/glue/password_form.h"
 
+using content::BrowserThread;
+
 namespace browser_sync {
 
 const char kPasswordTag[] = "google_chrome_passwords";
@@ -209,7 +211,7 @@ bool PasswordModelAssociator::SyncModelHasUserCreatedNodes(bool* has_nodes) {
 
   // The sync model has user created nodes if the password folder has any
   // children.
-  *has_nodes = sync_api::kInvalidId != password_node.GetFirstChildId();
+  *has_nodes = password_node.HasChildren();
   return true;
 }
 
@@ -420,11 +422,11 @@ std::string PasswordModelAssociator::MakeTag(
     const std::string& username_value,
     const std::string& password_element,
     const std::string& signon_realm) {
-  return EscapePath(origin_url) + "|" +
-         EscapePath(username_element) + "|" +
-         EscapePath(username_value) + "|" +
-         EscapePath(password_element) + "|" +
-         EscapePath(signon_realm);
+  return net::EscapePath(origin_url) + "|" +
+         net::EscapePath(username_element) + "|" +
+         net::EscapePath(username_value) + "|" +
+         net::EscapePath(password_element) + "|" +
+         net::EscapePath(signon_realm);
 }
 
 }  // namespace browser_sync

@@ -11,7 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
@@ -72,7 +72,7 @@ void WebUI::OnWebUISend(const GURL& source_url,
                         const std::string& message,
                         const ListValue& args) {
   if (!ChildProcessSecurityPolicy::GetInstance()->
-          HasWebUIBindings(tab_contents_->GetRenderProcessHost()->id())) {
+          HasWebUIBindings(tab_contents_->GetRenderProcessHost()->GetID())) {
     NOTREACHED() << "Blocked unauthorized use of WebUIBindings.";
     return;
   }
@@ -166,15 +166,6 @@ void WebUI::RegisterMessageCallback(const std::string &message,
     result.first->second = callback;
 }
 
-bool WebUI::IsLoading() const {
-  std::vector<WebUIMessageHandler*>::const_iterator iter;
-  for (iter = handlers_.begin(); iter != handlers_.end(); ++iter) {
-    if ((*iter)->IsLoading())
-      return true;
-  }
-  return false;
-}
-
 // WebUI, protected: ----------------------------------------------------------
 
 void WebUI::AddMessageHandler(WebUIMessageHandler* handler) {
@@ -198,10 +189,6 @@ WebUIMessageHandler* WebUIMessageHandler::Attach(WebUI* web_ui) {
   web_ui_ = web_ui;
   RegisterMessages();
   return this;
-}
-
-bool WebUIMessageHandler::IsLoading() const {
-  return false;
 }
 
 // WebUIMessageHandler, protected: ---------------------------------------------
@@ -237,6 +224,20 @@ bool WebUIMessageHandler::ExtractIntegerValue(const ListValue* value,
   std::string string_value;
   if (value->GetString(0, &string_value))
     return base::StringToInt(string_value, out_int);
+  double double_value;
+  if (value->GetDouble(0, &double_value)) {
+    *out_int = static_cast<int>(double_value);
+    return true;
+  }
+  NOTREACHED();
+  return false;
+}
+
+bool WebUIMessageHandler::ExtractDoubleValue(const ListValue* value,
+                                             double* out_value) {
+  std::string string_value;
+  if (value->GetString(0, &string_value))
+    return base::StringToDouble(string_value, out_value);
   NOTREACHED();
   return false;
 }

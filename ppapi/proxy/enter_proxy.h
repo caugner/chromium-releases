@@ -9,14 +9,11 @@
 #include "ppapi/cpp/completion_callback.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
+#include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/thunk/enter.h"
 
 namespace ppapi {
-
-namespace thunk {
-class ResourceCreationAPI;
-}
 
 namespace proxy {
 
@@ -30,10 +27,10 @@ template<typename ResourceT>
 class EnterPluginFromHostResource
     : public thunk::EnterResourceNoLock<ResourceT> {
  public:
-  EnterPluginFromHostResource(const HostResource& host_resource)
+  explicit EnterPluginFromHostResource(const HostResource& host_resource)
       : thunk::EnterResourceNoLock<ResourceT>(
-            PluginResourceTracker::GetInstance()->PluginResourceForHostResource(
-                host_resource),
+            PluginGlobals::Get()->plugin_resource_tracker()->
+                PluginResourceForHostResource(host_resource),
             false) {
     // Validate that we're in the plugin rather than the host. Otherwise this
     // object will do the wrong thing. In the plugin, the instance should have
@@ -47,7 +44,7 @@ template<typename ResourceT>
 class EnterHostFromHostResource
     : public thunk::EnterResourceNoLock<ResourceT> {
  public:
-  EnterHostFromHostResource(const HostResource& host_resource)
+  explicit EnterHostFromHostResource(const HostResource& host_resource)
       : thunk::EnterResourceNoLock<ResourceT>(
             host_resource.host_resource(), false) {
     // Validate that we're in the host rather than the plugin. Otherwise this
@@ -136,6 +133,82 @@ class EnterHostFromHostResourceForceCallback
   }
 
   ~EnterHostFromHostResourceForceCallback() {
+    if (needs_running_) {
+      NOTREACHED() << "Should always call SetResult except in the "
+                      "initialization failed case.";
+      RunCallback(PP_ERROR_FAILED);
+    }
+  }
+
+  void SetResult(int32_t result) {
+    DCHECK(needs_running_) << "Don't call SetResult when there already is one.";
+    needs_running_ = false;
+    if (result != PP_OK_COMPLETIONPENDING)
+      callback_.Run(result);
+  }
+
+  PP_CompletionCallback callback() {
+    return callback_.pp_completion_callback();
+  }
+
+ private:
+  void RunCallback(int32_t result) {
+    DCHECK(needs_running_);
+    needs_running_ = false;
+    callback_.Run(result);
+  }
+
+  bool needs_running_;
+  pp::CompletionCallback callback_;
+};
+
+// Like EnterHostFromHostResourceForceCallback but for Function APIs. It takes
+// an instance instead of a resource ID.
+template<typename FunctionT>
+class EnterHostFunctionForceCallback
+    : public thunk::EnterFunctionNoLock<FunctionT> {
+ public:
+  // For callbacks that take no parameters except the "int32_t result". Most
+  // implementations will use the 1-extra-argument constructor below.
+  template<class CallbackFactory, typename Method>
+  EnterHostFunctionForceCallback(PP_Instance instance,
+                                 CallbackFactory& factory,
+                                 Method method)
+      : thunk::EnterFunctionNoLock<FunctionT>(instance, false),
+        needs_running_(true),
+        callback_(factory.NewOptionalCallback(method)) {
+    if (this->failed())
+      RunCallback(PP_ERROR_BADARGUMENT);
+  }
+
+  // For callbacks that take an extra parameter as a closure.
+  template<class CallbackFactory, typename Method, typename A>
+  EnterHostFunctionForceCallback(PP_Instance instance,
+                                 CallbackFactory& factory,
+                                 Method method,
+                                 const A& a)
+      : thunk::EnterFunctionNoLock<FunctionT>(instance, false),
+        needs_running_(true),
+        callback_(factory.NewOptionalCallback(method, a)) {
+    if (this->failed())
+      RunCallback(PP_ERROR_BADARGUMENT);
+  }
+
+  // For callbacks that take two extra parameters as a closure.
+  template<class CallbackFactory, typename Method, typename A, typename B>
+  EnterHostFunctionForceCallback(PP_Instance instance,
+                                 CallbackFactory& factory,
+                                 Method method,
+                                 const A& a,
+                                 const B& b)
+      : thunk::EnterFunctionNoLock<FunctionT>(instance),
+        needs_running_(true),
+        callback_(factory.NewOptionalCallback(method, a, b)) {
+    if (this->failed())
+      RunCallback(PP_ERROR_BADARGUMENT);
+  }
+
+  ~EnterHostFunctionForceCallback() {
     if (needs_running_) {
       NOTREACHED() << "Should always call SetResult except in the "
                       "initialization failed case.";

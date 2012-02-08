@@ -12,14 +12,16 @@
 #include "ppapi/c/dev/ppb_video_capture_dev.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
+#include "ppapi/shared_impl/resource_tracker.h"
 #include "ppapi/thunk/enter.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_buffer_impl.h"
 #include "webkit/plugins/ppapi/resource_helper.h"
-#include "webkit/plugins/ppapi/resource_tracker.h"
 
+using ppapi::PpapiGlobals;
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_Buffer_API;
 using ppapi::thunk::PPB_VideoCapture_API;
@@ -99,7 +101,6 @@ int32_t PPB_VideoCapture_Impl::StartCapture(
     0,  // ignored.
     media::VideoFrame::I420,
     false,  // ignored
-    false  // resolution_fixed
   };
   status_ = PP_VIDEO_CAPTURE_STATUS_STARTING;
   AddRef();  // Balanced in |OnRemoved()|.
@@ -208,24 +209,25 @@ void PPB_VideoCapture_Impl::OnRemoved(media::VideoCapture* capture) {
 void PPB_VideoCapture_Impl::OnBufferReady(
     media::VideoCapture* capture,
     scoped_refptr<media::VideoCapture::VideoFrameBuffer> buffer) {
-  if (is_dead_)
-    return;
-
-  DCHECK(buffer.get());
-  for (uint32_t i = 0; i < buffers_.size(); ++i) {
-    if (!buffers_[i].in_use) {
-      // TODO(piman): it looks like stride isn't actually used/filled.
-      DCHECK(buffer->stride == 0);
-      size_t size = std::min(static_cast<size_t>(buffers_[i].buffer->size()),
-          buffer->buffer_size);
-      memcpy(buffers_[i].data, buffer->memory_pointer, size);
-      buffers_[i].in_use = true;
-      platform_video_capture_->FeedBuffer(buffer);
-      ppp_videocapture_->OnBufferReady(pp_instance(), pp_resource(), i);
-      return;
+  if (!is_dead_) {
+    DCHECK(buffer.get());
+    for (uint32_t i = 0; i < buffers_.size(); ++i) {
+      if (!buffers_[i].in_use) {
+        // TODO(ihf): Switch to a size calculation based on stride.
+        // Stride is filled out now but not more meaningful than size
+        // until wjia unifies VideoFrameBuffer and media::VideoFrame.
+        size_t size = std::min(static_cast<size_t>(buffers_[i].buffer->size()),
+            buffer->buffer_size);
+        memcpy(buffers_[i].data, buffer->memory_pointer, size);
+        buffers_[i].in_use = true;
+        platform_video_capture_->FeedBuffer(buffer);
+        ppp_videocapture_->OnBufferReady(pp_instance(), pp_resource(), i);
+        return;
+      }
     }
   }
-  // TODO(piman): signal dropped buffers ?
+  // Even after we have stopped and are dead we have to return buffers that
+  // are in flight to us. Otherwise VideoCaptureController will not tear down.
   platform_video_capture_->FeedBuffer(buffer);
 }
 
@@ -265,7 +267,7 @@ void PPB_VideoCapture_Impl::OnDeviceInfoReceived(
     info.buffer = static_cast<PPB_Buffer_Impl*>(enter.object());
     info.data = info.buffer->Map();
     if (!info.data) {
-      ResourceTracker::Get()->ReleaseResource(resources[i]);
+      PpapiGlobals::Get()->GetResourceTracker()->ReleaseResource(resources[i]);
       break;
     }
     buffers_.push_back(info);
@@ -286,7 +288,7 @@ void PPB_VideoCapture_Impl::OnDeviceInfoReceived(
 
 void PPB_VideoCapture_Impl::ReleaseBuffers() {
   DCHECK(!is_dead_);
-  ResourceTracker *tracker = ResourceTracker::Get();
+  ::ppapi::ResourceTracker* tracker = PpapiGlobals::Get()->GetResourceTracker();
   for (size_t i = 0; i < buffers_.size(); ++i) {
     buffers_[i].buffer->Unmap();
     tracker->ReleaseResource(buffers_[i].buffer->pp_resource());

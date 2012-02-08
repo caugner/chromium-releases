@@ -13,7 +13,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/cert_test_util.h"
 #include "net/base/ssl_info.h"
 #include "net/base/transport_security_state.h"
@@ -22,6 +22,7 @@
 #include "net/url_request/url_request.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
 using net::SSLInfo;
 
 namespace chrome_browser_net {
@@ -35,6 +36,7 @@ static SSLInfo GetBadSSLInfo() {
 
   info.cert = net::ImportCertFromFile(net::GetTestCertsDirectory(),
                                       "expired_cert.pem");
+  info.cert_status = net::CERT_STATUS_DATE_INVALID;
   info.is_issued_by_known_root = false;
 
   return info;
@@ -143,7 +145,8 @@ class MockReporter : public ChromeFraudulentCertificateReporter {
       bool sni_available) {
     DCHECK(!hostname.empty());
     DCHECK(ssl_info.is_valid());
-    ChromeFraudulentCertificateReporter::SendReport(hostname, ssl_info, sni_available);
+    ChromeFraudulentCertificateReporter::SendReport(hostname, ssl_info,
+                                                    sni_available);
   }
 };
 
@@ -158,7 +161,7 @@ static void DoReportIsNotSent() {
   scoped_refptr<ChromeURLRequestContext> context = new ChromeURLRequestContext;
   NotSendingTestReporter reporter(context.get());
   SSLInfo info = GetBadSSLInfo();
-  reporter.SendReport("127.0.0.1", info, true);
+  reporter.SendReport("www.example.com", info, true);
 }
 
 static void DoMockReportIsSent() {
@@ -178,21 +181,21 @@ TEST(ChromeFraudulentCertificateReporterTest, GoodBadInfo) {
 
 TEST(ChromeFraudulentCertificateReporterTest, ReportIsSent) {
   MessageLoop loop(MessageLoop::TYPE_IO);
-  BrowserThread io_thread(BrowserThread::IO, &loop);
+  content::TestBrowserThread io_thread(BrowserThread::IO, &loop);
   loop.PostTask(FROM_HERE, base::Bind(&DoReportIsSent));
   loop.RunAllPending();
 }
 
 TEST(ChromeFraudulentCertificateReporterTest, MockReportIsSent) {
   MessageLoop loop(MessageLoop::TYPE_IO);
-  BrowserThread io_thread(BrowserThread::IO, &loop);
+  content::TestBrowserThread io_thread(BrowserThread::IO, &loop);
   loop.PostTask(FROM_HERE, base::Bind(&DoMockReportIsSent));
   loop.RunAllPending();
 }
 
 TEST(ChromeFraudulentCertificateReporterTest, ReportIsNotSent) {
   MessageLoop loop(MessageLoop::TYPE_IO);
-  BrowserThread io_thread(BrowserThread::IO, &loop);
+  content::TestBrowserThread io_thread(BrowserThread::IO, &loop);
   loop.PostTask(FROM_HERE, base::Bind(&DoReportIsNotSent));
   loop.RunAllPending();
 }

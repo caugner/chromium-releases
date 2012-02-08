@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -13,11 +13,19 @@ import test_utils
 class SpecialTabsTest(pyauto.PyUITest):
   """TestCase for Special Tabs like about:version, chrome://history, etc."""
 
-  special_accelerator_tabs = {
-    pyauto.IDC_SHOW_HISTORY: 'History',
-    pyauto.IDC_MANAGE_EXTENSIONS: 'Extensions',
-    pyauto.IDC_SHOW_DOWNLOADS: 'Downloads',
-  }
+  @staticmethod
+  def GetSpecialAcceleratorTabs():
+    """Get a dict of accelerators and corresponding tab titles."""
+    ret = {
+        pyauto.IDC_SHOW_HISTORY: 'History',
+        pyauto.IDC_MANAGE_EXTENSIONS: 'Preferences - Extensions',
+        pyauto.IDC_SHOW_DOWNLOADS: 'Downloads',
+    }
+    if pyauto.PyUITest.IsWin():
+      ret[pyauto.IDC_MANAGE_EXTENSIONS] = 'Options - Extensions'
+    elif pyauto.PyUITest.IsChromeOS():
+      ret[pyauto.IDC_MANAGE_EXTENSIONS] = 'Settings - Extensions'
+    return ret
 
   special_url_redirects = {
    'about:': 'chrome://version',
@@ -43,13 +51,12 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://credits': { 'title': 'Credits', 'CSP': False },
     'chrome://downloads': { 'title': 'Downloads' },
     'chrome://dns': { 'title': 'About DNS' },
-    'chrome://settings/extensions': { 'title': 'Extensions' },
+    'chrome://settings/extensions': { 'title': 'Preferences - Extensions' },
     'chrome://flags': {},
     'chrome://flash': {},
     'chrome://gpu-internals': {},
     'chrome://histograms': { 'title': 'About Histograms' },
     'chrome://history': { 'title': 'History' },
-    'chrome://history2': { 'title': 'History' },
     'chrome://media-internals': { 'title': 'Media Internals' },
     'chrome://memory-redirect': { 'title': 'About Memory' },
     'chrome://net-internals': {},
@@ -107,6 +114,7 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://settings/clearBrowserData':
       { 'title': 'Settings - Clear Browsing Data' },
     'chrome://settings/content': { 'title': 'Settings - Content Settings' },
+    'chrome://settings/extensions': { 'title': 'Settings - Extensions' },
     'chrome://settings/internet': { 'title': 'Settings - Internet' },
     'chrome://settings/languages':
       { 'title': 'Settings - Languages and Input' },
@@ -153,6 +161,7 @@ class SpecialTabsTest(pyauto.PyUITest):
 
     # OVERRIDE - different title for page.
     'chrome://settings': { 'title': 'Options - Basics' },
+    'chrome://settings/extensions': { 'title': 'Options - Extensions' },
   }
   broken_win_special_url_tabs = {
     # Sync on windows badly broken at the moment.
@@ -321,7 +330,7 @@ class SpecialTabsTest(pyauto.PyUITest):
   def testSpecialAcceratorTabs(self):
     """Test special tabs created by acclerators like IDC_SHOW_HISTORY,
        IDC_SHOW_DOWNLOADS."""
-    for accel, title in self.special_accelerator_tabs.iteritems():
+    for accel, title in self.GetSpecialAcceleratorTabs().iteritems():
       self.RunCommand(accel)
       self.assertTrue(self.WaitUntil(
             self.GetActiveTabTitle, expect_retval=title),

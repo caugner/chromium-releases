@@ -10,10 +10,10 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
+#include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/ui/views/extensions/extension_popup.h"
-#include "views/controls/image_view.h"
+#include "ui/views/controls/image_view.h"
 
 class LocationBarView;
 namespace views {
@@ -25,7 +25,8 @@ class MenuRunner;
 class PageActionImageView : public views::ImageView,
                             public ImageLoadingTracker::Observer,
                             public ExtensionContextMenuModel::PopupDelegate,
-                            public ExtensionPopup::Observer {
+                            public views::Widget::Observer,
+                            public content::NotificationObserver {
  public:
   PageActionImageView(LocationBarView* owner,
                       ExtensionAction* page_action);
@@ -55,8 +56,13 @@ class PageActionImageView : public views::ImageView,
   // Overridden from ExtensionContextMenuModelModel::Delegate
   virtual void InspectPopup(ExtensionAction* action) OVERRIDE;
 
-  // Overridden from ExtensionPopup::Observer
-  virtual void ExtensionPopupIsClosing(ExtensionPopup* popup) OVERRIDE;
+  // Overridden from views::Widget::Observer
+  virtual void OnWidgetClosing(views::Widget* widget) OVERRIDE;
+
+  // content::NotificationObserver implementation.
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Called to notify the PageAction that it should determine whether to be
   // visible or hidden. |contents| is the TabContents that is active, |url| is
@@ -100,6 +106,8 @@ class PageActionImageView : public views::ImageView,
 
   // The current popup and the button it came from.  NULL if no popup.
   ExtensionPopup* popup_;
+
+  content::NotificationRegistrar registrar_;
 
   scoped_ptr<views::MenuRunner> menu_runner_;
 

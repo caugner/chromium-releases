@@ -10,7 +10,7 @@
 #include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/ui/cocoa/constrained_window_mac.h"
 #import "chrome/browser/ui/cocoa/content_settings/cookie_tree_node.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
 
 @class CollectedCookiesWindowController;
 @class CookieDetailsViewController;
@@ -20,24 +20,24 @@ class TabContentsWrapper;
 // The constrained window delegate reponsible for managing the collected
 // cookies dialog.
 class CollectedCookiesMac : public ConstrainedWindowMacDelegateCustomSheet,
-                            public NotificationObserver {
+                            public content::NotificationObserver {
  public:
   CollectedCookiesMac(NSWindow* parent, TabContentsWrapper* wrapper);
 
   void OnSheetDidEnd(NSWindow* sheet);
 
   // ConstrainedWindowMacDelegateCustomSheet implementation.
-  virtual void DeleteDelegate();
+  virtual void DeleteDelegate() OVERRIDE;
 
  private:
   virtual ~CollectedCookiesMac();
 
   // NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   ConstrainedWindow* window_;
 

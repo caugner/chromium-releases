@@ -30,18 +30,28 @@ class DnsConfigServicePosix::ConfigReader : public SerialWorker {
       success_(false) {}
 
   void DoWork() OVERRIDE {
+    success_ = false;
+#if defined(OS_ANDROID)
+    NOTIMPLEMENTED();
+#else
+#if defined(OS_OPENBSD)
+    // Note: res_ninit in glibc always returns 0 and sets RES_INIT.
+    // res_init behaves the same way.
+    if ((res_init() == 0) && (_res.options & RES_INIT)) {
+      success_ = ConvertResToConfig(_res, &dns_config_);
+    }
+#else
     struct __res_state res;
     if ((res_ninit(&res) == 0) && (res.options & RES_INIT)) {
       success_ = ConvertResToConfig(res, &dns_config_);
-    } else {
-      // Note: res_ninit in glibc always returns 0 and sets RES_INIT.
-      success_ = false;
     }
+#endif
 #if defined(OS_MACOSX)
     res_ndestroy(&res);
-#else
+#elif !defined(OS_OPENBSD)
     res_nclose(&res);
 #endif
+#endif  // defined(OS_ANDROID)
   }
 
   void OnWorkFinished() OVERRIDE {
@@ -78,6 +88,7 @@ DnsConfigService* DnsConfigService::CreateSystemService() {
   return new DnsConfigServicePosix();
 }
 
+#if !defined(OS_ANDROID)
 bool ConvertResToConfig(const struct __res_state& res, DnsConfig* dns_config) {
   CHECK(dns_config != NULL);
   DCHECK(res.options & RES_INIT);
@@ -123,10 +134,13 @@ bool ConvertResToConfig(const struct __res_state& res, DnsConfig* dns_config) {
   dns_config->ndots = res.ndots;
   dns_config->timeout = base::TimeDelta::FromSeconds(res.retrans);
   dns_config->attempts = res.retry;
+#if defined(RES_ROTATE)
   dns_config->rotate = res.options & RES_ROTATE;
+#endif
   dns_config->edns0 = res.options & RES_USE_EDNS0;
 
   return true;
 }
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace net

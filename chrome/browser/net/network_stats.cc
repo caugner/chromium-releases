@@ -4,6 +4,7 @@
 
 #include "chrome/browser/net/network_stats.h"
 
+#include "base/bind.h"
 #include "base/callback_old.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
@@ -14,7 +15,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/tuple.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
@@ -23,6 +24,8 @@
 #include "net/socket/tcp_client_socket.h"
 #include "net/udp/udp_client_socket.h"
 #include "net/udp/udp_server_socket.h"
+
+using content::BrowserThread;
 
 namespace chrome_browser_net {
 
@@ -80,14 +83,12 @@ NetworkStats::NetworkStats()
       bytes_to_send_(0),
       encoded_message_(""),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          resolve_callback_(this, &NetworkStats::OnResolveComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
           read_callback_(this, &NetworkStats::OnReadComplete)),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           write_callback_(this, &NetworkStats::OnWriteComplete)),
       finished_callback_(NULL),
       start_time_(base::TimeTicks::Now()),
-      ALLOW_THIS_IN_INITIALIZER_LIST(timers_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
 
 NetworkStats::~NetworkStats() {
@@ -103,11 +104,11 @@ bool NetworkStats::Start(net::HostResolver* host_resolver,
   Initialize(bytes_to_send, finished_callback);
 
   net::HostResolver::RequestInfo request(server_host_port_pair);
-  int rv = host_resolver->Resolve(request,
-                                  &addresses_,
-                                  &resolve_callback_,
-                                  NULL,
-                                  net::BoundNetLog());
+  int rv = host_resolver->Resolve(
+      request, &addresses_,
+      base::Bind(&NetworkStats::OnResolveComplete,
+                 base::Unretained(this)),
+      NULL, net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     return true;
   return DoConnect(rv);
@@ -205,7 +206,7 @@ void NetworkStats::OnReadComplete(int result) {
     const int kReadDataDelayMs = 1;
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
-        timers_factory_.NewRunnableMethod(&NetworkStats::ReadData),
+        base::Bind(&NetworkStats::ReadData, weak_factory_.GetWeakPtr()),
         kReadDataDelayMs);
   }
 }
@@ -281,7 +282,7 @@ int NetworkStats::SendData() {
 void NetworkStats::StartReadDataTimer(int milliseconds) {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      timers_factory_.NewRunnableMethod(&NetworkStats::OnReadDataTimeout),
+      base::Bind(&NetworkStats::OnReadDataTimeout, weak_factory_.GetWeakPtr()),
       milliseconds);
 }
 
@@ -528,7 +529,7 @@ void CollectNetworkStats(const std::string& network_stats_server,
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        NewRunnableFunction(
+        base::Bind(
             &CollectNetworkStats, network_stats_server, io_thread));
     return;
   }
@@ -539,7 +540,7 @@ void CollectNetworkStats(const std::string& network_stats_server,
   // to the server has succeeded.
   DCHECK(!net::NetworkChangeNotifier::IsOffline());
 
-  static scoped_refptr<base::FieldTrial> trial = NULL;
+  CR_DEFINE_STATIC_LOCAL(scoped_refptr<base::FieldTrial>, trial, ());
   static bool collect_stats = false;
 
   if (!trial.get()) {

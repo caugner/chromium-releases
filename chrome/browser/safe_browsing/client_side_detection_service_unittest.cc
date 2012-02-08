@@ -6,6 +6,7 @@
 #include <queue>
 #include <string>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
@@ -15,8 +16,7 @@
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/test/test_browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
@@ -28,6 +28,7 @@ using ::testing::_;
 using ::testing::Invoke;
 using ::testing::Mock;
 using ::testing::StrictMock;
+using content::BrowserThread;
 
 namespace safe_browsing {
 namespace {
@@ -46,7 +47,7 @@ class MockClientSideDetectionService : public ClientSideDetectionService {
 
   void Disable(int) {
     // Ignore the status.
-    SetEnabled(false);
+    SetEnabledAndRefreshState(false);
   }
 
  private:
@@ -62,11 +63,13 @@ ACTION(QuitCurrentMessageLoop) {
 class ClientSideDetectionServiceTest : public testing::Test {
  protected:
   virtual void SetUp() {
-    file_thread_.reset(new BrowserThread(BrowserThread::FILE, &msg_loop_));
+    file_thread_.reset(new content::TestBrowserThread(BrowserThread::FILE,
+                                                      &msg_loop_));
 
     factory_.reset(new FakeURLFetcherFactory());
 
-    browser_thread_.reset(new BrowserThread(BrowserThread::UI, &msg_loop_));
+    browser_thread_.reset(new content::TestBrowserThread(BrowserThread::UI,
+                                                         &msg_loop_));
   }
 
   virtual void TearDown() {
@@ -84,7 +87,8 @@ class ClientSideDetectionServiceTest : public testing::Test {
     request->set_is_phishing(true);  // client thinks the URL is phishing.
     csd_service_->SendClientReportPhishingRequest(
         request,
-        NewCallback(this, &ClientSideDetectionServiceTest::SendRequestDone));
+        base::Bind(&ClientSideDetectionServiceTest::SendRequestDone,
+                   base::Unretained(this)));
     phishing_url_ = phishing_url;
     msg_loop_.Run();  // Waits until callback is called.
     return is_phishing_;
@@ -189,8 +193,8 @@ class ClientSideDetectionServiceTest : public testing::Test {
     msg_loop_.Quit();
   }
 
-  scoped_ptr<BrowserThread> browser_thread_;
-  scoped_ptr<BrowserThread> file_thread_;
+  scoped_ptr<content::TestBrowserThread> browser_thread_;
+  scoped_ptr<content::TestBrowserThread> file_thread_;
 
   GURL phishing_url_;
   bool is_phishing_;
@@ -202,7 +206,7 @@ TEST_F(ClientSideDetectionServiceTest, FetchModelTest) {
   // make the test flaky.
   MockClientSideDetectionService service;
   EXPECT_CALL(service, ScheduleFetchModel(_)).Times(1);
-  service.SetEnabled(true);
+  service.SetEnabledAndRefreshState(true);
 
   // The model fetch failed.
   SetModelFetchResponse("blamodel", false /* failure */);
@@ -312,7 +316,7 @@ TEST_F(ClientSideDetectionServiceTest, FetchModelTest) {
 TEST_F(ClientSideDetectionServiceTest, ServiceObjectDeletedBeforeCallbackDone) {
   SetModelFetchResponse("bogus model", true /* success */);
   csd_service_.reset(ClientSideDetectionService::Create(NULL));
-  csd_service_->SetEnabled(true);
+  csd_service_->SetEnabledAndRefreshState(true);
   EXPECT_TRUE(csd_service_.get() != NULL);
   // We delete the client-side detection service class even though the callbacks
   // haven't run yet.
@@ -325,7 +329,7 @@ TEST_F(ClientSideDetectionServiceTest, ServiceObjectDeletedBeforeCallbackDone) {
 TEST_F(ClientSideDetectionServiceTest, SendClientReportPhishingRequest) {
   SetModelFetchResponse("bogus model", true /* success */);
   csd_service_.reset(ClientSideDetectionService::Create(NULL));
-  csd_service_->SetEnabled(true);
+  csd_service_->SetEnabledAndRefreshState(true);
 
   GURL url("http://a.com/");
   float score = 0.4f;  // Some random client score.
@@ -593,7 +597,7 @@ TEST_F(ClientSideDetectionServiceTest, ModelHasValidHashIds) {
   EXPECT_TRUE(ClientSideDetectionService::ModelHasValidHashIds(model));
 }
 
-TEST_F(ClientSideDetectionServiceTest, SetEnabled) {
+TEST_F(ClientSideDetectionServiceTest, SetEnabledAndRefreshState) {
   // Check that the model isn't downloaded until the service is enabled.
   csd_service_.reset(ClientSideDetectionService::Create(NULL));
   EXPECT_FALSE(csd_service_->enabled());
@@ -618,24 +622,24 @@ TEST_F(ClientSideDetectionServiceTest, SetEnabled) {
   EXPECT_CALL(*service, EndFetchModel(
       ClientSideDetectionService::MODEL_SUCCESS))
       .WillOnce(QuitCurrentMessageLoop());
-  csd_service_->SetEnabled(true);
+  csd_service_->SetEnabledAndRefreshState(true);
   EXPECT_TRUE(csd_service_->model_fetcher_.get() != NULL);
   msg_loop_.Run();  // EndFetchModel will quit the message loop.
   Mock::VerifyAndClearExpectations(service);
 
   // Check that enabling again doesn't request the model.
-  csd_service_->SetEnabled(true);
+  csd_service_->SetEnabledAndRefreshState(true);
   // No calls expected.
   Mock::VerifyAndClearExpectations(service);
 
   // Check that disabling the service cancels pending requests.
   EXPECT_CALL(*service, ScheduleFetchModel(_))
       .WillOnce(Invoke(service, &MockClientSideDetectionService::Schedule));
-  csd_service_->SetEnabled(false);
-  csd_service_->SetEnabled(true);
+  csd_service_->SetEnabledAndRefreshState(false);
+  csd_service_->SetEnabledAndRefreshState(true);
   Mock::VerifyAndClearExpectations(service);
   EXPECT_TRUE(csd_service_->model_fetcher_.get() != NULL);
-  csd_service_->SetEnabled(false);
+  csd_service_->SetEnabledAndRefreshState(false);
   EXPECT_TRUE(csd_service_->model_fetcher_.get() == NULL);
   msg_loop_.RunAllPending();
   // No calls expected.
@@ -655,7 +659,7 @@ TEST_F(ClientSideDetectionServiceTest, SetEnabled) {
   EXPECT_CALL(*service, EndFetchModel(
       ClientSideDetectionService::MODEL_NOT_CHANGED))
       .WillOnce(Invoke(service, &MockClientSideDetectionService::Disable));
-  csd_service_->SetEnabled(true);
+  csd_service_->SetEnabledAndRefreshState(true);
   EXPECT_FALSE(SendClientReportPhishingRequest(GURL("http://a.com/"), 0.4f));
   Mock::VerifyAndClearExpectations(service);
 }

@@ -15,16 +15,17 @@ class ManageProfileHandler : public OptionsPageUIHandler {
   virtual ~ManageProfileHandler();
 
   // OptionsPageUIHandler:
-  virtual void GetLocalizedValues(base::DictionaryValue* localized_strings);
-  virtual void Initialize();
+  virtual void GetLocalizedValues(
+      base::DictionaryValue* localized_strings) OVERRIDE;
+  virtual void Initialize() OVERRIDE;
 
   // WebUIMessageHandler:
-  virtual void RegisterMessages();
+  virtual void RegisterMessages() OVERRIDE;
 
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Callback for the "requestDefaultProfileIcons" message.
@@ -64,6 +65,16 @@ class ManageProfileHandler : public OptionsPageUIHandler {
   //     isCurrentProfile: false,
   //   };
   void RequestProfileInfo(const base::ListValue* args);
+
+  // Callback for the 'profileIconSelectionChanged' message. Used to update the
+  // name in the manager profile dialog based on the selected icon.
+  void ProfileIconSelectionChanged(const base::ListValue* args);
+
+  // Send all profile icons to the overlay.
+  void SendProfileIcons();
+
+  // URL for the current profile's GAIA picture.
+  std::string gaia_picture_url_;
 
   DISALLOW_COPY_AND_ASSIGN(ManageProfileHandler);
 };

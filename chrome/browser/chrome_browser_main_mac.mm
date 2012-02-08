@@ -19,8 +19,8 @@
 #include "chrome/browser/metrics/metrics_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/common/main_function_params.h"
-#include "content/common/result_codes.h"
+#include "content/public/common/main_function_params.h"
+#include "content/public/common/result_codes.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -37,31 +37,16 @@ void WarnAboutMinimumSystemRequirements() {
   // Nothing to check for on Mac right now.
 }
 
-void ShowMissingLocaleMessageBox() {
-  // Not called on Mac because we load the locale files differently.
-}
-
 // From browser_main_win.h, stubs until we figure out the right thing...
 
 int DoUninstallTasks(bool chrome_still_running) {
   return content::RESULT_CODE_NORMAL_EXIT;
 }
 
-int HandleIconsCommands(const CommandLine& parsed_command_line) {
-  return 0;
-}
-
-bool CheckMachineLevelInstall() {
-  return false;
-}
-
-void PrepareRestartOnCrashEnviroment(const CommandLine& parsed_command_line) {
-}
-
 // ChromeBrowserMainPartsMac ---------------------------------------------------
 
 ChromeBrowserMainPartsMac::ChromeBrowserMainPartsMac(
-    const MainFunctionParams& parameters)
+    const content::MainFunctionParams& parameters)
     : ChromeBrowserMainPartsPosix(parameters) {
 }
 
@@ -126,6 +111,11 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   // |-application:openFiles:|, since we already handle them directly.
   [[NSUserDefaults standardUserDefaults]
       setObject:@"NO" forKey:@"NSTreatUnknownArgumentsAsOpen"];
+}
+
+void ChromeBrowserMainPartsMac::ShowMissingLocaleMessageBox() {
+  // Not called on Mac because we load the locale files differently.
+  NOTREACHED();
 }
 
 void ChromeBrowserMainPartsMac::DidEndMainMessageLoop() {

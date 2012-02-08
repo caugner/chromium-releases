@@ -21,9 +21,11 @@
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "webkit/glue/password_form.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -50,9 +52,10 @@ PasswordChangeProcessor::~PasswordChangeProcessor() {
   DCHECK(expected_loop_ == MessageLoop::current());
 }
 
-void PasswordChangeProcessor::Observe(int type,
-                                      const NotificationSource& source,
-                                      const NotificationDetails& details) {
+void PasswordChangeProcessor::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(expected_loop_ == MessageLoop::current());
   DCHECK(chrome::NOTIFICATION_LOGINS_CHANGED == type);
   if (!observing_)
@@ -71,23 +74,43 @@ void PasswordChangeProcessor::Observe(int type,
   }
 
   PasswordStoreChangeList* changes =
-      Details<PasswordStoreChangeList>(details).ptr();
+      content::Details<PasswordStoreChangeList>(details).ptr();
   for (PasswordStoreChangeList::iterator change = changes->begin();
        change != changes->end(); ++change) {
     std::string tag = PasswordModelAssociator::MakeTag(change->form());
     switch (change->type()) {
       case PasswordStoreChange::ADD: {
         sync_api::WriteNode sync_node(&trans);
-        if (!sync_node.InitUniqueByCreation(syncable::PASSWORDS,
-                                            password_root, tag)) {
-          error_handler()->OnUnrecoverableError(FROM_HERE,
-              "Failed to create password sync node.");
-          return;
+        if (sync_node.InitUniqueByCreation(syncable::PASSWORDS,
+                                           password_root, tag)) {
+          PasswordModelAssociator::WriteToSyncNode(change->form(), &sync_node);
+          model_associator_->Associate(&tag, sync_node.GetId());
+          break;
+        } else {
+          // Maybe this node already exists and we should update it.
+          //
+          // If the PasswordStore is told to add an entry but an entry with the
+          // same name already exists, it will overwrite it.  It will report
+          // this change as an ADD rather than an UPDATE.  Ideally, it would be
+          // able to tell us what action was actually taken, rather than what
+          // action was requested.  If it did so, we wouldn't need to fall back
+          // to trying to update an existing password node here.
+          //
+          // TODO: Remove this.  See crbug.com/87855.
+          int64 sync_id = model_associator_->GetSyncIdFromChromeId(tag);
+          if (sync_api::kInvalidId == sync_id) {
+            error_handler()->OnUnrecoverableError(FROM_HERE,
+                "Unable to create or retrieve password node");
+            return;
+          }
+          if (!sync_node.InitByIdLookup(sync_id)) {
+            error_handler()->OnUnrecoverableError(FROM_HERE,
+                "Unable to create or retrieve password node");
+            return;
+          }
+          PasswordModelAssociator::WriteToSyncNode(change->form(), &sync_node);
+          break;
         }
-
-        PasswordModelAssociator::WriteToSyncNode(change->form(), &sync_node);
-        model_associator_->Associate(&tag, sync_node.GetId());
-        break;
       }
       case PasswordStoreChange::UPDATE: {
         sync_api::WriteNode sync_node(&trans);
@@ -196,7 +219,7 @@ void PasswordChangeProcessor::CommitChangesFromSyncModel() {
   DCHECK(expected_loop_ == MessageLoop::current());
   if (!running())
     return;
-  StopObserving();
+  ScopedStopObserving<PasswordChangeProcessor> stop_observing(this);
 
   if (!model_associator_->WriteToPasswordStore(&new_passwords_,
                                                &updated_passwords_,
@@ -208,8 +231,6 @@ void PasswordChangeProcessor::CommitChangesFromSyncModel() {
   deleted_passwords_.clear();
   new_passwords_.clear();
   updated_passwords_.clear();
-
-  StartObserving();
 }
 
 void PasswordChangeProcessor::StartImpl(Profile* profile) {
@@ -227,14 +248,15 @@ void PasswordChangeProcessor::StartObserving() {
   DCHECK(expected_loop_ == MessageLoop::current());
   notification_registrar_.Add(this,
                               chrome::NOTIFICATION_LOGINS_CHANGED,
-                              Source<PasswordStore>(password_store_));
+                              content::Source<PasswordStore>(password_store_));
 }
 
 void PasswordChangeProcessor::StopObserving() {
   DCHECK(expected_loop_ == MessageLoop::current());
-  notification_registrar_.Remove(this,
-                                 chrome::NOTIFICATION_LOGINS_CHANGED,
-                                 Source<PasswordStore>(password_store_));
+  notification_registrar_.Remove(
+      this,
+      chrome::NOTIFICATION_LOGINS_CHANGED,
+      content::Source<PasswordStore>(password_store_));
 }
 
 }  // namespace browser_sync

@@ -20,13 +20,10 @@
 #include "base/test/test_reg_util_win.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_comptr.h"
-
+#include "chrome_frame/chrome_tab.h"
 #include "chrome_frame/test/simulate_input.h"
 #include "chrome_frame/test_utils.h"
 #include "chrome_frame/utils.h"
-
-// Include without path to make GYP build see it.
-#include "chrome_tab.h"  // NOLINT
 
 #include "gtest/gtest.h"
 
@@ -193,9 +190,14 @@ class TimedMsgLoop {
     loop_.MessageLoop::Run();
   }
 
-  void PostDelayedTask(
-    const tracked_objects::Location& from_here, Task* task, int64 delay_ms) {
-      loop_.PostDelayedTask(from_here, task, delay_ms);
+  void PostTask(const tracked_objects::Location& from_here,
+                const base::Closure& task) {
+    loop_.PostTask(from_here, task);
+  }
+
+  void PostDelayedTask(const tracked_objects::Location& from_here,
+                       const base::Closure& task, int64 delay_ms) {
+    loop_.PostDelayedTask(from_here, task, delay_ms);
   }
 
   void Quit() {
@@ -204,7 +206,8 @@ class TimedMsgLoop {
 
   void QuitAfter(int seconds) {
     quit_loop_invoked_ = true;
-    loop_.PostDelayedTask(FROM_HERE, new MessageLoop::QuitTask, 1000 * seconds);
+    loop_.PostDelayedTask(
+        FROM_HERE, MessageLoop::QuitClosure(), 1000 * seconds);
   }
 
   bool WasTimedOut() const {

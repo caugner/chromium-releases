@@ -17,7 +17,6 @@
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../build/temp_gyp/googleurl.gyp:googleurl',
-        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
         '../third_party/openmax/openmax.gyp:il',
         '../ui/ui.gyp:ui',
       ],
@@ -33,6 +32,7 @@
         'audio/audio_io.h',
         'audio/audio_input_controller.cc',
         'audio/audio_input_controller.h',
+        'audio/audio_device_name.cc',
         'audio/audio_device_name.h',
         'audio/audio_manager.cc',
         'audio/audio_manager.h',
@@ -48,6 +48,10 @@
         'audio/audio_parameters.h',
         'audio/audio_util.cc',
         'audio/audio_util.h',
+        'audio/android/audio_manager_android.cc',
+        'audio/android/audio_manager_android.h',
+        'audio/android/audio_track_output_android.cc',
+        'audio/android/audio_track_output_android.h',
         'audio/fake_audio_input_stream.cc',
         'audio/fake_audio_input_stream.h',
         'audio/fake_audio_output_stream.cc',
@@ -62,8 +66,6 @@
         'audio/linux/alsa_util.h',
         'audio/linux/alsa_wrapper.cc',
         'audio/linux/alsa_wrapper.h',
-        'audio/linux/pulse_output.cc',
-        'audio/linux/pulse_output.h',
         'audio/openbsd/audio_manager_openbsd.cc',
         'audio/openbsd/audio_manager_openbsd.h',
         'audio/mac/audio_input_mac.cc',
@@ -76,10 +78,20 @@
         'audio/mac/audio_manager_mac.h',
         'audio/mac/audio_output_mac.cc',
         'audio/mac/audio_output_mac.h',
+        'audio/pulse/pulse_output.cc',
+        'audio/pulse/pulse_output.h',
         'audio/simple_sources.cc',
         'audio/simple_sources.h',
-        'audio/win/audio_manager_win.h',
+        'audio/win/audio_low_latency_input_win.cc',
+        'audio/win/audio_low_latency_input_win.h',
+        'audio/win/audio_low_latency_output_win.cc',
+        'audio/win/audio_low_latency_output_win.h',
         'audio/win/audio_manager_win.cc',
+        'audio/win/audio_manager_win.h',
+        'audio/win/avrt_wrapper_win.cc',
+        'audio/win/avrt_wrapper_win.h',
+        'audio/win/device_enumeration_win.cc',
+        'audio/win/device_enumeration_win.h',
         'audio/win/wavein_input_win.cc',
         'audio/win/wavein_input_win.h',
         'audio/win/waveout_output_win.cc',
@@ -109,6 +121,8 @@
         'base/demuxer_stream.h',
         'base/djb2.cc',
         'base/djb2.h',
+        'base/download_rate_monitor.cc',
+        'base/download_rate_monitor.h',
         'base/filter_collection.cc',
         'base/filter_collection.h',
         'base/filter_factories.cc',
@@ -119,6 +133,7 @@
         'base/h264_bitstream_converter.cc',
         'base/h264_bitstream_converter.h',
         'base/media.h',
+        'base/media_android.cc',
         'base/media_export.h',
         'base/media_log.cc',
         'base/media_log.h',
@@ -251,10 +266,12 @@
       'conditions': [
         # Android doesn't use ffmpeg, so make the dependency conditional
         # and exclude the sources which depend on ffmpeg.
-        ['OS=="android"', {
-          'dependencies!': [
+        ['OS != "android"', {
+          'dependencies': [
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
           ],
+        }],
+        ['OS == "android"', {
           'sources!': [
             'base/media_posix.cc',
             'ffmpeg/ffmpeg_common.cc',
@@ -286,38 +303,27 @@
             'video/ffmpeg_video_decode_engine.h',
           ],
         }],
+        # The below 'android' condition were added temporarily and should be
+        # removed in downstream, because there is no Java environment setup in
+        # upstream yet.
+        ['OS == "android"', {
+          'sources!':[
+            'audio/android/audio_track_output_android.cc',
+          ],
+          'sources':[
+            'audio/android/audio_track_output_stub_android.cc',
+          ],
+        }],
         ['OS=="linux" or OS=="freebsd" or OS=="solaris"', {
           'link_settings': {
             'libraries': [
               '-lasound',
             ],
           },
-          'conditions': [
-            ['OS=="linux"', {
-              'conditions': [
-                ['use_pulseaudio == 1', {
-                  'link_settings': {
-                    'libraries': [
-                      '-lpulse',
-                    ],
-                  },
-                  'defines': [
-                    'USE_PULSEAUDIO',
-                  ],
-                }, {  # else: use_pulseaudio == 0
-                  'sources!': [
-                    'audio/linux/pulse_output.cc',
-                    'audio/linux/pulse_output.h',
-                  ],
-                }],
-              ],
-            }],
-          ],
         }],
         ['OS=="openbsd"', {
-          'sources/': [ ['exclude', 'alsa_' ],
-                        ['exclude', 'audio_manager_linux' ],
-                        ['exclude', '\\.mm?$' ] ],
+          'sources/': [ ['exclude', '/alsa_' ],
+                        ['exclude', '/audio_manager_linux' ] ],
           'link_settings': {
             'libraries': [
             ],
@@ -330,6 +336,29 @@
           ],
         }],
         ['os_posix == 1', {
+          'conditions': [
+            ['use_pulseaudio == 1', {
+              'cflags': [
+                '<!@(pkg-config --cflags libpulse)',
+              ],
+              'link_settings': {
+                'libraries': [
+                  '<!@(pkg-config --libs-only-l libpulse)',
+                ],
+              },
+              'defines': [
+                'USE_PULSEAUDIO',
+              ],
+            }, {  # else: use_pulseaudio == 0
+              'sources!': [
+                'audio/pulse/pulse_output.cc',
+                'audio/pulse/pulse_output.h',
+              ],
+            }],
+          ],
+        }],
+        ['os_posix == 1 and OS != "android"', {
+          # Video capture isn't supported in Android yet.
           'sources!': [
             'video/capture/video_capture_device_dummy.cc',
             'video/capture/video_capture_device_dummy.h',
@@ -348,6 +377,8 @@
         }],
         ['OS=="win"', {
           'sources!': [
+            'audio/pulse/pulse_output.cc',
+            'audio/pulse/pulse_output.h',
             'video/capture/video_capture_device_dummy.cc',
             'video/capture/video_capture_device_dummy.h',
           ],
@@ -440,10 +471,16 @@
             'base/simd/scale_yuv_to_rgb_sse2_x64.asm',
           ],
         }],
-        [ 'os_posix == 1 and OS != "mac"', {
+        [ 'os_posix == 1 and OS != "mac" and OS != "android"', {
           'cflags': [
             '-msse2',
             '-msse3',
+            '-mssse3',
+          ],
+        }],
+        [ 'OS == "openbsd"', {
+          # OpenBSD's gcc (4.2.1) does not support -mssse3
+          'cflags!': [
             '-mssse3',
           ],
         }],
@@ -479,7 +516,7 @@
             ],
           },
         }],
-        [ 'OS=="linux"', {
+        [ 'os_posix==1 and OS!="mac"', {
           'variables': {
             'conditions': [
               [ 'target_arch=="ia32"', {
@@ -538,7 +575,6 @@
         '../base/base.gyp:test_support_base',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
-        '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
         '../ui/ui.gyp:ui',
       ],
       'sources': [
@@ -553,11 +589,14 @@
         'audio/mac/audio_low_latency_input_mac_unittest.cc',
         'audio/mac/audio_output_mac_unittest.cc',
         'audio/simple_sources_unittest.cc',
+        'audio/win/audio_low_latency_input_win_unittest.cc',
+        'audio/win/audio_low_latency_output_win_unittest.cc',
         'audio/win/audio_output_win_unittest.cc',
         'base/clock_unittest.cc',
         'base/composite_filter_unittest.cc',
         'base/data_buffer_unittest.cc',
         'base/djb2_unittest.cc',
+        'base/download_rate_monitor_unittest.cc',
         'base/filter_collection_unittest.cc',
         'base/h264_bitstream_converter_unittest.cc',
         'base/mock_reader.h',
@@ -585,7 +624,6 @@
         'filters/file_data_source_unittest.cc',
         'filters/video_renderer_base_unittest.cc',
         'video/capture/video_capture_device_unittest.cc',
-        'video/ffmpeg_video_decode_engine_unittest.cc',
         'webm/cluster_builder.cc',
         'webm/cluster_builder.h',
       ],
@@ -599,11 +637,15 @@
             }],
           ],
         }],
-        ['OS=="android"', {
-          'dependencies!': [
+        ['OS != "android"', {
+          'dependencies': [
             '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
           ],
+        }],
+        ['OS == "android"', {
           'sources!': [
+            'base/test_data_util.cc',
+            'base/test_data_util.h',
             'ffmpeg/ffmpeg_common_unittest.cc',
             'filters/ffmpeg_audio_decoder_unittest.cc',
             'filters/bitstream_converter_unittest.cc',
@@ -612,7 +654,6 @@
             'filters/ffmpeg_glue_unittest.cc',
             'filters/ffmpeg_h264_bitstream_converter_unittest.cc',
             'filters/ffmpeg_video_decoder_unittest.cc',
-            'video/ffmpeg_video_decode_engine_unittest.cc',
           ],
         }],
         [ 'target_arch=="ia32" or target_arch=="x64"', {
@@ -640,8 +681,6 @@
         'base/mock_filter_host.h',
         'base/mock_filters.cc',
         'base/mock_filters.h',
-        'video/video_mock_objects.cc',
-        'video/video_mock_objects.h',
       ],
     },
     {
@@ -784,7 +823,7 @@
         },
       ],
     }],
-    ['os_posix == 1 and OS != "mac"', {
+    ['os_posix == 1 and OS != "mac" and OS != "android"', {
       'targets': [
         {
           'target_name': 'player_x11',

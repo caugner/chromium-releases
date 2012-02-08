@@ -7,20 +7,23 @@
 #pragma once
 
 #include <string>
-#include "build/build_config.h"
 
-#if defined(OS_WIN)
+#include "build/build_config.h"
 #include "base/file_path.h"
 #include "base/message_loop_proxy.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "net/base/file_stream.h"
 #include "net/url_request/url_request.h"
 #include "ui/gfx/native_widget_types.h"
 
+namespace net {
+class URLRequestContextGetter;
+}
+
 // The PluginDownloadUrlHelper is used to handle one download URL request
 // from the plugin. Each download request is handled by a new instance
 // of this class.
-class PluginDownloadUrlHelper : public URLFetcher::Delegate {
+class PluginDownloadUrlHelper : public content::URLFetcherDelegate {
  public:
   // The delegate receives notification about the status of downloads
   // initiated.
@@ -40,20 +43,14 @@ class PluginDownloadUrlHelper : public URLFetcher::Delegate {
   void InitiateDownload(net::URLRequestContextGetter* request_context,
                         base::MessageLoopProxy* file_thread_proxy);
 
-  // URLFetcher::Delegate
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data) {}
-  virtual void OnURLFetchComplete(const URLFetcher* source);
+  // content::URLFetcherDelegate
+  virtual void OnURLFetchComplete(const content::URLFetcher* source);
 
   void OnDownloadCompleted(net::URLRequest* request);
 
  protected:
   // The download file request initiated by the plugin.
-  scoped_ptr<URLFetcher> download_file_fetcher_;
+  scoped_ptr<content::URLFetcher> download_file_fetcher_;
   // TODO(port): this comment doesn't describe the situation on Posix.
   // The window handle for sending the WM_COPYDATA notification,
   // indicating that the download completed.
@@ -65,7 +62,5 @@ class PluginDownloadUrlHelper : public URLFetcher::Delegate {
 
   DISALLOW_COPY_AND_ASSIGN(PluginDownloadUrlHelper);
 };
-
-#endif  // OS_WIN
 
 #endif  // CHROME_BROWSER_PLUGIN_DOWNLOAD_HELPER_H_

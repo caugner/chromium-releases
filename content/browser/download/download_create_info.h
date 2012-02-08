@@ -13,7 +13,8 @@
 #include "base/file_path.h"
 #include "base/time.h"
 #include "content/browser/download/download_file.h"
-#include "content/browser/download/download_request_handle.h"
+#include "content/browser/download/download_id.h"
+#include "content/browser/download/download_types.h"
 #include "content/common/content_export.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
@@ -27,7 +28,7 @@ struct CONTENT_EXPORT DownloadCreateInfo {
                      int64 received_bytes,
                      int64 total_bytes,
                      int32 state,
-                     int32 download_id,
+                     const DownloadId& download_id,
                      bool has_user_gesture,
                      content::PageTransition transition_type);
   DownloadCreateInfo();
@@ -66,16 +67,12 @@ struct CONTENT_EXPORT DownloadCreateInfo {
   int32 state;
 
   // The (per-session) ID of the download.
-  int32 download_id;
+  DownloadId download_id;
 
   // True if the download was initiated by user action.
   bool has_user_gesture;
 
   content::PageTransition transition_type;
-
-  // The handle to the download request information.  Used for operations
-  // outside the download system.
-  DownloadRequestHandle request_handle;
 
   // The handle of the download in the history database.
   int64 db_handle;
@@ -106,6 +103,10 @@ struct CONTENT_EXPORT DownloadCreateInfo {
 
   // The download file save info.
   DownloadSaveInfo save_info;
+
+  // The remote IP address where the download was fetched from.  Copied from
+  // UrlRequest::GetSocketAddress().
+  std::string remote_address;
 };
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_CREATE_INFO_H_

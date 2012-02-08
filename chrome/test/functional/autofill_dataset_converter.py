@@ -1,5 +1,4 @@
-#!/usr/bin/python
-
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -167,10 +166,8 @@ class DatasetConverter(object):
           if output_file:
             output_file.write(output_line)
             output_file.write(os.linesep)
-          self._logger.info('%d: %s' % (i, line.encode(sys.stdout.encoding,
-                                                       'ignore')))
-          self._logger.info('\tconverted to: %s' %
-                            output_line.encode(sys.stdout.encoding, 'ignore'))
+          self._logger.info('%d: %s' % (i, line.encode('UTF-8')))
+          self._logger.info('\tconverted to: %s' % output_line.encode('UTF-8'))
       if output_file:
         output_file.write(']')
         output_file.write(os.linesep)
@@ -183,7 +180,6 @@ class DatasetConverter(object):
 
 
 def main():
-  # Command line options.
   from optparse import OptionParser
   input_filename = os.path.join('..', 'data', 'autofill', 'dataset.txt')
   output_filename = os.path.join('..', 'data', 'autofill',
@@ -208,7 +204,7 @@ def main():
   (options, args) = parser.parse_args()
   if args:
     parser.print_help()
-    sys.exit(1)
+    return 1
   if not options.verbose:
     options.logging_level = None
   if options.verbose and not options.logging_level:
@@ -224,6 +220,8 @@ def main():
   c = DatasetConverter(options.input_filename, options.output_filename,
                        options.logging_level)
   c.Convert()
+  return 0
+
 
 if __name__ == '__main__':
-  main()
+  sys.exit(main())

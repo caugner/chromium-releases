@@ -4,18 +4,20 @@
 
 #include "chrome/browser/browsing_data_local_storage_helper.h"
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "content/public/browser/browser_thread.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/glue/webkit_glue.h"
 
+using content::BrowserThread;
 using WebKit::WebSecurityOrigin;
 
 BrowsingDataLocalStorageHelper::LocalStorageInfo::LocalStorageInfo()
@@ -47,7 +49,6 @@ BrowsingDataLocalStorageHelper::LocalStorageInfo::~LocalStorageInfo() {}
 BrowsingDataLocalStorageHelper::BrowsingDataLocalStorageHelper(
     Profile* profile)
     : profile_(profile),
-      completion_callback_(NULL),
       is_fetching_(false) {
   DCHECK(profile_);
 }
@@ -56,23 +57,23 @@ BrowsingDataLocalStorageHelper::~BrowsingDataLocalStorageHelper() {
 }
 
 void BrowsingDataLocalStorageHelper::StartFetching(
-    Callback1<const std::list<LocalStorageInfo>& >::Type* callback) {
+    const base::Callback<void(const std::list<LocalStorageInfo>&)>& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!is_fetching_);
-  DCHECK(callback);
+  DCHECK_EQ(false, callback.is_null());
+
   is_fetching_ = true;
-  completion_callback_.reset(callback);
+  completion_callback_ = callback;
   BrowserThread::PostTask(
       BrowserThread::WEBKIT, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &BrowsingDataLocalStorageHelper::
-              FetchLocalStorageInfoInWebKitThread));
+      base::Bind(
+          &BrowsingDataLocalStorageHelper::FetchLocalStorageInfoInWebKitThread,
+          this));
 }
 
 void BrowsingDataLocalStorageHelper::CancelNotification() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  completion_callback_.reset(NULL);
+  completion_callback_.Reset();
 }
 
 void BrowsingDataLocalStorageHelper::DeleteLocalStorageFile(
@@ -80,11 +81,9 @@ void BrowsingDataLocalStorageHelper::DeleteLocalStorageFile(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   BrowserThread::PostTask(
       BrowserThread::WEBKIT, FROM_HERE,
-       NewRunnableMethod(
-           this,
-           &BrowsingDataLocalStorageHelper::
-              DeleteLocalStorageFileInWebKitThread,
-           file_path));
+      base::Bind(
+          &BrowsingDataLocalStorageHelper::DeleteLocalStorageFileInWebKitThread,
+          this, file_path));
 }
 
 void BrowsingDataLocalStorageHelper::FetchLocalStorageInfoInWebKitThread() {
@@ -122,8 +121,7 @@ void BrowsingDataLocalStorageHelper::FetchLocalStorageInfoInWebKitThread() {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &BrowsingDataLocalStorageHelper::NotifyInUIThread));
+      base::Bind(&BrowsingDataLocalStorageHelper::NotifyInUIThread, this));
 }
 
 void BrowsingDataLocalStorageHelper::NotifyInUIThread() {
@@ -131,9 +129,9 @@ void BrowsingDataLocalStorageHelper::NotifyInUIThread() {
   DCHECK(is_fetching_);
   // Note: completion_callback_ mutates only in the UI thread, so it's safe to
   // test it here.
-  if (completion_callback_ != NULL) {
-    completion_callback_->Run(local_storage_info_);
-    completion_callback_.reset();
+  if (!completion_callback_.is_null()) {
+    completion_callback_.Run(local_storage_info_);
+    completion_callback_.Reset();
   }
   is_fetching_ = false;
 }
@@ -181,18 +179,17 @@ bool CannedBrowsingDataLocalStorageHelper::empty() const {
 }
 
 void CannedBrowsingDataLocalStorageHelper::StartFetching(
-    Callback1<const std::list<LocalStorageInfo>& >::Type* callback) {
+    const base::Callback<void(const std::list<LocalStorageInfo>&)>& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!is_fetching_);
-  DCHECK(callback);
+  DCHECK_EQ(false, callback.is_null());
+
   is_fetching_ = true;
-  completion_callback_.reset(callback);
+  completion_callback_ = callback;
   BrowserThread::PostTask(
       BrowserThread::WEBKIT, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &CannedBrowsingDataLocalStorageHelper::
-              ConvertPendingInfoInWebKitThread));
+      base::Bind(&CannedBrowsingDataLocalStorageHelper::
+          ConvertPendingInfoInWebKitThread, this));
 }
 
 CannedBrowsingDataLocalStorageHelper::~CannedBrowsingDataLocalStorageHelper() {}
@@ -233,6 +230,6 @@ void CannedBrowsingDataLocalStorageHelper::ConvertPendingInfoInWebKitThread() {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &CannedBrowsingDataLocalStorageHelper::NotifyInUIThread));
+      base::Bind(&CannedBrowsingDataLocalStorageHelper::NotifyInUIThread,
+                 this));
 }

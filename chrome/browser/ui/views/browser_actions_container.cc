@@ -29,7 +29,7 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -43,14 +43,14 @@
 #include "ui/base/theme_provider.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/controls/resize_area.h"
-#include "views/drag_utils.h"
-#include "views/metrics.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/resize_area.h"
+#include "ui/views/drag_utils.h"
+#include "ui/views/metrics.h"
 
 // Horizontal spacing between most items in the container, as well as after the
 // last item or chevron (if visible).
@@ -80,7 +80,7 @@ BrowserActionButton::BrowserActionButton(const Extension* extension,
   // should call UpdateState() after creation.
 
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
-                 Source<ExtensionAction>(browser_action_));
+                 content::Source<ExtensionAction>(browser_action_));
 }
 
 void BrowserActionButton::Destroy() {
@@ -190,8 +190,8 @@ GURL BrowserActionButton::GetPopupUrl() {
 }
 
 void BrowserActionButton::Observe(int type,
-                                  const NotificationSource& source,
-                                  const NotificationDetails& details) {
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED);
   UpdateState();
   // The browser action may have become visible/hidden so we need to make
@@ -391,6 +391,8 @@ BrowserActionsContainer::~BrowserActionsContainer() {
   if (model_)
     model_->RemoveObserver(this);
   StopShowFolderDropMenuTimer();
+  if (popup_)
+    popup_->GetWidget()->RemoveObserver(this);
   HidePopup();
   DeleteBrowserActionViews();
 }
@@ -509,17 +511,11 @@ void BrowserActionsContainer::OnBrowserActionExecuted(
   // since buttons can be activated from the overflow menu (chevron). In that
   // case we show the popup as originating from the chevron.
   View* reference_view = button->parent()->IsVisible() ? button : chevron_;
-  gfx::Point origin;
-  View::ConvertPointToScreen(reference_view, &origin);
-  gfx::Rect rect = reference_view->bounds();
-  rect.set_origin(origin);
-
   views::BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
       views::BubbleBorder::TOP_LEFT : views::BubbleBorder::TOP_RIGHT;
-
-  popup_ = ExtensionPopup::Show(button->GetPopupUrl(), browser_, rect,
-                                arrow_location, inspect_with_devtools,
-                                this);
+  popup_ = ExtensionPopup::ShowPopup(button->GetPopupUrl(), browser_,
+               reference_view, arrow_location, inspect_with_devtools);
+  popup_->GetWidget()->AddObserver(this);
   popup_button_ = button;
   popup_button_->SetButtonPushed();
 }
@@ -797,9 +793,9 @@ void BrowserActionsContainer::InspectPopup(ExtensionAction* action) {
   OnBrowserActionExecuted(GetBrowserActionView(action)->button(), true);
 }
 
-void BrowserActionsContainer::ExtensionPopupIsClosing(ExtensionPopup* popup) {
-  // ExtensionPopup is ref-counted, so we don't need to delete it.
-  DCHECK_EQ(popup_, popup);
+void BrowserActionsContainer::OnWidgetClosing(views::Widget* widget) {
+  DCHECK_EQ(popup_->GetWidget(), widget);
+  popup_->GetWidget()->RemoveObserver(this);
   popup_ = NULL;
   popup_button_->SetButtonNotPushed();
   popup_button_ = NULL;
@@ -817,7 +813,7 @@ void BrowserActionsContainer::MoveBrowserAction(const std::string& extension_id,
 
 void BrowserActionsContainer::HidePopup() {
   if (popup_)
-    popup_->Close();
+    popup_->GetWidget()->Close();
 }
 
 void BrowserActionsContainer::TestExecuteBrowserAction(int index) {
@@ -845,9 +841,7 @@ void BrowserActionsContainer::OnPaint(gfx::Canvas* canvas) {
 
     // Color of the drop indicator.
     static const SkColor kDropIndicatorColor = SK_ColorBLACK;
-    canvas->FillRectInt(kDropIndicatorColor, indicator_bounds.x(),
-                        indicator_bounds.y(), indicator_bounds.width(),
-                        indicator_bounds.height());
+    canvas->FillRect(kDropIndicatorColor, indicator_bounds);
   }
 }
 

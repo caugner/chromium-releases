@@ -5,6 +5,7 @@
 #include "content/browser/renderer_host/web_input_event_aura.h"
 
 #include "base/event_types.h"
+#include "base/logging.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/win/WebInputEventFactory.h"
 
 namespace content {
@@ -20,12 +21,26 @@ WebKit::WebMouseEvent MakeUntranslatedWebMouseEventFromNativeEvent(
                                                   native_event.lParam);
 }
 
+WebKit::WebMouseWheelEvent MakeUntranslatedWebMouseWheelEventFromNativeEvent(
+    base::NativeEvent native_event) {
+  return WebKit::WebInputEventFactory::mouseWheelEvent(native_event.hwnd,
+                                                       native_event.message,
+                                                       native_event.wParam,
+                                                       native_event.lParam);
+}
+
 WebKit::WebKeyboardEvent MakeWebKeyboardEventFromNativeEvent(
     base::NativeEvent native_event) {
   return WebKit::WebInputEventFactory::keyboardEvent(native_event.hwnd,
                                                      native_event.message,
                                                      native_event.wParam,
                                                      native_event.lParam);
+}
+
+WebKit::WebTouchPoint* UpdateWebTouchEventFromNativeEvent(
+    base::NativeEvent native_event, WebKit::WebTouchEvent* web_event) {
+  NOTIMPLEMENTED();
+  return NULL;
 }
 
 }  // namespace content

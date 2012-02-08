@@ -17,11 +17,13 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/importer/firefox2_importer.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "grit/generated_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/codec/png_codec.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -135,8 +137,9 @@ class BookmarksObserver : public BookmarksExportObserver {
 // way of bookmark_html_writer, then using the importer to read it back in.
 TEST_F(BookmarkHTMLWriterTest, Test) {
   MessageLoop message_loop;
-  BrowserThread fake_ui_thread(BrowserThread::UI, &message_loop);
-  BrowserThread fake_file_thread(BrowserThread::FILE, &message_loop);
+  content::TestBrowserThread fake_ui_thread(BrowserThread::UI, &message_loop);
+  content::TestBrowserThread fake_file_thread(BrowserThread::FILE,
+                                              &message_loop);
 
   TestingProfile profile;
   profile.CreateHistoryService(true, false);
@@ -166,7 +169,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   //   F3
   //     F4
   //       url1
-  // Synced
+  // Mobile
   //   url1
   string16 f1_title = ASCIIToUTF16("F\"&;<1\"");
   string16 f2_title = ASCIIToUTF16("F2");
@@ -205,7 +208,7 @@ TEST_F(BookmarkHTMLWriterTest, Test) {
   model->AddURLWithCreationTime(f4, 0, url1_title, url1, t1);
   model->AddURLWithCreationTime(model->bookmark_bar_node(), 2, url4_title,
                                 url4, t4);
-  model->AddURLWithCreationTime(model->synced_node(), 0, url1_title, url1, t1);
+  model->AddURLWithCreationTime(model->mobile_node(), 0, url1_title, url1, t1);
 
   // Write to a temp file.
   BookmarksObserver observer(&message_loop);

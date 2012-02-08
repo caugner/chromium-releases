@@ -5,7 +5,8 @@
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/content_settings_utils.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
@@ -16,6 +17,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
@@ -23,13 +25,16 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
-namespace {
+using content_settings::SettingInfo;
+using content_settings::SettingSource;
+using content_settings::SETTING_SOURCE_USER;
 
+namespace {
 struct ContentSettingsTypeIdEntry {
   ContentSettingsType type;
   int id;
@@ -253,34 +258,53 @@ class ContentSettingSingleRadioGroup
     radio_group.radio_items.push_back(radio_allow_label);
     radio_group.radio_items.push_back(radio_block_label);
     HostContentSettingsMap* map = profile()->GetHostContentSettingsMap();
-    ContentSetting mostRestrictiveSetting;
+    CookieSettings* cookie_settings = CookieSettings::GetForProfile(profile());
+    ContentSetting most_restrictive_setting;
+    SettingSource most_restrictive_setting_source;
+
     if (resources.empty()) {
-      mostRestrictiveSetting =
-          content_type() == CONTENT_SETTINGS_TYPE_COOKIES ?
-              map->GetCookieContentSetting(url, url, true) :
-              map->GetContentSetting(url, url, content_type(), std::string());
+      if (content_type() == CONTENT_SETTINGS_TYPE_COOKIES) {
+        most_restrictive_setting = cookie_settings->GetCookieSetting(
+            url, url, true, &most_restrictive_setting_source);
+      } else {
+        SettingInfo info;
+        scoped_ptr<Value> value(map->GetWebsiteSetting(
+            url, url, content_type(), std::string(), &info));
+        most_restrictive_setting =
+            content_settings::ValueToContentSetting(value.get());
+        most_restrictive_setting_source = info.source;
+      }
     } else {
-      mostRestrictiveSetting = CONTENT_SETTING_ALLOW;
+      most_restrictive_setting = CONTENT_SETTING_ALLOW;
       for (std::set<std::string>::const_iterator it = resources.begin();
            it != resources.end(); ++it) {
-        ContentSetting setting = map->GetContentSetting(url,
-                                                        url,
-                                                        content_type(),
-                                                        *it);
+        SettingInfo info;
+        scoped_ptr<Value> value(map->GetWebsiteSetting(
+            url, url, content_type(), *it, &info));
+        ContentSetting setting =
+            content_settings::ValueToContentSetting(value.get());
         if (setting == CONTENT_SETTING_BLOCK) {
-          mostRestrictiveSetting = CONTENT_SETTING_BLOCK;
+          most_restrictive_setting = CONTENT_SETTING_BLOCK;
+          most_restrictive_setting_source = info.source;
           break;
         }
-        if (setting == CONTENT_SETTING_ASK)
-          mostRestrictiveSetting = CONTENT_SETTING_ASK;
+        if (setting == CONTENT_SETTING_ASK) {
+          most_restrictive_setting = CONTENT_SETTING_ASK;
+          most_restrictive_setting_source = info.source;
+        }
       }
     }
-    if (mostRestrictiveSetting == CONTENT_SETTING_ALLOW) {
+    if (most_restrictive_setting == CONTENT_SETTING_ALLOW) {
       radio_group.default_item = 0;
       // |block_setting_| is already set to |CONTENT_SETTING_BLOCK|.
     } else {
       radio_group.default_item = 1;
-      block_setting_ = mostRestrictiveSetting;
+      block_setting_ = most_restrictive_setting;
+    }
+    if (most_restrictive_setting_source != SETTING_SOURCE_USER) {
+      set_radio_group_enabled(false);
+    } else {
+      set_radio_group_enabled(true);
     }
     selected_item_ = radio_group.default_item;
     set_radio_group(radio_group);
@@ -327,10 +351,11 @@ class ContentSettingCookiesBubbleModel : public ContentSettingSingleRadioGroup {
   virtual void OnCustomLinkClicked() OVERRIDE {
     if (!tab_contents())
       return;
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
-        Source<TabSpecificContentSettings>(tab_contents()->content_settings()),
-        NotificationService::NoDetails());
+        content::Source<TabSpecificContentSettings>(
+            tab_contents()->content_settings()),
+        content::NotificationService::NoDetails());
     browser()->ShowCollectedCookiesDialog(tab_contents());
   }
 };
@@ -513,9 +538,9 @@ ContentSettingBubbleModel::ContentSettingBubbleModel(
       profile_(profile),
       content_type_(content_type) {
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 Source<TabContents>(tab_contents->tab_contents()));
+                 content::Source<TabContents>(tab_contents->tab_contents()));
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_));
 }
 
 ContentSettingBubbleModel::~ContentSettingBubbleModel() {
@@ -541,16 +566,18 @@ void ContentSettingBubbleModel::AddBlockedResource(
   bubble_content_.resource_identifiers.insert(resource_identifier);
 }
 
-void ContentSettingBubbleModel::Observe(int type,
-                                        const NotificationSource& source,
-                                        const NotificationDetails& details) {
+void ContentSettingBubbleModel::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
-      DCHECK(source == Source<TabContents>(tab_contents_->tab_contents()));
+      DCHECK(source ==
+             content::Source<TabContents>(tab_contents_->tab_contents()));
       tab_contents_ = NULL;
       break;
     case chrome::NOTIFICATION_PROFILE_DESTROYED:
-      DCHECK(source == Source<Profile>(profile_));
+      DCHECK(source == content::Source<Profile>(profile_));
       profile_ = NULL;
       break;
     default:

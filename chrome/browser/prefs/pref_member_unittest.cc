@@ -9,10 +9,13 @@
 #include "chrome/browser/prefs/pref_value_store.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_pref_service.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
+
 namespace {
 
 const char kBoolPref[] = "bool";
@@ -65,7 +68,7 @@ class GetPrefValueCallback
   bool value_;
 };
 
-class PrefMemberTestClass : public NotificationObserver {
+class PrefMemberTestClass : public content::NotificationObserver {
  public:
   explicit PrefMemberTestClass(PrefService* prefs)
       : observe_cnt_(0), prefs_(prefs) {
@@ -73,12 +76,12 @@ class PrefMemberTestClass : public NotificationObserver {
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     DCHECK(chrome::NOTIFICATION_PREF_CHANGED == type);
-    PrefService* prefs_in = Source<PrefService>(source).ptr();
+    PrefService* prefs_in = content::Source<PrefService>(source).ptr();
     EXPECT_EQ(prefs_in, prefs_);
-    std::string* pref_name_in = Details<std::string>(details).ptr();
+    std::string* pref_name_in = content::Details<std::string>(details).ptr();
     EXPECT_EQ(*pref_name_in, kStringPref);
     EXPECT_EQ(str_.GetValue(), prefs_->GetString(kStringPref));
     ++observe_cnt_;
@@ -240,8 +243,8 @@ TEST(PrefMemberTest, MoveToThread) {
   scoped_refptr<GetPrefValueCallback> callback =
       make_scoped_refptr(new GetPrefValueCallback());
   MessageLoop message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
-  BrowserThread io_thread(BrowserThread::IO);
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  content::TestBrowserThread io_thread(BrowserThread::IO);
   ASSERT_TRUE(io_thread.Start());
   RegisterTestPrefs(&prefs);
   callback->Init(kBoolPref, &prefs);

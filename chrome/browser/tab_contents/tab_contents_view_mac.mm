@@ -8,13 +8,11 @@
 
 #include <string>
 
-#include "chrome/browser/browser_shutdown.h"
+#import "base/mac/scoped_sending_event.h"
 #import "chrome/browser/renderer_host/chrome_render_widget_host_view_mac_delegate.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_mac.h"
+#include "chrome/browser/tab_contents/web_drag_bookmark_handler_mac.h"
 #import "chrome/browser/ui/cocoa/focus_tracker.h"
-#import "chrome/browser/ui/cocoa/tab_contents/sad_tab_controller.h"
-#import "chrome/browser/ui/cocoa/tab_contents/web_drag_source.h"
-#import "chrome/browser/ui/cocoa/tab_contents/web_drop_target.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
@@ -23,11 +21,10 @@
 #include "content/browser/tab_contents/popup_menu_helper_mac.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#import "content/browser/tab_contents/web_drag_dest_mac.h"
+#import "content/browser/tab_contents/web_drag_source_mac.h"
 #import "content/common/chrome_application_mac.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
 #include "content/common/view_messages.h"
-#include "content/public/browser/notification_types.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 
@@ -59,6 +56,9 @@ COMPILE_ASSERT_MATCHING_ENUM(DragOperationEvery);
 - (void)clearTabContentsView;
 - (void)closeTabAfterEvent;
 - (void)viewDidBecomeFirstResponder:(NSNotification*)notification;
+// Notify the RenderWidgetHost that the frame was updated so it can resize
+// its contents.
+- (void)renderWidgetHostWasResized;
 @end
 
 namespace tab_contents_view_mac {
@@ -69,9 +69,8 @@ TabContentsView* CreateTabContentsView(TabContents* tab_contents) {
 
 TabContentsViewMac::TabContentsViewMac(TabContents* tab_contents)
     : tab_contents_(tab_contents),
-      preferred_width_(0) {
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
-                 Source<TabContents>(tab_contents));
+      preferred_width_(0),
+      overlaid_view_(nil) {
 }
 
 TabContentsViewMac::~TabContentsViewMac() {
@@ -86,7 +85,6 @@ TabContentsViewMac::~TabContentsViewMac() {
 void TabContentsViewMac::CreateView(const gfx::Size& initial_size) {
   TabContentsViewCocoa* view =
       [[TabContentsViewCocoa alloc] initWithTabContentsViewMac:this];
-  [view setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
   cocoa_view_.reset(view);
 }
 
@@ -118,6 +116,8 @@ RenderWidgetHostView* TabContentsViewMac::CreateViewForWidget(
   NSView* view_view = view->native_view();
   [view_view setFrame:[cocoa_view_.get() bounds]];
   [view_view setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
+  // Add the new view below all other views; this also keeps it below any
+  // overlay view installed.
   [cocoa_view_.get() addSubview:view_view
                      positioned:NSWindowBelow
                      relativeTo:nil];
@@ -147,7 +147,19 @@ gfx::NativeWindow TabContentsViewMac::GetTopLevelNativeWindow() const {
 }
 
 void TabContentsViewMac::GetContainerBounds(gfx::Rect* out) const {
-  *out = [cocoa_view_.get() flipNSRectToRect:[cocoa_view_.get() bounds]];
+  // Convert bounds to window coordinate space.
+  NSRect bounds =
+      [cocoa_view_.get() convertRect:[cocoa_view_.get() bounds] toView:nil];
+
+  // Convert bounds to screen coordinate space.
+  NSWindow* window = [cocoa_view_.get() window];
+  bounds.origin = [window convertBaseToScreen:bounds.origin];
+
+  // Flip y to account for screen flip.
+  NSScreen* screen = [[NSScreen screens] objectAtIndex:0];
+  bounds.origin.y = [screen frame].size.height - bounds.origin.y
+      - bounds.size.height;
+  *out = gfx::Rect(NSRectToCGRect(bounds));
 }
 
 void TabContentsViewMac::StartDragging(
@@ -160,7 +172,7 @@ void TabContentsViewMac::StartDragging(
   // processing -sendEvent:, so Close() is deferred in that case.
   // Drags from web content do not come via -sendEvent:, this sets the
   // same flag -sendEvent: would.
-  chrome_application_mac::ScopedSendingEvent sendingEventScoper;
+  base::mac::ScopedSendingEvent sending_event_scoper;
 
   // The drag invokes a nested event loop, arrange to continue
   // processing events.
@@ -177,7 +189,7 @@ void TabContentsViewMac::RenderViewCreated(RenderViewHost* host) {
   // We want updates whenever the intrinsic width of the webpage changes.
   // Put the RenderView into that mode. The preferred width is used for example
   // when the "zoom" button in the browser window is clicked.
-  host->EnablePreferredSizeMode(kPreferredSizeWidth);
+  host->EnablePreferredSizeMode();
 }
 
 void TabContentsViewMac::SetPageTitle(const string16& title) {
@@ -186,21 +198,6 @@ void TabContentsViewMac::SetPageTitle(const string16& title) {
 
 void TabContentsViewMac::OnTabCrashed(base::TerminationStatus /* status */,
                                       int /* error_code */) {
-  // Only show the sad tab if we're not in browser shutdown, so that TabContents
-  // objects that are not in a browser (e.g., HTML dialogs) and thus are
-  // visible do not flash a sad tab page.
-  if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
-    return;
-
-  if (!sad_tab_.get()) {
-    DCHECK(tab_contents_);
-    if (tab_contents_) {
-      SadTabController* sad_tab =
-          [[SadTabController alloc] initWithTabContents:tab_contents_
-                                              superview:cocoa_view_];
-      sad_tab_.reset(sad_tab);
-    }
-  }
 }
 
 void TabContentsViewMac::SizeContents(const gfx::Size& size) {
@@ -395,21 +392,22 @@ void TabContentsViewMac::GetViewBounds(gfx::Rect* out) const {
   NOTIMPLEMENTED();
 }
 
-void TabContentsViewMac::CloseTab() {
-  tab_contents_->Close(tab_contents_->render_view_host());
+void TabContentsViewMac::InstallOverlayView(gfx::NativeView view) {
+  DCHECK(!overlaid_view_);
+  overlaid_view_ = view;
+  [view setAutoresizingMask:(NSViewWidthSizable | NSViewHeightSizable)];
+  [cocoa_view_.get() addSubview:view];
+  [view setFrame:[cocoa_view_.get() bounds]];
 }
 
-void TabContentsViewMac::Observe(int type,
-                                 const NotificationSource& source,
-                                 const NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_TAB_CONTENTS_CONNECTED: {
-      sad_tab_.reset();
-      break;
-    }
-    default:
-      NOTREACHED() << "Got a notification we didn't register for.";
-  }
+void TabContentsViewMac::RemoveOverlayView() {
+  DCHECK(overlaid_view_);
+  [overlaid_view_ removeFromSuperview];
+  overlaid_view_ = nil;
+}
+
+void TabContentsViewMac::CloseTab() {
+  tab_contents_->Close(tab_contents_->render_view_host());
 }
 
 @implementation TabContentsViewCocoa
@@ -418,8 +416,11 @@ void TabContentsViewMac::Observe(int type,
   self = [super initWithFrame:NSZeroRect];
   if (self != nil) {
     tabContentsView_ = w;
-    dropTarget_.reset(
-        [[WebDropTarget alloc] initWithTabContents:[self tabContents]]);
+    dragDest_.reset(
+        [[WebDragDest alloc] initWithTabContents:[self tabContents]]);
+    bookmarkHandler_.reset(new WebDragBookmarkHandlerMac);
+    [dragDest_ setDragDelegate:
+        static_cast<content::WebDragDestDelegate*>(bookmarkHandler_.get())];
     [self registerDragTypes];
     // TabContentsViewCocoa's ViewID may be changed to VIEW_ID_DEV_TOOLS_DOCKED
     // by TabContentsController, so we can't just override -viewID method to
@@ -457,7 +458,7 @@ void TabContentsViewMac::Observe(int type,
 }
 
 - (void)setCurrentDragOperation:(NSDragOperation)operation {
-  [dropTarget_ setCurrentOperation:operation];
+  [dragDest_ setCurrentOperation:operation];
 }
 
 - (TabContents*)tabContents {
@@ -499,13 +500,27 @@ void TabContentsViewMac::Observe(int type,
                         image:(NSImage*)image
                        offset:(NSPoint)offset {
   dragSource_.reset([[WebDragSource alloc]
-          initWithContentsView:self
-                      dropData:&dropData
-                         image:image
-                        offset:offset
-                    pasteboard:[NSPasteboard pasteboardWithName:NSDragPboard]
-             dragOperationMask:operationMask]);
+      initWithContents:[self tabContents]
+                  view:self
+              dropData:&dropData
+                 image:image
+                offset:offset
+            pasteboard:[NSPasteboard pasteboardWithName:NSDragPboard]
+     dragOperationMask:operationMask]);
   [dragSource_ startDrag];
+}
+
+- (void)setFrameWithDeferredUpdate:(NSRect)frameRect {
+  [super setFrame:frameRect];
+  [self performSelector:@selector(renderWidgetHostWasResized)
+             withObject:nil
+             afterDelay:0];
+}
+
+- (void)renderWidgetHostWasResized {
+  TabContents* tabContents = [self tabContents];
+  if (tabContents && tabContents->render_view_host())
+    tabContents->render_view_host()->WasResized();
 }
 
 // NSDraggingSource methods
@@ -552,19 +567,19 @@ void TabContentsViewMac::Observe(int type,
 // NSDraggingDestination methods
 
 - (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)sender {
-  return [dropTarget_ draggingEntered:sender view:self];
+  return [dragDest_ draggingEntered:sender view:self];
 }
 
 - (void)draggingExited:(id<NSDraggingInfo>)sender {
-  [dropTarget_ draggingExited:sender];
+  [dragDest_ draggingExited:sender];
 }
 
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)sender {
-  return [dropTarget_ draggingUpdated:sender view:self];
+  return [dragDest_ draggingUpdated:sender view:self];
 }
 
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)sender {
-  return [dropTarget_ performDragOperation:sender view:self];
+  return [dragDest_ performDragOperation:sender view:self];
 }
 
 - (void)cancelDeferredClose {

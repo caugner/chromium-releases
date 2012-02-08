@@ -6,8 +6,10 @@
 #define CHROME_BROWSER_FAVICON_FAVICON_TAB_HELPER_H_
 #pragma once
 
+#include <vector>
+
 #include "base/basictypes.h"
-#include "base/callback_old.h"
+#include "base/bind.h"
 #include "chrome/browser/favicon/favicon_handler_delegate.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/common/favicon_url.h"
@@ -16,7 +18,6 @@
 
 class FaviconHandler;
 class NavigationEntry;
-class RefCountedMemory;
 class SkBitmap;
 class TabContents;
 
@@ -61,11 +62,12 @@ class FaviconTabHelper : public TabContentsObserver,
   // Note that |image_size| is a hint for images with multiple sizes. The
   // downloaded image is not resized to the given image_size. If 0 is passed,
   // the first frame of the image is returned.
-  typedef Callback3<int, bool, const SkBitmap&>::Type ImageDownloadCallback;
+  typedef base::Callback<void(int, bool, const SkBitmap&)>
+      ImageDownloadCallback;
   int DownloadImage(const GURL& image_url,
                     int image_size,
                     history::IconType icon_type,
-                    ImageDownloadCallback* callback);
+                    const ImageDownloadCallback& callback);
 
   // Message Handler.  Must be public, because also called from
   // PrerenderContents.
@@ -82,9 +84,9 @@ class FaviconTabHelper : public TabContentsObserver,
   virtual void NavigateToPendingEntry(
       const GURL& url,
       NavigationController::ReloadType reload_type) OVERRIDE;
-  virtual void DidNavigateMainFramePostCommit(
+  virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+      const content::FrameNavigateParams& params) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void OnDidDownloadFavicon(int id,

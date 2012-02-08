@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/execute_code_in_tab_function.h"
 
+#include "base/bind.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -24,7 +25,8 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+
+using content::BrowserThread;
 
 namespace keys = extension_tabs_module_constants;
 
@@ -118,9 +120,8 @@ bool ExecuteCodeInTabFunction::RunImpl() {
   }
 
   scoped_refptr<FileReader> file_reader(new FileReader(
-      resource_, NewCallback(this, &ExecuteCodeInTabFunction::DidLoadFile)));
+      resource_, base::Bind(&ExecuteCodeInTabFunction::DidLoadFile, this)));
   file_reader->Start();
-  AddRef();  // Keep us alive until DidLoadAndLocalizeFile is called.
 
   return true;
 }
@@ -137,11 +138,11 @@ void ExecuteCodeInTabFunction::DidLoadFile(bool success,
       data.find(ExtensionMessageBundle::kMessageBegin) != std::string::npos) {
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(this, &ExecuteCodeInTabFunction::LocalizeCSS,
-                          data,
-                          extension->id(),
-                          extension->path(),
-                          extension->default_locale()));
+        base::Bind(&ExecuteCodeInTabFunction::LocalizeCSS, this,
+                   data,
+                   extension->id(),
+                   extension->path(),
+                   extension->default_locale()));
   } else {
     DidLoadAndLocalizeFile(success, data);
   }
@@ -167,9 +168,8 @@ void ExecuteCodeInTabFunction::LocalizeCSS(
   // anything to localize.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this,
-                        &ExecuteCodeInTabFunction::DidLoadAndLocalizeFile,
-                        true, css_data));
+      base::Bind(&ExecuteCodeInTabFunction::DidLoadAndLocalizeFile, this,
+                 true, css_data));
 }
 
 void ExecuteCodeInTabFunction::DidLoadAndLocalizeFile(bool success,
@@ -188,7 +188,6 @@ void ExecuteCodeInTabFunction::DidLoadAndLocalizeFile(bool success,
 #endif  // OS_WIN
     SendResponse(false);
   }
-  Release();  // Balance the AddRef taken in RunImpl
 }
 
 bool ExecuteCodeInTabFunction::Execute(const std::string& code_string) {

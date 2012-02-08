@@ -10,33 +10,24 @@
 
 #include "base/compiler_specific.h"
 #include "base/message_loop.h"
-#include "chrome/browser/chromeos/status/status_area_host.h"
+#include "chrome/browser/chromeos/status/status_area_button.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "views/context_menu_controller.h"
-#include "views/controls/menu/menu_listener.h"
+#include "ui/views/context_menu_controller.h"
+#include "ui/views/controls/menu/menu_listener.h"
 
-class AccessibleToolbarView;
-class Profile;
-class TabStripModel;
-
-namespace ui {
-class SimpleMenuModel;
-}  // namespace ui
+class StatusAreaButton;
 
 namespace views {
-class ImageButton;
-class ImageView;
+class AccessiblePaneView;
 class MenuDelegate;
-class MenuItemView;
 class MenuRunner;
 }  // namespace views
 
 namespace chromeos {
 
 class LayoutModeButton;
-class StatusAreaView;
-class StatusAreaButton;
+class StatusAreaViewChromeos;
 
 // chromeos::BrowserView adds ChromeOS specific controls and menus to a
 // BrowserView created with Browser::TYPE_TABBED. This extender adds controls
@@ -49,11 +40,24 @@ class BrowserView : public ::BrowserView,
                     public views::ContextMenuController,
                     public views::MenuListener,
                     public BrowserList::Observer,
-                    public StatusAreaHost,
+                    public StatusAreaButton::Delegate,
                     public MessageLoopForUI::Observer {
  public:
   explicit BrowserView(Browser* browser);
   virtual ~BrowserView();
+
+  // Adds a new tray icon/button to the Chrome OS Tray.
+  // Takes ownership of the button object.
+  void AddTrayButton(StatusAreaButton* button, bool bordered);
+
+  // Remove an existing tray button from the Chrome OS Tray.
+  // Pointer will become invalid after this call.
+  void RemoveTrayButton(StatusAreaButton* button);
+
+  // Check if a button is currently contained in the view.
+  bool ContainsButton(StatusAreaButton* button);
+
+  static BrowserView* GetBrowserViewForBrowser(Browser* browser);
 
   // BrowserView implementation.
   virtual void Init() OVERRIDE;
@@ -83,19 +87,17 @@ class BrowserView : public ::BrowserView,
   virtual void OnBrowserAdded(const Browser* browser) OVERRIDE;
   virtual void OnBrowserRemoved(const Browser* browser) OVERRIDE;
 
-  // StatusAreaHost overrides.
-  virtual Profile* GetProfile() const OVERRIDE;
-  virtual gfx::NativeWindow GetNativeWindow() const OVERRIDE;
-  virtual bool ShouldOpenButtonOptions(
-      const views::View* button_view) const OVERRIDE;
-  virtual void ExecuteBrowserCommand(int id) const OVERRIDE;
-  virtual void OpenButtonOptions(const views::View* button_view) OVERRIDE;
-  virtual ScreenMode GetScreenMode() const OVERRIDE;
-  virtual TextStyle GetTextStyle() const OVERRIDE;
+  // StatusAreaButton::Delegate overrides.
+  virtual bool ShouldExecuteStatusAreaCommand(
+      const views::View* button_view, int command_id) const OVERRIDE;
+  virtual void ExecuteStatusAreaCommand(
+      const views::View* button_view, int command_id) OVERRIDE;
+  virtual gfx::Font GetStatusAreaFont(const gfx::Font& font) const OVERRIDE;
+  virtual StatusAreaButton::TextStyle GetStatusAreaTextStyle() const OVERRIDE;
   virtual void ButtonVisibilityChanged(views::View* button_view) OVERRIDE;
 
   // MessageLoopForUI::Observer overrides.
-#if defined(TOUCH_UI) || defined(USE_AURA)
+#if defined(USE_AURA)
   // MessageLoopForUI::Observer overrides.
   virtual base::EventStatus WillProcessEvent(
       const base::NativeEvent& event) OVERRIDE;
@@ -122,7 +124,7 @@ class BrowserView : public ::BrowserView,
 
  protected:
   virtual void GetAccessiblePanes(
-      std::vector<AccessiblePaneView*>* panes);
+      std::vector<views::AccessiblePaneView*>* panes) OVERRIDE;
 
  private:
   void InitSystemMenu();
@@ -136,7 +138,7 @@ class BrowserView : public ::BrowserView,
   // onscreen until Layout() is called.
   void UpdateLayoutModeButtonVisibility();
 
-  StatusAreaView* status_area_;
+  StatusAreaViewChromeos* status_area_;
   LayoutModeButton* layout_mode_button_;
 
   // System menu.

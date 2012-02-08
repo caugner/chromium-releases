@@ -8,9 +8,12 @@
 #include <deque>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/file_path.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/task.h"
 #include "webkit/appcache/appcache_database.h"
@@ -32,28 +35,33 @@ class AppCacheStorageImpl : public AppCacheStorage {
   bool is_disabled() const { return is_disabled_; }
 
   // AppCacheStorage methods, see the base class for doc comments.
-  virtual void GetAllInfo(Delegate* delegate);
-  virtual void LoadCache(int64 id, Delegate* delegate);
-  virtual void LoadOrCreateGroup(const GURL& manifest_url, Delegate* delegate);
-  virtual void StoreGroupAndNewestCache(
-      AppCacheGroup* group, AppCache* newest_cache, Delegate* delegate);
-  virtual void FindResponseForMainRequest(
-      const GURL& url, const GURL& preferred_manifest_url, Delegate* delegate);
+  virtual void GetAllInfo(Delegate* delegate) OVERRIDE;
+  virtual void LoadCache(int64 id, Delegate* delegate) OVERRIDE;
+  virtual void LoadOrCreateGroup(const GURL& manifest_url,
+                                 Delegate* delegate) OVERRIDE;
+  virtual void StoreGroupAndNewestCache(AppCacheGroup* group,
+                                        AppCache* newest_cache,
+                                        Delegate* delegate) OVERRIDE;
+  virtual void FindResponseForMainRequest(const GURL& url,
+                                          const GURL& preferred_manifest_url,
+                                          Delegate* delegate) OVERRIDE;
   virtual void FindResponseForSubRequest(
       AppCache* cache, const GURL& url,
       AppCacheEntry* found_entry, AppCacheEntry* found_fallback_entry,
-      bool* found_network_namespace);
-  virtual void MarkEntryAsForeign(const GURL& entry_url, int64 cache_id);
-  virtual void MakeGroupObsolete(AppCacheGroup* group, Delegate* delegate);
+      bool* found_network_namespace) OVERRIDE;
+  virtual void MarkEntryAsForeign(const GURL& entry_url,
+                                  int64 cache_id) OVERRIDE;
+  virtual void MakeGroupObsolete(AppCacheGroup* group,
+                                 Delegate* delegate) OVERRIDE;
   virtual AppCacheResponseReader* CreateResponseReader(
-      const GURL& manifest_url, int64 response_id);
+      const GURL& manifest_url, int64 group_id, int64 response_id) OVERRIDE;
   virtual AppCacheResponseWriter* CreateResponseWriter(
-      const GURL& manifest_url);
-  virtual void DoomResponses(
-      const GURL& manifest_url, const std::vector<int64>& response_ids);
-  virtual void DeleteResponses(
-      const GURL& manifest_url, const std::vector<int64>& response_ids);
-  virtual void PurgeMemory();
+      const GURL& manifest_url, int64 group_id) OVERRIDE;
+  virtual void DoomResponses(const GURL& manifest_url,
+                             const std::vector<int64>& response_ids) OVERRIDE;
+  virtual void DeleteResponses(const GURL& manifest_url,
+                               const std::vector<int64>& response_ids) OVERRIDE;
+  virtual void PurgeMemory() OVERRIDE;
 
  private:
   friend class AppCacheStorageImplTest;
@@ -93,7 +101,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
   void GetPendingForeignMarkingsForCache(
       int64 cache_id, std::vector<GURL>* urls);
 
-  void ScheduleSimpleTask(Task* task);
+  void ScheduleSimpleTask(const base::Closure& task);
   void RunOnePendingSimpleTask();
 
   void DelayedStartDeletingUnusedResponses();
@@ -118,7 +126,7 @@ class AppCacheStorageImpl : public AppCacheStorage {
       DelegateReferenceVector* delegates,
       const GURL& url, const AppCacheEntry& entry,
       const GURL& fallback_url, const AppCacheEntry& fallback_entry,
-      int64 cache_id, const GURL& manifest_url);
+      int64 cache_id, int64 group_id, const GURL& manifest_url);
 
   APPCACHE_EXPORT AppCacheDiskCache* disk_cache();
 
@@ -126,8 +134,8 @@ class AppCacheStorageImpl : public AppCacheStorage {
   FilePath cache_directory_;
   bool is_incognito_;
 
-  // This class operates primarily on the io thread, but schedules
-  // its DatabaseTasks on the db thread. Seperately, the disk_cache uses
+  // This class operates primarily on the IO thread, but schedules
+  // its DatabaseTasks on the db thread. Separately, the disk_cache uses
   // the cache_thread.
   scoped_refptr<base::MessageLoopProxy> db_thread_;
   scoped_refptr<base::MessageLoopProxy> cache_thread_;
@@ -153,17 +161,16 @@ class AppCacheStorageImpl : public AppCacheStorage {
   // Created on the IO thread, but only used on the DB thread.
   AppCacheDatabase* database_;
 
-  // Set if we discover a fatal error like a corrupt sql database or
+  // Set if we discover a fatal error like a corrupt SQL database or
   // disk cache and cannot continue.
   bool is_disabled_;
 
-  // TODO(michaeln): use a disk_cache per group (manifest or group_id).
   scoped_ptr<AppCacheDiskCache> disk_cache_;
 
   // Used to short-circuit certain operations without having to schedule
   // any tasks on the background database thread.
-  std::deque<Task*> pending_simple_tasks_;
-  ScopedRunnableMethodFactory<AppCacheStorageImpl> method_factory_;
+  std::deque<base::Closure> pending_simple_tasks_;
+  base::WeakPtrFactory<AppCacheStorageImpl> weak_factory_;
 
   friend class ChromeAppCacheServiceTest;
 };

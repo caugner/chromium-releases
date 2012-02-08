@@ -8,30 +8,41 @@
 
 #include <vector>
 
+#include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/profiles/avatar_menu_model_observer.h"
-#include "chrome/browser/ui/views/bubble/bubble.h"
-#include "views/controls/button/custom_button.h"
-#include "views/controls/link.h"
-#include "views/controls/link_listener.h"
-#include "views/controls/separator.h"
+#include "ui/views/bubble/bubble_delegate.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/link_listener.h"
 
 class AvatarMenuModel;
 class Browser;
 
+namespace views {
+class CustomButton;
+class Link;
+class Separator;
+}
+
 // This bubble view is displayed when the user clicks on the avatar button.
 // It displays a list of profiles and allows users to switch between profiles.
-class AvatarMenuBubbleView : public views::View,
+class AvatarMenuBubbleView : public views::BubbleDelegateView,
                              public views::ButtonListener,
                              public views::LinkListener,
-                             public BubbleDelegate,
                              public AvatarMenuModelObserver {
  public:
-  explicit AvatarMenuBubbleView(Browser* browser);
+  AvatarMenuBubbleView(views::View* anchor_view,
+                       views::BubbleBorder::ArrowLocation arrow_location,
+                       const gfx::Rect& anchor_rect,
+                       Browser* browser);
   virtual ~AvatarMenuBubbleView();
 
   // views::View implementation.
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void Layout() OVERRIDE;
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
+  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child)
+      OVERRIDE;
 
   // views::ButtonListener implementation.
   virtual void ButtonPressed(views::Button* sender,
@@ -41,9 +52,8 @@ class AvatarMenuBubbleView : public views::View,
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
   // BubbleDelegate implementation.
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
-  virtual bool CloseOnEscape() OVERRIDE;
-  virtual bool FadeInOnShow() OVERRIDE;
+  virtual gfx::Rect GetAnchorRect() OVERRIDE;
+  virtual void Init() OVERRIDE;
 
   // AvatarMenuModelObserver implementation.
   virtual void OnAvatarMenuModelChanged(
@@ -52,6 +62,7 @@ class AvatarMenuBubbleView : public views::View,
  private:
   views::Link* add_profile_link_;
   scoped_ptr<AvatarMenuModel> avatar_menu_model_;
+  gfx::Rect anchor_rect_;
   Browser* browser_;
   std::vector<views::CustomButton*> item_views_;
   views::Separator* separator_;

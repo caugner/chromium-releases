@@ -13,13 +13,14 @@
 
 #include <gtk/gtk.h>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/models/simple_menu_model.h"
-#include "ui/base/x/active_window_watcher_x.h"
+#include "ui/base/x/active_window_watcher_x_observer.h"
 
 class AvatarMenuButtonGtk;
 class BrowserWindowGtk;
@@ -29,8 +30,8 @@ class MenuGtk;
 class PopupPageMenuModel;
 class TabContents;
 
-class BrowserTitlebar : public NotificationObserver,
-                        public ui::ActiveWindowWatcherX::Observer,
+class BrowserTitlebar : public content::NotificationObserver,
+                        public ui::ActiveWindowWatcherXObserver,
                         public ui::SimpleMenuModel::Delegate {
  public:
   // A default button order string for when we aren't asking gconf for the
@@ -49,6 +50,9 @@ class BrowserTitlebar : public NotificationObserver,
   // Builds the buttons based on the metacity |button_string|.
   void BuildButtons(const std::string& button_string);
 
+  // Updates the theme supplied background color and image.
+  void UpdateButtonBackground(CustomDrawButton* button);
+
   // Update the appearance of the title bar based on whether we're showing a
   // custom frame or not.  If |use_custom_frame| is true, we show an extra
   // tall titlebar and the min/max/close buttons.
@@ -66,6 +70,8 @@ class BrowserTitlebar : public NotificationObserver,
   // menu.  There's no such thing on linux, so we just show the menu items we
   // add to the menu.
   void ShowContextMenu(GdkEventButton* event);
+
+  AvatarMenuButtonGtk* avatar_button() { return avatar_button_.get(); }
 
  private:
   // A helper class to keep track of which frame of the throbber animation
@@ -94,9 +100,9 @@ class BrowserTitlebar : public NotificationObserver,
     explicit ContextMenuModel(ui::SimpleMenuModel::Delegate* delegate);
   };
 
-  // Build the titlebar, the space above the tab
-  // strip, and (maybe) the min, max, close buttons.  |container| is the gtk
-  // continer that we put the widget into.
+  // Build the titlebar, the space above the tab strip, and (maybe) the min,
+  // max, close buttons. |container_| is the gtk container that we put the
+  // widget into.
   void Init();
 
   // Lazily builds and returns |titlebar_{left,right}_buttons_vbox_| and their
@@ -160,19 +166,20 @@ class BrowserTitlebar : public NotificationObserver,
   // -- Context Menu -----------------------------------------------------------
 
   // SimpleMenuModel::Delegate implementation:
-  virtual bool IsCommandIdEnabled(int command_id) const;
-  virtual bool IsCommandIdChecked(int command_id) const;
-  virtual void ExecuteCommand(int command_id);
-  virtual bool GetAcceleratorForCommandId(int command_id,
-                                          ui::Accelerator* accelerator);
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
+  virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
+  virtual bool GetAcceleratorForCommandId(
+      int command_id,
+      ui::Accelerator* accelerator) OVERRIDE;
 
-  // Overridden from NotificationObserver:
+  // Overridden from content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  // Overriden from ActiveWindowWatcher::Observer.
-  virtual void ActiveWindowChanged(GdkWindow* active_window);
+  // Overriden from ActiveWindowWatcherXObserver.
+  virtual void ActiveWindowChanged(GdkWindow* active_window) OVERRIDE;
 
   bool IsTypePanel();
 
@@ -274,7 +281,7 @@ class BrowserTitlebar : public NotificationObserver,
   // Theme provider for building buttons.
   GtkThemeService* theme_service_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 };
 
 #endif  // CHROME_BROWSER_UI_GTK_BROWSER_TITLEBAR_H_

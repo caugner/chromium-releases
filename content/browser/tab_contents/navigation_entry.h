@@ -10,10 +10,12 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "content/browser/renderer_host/global_request_id.h"
 #include "content/common/content_export.h"
-#include "content/common/page_type.h"
-#include "content/common/security_style.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/page_type.h"
+#include "content/public/common/referrer.h"
+#include "content/public/common/security_style.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cert_status_flags.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -62,10 +64,10 @@ class CONTENT_EXPORT NavigationEntry {
              content_status_ == status.content_status_;
     }
 
-    void set_security_style(SecurityStyle security_style) {
+    void set_security_style(content::SecurityStyle security_style) {
       security_style_ = security_style;
     }
-    SecurityStyle security_style() const {
+    content::SecurityStyle security_style() const {
       return security_style_;
     }
 
@@ -124,7 +126,7 @@ class CONTENT_EXPORT NavigationEntry {
 
    private:
     // See the accessors above for descriptions.
-    SecurityStyle security_style_;
+    content::SecurityStyle security_style_;
     int cert_id_;
     net::CertStatus cert_status_;
     int security_bits_;
@@ -184,7 +186,7 @@ class CONTENT_EXPORT NavigationEntry {
   NavigationEntry(SiteInstance* instance,
                   int page_id,
                   const GURL& url,
-                  const GURL& referrer,
+                  const content::Referrer& referrer,
                   const string16& title,
                   content::PageTransition transition_type,
                   bool is_renderer_initiated);
@@ -209,7 +211,7 @@ class CONTENT_EXPORT NavigationEntry {
   //
   // Note that the SiteInstance should usually not be changed after it is set,
   // but this may happen if the NavigationEntry was cloned and needs to use a
-  // different SiteInstance, or if a hosted app is installed or uninstalled.
+  // different SiteInstance.
   void set_site_instance(SiteInstance* site_instance);
   SiteInstance* site_instance() const {
     return site_instance_;
@@ -217,10 +219,10 @@ class CONTENT_EXPORT NavigationEntry {
 
   // The page type tells us if this entry is for an interstitial or error page.
   // See the PageType enum above.
-  void set_page_type(PageType page_type) {
+  void set_page_type(content::PageType page_type) {
     page_type_ = page_type;
   }
-  PageType page_type() const {
+  content::PageType page_type() const {
     return page_type_;
   }
 
@@ -236,10 +238,10 @@ class CONTENT_EXPORT NavigationEntry {
   }
 
   // The referring URL. Can be empty.
-  void set_referrer(const GURL& referrer) {
+  void set_referrer(const content::Referrer& referrer) {
     referrer_ = referrer;
   }
-  const GURL& referrer() const {
+  const content::Referrer& referrer() const {
     return referrer_;
   }
 
@@ -412,6 +414,15 @@ class CONTENT_EXPORT NavigationEntry {
     return restore_type_;
   }
 
+  void set_transferred_global_request_id(
+      const GlobalRequestID& transferred_global_request_id) {
+    transferred_global_request_id_ = transferred_global_request_id;
+  }
+
+  GlobalRequestID transferred_global_request_id() const {
+    return transferred_global_request_id_;
+  }
+
  private:
   // WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING WARNING
   // Session/Tab restore save portions of this class so that it can be recreated
@@ -422,9 +433,9 @@ class CONTENT_EXPORT NavigationEntry {
   // See the accessors above for descriptions.
   int unique_id_;
   scoped_refptr<SiteInstance> site_instance_;
-  PageType page_type_;
+  content::PageType page_type_;
   GURL url_;
-  GURL referrer_;
+  content::Referrer referrer_;
   GURL virtual_url_;
   bool update_virtual_url_with_url_;
   string16 title_;
@@ -450,6 +461,15 @@ class CONTENT_EXPORT NavigationEntry {
   // displayed. When the URL, virtual URL, or title is set, this should be
   // cleared to force a refresh.
   mutable string16 cached_display_title_;
+
+  // In case a navigation is transferred to a new RVH but the request has
+  // been generated in the renderer already, this identifies the old request so
+  // that it can be resumed. The old request is stored until the
+  // ResourceDispatcher receives the navigation from the renderer which
+  // carries this |transferred_global_request_id_| annotation. Once the request
+  // is transferred to the new process, this is cleared and the request
+  // continues as normal.
+  GlobalRequestID transferred_global_request_id_;
 
   // Copy and assignment is explicitly allowed for this class.
 };

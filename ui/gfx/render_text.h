@@ -21,16 +21,13 @@
 
 namespace gfx {
 
-// Strike line width.
-const int kStrikeWidth = 2;
-
 // Color settings for text, backgrounds and cursor.
 // These are tentative, and should be derived from theme, system
 // settings and current settings.
 // TODO(oshima): Change this to match the standard chrome
 // before dogfooding textfield views.
 const SkColor kSelectedTextColor = SK_ColorWHITE;
-const SkColor kFocusedSelectionColor = SK_ColorCYAN;
+const SkColor kFocusedSelectionColor = SkColorSetRGB(30, 144, 255);
 const SkColor kUnfocusedSelectionColor = SK_ColorLTGRAY;
 const SkColor kCursorColor = SK_ColorBLACK;
 
@@ -74,7 +71,7 @@ class UI_EXPORT RenderText {
   static RenderText* CreateRenderText();
 
   const string16& text() const { return text_; }
-  virtual void SetText(const string16& text);
+  void SetText(const string16& text);
 
   const SelectionModel& selection_model() const { return selection_model_; }
 
@@ -91,7 +88,7 @@ class UI_EXPORT RenderText {
   void set_default_style(StyleRange style) { default_style_ = style; }
 
   const Rect& display_rect() const { return display_rect_; }
-  virtual void SetDisplayRect(const Rect& r);
+  void SetDisplayRect(const Rect& r);
 
   // This cursor position corresponds to SelectionModel::selection_end. In
   // addition to representing the selection end, it's also where logical text
@@ -148,13 +145,13 @@ class UI_EXPORT RenderText {
   void SelectWord();
 
   const ui::Range& GetCompositionRange() const;
-  virtual void SetCompositionRange(const ui::Range& composition_range);
+  void SetCompositionRange(const ui::Range& composition_range);
 
   // Apply |style_range| to the internal style model.
-  virtual void ApplyStyleRange(StyleRange style_range);
+  void ApplyStyleRange(StyleRange style_range);
 
   // Apply |default_style_| over the entire text range.
-  virtual void ApplyDefaultStyle();
+  void ApplyDefaultStyle();
 
   virtual base::i18n::TextDirection GetTextDirection();
 
@@ -172,7 +169,7 @@ class UI_EXPORT RenderText {
   // may be outside the visible region if the text is longer than the textfield.
   // Subsequent text, cursor, or bounds changes may invalidate returned values.
   virtual Rect GetCursorBounds(const SelectionModel& selection,
-                               bool insert_mode);
+                               bool insert_mode) = 0;
 
   // Compute the current cursor bounds, panning the text to show the cursor in
   // the display rect if necessary. These bounds are in local coordinates.
@@ -180,7 +177,7 @@ class UI_EXPORT RenderText {
   const Rect& GetUpdatedCursorBounds();
 
   // Get the logical index of the grapheme following the argument |position|.
-  virtual size_t GetIndexOfNextGrapheme(size_t position);
+  size_t GetIndexOfNextGrapheme(size_t position);
 
   // Return a SelectionModel with the cursor at the current selection's start.
   // The returned value represents a cursor/caret position without a selection.
@@ -209,20 +206,35 @@ class UI_EXPORT RenderText {
   virtual SelectionModel LeftEndSelectionModel();
   virtual SelectionModel RightEndSelectionModel();
 
-  // Get the logical index of the grapheme preceeding the argument |position|.
-  virtual size_t GetIndexOfPreviousGrapheme(size_t position);
+  // Sets the selection model, the argument is assumed to be valid.
+  virtual void SetSelectionModel(const SelectionModel& model);
 
   // Get the visual bounds containing the logical substring within |from| to
-  // |to|. These bounds could be visually discontinuous if the substring is
-  // split by a LTR/RTL level change. These bounds are in local coordinates, but
-  // may be outside the visible region if the text is longer than the textfield.
+  // |to| into |bounds|. If |from| equals to |to|, |bounds| is set as empty.
+  // These bounds could be visually discontinuous if the substring is split by a
+  // LTR/RTL level change. These bounds are in local coordinates, but may be
+  // outside the visible region if the text is longer than the textfield.
   // Subsequent text, cursor, or bounds changes may invalidate returned values.
-  // TODO(msw) Re-evaluate this function's necessity and signature.
-  virtual std::vector<Rect> GetSubstringBounds(size_t from, size_t to);
+  virtual void GetSubstringBounds(size_t from,
+                                  size_t to,
+                                  std::vector<Rect>* bounds) = 0;
 
   // Return true if cursor can appear in front of the character at |position|,
   // which means it is a grapheme boundary or the first character in the text.
   virtual bool IsCursorablePosition(size_t position) = 0;
+
+  // Update the layout so that the next draw request can correctly
+  // render the text and its attributes.
+  virtual void UpdateLayout() = 0;
+
+  // Ensure the text is laid out.
+  virtual void EnsureLayout() = 0;
+
+  // Draw the text.
+  virtual void DrawVisualText(Canvas* canvas) = 0;
+
+  // Get the logical index of the grapheme preceding the argument |position|.
+  size_t GetIndexOfPreviousGrapheme(size_t position);
 
   // Apply composition style (underline) to composition range and selection
   // style (foreground) to selection range.
@@ -245,9 +257,6 @@ class UI_EXPORT RenderText {
   // The return value is bounded by 0 and the text length, inclusive.
   virtual size_t IndexOfAdjacentGrapheme(size_t index, bool next) = 0;
 
-  // Sets the selection model, the argument is assumed to be valid.
-  void SetSelectionModel(const SelectionModel& selection_model);
-
   // Set the cursor to |position|, with the caret trailing the previous
   // grapheme, or if there is no previous grapheme, leading the cursor position.
   // If |select| is false, the selection start is moved to the same position.
@@ -258,6 +267,10 @@ class UI_EXPORT RenderText {
   // Update the cached bounds and display offset to ensure that the current
   // cursor is within the visible display area.
   void UpdateCachedBoundsAndOffset();
+
+  // Draw the selection and cursor.
+  void DrawSelection(Canvas* canvas);
+  void DrawCursor(Canvas* canvas);
 
   // Logical UTF-16 string data to be drawn.
   string16 text_;

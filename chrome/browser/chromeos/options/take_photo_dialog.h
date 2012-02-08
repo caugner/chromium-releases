@@ -6,13 +6,14 @@
 #define CHROME_BROWSER_CHROMEOS_OPTIONS_TAKE_PHOTO_DIALOG_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/login/camera_controller.h"
 #include "chrome/browser/chromeos/login/take_photo_view.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "views/window/dialog_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class View;
@@ -24,7 +25,7 @@ namespace chromeos {
 class TakePhotoDialog : public views::DialogDelegateView,
                         public TakePhotoView::Delegate,
                         public CameraController::Delegate,
-                        public NotificationObserver {
+                        public content::NotificationObserver {
  public:
   class Delegate {
    public:
@@ -38,8 +39,7 @@ class TakePhotoDialog : public views::DialogDelegateView,
   virtual ~TakePhotoDialog();
 
   // views::DialogDelegateView overrides.
-  virtual bool IsDialogButtonEnabled(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;
 
@@ -86,15 +86,15 @@ class TakePhotoDialog : public views::DialogDelegateView,
   void NotifyOnCaptureFailure();
   void NotifyOnCapturingStopped();
 
-  // NotificationObserver implementation:
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  protected:
   // views::View overrides:
-  virtual void Layout();
-  virtual gfx::Size GetPreferredSize();
+  virtual void Layout() OVERRIDE;
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
 
  private:
   // Starts initializing the camera and shows the appropriate status on the
@@ -105,7 +105,7 @@ class TakePhotoDialog : public views::DialogDelegateView,
 
   CameraController camera_controller_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   Delegate* delegate_;
 

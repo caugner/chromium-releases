@@ -10,15 +10,15 @@
 
 #include "base/basictypes.h"
 #include "base/time.h"
-#include "content/common/child_process_info.h"
 #include "content/common/content_export.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/process_type.h"
 #include "net/base/load_states.h"
 #include "net/url_request/url_request.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 #include "webkit/glue/resource_type.h"
 
 class CrossSiteResourceHandler;
-class LoginHandler;
 class ResourceDispatcherHost;
 class ResourceDispatcherHostLoginDelegate;
 class ResourceHandler;
@@ -39,19 +39,22 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
   // This will take a reference to the handler.
   CONTENT_EXPORT ResourceDispatcherHostRequestInfo(
       ResourceHandler* handler,
-      ChildProcessInfo::ProcessType process_type,
+      content::ProcessType process_type,
       int child_id,
       int route_id,
       int origin_pid,
       int request_id,
       bool is_main_frame,
       int64 frame_id,
+      bool parent_is_main_frame,
+      int64 parent_frame_id,
       ResourceType::Type resource_type,
       content::PageTransition transition_type,
       uint64 upload_size,
       bool is_download,
       bool allow_download,
       bool has_user_gesture,
+      WebKit::WebReferrerPolicy referrer_policy,
       const content::ResourceContext* context);
   virtual ~ResourceDispatcherHostRequestInfo();
 
@@ -82,7 +85,7 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
   void set_ssl_client_auth_handler(SSLClientAuthHandler* s);
 
   // Identifies the type of process (renderer, plugin, etc.) making the request.
-  ChildProcessInfo::ProcessType process_type() const {
+  content::ProcessType process_type() const {
     return process_type_;
   }
 
@@ -111,6 +114,13 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
 
   // Frame ID that sent this resource request. -1 if unknown / invalid.
   int64 frame_id() const { return frame_id_; }
+
+  // True if |parent_frame_id_| represents a main frame in the RenderView.
+  bool parent_is_main_frame() const { return parent_is_main_frame_; }
+
+  // Frame ID of parent frame of frame that sent this resource request.
+  // -1 if unknown / invalid.
+  int64 parent_frame_id() const { return parent_frame_id_; }
 
   // Number of messages we've sent to the renderer that we haven't gotten an
   // ACK for. This allows us to avoid having too many messages in flight.
@@ -175,6 +185,8 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
   }
   void set_requested_blob_data(webkit_blob::BlobData* data);
 
+  WebKit::WebReferrerPolicy referrer_policy() const { return referrer_policy_; }
+
   const content::ResourceContext* context() const { return context_; }
 
  private:
@@ -213,13 +225,15 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
   CrossSiteResourceHandler* cross_site_handler_;  // Non-owning, may be NULL.
   scoped_refptr<ResourceDispatcherHostLoginDelegate> login_delegate_;
   scoped_refptr<SSLClientAuthHandler> ssl_client_auth_handler_;
-  ChildProcessInfo::ProcessType process_type_;
+  content::ProcessType process_type_;
   int child_id_;
   int route_id_;
   int origin_pid_;
   int request_id_;
   bool is_main_frame_;
   int64 frame_id_;
+  bool parent_is_main_frame_;
+  int64 parent_frame_id_;
   int pending_data_count_;
   bool is_download_;
   bool allow_download_;
@@ -233,6 +247,7 @@ class ResourceDispatcherHostRequestInfo : public net::URLRequest::UserData {
   bool waiting_for_upload_progress_ack_;
   int memory_cost_;
   scoped_refptr<webkit_blob::BlobData> requested_blob_data_;
+  WebKit::WebReferrerPolicy referrer_policy_;
   const content::ResourceContext* context_;
 
   // "Private" data accessible only to ResourceDispatcherHost (use the

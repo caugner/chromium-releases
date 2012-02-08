@@ -13,7 +13,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/gfx/rect.h"
-#include "views/widget/native_widget_gtk.h"
+#include "ui/views/widget/native_widget_gtk.h"
 
 // ConstrainedHtmlDelegateGtk works with ConstrainedWindowGtk to present
 // a TabContents in a ContraintedHtmlUI.
@@ -92,7 +92,8 @@ ConstrainedHtmlDelegateGtk::ConstrainedHtmlDelegateGtk(
       tab_container_(NULL),
       html_delegate_(delegate),
       window_(NULL),
-      closed_via_webui_(false) {
+      closed_via_webui_(false),
+      release_tab_on_close_(false) {
   CHECK(delegate);
   TabContents* tab_contents =
       new TabContents(profile, NULL, MSG_ROUTING_NONE, NULL, NULL);
@@ -102,7 +103,8 @@ ConstrainedHtmlDelegateGtk::ConstrainedHtmlDelegateGtk(
   // Set |this| as a property so the ConstrainedHtmlUI can retrieve it.
   ConstrainedHtmlUI::GetPropertyAccessor().SetProperty(
       tab_contents->property_bag(), this);
-  tab_contents->controller().LoadURL(delegate->GetDialogContentURL(), GURL(),
+  tab_contents->controller().LoadURL(delegate->GetDialogContentURL(),
+                                     content::Referrer(),
                                      content::PAGE_TRANSITION_START_PAGE,
                                      std::string());
 
@@ -122,6 +124,8 @@ ConstrainedHtmlDelegateGtk::ConstrainedHtmlDelegateGtk(
 }
 
 ConstrainedHtmlDelegateGtk::~ConstrainedHtmlDelegateGtk() {
+  if (release_tab_on_close_)
+    ignore_result(html_tab_contents_.release());
 }
 
 HtmlDialogUIDelegate* ConstrainedHtmlDelegateGtk::GetHtmlDialogUIDelegate() {

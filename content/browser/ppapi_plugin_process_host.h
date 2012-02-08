@@ -15,9 +15,8 @@
 #include "content/browser/browser_child_process_host.h"
 #include "content/browser/renderer_host/pepper_message_filter.h"
 
-struct PepperPluginInfo;
-
 namespace content {
+struct PepperPluginInfo;
 class ResourceContext;
 }
 
@@ -56,9 +55,10 @@ class PpapiPluginProcessHost
   virtual ~PpapiPluginProcessHost();
 
   static PpapiPluginProcessHost* CreatePluginHost(
-      const PepperPluginInfo& info,
+      const content::PepperPluginInfo& info,
       net::HostResolver* host_resolver);
-  static PpapiPluginProcessHost* CreateBrokerHost(const PepperPluginInfo& info);
+  static PpapiPluginProcessHost* CreateBrokerHost(
+      const content::PepperPluginInfo& info);
 
   // Opens a new channel to the plugin. The client will be notified when the
   // channel is ready or if there's an error.
@@ -78,12 +78,11 @@ class PpapiPluginProcessHost
 
   // Actually launches the process with the given plugin info. Returns true
   // on success (the process was spawned).
-  bool Init(const PepperPluginInfo& info);
+  bool Init(const content::PepperPluginInfo& info);
 
   void RequestPluginChannel(Client* client);
 
-  virtual bool CanShutdown();
-  virtual void OnProcessLaunched();
+  virtual void OnProcessLaunched() OVERRIDE;
 
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
@@ -112,6 +111,9 @@ class PpapiPluginProcessHost
   FilePath plugin_path_;
 
   const bool is_broker_;
+
+  // The unique id created for the process.
+  int process_id_;
 
   DISALLOW_COPY_AND_ASSIGN(PpapiPluginProcessHost);
 };

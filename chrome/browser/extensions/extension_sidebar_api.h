@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "chrome/browser/extensions/extension_function.h"
 
 class Profile;
-class RenderViewHost;
 class TabContents;
 
 namespace base {
@@ -37,7 +36,7 @@ class ExtensionSidebarEventRouter {
 // Base class for sidebar function APIs.
 class SidebarFunction : public SyncExtensionFunction {
  public:
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
@@ -48,7 +47,7 @@ class CollapseSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.collapse");
 };
 
@@ -56,7 +55,7 @@ class ExpandSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.expand");
 };
 
@@ -64,7 +63,7 @@ class GetStateSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.getState");
 };
 
@@ -72,7 +71,7 @@ class HideSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.hide");
 };
 
@@ -80,7 +79,7 @@ class NavigateSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.navigate");
 };
 
@@ -88,7 +87,7 @@ class SetBadgeTextSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.setBadgeText");
 };
 
@@ -96,7 +95,7 @@ class SetIconSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.setIcon");
 };
 
@@ -104,7 +103,7 @@ class SetTitleSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.setTitle");
 };
 
@@ -112,7 +111,7 @@ class ShowSidebarFunction : public SidebarFunction {
  private:
   virtual bool RunImpl(TabContents* tab,
                        const std::string& content_id,
-                       const base::DictionaryValue& details);
+                       const base::DictionaryValue& details) OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("experimental.sidebar.show");
 };
 

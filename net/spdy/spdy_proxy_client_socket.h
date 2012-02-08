@@ -11,6 +11,7 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_log.h"
@@ -30,10 +31,8 @@ class GURL;
 namespace net {
 
 class AddressList;
-class ClientSocketHandle;
 class HttpStream;
 class IOBuffer;
-class SpdySession;
 class SpdyStream;
 
 class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
@@ -60,45 +59,49 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   }
 
   // ProxyClientSocket methods:
-  virtual const HttpResponseInfo* GetConnectResponseInfo() const;
+  virtual const HttpResponseInfo* GetConnectResponseInfo() const OVERRIDE;
 
   // In the event of a non-200 response to the CONNECT request, this
   // method may be called to return an HttpStream in order to read
   // the response body.
-  virtual HttpStream* CreateConnectResponseStream();
+  virtual HttpStream* CreateConnectResponseStream() OVERRIDE;
 
   // StreamSocket methods:
-  virtual int Connect(OldCompletionCallback* callback);
-  virtual void Disconnect();
-  virtual bool IsConnected() const;
-  virtual bool IsConnectedAndIdle() const;
-  virtual const BoundNetLog& NetLog() const;
-  virtual void SetSubresourceSpeculation();
-  virtual void SetOmniboxSpeculation();
-  virtual bool WasEverUsed() const;
-  virtual bool UsingTCPFastOpen() const;
-  virtual int64 NumBytesRead() const;
-  virtual base::TimeDelta GetConnectTimeMicros() const;
+  virtual int Connect(OldCompletionCallback* callback) OVERRIDE;
+  virtual void Disconnect() OVERRIDE;
+  virtual bool IsConnected() const OVERRIDE;
+  virtual bool IsConnectedAndIdle() const OVERRIDE;
+  virtual const BoundNetLog& NetLog() const OVERRIDE;
+  virtual void SetSubresourceSpeculation() OVERRIDE;
+  virtual void SetOmniboxSpeculation() OVERRIDE;
+  virtual bool WasEverUsed() const OVERRIDE;
+  virtual bool UsingTCPFastOpen() const OVERRIDE;
+  virtual int64 NumBytesRead() const OVERRIDE;
+  virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
 
   // Socket methods:
-  virtual int Read(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
-  virtual int Write(IOBuffer* buf, int buf_len, OldCompletionCallback* callback);
-  virtual bool SetReceiveBufferSize(int32 size);
-  virtual bool SetSendBufferSize(int32 size);
-  virtual int GetPeerAddress(AddressList* address) const;
-  virtual int GetLocalAddress(IPEndPoint* address) const;
+  virtual int Read(IOBuffer* buf,
+                   int buf_len,
+                   OldCompletionCallback* callback) OVERRIDE;
+  virtual int Write(IOBuffer* buf,
+                    int buf_len,
+                    OldCompletionCallback* callback) OVERRIDE;
+  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
+  virtual bool SetSendBufferSize(int32 size) OVERRIDE;
+  virtual int GetPeerAddress(AddressList* address) const OVERRIDE;
+  virtual int GetLocalAddress(IPEndPoint* address) const OVERRIDE;
 
   // SpdyStream::Delegate methods:
-  virtual bool OnSendHeadersComplete(int status);
-  virtual int OnSendBody();
-  virtual int OnSendBodyComplete(int status, bool* eof);
+  virtual bool OnSendHeadersComplete(int status) OVERRIDE;
+  virtual int OnSendBody() OVERRIDE;
+  virtual int OnSendBodyComplete(int status, bool* eof) OVERRIDE;
   virtual int OnResponseReceived(const spdy::SpdyHeaderBlock& response,
                                  base::Time response_time,
-                                 int status);
-  virtual void OnDataReceived(const char* data, int length);
-  virtual void OnDataSent(int length);
-  virtual void OnClose(int status);
-  virtual void set_chunk_callback(ChunkCallback* /*callback*/);
+                                 int status) OVERRIDE;
+  virtual void OnDataReceived(const char* data, int length) OVERRIDE;
+  virtual void OnDataSent(int length) OVERRIDE;
+  virtual void OnClose(int status) OVERRIDE;
+  virtual void set_chunk_callback(ChunkCallback* /*callback*/) OVERRIDE;
 
  private:
   enum State {
@@ -157,12 +160,12 @@ class NET_EXPORT_PRIVATE SpdyProxyClientSocket : public ProxyClientSocket,
   // Number of bytes written which have not been confirmed
   int write_bytes_outstanding_;
 
-  // True if read has ever returned zero for eof.
-  bool eof_has_been_read_;
   // True if the transport socket has ever sent data.
   bool was_ever_used_;
 
   scoped_ptr<SpdyHttpStream> response_stream_;
+
+  base::WeakPtrFactory<SpdyProxyClientSocket> weak_factory_;
 
   const BoundNetLog net_log_;
 

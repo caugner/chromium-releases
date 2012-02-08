@@ -12,11 +12,11 @@
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
 #include "chrome/browser/sync/glue/search_engine_data_type_controller.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using browser_sync::ChangeProcessorMock;
@@ -39,7 +39,7 @@ class SearchEngineDataTypeControllerTest : public testing::Test {
     model_associator_ = new ModelAssociatorMock();
     change_processor_ = new ChangeProcessorMock();
     profile_sync_factory_.reset(
-        new ProfileSyncFactoryMock(model_associator_,
+        new ProfileSyncComponentsFactoryMock(model_associator_,
                                    change_processor_));
     // Feed the DTC test_util_'s profile so it is reused later.
     // This allows us to control the associated TemplateURLService.
@@ -80,7 +80,7 @@ class SearchEngineDataTypeControllerTest : public testing::Test {
   // matters - we could leak if this is declared below.
   TemplateURLServiceTestUtil test_util_;
   scoped_refptr<SearchEngineDataTypeController> search_engine_dtc_;
-  scoped_ptr<ProfileSyncFactoryMock> profile_sync_factory_;
+  scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   ProfileSyncServiceMock service_;
   ModelAssociatorMock* model_associator_;
   ChangeProcessorMock* change_processor_;
@@ -107,10 +107,10 @@ TEST_F(SearchEngineDataTypeControllerTest, StartURLServiceNotReady) {
   EXPECT_EQ(DataTypeController::MODEL_STARTING, search_engine_dtc_->state());
 
   // Send the notification that the TemplateURLService has started.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TEMPLATE_URL_SERVICE_LOADED,
-      Source<TemplateURLService>(test_util_.model()),
-      NotificationService::NoDetails());
+      content::Source<TemplateURLService>(test_util_.model()),
+      content::NotificationService::NoDetails());
   EXPECT_EQ(DataTypeController::RUNNING, search_engine_dtc_->state());
 }
 

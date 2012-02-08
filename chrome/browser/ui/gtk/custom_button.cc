@@ -5,16 +5,17 @@
 #include "chrome/browser/ui/gtk/custom_button.h"
 
 #include "base/basictypes.h"
-#include "chrome/browser/ui/gtk/cairo_cached_surface.h"
+#include "base/logging.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/theme_resources_standard.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
+#include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/skbitmap_operations.h"
 
 CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeService* theme_provider,
@@ -31,8 +32,8 @@ CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeService* theme_provider,
       theme_service_(theme_provider),
       flipped_(false) {
   for (int i = 0; i < (GTK_STATE_INSENSITIVE + 1); ++i)
-    surfaces_[i].reset(new CairoCachedSurface);
-  background_image_.reset(new CairoCachedSurface);
+    surfaces_[i].reset(new gfx::CairoCachedSurface);
+  background_image_.reset(new gfx::CairoCachedSurface);
 
   if (theme_provider) {
     // Load images by pretending that we got a BROWSER_THEME_CHANGED
@@ -41,7 +42,7 @@ CustomDrawButtonBase::CustomDrawButtonBase(GtkThemeService* theme_provider,
 
     registrar_.Add(this,
                    chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                   Source<ThemeService>(theme_provider));
+                   content::Source<ThemeService>(theme_provider));
   } else {
     // Load the button images from the resource bundle.
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -80,8 +81,8 @@ gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget,
     paint_state = GTK_STATE_NORMAL;
   bool animating_hover = hover_state > 0.0 &&
       paint_state == GTK_STATE_NORMAL;
-  CairoCachedSurface* pixbuf = PixbufForState(paint_state);
-  CairoCachedSurface* hover_pixbuf = PixbufForState(GTK_STATE_PRELIGHT);
+  gfx::CairoCachedSurface* pixbuf = PixbufForState(paint_state);
+  gfx::CairoCachedSurface* hover_pixbuf = PixbufForState(GTK_STATE_PRELIGHT);
 
   if (!pixbuf || !pixbuf->valid())
     return FALSE;
@@ -89,11 +90,13 @@ gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget,
     return FALSE;
 
   cairo_t* cairo_context = gdk_cairo_create(GDK_DRAWABLE(widget->window));
-  cairo_translate(cairo_context, widget->allocation.x, widget->allocation.y);
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+  cairo_translate(cairo_context, allocation.x, allocation.y);
 
   if (flipped_) {
     // Horizontally flip the image for non-LTR/RTL reasons.
-    cairo_translate(cairo_context, widget->allocation.width, 0.0f);
+    cairo_translate(cairo_context, allocation.width, 0.0f);
     cairo_scale(cairo_context, -1.0f, 1.0f);
   }
 
@@ -101,18 +104,18 @@ gboolean CustomDrawButtonBase::OnExpose(GtkWidget* widget,
   // start of the widget (left for LTR, right for RTL) and its bottom.
   gfx::Rect bounds = gfx::Rect(0, 0, pixbuf->Width(), 0);
   int x = gtk_util::MirroredLeftPointForRect(widget, bounds);
-  int y = widget->allocation.height - pixbuf->Height();
+  int y = allocation.height - pixbuf->Height();
 
   if (background_image_->valid()) {
-    background_image_->SetSource(cairo_context, x, y);
+    background_image_->SetSource(cairo_context, widget, x, y);
     cairo_paint(cairo_context);
   }
 
-  pixbuf->SetSource(cairo_context, x, y);
+  pixbuf->SetSource(cairo_context, widget, x, y);
   cairo_paint(cairo_context);
 
   if (animating_hover) {
-    hover_pixbuf->SetSource(cairo_context, x, y);
+    hover_pixbuf->SetSource(cairo_context, widget, x, y);
     cairo_paint_with_alpha(cairo_context, hover_state);
   }
 
@@ -142,7 +145,8 @@ void CustomDrawButtonBase::SetBackground(SkColor color,
 }
 
 void CustomDrawButtonBase::Observe(int type,
-    const NotificationSource& source, const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(theme_service_);
   DCHECK(chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type);
 
@@ -157,8 +161,8 @@ void CustomDrawButtonBase::Observe(int type,
       theme_service_->GetRTLEnabledPixbufNamed(disabled_id_) : NULL);
 }
 
-CairoCachedSurface* CustomDrawButtonBase::PixbufForState(int state) {
-  CairoCachedSurface* pixbuf = surfaces_[state].get();
+gfx::CairoCachedSurface* CustomDrawButtonBase::PixbufForState(int state) {
+  gfx::CairoCachedSurface* pixbuf = surfaces_[state].get();
 
   // Fall back to the default image if we don't have one for this state.
   if (!pixbuf || !pixbuf->valid())
@@ -248,7 +252,7 @@ CustomDrawButton::CustomDrawButton(GtkThemeService* theme_provider,
   theme_service_->InitThemesFor(this);
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_provider));
+                 content::Source<ThemeService>(theme_provider));
 }
 
 CustomDrawButton::CustomDrawButton(GtkThemeService* theme_provider,
@@ -267,7 +271,7 @@ CustomDrawButton::CustomDrawButton(GtkThemeService* theme_provider,
   theme_service_->InitThemesFor(this);
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_provider));
+                 content::Source<ThemeService>(theme_provider));
 }
 
 CustomDrawButton::~CustomDrawButton() {
@@ -289,9 +293,16 @@ void CustomDrawButton::ForceChromeTheme() {
 }
 
 void CustomDrawButton::Observe(int type,
-    const NotificationSource& source, const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type);
   SetBrowserTheme();
+}
+
+int CustomDrawButton::WidgetWidth() const {
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget_.get(), &allocation);
+  return allocation.width;
 }
 
 int CustomDrawButton::SurfaceWidth() const {

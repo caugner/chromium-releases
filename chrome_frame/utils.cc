@@ -29,6 +29,7 @@
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/chrome_frame_distribution.h"
+#include "chrome_frame/chrome_tab.h"
 #include "chrome_frame/extra_system_apis.h"
 #include "chrome_frame/html_utils.h"
 #include "chrome_frame/navigation_constraints.h"
@@ -40,8 +41,6 @@
 #include "net/base/escape.h"
 #include "net/http/http_util.h"
 #include "ui/base/models/menu_model.h"
-
-#include "chrome_tab.h"  // NOLINT
 
 using base::win::RegKey;
 
@@ -111,7 +110,7 @@ namespace {
 // pointer so it should not be dereferenced and used for comparison against a
 // living instance only.
 base::LazyInstance<base::ThreadLocalPointer<IBrowserService> >
-    g_tls_browser_for_cf_navigation(base::LINKER_INITIALIZED);
+    g_tls_browser_for_cf_navigation = LAZY_INSTANCE_INITIALIZER;
 
 }  // end anonymous namespace
 
@@ -1329,6 +1328,7 @@ std::string Bscf2Str(DWORD flags) {
 // Reads data from a stream into a string.
 HRESULT ReadStream(IStream* stream, size_t size, std::string* data) {
   DCHECK(stream);
+  DCHECK_GT(size, 0u);
   DCHECK(data);
 
   DWORD read = 0;
@@ -1425,7 +1425,7 @@ bool ChromeFrameUrl::ParseAttachExternalTabUrl() {
     profile_name_ = tokenizer.token();
     // Escape out special characters like %20, etc.
     profile_name_ = net::UnescapeURLComponent(profile_name_,
-        UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS);
+        net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS);
   } else {
     return false;
   }

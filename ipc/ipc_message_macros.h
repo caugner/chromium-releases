@@ -20,7 +20,7 @@
 //
 // The XXXMsgStart value is an enumeration that ensures uniqueness for
 // each different message file.  Later, you will use this inside your
-// XXX_messages.h file before invoking message declatation macros:
+// XXX_messages.h file before invoking message declaration macros:
 //     #define IPC_MESSAGE_START XXXMsgStart
 //       ( ... your macro invocations go here ... )
 //
@@ -176,6 +176,7 @@
 #ifndef IPC_IPC_MESSAGE_MACROS_H_
 #define IPC_IPC_MESSAGE_MACROS_H_
 
+#include "base/profiler/scoped_profile.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/param_traits_macros.h"
 
@@ -190,10 +191,12 @@
 
 // Macros for defining structs.  May be subsequently redefined.
 #define IPC_STRUCT_BEGIN(struct_name) \
+  IPC_STRUCT_BEGIN_WITH_PARENT(struct_name, IPC::NoParams)
+#define IPC_STRUCT_BEGIN_WITH_PARENT(struct_name, parent) \
   struct struct_name; \
   IPC_STRUCT_TRAITS_BEGIN(struct_name) \
   IPC_STRUCT_TRAITS_END() \
-  struct IPC_MESSAGE_EXPORT struct_name : IPC::NoParams { \
+  struct IPC_MESSAGE_EXPORT struct_name : parent { \
     struct_name(); \
     ~struct_name();
 #define IPC_STRUCT_MEMBER(type, name) type name;
@@ -595,7 +598,7 @@
   IPC_MESSAGE_EXTRA(sync, kind, msg_class, in_cnt, out_cnt, in_list, out_list)
 
 #define IPC_EMPTY_CONTROL_DECL(msg_class, in_cnt, out_cnt, in_list, out_list) \
-  class msg_class : public IPC::Message {                                     \
+  class IPC_MESSAGE_EXPORT msg_class : public IPC::Message {                  \
    public:                                                                    \
     typedef IPC::Message Schema;                                              \
     enum { ID = IPC_MESSAGE_ID() };                                           \
@@ -604,7 +607,7 @@
   };
 
 #define IPC_EMPTY_ROUTED_DECL(msg_class, in_cnt, out_cnt, in_list, out_list)  \
-  class msg_class : public IPC::Message {                                     \
+  class IPC_MESSAGE_EXPORT msg_class : public IPC::Message {                  \
    public:                                                                    \
     typedef IPC::Message Schema;                                              \
     enum { ID = IPC_MESSAGE_ID() };                                           \
@@ -818,7 +821,8 @@ LogFunctionMap g_log_function_mapping;
   class LoggerRegisterHelper##msg_class {                               \
  public:                                                                \
     LoggerRegisterHelper##msg_class() {                                 \
-      g_log_function_mapping[msg_class::ID] = msg_class::Log;           \
+      const uint32 msg_id = static_cast<uint32>(msg_class::ID);         \
+      g_log_function_mapping[msg_id] = msg_class::Log;                  \
     }                                                                   \
   };                                                                    \
   LoggerRegisterHelper##msg_class g_LoggerRegisterHelper##msg_class;
@@ -900,9 +904,7 @@ LogFunctionMap g_log_function_mapping;
 // Message IDs
 // Note: we currently use __LINE__ to give unique IDs to messages within
 // a file.  They're globally unique since each file defines its own
-// IPC_MESSAGE_START.  Ideally, we wouldn't use line numbers (a possibility
-// is to instead use the __COUNTER__ macro, but it needs gcc 4.3 and xcode
-// doesn't use it yet).
+// IPC_MESSAGE_START.
 #define IPC_MESSAGE_ID() ((IPC_MESSAGE_START << 16) + __LINE__)
 #define IPC_MESSAGE_ID_CLASS(id) ((id) >> 16)
 #define IPC_MESSAGE_ID_LINE(id) ((id) & 0xffff)
@@ -941,40 +943,50 @@ LogFunctionMap g_log_function_mapping;
     bool msg_is_ok__ = true; \
     switch (ipc_message__.type()) { \
 
-#define IPC_MESSAGE_FORWARD(msg_class, obj, member_func) \
-  case msg_class::ID: \
-    msg_is_ok__ = msg_class::Dispatch(&ipc_message__, obj, this, \
-                                      &member_func); \
-    break;
+#define IPC_MESSAGE_FORWARD(msg_class, obj, member_func)                       \
+    case msg_class::ID: {                                                      \
+        TRACK_RUN_IN_IPC_HANDLER(member_func);                                 \
+        msg_is_ok__ = msg_class::Dispatch(&ipc_message__, obj, this,           \
+                                      &member_func);                           \
+      }                                                                        \
+      break;
 
 #define IPC_MESSAGE_HANDLER(msg_class, member_func) \
   IPC_MESSAGE_FORWARD(msg_class, this, _IpcMessageHandlerClass::member_func)
 
-#define IPC_MESSAGE_FORWARD_DELAY_REPLY(msg_class, obj, member_func) \
-    case msg_class::ID: \
-    msg_is_ok__ = msg_class::DispatchDelayReply(&ipc_message__, obj, \
-                                                &member_func); \
-    break;
+#define IPC_MESSAGE_FORWARD_DELAY_REPLY(msg_class, obj, member_func)           \
+    case msg_class::ID: {                                                      \
+        TRACK_RUN_IN_IPC_HANDLER(member_func);                                 \
+        msg_is_ok__ = msg_class::DispatchDelayReply(&ipc_message__, obj,       \
+                                                  &member_func);               \
+      }                                                                        \
+      break;
 
-#define IPC_MESSAGE_HANDLER_DELAY_REPLY(msg_class, member_func) \
-  IPC_MESSAGE_FORWARD_DELAY_REPLY(msg_class, this, \
-                                  _IpcMessageHandlerClass::member_func)
+#define IPC_MESSAGE_HANDLER_DELAY_REPLY(msg_class, member_func)                \
+    IPC_MESSAGE_FORWARD_DELAY_REPLY(msg_class, this,                           \
+                                    _IpcMessageHandlerClass::member_func)
 
-#define IPC_MESSAGE_HANDLER_GENERIC(msg_class, code) \
-  case msg_class::ID: \
-    code; \
-    break;
+// TODO(jar): fix chrome frame to always supply |code| argument.
+#define IPC_MESSAGE_HANDLER_GENERIC(msg_class, code)                           \
+    case msg_class::ID: {                                                      \
+        /* TRACK_RUN_IN_IPC_HANDLER(code);  TODO(jar) */                       \
+        code;                                                                  \
+      }                                                                        \
+      break;
 
-#define IPC_REPLY_HANDLER(func) \
-   case IPC_REPLY_ID: \
-     func(ipc_message__); \
-     break;
+#define IPC_REPLY_HANDLER(func)                                                \
+    case IPC_REPLY_ID: {                                                       \
+        TRACK_RUN_IN_IPC_HANDLER(func);                                        \
+        func(ipc_message__);                                                   \
+      }                                                                        \
+      break;
 
 
-#define IPC_MESSAGE_UNHANDLED(code) \
-  default: \
-    code; \
-    break;
+#define IPC_MESSAGE_UNHANDLED(code)                                            \
+    default: {                                                                 \
+        code;                                                                  \
+      }                                                                        \
+      break;
 
 #define IPC_MESSAGE_UNHANDLED_ERROR() \
   IPC_MESSAGE_UNHANDLED(NOTREACHED() << \

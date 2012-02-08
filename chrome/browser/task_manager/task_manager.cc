@@ -4,6 +4,7 @@
 
 #include "chrome/browser/task_manager/task_manager.h"
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/i18n/number_formatting.h"
 #include "base/i18n/rtl.h"
@@ -20,18 +21,18 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/task_manager/task_manager_resource_providers.h"
+#include "chrome/browser/task_manager/task_manager_worker_resource_provider.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/chrome_view_types.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/result_codes.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/ui_resources.h"
@@ -43,6 +44,8 @@
 #if defined(OS_MACOSX)
 #include "content/browser/mach_broker_mac.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -78,7 +81,8 @@ string16 FormatStatsSize(const WebKit::WebCache::ResourceTypeStat& stat) {
 TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
     : update_requests_(0),
       update_state_(IDLE),
-      goat_salt_(rand()) {
+      goat_salt_(rand()),
+      last_unique_id_(0) {
   AddResourceProvider(
       new TaskManagerBrowserProcessResourceProvider(task_manager));
   AddResourceProvider(
@@ -93,13 +97,11 @@ TaskManagerModel::TaskManagerModel(TaskManager* task_manager)
       TaskManagerNotificationResourceProvider::Create(task_manager);
   if (provider)
     AddResourceProvider(provider);
+
+  AddResourceProvider(new TaskManagerWorkerResourceProvider(task_manager));
 }
 
 TaskManagerModel::~TaskManagerModel() {
-  for (ResourceProviderList::iterator iter = providers_.begin();
-       iter != providers_.end(); ++iter) {
-    (*iter)->Release();
-  }
 }
 
 int TaskManagerModel::ResourceCount() const {
@@ -116,6 +118,11 @@ void TaskManagerModel::AddObserver(TaskManagerModelObserver* observer) {
 
 void TaskManagerModel::RemoveObserver(TaskManagerModelObserver* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+int TaskManagerModel::GetResourceUniqueId(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return resources_[index]->get_unique_id();
 }
 
 string16 TaskManagerModel::GetResourceTitle(int index) const {
@@ -560,6 +567,21 @@ bool TaskManagerModel::GetV8Memory(int index, size_t* result) const {
   return true;
 }
 
+bool TaskManagerModel::CanActivate(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return GetResourceTabContents(index) != NULL;
+}
+
+bool TaskManagerModel::CanInspect(int index) const {
+  CHECK_LT(index, ResourceCount());
+  return resources_[index]->CanInspect();
+}
+
+void TaskManagerModel::Inspect(int index) const {
+  CHECK_LT(index, ResourceCount());
+  resources_[index]->Inspect();
+}
+
 int TaskManagerModel::GetGoatsTeleported(int index) const {
   int seed = goat_salt_ * (index + 1);
   return (seed >> 16) & 255;
@@ -591,8 +613,8 @@ void TaskManagerModel::StartUpdating() {
   // If update_state_ is STOPPING, it means a task is still pending.  Setting
   // it to TASK_PENDING ensures the tasks keep being posted (by Refresh()).
   if (update_state_ == IDLE) {
-      MessageLoop::current()->PostDelayedTask(FROM_HERE,
-          NewRunnableMethod(this, &TaskManagerModel::Refresh),
+      MessageLoop::current()->PostDelayedTask(
+          FROM_HERE, base::Bind(&TaskManagerModel::Refresh, this),
           kUpdateTimeMs);
   }
   update_state_ = TASK_PENDING;
@@ -628,12 +650,12 @@ void TaskManagerModel::StopUpdating() {
 void TaskManagerModel::AddResourceProvider(
     TaskManager::ResourceProvider* provider) {
   DCHECK(provider);
-  // AddRef matched with Release in destructor.
-  provider->AddRef();
   providers_.push_back(provider);
 }
 
 void TaskManagerModel::AddResource(TaskManager::Resource* resource) {
+  resource->unique_id_ = ++last_unique_id_;
+
   base::ProcessHandle process = resource->GetProcess();
 
   ResourceList* group_entries = NULL;
@@ -759,6 +781,7 @@ void TaskManagerModel::Clear() {
     FOR_EACH_OBSERVER(TaskManagerModelObserver, observer_list_,
                       OnItemsRemoved(0, size));
   }
+  last_unique_id_ = 0;
 }
 
 void TaskManagerModel::ModelChanged() {
@@ -860,9 +883,8 @@ void TaskManagerModel::Refresh() {
   }
 
   // Schedule the next update.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      NewRunnableMethod(this, &TaskManagerModel::Refresh),
-      kUpdateTimeMs);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, base::Bind(&TaskManagerModel::Refresh, this), kUpdateTimeMs);
 }
 
 int64 TaskManagerModel::GetNetworkUsageForResource(
@@ -947,12 +969,9 @@ void TaskManagerModel::NotifyBytesRead(const net::URLRequest& request,
   // This happens in the IO thread, post it to the UI thread.
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &TaskManagerModel::BytesRead,
-          BytesReadParam(origin_pid,
-                         render_process_host_child_id,
-                         routing_id, byte_count)));
+      base::Bind(&TaskManagerModel::BytesRead, this,
+                 BytesReadParam(origin_pid, render_process_host_child_id,
+                                routing_id, byte_count)));
 }
 
 bool TaskManagerModel::GetProcessMetricsForRow(
@@ -1046,22 +1065,20 @@ void TaskManager::OpenAboutMemory() {
     browser = Browser::Create(profile);
     browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
                      NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
-    browser->window()->Show();
   } else {
     browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
                      NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
 
-    // In case the browser window is minimzed, show it. If |browser| is a
+    // In case the browser window is minimized, show it. If |browser| is a
     // non-tabbed window, the call to OpenURL above will have opened a
-    // TabContents in a tabbed browser, so we need to grab it with GetLastActive
-    // before the call to show().
+    // TabContents in a tabbed browser, so we need to grab it with
+    // GetLastActive before the call to show().
     if (!browser->is_type_tabbed()) {
       browser = BrowserList::GetLastActive();
       DCHECK(browser);
     }
-
-    browser->window()->Show();
   }
+  browser->window()->Show();
 }
 
 bool TaskManagerModel::GetAndCacheMemoryMetrics(
@@ -1089,7 +1106,7 @@ int CountExtensionBackgroundPagesForProfile(Profile* profile) {
   for (ExtensionProcessManager::const_iterator iter = manager->begin();
        iter != manager->end();
        ++iter) {
-    if ((*iter)->GetRenderViewType() ==
+    if ((*iter)->extension_host_type() ==
         chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
       count++;
     }

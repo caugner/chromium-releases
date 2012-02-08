@@ -12,16 +12,14 @@
 #include "base/basictypes.h"
 #include "base/observer_list.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
-class ExtensionService;
-class PrefService;
 class Profile;
 
 // Model for list of Background Applications, that is, Extensions with
 // kBackgroundPermission set, associated with a Profile.
-class BackgroundApplicationListModel : public NotificationObserver {
+class BackgroundApplicationListModel : public content::NotificationObserver {
  public:
   // Observer is informed of changes to the model.  Users of the
   // BackgroundApplicationListModel should anticipate that associated data,
@@ -104,10 +102,10 @@ class BackgroundApplicationListModel : public NotificationObserver {
   // Returns the Application associated with |extension| or NULL.
   Application* FindApplication(const Extension* extension);
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Notifies observers that some of the data associated with this background
   // application, e. g. the Icon, has changed.
@@ -136,7 +134,7 @@ class BackgroundApplicationListModel : public NotificationObserver {
   ExtensionList extensions_;
   ObserverList<Observer> observers_;
   Profile* profile_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundApplicationListModel);
 };

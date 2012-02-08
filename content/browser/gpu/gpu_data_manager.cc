@@ -8,23 +8,28 @@
 #include <CoreGraphics/CGDisplayConfiguration.h>
 #endif
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/file_util.h"
 #include "base/metrics/histogram.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/values.h"
 #include "base/version.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/gpu/gpu_blacklist.h"
 #include "content/browser/gpu/gpu_process_host.h"
-#include "content/common/content_client.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/gpu/gpu_info_collector.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_switches.h"
 #include "webkit/plugins/plugin_switches.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -92,7 +97,7 @@ enum WinSubVersion {
 };
 
 // Output DxDiagNode tree as nested array of {description,value} pairs
-ListValue* DxDiagNodeToList(const DxDiagNode& node) {
+ListValue* DxDiagNodeToList(const content::DxDiagNode& node) {
   ListValue* list = new ListValue();
   for (std::map<std::string, std::string>::const_iterator it =
       node.values.begin();
@@ -101,7 +106,7 @@ ListValue* DxDiagNodeToList(const DxDiagNode& node) {
     list->Append(NewDescriptionValuePair(it->first, it->second));
   }
 
-  for (std::map<std::string, DxDiagNode>::const_iterator it =
+  for (std::map<std::string, content::DxDiagNode>::const_iterator it =
       node.children.begin();
       it != node.children.end();
       ++it) {
@@ -153,7 +158,8 @@ GpuDataManager::UserFlags::UserFlags()
       disable_accelerated_layers_(false),
       disable_experimental_webgl_(false),
       disable_gl_multisampling_(false),
-      ignore_gpu_blacklist_(false) {
+      ignore_gpu_blacklist_(false),
+      skip_gpu_data_loading_(false) {
 }
 
 void GpuDataManager::UserFlags::Initialize() {
@@ -173,6 +179,8 @@ void GpuDataManager::UserFlags::Initialize() {
 
   ignore_gpu_blacklist_ = browser_command_line.HasSwitch(
       switches::kIgnoreGpuBlacklist);
+  skip_gpu_data_loading_ = browser_command_line.HasSwitch(
+      switches::kSkipGpuDataLoading);
 
   use_gl_ = browser_command_line.GetSwitchValueASCII(switches::kUseGL);
 
@@ -187,22 +195,21 @@ void GpuDataManager::UserFlags::ApplyPolicies() {
 }
 
 GpuDataManager::GpuDataManager()
-    : complete_gpu_info_already_requested_(false) {
+    : complete_gpu_info_already_requested_(false),
+      observer_list_(new GpuDataManagerObserverList),
+      software_rendering_(false) {
   Initialize();
 }
 
 void GpuDataManager::Initialize() {
-  // Certain tests doesn't go through the browser startup path that
-  // initializes GpuDataManager on FILE thread; therefore, it is initialized
-  // on UI thread later, and we skip the preliminary gpu info collection
-  // in such situation.
-  if (BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
-    GPUInfo gpu_info;
+  // User flags need to be collected before any further initialization.
+  user_flags_.Initialize();
+
+  if (!user_flags_.skip_gpu_data_loading()) {
+    content::GPUInfo gpu_info;
     gpu_info_collector::CollectPreliminaryGraphicsInfo(&gpu_info);
     UpdateGpuInfo(gpu_info);
   }
-
-  user_flags_.Initialize();
 
 #if defined(OS_MACOSX)
   CGDisplayRegisterReconfigurationCallback(DisplayReconfigCallback, this);
@@ -232,14 +239,14 @@ void GpuDataManager::RequestCompleteGpuInfoIfNeeded() {
       new GpuMsg_CollectGraphicsInfo());
 }
 
-void GpuDataManager::UpdateGpuInfo(const GPUInfo& gpu_info) {
+void GpuDataManager::UpdateGpuInfo(const content::GPUInfo& gpu_info) {
   {
     base::AutoLock auto_lock(gpu_info_lock_);
-    if (!gpu_info_.Merge(gpu_info))
+    if (!Merge(&gpu_info_, gpu_info))
       return;
   }
 
-  RunGpuInfoUpdateCallbacks();
+  NotifyGpuInfoUpdate();
 
   {
     base::AutoLock auto_lock(gpu_info_lock_);
@@ -249,7 +256,7 @@ void GpuDataManager::UpdateGpuInfo(const GPUInfo& gpu_info) {
   UpdateGpuFeatureFlags();
 }
 
-const GPUInfo& GpuDataManager::gpu_info() const {
+const content::GPUInfo& GpuDataManager::gpu_info() const {
   base::AutoLock auto_lock(gpu_info_lock_);
   return gpu_info_;
 }
@@ -264,8 +271,10 @@ Value* GpuDataManager::GetFeatureStatus() {
       {
           "2d_canvas",
           flags & GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas,
-          user_flags_.disable_accelerated_2d_canvas(),
-          "Accelerated 2D canvas has been disabled at the command line.",
+          user_flags_.disable_accelerated_2d_canvas() ||
+          !supportsAccelerated2dCanvas(),
+          "Accelerated 2D canvas is unavailable: either disabled at the command"
+          " line or not supported by the current system.",
           true
       },
       {
@@ -314,7 +323,10 @@ Value* GpuDataManager::GetFeatureStatus() {
           status += "_software";
         else
           status += "_off";
-      } else if (kGpuFeatureInfo[i].blocked || gpu_access_blocked) {
+      } else if (software_rendering()) {
+        status = "unavailable_software";
+      } else if (kGpuFeatureInfo[i].blocked ||
+                 gpu_access_blocked) {
         status = "unavailable";
         if (kGpuFeatureInfo[i].fallback_to_software)
           status += "_software";
@@ -359,7 +371,7 @@ Value* GpuDataManager::GetFeatureStatus() {
     }
 
     GpuBlacklist* blacklist = GetGpuBlacklist();
-    if (blacklist && (!UseGLIsOSMesaOrAny()))
+    if (blacklist)
       blacklist->GetBlacklistReasons(problem_list);
 
     status->Set("problems", problem_list);
@@ -394,13 +406,20 @@ const ListValue& GpuDataManager::log_messages() const {
 }
 
 GpuFeatureFlags GpuDataManager::GetGpuFeatureFlags() {
-  if (UseGLIsOSMesaOrAny())
-    return GpuFeatureFlags();
+  if (software_rendering_) {
+    GpuFeatureFlags flags;
+
+    // Skia's software rendering is probably more efficient than going through
+    // software emulation of the GPU, so use that.
+    flags.set_flags(GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas);
+    return flags;
+  }
+
   return gpu_feature_flags_;
 }
 
 bool GpuDataManager::GpuAccessAllowed() {
-  if (UseGLIsOSMesaOrAny())
+  if (software_rendering())
     return true;
 
   // We only need to block GPU process if more features are disallowed other
@@ -410,20 +429,12 @@ bool GpuDataManager::GpuAccessAllowed() {
   return (gpu_feature_flags_.flags() & mask) == 0;
 }
 
-void GpuDataManager::AddGpuInfoUpdateCallback(Callback0::Type* callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  gpu_info_update_callbacks_.insert(callback);
+void GpuDataManager::AddObserver(Observer* observer) {
+  observer_list_->AddObserver(observer);
 }
 
-bool GpuDataManager::RemoveGpuInfoUpdateCallback(Callback0::Type* callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::set<Callback0::Type*>::iterator i =
-      gpu_info_update_callbacks_.find(callback);
-  if (i != gpu_info_update_callbacks_.end()) {
-    gpu_info_update_callbacks_.erase(i);
-    return true;
-  }
-  return false;
+void GpuDataManager::RemoveObserver(Observer* observer) {
+  observer_list_->RemoveObserver(observer);
 }
 
 void GpuDataManager::AppendRendererCommandLine(
@@ -431,7 +442,7 @@ void GpuDataManager::AppendRendererCommandLine(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(command_line);
 
-  uint32 flags = gpu_feature_flags_.flags();
+  uint32 flags = GpuFeatureFlags().flags();
   if ((flags & GpuFeatureFlags::kGpuFeatureWebgl)) {
     if (!command_line->HasSwitch(switches::kDisableExperimentalWebGL))
       command_line->AppendSwitch(switches::kDisableExperimentalWebGL);
@@ -454,12 +465,16 @@ void GpuDataManager::AppendGpuCommandLine(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(command_line);
 
-  uint32 flags = gpu_feature_flags_.flags();
+  uint32 flags = GpuFeatureFlags().flags();
   if ((flags & GpuFeatureFlags::kGpuFeatureMultisampling) &&
       !command_line->HasSwitch(switches::kDisableGLMultisampling))
     command_line->AppendSwitch(switches::kDisableGLMultisampling);
 
-  if ((flags & (GpuFeatureFlags::kGpuFeatureWebgl |
+  if (software_rendering_) {
+    command_line->AppendSwitchASCII(switches::kUseGL, "swiftshader");
+    command_line->AppendSwitchPath(switches::kSwiftShaderPath,
+                                   swiftshader_path_);
+  } else if ((flags & (GpuFeatureFlags::kGpuFeatureWebgl |
                 GpuFeatureFlags::kGpuFeatureAcceleratedCompositing |
                 GpuFeatureFlags::kGpuFeatureAccelerated2dCanvas)) &&
       (user_flags_.use_gl() == "any")) {
@@ -470,52 +485,17 @@ void GpuDataManager::AppendGpuCommandLine(
   }
 }
 
-void GpuDataManager::SetBuiltInGpuBlacklist(GpuBlacklist* built_in_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(built_in_list);
-  uint16 version_major, version_minor;
-  bool succeed = built_in_list->GetVersion(
-      &version_major, &version_minor);
-  DCHECK(succeed);
-  gpu_blacklist_.reset(built_in_list);
-  UpdateGpuFeatureFlags();
-  preliminary_gpu_feature_flags_ = gpu_feature_flags_;
-  VLOG(1) << "Using software rendering list version "
-          << version_major << "." << version_minor;
-}
-
-void GpuDataManager::UpdateGpuBlacklist(
-    GpuBlacklist* gpu_blacklist, bool preliminary) {
+void GpuDataManager::SetGpuBlacklist(GpuBlacklist* gpu_blacklist) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(gpu_blacklist);
-
-  scoped_ptr<GpuBlacklist> updated_list(gpu_blacklist);
-
-  uint16 updated_version_major, updated_version_minor;
-  if (!updated_list->GetVersion(
-          &updated_version_major, &updated_version_minor))
-    return;
-
-  uint16 current_version_major, current_version_minor;
-  bool succeed = gpu_blacklist_->GetVersion(
-      &current_version_major, &current_version_minor);
-  DCHECK(succeed);
-  if (updated_version_major < current_version_major ||
-      (updated_version_major == current_version_major &&
-       updated_version_minor <= current_version_minor))
-    return;
-
-  gpu_blacklist_.reset(updated_list.release());
+  gpu_blacklist_.reset(gpu_blacklist);
   UpdateGpuFeatureFlags();
-  if (preliminary)
-    preliminary_gpu_feature_flags_ = gpu_feature_flags_;
-  VLOG(1) << "Using software rendering list version "
-          << updated_version_major << "." << updated_version_minor;
+  preliminary_gpu_feature_flags_ = gpu_feature_flags_;
 }
 
 void GpuDataManager::HandleGpuSwitch() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  GPUInfo gpu_info;
+  content::GPUInfo gpu_info;
   gpu_info_collector::CollectVideoCardInfo(&gpu_info);
   LOG(INFO) << "Switching to use GPU: vendor_id = 0x"
             << base::StringPrintf("%04x", gpu_info.vendor_id)
@@ -570,23 +550,16 @@ DictionaryValue* GpuDataManager::GpuInfoAsDictionaryValue() const {
   return info;
 }
 
-void GpuDataManager::RunGpuInfoUpdateCallbacks() {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &GpuDataManager::RunGpuInfoUpdateCallbacks));
-    return;
-  }
-
-  std::set<Callback0::Type*>::iterator i = gpu_info_update_callbacks_.begin();
-  for (; i != gpu_info_update_callbacks_.end(); ++i) {
-    (*i)->Run();
-  }
+void GpuDataManager::NotifyGpuInfoUpdate() {
+  observer_list_->Notify(&GpuDataManager::Observer::OnGpuInfoUpdate);
 }
 
 void GpuDataManager::UpdateGpuFeatureFlags() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &GpuDataManager::UpdateGpuFeatureFlags));
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&GpuDataManager::UpdateGpuFeatureFlags,
+                   base::Unretained(this)));
     return;
   }
 
@@ -605,7 +578,7 @@ void GpuDataManager::UpdateGpuFeatureFlags() {
   }
 
   // Notify clients that GpuInfo state has changed
-  RunGpuInfoUpdateCallbacks();
+  NotifyGpuInfoUpdate();
 
   uint32 flags = gpu_feature_flags_.flags();
   uint32 max_entry_id = gpu_blacklist->max_entry_id();
@@ -681,6 +654,27 @@ void GpuDataManager::UpdateGpuFeatureFlags() {
     histogram_pointer->Add(GetGpuBlacklistHistogramValueWin(value));
 #endif
   }
+
+  EnableSoftwareRenderingIfNecessary();
+}
+
+void GpuDataManager::RegisterSwiftShaderPath(FilePath path) {
+  swiftshader_path_ = path;
+  EnableSoftwareRenderingIfNecessary();
+}
+
+void GpuDataManager::EnableSoftwareRenderingIfNecessary() {
+  if (!GpuAccessAllowed() ||
+      (gpu_feature_flags_.flags() & GpuFeatureFlags::kGpuFeatureWebgl)) {
+#if defined(ENABLE_SWIFTSHADER)
+    if (!swiftshader_path_.empty())
+      software_rendering_ = true;
+#endif
+  }
+}
+
+bool GpuDataManager::software_rendering() {
+  return software_rendering_;
 }
 
 GpuBlacklist* GpuDataManager::GetGpuBlacklist() const {
@@ -693,8 +687,78 @@ GpuBlacklist* GpuDataManager::GetGpuBlacklist() const {
   return gpu_blacklist_.get();
 }
 
-bool GpuDataManager::UseGLIsOSMesaOrAny() {
-  return (user_flags_.use_gl() == "any" ||
-          user_flags_.use_gl() == gfx::kGLImplementationOSMesaName);
+bool GpuDataManager::Merge(content::GPUInfo* object,
+                           const content::GPUInfo& other) {
+  if (object->device_id != other.device_id ||
+      object->vendor_id != other.vendor_id) {
+    *object = other;
+    return true;
+  }
+
+  bool changed = false;
+  if (!object->finalized) {
+    object->finalized = other.finalized;
+    object->initialization_time = other.initialization_time;
+
+    if (object->driver_vendor.empty()) {
+      changed |= object->driver_vendor != other.driver_vendor;
+      object->driver_vendor = other.driver_vendor;
+    }
+    if (object->driver_version.empty()) {
+      changed |= object->driver_version != other.driver_version;
+      object->driver_version = other.driver_version;
+    }
+    if (object->driver_date.empty()) {
+      changed |= object->driver_date != other.driver_date;
+      object->driver_date = other.driver_date;
+    }
+    if (object->pixel_shader_version.empty()) {
+      changed |= object->pixel_shader_version != other.pixel_shader_version;
+      object->pixel_shader_version = other.pixel_shader_version;
+    }
+    if (object->vertex_shader_version.empty()) {
+      changed |= object->vertex_shader_version != other.vertex_shader_version;
+      object->vertex_shader_version = other.vertex_shader_version;
+    }
+    if (object->gl_version.empty()) {
+      changed |= object->gl_version != other.gl_version;
+      object->gl_version = other.gl_version;
+    }
+    if (object->gl_version_string.empty()) {
+      changed |= object->gl_version_string != other.gl_version_string;
+      object->gl_version_string = other.gl_version_string;
+    }
+    if (object->gl_vendor.empty()) {
+      changed |= object->gl_vendor != other.gl_vendor;
+      object->gl_vendor = other.gl_vendor;
+    }
+    if (object->gl_renderer.empty()) {
+      changed |= object->gl_renderer != other.gl_renderer;
+      object->gl_renderer = other.gl_renderer;
+    }
+    if (object->gl_extensions.empty()) {
+      changed |= object->gl_extensions != other.gl_extensions;
+      object->gl_extensions = other.gl_extensions;
+    }
+    object->can_lose_context = other.can_lose_context;
+#if defined(OS_WIN)
+    if (object->dx_diagnostics.values.size() == 0 &&
+        object->dx_diagnostics.children.size() == 0) {
+      object->dx_diagnostics = other.dx_diagnostics;
+      changed = true;
+    }
+#endif
+  }
+  return changed;
+}
+
+bool GpuDataManager::supportsAccelerated2dCanvas() const {
+  if (gpu_info_.can_lose_context)
+    return false;
+#if defined(USE_SKIA)
+  return true;
+#else
+  return false;
+#endif
 }
 

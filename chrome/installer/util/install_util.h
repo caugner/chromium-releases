@@ -48,7 +48,10 @@ class InstallUtil {
   // Find the last critical update (version) of Chrome. Returns the version or
   // NULL if no such version is found. A critical update is a specially flagged
   // version (by Google Update) that contains an important security fix.
-  static Version* GetCriticalUpdateVersion(BrowserDistribution* dist);
+  // system_install: if true, looks for version number under the HKLM root,
+  //                 otherwise looks under the HKCU.
+  static Version* GetCriticalUpdateVersion(BrowserDistribution* dist,
+                                           bool system_install);
 
   // This function checks if the current OS is supported for Chromium.
   static bool IsOSSupported();
@@ -123,25 +126,32 @@ class InstallUtil {
     virtual bool Evaluate(const std::wstring& value) const = 0;
   };
 
+  // The result of a conditional delete operation (i.e., DeleteFOOIf).
+  enum ConditionalDeleteResult {
+    NOT_FOUND,      // The condition was not satisfied.
+    DELETED,        // The condition was satisfied and the delete succeeded.
+    DELETE_FAILED   // The condition was satisfied but the delete failed.
+  };
+
   // Deletes the key |key_to_delete_path| under |root_key| iff the value
   // |value_name| in the key |key_to_test_path| under |root_key| satisfies
   // |predicate|.  |value_name| must be an empty string to test the key's
-  // default value.  Returns false if the value satisfied the predicate but
-  // could not be deleted, otherwise returns true.
-  static bool DeleteRegistryKeyIf(HKEY root_key,
-                                  const std::wstring& key_to_delete_path,
-                                  const std::wstring& key_to_test_path,
-                                  const wchar_t* value_name,
-                                  const RegistryValuePredicate& predicate);
+  // default value.
+  static ConditionalDeleteResult DeleteRegistryKeyIf(
+      HKEY root_key,
+      const std::wstring& key_to_delete_path,
+      const std::wstring& key_to_test_path,
+      const wchar_t* value_name,
+      const RegistryValuePredicate& predicate);
 
   // Deletes the value |value_name| in the key |key_path| under |root_key| iff
   // its current value satisfies |predicate|.  |value_name| must be an empty
-  // string to test the key's default value.    Returns false if the value
-  // satisfied the predicate but could not be deleted, otherwise returns true.
-  static bool DeleteRegistryValueIf(HKEY root_key,
-                                    const wchar_t* key_path,
-                                    const wchar_t* value_name,
-                                    const RegistryValuePredicate& predicate);
+  // string to test the key's default value.
+  static ConditionalDeleteResult DeleteRegistryValueIf(
+      HKEY root_key,
+      const wchar_t* key_path,
+      const wchar_t* value_name,
+      const RegistryValuePredicate& predicate);
 
   // A predicate that performs a case-sensitive string comparison.
   class ValueEquals : public RegistryValuePredicate {

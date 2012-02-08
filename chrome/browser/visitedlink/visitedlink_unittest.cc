@@ -2,28 +2,30 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <vector>
-#include <string>
 #include <cstdio>
+#include <string>
+#include <vector>
 
-#include "base/message_loop.h"
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/shared_memory.h"
 #include "base/string_util.h"
-#include "chrome/browser/visitedlink/visitedlink_master.h"
 #include "chrome/browser/visitedlink/visitedlink_event_listener.h"
+#include "chrome/browser/visitedlink/visitedlink_master.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/visitedlink_slave.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
-#include "content/common/notification_service.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -178,8 +180,8 @@ class VisitedLinkTest : public testing::Test {
   ScopedTempDir temp_dir_;
 
   MessageLoop message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   // Filenames for the services;
   FilePath history_dir_;
@@ -493,20 +495,22 @@ class VisitCountingProfile : public TestingProfile {
   scoped_ptr<VisitedLinkMaster> visited_link_master_;
 };
 
-// Stub out as little as possible, borrowing from BrowserRenderProcessHost.
-class VisitRelayingRenderProcessHost : public BrowserRenderProcessHost {
+// Stub out as little as possible, borrowing from RenderProcessHost.
+class VisitRelayingRenderProcessHost : public RenderProcessHostImpl {
  public:
   explicit VisitRelayingRenderProcessHost(
       content::BrowserContext* browser_context)
-          : BrowserRenderProcessHost(browser_context) {
-    NotificationService::current()->Notify(
+          : RenderProcessHostImpl(browser_context) {
+    content::NotificationService::current()->Notify(
         content::NOTIFICATION_RENDERER_PROCESS_CREATED,
-        Source<RenderProcessHost>(this), NotificationService::NoDetails());
+        content::Source<RenderProcessHost>(this),
+        content::NotificationService::NoDetails());
   }
   virtual ~VisitRelayingRenderProcessHost() {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-        Source<RenderProcessHost>(this), NotificationService::NoDetails());
+        content::Source<content::RenderProcessHost>(this),
+        content::NotificationService::NoDetails());
   }
 
   virtual bool Init(bool is_accessibility_enabled) {
@@ -528,7 +532,7 @@ class VisitRelayingRenderProcessHost : public BrowserRenderProcessHost {
   virtual bool Send(IPC::Message* msg) {
     VisitCountingProfile* counting_profile =
         static_cast<VisitCountingProfile*>(
-            Profile::FromBrowserContext(browser_context()));
+            Profile::FromBrowserContext(GetBrowserContext()));
 
     if (msg->type() == ChromeViewMsg_VisitedLink_Add::ID) {
       void* iter = NULL;
@@ -552,11 +556,11 @@ class VisitRelayingRenderProcessHost : public BrowserRenderProcessHost {
 };
 
 class VisitedLinkRenderProcessHostFactory
-    : public RenderProcessHostFactory {
+    : public content::RenderProcessHostFactory {
  public:
   VisitedLinkRenderProcessHostFactory()
-      : RenderProcessHostFactory() {}
-  virtual RenderProcessHost* CreateRenderProcessHost(
+      : content::RenderProcessHostFactory() {}
+  virtual content::RenderProcessHost* CreateRenderProcessHost(
       content::BrowserContext* browser_context) const OVERRIDE {
     return new VisitRelayingRenderProcessHost(browser_context);
   }
@@ -595,8 +599,8 @@ class VisitedLinkEventsTest : public ChromeRenderViewHostTestHarness {
   VisitedLinkRenderProcessHostFactory vc_rph_factory_;
 
  private:
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(VisitedLinkEventsTest);
 };

@@ -8,7 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/http/http_response_info.h"
@@ -100,8 +100,6 @@ class APPCACHE_EXPORT AppCacheResponseIO {
   int64 response_id() const { return response_id_; }
 
  protected:
-  friend class ScopedRunnableMethodFactory<AppCacheResponseIO>;
-
   template <class T>
   class EntryCallback : public net::CancelableOldCompletionCallback<T> {
    public:
@@ -118,6 +116,7 @@ class APPCACHE_EXPORT AppCacheResponseIO {
   };
 
   AppCacheResponseIO(int64 response_id,
+                     int64 group_id,
                      AppCacheDiskCacheInterface* disk_cache);
 
   virtual void OnIOComplete(int result) = 0;
@@ -129,13 +128,14 @@ class APPCACHE_EXPORT AppCacheResponseIO {
   void WriteRaw(int index, int offset, net::IOBuffer* buf, int buf_len);
 
   const int64 response_id_;
+  const int64 group_id_;
   AppCacheDiskCacheInterface* disk_cache_;
   AppCacheDiskCacheInterface::Entry* entry_;
   scoped_refptr<HttpResponseInfoIOBuffer> info_buffer_;
   scoped_refptr<net::IOBuffer> buffer_;
   int buffer_len_;
   net::OldCompletionCallback* user_callback_;
-  ScopedRunnableMethodFactory<AppCacheResponseIO> method_factory_;
+  base::WeakPtrFactory<AppCacheResponseIO> weak_factory_;
 
  private:
   void OnRawIOComplete(int result);
@@ -190,9 +190,10 @@ class APPCACHE_EXPORT AppCacheResponseReader : public AppCacheResponseIO {
 
   // Should only be constructed by the storage class.
   AppCacheResponseReader(int64 response_id,
+                         int64 group_id,
                          AppCacheDiskCacheInterface* disk_cache);
 
-  virtual void OnIOComplete(int result);
+  virtual void OnIOComplete(int result) OVERRIDE;
   void ContinueReadInfo();
   void ContinueReadData();
   void OpenEntryIfNeededAndContinue();
@@ -252,9 +253,10 @@ class APPCACHE_EXPORT AppCacheResponseWriter : public AppCacheResponseIO {
 
   // Should only be constructed by the storage class.
   AppCacheResponseWriter(int64 response_id,
+                         int64 group_id,
                          AppCacheDiskCacheInterface* disk_cache);
 
-  virtual void OnIOComplete(int result);
+  virtual void OnIOComplete(int result) OVERRIDE;
   void ContinueWriteInfo();
   void ContinueWriteData();
   void CreateEntryIfNeededAndContinue();

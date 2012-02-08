@@ -6,7 +6,9 @@
 #define CONTENT_RENDERER_MEDIA_VIDEO_CAPTURE_MODULE_IMPL_H_
 
 #include "base/compiler_specific.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
+#include "content/common/media/video_capture.h"
 #include "media/video/capture/video_capture.h"
 #include "third_party/webrtc/common_types.h"
 #include "third_party/webrtc/modules/video_capture/main/interface/video_capture_defines.h"
@@ -36,17 +38,17 @@ class VideoCaptureModuleImpl
       webrtc::VideoCaptureCapability& settings) OVERRIDE;
 
   // media::VideoCapture::EventHandler implementation.
-  virtual void OnStarted(media::VideoCapture* capture);
-  virtual void OnStopped(media::VideoCapture* capture);
-  virtual void OnPaused(media::VideoCapture* capture);
-  virtual void OnError(media::VideoCapture* capture, int error_code);
-  virtual void OnRemoved(media::VideoCapture* capture);
+  virtual void OnStarted(media::VideoCapture* capture) OVERRIDE;
+  virtual void OnStopped(media::VideoCapture* capture) OVERRIDE;
+  virtual void OnPaused(media::VideoCapture* capture) OVERRIDE;
+  virtual void OnError(media::VideoCapture* capture, int error_code) OVERRIDE;
+  virtual void OnRemoved(media::VideoCapture* capture) OVERRIDE;
   virtual void OnBufferReady(
       media::VideoCapture* capture,
-      scoped_refptr<media::VideoCapture::VideoFrameBuffer> buf);
+      scoped_refptr<media::VideoCapture::VideoFrameBuffer> buf) OVERRIDE;
   virtual void OnDeviceInfoReceived(
       media::VideoCapture* capture,
-      const media::VideoCaptureParams& device_info);
+      const media::VideoCaptureParams& device_info) OVERRIDE;
 
  private:
   virtual ~VideoCaptureModuleImpl();
@@ -57,7 +59,6 @@ class VideoCaptureModuleImpl
   void StopCaptureOnCaptureThread();
   void StartCaptureInternal(const webrtc::VideoCaptureCapability& capability);
 
-  void OnStoppedOnCaptureThread(media::VideoCapture* capture);
   void OnBufferReadyOnCaptureThread(
       media::VideoCapture* capture,
       scoped_refptr<media::VideoCapture::VideoFrameBuffer> buf);
@@ -67,10 +68,10 @@ class VideoCaptureModuleImpl
   media::VideoCaptureSessionId session_id_;
   base::Thread thread_;
   scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
+  base::WaitableEvent stopped_event_;
   // The video capture manager handles open/close of video capture devices.
   scoped_refptr<VideoCaptureImplManager> vc_manager_;
-  media::VideoCapture::State state_;
-  bool got_first_frame_;
+  video_capture::State state_;
   WebRtc_UWord32 width_;
   WebRtc_UWord32 height_;
   WebRtc_Word32 frame_rate_;
@@ -79,13 +80,9 @@ class VideoCaptureModuleImpl
   base::Time start_time_;
   // The video capture module generating raw frame data.
   media::VideoCapture* capture_engine_;
-  bool pending_start_;
-  webrtc::VideoCaptureCapability pending_cap_;
   int ref_count_;
 
   DISALLOW_COPY_AND_ASSIGN(VideoCaptureModuleImpl);
 };
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(VideoCaptureModuleImpl);
 
 #endif  // CONTENT_RENDERER_MEDIA_VIDEO_CAPTURE_MODULE_IMPL_H_

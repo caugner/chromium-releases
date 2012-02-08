@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -37,8 +37,7 @@ class ExecuteJavascriptTest(PyUITest):
     """Test we can inject JavaScript into an extension."""
     dir_path = os.path.abspath(
         os.path.join(self.DataDir(), 'extensions', 'js_injection_background'))
-    ext_id = self.InstallExtension(dir_path, False);
-    self.assertTrue(ext_id, msg='Failed to install extension: %s.' % dir_path)
+    ext_id = self.InstallExtension(dir_path)
 
     # Verify extension is enabled.
     extension = self._GetExtensionInfoById(self.GetExtensionsInfo(), ext_id)

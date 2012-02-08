@@ -9,12 +9,13 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/webui/cookies_tree_model_adapter.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/content_settings.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class GURL;
 class TabContents;
@@ -26,7 +27,7 @@ class Size;
 
 class CollectedCookiesUIDelegate : public HtmlDialogUIDelegate,
                                           WebUIMessageHandler,
-                                          NotificationObserver {
+                                          content::NotificationObserver {
  public:
   virtual ~CollectedCookiesUIDelegate();
 
@@ -47,7 +48,7 @@ class CollectedCookiesUIDelegate : public HtmlDialogUIDelegate,
   virtual bool ShouldShowDialogTitle() const OVERRIDE;
 
   // WebUIMessageHandler implementation:
-  virtual void RegisterMessages();
+  virtual void RegisterMessages() OVERRIDE;
 
  private:
   explicit CollectedCookiesUIDelegate(TabContentsWrapper* wrapper);
@@ -64,8 +65,8 @@ class CollectedCookiesUIDelegate : public HtmlDialogUIDelegate,
 
   // Notification Observer implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // JS callback to bind cookies tree models with JS trees.
   void BindCookiesTreeModel(const base::ListValue* args);
@@ -75,7 +76,7 @@ class CollectedCookiesUIDelegate : public HtmlDialogUIDelegate,
   void Allow(const base::ListValue* args);
   void AllowThisSession(const base::ListValue* args);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   TabContentsWrapper* wrapper_;
   bool closed_;
 

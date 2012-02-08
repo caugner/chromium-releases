@@ -6,11 +6,11 @@
 
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
 
-#include "gpu/GLES2/gl2.h"
+#include "third_party/khronos/GLES2/gl2.h"
 #ifndef GL_GLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES 1
 #endif
-#include "gpu/GLES2/gl2ext.h"
+#include "third_party/khronos/GLES2/gl2ext.h"
 
 #include <algorithm>
 #include <set>
@@ -35,10 +35,11 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/gl_bindings_skia_cmd_buffer.h"
 
-static base::LazyInstance<base::Lock>
-    g_all_shared_contexts_lock(base::LINKER_INITIALIZED);
+static base::LazyInstance<base::Lock,
+                          base::LeakyLazyInstanceTraits<base::Lock> >
+    g_all_shared_contexts_lock = LAZY_INSTANCE_INITIALIZER;
 static base::LazyInstance<std::set<WebGraphicsContext3DCommandBufferImpl*> >
-    g_all_shared_contexts(base::LINKER_INITIALIZED);
+    g_all_shared_contexts = LAZY_INSTANCE_INITIALIZER;
 
 WebGraphicsContext3DCommandBufferImpl::WebGraphicsContext3DCommandBufferImpl()
     : initialize_failed_(false),
@@ -113,7 +114,7 @@ bool WebGraphicsContext3DCommandBufferImpl::initialize(
     }
   } while (retry);
 
-  const GPUInfo& gpu_info = host_->gpu_info();
+  const content::GPUInfo& gpu_info = host_->gpu_info();
   UMA_HISTOGRAM_ENUMERATION(
       "GPU.WebGraphicsContext3D_Init_CanLoseContext",
       attributes.canRecoverFromContextLoss * 2 + gpu_info.can_lose_context,
@@ -291,6 +292,20 @@ void WebGraphicsContext3DCommandBufferImpl::prepareTexture() {
 #endif
 }
 
+void WebGraphicsContext3DCommandBufferImpl::postSubBufferCHROMIUM(
+    int x, int y, int width, int height) {
+  // Same flow control as WebGraphicsContext3DCommandBufferImpl::prepareTexture
+  // (see above).
+  RenderViewImpl* renderview =
+      web_view_ ? RenderViewImpl::FromWebView(web_view_) : NULL;
+  if (renderview)
+    renderview->OnViewContextSwapBuffersPosted();
+  gl_->PostSubBufferCHROMIUM(x, y, width, height);
+  context_->Echo(base::Bind(
+      &WebGraphicsContext3DCommandBufferImpl::OnSwapBuffersComplete,
+      weak_ptr_factory_.GetWeakPtr()));
+}
+
 void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
   cached_width_ = width;
   cached_height_ = height;
@@ -300,11 +315,6 @@ void WebGraphicsContext3DCommandBufferImpl::reshape(int width, int height) {
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   scanline_.reset(new uint8[width * 4]);
 #endif  // FLIP_FRAMEBUFFER_VERTICALLY
-}
-
-void WebGraphicsContext3DCommandBufferImpl::setVisibility(bool visible) {
-  gl_->Flush();
-  context_->SetSurfaceVisible(visible);
 }
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
@@ -352,8 +362,7 @@ bool WebGraphicsContext3DCommandBufferImpl::readBackFramebuffer(
   if (mustRestoreFBO) {
     gl_->BindFramebuffer(GL_FRAMEBUFFER, buffer);
   }
-   gl_->ReadPixels(0, 0, width, height,
-                   GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+  gl_->ReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
   // Swizzle red and blue channels
   // TODO(kbr): expose GL_BGRA as extension
@@ -418,6 +427,14 @@ void* WebGraphicsContext3DCommandBufferImpl::mapTexSubImage2DCHROMIUM(
 void WebGraphicsContext3DCommandBufferImpl::unmapTexSubImage2DCHROMIUM(
     const void* mem) {
   gl_->UnmapTexSubImage2DCHROMIUM(mem);
+}
+
+void WebGraphicsContext3DCommandBufferImpl::setVisibilityCHROMIUM(
+    bool visible) {
+  gl_->Flush();
+  context_->SetSurfaceVisible(visible);
+  if (!visible)
+    gl_->FreeEverything();
 }
 
 void WebGraphicsContext3DCommandBufferImpl::copyTextureToParentTextureCHROMIUM(
@@ -588,6 +605,14 @@ DELEGATE_TO_GL_4(colorMask, ColorMask,
                  WGC3Dboolean, WGC3Dboolean, WGC3Dboolean, WGC3Dboolean)
 
 DELEGATE_TO_GL_1(compileShader, CompileShader, WebGLId)
+
+DELEGATE_TO_GL_8(compressedTexImage2D, CompressedTexImage2D,
+                 WGC3Denum, WGC3Dint, WGC3Denum, WGC3Dint, WGC3Dint,
+                 WGC3Dsizei, WGC3Dsizei, const void*)
+
+DELEGATE_TO_GL_9(compressedTexSubImage2D, CompressedTexSubImage2D,
+                 WGC3Denum, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint,
+                 WGC3Denum, WGC3Dsizei, const void*)
 
 DELEGATE_TO_GL_8(copyTexImage2D, CopyTexImage2D,
                  WGC3Denum, WGC3Dint, WGC3Denum, WGC3Dint, WGC3Dint,
@@ -1114,6 +1139,9 @@ void WebGraphicsContext3DCommandBufferImpl::
     WebGraphicsContext3D::WebGraphicsSwapBuffersCompleteCallbackCHROMIUM* cb) {
   swapbuffers_complete_callback_ = cb;
 }
+
+DELEGATE_TO_GL_5(texImageIOSurface2DCHROMIUM, TexImageIOSurface2DCHROMIUM,
+                 WGC3Denum, WGC3Dint, WGC3Dint, WGC3Duint, WGC3Duint)
 
 #if WEBKIT_USING_SKIA
 GrGLInterface* WebGraphicsContext3DCommandBufferImpl::onCreateGrGLInterface() {

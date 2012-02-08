@@ -25,19 +25,23 @@
 
 #include "base/base64.h"
 #include "base/basictypes.h"
+#include "base/bind.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "chrome/browser/chromeos/web_socket_proxy_helper.h"
 #include "chrome/browser/internal_auth.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -54,6 +58,8 @@
 #include "net/socket/stream_socket.h"
 #include "third_party/libevent/evdns.h"
 #include "third_party/libevent/event.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -144,40 +150,6 @@ std::string FetchAsciiSnippet(uint8* begin, uint8* end, AsciiFilter filter) {
   return rv;
 }
 
-// Parses "passport:hostname:port:" string.  Returns true on success.
-bool FetchPassportNamePort(
-    uint8* begin, uint8* end,
-    std::string* passport, std::string* name, int* port) {
-  std::string input(begin, end);
-  if (input[input.size() - 1] != ':')
-    return false;
-  input.resize(input.size() - 1);
-
-  size_t pos = input.find_last_of(':');
-  if (pos == std::string::npos)
-    return false;
-  std::string port_str(input, pos + 1);
-  if (port_str.empty())
-    return false;
-  const char kAsciiDigits[] = "0123456789";
-  COMPILE_ASSERT(sizeof(kAsciiDigits) == 10 + 1, mess_with_digits);
-  if (port_str.find_first_not_of(kAsciiDigits) != std::string::npos)
-    return false;
-  if (!base::StringToInt(port_str, port) ||
-      *port < 0 ||
-      *port >= (1 << 16)) {
-    return false;
-  }
-  input.resize(pos);
-
-  pos = input.find_first_of(':');
-  if (pos == std::string::npos)
-    return false;
-  passport->assign(input, 0, pos);
-  name->assign(input, pos + 1, std::string::npos);
-  return !name->empty();
-}
-
 std::string FetchExtensionIdFromOrigin(const std::string &origin) {
   GURL url(origin);
   if (url.SchemeIs(chrome::kExtensionScheme))
@@ -192,9 +164,9 @@ inline size_t strlen(const void* s) {
 
 void SendNotification(int port) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_WEB_SOCKET_PROXY_STARTED,
-      NotificationService::AllSources(), Details<int>(&port));
+      content::NotificationService::AllSources(), content::Details<int>(&port));
 }
 
 class Conn;
@@ -447,6 +419,9 @@ class Conn {
   std::string destname_;
   int destport_;
 
+  // Preresolved |destname_| (empty if not pre-resolved).
+  std::string destaddr_;
+
   // Whether TLS over TCP requested.
   bool do_tls_;
 
@@ -458,7 +433,9 @@ class Conn {
   // Used to schedule a timeout for initial phase of connection.
   scoped_ptr<struct event> destconnect_timeout_event_;
 
-  static EventKeyMap evkey_map_;
+  static base::LazyInstance<EventKeyMap,
+                            base::LeakyLazyInstanceTraits<EventKeyMap> >
+      evkey_map_;
   static EventKey last_evkey_;
 
   DISALLOW_COPY_AND_ASSIGN(Conn);
@@ -626,7 +603,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
         socket_->Disconnect();
         socket_.reset();
       }
-      delete this;
+      MessageLoop::current()->DeleteSoon(FROM_HERE, this);
     }
   }
 
@@ -660,8 +637,10 @@ class SSLChan : public MessageLoopForIO::Watcher {
   }
 
   void OnSSLHandshakeCompleted(int result) {
-    if (result)
+    if (result) {
       Shut(result);
+      return;
+    }
     is_socket_read_pending_ = false;
     is_socket_write_pending_ = false;
     is_read_pipe_blocked_ = false;
@@ -820,7 +799,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
   MessageLoopForIO::FileDescriptorWatcher read_pipe_controller_;
   MessageLoopForIO::FileDescriptorWatcher write_pipe_controller_;
 
-  friend class base::RefCountedThreadSafe<SSLChan>;
+  friend class DeleteTask<SSLChan>;
   DISALLOW_COPY_AND_ASSIGN(SSLChan);
 };
 
@@ -962,7 +941,7 @@ void Serv::Run() {
   }
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(&SendNotification, ntohs(addr.sin_port)));
+      base::Bind(&SendNotification, ntohs(addr.sin_port)));
 
   LOG(INFO) << "WebSocketProxy: Starting event dispatch loop.";
   event_base_dispatch(evbase_);
@@ -1137,12 +1116,12 @@ Conn::Conn(Serv* master)
       do_tls_(false),
       destresolution_ipv4_failed_(false),
       destresolution_ipv6_failed_(false) {
-  while (evkey_map_.find(last_evkey_) != evkey_map_.end()) {
+  while (evkey_map_.Get().find(last_evkey_) != evkey_map_.Get().end()) {
     last_evkey_ = reinterpret_cast<EventKey>(reinterpret_cast<size_t>(
         last_evkey_) + 1);
   }
   evkey_ = last_evkey_;
-  evkey_map_[evkey_] = this;
+  evkey_map_.Get()[evkey_] = this;
   // Schedule timeout for initial phase of connection.
   destconnect_timeout_event_.reset(new struct event);
   evtimer_set(destconnect_timeout_event_.get(),
@@ -1159,15 +1138,15 @@ Conn::Conn(Serv* master)
 Conn::~Conn() {
   phase_ = PHASE_DEFUNCT;
   event_del(destconnect_timeout_event_.get());
-  if (evkey_map_[evkey_] == this)
-    evkey_map_.erase(evkey_);
+  if (evkey_map_.Get()[evkey_] == this)
+    evkey_map_.Get().erase(evkey_);
   else
     NOTREACHED();
 }
 
 Conn* Conn::Get(EventKey evkey) {
-  EventKeyMap::iterator it = evkey_map_.find(evkey);
-  if (it == evkey_map_.end())
+  EventKeyMap::iterator it = evkey_map_.Get().find(evkey);
+  if (it == evkey_map_.Get().end())
     return NULL;
   Conn* cs = it->second;
   if (cs == NULL ||
@@ -1247,7 +1226,7 @@ Conn::Status Conn::ConsumeHeader(struct evbuffer* evb) {
       if (key.len > 0) {
         requested_parameters_[std::string(piece + key.begin, key.len)] =
             net::UnescapeURLComponent(std::string(piece + value.begin,
-                value.len), UnescapeRule::URL_SPECIAL_CHARS);
+                value.len), net::UnescapeRule::URL_SPECIAL_CHARS);
       }
     }
   }
@@ -1297,6 +1276,7 @@ Conn::Status Conn::ConsumeHeader(struct evbuffer* evb) {
       return STATUS_ABORT;
     }
     destport_ = port;
+    destaddr_ = requested_parameters_["addr"];
     do_tls_ = (requested_parameters_["tls"] == "true");
 
     requested_parameters_["extension_id"] =
@@ -1384,14 +1364,17 @@ Conn::Status Conn::ConsumeDestframe(struct evbuffer* evb) {
     frame_mask_index_ = (frame_mask_index_ + 1) % 4;
   }
   std::string passport;
-  if (!FetchPassportNamePort(buf, buf + frame_bytes_remaining_,
-                             &passport, &destname_, &destport_)) {
+  if (!WebSocketProxyHelper::FetchPassportAddrNamePort(
+      buf, buf + frame_bytes_remaining_,
+      &passport, &destaddr_, &destname_, &destport_)) {
     return STATUS_ABORT;
   }
   std::map<std::string, std::string> map;
   map["hostname"] = destname_;
   map["port"] = base::IntToString(destport_);
   map["extension_id"] = FetchExtensionIdFromOrigin(GetOrigin());
+  if (!destaddr_.empty())
+    map["addr"] = destaddr_;
   if (!browser::InternalAuthVerification::VerifyPassport(
       passport, "web_socket_proxy", map)) {
     return STATUS_ABORT;
@@ -1515,7 +1498,7 @@ bool Conn::TryConnectDest(const struct sockaddr* addr, socklen_t addrlen) {
         addr, addrlen, SOCK_STREAM, IPPROTO_TCP);
     net::HostPortPair host_port_pair(destname_, destport_);
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE, NewRunnableFunction(
+        BrowserThread::IO, FROM_HERE, base::Bind(
             &SSLChan::Start, addrlist, host_port_pair, fd[2], fd[1]));
   } else {
     int sock = socket(addr->sa_family, SOCK_STREAM, 0);
@@ -1600,12 +1583,14 @@ void Conn::OnPrimchanRead(struct bufferevent* bev, EventKey evkey) {
               if (cs->destname_ == "localhost")
                 cs->destname_ = "127.0.0.1";
             }
+            if (cs->destaddr_.empty())
+              cs->destaddr_ = cs->destname_;
             {
               struct sockaddr_in sa;
               memset(&sa, 0, sizeof(sa));
               sa.sin_port = htons(cs->destport_);
               if (inet_pton(sa.sin_family = AF_INET,
-                            cs->destname_.c_str(),
+                            cs->destaddr_.c_str(),
                             &sa.sin_addr) == 1) {
                 // valid IPv4 address supplied.
                 if (cs->TryConnectDest((struct sockaddr*)&sa, sizeof(sa))) {
@@ -1615,18 +1600,18 @@ void Conn::OnPrimchanRead(struct bufferevent* bev, EventKey evkey) {
               }
             }
             {
-              if (cs->destname_.size() >= 2 &&
-                  cs->destname_[0] == '[' &&
-                  cs->destname_[cs->destname_.size() - 1] == ']') {
+              if (cs->destaddr_.size() >= 2 &&
+                  cs->destaddr_[0] == '[' &&
+                  cs->destaddr_[cs->destaddr_.size() - 1] == ']') {
                 // Literal IPv6 address in brackets.
-                cs->destname_ =
-                    cs->destname_.substr(1, cs->destname_.size() - 2);
+                cs->destaddr_ =
+                    cs->destaddr_.substr(1, cs->destaddr_.size() - 2);
               }
               struct sockaddr_in6 sa;
               memset(&sa, 0, sizeof(sa));
               sa.sin6_port = htons(cs->destport_);
               if (inet_pton(sa.sin6_family = AF_INET6,
-                            cs->destname_.c_str(),
+                            cs->destaddr_.c_str(),
                             &sa.sin6_addr) == 1) {
                 // valid IPv6 address supplied.
                 if (cs->TryConnectDest((struct sockaddr*)&sa, sizeof(sa))) {
@@ -1904,8 +1889,13 @@ void Conn::OnDestchanError(struct bufferevent* bev,
              "Failure reported on destination channel");
 }
 
+// static
 Conn::EventKey Conn::last_evkey_ = 0;
-Conn::EventKeyMap Conn::evkey_map_;
+
+// static
+base::LazyInstance<Conn::EventKeyMap,
+                   base::LeakyLazyInstanceTraits<Conn::EventKeyMap> >
+    Conn::evkey_map_ = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 

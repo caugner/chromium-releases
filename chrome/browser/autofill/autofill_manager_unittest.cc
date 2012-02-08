@@ -4,6 +4,7 @@
 
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/string16.h"
@@ -14,6 +15,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_common_test.h"
+#include "chrome/browser/autofill/autofill_external_delegate.h"
 #include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/credit_card.h"
@@ -25,19 +27,23 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/autofill_messages.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_test_sink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/rect.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/form_field.h"
 
+using content::BrowserThread;
+using testing::_;
 using webkit_glue::FormData;
 using webkit_glue::FormField;
 
@@ -407,13 +413,71 @@ class TestAutofillManager : public AutofillManager {
                       TestPersonalDataManager* personal_data)
       : AutofillManager(tab_contents, personal_data),
         personal_data_(personal_data),
-        autofill_enabled_(true) {
+        autofill_enabled_(true),
+        did_finish_async_form_submit_(false),
+        message_loop_is_running_(false) {
   }
 
   virtual bool IsAutofillEnabled() const OVERRIDE { return autofill_enabled_; }
 
   void set_autofill_enabled(bool autofill_enabled) {
     autofill_enabled_ = autofill_enabled;
+  }
+
+  void set_expected_submitted_field_types(
+      const std::vector<FieldTypeSet>& expected_types) {
+    expected_submitted_field_types_ = expected_types;
+  }
+
+  virtual void UploadFormDataAsyncCallback(
+      const FormStructure* submitted_form,
+      const base::TimeTicks& load_time,
+      const base::TimeTicks& interaction_time,
+      const base::TimeTicks& submission_time) OVERRIDE {
+    if (message_loop_is_running_) {
+      MessageLoop::current()->Quit();
+      message_loop_is_running_ = false;
+    } else {
+      did_finish_async_form_submit_ = true;
+    }
+
+    // If we have expected field types set, make sure they match.
+    if (!expected_submitted_field_types_.empty()) {
+      ASSERT_EQ(expected_submitted_field_types_.size(),
+                submitted_form->field_count());
+      for (size_t i = 0; i < expected_submitted_field_types_.size(); ++i) {
+        SCOPED_TRACE(
+            StringPrintf("Field %d with value %s", static_cast<int>(i),
+                         UTF16ToUTF8(submitted_form->field(i)->value).c_str()));
+        const FieldTypeSet& possible_types =
+            submitted_form->field(i)->possible_types();
+        EXPECT_EQ(expected_submitted_field_types_[i].size(),
+                  possible_types.size());
+        for (FieldTypeSet::const_iterator it =
+                 expected_submitted_field_types_[i].begin();
+             it != expected_submitted_field_types_[i].end(); ++it) {
+          EXPECT_TRUE(possible_types.count(*it))
+              << "Expected type: " << AutofillType::FieldTypeToString(*it);
+        }
+      }
+    }
+
+    AutofillManager::UploadFormDataAsyncCallback(submitted_form,
+                                                 load_time,
+                                                 interaction_time,
+                                                 submission_time);
+  }
+
+  // Wait for the asynchronous OnFormSubmitted() call to complete.
+  void WaitForAsyncFormSubmit() {
+    if (!did_finish_async_form_submit_) {
+      // TODO(isherman): It seems silly to need this variable.  Is there some
+      // way I can just query the message loop's state?
+      message_loop_is_running_ = true;
+      MessageLoop::current()->Run();
+    } else {
+      did_finish_async_form_submit_ = false;
+    }
   }
 
   virtual void UploadFormData(const FormStructure& submitted_form) OVERRIDE {
@@ -448,10 +512,19 @@ class TestAutofillManager : public AutofillManager {
   }
 
  private:
+  // AutofillManager is ref counted.
+  virtual ~TestAutofillManager() {}
+
   // Weak reference.
   TestPersonalDataManager* personal_data_;
+
   bool autofill_enabled_;
+
+  bool did_finish_async_form_submit_;
+  bool message_loop_is_running_;
+
   std::string submitted_form_signature_;
+  std::vector<FieldTypeSet> expected_submitted_field_types_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillManager);
 };
@@ -464,30 +537,42 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
 
   AutofillManagerTest()
       : TabContentsWrapperTestHarness(),
-        browser_thread_(BrowserThread::UI, &message_loop_) {
+        ui_thread_(BrowserThread::UI, &message_loop_),
+        file_thread_(BrowserThread::FILE) {
   }
 
   virtual ~AutofillManagerTest() {
     // Order of destruction is important as AutofillManager relies on
     // PersonalDataManager to be around when it gets destroyed.
-    autofill_manager_.reset(NULL);
+    autofill_manager_ = NULL;
   }
 
-  virtual void SetUp() {
+  virtual void SetUp() OVERRIDE {
     Profile* profile = new TestingProfile();
     browser_context_.reset(profile);
     PersonalDataManagerFactory::GetInstance()->SetTestingFactory(
         profile, TestPersonalDataManager::Build);
 
     TabContentsWrapperTestHarness::SetUp();
-    autofill_manager_.reset(new TestAutofillManager(contents_wrapper(),
-                                                    &personal_data_));
+    autofill_manager_ = new TestAutofillManager(contents_wrapper(),
+                                                &personal_data_);
+
+    file_thread_.Start();
+  }
+
+  virtual void TearDown() OVERRIDE {
+    file_thread_.Stop();
+    TabContentsWrapperTestHarness::TearDown();
   }
 
   void GetAutofillSuggestions(int query_id,
                               const webkit_glue::FormData& form,
                               const webkit_glue::FormField& field) {
-    autofill_manager_->OnQueryFormFieldAutofill(query_id, form, field);
+    autofill_manager_->OnQueryFormFieldAutofill(query_id,
+                                                form,
+                                                field,
+                                                gfx::Rect(),
+                                                false);
   }
 
   void GetAutofillSuggestions(const webkit_glue::FormData& form,
@@ -505,7 +590,8 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   }
 
   void FormSubmitted(const FormData& form) {
-    autofill_manager_->OnFormSubmitted(form, base::TimeTicks::Now());
+    if (autofill_manager_->OnFormSubmitted(form, base::TimeTicks::Now()))
+      autofill_manager_->WaitForAsyncFormSubmit();
   }
 
   void FillAutofillFormData(int query_id,
@@ -566,9 +652,10 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   }
 
  protected:
-  BrowserThread browser_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
-  scoped_ptr<TestAutofillManager> autofill_manager_;
+  scoped_refptr<TestAutofillManager> autofill_manager_;
   TestPersonalDataManager personal_data_;
 
  private:
@@ -586,10 +673,10 @@ class TestFormStructure : public FormStructure {
     ASSERT_EQ(field_count(), server_types.size());
 
     for (size_t i = 0; i < field_count(); ++i) {
-      AutofillField* field = (*fields())[i];
-      ASSERT_TRUE(field);
-      field->set_heuristic_type(heuristic_types[i]);
-      field->set_server_type(server_types[i]);
+      AutofillField* form_field = field(i);
+      ASSERT_TRUE(form_field);
+      form_field->set_heuristic_type(heuristic_types[i]);
+      form_field->set_server_type(server_types[i]);
     }
 
     UpdateAutofillCount();
@@ -2769,68 +2856,81 @@ TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUpload) {
   form.fields.push_back(field);
   expected_types.push_back(types);
 
-  FormStructure form_structure(form);
-  autofill_manager_->DeterminePossibleFieldTypesForUpload(&form_structure);
-
-  ASSERT_EQ(expected_types.size(), form_structure.field_count());
-  for (size_t i = 0; i < expected_types.size(); ++i) {
-    SCOPED_TRACE(
-        StringPrintf("Field %d with value %s", static_cast<int>(i),
-                     UTF16ToUTF8(form_structure.field(i)->value).c_str()));
-    const FieldTypeSet& possible_types =
-        form_structure.field(i)->possible_types();
-    EXPECT_EQ(expected_types[i].size(), possible_types.size());
-    for (FieldTypeSet::const_iterator it = expected_types[i].begin();
-         it != expected_types[i].end(); ++it) {
-      EXPECT_TRUE(possible_types.count(*it))
-          << "Expected type: " << AutofillType::FieldTypeToString(*it);
-    }
-  }
+  autofill_manager_->set_expected_submitted_field_types(expected_types);
+  FormSubmitted(form);
 }
 
-TEST_F(AutofillManagerTest, DeterminePossibleFieldTypesForUploadStressTest) {
-  personal_data_.ClearAutofillProfiles();
-  const int kNumProfiles = 5;
-  for (int i = 0; i < kNumProfiles; ++i) {
-    AutofillProfile* profile = new AutofillProfile;
-    autofill_test::SetProfileInfo(profile,
-                                  StringPrintf("John%d", i).c_str(),
-                                  "",
-                                  StringPrintf("Doe%d", i).c_str(),
-                                  StringPrintf("JohnDoe%d@somesite.com",
-                                               i).c_str(),
-                                  "",
-                                  StringPrintf("%d 1st st.", i).c_str(),
-                                  "",
-                                  "Memphis", "Tennessee", "38116", "USA",
-                                  StringPrintf("650234%04d", i).c_str());
-    profile->set_guid(
-        StringPrintf("00000000-0000-0000-0001-00000000%04d", i).c_str());
-    personal_data_.AddProfile(profile);
-  }
+namespace {
+
+class MockAutofillExternalDelegate : public AutofillExternalDelegate {
+ public:
+  explicit MockAutofillExternalDelegate(TabContentsWrapper* wrapper)
+      : AutofillExternalDelegate(wrapper) {}
+  virtual ~MockAutofillExternalDelegate() {}
+
+  MOCK_METHOD5(OnQuery, void(int query_id,
+                             const webkit_glue::FormData& form,
+                             const webkit_glue::FormField& field,
+                             const gfx::Rect& bounds,
+                             bool display_warning));
+
+  virtual void HideAutofillPopup() OVERRIDE {}
+
+  virtual void ApplyAutofillSuggestions(
+      const std::vector<string16>& autofill_values,
+      const std::vector<string16>& autofill_labels,
+      const std::vector<string16>& autofill_icons,
+      const std::vector<int>& autofill_unique_ids,
+      int separator_index) OVERRIDE {}
+
+  virtual void OnQueryPlatformSpecific(
+      int query_id,
+      const webkit_glue::FormData& form,
+      const webkit_glue::FormField& field) OVERRIDE {}
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockAutofillExternalDelegate);
+};
+
+}  // namespace
+
+// Test our external delegate is called at the right time.
+TEST_F(AutofillManagerTest, TestExternalDelegate) {
+  MockAutofillExternalDelegate external_delegate(contents_wrapper());
+  EXPECT_CALL(external_delegate, OnQuery(_, _, _, _, _));
+  autofill_manager_->SetExternalDelegate(&external_delegate);
+
   FormData form;
   CreateTestAddressFormData(&form);
-  ASSERT_LT(3U, form.fields.size());
-  form.fields[0].value = ASCIIToUTF16("6502340001");
-  form.fields[1].value = ASCIIToUTF16("John1");
-  form.fields[2].value = ASCIIToUTF16("12345");
-  FormStructure form_structure(form);
-  autofill_manager_->DeterminePossibleFieldTypesForUpload(&form_structure);
-  ASSERT_LT(3U, form_structure.field_count());
-  const FieldTypeSet& possible_types0 =
-      form_structure.field(0)->possible_types();
-  EXPECT_EQ(2U, possible_types0.size());
-  EXPECT_TRUE(possible_types0.find(PHONE_HOME_WHOLE_NUMBER) !=
-              possible_types0.end());
-  EXPECT_TRUE(possible_types0.find(PHONE_HOME_CITY_AND_NUMBER) !=
-              possible_types0.end());
-  const FieldTypeSet& possible_types1 =
-      form_structure.field(1)->possible_types();
-  EXPECT_EQ(1U, possible_types1.size());
-  EXPECT_TRUE(possible_types1.find(NAME_FIRST) != possible_types1.end());
-  const FieldTypeSet& possible_types2 =
-      form_structure.field(2)->possible_types();
-  EXPECT_EQ(1U, possible_types2.size());
-  EXPECT_TRUE(possible_types2.find(UNKNOWN_TYPE) !=
-              possible_types2.end());
+  std::vector<FormData> forms(1, form);
+  FormsSeen(forms);
+  const FormField& field = form.fields[0];
+  GetAutofillSuggestions(form, field);  // should call the delegate's OnQuery()
+
+  autofill_manager_->SetExternalDelegate(NULL);
 }
+
+#if defined(OS_ANDROID)
+// Only OS_ANDROID defines an external delegate, but prerequisites for
+// landing autofill_external_delegate_android.cc in the Chromium tree
+// have not themselves landed.
+
+// Turn on the external delegate.  Recreate a TabContents.  Make sure
+// an external delegate was set in the proper structures.
+TEST_F(AutofillManagerTest, TestTabContentsWithExternalDelegate) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kExternalAutofillPopup);
+
+  // Setting the contents creates a new TabContentsWrapper.
+  TestTabContents* contents = CreateTestTabContents();
+  SetContents(contents);
+
+  AutofillManager* autofill_manager = contents_wrapper()->autofill_manager();
+  EXPECT_TRUE(autofill_manager->external_delegate());
+
+  AutocompleteHistoryManager* autocomplete_history_manager =
+      contents_wrapper()->autocomplete_history_manager();
+  EXPECT_TRUE(autocomplete_history_manager->external_delegate());
+}
+
+#endif  // OS_ANDROID

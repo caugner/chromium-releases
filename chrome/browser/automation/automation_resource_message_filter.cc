@@ -5,8 +5,8 @@
 #include "chrome/browser/automation/automation_resource_message_filter.h"
 
 #include "base/bind.h"
-#include "base/path_service.h"
 #include "base/metrics/histogram.h"
+#include "base/path_service.h"
 #include "base/stl_util.h"
 #include "chrome/browser/automation/url_request_automation_job.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -15,19 +15,21 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/browser_message_filter.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_filter.h"
 
+using content::BrowserThread;
+
 base::LazyInstance<AutomationResourceMessageFilter::RenderViewMap>
-    AutomationResourceMessageFilter::filtered_render_views_(
-        base::LINKER_INITIALIZED);
+    AutomationResourceMessageFilter::filtered_render_views_ =
+        LAZY_INSTANCE_INITIALIZER;
 
 base::LazyInstance<AutomationResourceMessageFilter::CompletionCallbackMap>
-    AutomationResourceMessageFilter::completion_callback_map_(
-        base::LINKER_INITIALIZED);
+    AutomationResourceMessageFilter::completion_callback_map_ =
+        LAZY_INSTANCE_INITIALIZER;
 
 int AutomationResourceMessageFilter::unique_request_id_ = 1;
 int AutomationResourceMessageFilter::next_completion_callback_id_ = 0;
@@ -262,9 +264,24 @@ void AutomationResourceMessageFilter::RegisterRenderViewInIOThread(
 
   RenderViewMap::iterator automation_details_iter(
       filtered_render_views_.Get().find(renderer_key));
-  if (automation_details_iter != filtered_render_views_.Get().end()) {
+  // We need to match the renderer key and the AutomationResourceMessageFilter
+  // instances. If the filter instances are different it means that a new
+  // automation channel (External host process) was created for this tab.
+  if (automation_details_iter != filtered_render_views_.Get().end() &&
+      automation_details_iter->second.filter == filter) {
     DCHECK_GT(automation_details_iter->second.ref_count, 0);
     automation_details_iter->second.ref_count++;
+    // The tab handle and the pending status may have changed:-
+    // 1.A external tab container is being destroyed and a new one is being
+    //   created.
+    // 2.The external tab container being destroyed receives a RVH created
+    //   notification for the new RVH created to host the newly created tab.
+    //   In this case the tab handle in the AutomationDetails structure would
+    //   be invalid as it points to a destroyed tab.
+    // We need to replace the handle of the external tab being destroyed with
+    // the new one that is being created."
+    automation_details_iter->second.tab_handle = tab_handle;
+    automation_details_iter->second.is_pending_render_view = pending_view;
   } else {
     filtered_render_views_.Get()[renderer_key] =
         AutomationDetails(tab_handle, filter, pending_view);
@@ -471,15 +488,14 @@ void AutomationResourceMessageFilter::ResumeJobsForPendingView(
   DCHECK(new_filter != NULL);
 
   RequestMap pending_requests = old_filter->pending_request_map_;
+  old_filter->pending_request_map_.clear();
 
-  for (RequestMap::iterator index = old_filter->pending_request_map_.begin();
-          index != old_filter->pending_request_map_.end(); index++) {
+  for (RequestMap::iterator index = pending_requests.begin();
+       index != pending_requests.end(); index++) {
     URLRequestAutomationJob* job = (*index).second;
     DCHECK_EQ(job->message_filter(), old_filter);
     DCHECK(job->is_pending());
     // StartPendingJob will register the job with the new filter.
     job->StartPendingJob(tab_handle, new_filter);
   }
-
-  old_filter->pending_request_map_.clear();
 }

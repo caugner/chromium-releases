@@ -103,8 +103,7 @@ union MemoryAligner {
 
 static SpinLock spinlock(SpinLock::LINKER_INITIALIZED);
 
-#if defined(HAVE_MMAP) || defined(MADV_DONTNEED)
-// Page size is initialized on demand (only needed for mmap-based allocators)
+#ifdef HAVE_GETPAGESIZE
 static size_t pagesize = 0;
 #endif
 
@@ -160,6 +159,7 @@ class DefaultSysAllocator : public SysAllocator {
     for (int i = 0; i < kMaxAllocators; i++) {
       failed_[i] = true;
       allocs_[i] = NULL;
+      names_[i] = NULL;
     }
   }
   void SetChildAllocator(SysAllocator* alloc, unsigned int index,
@@ -167,6 +167,7 @@ class DefaultSysAllocator : public SysAllocator {
     if (index < kMaxAllocators && alloc != NULL) {
       allocs_[index] = alloc;
       failed_[index] = false;
+      names_[index] = name;
     }
   }
   void* Alloc(size_t size, size_t *actual_size, size_t alignment);
@@ -480,6 +481,21 @@ void* TCMalloc_SystemAlloc(size_t size, size_t *actual_size,
     }
   }
   return result;
+}
+
+size_t TCMalloc_SystemAddGuard(void* start, size_t size) {
+#ifdef HAVE_GETPAGESIZE
+  if (pagesize == 0)
+    pagesize = getpagesize();
+
+  if (size < pagesize || (reinterpret_cast<size_t>(start) % pagesize) != 0)
+    return 0;
+
+  if (!mprotect(start, pagesize, PROT_NONE))
+    return pagesize;
+#endif
+
+  return 0;
 }
 
 void TCMalloc_SystemRelease(void* start, size_t length) {

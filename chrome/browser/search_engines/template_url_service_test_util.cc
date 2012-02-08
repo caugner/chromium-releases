@@ -4,6 +4,7 @@
 
 #include "chrome/browser/search_engines/template_url_service_test_util.h"
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
@@ -13,35 +14,29 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
-// A Task used to coordinate when the database has finished processing
+// A callback used to coordinate when the database has finished processing
 // requests. See note in BlockTillServiceProcessesRequests for details.
 //
-// When Run() schedules a QuitTask on the message loop it was created with.
-class QuitTask2 : public Task {
- public:
-  QuitTask2() : main_loop_(MessageLoop::current()) {}
-
-  virtual void Run() {
-    main_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
-  }
-
- private:
-  MessageLoop* main_loop_;
-};
+// Schedules a QuitClosure on the message loop it was created with.
+void QuitCallback(MessageLoop* message_loop) {
+  message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+}
 
 // Blocks the caller until thread has finished servicing all pending
 // requests.
 static void WaitForThreadToProcessRequests(BrowserThread::ID identifier) {
   // Schedule a task on the thread that is processed after all
   // pending requests on the thread.
-  BrowserThread::PostTask(identifier, FROM_HERE, new QuitTask2());
-  // Run the current message loop. QuitTask2, when run, invokes Quit,
-  // which unblocks this.
+  BrowserThread::PostTask(identifier, FROM_HERE,
+                          base::Bind(&QuitCallback, MessageLoop::current()));
   MessageLoop::current()->Run();
 }
 
@@ -62,9 +57,7 @@ class TemplateURLServiceTestingProfile : public TestingProfile {
   // Starts the I/O thread. This isn't done automatically because not every test
   // needs this.
   void StartIOThread() {
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread_.StartWithOptions(options);
+    io_thread_.StartIOThread();
   }
 
   virtual WebDataService* GetWebDataService(ServiceAccessType access) {
@@ -74,8 +67,8 @@ class TemplateURLServiceTestingProfile : public TestingProfile {
  private:
   scoped_refptr<WebDataService> service_;
   ScopedTempDir temp_dir_;
-  BrowserThread db_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread db_thread_;
+  content::TestBrowserThread io_thread_;
 };
 
 // Trivial subclass of TemplateURLService that records the last invocation of
@@ -227,10 +220,10 @@ string16 TemplateURLServiceTestUtil::GetAndClearSearchTerm() {
 void TemplateURLServiceTestUtil::SetGoogleBaseURL(
     const std::string& base_url) const {
   TemplateURLRef::SetGoogleBaseURL(new std::string(base_url));
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
-      NotificationService::AllSources(),
-      NotificationService::NoDetails());
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
 }
 
 WebDataService* TemplateURLServiceTestUtil::GetWebDataService() {

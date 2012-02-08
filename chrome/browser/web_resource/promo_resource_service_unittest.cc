@@ -18,7 +18,7 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -36,57 +36,65 @@ class PromoResourceServiceTest : public testing::Test {
   MessageLoop loop_;
 };
 
-class SyncPromoTest : public PromoResourceServiceTest,
-                      public NotificationObserver {
+class NTPSignInPromoTest : public PromoResourceServiceTest,
+                      public content::NotificationObserver {
  public:
-  SyncPromoTest() : PromoResourceServiceTest(), notifications_allowed_(false) {
+  NTPSignInPromoTest() : PromoResourceServiceTest(),
+                         notifications_received_(0) {
     web_resource_service_->set_channel(chrome::VersionInfo::CHANNEL_DEV);
     registrar_.Add(this,
                    chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    // If we get any unexpected notifications we should fail.
-    EXPECT_TRUE(notifications_allowed_);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
+    EXPECT_EQ(type, chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
+    // Remember how many notifications we've received.
+    ++notifications_received_;
   }
 
-  void allow_notifications(bool allowed) { notifications_allowed_ = allowed; }
+  void reset_notification_count() {
+    notifications_received_ = 0;
+  }
+
+  int notifications_received() const {
+    return notifications_received_;
+  }
 
  protected:
-  void ClearSyncPromoPrefs() {
+  void ClearNTPSignInPromoPrefs() {
     PrefService* prefs = profile_.GetPrefs();
-    prefs->ClearPref(prefs::kNTPSyncPromoGroup);
-    prefs->ClearPref(prefs::kNTPSyncPromoGroupMax);
-    ASSERT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroup));
-    ASSERT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroupMax));
+    prefs->ClearPref(prefs::kNTPSignInPromoGroup);
+    prefs->ClearPref(prefs::kNTPSignInPromoGroupMax);
+    ASSERT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroup));
+    ASSERT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroupMax));
   }
 
   void InvalidTestCase(const std::string& question) {
     PrefService* prefs = profile_.GetPrefs();
     ASSERT_TRUE(prefs != NULL);
-    prefs->SetInteger(prefs::kNTPSyncPromoGroup, 50);
-    prefs->SetInteger(prefs::kNTPSyncPromoGroupMax, 75);
-    UnpackSyncPromo(question);
-    EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroup));
-    EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroupMax));
+    prefs->SetInteger(prefs::kNTPSignInPromoGroup, 50);
+    prefs->SetInteger(prefs::kNTPSignInPromoGroupMax, 75);
+    UnpackNTPSignInPromo(question);
+    EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroup));
+    EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroupMax));
   }
 
-  void SetupSyncPromoCase(int build, int max_group) {
+  void SetupNTPSignInPromoCase(int build, int max_group) {
     std::string question = base::IntToString(build) + ":" +
                            base::IntToString(max_group);
-    UnpackSyncPromo(question);
+    UnpackNTPSignInPromo(question);
   }
 
-  void UnpackSyncPromo(const std::string& question) {
+  void UnpackNTPSignInPromo(const std::string& question) {
     std::string json_header =
       "{ "
       "  \"topic\": {"
       "    \"answers\": ["
       "       {"
-      "        \"name\": \"sync_promo\","
+      "        \"name\": \"sign_in_promo\","
       "        \"question\": \"";
 
     std::string json_footer = "\""
@@ -95,14 +103,14 @@ class SyncPromoTest : public PromoResourceServiceTest,
       "  }"
       "}";
 
-   scoped_ptr<DictionaryValue> test_json(static_cast<DictionaryValue*>(
+    scoped_ptr<DictionaryValue> test_json(static_cast<DictionaryValue*>(
         base::JSONReader::Read(json_header + question + json_footer, false)));
-   web_resource_service_->UnpackSyncPromoSignal(*(test_json.get()));
+    web_resource_service_->UnpackNTPSignInPromoSignal(*(test_json.get()));
   }
 
   private:
-    bool notifications_allowed_;
-    NotificationRegistrar registrar_;
+    int notifications_received_;
+    content::NotificationRegistrar registrar_;
 };
 
 // Verifies that custom dates read from a web resource server are written to
@@ -186,26 +194,34 @@ TEST_F(PromoResourceServiceTest, UnpackLogoSignal) {
 
 class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
  public:
-  explicit NotificationPromoTestDelegate(PrefService* prefs)
-      : prefs_(prefs),
+  explicit NotificationPromoTestDelegate(Profile* profile)
+      : profile_(profile),
+        prefs_(profile->GetPrefs()),
         notification_promo_(NULL),
         received_notification_(false),
+        should_receive_notification_(false),
         build_targeted_(true),
         start_(0.0),
         end_(0.0),
-        build_(PromoResourceService::ALL_BUILDS),
+        build_(PromoResourceService::NO_BUILD),
         time_slice_(0),
         max_group_(0),
         max_views_(0),
+        platform_(NotificationPromo::PLATFORM_NONE),
+        feature_mask_(0),
         text_(),
-        closed_(false) {
+        closed_(false),
+        gplus_(false),
+        current_platform_(NotificationPromo::CurrentPlatform()) {
   }
 
   void Init(NotificationPromo* notification_promo,
             const std::string& json,
             double start, double end,
-            int build, int time_slice, int max_group, int max_views,
-            const std::string& text, bool closed) {
+            int build, int time_slice,
+            int max_group, int max_views, int platform,
+            int feature_mask, const std::string& text, bool closed,
+            bool gplus) {
     notification_promo_ = notification_promo;
 
     test_json_.reset(static_cast<DictionaryValue*>(
@@ -218,24 +234,36 @@ class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
     time_slice_ = time_slice;
     max_group_ = max_group;
     max_views_ = max_views;
+    platform_ = platform;
 
     text_ = text;
     closed_ = closed;
+    gplus_ = gplus;
+    feature_mask_ = feature_mask;
 
     received_notification_ = false;
   }
 
   // NotificationPromo::Delegate implementation.
-  virtual void OnNewNotification(double start, double end) {
-    EXPECT_EQ(CalcStart(), start);
-    EXPECT_EQ(notification_promo_->StartTimeWithOffset(), start);
-    EXPECT_EQ(notification_promo_->end_, end);
-    received_notification_ = true;
+  virtual void OnNotificationParsed(double start, double end,
+                                    bool new_notification) {
+    if (should_receive_notification_) {
+      EXPECT_EQ(CalcStart(), start);
+      EXPECT_EQ(notification_promo_->StartTimeWithOffset(), start);
+      EXPECT_EQ(notification_promo_->end_, end);
+    }
+
+    received_notification_ = new_notification;
+    EXPECT_TRUE(received_notification_ == should_receive_notification_);
   }
 
   virtual bool IsBuildAllowed(int builds_targeted) const {
     EXPECT_EQ(builds_targeted, build_);
     return build_targeted_;
+  }
+
+  virtual int CurrentPlatform() const {
+    return current_platform_;
   }
 
   const base::DictionaryValue& TestJson() const {
@@ -247,13 +275,64 @@ class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
   }
 
   void InitPromoFromJson(bool should_receive_notification) {
+    should_receive_notification_ = should_receive_notification;
     received_notification_ = false;
-    notification_promo_->InitFromJson(TestJson());
+    notification_promo_->InitFromJson(TestJson(), false);
     EXPECT_TRUE(received_notification_ == should_receive_notification);
 
     // Test the fields.
     TestNotification();
     TestPrefs();
+  }
+
+  void TestCookie(const std::string& cookies,
+      bool should_receive_notification, bool should_find_cookie) {
+    gplus_ = should_find_cookie;
+    should_receive_notification_ = should_receive_notification;
+    received_notification_ = false;
+
+    bool found_cookie = NotificationPromo::CheckForGPlusCookie(cookies);
+    EXPECT_TRUE(found_cookie == should_find_cookie);
+
+    notification_promo_->CheckForNewNotification(found_cookie);
+    EXPECT_TRUE(received_notification_ == should_receive_notification);
+
+    // Test the fields.
+    EXPECT_EQ(notification_promo_->gplus_, gplus_);
+    EXPECT_EQ(notification_promo_->feature_mask_, feature_mask_);
+    // Test the prefs.
+    EXPECT_EQ(prefs_->GetBoolean(prefs::kNTPPromoIsLoggedInToPlus), gplus_);
+    EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoFeatureMask), feature_mask_);
+
+    // Set group_ manually to a passing group.
+    notification_promo_->group_ = max_group_ - 1;
+    // Assumes feature_mask = GPLUS_FEATURE, so whether or not the promo is
+    // is shown depends only on the value of gplus_.
+    EXPECT_TRUE(notification_promo_->CanShow() == gplus_);
+  }
+
+  void TestGPlus() {
+    feature_mask_ = NotificationPromo::FEATURE_GPLUS;
+    notification_promo_->feature_mask_ = NotificationPromo::FEATURE_GPLUS;
+    // Force a notification when gplus_ is found to be false.
+    notification_promo_->prefs_->
+        SetBoolean(prefs::kNTPPromoIsLoggedInToPlus, true);
+
+    TestCookie("WRONG=123456;", true, false);
+    // Should not trigger notification on second call.
+    TestCookie("WRONG=123456;", false, false);
+
+    TestCookie("SID=123456;", true, true);
+    // Should not trigger notification on second call.
+    TestCookie("SID=123456;", false, true);
+
+    // Reset the notification_promo to its original state.
+    feature_mask_ = NotificationPromo::NO_FEATURE;
+    notification_promo_->feature_mask_ = NotificationPromo::NO_FEATURE;
+    gplus_ = false;
+    notification_promo_->prefs_->
+        SetBoolean(prefs::kNTPPromoIsLoggedInToPlus, false);
+    notification_promo_->gplus_ = false;
   }
 
   void TestNotification() {
@@ -264,8 +343,11 @@ class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
     EXPECT_EQ(notification_promo_->time_slice_, time_slice_);
     EXPECT_EQ(notification_promo_->max_group_, max_group_);
     EXPECT_EQ(notification_promo_->max_views_, max_views_);
+    EXPECT_EQ(notification_promo_->platform_, platform_);
     EXPECT_EQ(notification_promo_->text_, text_);
     EXPECT_EQ(notification_promo_->closed_, closed_);
+    EXPECT_EQ(notification_promo_->gplus_, gplus_);
+    EXPECT_EQ(notification_promo_->feature_mask_, feature_mask_);
 
     // Check group within bounds.
     EXPECT_GE(notification_promo_->group_, 0);
@@ -286,20 +368,24 @@ class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
     EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoGroupTimeSlice), time_slice_);
     EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoGroupMax), max_group_);
     EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoViewsMax), max_views_);
+    EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoPlatform), platform_);
 
     EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoGroup),
         notification_promo_ ? notification_promo_->group_: 0);
     EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoViews), 0);
     EXPECT_EQ(prefs_->GetString(prefs::kNTPPromoLine), text_);
     EXPECT_EQ(prefs_->GetBoolean(prefs::kNTPPromoClosed), closed_);
+    EXPECT_EQ(prefs_->GetBoolean(prefs::kNTPPromoIsLoggedInToPlus), gplus_);
+    EXPECT_EQ(prefs_->GetInteger(prefs::kNTPPromoFeatureMask), feature_mask_);
   }
 
   // Create a new NotificationPromo from prefs and compare to current
   // notification.
   void TestInitFromPrefs() {
-    NotificationPromo prefs_notification_promo(prefs_, this);
-    prefs_notification_promo.InitFromPrefs();
-    const bool is_equal = *notification_promo_ == prefs_notification_promo;
+    scoped_refptr<NotificationPromo> prefs_notification_promo =
+    NotificationPromo::Create(profile_, this);
+    prefs_notification_promo->InitFromPrefs();
+    const bool is_equal = *notification_promo_ == *prefs_notification_promo;
     EXPECT_TRUE(is_equal);
   }
 
@@ -337,6 +423,123 @@ class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
 
     build_targeted_ = true;
     EXPECT_TRUE(notification_promo_->CanShow());
+  }
+
+  void TestOnePlatform(int current_platform, bool expected) {
+    current_platform_ = current_platform;
+    EXPECT_EQ(expected, notification_promo_->CanShow());
+  }
+
+  void TestPlatformSet(int target_platform, bool expected_win,
+      bool expected_mac, bool expected_linux, bool expected_chromeos) {
+    notification_promo_->platform_ = target_platform;
+    TestOnePlatform(NotificationPromo::PLATFORM_WIN, expected_win);
+    TestOnePlatform(NotificationPromo::PLATFORM_MAC, expected_mac);
+    TestOnePlatform(NotificationPromo::PLATFORM_LINUX, expected_linux);
+    TestOnePlatform(NotificationPromo::PLATFORM_CHROMEOS, expected_chromeos);
+  }
+
+  void TestPlatforms() {
+    int target_platform;
+
+    // Windows and Mac only - test real current platform.
+    target_platform = 3;
+    notification_promo_->platform_ = target_platform;
+    bool expected = false;
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    expected = true;
+#endif
+    EXPECT_EQ(expected, notification_promo_->CanShow());
+
+    // Windows only.
+    target_platform = 1;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_WIN);
+    TestPlatformSet(target_platform, true, false, false, false);
+
+    // Mac only.
+    target_platform = 2;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_MAC);
+    TestPlatformSet(target_platform, false, true, false, false);
+
+    // Linux only.
+    target_platform = 4;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_LINUX);
+    TestPlatformSet(target_platform, false, false, true, false);
+
+    // ChromeOS only.
+    target_platform = 8;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_CHROMEOS);
+    TestPlatformSet(target_platform, false, false, false, true);
+
+    // Non-Windows.
+    target_platform = 14;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_ALL
+                               & ~NotificationPromo::PLATFORM_WIN);
+    TestPlatformSet(target_platform, false, true, true, true);
+
+    // Non-Mac.
+    target_platform = 13;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_ALL
+                               & ~NotificationPromo::PLATFORM_MAC);
+    TestPlatformSet(target_platform, true, false, true, true);
+
+    // Non-Linux.
+    target_platform = 11;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_ALL
+                               & ~NotificationPromo::PLATFORM_LINUX);
+    TestPlatformSet(target_platform, true, true, false, true);
+
+    // Non-ChromeOS.
+    target_platform = 7;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_ALL
+                               & ~NotificationPromo::PLATFORM_CHROMEOS);
+    TestPlatformSet(target_platform, true, true, true, false);
+
+    // Windows and Mac.
+    target_platform = 3;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_WIN
+                               | NotificationPromo::PLATFORM_MAC);
+    TestPlatformSet(target_platform, true, true, false, false);
+
+    // Windows and Linux.
+    target_platform = 5;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_WIN
+                               | NotificationPromo::PLATFORM_LINUX);
+    TestPlatformSet(target_platform, true, false, true, false);
+
+    // Windows and ChromeOS.
+    target_platform = 9;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_WIN
+                               | NotificationPromo::PLATFORM_CHROMEOS);
+    TestPlatformSet(target_platform, true, false, false, true);
+
+    // Mac and Linux.
+    target_platform = 6;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_MAC
+                               | NotificationPromo::PLATFORM_LINUX);
+    TestPlatformSet(target_platform, false, true, true, false);
+
+    // Mac and ChromeOS.
+    target_platform = 10;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_MAC
+                               | NotificationPromo::PLATFORM_CHROMEOS);
+    TestPlatformSet(target_platform, false, true, false, true);
+
+    // Linux and ChromeOS.
+    target_platform = 12;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_LINUX
+                               | NotificationPromo::PLATFORM_CHROMEOS);
+    TestPlatformSet(target_platform, false, false, true, true);
+
+    // Disabled.
+    target_platform = 0;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_NONE);
+    TestPlatformSet(target_platform, false, false, false, false);
+
+    // All platforms.
+    target_platform = 15;
+    EXPECT_EQ(target_platform, NotificationPromo::PLATFORM_ALL);
+    TestPlatformSet(target_platform, true, true, true, true);
   }
 
   void TestClosed() {
@@ -380,10 +583,33 @@ class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
     EXPECT_TRUE(notification_promo_->CanShow());
   }
 
+  void TestFeatureMask() {
+    // No gplus cookie, feature mask in use.
+    notification_promo_->gplus_ = false;
+    notification_promo_->feature_mask_ = NotificationPromo::FEATURE_GPLUS;
+    EXPECT_FALSE(notification_promo_->CanShow());
+
+    // Gplus cookie, feature mask in use.
+    notification_promo_->gplus_ = true;
+    notification_promo_->feature_mask_ = NotificationPromo::FEATURE_GPLUS;
+    EXPECT_TRUE(notification_promo_->CanShow());
+
+    // If no feature mask, gplus_ value is ignored.
+    notification_promo_->gplus_ = true;
+    notification_promo_->feature_mask_ = NotificationPromo::NO_FEATURE;
+    EXPECT_TRUE(notification_promo_->CanShow());
+
+    notification_promo_->gplus_ = false;
+    notification_promo_->feature_mask_ = NotificationPromo::NO_FEATURE;
+    EXPECT_TRUE(notification_promo_->CanShow());
+  }
+
  private:
+  Profile* profile_;
   PrefService* prefs_;
   NotificationPromo* notification_promo_;
   bool received_notification_;
+  bool should_receive_notification_;
   bool build_targeted_;
   scoped_ptr<DictionaryValue> test_json_;
 
@@ -394,9 +620,14 @@ class NotificationPromoTestDelegate : public NotificationPromo::Delegate {
   int time_slice_;
   int max_group_;
   int max_views_;
+  int platform_;
+  int feature_mask_;
 
   std::string text_;
   bool closed_;
+
+  bool gplus_;
+  int current_platform_;
 };
 
 TEST_F(PromoResourceServiceTest, NotificationPromoTest) {
@@ -404,35 +635,36 @@ TEST_F(PromoResourceServiceTest, NotificationPromoTest) {
   PrefService* prefs = profile_.GetPrefs();
   ASSERT_TRUE(prefs != NULL);
 
-  NotificationPromoTestDelegate delegate(prefs);
-  NotificationPromo notification_promo(prefs, &delegate);
+  NotificationPromoTestDelegate delegate(&profile_);
+  scoped_refptr<NotificationPromo> notification_promo =
+      NotificationPromo::Create(&profile_, &delegate);
 
   // Make sure prefs are unset.
   delegate.TestPrefs();
 
   // Set up start and end dates and promo line in a Dictionary as if parsed
   // from the service.
-  delegate.Init(&notification_promo,
+  delegate.Init(notification_promo,
                 "{ "
                 "  \"topic\": {"
                 "    \"answers\": ["
                 "       {"
                 "        \"name\": \"promo_start\","
-                "        \"question\": \"3:2:5:10\","
+                "        \"question\": \"3:2:5:10:15:0\","
                 "        \"tooltip\": \"Eat more pie!\","
                 "        \"inproduct\": \"31/01/10 01:00 GMT\""
                 "       },"
                 "       {"
                 "        \"name\": \"promo_end\","
-                "        \"inproduct\": \"31/01/12 01:00 GMT\""
+                "        \"inproduct\": \"31/01/14 01:00 GMT\""
                 "       }"
                 "    ]"
                 "  }"
                 "}",
                 1264899600,  // unix epoch for Jan 31 2010 0100 GMT.
-                1327971600,  // unix epoch for Jan 31 2012 0100 GMT.
-                3, 2, 5, 10,
-                "Eat more pie!", false);
+                1391130000,  // unix epoch for Jan 31 2012 0100 GMT.
+                3, 2, 5, 10, 15, 0,
+                "Eat more pie!", false, false);
 
   delegate.InitPromoFromJson(true);
 
@@ -449,6 +681,9 @@ TEST_F(PromoResourceServiceTest, NotificationPromoTest) {
   delegate.TestClosed();
   delegate.TestText();
   delegate.TestTime();
+  delegate.TestFeatureMask();
+  delegate.TestPlatforms();
+  delegate.TestGPlus();
 }
 
 TEST_F(PromoResourceServiceTest, NotificationPromoTestFail) {
@@ -456,18 +691,19 @@ TEST_F(PromoResourceServiceTest, NotificationPromoTestFail) {
   PrefService* prefs = profile_.GetPrefs();
   ASSERT_TRUE(prefs != NULL);
 
-  NotificationPromoTestDelegate delegate(prefs);
-  NotificationPromo notification_promo(prefs, &delegate);
+  NotificationPromoTestDelegate delegate(&profile_);
+  scoped_refptr<NotificationPromo> notification_promo =
+      NotificationPromo::Create(&profile_, &delegate);
 
   // Set up start and end dates and promo line in a Dictionary as if parsed
   // from the service.
-  delegate.Init(&notification_promo,
+  delegate.Init(notification_promo,
                 "{ "
                 "  \"topic\": {"
                 "    \"answers\": ["
                 "       {"
                 "        \"name\": \"promo_start\","
-                "        \"question\": \"12:8:10:20\","
+                "        \"question\": \"12:8:10:20:15:0\","
                 "        \"tooltip\": \"Happy 3rd Birthday!\","
                 "        \"inproduct\": \"09/15/10 05:00 PDT\""
                 "       },"
@@ -480,8 +716,8 @@ TEST_F(PromoResourceServiceTest, NotificationPromoTestFail) {
                 "}",
                 1284552000,  // unix epoch for Sep 15 2010 0500 PDT.
                 1285848000,  // unix epoch for Sep 30 2010 0500 PDT.
-                12, 8, 10, 20,
-                "Happy 3rd Birthday!", false);
+                12, 8, 10, 20, 15, 0,
+                "Happy 3rd Birthday!", false, false);
 
   delegate.InitPromoFromJson(true);
 
@@ -491,12 +727,12 @@ TEST_F(PromoResourceServiceTest, NotificationPromoTestFail) {
   delegate.TestInitFromPrefs();
 
   // Should fail because out of time bounds.
-  EXPECT_FALSE(notification_promo.CanShow());
+  EXPECT_FALSE(notification_promo->CanShow());
 }
 
 TEST_F(PromoResourceServiceTest, GetNextQuestionValueTest) {
-  const std::string question("0:-100:2048:0:2a");
-  const int question_vec[] = { 0, -100, 2048, 0 };
+  const std::string question("0:-100:2048:0:0:0:2a");
+  const int question_vec[] = { 0, -100, 2048, 0, 0, 0};
   size_t index = 0;
   bool err = false;
 
@@ -742,87 +978,81 @@ TEST_F(PromoResourceServiceTest, UnpackWebStoreSignalHttpLogo) {
 }
 
 // Don't run sync promo unpacking tests on ChromeOS as on that plaform
-// PromoResourceService::UnpackSyncPromoSignal() basically just no-ops.
+// PromoResourceService::UnpackNTPSignInPromoSignal() basically just no-ops.
 #if !defined(OS_CHROMEOS)
-TEST_F(SyncPromoTest, UnpackSyncPromoSignal) {
+TEST_F(NTPSignInPromoTest, UnpackNTPSignInPromoSignal) {
   PrefService* prefs = profile_.GetPrefs();
   ASSERT_TRUE(prefs != NULL);
 
-  // It's OK if we get notifications now, so just allow all.
-  allow_notifications(true);
-
   // Test on by default (currently should be false).
-  EXPECT_FALSE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroup));
-  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroupMax));
+  EXPECT_FALSE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroup));
+  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroupMax));
 
   // Non-targeted build.
-  ClearSyncPromoPrefs();
-  SetupSyncPromoCase(2, 50);
-  EXPECT_FALSE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroup));
-  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroupMax));
+  ClearNTPSignInPromoPrefs();
+  SetupNTPSignInPromoCase(2, 50);
+  EXPECT_FALSE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroup));
+  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroupMax));
 
   // Targeted build, doesn't create bucket and doesn't show promo because
   // groupMax < group.
-  ClearSyncPromoPrefs();
-  SetupSyncPromoCase(1, 0);
-  EXPECT_FALSE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroupMax), 0);
-  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroup));
+  ClearNTPSignInPromoPrefs();
+  SetupNTPSignInPromoCase(1, 0);
+  EXPECT_FALSE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroupMax), 0);
+  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroup));
 
   // Targeted build, max_group = 50, ensure group pref created and within the
   // group bounds.
-  ClearSyncPromoPrefs();
-  SetupSyncPromoCase(1, 50);
-  PromoResourceService::CanShowSyncPromo(&profile_);
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroupMax), 50);
-  EXPECT_TRUE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroup));
-  EXPECT_GT(prefs->GetInteger(prefs::kNTPSyncPromoGroup), 0);
-  EXPECT_LE(prefs->GetInteger(prefs::kNTPSyncPromoGroup), 100);
+  ClearNTPSignInPromoPrefs();
+  SetupNTPSignInPromoCase(1, 50);
+  PromoResourceService::CanShowNTPSignInPromo(&profile_);
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroupMax), 50);
+  EXPECT_TRUE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroup));
+  EXPECT_GT(prefs->GetInteger(prefs::kNTPSignInPromoGroup), 0);
+  EXPECT_LE(prefs->GetInteger(prefs::kNTPSignInPromoGroup), 100);
 
   // Set user group = 50, now shows promo.
-  prefs->SetInteger(prefs::kNTPSyncPromoGroup, 50);
-  EXPECT_TRUE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroup), 50);
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroupMax), 50);
+  prefs->SetInteger(prefs::kNTPSignInPromoGroup, 50);
+  EXPECT_TRUE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroup), 50);
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroupMax), 50);
 
   // Bump user group, ensure that we should not show promo.
-  prefs->SetInteger(prefs::kNTPSyncPromoGroup, 51);
-  EXPECT_FALSE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroup), 51);
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroupMax), 50);
+  prefs->SetInteger(prefs::kNTPSignInPromoGroup, 51);
+  EXPECT_FALSE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroup), 51);
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroupMax), 50);
 
   // If the max group gets bumped to the user's group (or above), it should
   // show.
-  prefs->SetInteger(prefs::kNTPSyncPromoGroupMax, 51);
-  EXPECT_TRUE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroup), 51);
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroupMax), 51);
+  prefs->SetInteger(prefs::kNTPSignInPromoGroupMax, 51);
+  EXPECT_TRUE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroup), 51);
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroupMax), 51);
 
   // Reduce max group.
-  prefs->SetInteger(prefs::kNTPSyncPromoGroupMax, 49);
-  EXPECT_FALSE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroup), 51);
-  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSyncPromoGroupMax), 49);
+  prefs->SetInteger(prefs::kNTPSignInPromoGroupMax, 49);
+  EXPECT_FALSE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroup), 51);
+  EXPECT_EQ(prefs->GetInteger(prefs::kNTPSignInPromoGroupMax), 49);
 
   // Ignore non-targeted builds.
-  prefs->SetInteger(prefs::kNTPSyncPromoGroup, 50);
-  prefs->SetInteger(prefs::kNTPSyncPromoGroupMax, 75);
-  EXPECT_TRUE(PromoResourceService::CanShowSyncPromo(&profile_));
-  SetupSyncPromoCase(2, 25);
+  prefs->SetInteger(prefs::kNTPSignInPromoGroup, 50);
+  prefs->SetInteger(prefs::kNTPSignInPromoGroupMax, 75);
+  EXPECT_TRUE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  SetupNTPSignInPromoCase(2, 25);
   // Make sure the prefs are deleted.
-  EXPECT_FALSE(PromoResourceService::CanShowSyncPromo(&profile_));
-  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroup));
-  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSyncPromoGroupMax));
+  EXPECT_FALSE(PromoResourceService::CanShowNTPSignInPromo(&profile_));
+  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroup));
+  EXPECT_FALSE(prefs->HasPrefPath(prefs::kNTPSignInPromoGroupMax));
 }
 
-// Throw random stuff at UnpackSyncPromoSignal and make sure no segfaults or
-// other issues and that the prefs were cleared.
-TEST_F(SyncPromoTest, UnpackSyncPromoSignalInvalid) {
-  // We're not testing these here, so ignore them.
-  allow_notifications(true);
-
+// Throw random stuff at UnpackNTPSignInPromoSignal and make sure no segfaults
+// or other issues and that the prefs were cleared.
+TEST_F(NTPSignInPromoTest, UnpackNTPSignInPromoSignalInvalid) {
   // Empty.
   InvalidTestCase("");
 
@@ -842,17 +1072,29 @@ TEST_F(SyncPromoTest, UnpackSyncPromoSignalInvalid) {
   InvalidTestCase("だからって馬鹿に:してるの？怒る友人");
 }
 
-TEST_F(SyncPromoTest, UnpackSyncPromoSignalNotify) {
-  // Ensure no notifications are sent.
-  ClearSyncPromoPrefs();
-  allow_notifications(false);
-  SetupSyncPromoCase(2, 50);
-  SetupSyncPromoCase(1, 0);
-  SetupSyncPromoCase(1, 100);
+TEST_F(NTPSignInPromoTest, UnpackNTPSignInPromoSignalNotify) {
+  // Clear prefs and ensure we're not triggering notifications every time we
+  // receive not-targeted or valid data (only when we need to turn off the
+  // promo).
+  ClearNTPSignInPromoPrefs();
+  reset_notification_count();
 
-  // Expect a notification to be called when the promo is disabled.
-  allow_notifications(true);
-  SetupSyncPromoCase(2, 0);
+  // Non-targeted build.
+  SetupNTPSignInPromoCase(2, 50);
+
+  // Targeted, but under any possible max group.
+  SetupNTPSignInPromoCase(1, 0);
+
+  // Targeted for sure, but shouldn't send notification.
+  SetupNTPSignInPromoCase(1, 100);
+
+  // Expect this didn't trigger any notifications.
+  EXPECT_EQ(notifications_received(), 0);
+
+  // Expect notifications when the promo is disabled, as this is expected
+  // behavior.
+  SetupNTPSignInPromoCase(2, 0);
+  EXPECT_EQ(notifications_received(), 1);
 }
 #endif  // !defined(OS_CHROMEOS)
 

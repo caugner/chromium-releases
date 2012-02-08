@@ -31,11 +31,12 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/plugin_service.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 
@@ -63,6 +64,7 @@ ChromeWebUIDataSource* CreatePluginsUIHTMLSource() {
   source->AddLocalizedString("pluginVersion", IDS_PLUGINS_VERSION);
   source->AddLocalizedString("pluginDescription", IDS_PLUGINS_DESCRIPTION);
   source->AddLocalizedString("pluginPath", IDS_PLUGINS_PATH);
+  source->AddLocalizedString("pluginType", IDS_PLUGINS_TYPE);
   source->AddLocalizedString("pluginMimeTypes", IDS_PLUGINS_MIME_TYPES);
   source->AddLocalizedString("pluginMimeTypesMimeType",
                              IDS_PLUGINS_MIME_TYPES_MIME_TYPE);
@@ -80,6 +82,24 @@ ChromeWebUIDataSource* CreatePluginsUIHTMLSource() {
   return source;
 }
 
+string16 PluginTypeToString(int type) {
+  // The type is stored as an |int|, but doing the switch on the right
+  // enumeration type gives us better build-time error checking (if someone adds
+  // a new type).
+  switch (static_cast<WebPluginInfo::PluginType>(type)) {
+    case WebPluginInfo::PLUGIN_TYPE_NPAPI:
+      return l10n_util::GetStringUTF16(IDS_PLUGINS_NPAPI);
+    case WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS:
+      return l10n_util::GetStringUTF16(IDS_PLUGINS_PPAPI_IN_PROCESS);
+    case WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS:
+      return l10n_util::GetStringUTF16(IDS_PLUGINS_PPAPI_OUT_OF_PROCESS);
+    case WebPluginInfo::PLUGIN_TYPE_PEPPER_UNSANDBOXED:
+      return l10n_util::GetStringUTF16(IDS_PLUGINS_PPAPI_UNSANDBOXED);
+  }
+  NOTREACHED();
+  return string16();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 //
 // PluginsDOMHandler
@@ -91,7 +111,7 @@ ChromeWebUIDataSource* CreatePluginsUIHTMLSource() {
 // changes; maybe replumb plugin list through plugin service?
 // <http://crbug.com/39101>
 class PluginsDOMHandler : public WebUIMessageHandler,
-                          public NotificationObserver {
+                          public content::NotificationObserver {
  public:
   explicit PluginsDOMHandler();
   virtual ~PluginsDOMHandler() {}
@@ -112,10 +132,10 @@ class PluginsDOMHandler : public WebUIMessageHandler,
   // Calback for the "getShowDetails" message.
   void HandleGetShowDetails(const ListValue* args);
 
-  // NotificationObserver method overrides
+  // content::NotificationObserver method overrides
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Call this to start getting the plugins on the UI thread.
@@ -124,7 +144,7 @@ class PluginsDOMHandler : public WebUIMessageHandler,
   // Called on the UI thread when the plugin information is ready.
   void PluginsLoaded(const std::vector<PluginGroup>& groups);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   base::WeakPtrFactory<PluginsDOMHandler> weak_ptr_factory_;
 
@@ -147,7 +167,7 @@ WebUIMessageHandler* PluginsDOMHandler::Attach(WebUI* web_ui) {
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   return WebUIMessageHandler::Attach(web_ui);
 }
@@ -227,8 +247,8 @@ void PluginsDOMHandler::HandleGetShowDetails(const ListValue* args) {
 }
 
 void PluginsDOMHandler::Observe(int type,
-                                const NotificationSource& source,
-                                const NotificationDetails& details) {
+                                const content::NotificationSource& source,
+                                const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED, type);
   LoadPlugins();
 }
@@ -264,6 +284,7 @@ void PluginsDOMHandler::PluginsLoaded(const std::vector<PluginGroup>& groups) {
       plugin_file->SetString("description", group_plugin.desc);
       plugin_file->SetString("path", group_plugin.path.value());
       plugin_file->SetString("version", group_plugin.version);
+      plugin_file->SetString("type", PluginTypeToString(group_plugin.type));
 
       ListValue* mime_types = new ListValue();
       const std::vector<webkit::WebPluginMimeType>& plugin_mime_types =

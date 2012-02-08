@@ -4,7 +4,8 @@
 
 #include "content/browser/renderer_host/quota_dispatcher_host.h"
 
-#include "base/memory/scoped_callback_factory.h"
+#include "base/bind.h"
+#include "base/memory/weak_ptr.h"
 #include "content/browser/quota_permission_context.h"
 #include "content/common/quota_messages.h"
 #include "googleurl/src/gurl.h"
@@ -57,13 +58,14 @@ class QuotaDispatcherHost::QueryUsageAndQuotaDispatcher
       QuotaDispatcherHost* dispatcher_host,
       int request_id)
       : RequestDispatcher(dispatcher_host, request_id),
-        callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
+        weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
   virtual ~QueryUsageAndQuotaDispatcher() {}
 
   void QueryStorageUsageAndQuota(const GURL& origin, StorageType type) {
-    quota_manager()->GetUsageAndQuota(origin, type,
-        callback_factory_.NewCallback(
-            &QueryUsageAndQuotaDispatcher::DidQueryStorageUsageAndQuota));
+    quota_manager()->GetUsageAndQuota(
+        origin, type,
+        base::Bind(&QueryUsageAndQuotaDispatcher::DidQueryStorageUsageAndQuota,
+                   weak_factory_.GetWeakPtr()));
   }
 
  private:
@@ -79,7 +81,7 @@ class QuotaDispatcherHost::QueryUsageAndQuotaDispatcher
     Completed();
   }
 
-  base::ScopedCallbackFactory<QueryUsageAndQuotaDispatcher> callback_factory_;
+  base::WeakPtrFactory<QueryUsageAndQuotaDispatcher> weak_factory_;
 };
 
 class QuotaDispatcherHost::RequestQuotaDispatcher
@@ -100,7 +102,7 @@ class QuotaDispatcherHost::RequestQuotaDispatcher
         current_quota_(0),
         requested_quota_(requested_quota),
         render_view_id_(render_view_id),
-        callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
+        weak_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
   virtual ~RequestQuotaDispatcher() {}
 
   void Start() {
@@ -109,12 +111,13 @@ class QuotaDispatcherHost::RequestQuotaDispatcher
     if (type_ == quota::kStorageTypePersistent) {
       quota_manager()->GetPersistentHostQuota(
           host_,
-          callback_factory_.NewCallback(&self_type::DidGetHostQuota));
+          base::Bind(&self_type::DidGetHostQuota,
+                     weak_factory_.GetWeakPtr()));
     } else {
       quota_manager()->GetUsageAndQuota(
           origin_, type_,
-          callback_factory_.NewCallback(
-              &self_type::DidGetTemporaryUsageAndQuota));
+          base::Bind(&self_type::DidGetTemporaryUsageAndQuota,
+                     weak_factory_.GetWeakPtr()));
     }
   }
 
@@ -140,7 +143,8 @@ class QuotaDispatcherHost::RequestQuotaDispatcher
     DCHECK(permission_context());
     permission_context()->RequestQuotaPermission(
         origin_, type_, requested_quota_, render_process_id(), render_view_id_,
-        callback_factory_.NewCallback(&self_type::DidGetPermissionResponse));
+        base::Bind(&self_type::DidGetPermissionResponse,
+                   weak_factory_.GetWeakPtr()));
   }
 
   void DidGetTemporaryUsageAndQuota(QuotaStatusCode status,
@@ -158,7 +162,8 @@ class QuotaDispatcherHost::RequestQuotaDispatcher
     // Now we're allowed to set the new quota.
     quota_manager()->SetPersistentHostQuota(
         host_, requested_quota_,
-        callback_factory_.NewCallback(&self_type::DidSetHostQuota));
+        base::Bind(&self_type::DidSetHostQuota,
+                   weak_factory_.GetWeakPtr()));
   }
 
   void DidSetHostQuota(QuotaStatusCode status,
@@ -187,7 +192,7 @@ class QuotaDispatcherHost::RequestQuotaDispatcher
   int64 current_quota_;
   const int64 requested_quota_;
   const int render_view_id_;
-  base::ScopedCallbackFactory<self_type> callback_factory_;
+  base::WeakPtrFactory<self_type> weak_factory_;
 };
 
 QuotaDispatcherHost::QuotaDispatcherHost(

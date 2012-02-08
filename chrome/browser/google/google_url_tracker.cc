@@ -22,7 +22,8 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/common/url_fetcher.h"
 #include "grit/generated_resources.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_util.h"
@@ -204,34 +205,30 @@ void GoogleURLTracker::StartFetchIfDesirable() {
     return;
 
   already_fetched_ = true;
-  fetcher_.reset(URLFetcher::Create(fetcher_id_, GURL(kSearchDomainCheckURL),
-                                    URLFetcher::GET, this));
+  fetcher_.reset(content::URLFetcher::Create(
+      fetcher_id_, GURL(kSearchDomainCheckURL), content::URLFetcher::GET,
+      this));
   ++fetcher_id_;
   // We don't want this fetch to affect existing state in local_state.  For
   // example, if a user has no Google cookies, this automatic check should not
   // cause one to be set, lest we alarm the user.
-  fetcher_->set_load_flags(net::LOAD_DISABLE_CACHE |
-                           net::LOAD_DO_NOT_SAVE_COOKIES);
-  fetcher_->set_request_context(g_browser_process->system_request_context());
+  fetcher_->SetLoadFlags(net::LOAD_DISABLE_CACHE |
+                         net::LOAD_DO_NOT_SAVE_COOKIES);
+  fetcher_->SetRequestContext(g_browser_process->system_request_context());
 
   // Configure to max_retries at most kMaxRetries times for 5xx errors.
   static const int kMaxRetries = 5;
-  fetcher_->set_max_retries(kMaxRetries);
+  fetcher_->SetMaxRetries(kMaxRetries);
 
   fetcher_->Start();
 }
 
-void GoogleURLTracker::OnURLFetchComplete(const URLFetcher* source,
-                                          const GURL& url,
-                                          const net::URLRequestStatus& status,
-                                          int response_code,
-                                          const net::ResponseCookies& cookies,
-                                          const std::string& data) {
+void GoogleURLTracker::OnURLFetchComplete(const content::URLFetcher* source) {
   // Delete the fetcher on this function's exit.
-  scoped_ptr<URLFetcher> clean_up_fetcher(fetcher_.release());
+  scoped_ptr<content::URLFetcher> clean_up_fetcher(fetcher_.release());
 
   // Don't update the URL if the request didn't succeed.
-  if (!status.is_success() || (response_code != 200)) {
+  if (!source->GetStatus().is_success() || (source->GetResponseCode() != 200)) {
     already_fetched_ = false;
     return;
   }
@@ -239,7 +236,8 @@ void GoogleURLTracker::OnURLFetchComplete(const URLFetcher* source,
   // See if the response data was one we want to use, and if so, convert to the
   // appropriate Google base URL.
   std::string url_str;
-  TrimWhitespace(data, TRIM_ALL, &url_str);
+  source->GetResponseAsString(&url_str);
+  TrimWhitespace(url_str, TRIM_ALL, &url_str);
 
   if (!StartsWithASCII(url_str, ".google.", false))
     return;
@@ -278,10 +276,10 @@ void GoogleURLTracker::AcceptGoogleURL(const GURL& new_google_url) {
                                               google_url_.spec());
   g_browser_process->local_state()->SetString(prefs::kLastPromptedGoogleURL,
                                               google_url_.spec());
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_GOOGLE_URL_UPDATED,
-      NotificationService::AllSources(),
-      NotificationService::NoDetails());
+      content::NotificationService::AllSources(),
+      content::NotificationService::NoDetails());
   need_to_prompt_ = false;
 }
 
@@ -311,12 +309,12 @@ void GoogleURLTracker::RedoSearch() {
 }
 
 void GoogleURLTracker::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_NAV_ENTRY_PENDING: {
       NavigationController* controller =
-          Source<NavigationController>(source).ptr();
+          content::Source<NavigationController>(source).ptr();
       OnNavigationPending(source, controller->pending_entry()->url());
       break;
     }
@@ -324,7 +322,7 @@ void GoogleURLTracker::Observe(int type,
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
     case content::NOTIFICATION_TAB_CLOSED:
       OnNavigationCommittedOrTabClosed(
-          Source<NavigationController>(source).ptr()->tab_contents(),
+          content::Source<NavigationController>(source).ptr()->tab_contents(),
           type);
       break;
 
@@ -343,22 +341,23 @@ void GoogleURLTracker::SearchCommitted() {
     // This notification will fire a bit later in the same call chain we're
     // currently in.
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 }
 
-void GoogleURLTracker::OnNavigationPending(const NotificationSource& source,
-                                           const GURL& pending_url) {
-  controller_ = Source<NavigationController>(source).ptr();
+void GoogleURLTracker::OnNavigationPending(
+    const content::NotificationSource& source,
+    const GURL& pending_url) {
+  controller_ = content::Source<NavigationController>(source).ptr();
   search_url_ = pending_url;
   registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-                    NotificationService::AllSources());
+                    content::NotificationService::AllSources());
   // Start listening for the commit notification. We also need to listen for the
   // tab close command since that means the load will never commit.
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                 Source<NavigationController>(controller_));
+                 content::Source<NavigationController>(controller_));
   registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
-                 Source<NavigationController>(controller_));
+                 content::Source<NavigationController>(controller_));
 }
 
 void GoogleURLTracker::OnNavigationCommittedOrTabClosed(

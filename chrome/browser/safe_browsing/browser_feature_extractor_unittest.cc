@@ -12,25 +12,27 @@
 #include "base/message_loop.h"
 #include "base/stringprintf.h"
 #include "base/time.h"
-#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/browser_features.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
+#include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
-#include "content/common/view_messages.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/referrer.h"
+#include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 
 using ::testing::Return;
 using ::testing::StrictMock;
+using content::BrowserThread;
 
 namespace safe_browsing {
 namespace {
@@ -91,19 +93,19 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
   void NavigateAndCommit(const GURL& url,
                          const GURL& referrer,
                          content::PageTransition type) {
-    contents()->controller().LoadURL(url, referrer, type, std::string());
+    contents()->controller().LoadURL(
+        url, content::Referrer(referrer, WebKit::WebReferrerPolicyDefault),
+        type, std::string());
 
     static int page_id = 0;
-    ViewHostMsg_FrameNavigate_Params params;
-    InitNavigateParams(&params, ++page_id, url, type);
-    params.referrer = referrer;
-
     RenderViewHost* rvh = contents()->pending_rvh();
     if (!rvh) {
       rvh = contents()->render_view_host();
     }
     contents()->ProceedWithCrossSiteNavigation();
-    contents()->TestDidNavigate(rvh, params);
+    contents()->TestDidNavigateWithReferrer(
+        rvh, ++page_id, url,
+        content::Referrer(referrer, WebKit::WebReferrerPolicyDefault), type);
   }
 
   bool ExtractFeatures(ClientPhishingRequest* request) {
@@ -119,8 +121,8 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     extractor_->ExtractFeatures(
         browse_info_.get(),
         request,
-        NewCallback(this,
-                    &BrowserFeatureExtractorTest::ExtractFeaturesDone));
+        base::Bind(&BrowserFeatureExtractorTest::ExtractFeaturesDone,
+                   base::Unretained(this)));
   }
 
   void GetFeatureMap(const ClientPhishingRequest& request,
@@ -133,7 +135,7 @@ class BrowserFeatureExtractorTest : public ChromeRenderViewHostTestHarness {
     }
   }
 
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
   int num_pending_;
   scoped_ptr<BrowserFeatureExtractor> extractor_;
   std::map<ClientPhishingRequest*, bool> success_;
@@ -272,6 +274,7 @@ TEST_F(BrowserFeatureExtractorTest, BrowseFeatures) {
   redirect_chain.push_back(GURL("http://somerandomwebsite.com/"));
   redirect_chain.push_back(GURL("http://www.foo.com/"));
   SetRedirectChain(redirect_chain, true);
+  browse_info_->http_status_code = 200;
   NavigateAndCommit(GURL("http://www.foo.com/"),
                     GURL("http://google.com/"),
                     content::PageTransitionFromInt(
@@ -299,6 +302,7 @@ TEST_F(BrowserFeatureExtractorTest, BrowseFeatures) {
   EXPECT_EQ(0.0, features[features::kHasSSLReferrer]);
   EXPECT_EQ(2.0, features[features::kPageTransitionType]);
   EXPECT_EQ(1.0, features[features::kIsFirstNavigation]);
+  EXPECT_EQ(200.0, features[features::kHttpStatusCode]);
 
   request.Clear();
   request.set_url("http://www.foo.com/page.html");
@@ -308,6 +312,7 @@ TEST_F(BrowserFeatureExtractorTest, BrowseFeatures) {
   redirect_chain.push_back(GURL("http://www.foo.com/second_redirect"));
   redirect_chain.push_back(GURL("http://www.foo.com/page.html"));
   SetRedirectChain(redirect_chain, false);
+  browse_info_->http_status_code = 404;
   NavigateAndCommit(GURL("http://www.foo.com/page.html"),
                     GURL("http://www.foo.com"),
                     content::PageTransitionFromInt(
@@ -352,6 +357,7 @@ TEST_F(BrowserFeatureExtractorTest, BrowseFeatures) {
             features[StringPrintf("%s%s",
                                   features::kHostPrefix,
                                   features::kIsFirstNavigation)]);
+  EXPECT_EQ(404.0, features[features::kHttpStatusCode]);
 
   request.Clear();
   request.set_url("http://www.bar.com/");

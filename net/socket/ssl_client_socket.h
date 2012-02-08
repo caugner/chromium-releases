@@ -11,11 +11,8 @@
 #include "net/base/completion_callback.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
+#include "net/socket/ssl_socket.h"
 #include "net/socket/stream_socket.h"
-
-namespace base {
-class StringPiece;
-}  // namespace base
 
 namespace net {
 
@@ -79,7 +76,7 @@ struct SSLClientSocketContext {
 // connection is established.  If a SSL error occurs during the handshake,
 // Connect will fail.
 //
-class NET_EXPORT SSLClientSocket : public StreamSocket {
+class NET_EXPORT SSLClientSocket : public SSLSocket {
  public:
   SSLClientSocket();
 
@@ -107,20 +104,15 @@ class NET_EXPORT SSLClientSocket : public StreamSocket {
   };
 
   // Gets the SSL connection information of the socket.
+  //
+  // TODO(sergeyu): Move this method to the SSLSocket interface and
+  // implemented in SSLServerSocket too.
   virtual void GetSSLInfo(SSLInfo* ssl_info) = 0;
 
   // Gets the SSL CertificateRequest info of the socket after Connect failed
   // with ERR_SSL_CLIENT_AUTH_CERT_NEEDED.
   virtual void GetSSLCertRequestInfo(
       SSLCertRequestInfo* cert_request_info) = 0;
-
-  // Exports data derived from the SSL master-secret (see RFC 5705).
-  // The call will fail with an error if the socket is not connected, or the
-  // SSL implementation does not support the operation.
-  virtual int ExportKeyingMaterial(const base::StringPiece& label,
-                                   const base::StringPiece& context,
-                                   unsigned char *out,
-                                   unsigned int outlen) = 0;
 
   // Get the application level protocol that we negotiated with the server.
   // *proto is set to the resulting protocol (n.b. that the string may have
@@ -129,9 +121,18 @@ class NET_EXPORT SSLClientSocket : public StreamSocket {
   //   kNextProtoNegotiated:  *proto is set to the negotiated protocol.
   //   kNextProtoNoOverlap:   *proto is set to the first protocol in the
   //                          supported list.
-  virtual NextProtoStatus GetNextProto(std::string* proto) = 0;
+  // *server_protos is set to the server advertised protocols.
+  virtual NextProtoStatus GetNextProto(std::string* proto,
+                                       std::string* server_protos) = 0;
 
   static NextProto NextProtoFromString(const std::string& proto_string);
+
+  static const char* NextProtoStatusToString(
+      const SSLClientSocket::NextProtoStatus status);
+
+  // Can be used with the second argument(|server_protos|) of |GetNextProto| to
+  // construct a comma separated string of server advertised protocols.
+  static std::string ServerProtosToString(const std::string& server_protos);
 
   static bool IgnoreCertError(int error, int load_flags);
 

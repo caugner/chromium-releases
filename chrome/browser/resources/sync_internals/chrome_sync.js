@@ -85,14 +85,13 @@ chrome.sync.events = {
     'onStopSyncingPermanently',
     'onClearServerDataSucceeded',
     'onClearServerDataFailed',
+    'onEncryptedTypesChanged',
     'onEncryptionComplete',
     'onActionableError'
   ],
 
   'transaction': [
-    'onTransactionStart',
     'onTransactionWrite',
-    'onTransactionEnd'
   ]
 };
 

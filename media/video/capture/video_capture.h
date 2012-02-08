@@ -18,17 +18,6 @@ namespace media {
 
 class MEDIA_EXPORT VideoCapture {
  public:
-  // Current status of the video capture device in the browser process. Browser
-  // process sends information about the current capture state and error to the
-  // renderer process using this type.
-  enum State {
-    kStarted,
-    kPaused,
-    kStopped,
-    kStopping,
-    kError,
-  };
-
   // TODO(wjia): consider merging with media::VideoFrame if possible.
   class VideoFrameBuffer : public base::RefCountedThreadSafe<VideoFrameBuffer> {
    public:
@@ -90,7 +79,6 @@ class MEDIA_EXPORT VideoCapture {
     int expected_capture_delay;  // expected delay in millisecond.
     media::VideoFrame::Format raw_type;  // desired video type.
     bool interlaced;  // need interlace format.
-    bool resolution_fixed;  // indicate requested resolution can't be altered.
   };
 
   VideoCapture() {}

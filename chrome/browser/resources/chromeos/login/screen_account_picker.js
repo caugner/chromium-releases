@@ -39,10 +39,26 @@ cr.define('login', function() {
      * @param data {string} Screen init payload.
      */
     onBeforeShow: function(data) {
-      $('pod-row').handleShow();
+      var podRow = $('pod-row');
+      podRow.handleShow();
+
+      // If this is showing for the lock screen display the sign out button,
+      // hide the add user button and activate the locked user's pod.
+      var lockedPod = podRow.lockedPod;
+      $('add-user-header-bar-item').hidden = !!lockedPod;
+      $('sign-out-user-item').hidden = !lockedPod;
+      if (lockedPod)
+        podRow.focusPod(lockedPod);
+
       if (this.firstShown_) {
         this.firstShown_ = false;
-        $('pod-row').startInitAnimation();
+        // TODO(nkostylev): Enable animation back when session start jank
+        // is reduced. See http://crosbug.com/11116 http://crosbug.com/18307
+        // $('pod-row').startInitAnimation();
+
+        // TODO(altimofeev): Call it after animation has stoped when animation
+        // is enabled.
+        chrome.send('accountPickerReady', []);
       }
     },
 
@@ -63,6 +79,15 @@ cr.define('login', function() {
    */
   AccountPickerScreen.loadUsers = function(users, animated) {
     $('pod-row').loadPods(users, animated);
+  };
+
+  /**
+   * Updates current image of a user.
+   * @param {string} username User for which to update the image.
+   * @public
+   */
+  AccountPickerScreen.updateUserImage = function(username) {
+    $('pod-row').updateUserImage(username);
   };
 
   /**

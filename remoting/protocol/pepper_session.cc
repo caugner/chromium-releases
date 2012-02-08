@@ -9,11 +9,13 @@
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "remoting/base/constants.h"
-#include "remoting/jingle_glue/iq_request.h"
+#include "remoting/jingle_glue/iq_sender.h"
+#include "remoting/protocol/authenticator.h"
 #include "remoting/protocol/content_description.h"
 #include "remoting/protocol/jingle_messages.h"
 #include "remoting/protocol/pepper_session_manager.h"
 #include "remoting/protocol/pepper_stream_channel.h"
+#include "remoting/protocol/v1_client_channel_authenticator.h"
 #include "third_party/libjingle/source/talk/p2p/base/candidate.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
 
@@ -38,8 +40,6 @@ PepperSession::PepperSession(PepperSessionManager* session_manager)
 }
 
 PepperSession::~PepperSession() {
-  control_channel_socket_.reset();
-  event_channel_socket_.reset();
   STLDeleteContainerPairSecondPointers(channels_.begin(), channels_.end());
   session_manager_->SessionDestroyed(this);
 }
@@ -57,15 +57,15 @@ Session::Error PepperSession::error() {
 
 void PepperSession::StartConnection(
     const std::string& peer_jid,
-    const std::string& peer_public_key,
-    const std::string& client_token,
+    Authenticator* authenticator,
     CandidateSessionConfig* config,
     const StateChangeCallback& state_change_callback) {
   DCHECK(CalledOnValidThread());
+  DCHECK(authenticator);
+  DCHECK_EQ(authenticator->state(), Authenticator::MESSAGE_READY);
 
   peer_jid_ = peer_jid;
-  peer_public_key_ = peer_public_key;
-  initiator_token_ = client_token;
+  authenticator_.reset(authenticator);
   candidate_config_.reset(config);
   state_change_callback_ = state_change_callback;
 
@@ -80,11 +80,12 @@ void PepperSession::StartConnection(
                         session_id_);
   message.from = session_manager_->local_jid_;
   message.description.reset(
-      new ContentDescription(candidate_config_->Clone(), initiator_token_, ""));
-  initiate_request_.reset(session_manager_->CreateIqRequest());
-  initiate_request_->set_callback(base::Bind(
-      &PepperSession::OnSessionInitiateResponse, base::Unretained(this)));
-  initiate_request_->SendIq(message.ToXml());
+      new ContentDescription(candidate_config_->Clone(),
+                             authenticator_->GetNextMessage()));
+  initiate_request_.reset(session_manager_->iq_sender()->SendIq(
+      message.ToXml(),
+      base::Bind(&PepperSession::OnSessionInitiateResponse,
+                 base::Unretained(this))));
 
   SetState(CONNECTING);
 }
@@ -95,7 +96,7 @@ void PepperSession::OnSessionInitiateResponse(
   if (type != "result") {
     LOG(ERROR) << "Received error in response to session-initiate message: \""
                << response->Str()
-               << "\" Terminating the session.";
+               << "\". Terminating the session.";
 
     // TODO(sergeyu): There may be different reasons for error
     // here. Parse the response stanza to find failure reason.
@@ -113,10 +114,14 @@ void PepperSession::CreateStreamChannel(
       const StreamChannelCallback& callback) {
   DCHECK(!channels_[name]);
 
-  PepperStreamChannel* channel = new PepperStreamChannel(this, name, callback);
+  ChannelAuthenticator* channel_authenticator =
+      authenticator_->CreateChannelAuthenticator();
+  PepperStreamChannel* channel = new PepperStreamChannel(
+      this, name, callback);
   channels_[name] = channel;
   channel->Connect(session_manager_->pp_instance_,
-                   session_manager_->transport_config_, remote_cert_);
+                   session_manager_->transport_config_,
+                   channel_authenticator);
 }
 
 void PepperSession::CreateDatagramChannel(
@@ -126,14 +131,12 @@ void PepperSession::CreateDatagramChannel(
   NOTREACHED();
 }
 
-net::Socket* PepperSession::control_channel() {
-  DCHECK(CalledOnValidThread());
-  return control_channel_socket_.get();
-}
-
-net::Socket* PepperSession::event_channel() {
-  DCHECK(CalledOnValidThread());
-  return event_channel_socket_.get();
+void PepperSession::CancelChannelCreation(const std::string& name) {
+  ChannelsMap::iterator it = channels_.find(name);
+  if (it != channels_.end() && !it->second->is_connected()) {
+    delete it->second;
+    DCHECK(!channels_[name]);
+  }
 }
 
 const std::string& PepperSession::jid() {
@@ -157,48 +160,16 @@ void PepperSession::set_config(const SessionConfig& config) {
   NOTREACHED();
 }
 
-const std::string& PepperSession::initiator_token() {
-  DCHECK(CalledOnValidThread());
-  return initiator_token_;
-}
-
-void PepperSession::set_initiator_token(const std::string& initiator_token) {
-  DCHECK(CalledOnValidThread());
-  initiator_token_ = initiator_token;
-}
-
-const std::string& PepperSession::receiver_token() {
-  DCHECK(CalledOnValidThread());
-  return receiver_token_;
-}
-
-void PepperSession::set_receiver_token(const std::string& receiver_token) {
-  DCHECK(CalledOnValidThread());
-  // set_receiver_token() should not be called on the client side.
-  NOTREACHED();
-}
-
-void PepperSession::set_shared_secret(const std::string& secret) {
-  DCHECK(CalledOnValidThread());
-  shared_secret_ = secret;
-}
-
-const std::string& PepperSession::shared_secret() {
-  DCHECK(CalledOnValidThread());
-  return shared_secret_;
-}
-
 void PepperSession::Close() {
   DCHECK(CalledOnValidThread());
 
-  if (state_ == CONNECTING || state_ == CONNECTED ||
-      state_ == CONNECTED_CHANNELS) {
+  if (state_ == CONNECTING || state_ == CONNECTED) {
     // Send session-terminate message.
     JingleMessage message(peer_jid_, JingleMessage::SESSION_TERMINATE,
                           session_id_);
-    scoped_ptr<IqRequest>  terminate_request(
-        session_manager_->CreateIqRequest());
-    terminate_request->SendIq(message.ToXml());
+    scoped_ptr<IqRequest> terminate_request(
+        session_manager_->iq_sender()->SendIq(
+            message.ToXml(), IqSender::ReplyCallback()));
   }
 
   CloseInternal(false);
@@ -239,12 +210,31 @@ void PepperSession::OnAccept(const JingleMessage& message,
     return;
   }
 
+  const buzz::XmlElement* auth_message =
+      message.description->authenticator_message();
+  if (!auth_message) {
+    DLOG(WARNING) << "Received session-accept without authentication message "
+                  << auth_message->Str();
+    OnError(INCOMPATIBLE_PROTOCOL);
+    return;
+  }
+
+  DCHECK(authenticator_->state() == Authenticator::WAITING_MESSAGE);
+  authenticator_->ProcessMessage(auth_message);
+  // Support for more than two auth message is not implemented yet.
+  DCHECK(authenticator_->state() != Authenticator::WAITING_MESSAGE &&
+         authenticator_->state() != Authenticator::MESSAGE_READY);
+
+  if (authenticator_->state() == Authenticator::REJECTED) {
+    OnError(AUTHENTICATION_FAILED);
+    return;
+  }
+
   if (!InitializeConfigFromDescription(message.description.get())) {
     OnError(INCOMPATIBLE_PROTOCOL);
     return;
   }
 
-  CreateChannels();
   SetState(CONNECTED);
 
    // In case there is transport information in the accept message.
@@ -284,18 +274,21 @@ void PepperSession::OnTerminate(const JingleMessage& message,
     return;
   }
 
-  CloseInternal(false);
+  if (state_ == CONNECTED) {
+    if (message.reason == JingleMessage::GENERAL_ERROR) {
+      OnError(CHANNEL_CONNECTION_ERROR);
+    } else {
+      CloseInternal(false);
+    }
+    return;
+  }
+
+  LOG(WARNING) << "Received unexpected session-terminate message.";
 }
 
 bool PepperSession::InitializeConfigFromDescription(
     const ContentDescription* description) {
   DCHECK(description);
-
-  remote_cert_ = description->certificate();
-  if (remote_cert_.empty()) {
-    LOG(ERROR) << "session-accept does not specify certificate";
-    return false;
-  }
 
   if (!description->config()->GetFinalConfig(&config_)) {
     LOG(ERROR) << "session-accept does not specify configuration";
@@ -321,6 +314,22 @@ void PepperSession::AddLocalCandidate(const cricket::Candidate& candidate) {
   }
 }
 
+void PepperSession::OnTransportInfoResponse(const buzz::XmlElement* response) {
+  const std::string& type = response->Attr(buzz::QName("", "type"));
+  if (type != "result") {
+    LOG(ERROR) << "Received error in response to session-initiate message: \""
+               << response->Str()
+               << "\". Terminating the session.";
+
+    if (state_ == CONNECTING) {
+      OnError(PEER_IS_OFFLINE);
+    } else {
+      // Host has disconnected without sending session-terminate message.
+      CloseInternal(false);
+    }
+  }
+}
+
 void PepperSession::OnDeleteChannel(PepperChannel* channel) {
   ChannelsMap::iterator it = channels_.find(channel->name());
   DCHECK_EQ(it->second, channel);
@@ -330,44 +339,17 @@ void PepperSession::OnDeleteChannel(PepperChannel* channel) {
 void PepperSession::SendTransportInfo() {
   JingleMessage message(peer_jid_, JingleMessage::TRANSPORT_INFO, session_id_);
   message.candidates.swap(pending_candidates_);
-  scoped_ptr<IqRequest> request(session_manager_->CreateIqRequest());
-  request->SendIq(message.ToXml());
+  transport_info_request_.reset(session_manager_->iq_sender()->SendIq(
+      message.ToXml(), base::Bind(
+          &PepperSession::OnTransportInfoResponse,
+          base::Unretained(this))));
 }
 
-void PepperSession::CreateChannels() {
-   CreateStreamChannel(
-      kControlChannelName,
-      base::Bind(&PepperSession::OnChannelConnected,
-                 base::Unretained(this), &control_channel_socket_));
-  CreateStreamChannel(
-      kEventChannelName,
-      base::Bind(&PepperSession::OnChannelConnected,
-                 base::Unretained(this), &event_channel_socket_));
-}
-
-void PepperSession::OnChannelConnected(
-    scoped_ptr<net::Socket>* socket_container,
-    net::StreamSocket* socket) {
-  if (!socket) {
-    LOG(ERROR) << "Failed to connect control or events channel. "
-               << "Terminating connection";
-    OnError(CHANNEL_CONNECTION_ERROR);
-    return;
-  }
-
-  socket_container->reset(socket);
-
-  if (control_channel_socket_.get() && event_channel_socket_.get())
-    SetState(CONNECTED_CHANNELS);
-}
 
 void PepperSession::CloseInternal(bool failed) {
   DCHECK(CalledOnValidThread());
 
   if (state_ != FAILED && state_ != CLOSED) {
-    control_channel_socket_.reset();
-    event_channel_socket_.reset();
-
     if (failed)
       SetState(FAILED);
     else

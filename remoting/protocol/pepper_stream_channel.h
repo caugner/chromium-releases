@@ -5,6 +5,8 @@
 #ifndef REMOTING_PROTOCOL_PEPPER_STREAM_CHANNEL_H_
 #define REMOTING_PROTOCOL_PEPPER_STREAM_CHANNEL_H_
 
+#include <string>
+
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/completion_callback.h"
@@ -17,7 +19,6 @@ namespace net {
 class CertVerifier;
 class StreamSocket;
 class SSLClientSocket;
-class SSLServerSocket;
 }  // namespace net
 
 namespace remoting {
@@ -36,9 +37,10 @@ class PepperStreamChannel : public PepperChannel,
   // PepperChannel implementation.
   virtual void Connect(pp::Instance* pp_instance,
                        const TransportConfig& transport_config,
-                       const std::string& remote_cert) OVERRIDE;
+                       ChannelAuthenticator* authenticator) OVERRIDE;
   virtual void AddRemoveCandidate(const cricket::Candidate& candidate) OVERRIDE;
-  virtual const std::string& name() OVERRIDE;
+  virtual const std::string& name() const OVERRIDE;
+  virtual bool is_connected() const OVERRIDE;
 
   // PepperTransportSocketAdapter implementation.
   virtual void OnChannelDeleted() OVERRIDE;
@@ -47,12 +49,7 @@ class PepperStreamChannel : public PepperChannel,
 
  private:
   void OnP2PConnect(int result);
-
-  bool EstablishSSLConnection();
-  void OnSSLConnect(int result);
-
-  void AuthenticateChannel();
-  void OnAuthenticationDone(ChannelAuthenticator::Result result);
+  void OnAuthenticationDone(net::Error error, net::StreamSocket* socket);
 
   void NotifyConnected(net::StreamSocket* socket);
   void NotifyConnectFailed();
@@ -60,28 +57,18 @@ class PepperStreamChannel : public PepperChannel,
   PepperSession* session_;
   std::string name_;
   Session::StreamChannelCallback callback_;
-
-  std::string remote_cert_;
+  scoped_ptr<ChannelAuthenticator> authenticator_;
 
   // We own |channel_| until it is connected. After that
-  // SSLClientSocket owns it.
+  // |authenticator_| owns it.
   scoped_ptr<PepperTransportSocketAdapter> owned_channel_;
   PepperTransportSocketAdapter* channel_;
 
   // Indicates that we've finished connecting.
   bool connected_;
 
-  scoped_ptr<net::StreamSocket> socket_;
-  net::SSLClientSocket* ssl_client_socket_;
-
-  // Used to verify the certificate received in SSLClientSocket.
-  scoped_ptr<net::CertVerifier> cert_verifier_;
-
-  scoped_ptr<ChannelAuthenticator> authenticator_;
-
-  // Callback called by the TCP and SSL layers.
+  // Callback called by the TCP layer.
   net::OldCompletionCallbackImpl<PepperStreamChannel> p2p_connect_callback_;
-  net::OldCompletionCallbackImpl<PepperStreamChannel> ssl_connect_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperStreamChannel);
 };

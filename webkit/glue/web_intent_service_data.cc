@@ -7,8 +7,23 @@
 #include "base/utf_string_conversions.h"
 #include "webkit/glue/web_intent_service_data.h"
 
+namespace webkit_glue {
+
+static const char kIntentsInlineDisposition[] = "inline";
+
 WebIntentServiceData::WebIntentServiceData()
     : disposition(WebIntentServiceData::DISPOSITION_WINDOW) {
+}
+
+WebIntentServiceData::WebIntentServiceData(const GURL& svc_url,
+                                           const string16& svc_action,
+                                           const string16& svc_type,
+                                           const string16& svc_title)
+    : service_url(svc_url),
+      action(svc_action),
+      type(svc_type),
+      title(svc_title),
+      disposition(WebIntentServiceData::DISPOSITION_WINDOW) {
 }
 
 WebIntentServiceData::~WebIntentServiceData() {}
@@ -21,6 +36,13 @@ bool WebIntentServiceData::operator==(const WebIntentServiceData& other) const {
          disposition == other.disposition;
 }
 
+void WebIntentServiceData::setDisposition(const string16& disp) {
+  if (disp == ASCIIToUTF16(webkit_glue::kIntentsInlineDisposition))
+    disposition = DISPOSITION_INLINE;
+  else
+    disposition = DISPOSITION_WINDOW;
+}
+
 std::ostream& operator<<(::std::ostream& os,
                          const WebIntentServiceData& intent) {
   return os <<
@@ -31,3 +53,5 @@ std::ostream& operator<<(::std::ostream& os,
          ", " << intent.disposition <<
          "}";
 }
+
+}  // namespace webkit_glue

@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/basictypes.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/test/multiprocess_test.h"
@@ -11,6 +10,14 @@
 #include "base/time.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/multiprocess_func_list.h"
+
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
+#endif
+
+#if defined(OS_POSIX)
+#include <sys/mman.h>
+#endif
 
 static const int kNumThreads = 5;
 static const int kNumTasks = 5;
@@ -34,7 +41,9 @@ class MultipleThreadMain : public PlatformThread::Delegate {
 
   // PlatformThread::Delegate interface.
   void ThreadMain() {
-    mac::ScopedNSAutoreleasePool pool;  // noop if not OSX
+#if defined(OS_MACOSX)
+    mac::ScopedNSAutoreleasePool pool;
+#endif
     const uint32 kDataSize = 1024;
     SharedMemory memory;
     bool rv = memory.CreateNamed(s_test_name_, true, kDataSize);
@@ -327,6 +336,24 @@ TEST(SharedMemoryTest, AnonymousPrivate) {
   }
 }
 
+#if defined(OS_POSIX)
+// Create a shared memory object, mmap it, and mprotect it to PROT_EXEC.
+TEST(SharedMemoryTest, AnonymousExecutable) {
+  const uint32 kTestSize = 1 << 16;
+
+  SharedMemory shared_memory;
+  SharedMemoryCreateOptions options;
+  options.size = kTestSize;
+  options.executable = true;
+
+  EXPECT_TRUE(shared_memory.Create(options));
+  EXPECT_TRUE(shared_memory.Map(shared_memory.created_size()));
+
+  EXPECT_EQ(0, mprotect(shared_memory.memory(), shared_memory.created_size(),
+                        PROT_READ | PROT_EXEC));
+}
+#endif
+
 // On POSIX it is especially important we test shmem across processes,
 // not just across threads.  But the test is enabled on all platforms.
 class SharedMemoryProcessTest : public MultiProcessTest {
@@ -339,7 +366,9 @@ class SharedMemoryProcessTest : public MultiProcessTest {
 
   static int TaskTestMain() {
     int errors = 0;
-    mac::ScopedNSAutoreleasePool pool;  // noop if not OSX
+#if defined(OS_MACOSX)
+    mac::ScopedNSAutoreleasePool pool;
+#endif
     const uint32 kDataSize = 1024;
     SharedMemory memory;
     bool rv = memory.CreateNamed(s_test_name_, true, kDataSize);

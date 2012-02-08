@@ -39,12 +39,12 @@ class FakeSocket : public net::StreamSocket {
 
   // net::Socket interface.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback);
+                   net::OldCompletionCallback* callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback);
+                    net::OldCompletionCallback* callback) OVERRIDE;
 
-  virtual bool SetReceiveBufferSize(int32 size);
-  virtual bool SetSendBufferSize(int32 size);
+  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
+  virtual bool SetSendBufferSize(int32 size) OVERRIDE;
 
   // net::StreamSocket interface.
   virtual int Connect(net::OldCompletionCallback* callback) OVERRIDE;
@@ -95,12 +95,12 @@ class FakeUdpSocket : public net::Socket {
 
   // net::Socket interface.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback);
+                   net::OldCompletionCallback* callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback);
+                    net::OldCompletionCallback* callback) OVERRIDE;
 
-  virtual bool SetReceiveBufferSize(int32 size);
-  virtual bool SetSendBufferSize(int32 size);
+  virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
+  virtual bool SetSendBufferSize(int32 size) OVERRIDE;
 
  private:
   bool read_pending_;
@@ -138,49 +138,34 @@ class FakeSession : public Session {
   FakeUdpSocket* GetDatagramChannel(const std::string& name);
 
   // Session interface.
-  virtual void SetStateChangeCallback(const StateChangeCallback& callback);
+  virtual void SetStateChangeCallback(
+      const StateChangeCallback& callback) OVERRIDE;
 
-  virtual Session::Error error();
+  virtual Session::Error error() OVERRIDE;
 
   virtual void CreateStreamChannel(
-      const std::string& name, const StreamChannelCallback& callback);
+      const std::string& name, const StreamChannelCallback& callback) OVERRIDE;
   virtual void CreateDatagramChannel(
-      const std::string& name, const DatagramChannelCallback& callback);
+      const std::string& name,
+      const DatagramChannelCallback& callback) OVERRIDE;
+  virtual void CancelChannelCreation(const std::string& name) OVERRIDE;
 
-  virtual FakeSocket* control_channel();
-  virtual FakeSocket* event_channel();
+  virtual const std::string& jid() OVERRIDE;
 
-  virtual const std::string& jid();
+  virtual const CandidateSessionConfig* candidate_config() OVERRIDE;
+  virtual const SessionConfig& config() OVERRIDE;
+  virtual void set_config(const SessionConfig& config) OVERRIDE;
 
-  virtual const CandidateSessionConfig* candidate_config();
-  virtual const SessionConfig& config();
-  virtual void set_config(const SessionConfig& config);
-
-  virtual const std::string& initiator_token();
-  virtual void set_initiator_token(const std::string& initiator_token);
-  virtual const std::string& receiver_token();
-  virtual void set_receiver_token(const std::string& receiver_token);
-
-  virtual void set_shared_secret(const std::string& secret);
-  virtual const std::string& shared_secret();
-
-  virtual void Close();
+  virtual void Close() OVERRIDE;
 
  public:
   StateChangeCallback callback_;
   scoped_ptr<const CandidateSessionConfig> candidate_config_;
   SessionConfig config_;
   MessageLoop* message_loop_;
-  FakeSocket control_channel_;
-  FakeSocket event_channel_;
 
   std::map<std::string, FakeSocket*> stream_channels_;
   std::map<std::string, FakeUdpSocket*> datagram_channels_;
-
-  std::string initiator_token_;
-  std::string receiver_token_;
-
-  std::string shared_secret_;
 
   std::string jid_;
 

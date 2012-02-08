@@ -11,8 +11,8 @@
 #include "base/time.h"
 #include "content/common/dom_storage_common.h"
 #include "content/common/resource_messages.h"
-#include "content/common/resource_response.h"
 #include "content/common/view_messages.h"
+#include "content/public/common/resource_response.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/test/mock_render_process.h"
@@ -22,8 +22,8 @@
 #include "net/url_request/url_request_status.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebHistoryItem.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/glue_serialize.h"
 #include "webkit/glue/webkit_glue.h"
@@ -150,7 +150,7 @@ void RenderViewFakeResourcesTest::OnRequestResource(
     body = it->second;
   }
 
-  ResourceResponseHead response_head;
+  content::ResourceResponseHead response_head;
   response_head.headers = new net::HttpResponseHeaders(headers);
   response_head.mime_type = "text/html";
   ASSERT_TRUE(channel_->Send(new ResourceMsg_ReceivedResponse(

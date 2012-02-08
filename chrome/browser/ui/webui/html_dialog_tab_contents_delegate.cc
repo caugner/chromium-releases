@@ -18,7 +18,7 @@
 // profile that's long-lived?  Of course, we'd still have to clear it out
 // when all incognito browsers close.
 HtmlDialogTabContentsDelegate::HtmlDialogTabContentsDelegate(Profile* profile)
-    : profile_(profile->GetOriginalProfile()) {}
+    : profile_(profile) {}
 
 HtmlDialogTabContentsDelegate::~HtmlDialogTabContentsDelegate() {}
 
@@ -26,15 +26,6 @@ Profile* HtmlDialogTabContentsDelegate::profile() const { return profile_; }
 
 void HtmlDialogTabContentsDelegate::Detach() {
   profile_ = NULL;
-}
-
-// TODO(adriansc): Remove this method once refactoring changed all call sites.
-TabContents* HtmlDialogTabContentsDelegate::OpenURLFromTab(
-    TabContents* source, const GURL& url, const GURL& referrer,
-    WindowOpenDisposition disposition, content::PageTransition transition) {
-  return OpenURLFromTab(source,
-                        OpenURLParams(url, referrer, disposition, transition,
-                                      false));
 }
 
 TabContents* HtmlDialogTabContentsDelegate::OpenURLFromTab(
@@ -83,7 +74,8 @@ void HtmlDialogTabContentsDelegate::AddNewContents(
   }
 }
 
-bool HtmlDialogTabContentsDelegate::IsPopup(const TabContents* source) const {
+bool HtmlDialogTabContentsDelegate::IsPopupOrPanel(
+    const TabContents* source) const {
   // This needs to return true so that we are allowed to be resized by our
   // contents.
   return true;

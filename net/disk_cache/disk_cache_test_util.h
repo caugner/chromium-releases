@@ -21,9 +21,6 @@ bool CreateCacheTestFile(const FilePath& name);
 // Deletes all file son the cache.
 bool DeleteCache(const FilePath& path);
 
-// Copies a set of cache files from the data folder to the test folder.
-bool CopyTestCache(const std::string& name);
-
 // Gets the path to the cache test folder.
 FilePath GetCacheFilePath();
 
@@ -34,13 +31,13 @@ void CacheTestFillBuffer(char* buffer, size_t len, bool no_nulls);
 std::string GenerateKey(bool same_length);
 
 // Returns true if the cache is not corrupt.
-bool CheckCacheIntegrity(const FilePath& path, bool new_eviction);
+bool CheckCacheIntegrity(const FilePath& path, bool new_eviction, uint32 mask);
 
 // Helper class which ensures that the cache dir returned by GetCacheFilePath
 // exists and is clear in ctor and that the directory gets deleted in dtor.
 class ScopedTestCache {
  public:
-  ScopedTestCache();
+  explicit ScopedTestCache(const FilePath& path);
   // Use a specific folder name.
   explicit ScopedTestCache(const std::string& name);
   ~ScopedTestCache();
@@ -115,7 +112,7 @@ class CallbackTest : public CallbackRunner< Tuple1<int> > {
   CallbackTest(MessageLoopHelper* helper, bool reuse);
   virtual ~CallbackTest();
 
-  virtual void RunWithParams(const Tuple1<int>& params);
+  virtual void RunWithParams(const Tuple1<int>& params) OVERRIDE;
 
  private:
   MessageLoopHelper* helper_;

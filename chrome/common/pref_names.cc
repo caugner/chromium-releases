@@ -186,7 +186,8 @@ const char kWebKitDefaultFixedFontSize[] =
 const char kWebKitMinimumFontSize[] = "webkit.webprefs.minimum_font_size";
 const char kWebKitMinimumLogicalFontSize[] =
     "webkit.webprefs.minimum_logical_font_size";
-const char kWebKitJavascriptEnabled[] = "webkit.webprefs.javascript_enabled";
+const char kWebKitGlobalJavascriptEnabled[] =
+    "webkit.webprefs.global.javascript_enabled";
 const char kWebKitWebSecurityEnabled[] = "webkit.webprefs.web_security_enabled";
 const char kWebKitJavascriptCanOpenWindowsAutomatically[] =
     "webkit.webprefs.javascript_can_open_windows_automatically";
@@ -207,6 +208,9 @@ const char kWebKitAllowDisplayingInsecureContent[] =
     "webkit.webprefs.allow_displaying_insecure_content";
 const char kWebKitAllowRunningInsecureContent[] =
     "webkit.webprefs.allow_running_insecure_content";
+
+// Settings below can be overridden for each tab individually.
+const char kWebKitJavascriptEnabled[] = "webkit.webprefs.javascript_enabled";
 
 // Boolean which specifies whether the bookmark bar is visible on all tabs.
 const char kShowBookmarkBar[] = "bookmark_bar.show_on_all_tabs";
@@ -254,6 +258,14 @@ const char kConfirmToQuitEnabled[] = "browser.confirm_to_quit";
 // 1 - block third-party cookies
 // 2 - block all cookies
 const char kCookieBehavior[] = "security.cookie_behavior";
+
+// The GUID of the synced default search provider. Note that this acts like a
+// pointer to which synced search engine should be the default, rather than the
+// prefs below which describe the locally saved default search provider details
+// (and are not synced). This is ignored in the case of the default search
+// provider being managed by policy.
+const char kSyncedDefaultSearchProviderGUID[] =
+    "default_search_provider.synced_guid";
 
 // Whether having a default search provider is enabled.
 const char kDefaultSearchProviderEnabled[] =
@@ -334,6 +346,9 @@ const char kDnsPrefetchingHostReferralList[] =
 // Disables the SPDY protocol.
 const char kDisableSpdy[] = "spdy.disabled";
 
+// Prefs for persisting HttpServerProperties.
+const char kHttpServerProperties[] = "net.http_server_properties";
+
 // Prefs for server names that support SPDY protocol.
 const char kSpdyServers[] = "spdy.servers";
 
@@ -381,6 +396,14 @@ const char kMultipleProfilePrefMigration[] =
 // NOTE: The "dns_prefetching.enabled" value is used so that historical user
 // preferences are not lost.
 const char kNetworkPredictionEnabled[] = "dns_prefetching.enabled";
+
+// An integer representing the state of the default apps installation process.
+// This value is persisted in the profile's user preferences because the process
+// is async, and the user may have stopped chrome in the middle.  The next time
+// the profile is opened, the process will continue from where it left off.
+//
+// See possible values in external_extension_provider_impl.cc.
+const char kDefaultAppsInstallState[] = "default_apps_install_state";
 
 #if defined(OS_CHROMEOS)
 // An integer pref to initially mute volume if 1.
@@ -620,6 +643,11 @@ const char kEnableAutoSpellCorrect[] = "browser.enable_autospellcorrect";
 const char kSpeechInputFilterProfanities[] =
     "browser.speechinput_censor_results";
 
+// Boolean pref to determine if the tray notification balloon for speech input
+// extension API has been already shown once to the user.
+const char kSpeechInputTrayNotificationShown[] =
+    "browser.speechinput_tray_notification_shown";
+
 // Boolean controlling whether history saving is disabled.
 const char kSavingBrowserHistoryDisabled[] = "history.saving_disabled";
 
@@ -835,6 +863,14 @@ const char kImportSearchEngine[] = "import_search_engine";
 // browser on first run.
 const char kImportSavedPasswords[] = "import_saved_passwords";
 
+// The URL of the enterprise web store, which is a site trusted by the
+// enterprise admin. Users can install apps & extensions from this site
+// without scary warnings.
+const char kEnterpriseWebStoreURL[] = "webstore.enterprise_store_url";
+
+// The name of the enterprise web store, to be shown to the user.
+const char kEnterpriseWebStoreName[] = "webstore.enterprise_store_name";
+
 #if !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)
 // The local profile id for this profile.
 const char kLocalProfileId[] = "profile.local_profile_id";
@@ -862,7 +898,10 @@ const char kProfileInfoCache[] = "profile.info_cache";
 
 // Prefs for SSLConfigServicePref.
 const char kCertRevocationCheckingEnabled[] = "ssl.rev_checking.enabled";
+const char kSSL3Enabled[] = "ssl.ssl3.enabled";
+const char kTLS1Enabled[] = "ssl.tls1.enabled";
 const char kCipherSuiteBlacklist[] = "ssl.cipher_suites.blacklist";
+const char kEnableOriginBoundCerts[] = "ssl.origin_bound_certs.enabled";
 
 // The metrics client GUID and session ID.
 const char kMetricsClientID[] = "user_experience_metrics.client_id";
@@ -1158,6 +1197,9 @@ const char kShutdownNumProcessesSlow[] = "shutdown.num_processes_slow";
 // before shutting everything down.
 const char kRestartLastSessionOnShutdown[] = "restart.last.session.on.shutdown";
 
+// Set before autorestarting Chrome, cleared on clean exit.
+const char kWasRestarted[] = "was.restarted";
+
 // Number of bookmarks/folders on the bookmark bar/other bookmark folder.
 const char kNumBookmarksOnBookmarkBar[] =
     "user_experience_metrics.num_bookmarks_on_bookmark_bar";
@@ -1232,6 +1274,12 @@ const char kNTPPromoResourceCache[] = "ntp.promo_resource_cache";
 // Last time of update of promo_resource_cache.
 const char kNTPPromoResourceCacheUpdate[] = "ntp.promo_resource_cache_update";
 
+// Is user logged into G+ (used for G+ extension promo).
+const char kNTPPromoIsLoggedInToPlus[] = "ntp.promo_is_logged_in_to_plus";
+
+// Bit mask used to decide when to show the NTP Promo.
+const char kNTPPromoFeatureMask[] = "ntp.promo_feature_mask";
+
 // Serves promo resources for the NTP.
 const char kNTPPromoResourceServer[] = "ntp.web_resource_server";
 
@@ -1246,17 +1294,6 @@ const char kNTPShownBookmarksFolder[] = "ntp.shown_bookmarks_folder";
 
 // Which page should be visible on the new tab page v4
 const char kNTPShownPage[] = "ntp.shown_page";
-
-// Which sections should be visible on the new tab page
-// 1 - Show the most visited sites in a grid
-// 2 - Show the most visited sites as a list
-// 4 - Show the recent section
-// 8 - (Show tips -- DEPRECATED)
-// 16 - Show sync status
-const char kNTPShownSections[] = "ntp.shown_sections";
-
-// This pref is used for migrating the prefs for the NTP
-const char kNTPPrefVersion[] = "ntp.pref_version";
 
 // Dates between which the NTP should show a custom logo rather than the
 // standard one.
@@ -1292,6 +1329,9 @@ const char kNTPPromoViews[] = "ntp.promo_views";
 // Max number of views of this promo.
 const char kNTPPromoViewsMax[] = "ntp.promo_views_max";
 
+// Target platform for this promo.
+const char kNTPPromoPlatform[] = "ntp.promo_platform";
+
 // Promo line from server.
 const char kNTPPromoLine[] = "ntp.promo_line";
 
@@ -1302,10 +1342,10 @@ const char kNTPPromoEnd[] = "ntp.promo_end";
 
 // A randomly generated group created to control the number of users we show the
 // sync promo to on the NTP.
-const char kNTPSyncPromoGroup[] = "ntp.sync_promo.group";
+const char kNTPSignInPromoGroup[] = "ntp.sign_in_promo.group";
 
 // The maximum allowable group that can be shown the sync promotion on the NTP.
-const char kNTPSyncPromoGroupMax[] = "ntp.sync_promo.group_max";
+const char kNTPSignInPromoGroupMax[] = "ntp.sign_in_promo.group_max";
 
 // Boolean indicating whether the web store is active for the current locale.
 const char kNTPWebStoreEnabled[] = "ntp.webstore_enabled";
@@ -1343,13 +1383,6 @@ const char kNTPAppPageNames[] = "ntp.app_page_names";
 // When true, web store promos will never be shown.
 const char kNTPHideWebStorePromo[] = "ntp.hide_webstore_promo";
 
-// The most up-to-date GPU blacklist downloaded from the web, which replaces
-// the one that's installed with chrome.
-const char kGpuBlacklist[] = "gpu_blacklist";
-
-// Last time of update of gpu_blacklist.
-const char kGpuBlacklistUpdate[] = "gpu_blacklist_update";
-
 const char kDevToolsDisabled[] = "devtools.disabled";
 
 // A boolean specifying whether dev tools window should be opened docked.
@@ -1374,6 +1407,8 @@ const char kSyncKeepEverythingSynced[] = "sync.keep_everything_synced";
 const char kSyncBookmarks[] = "sync.bookmarks";
 const char kSyncPasswords[] = "sync.passwords";
 const char kSyncPreferences[] = "sync.preferences";
+const char kSyncAppNotifications[] = "sync.app_notifications";
+const char kSyncAppSettings[] = "sync.app_settings";
 const char kSyncApps[] = "sync.apps";
 const char kSyncAutofill[] = "sync.autofill";
 const char kSyncAutofillProfile[] = "sync.autofill_profile";
@@ -1383,7 +1418,6 @@ const char kSyncExtensions[] = "sync.extensions";
 const char kSyncExtensionSettings[] = "sync.extension_settings";
 const char kSyncSearchEngines[] = "sync.search_engines";
 const char kSyncSessions[] = "sync.sessions";
-const char kSyncAppNotifications[] = "sync.app_notifications";
 
 // Boolean used by enterprise configuration management in order to lock down
 // sync.
@@ -1432,6 +1466,17 @@ const char kSyncPromoUserSkipped[] = "sync_promo.user_skipped";
 const char kSyncPromoShowOnFirstRunAllowed[] =
     "sync_promo.show_on_first_run_allowed";
 
+// Boolean that specifies if we should show a bubble in the new tab page.
+// The bubble is used to confirm that the user is signed into sync.
+const char kSyncPromoShowNTPBubble[] = "sync_promo.show_ntp_bubble";
+
+// Time when the user's GAIA info was last updated (represented as an int64).
+const char kProfileGAIAInfoUpdateTime[] = "profile.gaia_info_update_time";
+
+// The URL from which the GAIA profile picture was downloaded. This is cached to
+// prevent the same picture from being downloaded multiple times.
+const char kProfileGAIAInfoPictureURL[] = "profile.gaia_info_picture_url";
+
 // Create web application shortcut dialog preferences.
 const char kWebAppCreateOnDesktop[] = "browser.web_app.create_on_desktop";
 const char kWebAppCreateInAppsMenu[] = "browser.web_app.create_in_apps_menu";
@@ -1448,8 +1493,6 @@ const char kLoginDatabaseMigrated[] = "login_database.migrated";
 
 // Boolean that indicates whether to allow firewall traversal while trying to
 // establish the initial connection from the client or host.
-const char kRemoteAccessClientFirewallTraversal[] =
-    "remote_access.client_firewall_traversal";
 const char kRemoteAccessHostFirewallTraversal[] =
     "remote_access.host_firewall_traversal";
 
@@ -1497,7 +1540,7 @@ const char kAllowCrossOriginAuthPrompt[] = "auth.allow_cross_origin_prompt";
 #if defined(OS_CHROMEOS)
 // Dictionary for transient storage of settings that should go into signed
 // settings storage before owner has been assigned.
-const char kSignedSettingsTempStorage[] = "signed_settings_temp_storage";
+const char kSignedSettingsCache[] = "signed_settings_cache";
 
 // The hardware keyboard layout of the device. This should look like
 // "xkb:us::eng".
@@ -1514,6 +1557,10 @@ const char kClearPluginLSODataEnabled[] = "browser.clear_lso_data_enabled";
 
 // String which specifies where to store the disk cache.
 const char kDiskCacheDir[] = "browser.disk_cache_dir";
+// Pref name for the policy specifying the maximal cache size.
+const char kDiskCacheSize[] = "browser.disk_cache_size";
+// Pref name for the policy specifying the maximal media cache size.
+const char kMediaCacheSize[] = "browser.media_cache_size";
 
 // Specifies the release channel that the device should be locked to.
 // Possible values: "stable-channel", "beta-channel", "dev-channel", or an
@@ -1547,6 +1594,9 @@ const char kCloudPrintRobotRefreshToken[] = "cloud_print.robot_refresh_token";
 const char kCloudPrintRobotEmail[] = "cloud_print.robot_email";
 // Indicates whether the Mac Virtual driver is enabled.
 const char kVirtualPrinterDriverEnabled[] = "cloud_print.enable_virtual_driver";
+// A boolean indicating whether submitting jobs to Google Cloud Print is
+// blocked by policy.
+const char kCloudPrintSubmitEnabled[] = "cloud_print.submit_enabled";
 
 // Preference to store proxy settings.
 const char kProxy[] = "proxy";

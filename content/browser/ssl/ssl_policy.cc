@@ -10,14 +10,14 @@
 #include "base/memory/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
-#include "content/browser/content_browser_client.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
 #include "content/browser/ssl/ssl_request_info.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/ssl_info.h"
@@ -93,7 +93,7 @@ void SSLPolicy::DidRunInsecureContent(NavigationEntry* entry,
       return;
 
   backend_->HostRanInsecureContent(GURL(security_origin).host(),
-                                   site_instance->GetProcess()->id());
+                                   site_instance->GetProcess()->GetID());
 }
 
 void SSLPolicy::OnRequestStarted(SSLRequestInfo* info) {
@@ -117,7 +117,7 @@ void SSLPolicy::UpdateEntry(NavigationEntry* entry, TabContents* tab_contents) {
   // happens, use the unauthenticated (HTTP) rather than the authentication
   // broken security style so that we can detect this error condition.
   if (!entry->ssl().cert_id()) {
-    entry->ssl().set_security_style(SECURITY_STYLE_UNAUTHENTICATED);
+    entry->ssl().set_security_style(content::SECURITY_STYLE_UNAUTHENTICATED);
     return;
   }
 
@@ -133,8 +133,10 @@ void SSLPolicy::UpdateEntry(NavigationEntry* entry, TabContents* tab_contents) {
   if (net::IsCertStatusError(entry->ssl().cert_status())) {
     // Minor errors don't lower the security style to
     // SECURITY_STYLE_AUTHENTICATION_BROKEN.
-    if (!net::IsCertStatusMinorError(entry->ssl().cert_status()))
-      entry->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATION_BROKEN);
+    if (!net::IsCertStatusMinorError(entry->ssl().cert_status())) {
+      entry->ssl().set_security_style(
+          content::SECURITY_STYLE_AUTHENTICATION_BROKEN);
+    }
     return;
   }
 
@@ -143,9 +145,10 @@ void SSLPolicy::UpdateEntry(NavigationEntry* entry, TabContents* tab_contents) {
   // necessarily have site instances.  Without a process, the entry can't
   // possibly have insecure content.  See bug http://crbug.com/12423.
   if (site_instance &&
-      backend_->DidHostRunInsecureContent(entry->url().host(),
-                                          site_instance->GetProcess()->id())) {
-    entry->ssl().set_security_style(SECURITY_STYLE_AUTHENTICATION_BROKEN);
+      backend_->DidHostRunInsecureContent(
+          entry->url().host(), site_instance->GetProcess()->GetID())) {
+    entry->ssl().set_security_style(
+        content::SECURITY_STYLE_AUTHENTICATION_BROKEN);
     entry->ssl().set_ran_insecure_content();
     return;
   }
@@ -202,11 +205,12 @@ void SSLPolicy::OnCertErrorInternal(SSLCertErrorHandler* handler,
 }
 
 void SSLPolicy::InitializeEntryIfNeeded(NavigationEntry* entry) {
-  if (entry->ssl().security_style() != SECURITY_STYLE_UNKNOWN)
+  if (entry->ssl().security_style() != content::SECURITY_STYLE_UNKNOWN)
     return;
 
   entry->ssl().set_security_style(entry->url().SchemeIsSecure() ?
-      SECURITY_STYLE_AUTHENTICATED : SECURITY_STYLE_UNAUTHENTICATED);
+      content::SECURITY_STYLE_AUTHENTICATED :
+      content::SECURITY_STYLE_UNAUTHENTICATED);
 }
 
 void SSLPolicy::OriginRanInsecureContent(const std::string& origin, int pid) {

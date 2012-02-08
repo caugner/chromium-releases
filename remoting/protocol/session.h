@@ -12,8 +12,6 @@
 #include "remoting/protocol/buffered_socket_writer.h"
 #include "remoting/protocol/session_config.h"
 
-class Task;
-
 namespace net {
 class Socket;
 class StreamSocket;
@@ -25,6 +23,11 @@ namespace protocol {
 // Generic interface for Chromotocol connection used by both client and host.
 // Provides access to the connection channels, but doesn't depend on the
 // protocol used for each channel.
+//
+// Because libjingle's sigslot class doesn't handle deletion properly
+// while it is being invoked all Session instances must be deleted
+// with a clean stack, i.e. not from event handlers, when sigslot may
+// be present in the stack.
 class Session : public base::NonThreadSafe {
  public:
   enum State {
@@ -35,12 +38,8 @@ class Session : public base::NonThreadSafe {
     // session-accept.
     CONNECTING,
 
-    // Session has been accepted, but channels are connected yet.
+    // Session has been accepted.
     CONNECTED,
-
-    // Video and control channels are connected.
-    // TODO(sergeyu): Remove this state.
-    CONNECTED_CHANNELS,
 
     // Session has been closed.
     CLOSED,
@@ -55,6 +54,7 @@ class Session : public base::NonThreadSafe {
     PEER_IS_OFFLINE,
     SESSION_REJECTED,
     INCOMPATIBLE_PROTOCOL,
+    AUTHENTICATION_FAILED,
     CHANNEL_CONNECTION_ERROR,
   };
 
@@ -87,10 +87,11 @@ class Session : public base::NonThreadSafe {
   virtual void CreateDatagramChannel(
       const std::string& name, const DatagramChannelCallback& callback) = 0;
 
-  // TODO(sergeyu): Remove these methods, and use CreateChannel()
-  // instead.
-  virtual net::Socket* control_channel() = 0;
-  virtual net::Socket* event_channel() = 0;
+  // Cancels a pending CreateStreamChannel() or CreateDatagramChannel()
+  // operation for the named channel. If the channel creation already
+  // completed then cancelling it has no effect. When shutting down
+  // this method must be called for each channel pending creation.
+  virtual void CancelChannelCreation(const std::string& name) = 0;
 
   // JID of the other side.
   virtual const std::string& jid() = 0;
@@ -108,16 +109,6 @@ class Session : public base::NonThreadSafe {
   // called on the host before the connection is accepted, from
   // ChromotocolServer::IncomingConnectionCallback.
   virtual void set_config(const SessionConfig& config) = 0;
-
-  // The raw auth tokens from the session-initiate, or session-accept stanzas.
-  virtual const std::string& initiator_token() = 0;
-  virtual void set_initiator_token(const std::string& initiator_token) = 0;
-  virtual const std::string& receiver_token() = 0;
-  virtual void set_receiver_token(const std::string& receiver_token) = 0;
-
-  // A shared secret to use to mutually-authenticate the SSL channels.
-  virtual void set_shared_secret(const std::string& secret) = 0;
-  virtual const std::string& shared_secret() = 0;
 
   // Closes connection. Callbacks are guaranteed not to be called
   // after this method returns. Must be called before the object is

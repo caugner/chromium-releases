@@ -20,10 +20,10 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNamedNodeMap.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
 #ifndef NDEBUG
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityNotification.h"
@@ -582,11 +582,23 @@ std::string WebAccessibility::DebugString(bool recursive,
        ++iter) {
     std::string value = IntToString(iter->second);
     switch (iter->first) {
-      case ATTR_DOC_SCROLLX:
-        result += " scrollx=" + value;
+      case ATTR_SCROLL_X:
+        result += " scroll_x=" + value;
         break;
-      case ATTR_DOC_SCROLLY:
-        result += " scrolly=" + value;
+      case ATTR_SCROLL_X_MIN:
+        result += " scroll_x_min=" + value;
+        break;
+      case ATTR_SCROLL_X_MAX:
+        result += " scroll_x_max=" + value;
+        break;
+      case ATTR_SCROLL_Y:
+        result += " scroll_y=" + value;
+        break;
+      case ATTR_SCROLL_Y_MIN:
+        result += " scroll_y_min=" + value;
+        break;
+      case ATTR_SCROLL_Y_MAX:
+        result += " scroll_y_max=" + value;
         break;
       case ATTR_HIERARCHICAL_LEVEL:
         result += " level=" + value;
@@ -614,6 +626,9 @@ std::string WebAccessibility::DebugString(bool recursive,
         break;
       case ATTR_TABLE_CELL_ROW_SPAN:
         result += " rowspan=" + value;
+        break;
+    case ATTR_TITLE_UI_ELEMENT:
+        result += " title_elem=" + value;
         break;
     }
   }
@@ -787,6 +802,8 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
     string_attributes[ATTR_HELP] = src.helpText();
   if (src.keyboardShortcut().length())
     string_attributes[ATTR_SHORTCUT] = src.keyboardShortcut();
+  if (src.titleUIElement().isValid())
+    int_attributes[ATTR_TITLE_UI_ELEMENT] = src.titleUIElement().axID();
   if (!src.url().isEmpty())
     string_attributes[ATTR_URL] = src.url().spec().utf16();
 
@@ -795,6 +812,10 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
 
   if (role == ROLE_SLIDER)
     include_children = false;
+
+  // Treat the active list box item as focused.
+  if (role == ROLE_LISTBOX_OPTION && src.isSelectedOptionActive())
+    state |= (1 << WebAccessibility::STATE_FOCUSED);
 
   WebKit::WebNode node = src.node();
   bool is_iframe = false;
@@ -815,22 +836,19 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
       html_attributes.push_back(std::pair<string16, string16>(name, value));
     }
 
-    if (element.isFormControlElement()) {
-      WebKit::WebFormControlElement form_element =
-          element.to<WebKit::WebFormControlElement>();
-      if (form_element.formControlType() == ASCIIToUTF16("text") ||
-          form_element.formControlType() == ASCIIToUTF16("textarea")) {
-        // Jaws gets confused by children of text fields, so we ignore them.
-        include_children = false;
+    if (role == ROLE_EDITABLE_TEXT ||
+        role == ROLE_TEXTAREA ||
+        role == ROLE_TEXT_FIELD) {
+      // Jaws gets confused by children of text fields, so we ignore them.
+      include_children = false;
 
-        int_attributes[ATTR_TEXT_SEL_START] = src.selectionStart();
-        int_attributes[ATTR_TEXT_SEL_END] = src.selectionEnd();
-        WebKit::WebVector<int> src_line_breaks;
-        src.lineBreaks(src_line_breaks);
-        line_breaks.reserve(src_line_breaks.size());
-        for (size_t i = 0; i < src_line_breaks.size(); ++i)
-          line_breaks.push_back(src_line_breaks[i]);
-      }
+      int_attributes[ATTR_TEXT_SEL_START] = src.selectionStart();
+      int_attributes[ATTR_TEXT_SEL_END] = src.selectionEnd();
+      WebKit::WebVector<int> src_line_breaks;
+      src.lineBreaks(src_line_breaks);
+      line_breaks.reserve(src_line_breaks.size());
+      for (size_t i = 0; i < src_line_breaks.size(); ++i)
+        line_breaks.push_back(src_line_breaks[i]);
     }
 
     // ARIA role.
@@ -922,8 +940,16 @@ void WebAccessibility::Init(const WebKit::WebAccessibilityObject& src,
       string_attributes[ATTR_DOC_DOCTYPE] = doctype.name();
 
     const gfx::Size& scroll_offset = document.frame()->scrollOffset();
-    int_attributes[ATTR_DOC_SCROLLX] = scroll_offset.width();
-    int_attributes[ATTR_DOC_SCROLLY] = scroll_offset.height();
+    int_attributes[ATTR_SCROLL_X] = scroll_offset.width();
+    int_attributes[ATTR_SCROLL_Y] = scroll_offset.height();
+
+    const gfx::Size& min_offset = document.frame()->minimumScrollOffset();
+    int_attributes[ATTR_SCROLL_X_MIN] = min_offset.width();
+    int_attributes[ATTR_SCROLL_Y_MIN] = min_offset.height();
+
+    const gfx::Size& max_offset = document.frame()->maximumScrollOffset();
+    int_attributes[ATTR_SCROLL_X_MAX] = max_offset.width();
+    int_attributes[ATTR_SCROLL_Y_MAX] = max_offset.height();
   }
 
   if (role == WebAccessibility::ROLE_TABLE) {

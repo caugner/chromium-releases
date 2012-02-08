@@ -15,8 +15,8 @@
 #include "base/string_number_conversions.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "views/view.h"
-#include "views/widget/widget.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -88,8 +88,7 @@ void ViewEventTestBase::TearDown() {
     DestroyWindow(window_->GetNativeWindow());
 #else
     window_->Close();
-    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
-    ui_test_utils::RunMessageLoop();
+    ui_test_utils::RunAllPendingInMessageLoop();
 #endif
     window_ = NULL;
   }
@@ -134,7 +133,7 @@ void ViewEventTestBase::StartMessageLoopAndRunTest() {
 #endif
 
   // Flush any pending events to make sure we start with a clean slate.
-  MessageLoop::current()->RunAllPending();
+  ui_test_utils::RunAllPendingInMessageLoop();
 
   // Schedule a task that starts the test. Need to do this as we're going to
   // run the message loop.
@@ -142,7 +141,7 @@ void ViewEventTestBase::StartMessageLoopAndRunTest() {
       FROM_HERE,
       base::Bind(&ViewEventTestBase::DoTestOnMessageLoop, this));
 
-  MessageLoop::current()->Run();
+  ui_test_utils::RunMessageLoop();
 }
 
 gfx::Size ViewEventTestBase::GetPreferredSize() {

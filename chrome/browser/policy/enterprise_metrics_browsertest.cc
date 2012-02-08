@@ -7,6 +7,7 @@
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/scoped_temp_dir.h"
+#include "base/threading/thread.h"
 #include "base/time.h"
 #include "chrome/browser/policy/cloud_policy_controller.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
@@ -22,7 +23,7 @@
 #include "chrome/browser/policy/proto/device_management_local.pb.h"
 #include "chrome/browser/policy/user_policy_cache.h"
 #include "chrome/browser/policy/user_policy_token_cache.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -40,6 +41,7 @@ namespace policy {
 
 namespace em = enterprise_management;
 
+using content::BrowserThread;
 using testing::AnyNumber;
 using testing::DoAll;
 using testing::Invoke;
@@ -141,7 +143,7 @@ class EnterpriseMetricsTest : public testing::Test {
     // when the instance is created.
     chromeos::system::StatisticsProvider::GetInstance();
     // Run the FILE thread's message loop to process the task.
-    file_thread_.message_loop()->RunAllPending();
+    file_thread_.DeprecatedGetThreadObject()->message_loop()->RunAllPending();
 #endif
   }
 
@@ -222,8 +224,8 @@ class EnterpriseMetricsTest : public testing::Test {
   // test in a separate process.
   base::StatisticsRecorder statistics_recorder_;
   MessageLoop loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
   // |metric_name_| is the UMA counter that is being tested. It must be set
   // before any calls to ExpectSample or CheckSamples.
   std::string metric_name_;
@@ -309,7 +311,7 @@ TEST_F(EnterpriseMetricsTest, TokenFetchOK) {
   DeviceManagementBackendTestHelper helper(loop());
 
   // Test token fetcher.
-  UserPolicyCache cache(temp_dir().AppendASCII("FetchTokenTest"));
+  UserPolicyCache cache(temp_dir().AppendASCII("FetchTokenTest"), false);
   scoped_ptr<CloudPolicyDataStore> data_store;
   data_store.reset(CloudPolicyDataStore::CreateForUserPolicies());
   data_store->SetupForTesting("", "fake_device_id", "fake_user_name",
@@ -464,7 +466,7 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchReceiveResponse) {
 TEST_F(EnterpriseMetricsTest, PolicyFetchInvalidPolicy) {
   SetMetricName(kMetricPolicy);
 
-  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"));
+  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"), false);
   UserPolicyDiskCache::Delegate* cache_as_delegate =
       implicit_cast<UserPolicyDiskCache::Delegate*>(&cache);
 
@@ -479,7 +481,7 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchInvalidPolicy) {
 TEST_F(EnterpriseMetricsTest, PolicyFetchTimestampInFuture) {
   SetMetricName(kMetricPolicy);
 
-  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"));
+  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"), false);
   UserPolicyDiskCache::Delegate* cache_as_delegate =
       implicit_cast<UserPolicyDiskCache::Delegate*>(&cache);
 
@@ -501,7 +503,7 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchTimestampInFuture) {
 TEST_F(EnterpriseMetricsTest, PolicyFetchNotModified) {
   SetMetricName(kMetricPolicy);
 
-  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"));
+  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"), false);
   UserPolicyDiskCache::Delegate* cache_as_delegate =
       implicit_cast<UserPolicyDiskCache::Delegate*>(&cache);
 
@@ -520,7 +522,7 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchNotModified) {
 TEST_F(EnterpriseMetricsTest, PolicyFetchOK) {
   SetMetricName(kMetricPolicy);
 
-  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"));
+  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"), false);
 
   std::string data;
   em::PolicyData policy_data;
@@ -540,7 +542,7 @@ TEST_F(EnterpriseMetricsTest, PolicyFetchOK) {
 TEST_F(EnterpriseMetricsTest, PolicyFetchBadResponse) {
   SetMetricName(kMetricPolicy);
 
-  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"));
+  UserPolicyCache cache(temp_dir().AppendASCII("UserPolicyCacheTest"), false);
   PolicyNotifier notifier;
   scoped_ptr<CloudPolicyDataStore> data_store;
   data_store.reset(CloudPolicyDataStore::CreateForUserPolicies());
@@ -694,9 +696,6 @@ class DevicePolicyCacheTestHelper {
     install_attributes_.ExpectUsage();
     EXPECT_CALL(mock_signed_settings_helper_, StartStorePolicyOp(_, _))
         .WillOnce(MockSignedSettingsHelperStorePolicy(code));
-    EXPECT_CALL(mock_signed_settings_helper_, CancelCallback(_))
-        .Times(1)
-        .RetiresOnSaturation();
     EXPECT_CALL(mock_signed_settings_helper_,
                 StartRetrievePolicyOp(_)).Times(expected_retrieves);
   }
@@ -712,7 +711,6 @@ class DevicePolicyCacheTestHelper {
                                install_attributes_.install_attributes(),
                                &mock_signed_settings_helper_));
     data_store_->SetupForTesting("", "id", "user", "gaia_token", false);
-    EXPECT_CALL(mock_signed_settings_helper_, CancelCallback(_)).Times(1);
   }
 
   chromeos::MockSignedSettingsHelper mock_signed_settings_helper_;

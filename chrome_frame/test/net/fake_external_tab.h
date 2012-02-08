@@ -13,15 +13,18 @@
 #include "base/win/scoped_handle.h"
 #include "chrome/app/scoped_ole_initializer.h"
 #include "chrome/browser/browser_process_impl.h"
-#include "chrome_frame/test_utils.h"
-#include "chrome_frame/test/test_server.h"
-#include "chrome_frame/test/net/test_automation_provider.h"
 #include "chrome_frame/test/net/process_singleton_subclass.h"
-#include "content/browser/browser_thread.h"
+#include "chrome_frame/test/net/test_automation_provider.h"
+#include "chrome_frame/test/test_server.h"
+#include "chrome_frame/test_utils.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/net_test_suite.h"
 
 class ProcessSingleton;
+
+namespace content {
 class NotificationService;
+}
 
 class FakeExternalTab {
  public:
@@ -29,6 +32,7 @@ class FakeExternalTab {
   virtual ~FakeExternalTab();
 
   virtual void Initialize();
+  virtual void InitializePostThreadsCreated();
   virtual void Shutdown();
 
   const FilePath& user_data() const {
@@ -45,7 +49,7 @@ class FakeExternalTab {
   FilePath overridden_user_dir_;
   FilePath user_data_dir_;
   scoped_ptr<ProcessSingleton> process_singleton_;
-  scoped_ptr<NotificationService> notificaton_service_;
+  scoped_ptr<content::NotificationService> notificaton_service_;
 };
 
 // The "master class" that spins the UI and test threads.
@@ -102,9 +106,15 @@ class CFUrlRequestUnittestRunner
   // on the main thread.
   FakeExternalTab fake_chrome_;
   scoped_ptr<ProcessSingletonSubclass> pss_subclass_;
-  scoped_ptr<BrowserThread> main_thread_;
+  scoped_ptr<content::TestBrowserThread> main_thread_;
   ScopedChromeFrameRegistrar registrar_;
   int test_result_;
+
+  // TODO(joi): This should be fixed so that this test executable uses
+  // content::BrowserMainParts.  As it stands it is a horrible hack.
+  scoped_ptr<content::TestBrowserThread> db_thread_;
+  scoped_ptr<content::TestBrowserThread> file_thread_;
+  scoped_ptr<content::TestBrowserThread> io_thread_;
 };
 
 #endif  // CHROME_FRAME_TEST_NET_FAKE_EXTERNAL_TAB_H_

@@ -13,8 +13,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/process_util.h"
 #include "content/browser/browser_child_process_host.h"
-#include "content/browser/browser_thread.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_thread.h"
 
 // This class acts as the browser-side host to a utility child process.  A
 // utility process is a short-lived sandboxed process that is created to run
@@ -49,11 +49,12 @@ class CONTENT_EXPORT UtilityProcessHost : public BrowserChildProcessHost {
     DISALLOW_COPY_AND_ASSIGN(Client);
   };
 
-  UtilityProcessHost(Client* client, BrowserThread::ID client_thread_id);
+  UtilityProcessHost(Client* client,
+                     content::BrowserThread::ID client_thread_id);
   virtual ~UtilityProcessHost();
 
   // BrowserChildProcessHost override
-  virtual bool Send(IPC::Message* message);
+  virtual bool Send(IPC::Message* message) OVERRIDE;
 
   // Starts utility process in batch mode. Caller must call EndBatchMode()
   // to finish the utility process.
@@ -79,15 +80,14 @@ class CONTENT_EXPORT UtilityProcessHost : public BrowserChildProcessHost {
   bool StartProcess();
 
   // IPC messages:
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // BrowserChildProcessHost:
-  virtual void OnProcessCrashed(int exit_code);
-  virtual bool CanShutdown();
+  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
 
   // A pointer to our client interface, who will be informed of progress.
   scoped_refptr<Client> client_;
-  BrowserThread::ID client_thread_id_;
+  content::BrowserThread::ID client_thread_id_;
   // True when running in batch mode, i.e., StartBatchMode() has been called
   // and the utility process will run until EndBatchMode().
   bool is_batch_mode_;

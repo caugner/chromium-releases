@@ -1,13 +1,17 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
+
 import pyauto_functional  # must come before pyauto.
+import policy_base
 import pyauto
+from pyauto_errors import JSONInterfaceError
 
 
-class PolicyTest(pyauto.PyUITest):
+class PolicyTest(policy_base.PolicyTestBase):
   """Tests that the effects of policies are being enforced as expected."""
 
   def IsBlocked(self, url):
@@ -26,11 +30,33 @@ class PolicyTest(pyauto.PyUITest):
     self.assertEqual(blocked, ret)
     return blocked
 
-  def GetInnerHeight(self):
-    """Returns the inner height of the content area."""
-    ret = self.ExecuteJavascript(
-        'domAutomationController.send(innerHeight.toString());');
-    return int(ret)
+  def IsJavascriptEnabled(self):
+    """Returns true if Javascript is enabled, false otherwise."""
+    try:
+      ret = self.ExecuteJavascript('domAutomationController.send("done");')
+      return ret == 'done'
+    except JSONInterfaceError as e:
+      if 'Javascript execution was blocked' == str(e):
+        logging.debug('The previous failure was expected')
+        return False
+      else:
+        raise e
+
+  def IsWebGLEnabled(self):
+    """Returns true if WebGL is enabled, false otherwise."""
+    ret = self.GetDOMValue("""
+        document.createElement('canvas').
+            getContext('experimental-webgl') ? 'ok' : ''
+    """)
+    return ret == 'ok'
+
+  def RestartRenderer(self, windex=0):
+    """Kills the current renderer, and reloads it again."""
+    info = self.GetBrowserInfo()
+    tab = self.GetActiveTabIndex()
+    pid = info['windows'][windex]['tabs'][tab]['renderer_pid']
+    self.KillRendererProcess(pid)
+    self.ReloadActiveTab()
 
   def testBlacklistPolicy(self):
     """Tests the URLBlacklist and URLWhitelist policies."""
@@ -58,24 +84,14 @@ class PolicyTest(pyauto.PyUITest):
 
   def testBookmarkBarPolicy(self):
     """Tests the BookmarkBarEnabled policy."""
-    # The browser already starts at about:blank, but strangely it loses 2
-    # pixels of the innerHeight after explicitly navigating once.
     self.NavigateToURL('about:blank')
     self.assertFalse(self.GetBookmarkBarVisibility())
+    self.assertFalse(self.IsBookmarkBarDetached())
 
-    # The browser starts at about:blank. |fullHeight| is the inner height of the
-    # content area, when there is no bookmark bar at all.
-    fullHeight = self.GetInnerHeight()
-
-    # It should be visible in detached state, in the NTP. When on that state,
-    # the content is pushed down to make room for the bookmark bar.
+    # It should be visible in detached state, in the NTP.
     self.NavigateToURL('chrome://newtab')
-    # |GetBookmarkBarVisibility()| returns true when the bookmark bar is
-    # visible on the window, attached to the location bar. So it should still
-    # be not visible on the window, but the inner height must have decreased.
-    self.assertTrue(self.WaitForBookmarkBarVisibilityChange(False))
     self.assertFalse(self.GetBookmarkBarVisibility())
-    self.assertTrue(self.GetInnerHeight() < fullHeight)
+    self.assertTrue(self.IsBookmarkBarDetached())
 
     policy = {
       'BookmarkBarEnabled': True
@@ -84,10 +100,12 @@ class PolicyTest(pyauto.PyUITest):
 
     self.assertTrue(self.WaitForBookmarkBarVisibilityChange(True))
     self.assertTrue(self.GetBookmarkBarVisibility())
+    self.assertFalse(self.IsBookmarkBarDetached())
     # The accelerator should be disabled by the policy.
     self.ApplyAccelerator(pyauto.IDC_SHOW_BOOKMARK_BAR)
     self.assertTrue(self.WaitForBookmarkBarVisibilityChange(True))
     self.assertTrue(self.GetBookmarkBarVisibility())
+    self.assertFalse(self.IsBookmarkBarDetached())
 
     policy['BookmarkBarEnabled'] = False
     self.SetPolicies(policy)
@@ -98,8 +116,81 @@ class PolicyTest(pyauto.PyUITest):
     self.assertTrue(self.WaitForBookmarkBarVisibilityChange(False))
     self.assertFalse(self.GetBookmarkBarVisibility())
     # When disabled by policy, it should never be displayed at all,
-    # not even on the NTP. So the content should have the maximum height.
-    self.assertEqual(fullHeight, self.GetInnerHeight())
+    # not even on the NTP.
+    self.assertFalse(self.IsBookmarkBarDetached())
+
+  def testJavascriptPolicies(self):
+    """Tests the Javascript policies."""
+    # The navigation to about:blank after each policy reset is to reset the
+    # content settings state.
+    policy = {}
+    self.SetPolicies(policy)
+    self.assertTrue(self.IsJavascriptEnabled())
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS))
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS_CONSOLE))
+
+    policy['DeveloperToolsDisabled'] = True
+    self.SetPolicies(policy)
+    self.assertTrue(self.IsJavascriptEnabled())
+    self.assertFalse(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS))
+    self.assertFalse(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS_CONSOLE))
+
+    policy['DeveloperToolsDisabled'] = False
+    self.SetPolicies(policy)
+    self.assertTrue(self.IsJavascriptEnabled())
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS))
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS_CONSOLE))
+
+    # The Developer Tools still work when javascript is disabled.
+    policy['JavascriptEnabled'] = False
+    self.SetPolicies(policy)
+    self.NavigateToURL('about:blank')
+    self.assertFalse(self.IsJavascriptEnabled())
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS))
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS_CONSOLE))
+    # Javascript is always enabled for internal Chrome pages.
+    self.NavigateToURL('chrome://settings')
+    self.assertTrue(self.IsJavascriptEnabled())
+
+    # The Developer Tools can be explicitly disabled.
+    policy['DeveloperToolsDisabled'] = True
+    self.SetPolicies(policy)
+    self.NavigateToURL('about:blank')
+    self.assertFalse(self.IsJavascriptEnabled())
+    self.assertFalse(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS))
+    self.assertFalse(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS_CONSOLE))
+
+    # Javascript can also be disabled with content settings policies.
+    policy = {
+      'DefaultJavaScriptSetting': 2,
+    }
+    self.SetPolicies(policy)
+    self.NavigateToURL('about:blank')
+    self.assertFalse(self.IsJavascriptEnabled())
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS))
+    self.assertTrue(self.IsMenuCommandEnabled(pyauto.IDC_DEV_TOOLS_CONSOLE))
+
+    # The content setting overrides JavascriptEnabled.
+    policy = {
+      'DefaultJavaScriptSetting': 1,
+      'JavascriptEnabled': False,
+    }
+    self.SetPolicies(policy)
+    self.NavigateToURL('about:blank')
+    self.assertTrue(self.IsJavascriptEnabled())
+
+  def testDisable3DAPIs(self):
+    """Tests the policy that disables the 3D APIs."""
+    self.assertFalse(self.GetPrefsInfo().Prefs(pyauto.kDisable3DAPIs))
+    self.assertTrue(self.IsWebGLEnabled())
+
+    self.SetPolicies({
+        'Disable3DAPIs': True
+    })
+    self.assertTrue(self.GetPrefsInfo().Prefs(pyauto.kDisable3DAPIs))
+    # The Disable3DAPIs policy only applies updated values to new renderers.
+    self.RestartRenderer()
+    self.assertFalse(self.IsWebGLEnabled())
 
 
 if __name__ == '__main__':

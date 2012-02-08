@@ -11,8 +11,9 @@
 #include "chrome/browser/net/chrome_net_log.h"
 #include "chrome/browser/policy/device_management_backend.h"
 #include "chrome/browser/policy/device_management_backend_impl.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/content_client.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/host_resolver.h"
 #include "net/base/load_flags.h"
@@ -24,6 +25,8 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+
+using content::BrowserThread;
 
 namespace policy {
 
@@ -44,8 +47,8 @@ bool IsProxyError(const net::URLRequestStatus status) {
   return false;
 }
 
-bool IsProtobufMimeType(const URLFetcher* source) {
-  return source->response_headers()->HasHeaderValue(
+bool IsProtobufMimeType(const content::URLFetcher* source) {
+  return source->GetResponseHeaders()->HasHeaderValue(
       "content-type", "application/x-protobuffer");
 }
 
@@ -209,25 +212,20 @@ void DeviceManagementService::RemoveJob(DeviceManagementJob* job) {
 
 void DeviceManagementService::StartJob(DeviceManagementJob* job,
                                        bool bypass_proxy) {
-  URLFetcher* fetcher = URLFetcher::Create(0, job->GetURL(server_url_),
-                                           URLFetcher::POST, this);
-  fetcher->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES |
-                          net::LOAD_DO_NOT_SAVE_COOKIES |
-                          net::LOAD_DISABLE_CACHE |
-                          (bypass_proxy ? net::LOAD_BYPASS_PROXY : 0));
-  fetcher->set_request_context(request_context_getter_.get());
+  content::URLFetcher* fetcher = content::URLFetcher::Create(
+      0, job->GetURL(server_url_), content::URLFetcher::POST, this);
+  fetcher->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                        net::LOAD_DO_NOT_SAVE_COOKIES |
+                        net::LOAD_DISABLE_CACHE |
+                        (bypass_proxy ? net::LOAD_BYPASS_PROXY : 0));
+  fetcher->SetRequestContext(request_context_getter_.get());
   job->ConfigureRequest(fetcher);
   pending_jobs_[fetcher] = job;
   fetcher->Start();
 }
 
 void DeviceManagementService::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
+    const content::URLFetcher* source) {
   JobFetcherMap::iterator entry(pending_jobs_.find(source));
   if (entry != pending_jobs_.end()) {
     DeviceManagementJob* job = entry->second;
@@ -237,12 +235,13 @@ void DeviceManagementService::OnURLFetchComplete(
     // proxy on the next try. Don't retry if this URLFetcher already bypassed
     // the proxy.
     bool retry = false;
-    if ((source->load_flags() & net::LOAD_BYPASS_PROXY) == 0) {
-      if (!status.is_success() && IsProxyError(status)) {
+    if ((source->GetLoadFlags() & net::LOAD_BYPASS_PROXY) == 0) {
+      if (!source->GetStatus().is_success() &&
+          IsProxyError(source->GetStatus())) {
         LOG(WARNING) << "Proxy failed while contacting dmserver.";
         retry = true;
-      } else if (status.is_success() &&
-                 source->was_fetched_via_proxy() &&
+      } else if (source->GetStatus().is_success() &&
+                 source->WasFetchedViaProxy() &&
                  !IsProtobufMimeType(source)) {
         // The proxy server can be misconfigured but pointing to an existing
         // server that replies to requests. Try to recover if a successful
@@ -257,7 +256,10 @@ void DeviceManagementService::OnURLFetchComplete(
       LOG(WARNING) << "Retrying dmserver request without using a proxy.";
       StartJob(job, true);
     } else {
-      job->HandleResponse(status, response_code, cookies, data);
+      std::string data;
+      source->GetResponseAsString(&data);
+      job->HandleResponse(source->GetStatus(), source->GetResponseCode(),
+                          source->GetCookies(), data);
     }
   } else {
     NOTREACHED() << "Callback from foreign URL fetcher";

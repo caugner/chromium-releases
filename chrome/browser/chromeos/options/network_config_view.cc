@@ -13,13 +13,17 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
+#include "grit/theme_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/rect.h"
-#include "views/controls/button/text_button.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 namespace chromeos {
 
@@ -62,16 +66,15 @@ gfx::NativeWindow NetworkConfigView::GetNativeWindow() const {
 }
 
 string16 NetworkConfigView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK)
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return l10n_util::GetStringUTF16(IDS_OPTIONS_SETTINGS_CONNECT);
   return string16();
 }
 
-bool NetworkConfigView::IsDialogButtonEnabled(
-    MessageBoxFlags::DialogButton button) const {
+bool NetworkConfigView::IsDialogButtonEnabled(ui::DialogButton button) const {
   // Disable connect button if cannot login.
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
+  if (button == ui::DIALOG_BUTTON_OK)
     return child_config_view_->CanLogin();
   return true;
 }
@@ -140,7 +143,7 @@ void NetworkConfigView::ShowAdvancedView() {
   int vert_padding = bounds.height() - size.height();
   bounds.Inset(horiz_padding / 2, vert_padding / 2,
                horiz_padding / 2, vert_padding / 2);
-  GetWidget()->SetBoundsConstrained(bounds, NULL);
+  GetWidget()->SetBoundsConstrained(bounds);
   Layout();
   child_config_view_->InitFocus();
 }
@@ -171,9 +174,9 @@ void NetworkConfigView::ViewHierarchyChanged(
 }
 
 void NetworkConfigView::CreateAdvancedButton() {
-  advanced_button_ = new views::NativeTextButton(this, UTF16ToWide(
+  advanced_button_ = new views::NativeTextButton(this,
       l10n_util::GetStringUTF16(
-          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADVANCED_BUTTON)));
+          IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_ADVANCED_BUTTON));
 
   // Wrap the advanced button in a grid layout in order to left-align it.
   advanced_button_container_ = new views::View();
@@ -186,6 +189,70 @@ void NetworkConfigView::CreateAdvancedButton() {
                         0, views::GridLayout::USE_PREF, 0, 0);
   layout->StartRow(0, column_set_id);
   layout->AddView(advanced_button_);
+}
+
+ControlledSettingIndicatorView::ControlledSettingIndicatorView()
+    : managed_(false),
+      image_view_(NULL) {
+  Init();
+}
+
+ControlledSettingIndicatorView::ControlledSettingIndicatorView(
+    const NetworkPropertyUIData& ui_data)
+    : managed_(false),
+      image_view_(NULL) {
+  Init();
+  Update(ui_data);
+}
+
+ControlledSettingIndicatorView::~ControlledSettingIndicatorView() {}
+
+void ControlledSettingIndicatorView::Update(
+    const NetworkPropertyUIData& ui_data) {
+  if (managed_ == ui_data.managed())
+    return;
+
+  managed_ = ui_data.managed();
+  PreferredSizeChanged();
+}
+
+gfx::Size ControlledSettingIndicatorView::GetPreferredSize() {
+  if (!IsVisible())
+    return gfx::Size();
+
+  return image_view_->GetPreferredSize();
+}
+
+bool ControlledSettingIndicatorView::IsVisible() const {
+  return managed_ && views::View::IsVisible();
+}
+
+void ControlledSettingIndicatorView::Layout() {
+  image_view_->SetBounds(0, 0, width(), height());
+}
+
+void ControlledSettingIndicatorView::OnMouseEntered(
+    const views::MouseEvent& event) {
+  image_view_->SetImage(color_image_);
+}
+
+void ControlledSettingIndicatorView::OnMouseExited(
+    const views::MouseEvent& event) {
+  image_view_->SetImage(gray_image_);
+}
+
+void ControlledSettingIndicatorView::Init() {
+  color_image_ = ResourceBundle::GetSharedInstance().GetImageNamed(
+      IDR_CONTROLLED_SETTING_MANDATORY).ToSkBitmap();
+  gray_image_ = ResourceBundle::GetSharedInstance().GetImageNamed(
+      IDR_CONTROLLED_SETTING_MANDATORY_GRAY).ToSkBitmap();
+  image_view_ = new views::ImageView();
+  // Disable |image_view_| so mouse events propagate to the parent.
+  image_view_->SetEnabled(false);
+  image_view_->SetImage(gray_image_);
+  image_view_->SetTooltipText(
+      l10n_util::GetStringUTF16(IDS_OPTIONS_CONTROLLED_SETTING_POLICY));
+  AddChildView(image_view_);
 }
 
 }  // namespace chromeos

@@ -8,9 +8,11 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -19,13 +21,14 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::BrowserThread;
 using testing::A;
 using testing::AtLeast;
 using testing::Eq;
@@ -93,8 +96,8 @@ class MockCloudPrintFlowHandler
   MOCK_METHOD0(RegisterMessages, void());
   MOCK_METHOD3(Observe,
                void(int type,
-                    const NotificationSource& source,
-                    const NotificationDetails& details));
+                    const content::NotificationSource& source,
+                    const content::NotificationDetails& details));
   MOCK_METHOD1(SetDialogDelegate,
                void(CloudPrintHtmlDialogDelegate* delegate));
   MOCK_METHOD0(CreateCloudPrintDataSender,
@@ -233,8 +236,8 @@ class CloudPrintDataSenderTest : public testing::Test {
   scoped_ptr<MockCloudPrintDataSenderHelper> mock_helper_;
 
   MessageLoop message_loop_;
-  BrowserThread file_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread file_thread_;
+  content::TestBrowserThread io_thread_;
 };
 
 // TODO(scottbyer): DISABLED until the binary test file can get
@@ -246,11 +249,10 @@ TEST_F(CloudPrintDataSenderTest, CanSend) {
       WillOnce(Return());
 
   FilePath test_data_file_name = GetTestDataFileName();
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          NewRunnableMethod(
-                              print_data_sender_.get(),
-                              &CloudPrintDataSender::ReadPrintDataFile,
-                              test_data_file_name));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&CloudPrintDataSender::ReadPrintDataFile,
+                 print_data_sender_.get(), test_data_file_name));
   MessageLoop::current()->RunAllPending();
 }
 
@@ -262,11 +264,10 @@ TEST_F(CloudPrintDataSenderTest, BadFile) {
 #else
   FilePath bad_data_file_name("/some/file/that/isnot/there");
 #endif
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          NewRunnableMethod(
-                              print_data_sender_.get(),
-                              &CloudPrintDataSender::ReadPrintDataFile,
-                             bad_data_file_name));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&CloudPrintDataSender::ReadPrintDataFile,
+                 print_data_sender_.get(), bad_data_file_name));
   MessageLoop::current()->RunAllPending();
 }
 
@@ -274,11 +275,10 @@ TEST_F(CloudPrintDataSenderTest, EmptyFile) {
   EXPECT_CALL(*mock_helper_, CallJavascriptFunction(_, _, _)).Times(0);
 
   FilePath empty_data_file_name = GetEmptyDataFileName();
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          NewRunnableMethod(
-                              print_data_sender_.get(),
-                              &CloudPrintDataSender::ReadPrintDataFile,
-                              empty_data_file_name));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&CloudPrintDataSender::ReadPrintDataFile,
+                 print_data_sender_.get(), empty_data_file_name));
   MessageLoop::current()->RunAllPending();
 }
 
@@ -320,7 +320,7 @@ class CloudPrintHtmlDialogDelegateTest : public testing::Test {
   }
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
   base::WeakPtr<MockCloudPrintFlowHandler> mock_flow_handler_;
   scoped_ptr<CloudPrintHtmlDialogDelegate> delegate_;
 };

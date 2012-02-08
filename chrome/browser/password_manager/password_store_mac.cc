@@ -21,7 +21,7 @@
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/browser/notification_service_impl.h"
 
 using webkit_glue::PasswordForm;
 
@@ -687,7 +687,10 @@ bool MacKeychainPasswordFormAdapter::ExtractSignonRealmComponents(
     *port = realm_as_url.has_port() ? atoi(realm_as_url.port().c_str()) : 0;
   if (security_domain) {
     // Strip the leading '/' off of the path to get the security domain.
-    *security_domain = realm_as_url.path().substr(1);
+    if (realm_as_url.path().length() > 0)
+      *security_domain = realm_as_url.path().substr(1);
+    else
+      security_domain->clear();
   }
   return true;
 }
@@ -775,10 +778,10 @@ void PasswordStoreMac::AddLoginImpl(const PasswordForm& form) {
     if (login_metadata_db_->AddLogin(form)) {
       PasswordStoreChangeList changes;
       changes.push_back(PasswordStoreChange(PasswordStoreChange::ADD, form));
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_LOGINS_CHANGED,
-          Source<PasswordStore>(this),
-          Details<PasswordStoreChangeList>(&changes));
+          content::Source<PasswordStore>(this),
+          content::Details<PasswordStoreChangeList>(&changes));
     }
   }
 }
@@ -810,10 +813,10 @@ void PasswordStoreMac::UpdateLoginImpl(const PasswordForm& form) {
                                             form));
     }
     if (!changes.empty()) {
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_LOGINS_CHANGED,
-          Source<PasswordStore>(this),
-          Details<PasswordStoreChangeList>(&changes));
+          content::Source<PasswordStore>(this),
+          content::Details<PasswordStoreChangeList>(&changes));
     }
   }
 }
@@ -841,10 +844,10 @@ void PasswordStoreMac::RemoveLoginImpl(const PasswordForm& form) {
 
     PasswordStoreChangeList changes;
     changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE, form));
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_LOGINS_CHANGED,
-        Source<PasswordStore>(this),
-        Details<PasswordStoreChangeList>(&changes));
+        content::Source<PasswordStore>(this),
+        content::Details<PasswordStoreChangeList>(&changes));
   }
 }
 
@@ -875,10 +878,10 @@ void PasswordStoreMac::RemoveLoginsCreatedBetweenImpl(
         changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE,
                                               **it));
       }
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_LOGINS_CHANGED,
-          Source<PasswordStore>(this),
-          Details<PasswordStoreChangeList>(&changes));
+          content::Source<PasswordStore>(this),
+          content::Details<PasswordStoreChangeList>(&changes));
     }
   }
 }
@@ -1013,5 +1016,5 @@ void PasswordStoreMac::RemoveKeychainForms(
 }
 
 void PasswordStoreMac::CreateNotificationService() {
-  notification_service_.reset(new NotificationService);
+  notification_service_.reset(new NotificationServiceImpl);
 }

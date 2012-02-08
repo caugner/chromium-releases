@@ -140,26 +140,63 @@ TEST_F(MiniInstallTest,
 
 TEST_F(MiniInstallTest,
     InstallChromeUsingMultiInstallSys) {
-  chrome_user_installer_->InstallChromeUsingMultiInstall();
+  chrome_sys_installer_->InstallChromeUsingMultiInstall();
+}
+
+TEST_F(MiniInstallTest, InstallChromeAndChromeFrameUser) {
+  chrome_user_installer_->InstallChromeAndChromeFrame(false);
+}
+
+TEST_F(MiniInstallTest, InstallChromeAndChromeFrameSys) {
+  chrome_sys_installer_->InstallChromeAndChromeFrame(false);
 }
 
 TEST_F(MiniInstallTest,
     InstallChromeAndChromeFrameReadyModeUser) {
-  chrome_user_installer_->InstallChromeAndChromeFrameReadyMode();
+  chrome_user_installer_->InstallChromeAndChromeFrame(true);
 }
 
 TEST_F(MiniInstallTest,
     InstallChromeAndChromeFrameReadyModeSys) {
-  chrome_sys_installer_->InstallChromeAndChromeFrameReadyMode();
+  chrome_sys_installer_->InstallChromeAndChromeFrame(true);
 }
 
 TEST_F(MiniInstallTest, InstallChromeFrameUsingMultiInstallUser) {
   cf_user_installer_->InstallChromeFrameUsingMultiInstall();
 }
+
+TEST_F(MiniInstallTest, InstallChromeFrameUsingMultiInstallSys) {
+  cf_sys_installer_->InstallChromeFrameUsingMultiInstall();
+}
+
+// Chrome Frame is in use while Chrome is install.
+TEST_F(MiniInstallTest, InstallChromeWithExistingChromeFrameMultiInstallUser) {
+  cf_user_installer_->InstallChromeFrameUsingMultiInstall();
+  chrome_user_installer_->InstallChromeUsingMultiInstall();
+}
+
+// Chrome Frame is in use while Chrome is install.
+TEST_F(MiniInstallTest, InstallChromeWithExistingChromeFrameMultiInstallSys) {
+  cf_sys_installer_->InstallChromeFrameUsingMultiInstall();
+  chrome_sys_installer_->InstallChromeUsingMultiInstall();
+}
+
+TEST_F(MiniInstallTest, OverInstallChromeWhenInUseUser) {
+  chrome_user_installer_->InstallChromeUsingMultiInstall();
+  chrome_user_installer_->LaunchChrome(false);
+  chrome_user_installer_->InstallChromeUsingMultiInstall();
+}
+
+TEST_F(MiniInstallTest, OverInstallChromeWhenInUseSys) {
+  chrome_sys_installer_->InstallChromeUsingMultiInstall();
+  chrome_sys_installer_->LaunchChrome(false);
+  chrome_sys_installer_->InstallChromeUsingMultiInstall();
+}
+
 #endif
 
 TEST_F(MiniInstallTest, InstallMiniInstallerSys) {
-  chrome_user_installer_->Install();
+  chrome_sys_installer_->Install();
 }
 
 #if defined(OS_WIN)

@@ -17,11 +17,9 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
-class NotificationDetails;
-class NotificationSource;
 class TabContents;
 
 namespace safe_browsing {
@@ -34,7 +32,7 @@ class ClientSideDetectionService;
 // class which sends a ping to a server to validate the verdict.
 // TODO(noelutz): move all client-side detection IPCs to this class.
 class ClientSideDetectionHost : public TabContentsObserver,
-                                public NotificationObserver,
+                                public content::NotificationObserver,
                                 public SafeBrowsingService::Observer {
  public:
   // The caller keeps ownership of the tab object and is responsible for
@@ -48,9 +46,9 @@ class ClientSideDetectionHost : public TabContentsObserver,
   // From TabContentsObserver.  If we navigate away we cancel all pending
   // callbacks that could show an interstitial, and check to see whether
   // we should classify the new URL.
-  virtual void DidNavigateMainFramePostCommit(
+  virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+      const content::FrameNavigateParams& params) OVERRIDE;
 
   // Called when the SafeBrowsingService found a hit with one of the
   // SafeBrowsing lists.  This method is called on the UI thread.
@@ -84,8 +82,8 @@ class ClientSideDetectionHost : public TabContentsObserver,
   // From NotificationObserver.  Called when a notification comes in.  This
   // method is called in the UI thread.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Returns true if the user has seen a regular SafeBrowsing
   // interstitial for the current page.  This is only true if the user has
@@ -121,9 +119,9 @@ class ClientSideDetectionHost : public TabContentsObserver,
   // Current host, used to help determine cur_host_redirects_.
   std::string cur_host_;
   // Handles registering notifications with the NotificationService.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
-  base::ScopedCallbackFactory<ClientSideDetectionHost> cb_factory_;
+  base::WeakPtrFactory<ClientSideDetectionHost> weak_factory_;
 
   // Unique page ID of the most recent unsafe site that was loaded in this tab
   // as well as the UnsafeResource.

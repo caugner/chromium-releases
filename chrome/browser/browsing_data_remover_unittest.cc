@@ -15,6 +15,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/cookie_monster.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -27,6 +28,8 @@
 #include "webkit/quota/mock_quota_manager.h"
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/quota_types.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -240,7 +243,6 @@ class BrowsingDataRemoverTest : public testing::Test {
         file_thread_(BrowserThread::FILE, &message_loop_),
         io_thread_(BrowserThread::IO, &message_loop_),
         profile_(new TestingProfile()) {
-    profile_->GetPrefs()->SetBoolean(prefs::kClearPluginLSODataEnabled, false);
   }
 
   virtual ~BrowsingDataRemoverTest() {
@@ -289,11 +291,11 @@ class BrowsingDataRemoverTest : public testing::Test {
   // message_loop_, as well as all the threads associated with it must be
   // defined before profile_ to prevent explosions. Oh how I love C++.
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
-  BrowserThread webkit_thread_;
-  BrowserThread file_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
+  content::TestBrowserThread webkit_thread_;
+  content::TestBrowserThread file_thread_;
+  content::TestBrowserThread io_thread_;
   scoped_ptr<TestingProfile> profile_;
 
   DISALLOW_COPY_AND_ASSIGN(BrowsingDataRemoverTest);

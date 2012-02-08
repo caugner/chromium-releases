@@ -6,6 +6,7 @@
 
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/string_number_conversions.h"  // Temporary
 #include "base/string_util.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -13,6 +14,7 @@
 #include "content/browser/browser_url_handler.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
+#include "content/browser/renderer_host/render_view_host.h"  // Temporary
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/navigation_details.h"
@@ -20,8 +22,8 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/content_constants.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/common/content_constants.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/notification_types.h"
 #include "net/base/escape.h"
@@ -42,10 +44,10 @@ void NotifyPrunedEntries(NavigationController* nav_controller,
   content::PrunedDetails details;
   details.from_front = from_front;
   details.count = count;
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_NAV_LIST_PRUNED,
-      Source<NavigationController>(nav_controller),
-      Details<content::PrunedDetails>(&details));
+      content::Source<NavigationController>(nav_controller),
+      content::Details<content::PrunedDetails>(&details));
 }
 
 // Ensure the given NavigationEntry has a valid state, so that WebKit does not
@@ -133,10 +135,10 @@ NavigationController::NavigationController(
 NavigationController::~NavigationController() {
   DiscardNonCommittedEntriesInternal();
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_TAB_CLOSED,
-      Source<NavigationController>(this),
-      NotificationService::NoDetails());
+      content::Source<NavigationController>(this),
+      content::NotificationService::NoDetails());
 }
 
 void NavigationController::Restore(
@@ -183,10 +185,10 @@ void NavigationController::ReloadInternal(bool check_for_repost,
     // The user is asking to reload a page with POST data. Prompt to make sure
     // they really want to do this. If they do, the dialog will call us back
     // with check_for_repost = false.
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         content::NOTIFICATION_REPOST_WARNING_SHOWN,
-        Source<NavigationController>(this),
-        NotificationService::NoDetails());
+        content::Source<NavigationController>(this),
+        content::NotificationService::NoDetails());
 
     pending_reload_ = reload_type;
     tab_contents_->Activate();
@@ -221,7 +223,8 @@ bool NavigationController::IsInitialNavigation() {
 
 // static
 NavigationEntry* NavigationController::CreateNavigationEntry(
-    const GURL& url, const GURL& referrer, content::PageTransition transition,
+    const GURL& url, const content::Referrer& referrer,
+    content::PageTransition transition,
     bool is_renderer_initiated, const std::string& extra_headers,
     content::BrowserContext* browser_context) {
   // Allow the browser URL handler to rewrite the URL. This will, for example,
@@ -274,10 +277,10 @@ void NavigationController::LoadEntry(NavigationEntry* entry) {
   // result in a download or a 'no content' response (e.g., a mailto: URL).
   DiscardNonCommittedEntriesInternal();
   pending_entry_ = entry;
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_NAV_ENTRY_PENDING,
-      Source<NavigationController>(this),
-      Details<NavigationEntry>(entry));
+      content::Source<NavigationController>(this),
+      content::Details<NavigationEntry>(entry));
   NavigateToPendingEntry(NO_RELOAD);
 }
 
@@ -470,7 +473,8 @@ void NavigationController::RemoveEntryAtIndex(int index,
     } else {
       // If there is nothing to show, show a default page.
       LoadURL(default_url.is_empty() ? GURL("about:blank") : default_url,
-              GURL(), content::PAGE_TRANSITION_START_PAGE, std::string());
+              content::Referrer(), content::PAGE_TRANSITION_START_PAGE,
+              std::string());
     }
   }
 }
@@ -495,9 +499,28 @@ void NavigationController::AddTransientEntry(NavigationEntry* entry) {
   tab_contents_->NotifyNavigationStateChanged(kInvalidateAll);
 }
 
+void NavigationController::TransferURL(
+    const GURL& url,
+    const content::Referrer& referrer,
+    content::PageTransition transition,
+    const std::string& extra_headers,
+    const GlobalRequestID& transferred_global_request_id,
+    bool is_renderer_initiated) {
+  // The user initiated a load, we don't need to reload anymore.
+  needs_reload_ = false;
+
+  NavigationEntry* entry = CreateNavigationEntry(url, referrer, transition,
+                                                 is_renderer_initiated,
+                                                 extra_headers,
+                                                 browser_context_);
+  entry->set_transferred_global_request_id(transferred_global_request_id);
+
+  LoadEntry(entry);
+}
+
 void NavigationController::LoadURL(
     const GURL& url,
-    const GURL& referrer,
+    const content::Referrer& referrer,
     content::PageTransition transition,
     const std::string& extra_headers) {
   // The user initiated a load, we don't need to reload anymore.
@@ -513,7 +536,7 @@ void NavigationController::LoadURL(
 
 void NavigationController::LoadURLFromRenderer(
     const GURL& url,
-    const GURL& referrer,
+    const content::Referrer& referrer,
     content::PageTransition transition,
     const std::string& extra_headers) {
   // The user initiated a load, we don't need to reload anymore.
@@ -671,6 +694,37 @@ content::NavigationType NavigationController::ClassifyNavigation(
     // release builds. Instead, we'll kill the renderer process to be safe.
     LOG(ERROR) << "terminating renderer for bad navigation: " << params.url;
     UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_NC"));
+
+    // Temporary code so we can get more information.  Format:
+    //  http://url/foo.html#page1#max3#frame1#ids:2_Nx,1_1x,3_2
+    std::string temp = params.url.spec();
+    temp.append("#page");
+    temp.append(base::IntToString(params.page_id));
+    temp.append("#max");
+    temp.append(base::IntToString(tab_contents_->GetMaxPageID()));
+    temp.append("#frame");
+    temp.append(base::IntToString(params.frame_id));
+    temp.append("#ids");
+    for (int i = 0; i < static_cast<int>(entries_.size()); ++i) {
+      // Append entry metadata (e.g., 3_7x):
+      //  3: page_id
+      //  7: SiteInstance ID, or N for null
+      //  x: appended if not from the current SiteInstance
+      temp.append(base::IntToString(entries_[i]->page_id()));
+      temp.append("_");
+      if (entries_[i]->site_instance())
+        temp.append(base::IntToString(entries_[i]->site_instance()->id()));
+      else
+        temp.append("N");
+      if (entries_[i]->site_instance() != tab_contents_->GetSiteInstance())
+        temp.append("x");
+      temp.append(",");
+    }
+    GURL url(temp);
+    tab_contents_->render_view_host()->Send(new ViewMsg_TempCrashWithData(url));
+    return content::NAVIGATION_TYPE_NAV_IGNORE;
+
+
     if (tab_contents_->GetSiteInstance()->HasProcess())
       tab_contents_->GetSiteInstance()->GetProcess()->ReceivedBadMessage();
     return content::NAVIGATION_TYPE_NAV_IGNORE;
@@ -736,7 +790,7 @@ void NavigationController::RendererDidNavigateToNewPage(
     // Don't use the page type from the pending entry. Some interstitial page
     // may have set the type to interstitial. Once we commit, however, the page
     // type must always be normal.
-    new_entry->set_page_type(NORMAL_PAGE);
+    new_entry->set_page_type(content::PAGE_TYPE_NORMAL);
     update_virtual_url = new_entry->update_virtual_url_with_url();
   } else {
     new_entry = new NavigationEntry;
@@ -1126,8 +1180,8 @@ void NavigationController::NavigateToPendingEntry(ReloadType reload_type) {
 void NavigationController::NotifyNavigationEntryCommitted(
     content::LoadCommittedDetails* details) {
   details->entry = GetActiveEntry();
-  NotificationDetails notification_details =
-      Details<content::LoadCommittedDetails>(details);
+  content::NotificationDetails notification_details =
+      content::Details<content::LoadCommittedDetails>(details);
 
   // We need to notify the ssl_manager_ before the tab_contents_ so the
   // location bar will have up-to-date information about the security style
@@ -1139,9 +1193,9 @@ void NavigationController::NotifyNavigationEntryCommitted(
   // notification below instead.
   tab_contents_->NotifyNavigationStateChanged(kInvalidateAll);
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      Source<NavigationController>(this),
+      content::Source<NavigationController>(this),
       notification_details);
 }
 
@@ -1171,10 +1225,10 @@ void NavigationController::NotifyEntryChanged(const NavigationEntry* entry,
   content::EntryChangedDetails det;
   det.changed_entry = entry;
   det.index = index;
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_NAV_ENTRY_CHANGED,
-      Source<NavigationController>(this),
-      Details<content::EntryChangedDetails>(&det));
+      content::Source<NavigationController>(this),
+      content::Details<content::EntryChangedDetails>(&det));
 }
 
 void NavigationController::FinishRestore(int selected_index,
@@ -1228,7 +1282,8 @@ void NavigationController::InsertEntriesFrom(
   size_t insert_index = 0;
   for (int i = 0; i < max_index; i++) {
     // When cloning a tab, copy all entries except interstitial pages
-    if (source.entries_[i].get()->page_type() != INTERSTITIAL_PAGE) {
+    if (source.entries_[i].get()->page_type() !=
+        content::PAGE_TYPE_INTERSTITIAL) {
       entries_.insert(entries_.begin() + insert_index++,
                       linked_ptr<NavigationEntry>(
                           new NavigationEntry(*source.entries_[i])));

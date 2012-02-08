@@ -16,7 +16,7 @@
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
 
@@ -109,7 +109,7 @@ void FaviconTabHelper::SaveFavicon() {
 int FaviconTabHelper::DownloadImage(const GURL& image_url,
                                  int image_size,
                                  history::IconType icon_type,
-                                 ImageDownloadCallback* callback) {
+                                 const ImageDownloadCallback& callback) {
   if (icon_type == history::FAVICON)
     return favicon_handler_->DownloadImage(image_url, image_size, icon_type,
                                            callback);
@@ -138,10 +138,10 @@ void FaviconTabHelper::StartDownload(int id, const GURL& url, int image_size) {
 }
 
 void FaviconTabHelper::NotifyFaviconUpdated() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_FAVICON_UPDATED,
-      Source<TabContents>(tab_contents()),
-      NotificationService::NoDetails());
+      content::Source<TabContents>(tab_contents()),
+      content::NotificationService::NoDetails());
   tab_contents()->NotifyNavigationStateChanged(TabContents::INVALIDATE_TAB);
 }
 
@@ -157,9 +157,9 @@ void FaviconTabHelper::NavigateToPendingEntry(
   }
 }
 
-void FaviconTabHelper::DidNavigateMainFramePostCommit(
+void FaviconTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   // Get the favicon, either from history or request it from the net.
   FetchFavicon(details.entry->url());
 }

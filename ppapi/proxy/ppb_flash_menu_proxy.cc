@@ -11,7 +11,6 @@
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_flash_menu_api.h"
 #include "ppapi/thunk/resource_creation_api.h"
-#include "ppapi/thunk/thunk.h"
 
 using ppapi::thunk::EnterFunctionNoLock;
 using ppapi::thunk::PPB_Flash_Menu_API;
@@ -66,7 +65,7 @@ int32_t FlashMenu::Show(const struct PP_Point* location,
 
   PluginDispatcher::GetForResource(this)->Send(
       new PpapiHostMsg_PPBFlashMenu_Show(
-          INTERFACE_ID_PPB_FLASH_MENU, host_resource(), *location));
+          API_ID_PPB_FLASH_MENU, host_resource(), *location));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -75,32 +74,12 @@ void FlashMenu::ShowACK(int32_t selected_id, int32_t result) {
   PP_RunAndClearCompletionCallback(&callback_, result);
 }
 
-namespace {
-
-InterfaceProxy* CreateFlashMenuProxy(Dispatcher* dispatcher) {
-  return new PPB_Flash_Menu_Proxy(dispatcher);
-}
-
-}  // namespace
-
 PPB_Flash_Menu_Proxy::PPB_Flash_Menu_Proxy(Dispatcher* dispatcher)
     : InterfaceProxy(dispatcher),
       callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 PPB_Flash_Menu_Proxy::~PPB_Flash_Menu_Proxy() {
-}
-
-// static
-const InterfaceProxy::Info* PPB_Flash_Menu_Proxy::GetInfo() {
-  static const Info info = {
-    ppapi::thunk::GetPPB_Flash_Menu_Thunk(),
-    PPB_FLASH_MENU_INTERFACE,
-    INTERFACE_ID_PPB_FLASH_MENU,
-    true,
-    &CreateFlashMenuProxy,
-  };
-  return &info;
 }
 
 // static
@@ -117,7 +96,7 @@ PP_Resource PPB_Flash_Menu_Proxy::CreateProxyResource(
     return 0;
 
   dispatcher->Send(new PpapiHostMsg_PPBFlashMenu_Create(
-      INTERFACE_ID_PPB_FLASH_MENU, instance_id, serialized_menu, &result));
+      API_ID_PPB_FLASH_MENU, instance_id, serialized_menu, &result));
   if (result.is_null())
     return 0;
   return (new FlashMenu(result))->GetReference();
@@ -182,7 +161,7 @@ void PPB_Flash_Menu_Proxy::SendShowACKToPlugin(
     int32_t result,
     ShowRequest* request) {
   dispatcher()->Send(new PpapiMsg_PPBFlashMenu_ShowACK(
-      INTERFACE_ID_PPB_FLASH_MENU,
+      API_ID_PPB_FLASH_MENU,
       request->menu,
       request->selected_id,
       result));

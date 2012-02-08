@@ -18,10 +18,11 @@ class ClipboardMessageFilter : public BrowserMessageFilter {
  public:
   ClipboardMessageFilter();
 
-  virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
+  virtual void OverrideThreadForMessage(
+      const IPC::Message& message,
+      content::BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
  private:
   virtual ~ClipboardMessageFilter();
 
@@ -29,6 +30,8 @@ class ClipboardMessageFilter : public BrowserMessageFilter {
   void OnWriteObjectsSync(const ui::Clipboard::ObjectMap& objects,
                           base::SharedMemoryHandle bitmap_handle);
 
+  void OnGetSequenceNumber(const ui::Clipboard::Buffer buffer,
+                           uint64* sequence_number);
   void OnIsFormatAvailable(const ui::Clipboard::FormatType& format,
                            ui::Clipboard::Buffer buffer,
                            bool* result);
@@ -41,14 +44,12 @@ class ClipboardMessageFilter : public BrowserMessageFilter {
                   uint32* fragment_start, uint32* fragment_end);
   void OnReadImage(ui::Clipboard::Buffer buffer, IPC::Message* reply_msg);
   void OnReadImageReply(const SkBitmap& bitmap, IPC::Message* reply_msg);
+  void OnReadCustomData(ui::Clipboard::Buffer buffer,
+                        const string16& type,
+                        string16* result);
 #if defined(OS_MACOSX)
   void OnFindPboardWriteString(const string16& text);
 #endif
-  void OnReadData(ui::Clipboard::Buffer buffer, const string16& type,
-                  bool* succeeded, string16* data, string16* metadata);
-  void OnReadFilenames(ui::Clipboard::Buffer buffer, bool* succeeded,
-                       std::vector<string16>* filenames);
-  void OnGetSequenceNumber(uint64* seq_num);
 
   // We have our own clipboard because we want to access the clipboard on the
   // IO thread instead of forwarding (possibly synchronous) messages to the UI

@@ -13,9 +13,11 @@ namespace {
 
 const char* kOriginNames[] = {
   "Link Rel Prerender",
-  "Omnibox (original)",
+  "[Deprecated] Omnibox (original)",
   "GWS Prerender",
-  "Omnibox (conservative)",
+  "[Deprecated] Omnibox (conservative)",
+  "Omnibox (exact)",
+  "Omnibox (exact full)",
   "Max"
 };
 COMPILE_ASSERT(arraysize(kOriginNames) == ORIGIN_MAX + 1,

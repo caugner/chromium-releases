@@ -8,8 +8,10 @@
 
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/cros/chromeos_cryptohome.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 

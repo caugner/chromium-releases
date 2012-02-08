@@ -11,19 +11,21 @@
 #include "chrome/browser/certificate_viewer.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/constrained_window_views.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "net/base/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/table_model.h"
 #include "ui/base/models/table_model_observer.h"
 #include "ui/gfx/native_widget_types.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/label.h"
-#include "views/controls/table/table_view.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/table/table_view.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -175,8 +177,8 @@ void SSLClientCertificateSelector::DeleteDelegate() {
 }
 
 bool SSLClientCertificateSelector::IsDialogButtonEnabled(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return !!GetSelectedCert();
   return true;
 }

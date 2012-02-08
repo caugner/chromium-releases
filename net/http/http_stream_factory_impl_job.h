@@ -7,7 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
@@ -23,11 +23,7 @@ namespace net {
 class ClientSocketHandle;
 class HttpAuthController;
 class HttpNetworkSession;
-class HttpProxySocketParams;
 class HttpStream;
-class SOCKSSocketParams;
-class SSLSocketParams;
-class TransportSocketParams;
 
 // An HttpStreamRequestImpl exists for each stream which is in progress of being
 // created for the StreamFactory.
@@ -49,8 +45,7 @@ class HttpStreamFactoryImpl::Job {
   // appropriate ClientSocketPool.
   int Preconnect(int num_streams);
 
-  int RestartTunnelWithProxyAuth(const string16& username,
-                                 const string16& password);
+  int RestartTunnelWithProxyAuth(const AuthCredentials& credentials);
   LoadState GetLoadState() const;
 
   // Marks this Job as the "alternate" job, from Alternate-Protocol. Tracks the
@@ -197,10 +192,10 @@ class HttpStreamFactoryImpl::Job {
   // Should we force SPDY to run without SSL for this stream request.
   bool ShouldForceSpdyWithoutSSL() const;
 
+  bool IsRequestEligibleForPipelining();
+
   // Record histograms of latency until Connect() completes.
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
-
-  void HACKCrashHereToDebug80095();
 
   Request* request_;
 
@@ -276,7 +271,10 @@ class HttpStreamFactoryImpl::Job {
   // Only used if |new_spdy_session_| is non-NULL.
   bool spdy_session_direct_;
 
-  ScopedRunnableMethodFactory<Job> method_factory_;
+  // True if an existing pipeline can handle this job's request.
+  bool existing_available_pipeline_;
+
+  base::WeakPtrFactory<Job> ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Job);
 };

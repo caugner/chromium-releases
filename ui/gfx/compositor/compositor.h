@@ -13,16 +13,29 @@
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/size.h"
 
+class SkBitmap;
 class SkCanvas;
 namespace gfx {
 class Point;
 class Rect;
+class ScopedMakeCurrent;
 }
 
 namespace ui {
 
 class CompositorObserver;
 class Layer;
+
+class SharedResources {
+ public:
+  virtual ~SharedResources() {}
+
+  // Creates an instance of ScopedMakeCurrent.
+  // Note: Caller is responsible for managing lifetime of returned pointer.
+  virtual gfx::ScopedMakeCurrent* GetScopedMakeCurrent() = 0;
+
+  virtual void* GetDisplay() = 0;
+};
 
 struct TextureDrawParams {
   TextureDrawParams();
@@ -107,12 +120,14 @@ class COMPOSITOR_EXPORT Compositor : public base::RefCounted<Compositor> {
   virtual void Blur(const gfx::Rect& bounds) = 0;
 
   // Schedules a redraw of the layer tree associated with this compositor.
-  void ScheduleDraw() {
-    delegate_->ScheduleDraw();
-  }
+  virtual void ScheduleDraw();
 
-  // Sets the root of the layer tree drawn by this Compositor.
+  // Sets the root of the layer tree drawn by this Compositor. The root layer
+  // must have no parent. The compositor's root layer is reset if the root layer
+  // is destroyed. NULL can be passed to reset the root layer, in which case the
+  // compositor will stop drawing anything.
   // The Compositor does not own the root layer.
+  const Layer* root_layer() const { return root_layer_; }
   Layer* root_layer() { return root_layer_; }
   void SetRootLayer(Layer* root_layer);
 
@@ -120,6 +135,11 @@ class COMPOSITOR_EXPORT Compositor : public base::RefCounted<Compositor> {
   // |force_clear| is true, this will cause the compositor to clear before
   // compositing.
   void Draw(bool force_clear);
+
+  // Reads the region |bounds| of the contents of the last rendered frame
+  // into the given bitmap.
+  // Returns false if the pixels could not be read.
+  virtual bool ReadPixels(SkBitmap* bitmap, const gfx::Rect& bounds) = 0;
 
   // Notifies the compositor that the size of the widget that it is
   // drawing to has changed.
@@ -139,6 +159,16 @@ class COMPOSITOR_EXPORT Compositor : public base::RefCounted<Compositor> {
   void RemoveObserver(CompositorObserver* observer);
   bool HasObserver(CompositorObserver* observer);
 
+  static void set_compositor_factory_for_testing(
+      ui::Compositor*(*factory)(ui::CompositorDelegate* owner)) {
+    compositor_factory_ = factory;
+  }
+
+  static ui::Compositor* (*compositor_factory())(
+      ui::CompositorDelegate* owner) {
+    return compositor_factory_;
+  }
+
  protected:
   Compositor(CompositorDelegate* delegate, const gfx::Size& size);
   virtual ~Compositor();
@@ -150,8 +180,15 @@ class COMPOSITOR_EXPORT Compositor : public base::RefCounted<Compositor> {
   virtual void OnNotifyEnd() = 0;
 
   virtual void OnWidgetSizeChanged() = 0;
+  virtual void OnRootLayerChanged();
+  virtual void DrawTree();
 
   CompositorDelegate* delegate() { return delegate_; }
+
+  // When reading back pixel data we often get RGBA rather than BGRA pixels and
+  // and the image often needs to be flipped vertically.
+  static void SwizzleRGBAToBGRAAndFlip(unsigned char* pixels,
+                                       const gfx::Size& image_size);
 
  private:
   // Notifies the compositor that compositing is about to start. See Draw() for
@@ -168,6 +205,12 @@ class COMPOSITOR_EXPORT Compositor : public base::RefCounted<Compositor> {
   Layer* root_layer_;
 
   ObserverList<CompositorObserver> observer_list_;
+
+  // Factory used to create Compositors. Settable by tests.
+  // The delegate can be NULL if you don't wish to catch the ScheduleDraw()
+  // calls to it.
+  static ui::Compositor*(*compositor_factory_)(
+      ui::CompositorDelegate* delegate);
 
   friend class base::RefCounted<Compositor>;
 };

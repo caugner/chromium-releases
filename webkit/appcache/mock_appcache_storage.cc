@@ -4,6 +4,7 @@
 
 #include "webkit/appcache/mock_appcache_storage.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
@@ -28,12 +29,13 @@ namespace appcache {
 
 MockAppCacheStorage::MockAppCacheStorage(AppCacheService* service)
     : AppCacheStorage(service),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       simulate_make_group_obsolete_failure_(false),
       simulate_store_group_and_newest_cache_failure_(false),
       simulate_find_main_resource_(false),
       simulate_find_sub_resource_(false),
       simulated_found_cache_id_(kNoCacheId),
+      simulated_found_group_id_(0),
       simulated_found_network_namespace_(false) {
   last_cache_id_ = 0;
   last_group_id_ = 0;
@@ -41,22 +43,23 @@ MockAppCacheStorage::MockAppCacheStorage(AppCacheService* service)
 }
 
 MockAppCacheStorage::~MockAppCacheStorage() {
-  STLDeleteElements(&pending_tasks_);
 }
 
 void MockAppCacheStorage::GetAllInfo(Delegate* delegate) {
-  ScheduleTask(method_factory_.NewRunnableMethod(
-      &MockAppCacheStorage::ProcessGetAllInfo,
-      make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
+  ScheduleTask(
+      base::Bind(&MockAppCacheStorage::ProcessGetAllInfo,
+                 weak_factory_.GetWeakPtr(),
+                 make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
 }
 
 void MockAppCacheStorage::LoadCache(int64 id, Delegate* delegate) {
   DCHECK(delegate);
   AppCache* cache = working_set_.GetCache(id);
   if (ShouldCacheLoadAppearAsync(cache)) {
-    ScheduleTask(method_factory_.NewRunnableMethod(
-        &MockAppCacheStorage::ProcessLoadCache,
-        id, make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
+    ScheduleTask(
+        base::Bind(&MockAppCacheStorage::ProcessLoadCache,
+                   weak_factory_.GetWeakPtr(), id,
+                   make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
     return;
   }
   ProcessLoadCache(id, GetOrCreateDelegateReference(delegate));
@@ -67,10 +70,10 @@ void MockAppCacheStorage::LoadOrCreateGroup(
   DCHECK(delegate);
   AppCacheGroup* group = working_set_.GetGroup(manifest_url);
   if (ShouldGroupLoadAppearAsync(group)) {
-    ScheduleTask(method_factory_.NewRunnableMethod(
-        &MockAppCacheStorage::ProcessLoadOrCreateGroup,
-        manifest_url,
-        make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
+    ScheduleTask(
+        base::Bind(&MockAppCacheStorage::ProcessLoadOrCreateGroup,
+                   weak_factory_.GetWeakPtr(), manifest_url,
+                   make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
     return;
   }
   ProcessLoadOrCreateGroup(
@@ -82,11 +85,11 @@ void MockAppCacheStorage::StoreGroupAndNewestCache(
   DCHECK(group && delegate && newest_cache);
 
   // Always make this operation look async.
-  ScheduleTask(method_factory_.NewRunnableMethod(
-      &MockAppCacheStorage::ProcessStoreGroupAndNewestCache,
-      make_scoped_refptr(group),
-      make_scoped_refptr(newest_cache),
-      make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
+  ScheduleTask(
+      base::Bind(&MockAppCacheStorage::ProcessStoreGroupAndNewestCache,
+                 weak_factory_.GetWeakPtr(), make_scoped_refptr(group),
+                 make_scoped_refptr(newest_cache),
+                 make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
 }
 
 void MockAppCacheStorage::FindResponseForMainRequest(
@@ -96,10 +99,10 @@ void MockAppCacheStorage::FindResponseForMainRequest(
   // Note: MockAppCacheStorage does not respect the preferred_manifest_url.
 
   // Always make this operation look async.
-  ScheduleTask(method_factory_.NewRunnableMethod(
-      &MockAppCacheStorage::ProcessFindResponseForMainRequest,
-      url,
-      make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
+  ScheduleTask(
+      base::Bind(&MockAppCacheStorage::ProcessFindResponseForMainRequest,
+                 weak_factory_.GetWeakPtr(), url,
+                 make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
 }
 
 void MockAppCacheStorage::FindResponseForSubRequest(
@@ -139,22 +142,22 @@ void MockAppCacheStorage::MakeGroupObsolete(
   DCHECK(group && delegate);
 
   // Always make this method look async.
-  ScheduleTask(method_factory_.NewRunnableMethod(
-      &MockAppCacheStorage::ProcessMakeGroupObsolete,
-      make_scoped_refptr(group),
-      make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
+  ScheduleTask(
+      base::Bind(&MockAppCacheStorage::ProcessMakeGroupObsolete,
+                 weak_factory_.GetWeakPtr(), make_scoped_refptr(group),
+                 make_scoped_refptr(GetOrCreateDelegateReference(delegate))));
 }
 
 AppCacheResponseReader* MockAppCacheStorage::CreateResponseReader(
-    const GURL& manifest_url, int64 response_id) {
+    const GURL& manifest_url, int64 group_id, int64 response_id) {
   if (simulated_reader_.get())
     return simulated_reader_.release();
-  return new AppCacheResponseReader(response_id, disk_cache());
+  return new AppCacheResponseReader(response_id, group_id, disk_cache());
 }
 
 AppCacheResponseWriter* MockAppCacheStorage::CreateResponseWriter(
-    const GURL& manifest_url) {
-  return new AppCacheResponseWriter(NewResponseId(), disk_cache());
+    const GURL& manifest_url, int64 group_id) {
+  return new AppCacheResponseWriter(NewResponseId(),  group_id, disk_cache());
 }
 
 void MockAppCacheStorage::DoomResponses(
@@ -232,10 +235,12 @@ struct FoundCandidate {
   GURL url;
   AppCacheEntry entry;
   int64 cache_id;
+  int64 group_id;
   GURL manifest_url;
   bool is_cache_in_use;
 
-  FoundCandidate() : cache_id(kNoCacheId), is_cache_in_use(false) {}
+  FoundCandidate()
+      : cache_id(kNoCacheId), group_id(0), is_cache_in_use(false) {}
 };
 
 }  // namespace
@@ -248,7 +253,8 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
       delegate_ref->delegate->OnMainResponseFound(
           url, simulated_found_entry_,
           simulated_found_fallback_url_, simulated_found_fallback_entry_,
-          simulated_found_cache_id_, simulated_found_manifest_url_);
+          simulated_found_cache_id_, simulated_found_group_id_,
+          simulated_found_manifest_url_);
     }
     return;
   }
@@ -305,6 +311,7 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
       found_candidate.url = url;
       found_candidate.entry = found_entry;
       found_candidate.cache_id = cache->cache_id();
+      found_candidate.group_id = group->group_id();
       found_candidate.manifest_url = group->manifest_url();
       found_candidate.is_cache_in_use = is_in_use;
       if (is_in_use)
@@ -337,6 +344,7 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
             cache->GetFallbackEntryUrl(found_fallback_namespace);
         found_fallback_candidate.entry = found_fallback_entry;
         found_fallback_candidate.cache_id = cache->cache_id();
+        found_fallback_candidate.group_id = group->group_id();
         found_fallback_candidate.manifest_url = group->manifest_url();
         found_fallback_candidate.is_cache_in_use = is_in_use;
         found_fallback_candidate_namespace = found_fallback_namespace;
@@ -348,7 +356,8 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
   if (found_candidate.entry.has_response_id()) {
     delegate_ref->delegate->OnMainResponseFound(
         url, found_candidate.entry, GURL(), AppCacheEntry(),
-        found_candidate.cache_id, found_candidate.manifest_url);
+        found_candidate.cache_id, found_candidate.group_id,
+        found_candidate.manifest_url);
     return;
   }
 
@@ -359,13 +368,14 @@ void MockAppCacheStorage::ProcessFindResponseForMainRequest(
         found_fallback_candidate.url,
         found_fallback_candidate.entry,
         found_fallback_candidate.cache_id,
+        found_fallback_candidate.group_id,
         found_fallback_candidate.manifest_url);
     return;
   }
 
   // Didn't find anything.
   delegate_ref->delegate->OnMainResponseFound(
-      url, AppCacheEntry(), GURL(), AppCacheEntry(), kNoCacheId, GURL());
+      url, AppCacheEntry(), GURL(), AppCacheEntry(), kNoCacheId, 0, GURL());
 }
 
 void MockAppCacheStorage::ProcessMakeGroupObsolete(
@@ -397,19 +407,19 @@ void MockAppCacheStorage::ProcessMakeGroupObsolete(
     delegate_ref->delegate->OnGroupMadeObsolete(group, true);
 }
 
-void MockAppCacheStorage::ScheduleTask(Task* task) {
+void MockAppCacheStorage::ScheduleTask(const base::Closure& task) {
   pending_tasks_.push_back(task);
-  MessageLoop::current()->PostTask(FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &MockAppCacheStorage::RunOnePendingTask));
+  MessageLoop::current()->PostTask(
+      FROM_HERE,
+      base::Bind(&MockAppCacheStorage::RunOnePendingTask,
+                 weak_factory_.GetWeakPtr()));
 }
 
 void MockAppCacheStorage::RunOnePendingTask() {
   DCHECK(!pending_tasks_.empty());
-  Task* task = pending_tasks_.front();
+  base::Closure task = pending_tasks_.front();
   pending_tasks_.pop_front();
-  task->Run();
-  delete task;
+  task.Run();
 }
 
 void MockAppCacheStorage::AddStoredCache(AppCache* cache) {

@@ -12,12 +12,15 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
-static base::LazyInstance<OwnershipService> g_ownership_service(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<OwnershipService> g_ownership_service =
+    LAZY_INSTANCE_INITIALIZER;
 
 //  static
 OwnershipService* OwnershipService::GetSharedInstance() {
@@ -27,12 +30,11 @@ OwnershipService* OwnershipService::GetSharedInstance() {
 OwnershipService::OwnershipService()
     : manager_(new OwnerManager),
       utils_(OwnerKeyUtils::Create()),
-      policy_(NULL),
       ownership_status_(OWNERSHIP_UNKNOWN) {
   notification_registrar_.Add(
       this,
       chrome::NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
 }
 
 OwnershipService::~OwnershipService() {}
@@ -52,19 +54,6 @@ void OwnershipService::Prewarm() {
     // DISABLE_RUNNABLE_METHOD_REFCOUNT.  So avoid posting task in those
     // circumstances in order to avoid accessing already deleted object.
   }
-}
-
-void OwnershipService::set_cached_policy(const em::PolicyData& pol) {
-  policy_.reset(pol.New());
-  policy_->CheckTypeAndMergeFrom(pol);
-}
-
-bool OwnershipService::has_cached_policy() {
-  return policy_.get();
-}
-
-const em::PolicyData& OwnershipService::cached_policy() {
-  return *(policy_.get());
 }
 
 bool OwnershipService::IsAlreadyOwned() {
@@ -138,8 +127,8 @@ void OwnershipService::StartVerifyAttempt(const std::string& data,
 }
 
 void OwnershipService::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_OWNER_KEY_FETCH_ATTEMPT_SUCCEEDED) {
     SetStatus(OWNERSHIP_TAKEN);
     notification_registrar_.RemoveAll();

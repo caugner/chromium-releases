@@ -12,11 +12,12 @@
 #include "base/synchronization/lock.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_login_delegate.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 namespace net {
 class AuthChallengeInfo;
+class HttpNetworkSession;
 class URLRequest;
 }  // namespace net
 
@@ -29,7 +30,7 @@ class RenderViewHostDelegate;
 // must be implemented in a thread safe manner.
 class LoginHandler : public ResourceDispatcherHostLoginDelegate,
                      public LoginModelObserver,
-                     public NotificationObserver {
+                     public content::NotificationObserver {
  public:
   LoginHandler(net::AuthChallengeInfo* auth_info, net::URLRequest* request);
   virtual ~LoginHandler();
@@ -40,7 +41,7 @@ class LoginHandler : public ResourceDispatcherHostLoginDelegate,
                               net::URLRequest* request);
 
   // ResourceDispatcherHostLoginDelegate implementation:
-  virtual void OnRequestCancelled();
+  virtual void OnRequestCancelled() OVERRIDE;
 
   // Initializes the underlying platform specific view.
   virtual void BuildViewForPasswordManager(PasswordManager* manager,
@@ -65,13 +66,13 @@ class LoginHandler : public ResourceDispatcherHostLoginDelegate,
   // This function can be called from either thread.
   void CancelAuth();
 
-  // Implements the NotificationObserver interface.
+  // Implements the content::NotificationObserver interface.
   // Listens for AUTH_SUPPLIED and AUTH_CANCELLED notifications from other
   // LoginHandlers so that this LoginHandler has the chance to dismiss itself
   // if it was waiting for the same authentication.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Who/where/what asked for the authentication.
   const net::AuthChallengeInfo* auth_info() const { return auth_info_.get(); }
@@ -133,6 +134,9 @@ class LoginHandler : public ResourceDispatcherHostLoginDelegate,
   // This should only be accessed on the IO loop.
   net::URLRequest* request_;
 
+  // The HttpNetworkSession |request_| is associated with.
+  const net::HttpNetworkSession* http_network_session_;
+
   // The PasswordForm sent to the PasswordManager. This is so we can refer to it
   // when later notifying the password manager if the credentials were accepted
   // or rejected.
@@ -153,11 +157,11 @@ class LoginHandler : public ResourceDispatcherHostLoginDelegate,
   LoginModel* login_model_;
 
   // Observes other login handlers so this login handler can respond.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 };
 
-// Details to provide the NotificationObserver.  Used by the automation proxy
-// for testing.
+// Details to provide the content::NotificationObserver.  Used by the automation
+// proxy for testing.
 class LoginNotificationDetails {
  public:
   explicit LoginNotificationDetails(LoginHandler* handler)

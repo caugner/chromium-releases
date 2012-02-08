@@ -15,7 +15,7 @@
 #include "chrome/browser/content_settings/content_settings_observable_provider.h"
 #include "chrome/browser/content_settings/content_settings_origin_identifier_value_map.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "content/common/notification_observer.h"
+#include "content/public/browser/notification_observer.h"
 
 class PrefService;
 
@@ -23,7 +23,7 @@ namespace content_settings {
 
 // PolicyProvider that provides managed content-settings.
 class PolicyProvider : public ObservableProvider,
-                       public NotificationObserver {
+                       public content::NotificationObserver {
  public:
   explicit PolicyProvider(PrefService* prefs);
   virtual ~PolicyProvider();
@@ -35,22 +35,22 @@ class PolicyProvider : public ObservableProvider,
       const ResourceIdentifier& resource_identifier,
       bool incognito) const OVERRIDE;
 
-  virtual void SetContentSetting(
+  virtual bool SetWebsiteSetting(
       const ContentSettingsPattern& primary_pattern,
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
-      ContentSetting content_setting) OVERRIDE;
+      Value* value) OVERRIDE;
 
   virtual void ClearAllContentSettingsRules(
       ContentSettingsType content_type) OVERRIDE;
 
   virtual void ShutdownOnUIThread() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
  private:
   // Reads the policy managed default settings.
   void ReadManagedDefaultSettings();

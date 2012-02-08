@@ -4,10 +4,12 @@
 
 #include "content/renderer/renderer_webstoragearea_impl.h"
 
+#include "base/metrics/histogram.h"
+#include "base/time.h"
 #include "content/common/dom_storage_messages.h"
 #include "content/renderer/render_thread_impl.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 
 using WebKit::WebStorageNamespace;
 using WebKit::WebString;
@@ -22,6 +24,20 @@ RendererWebStorageAreaImpl::RendererWebStorageAreaImpl(
 
 RendererWebStorageAreaImpl::~RendererWebStorageAreaImpl() {
 }
+
+// In November 2011 stats were recorded about performance of each of the
+// DOMStorage operations. Results of median, 99% quantile, and 99.9% quantile
+// are provided in milliseconds. The ratio of number of calls for each operation
+// relative to the number of calls to getItem is also provided.
+//
+// Operation    Freq     50%     99%     99.9%
+// -------------------------------------------
+// getItem      1.00     0.6     2.0     27.9
+// setItem      .029     0.7     13.6    114.9
+// removeItem   .003     0.9     11.8    90.7
+// length       .017     0.6     2.0     12.0
+// key          .591     0.6     2.0     29.9
+// clear        1e-6     1.0     32.4    605.2
 
 unsigned RendererWebStorageAreaImpl::length() {
   unsigned length;

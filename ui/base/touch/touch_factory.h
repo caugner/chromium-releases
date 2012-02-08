@@ -79,9 +79,9 @@ class UI_EXPORT TouchFactory {
   // Is the device a touch-device?
   bool IsTouchDevice(unsigned int deviceid) const;
 
-  // Is the device a real touch-device? (see doc. for |touch_device_list_| below
-  // for more explanation.)
-  bool IsRealTouchDevice(unsigned int deviceid) const;
+  // Is the device a real multi-touch-device? (see doc. for |touch_device_list_|
+  // below for more explanation.)
+  bool IsMultiTouchDevice(unsigned int deviceid) const;
 
 #if defined(USE_XI2_MT)
   // Tries to find an existing slot ID mapping to tracking ID. If there
@@ -134,9 +134,6 @@ class UI_EXPORT TouchFactory {
                           float* min,
                           float* max);
 
-  void set_keep_mouse_cursor(bool keep) { keep_mouse_cursor_ = keep; }
-  bool keep_mouse_cursor() const { return keep_mouse_cursor_; }
-
  private:
   TouchFactory();
 
@@ -157,10 +154,6 @@ class UI_EXPORT TouchFactory {
   // idle for a while. Once there is some event from a mouse device, the cursor
   // is immediately displayed.
   bool is_cursor_visible_;
-
-  // Whether to turn off automatic hiding of mouse cursor. This is useful for
-  // debugging touch build on the desktop.
-  bool keep_mouse_cursor_;
 
   // The cursor is hidden if it is idle for a certain amount time. This timer
   // is used to keep track of the idleness.
@@ -191,10 +184,11 @@ class UI_EXPORT TouchFactory {
   // Indicates whether a touch device is currently available or not.
   bool touch_device_available_;
 
-  // The list of touch devices. For testing/debugging purposes, a mouse-device
+  // The list of touch devices. For testing/debugging purposes, a single-pointer
+  // device (mouse or touch screen without sufficient X/driver support for MT)
   // can sometimes be treated as a touch device. The key in the map represents
-  // the device id, and the value represents if the device is a real touch
-  // device (when true) or if the device is really a mouse device.
+  // the device id, and the value represents if the device is multi-touch
+  // capable.
   std::map<int, bool> touch_device_list_;
 
   // Index table to find the valuator for the TouchParam on the specific device

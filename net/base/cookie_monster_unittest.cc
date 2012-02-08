@@ -21,6 +21,7 @@
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_monster_store_test.h"  // For CookieStore mock
+#include "net/base/cookie_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -1852,7 +1853,7 @@ TEST_F(CookieMonsterTest, TestDomainIsHostOnly) {
 
   for (size_t i = 0; i < arraysize(tests); ++i) {
     EXPECT_EQ(tests[i].is_host_only,
-              CookieMonster::DomainIsHostOnly(tests[i].str));
+              cookie_util::DomainIsHostOnly(tests[i].str));
   }
 }
 
@@ -3536,6 +3537,84 @@ TEST_F(MultiThreadedCookieMonsterTest, ThreadCheckDeleteCanonicalCookie) {
   RunOnOtherThread(task);
   EXPECT_TRUE(callback.did_run());
   EXPECT_TRUE(callback.result());
+}
+
+TEST_F(CookieMonsterTest, ShortLivedSessionCookies) {
+  scoped_refptr<MockPersistentCookieStore> store(
+      new MockPersistentCookieStore);
+  scoped_refptr<CookieMonster> cm(new CookieMonster(store, NULL));
+
+  // Create a short-lived session cookie.
+  CookieOptions options;
+  options.set_force_session();
+  Time current = Time::Now();
+  EXPECT_TRUE(SetCookieWithOptions(cm, url_google_,
+                                   std::string(kValidCookieLine) +
+                                   "; max-age=10",
+                                   options));
+
+  // FindCookiesForKey asserts that its caller holds this lock.
+  base::AutoLock auto_lock(cm->lock_);
+
+  // Get cookies before the cookie has expired.
+  std::vector<CookieMonster::CanonicalCookie*> cookies;
+  cm->FindCookiesForKey(cm->GetKey(url_google_.host()), url_google_,
+                        CookieOptions(), current, false, &cookies);
+  EXPECT_EQ(1U, cookies.size());
+
+  // Get cookies after the cookie has expired.
+  cookies.clear();
+  cm->FindCookiesForKey(cm->GetKey(url_google_.host()), url_google_,
+                        CookieOptions(), current + TimeDelta::FromSeconds(20),
+                        false, &cookies);
+  EXPECT_EQ(0U, cookies.size());
+}
+
+TEST_F(CookieMonsterTest, InvalidExpiryTime) {
+  CookieMonster::ParsedCookie pc(
+      std::string(kValidCookieLine) + "; expires=Blarg arg arg");
+  scoped_ptr<CookieMonster::CanonicalCookie> cookie(
+      CookieMonster::CanonicalCookie::Create(url_google_, pc));
+
+  ASSERT_FALSE(cookie->DoesExpire());
+}
+
+// Test that CookieMonster writes session cookies into the underlying
+// CookieStore if the "persist session cookies" option is on.
+TEST_F(CookieMonsterTest, PersistSessionCookies) {
+  scoped_refptr<MockPersistentCookieStore> store(
+      new MockPersistentCookieStore);
+  scoped_refptr<CookieMonster> cm(new CookieMonster(store, NULL));
+  cm->SetPersistSessionCookies(true);
+
+  // All cookies set with SetCookie are session cookies.
+  EXPECT_TRUE(SetCookie(cm, url_google_, "A=B"));
+  EXPECT_EQ("A=B", GetCookies(cm, url_google_));
+
+  // The cookie was written to the backing store.
+  EXPECT_EQ(1u, store->commands().size());
+  EXPECT_EQ(CookieStoreCommand::ADD, store->commands()[0].type);
+  EXPECT_EQ("A", store->commands()[0].cookie.Name());
+  EXPECT_EQ("B", store->commands()[0].cookie.Value());
+
+  // Modify the cookie.
+  EXPECT_TRUE(SetCookie(cm, url_google_, "A=C"));
+  EXPECT_EQ("A=C", GetCookies(cm, url_google_));
+  EXPECT_EQ(3u, store->commands().size());
+  EXPECT_EQ(CookieStoreCommand::REMOVE, store->commands()[1].type);
+  EXPECT_EQ("A", store->commands()[1].cookie.Name());
+  EXPECT_EQ("B", store->commands()[1].cookie.Value());
+  EXPECT_EQ(CookieStoreCommand::ADD, store->commands()[2].type);
+  EXPECT_EQ("A", store->commands()[2].cookie.Name());
+  EXPECT_EQ("C", store->commands()[2].cookie.Value());
+
+  // Delete the cookie.
+  DeleteCookie(cm, url_google_, "A");
+  EXPECT_EQ("", GetCookies(cm, url_google_));
+  EXPECT_EQ(4u, store->commands().size());
+  EXPECT_EQ(CookieStoreCommand::REMOVE, store->commands()[3].type);
+  EXPECT_EQ("A", store->commands()[3].cookie.Name());
+  EXPECT_EQ("C", store->commands()[3].cookie.Value());
 }
 
 }  // namespace net

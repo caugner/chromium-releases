@@ -5,11 +5,12 @@
 #include "base/location.h"
 #include "chrome/browser/sync/engine/verify_updates_command.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
+#include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/sessions/sync_session.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
-#include "chrome/browser/sync/engine/mock_model_safe_workers.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/syncable/syncable_id.h"
+#include "chrome/browser/sync/test/engine/fake_model_worker.h"
 #include "chrome/browser/sync/test/engine/syncer_command_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -31,8 +32,8 @@ class VerifyUpdatesCommandTest : public SyncerCommandTest {
   virtual void SetUp() {
     workers()->clear();
     mutable_routing_info()->clear();
-    workers()->push_back(make_scoped_refptr(new MockDBModelWorker()));
-    workers()->push_back(make_scoped_refptr(new MockUIModelWorker()));
+    workers()->push_back(make_scoped_refptr(new FakeModelWorker(GROUP_DB)));
+    workers()->push_back(make_scoped_refptr(new FakeModelWorker(GROUP_UI)));
     (*mutable_routing_info())[syncable::PREFERENCES] = GROUP_UI;
     (*mutable_routing_info())[syncable::BOOKMARKS] = GROUP_UI;
     (*mutable_routing_info())[syncable::AUTOFILL] = GROUP_DB;
@@ -81,27 +82,33 @@ TEST_F(VerifyUpdatesCommandTest, AllVerified) {
   CreateLocalItem("p1", root, syncable::PREFERENCES);
   CreateLocalItem("a1", root, syncable::AUTOFILL);
 
-  GetUpdatesResponse* updates = session()->status_controller()->
+  ExpectNoGroupsToChange(command_);
+
+  GetUpdatesResponse* updates = session()->mutable_status_controller()->
       mutable_updates_response()->mutable_get_updates();
   AddUpdate(updates, "b1", root, syncable::BOOKMARKS);
   AddUpdate(updates, "b2", root, syncable::BOOKMARKS);
   AddUpdate(updates, "p1", root, syncable::PREFERENCES);
   AddUpdate(updates, "a1", root, syncable::AUTOFILL);
 
+  ExpectGroupsToChange(command_, GROUP_UI, GROUP_DB);
+
   command_.ExecuteImpl(session());
 
-  StatusController* status = session()->status_controller();
+  StatusController* status = session()->mutable_status_controller();
   {
     sessions::ScopedModelSafeGroupRestriction r(status, GROUP_UI);
-    EXPECT_EQ(3, status->update_progress().VerifiedUpdatesSize());
+    ASSERT_TRUE(status->update_progress());
+    EXPECT_EQ(3, status->update_progress()->VerifiedUpdatesSize());
   }
   {
     sessions::ScopedModelSafeGroupRestriction r(status, GROUP_DB);
-    EXPECT_EQ(1, status->update_progress().VerifiedUpdatesSize());
+    ASSERT_TRUE(status->update_progress());
+    EXPECT_EQ(1, status->update_progress()->VerifiedUpdatesSize());
   }
   {
     sessions::ScopedModelSafeGroupRestriction r(status, GROUP_PASSIVE);
-    EXPECT_EQ(0, status->update_progress().VerifiedUpdatesSize());
+    EXPECT_FALSE(status->update_progress());
   }
 }
 

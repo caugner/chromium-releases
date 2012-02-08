@@ -307,19 +307,27 @@ Chrome supports. -->
         Continue running background apps when Google Chrome is closed
       </message>
       <message name="IDS_CANT_WRITE_USER_DIRECTORY_SUMMARY" desc="Summary of problem displayed in dialog when we can't create a directory for this user.">
-        Google Chrome cannot read and write to its data directory:\n\n<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph>
+Google Chrome cannot read and write to its data directory:
+
+<ph name="USER_DATA_DIRECTORY">$1<ex>C:\Documents and Settings\devint\Local Settings\Application Data\Google\Chrome</ex></ph>
       </message>
       <message name="IDS_EULA_CHECKBOX_ENABLE_LOGGING" desc="The label of the checkbox to enable/disable crash and user metrics logging on EULA screen.">
         Optional: Help make Chrome OS better by automatically sending usage statistics and crash reports to Google.
       </message>
       <message name="IDS_PROFILE_TOO_NEW_ERROR" desc="Error displayed on startup when the profile is from a newer version of the product and can not be read">
-        Your profile can not be used because it is from a newer version of Google Chrome.\n\nSome features may be unavailable. Please specify a different profile directory or use a newer version of Chrome.
+Your profile can not be used because it is from a newer version of Google Chrome.
+
+Some features may be unavailable. Please specify a different profile directory or use a newer version of Chrome.
       </message>
       <message name="IDS_PREFERENCES_UNREADABLE_ERROR" desc="Error displayed on startup when user preferences file can not be read">
-        Your preferences can not be read.\n\nSome features may be unavailable and changes to preferences won't be saved.
+Your preferences can not be read.
+
+Some features may be unavailable and changes to preferences won't be saved.
       </message>
       <message name="IDS_PREFERENCES_CORRUPT_ERROR" desc="Error displayed on startup when user preferences file can not be read">
-        Your preferences file is corrupt or invalid.\n\nGoogle Chrome is unable to recover your settings.
+Your preferences file is corrupt or invalid.
+
+Google Chrome is unable to recover your settings.
       </message>
       <!-- Crash Recovery Dialog -->
       <message name="IDS_CRASH_RECOVERY_TITLE" desc="Title of dialog shown when the browser crashes.">
@@ -349,8 +357,8 @@ Chrome supports. -->
       <message name="IDS_INSTALL_HIGHER_VERSION_CB_CF" desc="Error displayed when higher version of Chrome and Chrome Frame already exists">
         This computer already has a more recent version of Google Chrome and Google Chrome Frame. If the software is not working, please uninstall both Google Chrome and Google Chrome Frame and try again.
       </message>
-      <message name="IDS_INSTALL_SYSTEM_LEVEL_EXISTS" desc="Error displayed during user level install if system level Chromium is already installed.">
-        Google Chrome is already installed and available to all users of this computer. If you want to install Google Chrome at the user level, you must first uninstall the system-level version installed by an administrator.
+      <message name="IDS_INSTALL_SYSTEM_LEVEL_EXISTS" desc="Error displayed during user level install if system level Chrome Frame is already installed.">
+        Google Chrome Frame is already installed and available to all users of this computer. If you want to install Google Chrome Frame at the user level, you must first uninstall the system-level version installed by an administrator.
       </message>
       <message name="IDS_INSTALL_FAILED" desc="Error displayed if installation fails due to some unknown error.">
         Installation failed due to unspecified error. If Google Chrome is currently running, please close it and try again.
@@ -388,9 +396,6 @@ Chrome supports. -->
       <message name="IDS_INSTALL_APP_CONFLICT" desc="Error displayed if installation fails due to another existing application.">
         A conflict with another installed application has been detected.
       </message>
-      <message name="IDS_UNINSTALL_FAILED" desc="Error during uninstall if we can not find the installation directory from registry.">
-        Google Chrome is not installed or it failed to find installation directory. Please download Google Chrome again.
-      </message>
       <message name="IDS_UNINSTALL_COMPLETE" desc="Text displayed on dialog that is shown when uninstall is complete and no reboot is required.">
         Uninstallation complete.
       </message>
@@ -403,14 +408,11 @@ Chrome supports. -->
       <message name="IDS_INSTALL_MULTI_INSTALLATION_EXISTS" desc="Error during install if a multi-install Google Chrome or Google Chrome Frame is present, thereby preventing the installation of a single-install Google Chrome or Google Chrome Frame.">
         A conflicting installation of Google Chrome or Google Chrome Frame was found on the system. Please uninstall it and try again.
       </message>
-      <message name="IDS_INSTALL_CONFLICTING_CHANNEL_EXISTS" desc="Error during install if a version of Google Chrome on a different update channel exists when installing Google Chrome Frame.">
-        A conflicting installation of Google Chrome was found on the system. Please uninstall it and try again.
-      </message>
       <message name="IDS_INSTALL_READY_MODE_REQUIRES_CHROME" desc="Chrome Frame in ready mode requires Chrome.">
         Invalid arguments. Google Chrome Frame cannot be installed in ready mode without also installing Google Chrome.
       </message>
       <message name="IDS_INSTALL_INCONSISTENT_UPDATE_POLICY" desc="Error during install if the update policies settings in Group Policy are inconsistent.">
-        Google Chrome or Google Chrome Frame cannot be updated on account of inconsistent Google Update Group Policy settings. Use the Group Policy Editor to set the update policy override for the Google Chrome Binaries application and try again.
+        Google Chrome or Google Chrome Frame cannot be updated due to inconsistent Google Update Group Policy settings. Use the Group Policy Editor to set the update policy override for the Google Chrome Binaries application and try again; see http://goo.gl/uJ9gV for details.
       </message>
       <!-- Options Dialog -->
       <message name="IDS_OPTIONS_IMPROVE_BROWSING_EXPERIENCE" desc="The text in the options panel that describes how we use web services to improve browsing experience.">

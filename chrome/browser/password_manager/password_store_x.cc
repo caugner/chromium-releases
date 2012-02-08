@@ -13,11 +13,12 @@
 #include "base/stl_util.h"
 #include "chrome/browser/password_manager/password_store_change.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "chrome/common/pref_names.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 
+using content::BrowserThread;
 using std::vector;
 using webkit_glue::PasswordForm;
 
@@ -37,10 +38,10 @@ void PasswordStoreX::AddLoginImpl(const PasswordForm& form) {
   if (use_native_backend() && backend_->AddLogin(form)) {
     PasswordStoreChangeList changes;
     changes.push_back(PasswordStoreChange(PasswordStoreChange::ADD, form));
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_LOGINS_CHANGED,
-        Source<PasswordStore>(this),
-        Details<PasswordStoreChangeList>(&changes));
+        content::Source<PasswordStore>(this),
+        content::Details<PasswordStoreChangeList>(&changes));
     allow_fallback_ = false;
   } else if (allow_default_store()) {
     PasswordStoreDefault::AddLoginImpl(form);
@@ -52,10 +53,10 @@ void PasswordStoreX::UpdateLoginImpl(const PasswordForm& form) {
   if (use_native_backend() && backend_->UpdateLogin(form)) {
     PasswordStoreChangeList changes;
     changes.push_back(PasswordStoreChange(PasswordStoreChange::UPDATE, form));
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_LOGINS_CHANGED,
-        Source<PasswordStore>(this),
-        Details<PasswordStoreChangeList>(&changes));
+        content::Source<PasswordStore>(this),
+        content::Details<PasswordStoreChangeList>(&changes));
     allow_fallback_ = false;
   } else if (allow_default_store()) {
     PasswordStoreDefault::UpdateLoginImpl(form);
@@ -67,10 +68,10 @@ void PasswordStoreX::RemoveLoginImpl(const PasswordForm& form) {
   if (use_native_backend() && backend_->RemoveLogin(form)) {
     PasswordStoreChangeList changes;
     changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE, form));
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_LOGINS_CHANGED,
-        Source<PasswordStore>(this),
-        Details<PasswordStoreChangeList>(&changes));
+        content::Source<PasswordStore>(this),
+        content::Details<PasswordStoreChangeList>(&changes));
     allow_fallback_ = false;
   } else if (allow_default_store()) {
     PasswordStoreDefault::RemoveLoginImpl(form);
@@ -91,10 +92,10 @@ void PasswordStoreX::RemoveLoginsCreatedBetweenImpl(
       changes.push_back(PasswordStoreChange(PasswordStoreChange::REMOVE,
                                             **it));
     }
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_LOGINS_CHANGED,
-        Source<PasswordStore>(this),
-        Details<PasswordStoreChangeList>(&changes));
+        content::Source<PasswordStore>(this),
+        content::Details<PasswordStoreChangeList>(&changes));
     allow_fallback_ = false;
   } else if (allow_default_store()) {
     PasswordStoreDefault::RemoveLoginsCreatedBetweenImpl(delete_begin,
@@ -298,6 +299,6 @@ void PasswordStoreX::SetPasswordsUseLocalProfileId(PrefService* prefs) {
   // This method should work on any thread, but we expect the DB thread.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::Bind(UISetPasswordsUseLocalProfileId, prefs));
+                          base::Bind(&UISetPasswordsUseLocalProfileId, prefs));
 }
 #endif  // !defined(OS_MACOSX) && !defined(OS_CHROMEOS) && defined(OS_POSIX)

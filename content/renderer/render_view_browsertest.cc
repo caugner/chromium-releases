@@ -13,8 +13,8 @@
 #include "content/test/render_view_test.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/range/range.h"
@@ -521,9 +521,16 @@ TEST_F(RenderViewImplTest, OnSetTextDirection) {
   }
 }
 
+#if defined(USE_AURA)
+// crbug.com/103499.
+#define MAYBE_OnHandleKeyboardEvent DISABLED_OnHandleKeyboardEvent
+#else
+#define MAYBE_OnHandleKeyboardEvent OnHandleKeyboardEvent
+#endif
+
 // Test that we can receive correct DOM events when we send input events
 // through the RenderWidget::OnHandleInputEvent() function.
-TEST_F(RenderViewImplTest, OnHandleKeyboardEvent) {
+TEST_F(RenderViewImplTest, MAYBE_OnHandleKeyboardEvent) {
 #if !defined(OS_MACOSX)
   // Load an HTML page consisting of one <input> element and three
   // contentediable <div> elements.
@@ -667,11 +674,18 @@ TEST_F(RenderViewImplTest, OnHandleKeyboardEvent) {
 #endif
 }
 
+#if defined(USE_AURA)
+// crbug.com/103499.
+#define MAYBE_InsertCharacters DISABLED_InsertCharacters
+#else
+#define MAYBE_InsertCharacters InsertCharacters
+#endif
+
 // Test that our EditorClientImpl class can insert characters when we send
 // keyboard events through the RenderWidget::OnHandleInputEvent() function.
 // This test is for preventing regressions caused only when we use non-US
 // keyboards, such as Issue 10846.
-TEST_F(RenderViewImplTest, InsertCharacters) {
+TEST_F(RenderViewImplTest, MAYBE_InsertCharacters) {
 #if !defined(OS_MACOSX)
   static const struct {
     MockKeyboard::Layout layout;

@@ -29,7 +29,7 @@
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_size.h"
 #include "ppapi/c/dev/pp_video_dev.h"
-#include "ppapi/c/private/ppb_flash_tcp_socket.h"
+#include "ppapi/c/private/ppb_tcp_socket_private.h"
 #include "ppapi/proxy/ppapi_param_traits.h"
 #include "ppapi/proxy/ppapi_proxy_export.h"
 #include "ppapi/proxy/serialized_flash_menu.h"
@@ -193,10 +193,6 @@ IPC_SYNC_MESSAGE_CONTROL1_1(PpapiMsg_SupportsInterface,
                             std::string /* interface_name */,
                             bool /* result */)
 
-IPC_MESSAGE_CONTROL2(PpapiMsg_ExecuteCallback,
-                     uint32 /* serialized_callback */,
-                     int32 /* param */)
-
 // Broker Process.
 
 IPC_SYNC_MESSAGE_CONTROL2_1(PpapiMsg_ConnectToPlugin,
@@ -220,6 +216,14 @@ IPC_MESSAGE_ROUTED5(PpapiMsg_PPBAudio_NotifyAudioStreamCreated,
                     base::SharedMemoryHandle /* handle */,
                     int32_t /* length */)
 
+// PPB_AudioInput_Dev.
+IPC_MESSAGE_ROUTED5(PpapiMsg_PPBAudioInput_NotifyAudioStreamCreated,
+                    ppapi::HostResource /* audio_id */,
+                    int32_t /* result_code (will be != PP_OK on failure) */,
+                    IPC::PlatformFileForTransit /* socket_handle */,
+                    base::SharedMemoryHandle /* handle */,
+                    int32_t /* length */)
+
 // PPB_Broker.
 IPC_MESSAGE_ROUTED3(
     PpapiMsg_PPBBroker_ConnectComplete,
@@ -233,6 +237,13 @@ IPC_MESSAGE_ROUTED3(
     ppapi::HostResource /* chooser */,
     int32_t /* result_code (will be != PP_OK on failure */,
     std::vector<ppapi::PPB_FileRef_CreateInfo> /* chosen_files */)
+
+// PPB_FileRef.
+IPC_MESSAGE_ROUTED3(
+    PpapiMsg_PPBFileRef_CallbackComplete,
+    ppapi::HostResource /* resource */,
+    int /* callback_id */,
+    int32_t /* result */)
 
 // PPB_FileSystem.
 IPC_MESSAGE_ROUTED2(
@@ -248,40 +259,40 @@ IPC_MESSAGE_ROUTED5(PpapiMsg_PPBFlashNetConnector_ConnectACK,
                     std::string /* local_addr_as_string */,
                     std::string /* remote_addr_as_string */)
 
-// PPB_Flash_TCPSocket.
-IPC_MESSAGE_ROUTED5(PpapiMsg_PPBFlashTCPSocket_ConnectACK,
+// PPB_TCPSocket_Private.
+IPC_MESSAGE_ROUTED5(PpapiMsg_PPBTCPSocket_ConnectACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */,
-                    PP_Flash_NetAddress /* local_addr */,
-                    PP_Flash_NetAddress /* remote_addr */)
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPBFlashTCPSocket_SSLHandshakeACK,
+                    PP_NetAddress_Private /* local_addr */,
+                    PP_NetAddress_Private /* remote_addr */)
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */)
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPBFlashTCPSocket_ReadACK,
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPBTCPSocket_ReadACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */,
                     std::string /* data */)
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPBFlashTCPSocket_WriteACK,
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPBTCPSocket_WriteACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */,
                     int32_t /* bytes_written */)
 
-// PPB_Flash_UDPSocket
-IPC_MESSAGE_ROUTED3(PpapiMsg_PPBFlashUDPSocket_BindACK,
+// PPB_UDPSocket_Private
+IPC_MESSAGE_ROUTED3(PpapiMsg_PPBUDPSocket_BindACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */)
-IPC_MESSAGE_ROUTED5(PpapiMsg_PPBFlashUDPSocket_RecvFromACK,
+IPC_MESSAGE_ROUTED5(PpapiMsg_PPBUDPSocket_RecvFromACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */,
                     std::string /* data */,
-                    PP_Flash_NetAddress /* remote_addr */)
-IPC_MESSAGE_ROUTED4(PpapiMsg_PPBFlashUDPSocket_SendToACK,
+                    PP_NetAddress_Private /* remote_addr */)
+IPC_MESSAGE_ROUTED4(PpapiMsg_PPBUDPSocket_SendToACK,
                     uint32 /* plugin_dispatcher_id */,
                     uint32 /* socket_id */,
                     bool /* succeeded */,
@@ -297,10 +308,10 @@ IPC_MESSAGE_ROUTED2(PpapiMsg_PPBGraphics3D_SwapBuffersACK,
                     ppapi::HostResource /* graphics_3d */,
                     int32_t /* pp_error */)
 
-// PPB_Surface3D.
-IPC_MESSAGE_ROUTED2(PpapiMsg_PPBSurface3D_SwapBuffersACK,
-                    ppapi::HostResource /* surface_3d */,
-                    int32_t /* pp_error */)
+// PPB_Instance.
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPBInstance_MouseLockComplete,
+                    PP_Instance /* instance */,
+                    int32_t /* result */)
 
 // PPP_Class.
 IPC_SYNC_MESSAGE_ROUTED3_2(PpapiMsg_PPPClass_HasProperty,
@@ -412,6 +423,9 @@ IPC_MESSAGE_ROUTED3(PpapiMsg_PPBURLLoader_ReadResponseBody_Ack,
                     ppapi::HostResource /* loader */,
                     int32 /* result */,
                     std::string /* data */)
+IPC_MESSAGE_ROUTED2(PpapiMsg_PPBURLLoader_CallbackComplete,
+                    ppapi::HostResource /* loader */,
+                    int32_t /* result */)
 
 // PPP_VideoCapture_Dev
 IPC_MESSAGE_ROUTED3(
@@ -479,6 +493,16 @@ IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBAudio_StartOrStop,
                     ppapi::HostResource /* audio_id */,
                     bool /* play */)
 
+// PPB_AudioInput.
+IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBAudioInput_Create,
+                           PP_Instance /* instance_id */,
+                           int32_t /* sample_rate */,
+                           uint32_t /* sample_frame_count */,
+                           ppapi::HostResource /* result */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBAudioInput_StartOrStop,
+                    ppapi::HostResource /* audio_id */,
+                    bool /* capture */)
+
 // PPB_Broker.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBBroker_Create,
                            PP_Instance /* instance */,
@@ -492,53 +516,6 @@ IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBBuffer_Create,
                            uint32_t /* size */,
                            ppapi::HostResource /* result_resource */,
                            base::SharedMemoryHandle /* result_shm_handle */)
-
-// PPB_Context3D.
-IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBContext3D_Create,
-                           PP_Instance /* instance */,
-                           int32_t /* config */,
-                           std::vector<int32_t> /* attrib_list */,
-                           ppapi::HostResource /* result */)
-
-IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBContext3D_BindSurfaces,
-                           ppapi::HostResource /* context */,
-                           ppapi::HostResource /* draw */,
-                           ppapi::HostResource /* read */,
-                           int32_t /* result */)
-
-IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBContext3D_Initialize,
-                           ppapi::HostResource /* context */,
-                           int32 /* size */,
-                           base::SharedMemoryHandle /* ring_buffer */)
-
-IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBContext3D_GetState,
-                           ppapi::HostResource /* context */,
-                           gpu::CommandBuffer::State /* state */)
-
-IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBContext3D_Flush,
-                           ppapi::HostResource /* context */,
-                           int32 /* put_offset */,
-                           int32 /* last_known_get */,
-                           gpu::CommandBuffer::State /* state */)
-
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBContext3D_AsyncFlush,
-                    ppapi::HostResource /* context */,
-                    int32 /* put_offset */)
-
-IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBContext3D_CreateTransferBuffer,
-                           ppapi::HostResource /* context */,
-                           int32 /* size */,
-                           int32 /* id */)
-
-IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBContext3D_DestroyTransferBuffer,
-                           ppapi::HostResource /* context */,
-                           int32 /* id */)
-
-IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBContext3D_GetTransferBuffer,
-                           ppapi::HostResource /* context */,
-                           int32 /* id */,
-                           base::SharedMemoryHandle /* transfer_buffer */,
-                           uint32 /* size */)
 
 // PPB_Core.
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBCore_AddRefResource,
@@ -578,7 +555,6 @@ IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBFileChooser_Show,
                     std::string /* suggested_file_name */,
                     bool /* require_user_gesture */)
 
-
 // PPB_FileRef.
 IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBFileRef_Create,
                            ppapi::HostResource /* file_system */,
@@ -590,19 +566,22 @@ IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFileRef_GetParent,
 IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBFileRef_MakeDirectory,
                     ppapi::HostResource /* file_ref */,
                     PP_Bool /* make_ancestors */,
-                    uint32_t /* serialized_callback */)
+                    int /* callback_id */)
 IPC_MESSAGE_ROUTED4(PpapiHostMsg_PPBFileRef_Touch,
                     ppapi::HostResource /* file_ref */,
                     PP_Time /* last_access */,
                     PP_Time /* last_modified */,
-                    uint32_t /* serialized_callback */)
+                    int /* callback_id */)
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBFileRef_Delete,
                     ppapi::HostResource /* file_ref */,
-                    uint32_t /* serialized_callback */)
+                    int /* callback_id */)
 IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBFileRef_Rename,
                     ppapi::HostResource /* file_ref */,
                     ppapi::HostResource /* new_file_ref */,
-                    uint32_t /* serialized_callback */)
+                    int /* callback_id */)
+IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBFileRef_GetAbsolutePath,
+                           ppapi::HostResource /* file_ref */,
+                           ppapi::proxy::SerializedVar /* result */)
 
 // PPB_FileSystem.
 IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBFileSystem_Create,
@@ -727,47 +706,47 @@ IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBFlashNetConnector_ConnectTcpAddress,
                     ppapi::HostResource /* connector */,
                     std::string /* net_address_as_string */)
 
-// PPB_Flash_TCPSocket.
-IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBFlashTCPSocket_Create,
+// PPB_TCPSocket_Private.
+IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBTCPSocket_Create,
                             int32 /* routing_id */,
                             uint32 /* plugin_dispatcher_id */,
                             uint32 /* socket_id */)
-IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBFlashTCPSocket_Connect,
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBTCPSocket_Connect,
                      uint32 /* socket_id */,
                      std::string /* host */,
                      uint16_t /* port */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashTCPSocket_ConnectWithNetAddress,
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBTCPSocket_ConnectWithNetAddress,
                      uint32 /* socket_id */,
-                     PP_Flash_NetAddress /* net_addr */)
-IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBFlashTCPSocket_SSLHandshake,
+                     PP_NetAddress_Private /* net_addr */)
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBTCPSocket_SSLHandshake,
                      uint32 /* socket_id */,
                      std::string /* server_name */,
                      uint16_t /* server_port */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashTCPSocket_Read,
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBTCPSocket_Read,
                      uint32 /* socket_id */,
                      int32_t /* bytes_to_read */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashTCPSocket_Write,
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBTCPSocket_Write,
                      uint32 /* socket_id */,
                      std::string /* data */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBFlashTCPSocket_Disconnect,
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBTCPSocket_Disconnect,
                      uint32 /* socket_id */)
 
-// PPB_Flash_UDPSocket
-IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBFlashUDPSocket_Create,
+// PPB_UDPSocket_Private.
+IPC_SYNC_MESSAGE_CONTROL2_1(PpapiHostMsg_PPBUDPSocket_Create,
                             int32 /* routing_id */,
                             uint32 /* plugin_dispatcher_id */,
                             uint32 /* socket_id */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashUDPSocket_Bind,
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBUDPSocket_Bind,
                      uint32 /* socket_id */,
-                     PP_Flash_NetAddress /* net_addr */)
-IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBFlashUDPSocket_RecvFrom,
+                     PP_NetAddress_Private /* net_addr */)
+IPC_MESSAGE_CONTROL2(PpapiHostMsg_PPBUDPSocket_RecvFrom,
                      uint32 /* socket_id */,
                      int32_t /* num_bytes */)
-IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBFlashUDPSocket_SendTo,
+IPC_MESSAGE_CONTROL3(PpapiHostMsg_PPBUDPSocket_SendTo,
                      uint32 /* socket_id */,
                      std::string /* data */,
-                     PP_Flash_NetAddress /* net_addr */)
-IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBFlashUDPSocket_Close,
+                     PP_NetAddress_Private /* net_addr */)
+IPC_MESSAGE_CONTROL1(PpapiHostMsg_PPBUDPSocket_Close,
                      uint32 /* socket_id */)
 
 // PPB_Font.
@@ -775,6 +754,11 @@ IPC_SYNC_MESSAGE_CONTROL0_1(PpapiHostMsg_PPBFont_GetFontFamilies,
                             std::string /* result */)
 
 // PPB_Graphics2D.
+IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBGraphics2D_Create,
+                           PP_Instance /* instance */,
+                           PP_Size /* size */,
+                           PP_Bool /* is_always_opaque */,
+                           ppapi::HostResource /* result */)
 IPC_MESSAGE_ROUTED5(PpapiHostMsg_PPBGraphics2D_PaintImageData,
                     ppapi::HostResource /* graphics_2d */,
                     ppapi::HostResource /* image_data */,
@@ -797,43 +781,45 @@ IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBGraphics3D_Create,
                            PP_Instance /* instance */,
                            std::vector<int32_t> /* attrib_list */,
                            ppapi::HostResource /* result */)
-
 IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBGraphics3D_InitCommandBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* size */,
                            base::SharedMemoryHandle /* ring_buffer */)
-
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBGraphics3D_GetState,
                            ppapi::HostResource /* context */,
                            gpu::CommandBuffer::State /* state */)
-
 IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBGraphics3D_Flush,
                            ppapi::HostResource /* context */,
                            int32 /* put_offset */,
                            int32 /* last_known_get */,
                            gpu::CommandBuffer::State /* state */)
-
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBGraphics3D_AsyncFlush,
                     ppapi::HostResource /* context */,
                     int32 /* put_offset */)
-
 IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBGraphics3D_CreateTransferBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* size */,
                            int32 /* id */)
-
 IPC_SYNC_MESSAGE_ROUTED2_0(PpapiHostMsg_PPBGraphics3D_DestroyTransferBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* id */)
-
 IPC_SYNC_MESSAGE_ROUTED2_2(PpapiHostMsg_PPBGraphics3D_GetTransferBuffer,
                            ppapi::HostResource /* context */,
                            int32 /* id */,
                            base::SharedMemoryHandle /* transfer_buffer */,
                            uint32 /* size */)
-
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBGraphics3D_SwapBuffers,
                     ppapi::HostResource /* graphics_3d */)
+
+// PPB_ImageData.
+IPC_SYNC_MESSAGE_ROUTED4_3(PpapiHostMsg_PPBImageData_Create,
+                           PP_Instance /* instance */,
+                           int32 /* format */,
+                           PP_Size /* size */,
+                           PP_Bool /* init_to_zero */,
+                           ppapi::HostResource /* result_resource */,
+                           std::string /* image_data_desc */,
+                           ppapi::proxy::ImageHandle /* result */)
 
 // PPB_Instance.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBInstance_GetWindowObject,
@@ -892,9 +878,8 @@ IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_ClearInputEvents,
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_PostMessage,
                     PP_Instance /* instance */,
                     ppapi::proxy::SerializedVar /* message */)
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBInstance_LockMouse,
-                    PP_Instance /* instance */,
-                    uint32_t /* serialized_callback */)
+IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_LockMouse,
+                    PP_Instance /* instance */)
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBInstance_UnlockMouse,
                     PP_Instance /* instance */)
 IPC_SYNC_MESSAGE_ROUTED2_1(PpapiHostMsg_PPBInstance_ResolveRelativeToDocument,
@@ -928,15 +913,6 @@ IPC_SYNC_MESSAGE_ROUTED2_1(
     uint32_t /* table */,
     std::string /* result */)
 
-// PPB_Surface3D.
-IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBSurface3D_Create,
-                           PP_Instance /* instance */,
-                           int32_t /* config */,
-                           std::vector<int32_t> /* attrib_list */,
-                           ppapi::HostResource /* result */)
-IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBSurface3D_SwapBuffers,
-                    ppapi::HostResource /* surface_3d */)
-
 // PPB_Testing.
 IPC_SYNC_MESSAGE_ROUTED3_1(
     PpapiHostMsg_PPBTesting_ReadImageData,
@@ -947,6 +923,9 @@ IPC_SYNC_MESSAGE_ROUTED3_1(
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBTesting_GetLiveObjectsForInstance,
                            PP_Instance /* instance */,
                            uint32 /* result */)
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBTesting_SimulateInputEvent,
+                    PP_Instance /* instance */,
+                    ppapi::InputEventData /* input_event */)
 
 // PPB_TextInput.
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBTextInput_SetTextInputType,
@@ -963,13 +942,11 @@ IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBTextInput_CancelCompositionText,
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBURLLoader_Create,
                            PP_Instance /* instance */,
                            ppapi::HostResource /* result */)
-IPC_MESSAGE_ROUTED3(PpapiHostMsg_PPBURLLoader_Open,
+IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBURLLoader_Open,
                     ppapi::HostResource /* loader */,
-                    ppapi::PPB_URLRequestInfo_Data /* request_data */,
-                    uint32_t /* serialized_callback */)
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBURLLoader_FollowRedirect,
-                    ppapi::HostResource /* loader */,
-                    uint32_t /* serialized_callback */)
+                    ppapi::PPB_URLRequestInfo_Data /* request_data */)
+IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBURLLoader_FollowRedirect,
+                    ppapi::HostResource /* loader */)
 IPC_SYNC_MESSAGE_ROUTED1_1(
     PpapiHostMsg_PPBURLLoader_GetResponseInfo,
     ppapi::HostResource /* loader */,
@@ -977,9 +954,8 @@ IPC_SYNC_MESSAGE_ROUTED1_1(
 IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBURLLoader_ReadResponseBody,
                     ppapi::HostResource /* loader */,
                     int32_t /* bytes_to_read */)
-IPC_MESSAGE_ROUTED2(PpapiHostMsg_PPBURLLoader_FinishStreamingToFile,
-                    ppapi::HostResource /* loader */,
-                    uint32_t /* serialized_callback */)
+IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBURLLoader_FinishStreamingToFile,
+                    ppapi::HostResource /* loader */)
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBURLLoader_Close,
                     ppapi::HostResource /* loader */)
 IPC_MESSAGE_ROUTED1(PpapiHostMsg_PPBURLLoader_GrantUniversalAccess,
@@ -1056,20 +1032,6 @@ IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_PPBVar_CreateObjectDeprecated,
                            int64 /* object_class */,
                            int64 /* object_data */,
                            ppapi::proxy::SerializedVar /* result */)
-
-IPC_SYNC_MESSAGE_ROUTED3_1(PpapiHostMsg_ResourceCreation_Graphics2D,
-                           PP_Instance /* instance */,
-                           PP_Size /* size */,
-                           PP_Bool /* is_always_opaque */,
-                           ppapi::HostResource /* result */)
-IPC_SYNC_MESSAGE_ROUTED4_3(PpapiHostMsg_ResourceCreation_ImageData,
-                           PP_Instance /* instance */,
-                           int32 /* format */,
-                           PP_Size /* size */,
-                           PP_Bool /* init_to_zero */,
-                           ppapi::HostResource /* result_resource */,
-                           std::string /* image_data_desc */,
-                           ppapi::proxy::ImageHandle /* result */)
 
 // PPB_VideoCapture_Dev.
 IPC_SYNC_MESSAGE_ROUTED1_1(PpapiHostMsg_PPBVideoCapture_Create,

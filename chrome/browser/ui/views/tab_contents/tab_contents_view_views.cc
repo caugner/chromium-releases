@@ -7,25 +7,23 @@
 #include <vector>
 
 #include "base/time.h"
-#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/ui/constrained_window.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/views/sad_tab_view.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view.h"
 #include "chrome/browser/ui/views/tab_contents/render_view_context_menu_views.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/public/browser/render_process_host.h"
 #include "ui/gfx/screen.h"
-#include "views/focus/focus_manager.h"
-#include "views/focus/view_storage.h"
-#include "views/widget/native_widget.h"
-#include "views/widget/widget.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/focus/view_storage.h"
+#include "ui/views/widget/native_widget.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -39,9 +37,9 @@ using WebKit::WebInputEvent;
 TabContentsViewViews::TabContentsViewViews(TabContents* tab_contents)
     : tab_contents_(tab_contents),
       native_tab_contents_view_(NULL),
-      sad_tab_(NULL),
       close_tab_after_drag_ends_(false),
-      focus_manager_(NULL) {
+      focus_manager_(NULL),
+      overlaid_view_(NULL) {
   last_focused_view_storage_id_ =
       views::ViewStorage::GetInstance()->CreateStorageID();
 }
@@ -89,12 +87,6 @@ RenderWidgetHostView* TabContentsViewViews::CreateViewForWidget(
     return render_widget_host->view();
   }
 
-  // If we were showing sad tab, remove it now.
-  if (sad_tab_) {
-    SetContentsView(new views::View());
-    sad_tab_ = NULL;
-  }
-
   return native_tab_contents_view_->CreateRenderWidgetHostView(
       render_widget_host);
 }
@@ -130,22 +122,6 @@ void TabContentsViewViews::SetPageTitle(const string16& title) {
 
 void TabContentsViewViews::OnTabCrashed(base::TerminationStatus status,
                                         int /* error_code */) {
-  // Only show the sad tab if we're not in browser shutdown, so that TabContents
-  // objects that are not in a browser (e.g., HTML dialogs) and thus are
-  // visible do not flash a sad tab page.
-  if (browser_shutdown::GetShutdownType() != browser_shutdown::NOT_VALID)
-    return;
-
-  // Force an invalidation to render sad tab.
-  // Note that it's possible to get this message after the window was destroyed.
-  if (GetNativeView()) {
-    SadTabView::Kind kind =
-        status == base::TERMINATION_STATUS_PROCESS_WAS_KILLED ?
-        SadTabView::KILLED : SadTabView::CRASHED;
-    sad_tab_ = new SadTabView(tab_contents_, kind);
-    SetContentsView(sad_tab_);
-    sad_tab_->SchedulePaint();
-  }
 }
 
 void TabContentsViewViews::SizeContents(const gfx::Size& size) {
@@ -169,8 +145,8 @@ void TabContentsViewViews::Focus() {
     return;
   }
 
-  if (tab_contents_->is_crashed() && sad_tab_ != NULL) {
-    sad_tab_->RequestFocus();
+  if (overlaid_view_) {
+    overlaid_view_->GetContentsView()->RequestFocus();
     return;
   }
 
@@ -281,6 +257,19 @@ void TabContentsViewViews::GetViewBounds(gfx::Rect* out) const {
   *out = GetWindowScreenBounds();
 }
 
+void TabContentsViewViews::InstallOverlayView(gfx::NativeView view) {
+  DCHECK(!overlaid_view_);
+  views::Widget::ReparentNativeView(view, GetNativeView());
+  overlaid_view_ = views::Widget::GetWidgetForNativeView(view);
+  overlaid_view_->SetBounds(gfx::Rect(GetClientAreaScreenBounds().size()));
+}
+
+void TabContentsViewViews::RemoveOverlayView() {
+  DCHECK(overlaid_view_);
+  overlaid_view_->Close();
+  overlaid_view_ = NULL;
+}
+
 void TabContentsViewViews::UpdateDragCursor(WebDragOperation operation) {
   native_tab_contents_view_->SetDragCursor(operation);
 }
@@ -381,7 +370,7 @@ TabContents* TabContentsViewViews::GetTabContents() {
 }
 
 bool TabContentsViewViews::IsShowingSadTab() const {
-  return tab_contents_->is_crashed() && sad_tab_;
+  return tab_contents_->is_crashed() && overlaid_view_;
 }
 
 void TabContentsViewViews::OnNativeTabContentsViewShown() {
@@ -437,10 +426,15 @@ views::internal::NativeWidgetDelegate*
 // TabContentsViewViews, views::Widget overrides:
 
 views::FocusManager* TabContentsViewViews::GetFocusManager() {
-  views::FocusManager* focus_manager = Widget::GetFocusManager();
+  return const_cast<views::FocusManager*>(
+      static_cast<const TabContentsViewViews*>(this)->GetFocusManager());
+}
+
+const views::FocusManager* TabContentsViewViews::GetFocusManager() const {
+  const views::FocusManager* focus_manager = Widget::GetFocusManager();
   if (focus_manager) {
-    // If focus_manager_ is non NULL, it means we have been reparented, in which
-    // case its value may not be valid anymore.
+    // If |focus_manager| is non NULL, it means we have been reparented, in
+    // which case |focus_manager_| may not be valid anymore.
     focus_manager_ = NULL;
     return focus_manager;
   }
@@ -459,4 +453,11 @@ void TabContentsViewViews::OnNativeWidgetVisibilityChanged(bool visible) {
   } else {
     tab_contents_->HideContents();
   }
+}
+
+void TabContentsViewViews::OnNativeWidgetSizeChanged(
+    const gfx::Size& new_size) {
+  if (overlaid_view_)
+    overlaid_view_->SetBounds(gfx::Rect(new_size));
+  views::Widget::OnNativeWidgetSizeChanged(new_size);
 }

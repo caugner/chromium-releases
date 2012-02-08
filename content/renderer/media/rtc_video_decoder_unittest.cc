@@ -114,6 +114,8 @@ class RTCVideoDecoderTest : public testing::Test {
   RTCVideoDecoderTest() {
     decoder_ = new RTCVideoDecoder(&message_loop_, kUrl);
     renderer_ = new MockVideoRenderer();
+    read_cb_ = base::Bind(&RTCVideoDecoderTest::FrameReady,
+                          base::Unretained(this));
 
     DCHECK(decoder_);
 
@@ -141,12 +143,15 @@ class RTCVideoDecoderTest : public testing::Test {
                       base::Unretained(&stats_callback_object_));
   }
 
+  MOCK_METHOD1(FrameReady, void(scoped_refptr<media::VideoFrame>));
+
   // Fixture members.
   scoped_refptr<RTCVideoDecoder> decoder_;
   scoped_refptr<MockVideoRenderer> renderer_;
   MockStatisticsCallback stats_callback_object_;
   StrictMock<MockFilterHost> host_;
   MessageLoop message_loop_;
+  media::VideoDecoder::ReadCB read_cb_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RTCVideoDecoderTest);
@@ -171,17 +176,25 @@ TEST_F(RTCVideoDecoderTest, DoSeek) {
 
   InitializeDecoderSuccessfully();
 
-  decoder_->set_consume_video_frame_callback(
-      base::Bind(&MockVideoRenderer::ConsumeVideoFrame,
-                 base::Unretained(renderer_.get())));
-
-  // Expect Seek and verify the results.
-  EXPECT_CALL(*renderer_.get(), ConsumeVideoFrame(_))
-      .Times(Limits::kMaxVideoFrames);
+  // Expect seek and verify the results.
   decoder_->Seek(kZero, NewExpectedStatusCB(PIPELINE_OK));
 
   message_loop_.RunAllPending();
   EXPECT_EQ(RTCVideoDecoder::kNormal, decoder_->state_);
+}
+
+TEST_F(RTCVideoDecoderTest, DoFlush) {
+  const base::TimeDelta kZero;
+
+  InitializeDecoderSuccessfully();
+
+  EXPECT_CALL(*this, FrameReady(_));
+  decoder_->Read(read_cb_);
+  decoder_->Pause(media::NewExpectedClosure());
+  decoder_->Flush(media::NewExpectedClosure());
+
+  message_loop_.RunAllPending();
+  EXPECT_EQ(RTCVideoDecoder::kPaused, decoder_->state_);
 }
 
 TEST_F(RTCVideoDecoderTest, DoRenderFrame) {
@@ -189,18 +202,6 @@ TEST_F(RTCVideoDecoderTest, DoRenderFrame) {
   EXPECT_CALL(host_, GetTime()).WillRepeatedly(Return(base::TimeDelta()));
 
   InitializeDecoderSuccessfully();
-
-  // Pass the frame back to decoder
-  decoder_->set_consume_video_frame_callback(
-      base::Bind(&RTCVideoDecoder::ProduceVideoFrame,
-                 base::Unretained(decoder_.get())));
-  decoder_->Seek(kZero, NewExpectedStatusCB(PIPELINE_OK));
-
-  decoder_->set_consume_video_frame_callback(
-      base::Bind(&MockVideoRenderer::ConsumeVideoFrame,
-                 base::Unretained(renderer_.get())));
-  EXPECT_CALL(*renderer_.get(), ConsumeVideoFrame(_))
-      .Times(Limits::kMaxVideoFrames);
 
   NullVideoFrame video_frame;
 

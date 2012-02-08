@@ -12,14 +12,8 @@
 #include "ui/gfx/native_widget_types.h"
 
 class GpuProcessHost;
-class GpuProcessHostUIShim;
 struct GPUCreateCommandBufferConfig;
-struct GPUInfo;
 class RenderWidgetHelper;
-
-namespace IPC {
-struct ChannelHandle;
-}
 
 // A message filter for messages from the renderer to the GpuProcessHost(UIShim)
 // in the browser. Such messages are typically destined for the GPU process,
@@ -32,11 +26,10 @@ class GpuMessageFilter : public BrowserMessageFilter,
 
   // BrowserMessageFilter methods:
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
-  virtual void OnDestruct() const;
+                                 bool* message_was_ok) OVERRIDE;
 
  private:
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<GpuMessageFilter>;
   virtual ~GpuMessageFilter();
 

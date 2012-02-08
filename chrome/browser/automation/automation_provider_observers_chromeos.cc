@@ -14,21 +14,22 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 using chromeos::CrosLibrary;
 using chromeos::NetworkLibrary;
 
 NetworkManagerInitObserver::NetworkManagerInitObserver(
     AutomationProvider* automation)
-    : automation_(automation->AsWeakPtr()) {}
+    : automation_(automation->AsWeakPtr()) {
+}
 
 NetworkManagerInitObserver::~NetworkManagerInitObserver() {
     CrosLibrary::Get()->GetNetworkLibrary()->RemoveNetworkManagerObserver(this);
 }
 
 bool NetworkManagerInitObserver::Init() {
-  if (!CrosLibrary::Get()->EnsureLoaded()) {
+  if (!CrosLibrary::Get()->libcros_loaded()) {
     // If cros library fails to load, don't wait for the network
     // library to finish initializing, because it'll wait forever.
     automation_->OnNetworkLibraryInit();
@@ -41,7 +42,8 @@ bool NetworkManagerInitObserver::Init() {
 
 void NetworkManagerInitObserver::OnNetworkManagerChanged(NetworkLibrary* obj) {
   if (!obj->wifi_scanning()) {
-    automation_->OnNetworkLibraryInit();
+    if (automation_)
+      automation_->OnNetworkLibraryInit();
     delete this;
   }
 }
@@ -50,17 +52,19 @@ LoginWebuiReadyObserver::LoginWebuiReadyObserver(
     AutomationProvider* automation)
     : automation_(automation->AsWeakPtr()) {
   registrar_.Add(this, chrome::NOTIFICATION_LOGIN_WEBUI_READY,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 LoginWebuiReadyObserver::~LoginWebuiReadyObserver() {
 }
 
-void LoginWebuiReadyObserver::Observe(int type,
-                                      const NotificationSource& source,
-                                      const NotificationDetails& details) {
+void LoginWebuiReadyObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_LOGIN_WEBUI_READY);
-  automation_->OnLoginWebuiReady();
+  if (automation_)
+    automation_->OnLoginWebuiReady();
   delete this;
 }
 
@@ -104,18 +108,19 @@ ScreenLockUnlockObserver::ScreenLockUnlockObserver(
       reply_message_(reply_message),
       lock_screen_(lock_screen) {
   registrar_.Add(this, chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 ScreenLockUnlockObserver::~ScreenLockUnlockObserver() {}
 
-void ScreenLockUnlockObserver::Observe(int type,
-                                       const NotificationSource& source,
-                                       const NotificationDetails& details) {
+void ScreenLockUnlockObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED);
   if (automation_) {
     AutomationJSONReply reply(automation_, reply_message_.release());
-    bool is_screen_locked = *Details<bool>(details).ptr();
+    bool is_screen_locked = *content::Details<bool>(details).ptr();
     if (lock_screen_ == is_screen_locked)
       reply.SendSuccess(NULL);
     else
@@ -357,40 +362,6 @@ chromeos::VirtualNetwork* VirtualConnectObserver::GetVirtualNetwork(
   return virt;
 }
 
-CloudPolicyObserver::CloudPolicyObserver(AutomationProvider* automation,
-    IPC::Message* reply_message,
-    policy::BrowserPolicyConnector* browser_policy_connector,
-    policy::CloudPolicySubsystem* policy_subsystem)
-    : automation_(automation->AsWeakPtr()),
-      reply_message_(reply_message) {
-  observer_registrar_.reset(
-      new policy::CloudPolicySubsystem::ObserverRegistrar(policy_subsystem,
-                                                          this));
-}
-
-CloudPolicyObserver::~CloudPolicyObserver() {}
-
-void CloudPolicyObserver::OnPolicyStateChanged(
-    policy::CloudPolicySubsystem::PolicySubsystemState state,
-    policy::CloudPolicySubsystem::ErrorDetails error_details) {
-  if (state == policy::CloudPolicySubsystem::TOKEN_FETCHED) {
-    // fetched the token, now return and wait for a call with state SUCCESS
-    return;
-  } else if (automation_) {
-    if (state == policy::CloudPolicySubsystem::SUCCESS) {
-      AutomationJSONReply(automation_,
-                          reply_message_.release()).SendSuccess(NULL);
-    } else {
-      // fetch returned an error
-      AutomationJSONReply(automation_,
-                          reply_message_.release()).SendError(
-                              "Policy fetch failed.");
-    }
-  }
-  delete this;
-  return;
-}
-
 EnrollmentObserver::EnrollmentObserver(AutomationProvider* automation,
     IPC::Message* reply_message,
     chromeos::EnterpriseEnrollmentScreenActor* enrollment_screen_actor,
@@ -442,8 +413,10 @@ void PhotoCaptureObserver::OnCaptureSuccess(
 void PhotoCaptureObserver::OnCaptureFailure(
     chromeos::TakePhotoDialog* take_photo_dialog,
     chromeos::TakePhotoView* take_photo_view) {
-  AutomationJSONReply(automation_,
-                      reply_message_.release()).SendError("Capture failure");
+  if (automation_) {
+    AutomationJSONReply(automation_,
+                        reply_message_.release()).SendError("Capture failure");
+  }
   delete this;
 }
 
@@ -454,33 +427,37 @@ void PhotoCaptureObserver::OnCapturingStopped(
   const SkBitmap& photo = take_photo_view->GetImage();
   chromeos::UserManager* user_manager = chromeos::UserManager::Get();
   if (!user_manager) {
-    AutomationJSONReply(automation_,
-                        reply_message_.release()).SendError(
-                            "No user manager");
+    if (automation_) {
+      AutomationJSONReply(
+          automation_,
+          reply_message_.release()).SendError("No user manager");
+    }
     delete this;
     return;
   }
 
-  const chromeos::UserManager::User& user = user_manager->logged_in_user();
+  const chromeos::User& user = user_manager->logged_in_user();
   if (user.email().empty()) {
-    AutomationJSONReply(automation_,
-                        reply_message_.release()).SendError(
-                            "User email is not set");
+    if (automation_) {
+      AutomationJSONReply(
+          automation_,
+          reply_message_.release()).SendError("User email is not set");
+    }
     delete this;
     return;
   }
 
   // Set up an observer for UserManager (it will delete itself).
   user_manager->AddObserver(this);
-  user_manager->SetLoggedInUserImage(
-      photo, chromeos::UserManager::User::kExternalImageIndex);
-  user_manager->SaveUserImage(
-      user.email(), photo, chromeos::UserManager::User::kExternalImageIndex);
+  user_manager->SaveUserImage(user.email(), photo);
 }
 
 void PhotoCaptureObserver::LocalStateChanged(
     chromeos::UserManager* user_manager) {
   user_manager->RemoveObserver(this);
-  AutomationJSONReply(automation_, reply_message_.release()).SendSuccess(NULL);
+  if (automation_) {
+    AutomationJSONReply(
+        automation_, reply_message_.release()).SendSuccess(NULL);
+  }
   delete this;
 }

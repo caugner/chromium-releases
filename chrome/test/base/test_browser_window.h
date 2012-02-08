@@ -43,6 +43,9 @@ class TestBrowserWindow : public BrowserWindow {
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
+  virtual void Maximize() OVERRIDE {}
+  virtual void Minimize() OVERRIDE {}
+  virtual void Restore() OVERRIDE {}
   virtual void EnterFullscreen(
       const GURL& url, FullscreenExitBubbleType type) OVERRIDE {}
   virtual void ExitFullscreen() OVERRIDE {}
@@ -91,7 +94,6 @@ class TestBrowserWindow : public BrowserWindow {
       TabContents* tab_contents) OVERRIDE {}
   virtual void ShowCollectedCookiesDialog(
       TabContentsWrapper* wrapper) OVERRIDE {}
-  virtual void ShowThemeInstallBubble() OVERRIDE {}
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE {}
   virtual void UserChangedTheme() OVERRIDE {}
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
@@ -120,8 +122,10 @@ class TestBrowserWindow : public BrowserWindow {
   virtual FindBar* CreateFindBar() OVERRIDE;
   virtual void ShowAvatarBubble(TabContents* tab_contents,
                                 const gfx::Rect& rect) OVERRIDE {}
+  virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE {}
 
 #if defined(OS_CHROMEOS)
+  virtual void ShowMobileSetup() OVERRIDE {}
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) OVERRIDE {}
 #endif
 

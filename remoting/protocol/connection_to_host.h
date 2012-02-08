@@ -12,7 +12,6 @@
 #include "base/task.h"
 #include "remoting/jingle_glue/signal_strategy.h"
 #include "remoting/proto/internal.pb.h"
-#include "remoting/protocol/connection_to_host.h"
 #include "remoting/protocol/message_reader.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/session_manager.h"
@@ -27,18 +26,15 @@ class Instance;
 
 namespace remoting {
 
-class JingleThread;
 class XmppProxy;
 class VideoPacket;
 
 namespace protocol {
 
-class ClientMessageDispatcher;
-class ClientControlSender;
+class ClientControlDispatcher;
+class ClientEventDispatcher;
 class ClientStub;
-class HostControlSender;
 class HostStub;
-class InputSender;
 class InputStub;
 class SessionConfig;
 class VideoReader;
@@ -49,6 +45,9 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
  public:
   enum State {
     CONNECTING,
+    // TODO(sergeyu): Currently CONNECTED state is not used and state
+    // is set to AUTHENTICATED after we are connected. Remove it and
+    // renamed AUTHENTICATED to CONNECTED?
     CONNECTED,
     AUTHENTICATED,
     FAILED,
@@ -118,8 +117,8 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   // Callback for |session_|.
   void OnSessionStateChange(Session::State state);
 
-  // Callback for VideoReader::Init().
-  void OnVideoChannelInitialized(bool successful);
+  // Callbacks for channel initialization
+  void OnChannelInitialized(bool successful);
 
   void NotifyIfChannelsReady();
 
@@ -152,22 +151,13 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
   scoped_ptr<SessionManager> session_manager_;
   scoped_ptr<Session> session_;
 
-  // Handlers for incoming messages.
   scoped_ptr<VideoReader> video_reader_;
-  scoped_ptr<ClientMessageDispatcher> dispatcher_;
-
-  // Senders for outgoing messages.
-  scoped_ptr<InputSender> input_sender_;
-  scoped_ptr<HostControlSender> host_control_sender_;
+  scoped_ptr<ClientControlDispatcher> control_dispatcher_;
+  scoped_ptr<ClientEventDispatcher> event_dispatcher_;
 
   // Internal state of the connection.
   State state_;
   Error error_;
-
-  // State of the channels.
-  bool control_connected_;
-  bool input_connected_;
-  bool video_connected_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ConnectionToHost);
@@ -175,7 +165,5 @@ class ConnectionToHost : public SignalStrategy::StatusObserver,
 
 }  // namespace protocol
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::protocol::ConnectionToHost);
 
 #endif  // REMOTING_PROTOCOL_CONNECTION_TO_HOST_H_

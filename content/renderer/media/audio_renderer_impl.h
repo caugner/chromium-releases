@@ -65,34 +65,37 @@ class CONTENT_EXPORT AudioRendererImpl
 
   // Methods called on IO thread ----------------------------------------------
   // AudioMessageFilter::Delegate methods, called by AudioMessageFilter.
-  virtual void OnRequestPacket(AudioBuffersState buffers_state);
-  virtual void OnStateChanged(AudioStreamState state);
-  virtual void OnCreated(base::SharedMemoryHandle handle, uint32 length);
+  virtual void OnRequestPacket(AudioBuffersState buffers_state) OVERRIDE;
+  virtual void OnStateChanged(AudioStreamState state) OVERRIDE;
+  virtual void OnCreated(base::SharedMemoryHandle handle,
+                         uint32 length) OVERRIDE;
   virtual void OnLowLatencyCreated(base::SharedMemoryHandle handle,
                                    base::SyncSocket::Handle socket_handle,
-                                   uint32 length);
-  virtual void OnVolume(double volume);
+                                   uint32 length) OVERRIDE;
+  virtual void OnVolume(double volume) OVERRIDE;
 
   // Methods called on pipeline thread ----------------------------------------
   // media::Filter implementation.
-  virtual void SetPlaybackRate(float rate);
-  virtual void Pause(const base::Closure& callback);
-  virtual void Seek(base::TimeDelta time, const media::FilterStatusCB& cb);
-  virtual void Play(const base::Closure& callback);
+  virtual void SetPlaybackRate(float rate) OVERRIDE;
+  virtual void Pause(const base::Closure& callback) OVERRIDE;
+  virtual void Seek(base::TimeDelta time,
+                    const media::FilterStatusCB& cb) OVERRIDE;
+  virtual void Play(const base::Closure& callback) OVERRIDE;
 
   // media::AudioRenderer implementation.
-  virtual void SetVolume(float volume);
+  virtual void SetVolume(float volume) OVERRIDE;
 
  protected:
   // Methods called on audio renderer thread ----------------------------------
   // These methods are called from AudioRendererBase.
   virtual bool OnInitialize(int bits_per_channel,
                             ChannelLayout channel_layout,
-                            int sample_rate);
-  virtual void OnStop();
+                            int sample_rate) OVERRIDE;
+  virtual void OnStop() OVERRIDE;
 
   // Called when the decoder completes a Read().
-  virtual void ConsumeAudioSamples(scoped_refptr<media::Buffer> buffer_in);
+  virtual void ConsumeAudioSamples(
+      scoped_refptr<media::Buffer> buffer_in) OVERRIDE;
 
  private:
   // We are using either low- or high-latency code path.
@@ -128,10 +131,10 @@ class CONTENT_EXPORT AudioRendererImpl
   void DestroyTask();
 
   // Called on IO thread when message loop is dying.
-  virtual void WillDestroyCurrentMessageLoop();
+  virtual void WillDestroyCurrentMessageLoop() OVERRIDE;
 
   // DelegateSimpleThread::Delegate implementation.
-  virtual void Run();
+  virtual void Run() OVERRIDE;
 
   // (Re-)starts playback.
   void NotifyDataAvailableIfNecessary();
@@ -173,6 +176,9 @@ class CONTENT_EXPORT AudioRendererImpl
   // Used to calculate audio delay given bytes.
   uint32 bytes_per_second_;
 
+  // Whether the stream has been created yet.
+  bool stream_created_;
+
   // ID of the stream created in the browser process.
   int32 stream_id_;
 
@@ -203,12 +209,6 @@ class CONTENT_EXPORT AudioRendererImpl
 
   // State of the audio buffers at time of the last request.
   AudioBuffersState request_buffers_state_;
-
-  // State variables for prerolling.
-  bool prerolling_;
-
-  // Remaining bytes for prerolling to complete.
-  uint32 preroll_bytes_;
 
   // We're supposed to know amount of audio data OS or hardware buffered, but
   // that is not always so -- on my Linux box

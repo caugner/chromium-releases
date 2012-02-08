@@ -29,11 +29,11 @@
 #include "content/common/font_config_ipc_linux.h"
 #include "content/common/sandbox_methods_linux.h"
 #include "content/common/unix_domain_socket_posix.h"
+#include "content/common/webkitplatformsupport_impl.h"
 #include "skia/ext/SkFontHost_fontconfig_direct.h"
 #include "third_party/npapi/bindings/npapi_extensions.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebFontInfo.h"
-#include "webkit/glue/webkitplatformsupport_impl.h"
 
 using WebKit::WebCString;
 using WebKit::WebFontInfo;
@@ -267,16 +267,20 @@ class SandboxIPCProcess  {
     if (!pickle.ReadString(&iter, &preferred_locale))
       return;
 
-    WebCString family = WebFontInfo::familyForChars(chars.get(),
-                                                    num_chars,
-                                                    preferred_locale.c_str());
+    WebKit::WebFontFamily family;
+    WebFontInfo::familyForChars(chars.get(),
+                                num_chars,
+                                preferred_locale.c_str(),
+                                &family);
 
     Pickle reply;
-    if (family.data()) {
-      reply.WriteString(family.data());
+    if (family.name.data()) {
+      reply.WriteString(family.name.data());
     } else {
       reply.WriteString("");
     }
+    reply.WriteBool(family.isBold);
+    reply.WriteBool(family.isItalic);
     SendRendererReply(fds, reply, -1);
   }
 
@@ -369,12 +373,14 @@ class SandboxIPCProcess  {
 
   void HandleMakeSharedMemorySegment(int fd, const Pickle& pickle, void* iter,
                                      std::vector<int>& fds) {
-    uint32_t shm_size;
-    if (!pickle.ReadUInt32(&iter, &shm_size))
+    base::SharedMemoryCreateOptions options;
+    if (!pickle.ReadUInt32(&iter, &options.size))
+      return;
+    if (!pickle.ReadBool(&iter, &options.executable))
       return;
     int shm_fd = -1;
     base::SharedMemory shm;
-    if (shm.CreateAnonymous(shm_size))
+    if (shm.Create(options))
       shm_fd = shm.handle().fd;
     Pickle reply;
     SendRendererReply(fds, reply, shm_fd);
@@ -645,7 +651,7 @@ class SandboxIPCProcess  {
   const int browser_socket_;
   FontConfigDirect* const font_config_;
   std::vector<std::string> sandbox_cmd_;
-  scoped_ptr<webkit_glue::WebKitPlatformSupportImpl> webkit_platform_support_;
+  scoped_ptr<content::WebKitPlatformSupportImpl> webkit_platform_support_;
 };
 
 SandboxIPCProcess::~SandboxIPCProcess() {
@@ -656,8 +662,8 @@ SandboxIPCProcess::~SandboxIPCProcess() {
 void SandboxIPCProcess::EnsureWebKitInitialized() {
   if (webkit_platform_support_.get())
     return;
-  webkit_platform_support_.reset(new webkit_glue::WebKitPlatformSupportImpl);
-  WebKit::initialize(webkit_platform_support_.get());
+  webkit_platform_support_.reset(new content::WebKitPlatformSupportImpl);
+  WebKit::initializeWithoutV8(webkit_platform_support_.get());
 }
 
 // -----------------------------------------------------------------------------

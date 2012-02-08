@@ -56,11 +56,6 @@
 IPC_MESSAGE_ROUTED1(DevToolsClientMsg_DispatchOnInspectorFrontend,
                     std::string /* message */)
 
-// Legacy debugger output message.
-IPC_MESSAGE_ROUTED1(DevToolsClientMsg_DebuggerOutput,
-                    std::string /* message */)
-
-
 //-----------------------------------------------------------------------------
 // These are messages sent from DevToolsClient to DevToolsAgent through the
 // browser.
@@ -75,19 +70,9 @@ IPC_MESSAGE_ROUTED1(DevToolsAgentMsg_Reattach,
 // Tells agent that there is no longer a client host connected to it.
 IPC_MESSAGE_ROUTED0(DevToolsAgentMsg_Detach)
 
-// Tells agent that the front-end has been loaded
-IPC_MESSAGE_ROUTED0(DevToolsAgentMsg_FrontendLoaded)
-
 // WebKit-level transport.
 IPC_MESSAGE_ROUTED1(DevToolsAgentMsg_DispatchOnInspectorBackend,
                     std::string /* message */)
-
-// Send debugger command to the debugger agent. Debugger commands should
-// be handled on IO thread(while all other devtools messages are handled in
-// the render thread) to allow executing the commands when v8 is on a
-// breakpoint.
-IPC_MESSAGE_ROUTED1(DevToolsAgentMsg_DebuggerCommand,
-                     std::string  /* command */)
 
 // Inspect element with the given coordinates.
 IPC_MESSAGE_ROUTED2(DevToolsAgentMsg_InspectElement,
@@ -115,21 +100,16 @@ IPC_MESSAGE_ROUTED0(DevToolsMsg_SetupDevToolsClient)
 //-----------------------------------------------------------------------------
 // These are messages sent from the renderer to the browser.
 
-// Wraps an IPC message that's destined to the DevToolsClient on
-// DevToolsAgent->browser hop.
-IPC_MESSAGE_ROUTED1(DevToolsHostMsg_ForwardToClient,
-                    IPC::Message /* one of DevToolsClientMsg_XXX types */)
-
-// Wraps an IPC message that's destined to the DevToolsAgent on
-// DevToolsClient->browser hop.
-IPC_MESSAGE_ROUTED1(DevToolsHostMsg_ForwardToAgent,
-                    IPC::Message /* one of DevToolsAgentMsg_XXX types */)
-
 // Activates (brings to the front) corresponding dev tools window.
 IPC_MESSAGE_ROUTED0(DevToolsHostMsg_ActivateWindow)
 
 // Closes dev tools window that is inspecting current render_view_host.
 IPC_MESSAGE_ROUTED0(DevToolsHostMsg_CloseWindow)
+
+// Moves the corresponding dev tools window by the specified offset.
+IPC_MESSAGE_ROUTED2(DevToolsHostMsg_MoveWindow,
+                    int /* x */,
+                    int /* y */)
 
 // Attaches dev tools window that is inspecting current render_view_host.
 IPC_MESSAGE_ROUTED0(DevToolsHostMsg_RequestDockWindow)

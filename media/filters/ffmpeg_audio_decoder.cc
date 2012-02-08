@@ -5,6 +5,7 @@
 #include "media/filters/ffmpeg_audio_decoder.h"
 
 #include "base/bind.h"
+#include "media/base/audio_decoder_config.h"
 #include "media/base/data_buffer.h"
 #include "media/base/demuxer.h"
 #include "media/base/filter_host.h"
@@ -249,13 +250,10 @@ void FFmpegAudioDecoder::ReadFromDemuxerStream() {
   demuxer_stream_->Read(base::Bind(&FFmpegAudioDecoder::DecodeBuffer, this));
 }
 
-void FFmpegAudioDecoder::DecodeBuffer(Buffer* buffer) {
-  // TODO(scherkus): change DemuxerStream::Read() to use scoped_refptr<> for
-  // callback.
-  scoped_refptr<Buffer> ref_buffer(buffer);
+void FFmpegAudioDecoder::DecodeBuffer(const scoped_refptr<Buffer>& buffer) {
   message_loop_->PostTask(
       FROM_HERE,
-      base::Bind(&FFmpegAudioDecoder::DoDecodeBuffer, this, ref_buffer));
+      base::Bind(&FFmpegAudioDecoder::DoDecodeBuffer, this, buffer));
 }
 
 void FFmpegAudioDecoder::UpdateDurationAndTimestamp(

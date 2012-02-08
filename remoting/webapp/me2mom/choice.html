@@ -15,12 +15,22 @@ found in the LICENSE file.
     <link rel="stylesheet" href="main.css" />
     <link rel="stylesheet" href="choice.css" />
     <link rel="stylesheet" href="toolbar.css" />
+    <script src="client_screen.js"></script>
     <script src="client_session.js"></script>
     <script src="debug_log.js"></script>
+    <script src="host_list.js"></script>
+    <script src="host_screen.js"></script>
+    <script src="host_session.js"></script>
+    <script src="host_table_entry.js"></script>
     <script src="l10n.js"></script>
+    <script src="log_to_server.js"></script>
     <script src="oauth2.js"></script>
     <script src="plugin_settings.js"></script>
     <script src="remoting.js"></script>
+    <script src="server_log_entry.js"></script>
+    <script src="toolbar.js"></script>
+    <script src="ui_mode.js"></script>
+    <script src="util.js"></script>
     <script src="xhr.js"></script>
     <script src="wcs.js"></script>
     <script src="wcs_loader.js"></script>
@@ -44,7 +54,7 @@ found in the LICENSE file.
          hidden>
       <span id="email-status">
         <span id="current-email"></span>
-        <span data-ui-mode="home client.unconnected">
+        <span data-ui-mode="home client.unconnected client.connect-failed">
         (<a href="#" onclick="remoting.clearOAuth2();"
             i18n-content="SIGN_OUT_BUTTON"></a>)
         </span>
@@ -104,13 +114,19 @@ found in the LICENSE file.
       <div data-ui-mode="home">
         <div class="description"
              i18n-content="DESCRIPTION_HOME"
-             i18n-value-1="<a href='http://g.co/remote'>g.co/remote</a>"></div>
+             i18n-value-1="<a href='https://chrome.google.com/remotedesktop'>chrome.google.com/remotedesktop</a>"></div>
         <table class="mode-select-table">
           <tr>
-            <td i18n-content="HOME_SHARE_DESCRIPTION"
-                class="mode-select-label"></td>
             <td>
-              <button i18n-content="HOME_SHARE_BUTTON"
+              <div i18n-content="HOME_SHARE_DESCRIPTION"
+                  class="mode-select-label"></div>
+              <div id="chrome-os-no-share"
+                   i18n-content="HOME_SHARE_DESCRIPTION_CHROME_OS"
+                   class="small-print"></div>
+            </td>
+            <td>
+              <button id="share-button"
+                      i18n-content="HOME_SHARE_BUTTON"
                       onclick="remoting.tryShare();"
                       class="mode-select-button"
                       type="button"></button>
@@ -133,6 +149,16 @@ found in the LICENSE file.
             </td>
           </tr>
         </table>
+
+        <div id="host-list-div"
+             class="host-list-container collapsed"
+             hidden>
+          <img src="dividerbottom.png">
+          <h1 i18n-content="HOME_MY_COMPUTERS_TITLE"></h1>
+          <table id="host-list" class="host-list-table"></table>
+          <div id="host-list-error" class="error-state"></div>
+        </div> <!-- host-list-div -->
+
       </div> <!-- home -->
 
       <div id="host-panel" data-ui-mode="host">
@@ -194,7 +220,10 @@ found in the LICENSE file.
           <div id="access-code-entry-row">
             <form action="" onsubmit="remoting.tryConnect(); return false;">
               <label for="access-code-entry" i18n-content="ACCESS_CODE"></label>
-              <input id="access-code-entry" type="text" autofocus="autofocus"/>
+              <input id="access-code-entry"
+                     type="text"
+                     autofocus="autofocus"
+                     autocomplete="off"/>
               <button id="connect-button" class="big-button"
                       type="submit" i18n-content="CONNECT_BUTTON"></button>
               <button class="big-button" type="button"
@@ -206,7 +235,7 @@ found in the LICENSE file.
         </div> <!-- client.unconnected -->
 
         <div data-ui-mode="client.connecting" class="message"
-             i18n-content="VERIFYING_CODE">
+             i18n-content="MESSAGE_CONNECTING">
         </div> <!-- client.connecting -->
 
         <div data-ui-mode="client.connect-failed"
@@ -218,7 +247,7 @@ found in the LICENSE file.
              class="message" i18n-content="MESSAGE_SESSION_FINISHED">
         </div> <!-- client.session-finished -->
 
-        <div data-ui-mode="client.connect-failed client.session-finished"
+        <div data-ui-mode="client.connect-failed.it2me client.session-finished.it2me"
              class="centered-button">
           <button type="button"
                   class="big-button"
@@ -236,10 +265,6 @@ found in the LICENSE file.
            data-ui-mode="auth host client">
 
       <footer class="choice-footer">
-
-        <div id="client-footer-text-cros" data-ui-mode="client.unconnected"
-             i18n-content="FOOTER_CHROME_OS">
-        </div> <!-- client-footer-text-cros -->
 
         <div id="waiting-footer"
              data-ui-mode="host.waiting-for-connection host.waiting-for-code client.connecting">

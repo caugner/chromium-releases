@@ -20,9 +20,9 @@ class TranslateTabHelper : public TabContentsObserver {
  private:
   // TabContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
-  virtual void DidNavigateAnyFramePostCommit(
+  virtual void DidNavigateAnyFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+      const content::FrameNavigateParams& params) OVERRIDE;
 
   void OnLanguageDetermined(const std::string& language,
                             bool page_translatable);

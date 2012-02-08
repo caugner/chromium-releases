@@ -14,9 +14,11 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "base/property_bag.h"
 #include "base/string16.h"
 #include "content/browser/download/save_package.h"
 #include "content/browser/javascript_dialogs.h"
+#include "content/browser/renderer_host/java/java_bridge_dispatcher_host_manager.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
@@ -25,8 +27,7 @@
 #include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/browser/webui/web_ui.h"
 #include "content/common/content_export.h"
-#include "content/common/property_bag.h"
-#include "content/common/renderer_preferences.h"
+#include "content/public/common/renderer_preferences.h"
 #include "net/base/load_states.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/resource_type.h"
@@ -35,30 +36,19 @@
 #include "base/win/scoped_handle.h"
 #endif
 
-namespace gfx {
-class Rect;
-}
-namespace webkit_glue {
-struct WebIntentData;
-}
-
 class DownloadItem;
 class LoadNotificationDetails;
-struct RendererPreferences;
 class RenderViewHost;
 class SessionStorageNamespace;
 class SiteInstance;
-class SkBitmap;
 class TabContentsDelegate;
 class TabContentsObserver;
 class TabContentsView;
-struct ThumbnailScore;
-class URLPattern;
 struct ViewHostMsg_DidFailProvisionalLoadWithError_Params;
-struct ViewHostMsg_FrameNavigate_Params;
-struct ViewHostMsg_RunFileChooser_Params;
-struct WebPreferences;
-class WebUI;
+
+namespace webkit_glue {
+struct WebIntentData;
+}
 
 // Describes what goes in the main content area of a tab. TabContents is
 // the only type of TabContents, and these should be merged together.
@@ -97,8 +87,8 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // Returns the property bag for this tab contents, where callers can add
   // extra data they may wish to associate with the tab. Returns a pointer
   // rather than a reference since the PropertyAccessors expect this.
-  const PropertyBag* property_bag() const { return &property_bag_; }
-  PropertyBag* property_bag() { return &property_bag_; }
+  const base::PropertyBag* property_bag() const { return &property_bag_; }
+  base::PropertyBag* property_bag() { return &property_bag_; }
 
   TabContentsDelegate* delegate() const { return delegate_; }
   void set_delegate(TabContentsDelegate* delegate);
@@ -113,12 +103,15 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
     return controller_.browser_context();
   }
 
+  // Allows overriding the type of this tab.
+  void set_view_type(content::ViewType type) { view_type_ = type; }
+
   // Returns the SavePackage which manages the page saving job. May be NULL.
   SavePackage* save_package() const { return save_package_.get(); }
 
   // Return the currently active RenderProcessHost and RenderViewHost. Each of
   // these may change over time.
-  RenderProcessHost* GetRenderProcessHost() const;
+  content::RenderProcessHost* GetRenderProcessHost() const;
   RenderViewHost* render_view_host() const {
     return render_manager_.current_host();
   }
@@ -151,7 +144,7 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // Returns the current navigation properties, which if a navigation is
   // pending may be provisional (e.g., the navigation could result in a
   // download, in which case the URL would revert to what it was previously).
-  virtual const GURL& GetURL() const;
+  virtual const GURL& GetURL() const OVERRIDE;
   virtual const string16& GetTitle() const;
 
   // The max PageID of any page that this TabContents has loaded.  PageIDs
@@ -172,9 +165,8 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // returns the current SiteInstance.
   SiteInstance* GetPendingSiteInstance() const;
 
-  // Return whether this tab contents is loading a resource, or whether its
-  // web_ui is.
-  bool IsLoading() const;
+  // Return whether this tab contents is loading a resource.
+  bool IsLoading() const { return is_loading_; }
 
   // Returns whether this tab contents is waiting for a first-response for the
   // main resource of the page. This controls whether the throbber state is
@@ -323,13 +315,13 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // Returns true if the location bar should be focused by default rather than
   // the page contents. The view calls this function when the tab is focused
   // to see what it should do.
-  virtual bool FocusLocationBarByDefault();
+  virtual bool FocusLocationBarByDefault() OVERRIDE;
 
   // Focuses the location bar.
-  virtual void SetFocusToLocationBar(bool select_all);
+  virtual void SetFocusToLocationBar(bool select_all) OVERRIDE;
 
   // Creates a view and sets the size for the specified RVH.
-  virtual void CreateViewAndSetSizeForRVH(RenderViewHost* rvh);
+  virtual void CreateViewAndSetSizeForRVH(RenderViewHost* rvh) OVERRIDE;
 
   // Toolbars and such ---------------------------------------------------------
 
@@ -402,7 +394,7 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // ViewMsg_ResetPageEncodingToDefault to the renderer.
   void ResetOverrideEncoding();
 
-  RendererPreferences* GetMutableRendererPrefs() {
+  content::RendererPreferences* GetMutableRendererPrefs() {
     return &renderer_preferences_;
   }
 
@@ -441,7 +433,7 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   virtual void OnDialogClosed(IPC::Message* reply_msg,
                               bool success,
                               const string16& user_input) OVERRIDE;
-  virtual gfx::NativeWindow GetDialogRootWindow() OVERRIDE;
+  virtual gfx::NativeWindow GetDialogRootWindow() const OVERRIDE;
   virtual void OnDialogShown() OVERRIDE;
 
   // Gets the zoom level for this tab.
@@ -474,6 +466,105 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // Returns true if |allowed| is true and the mouse has been successfully
   // locked.
   bool GotResponseToLockMouseRequest(bool allowed);
+
+  JavaBridgeDispatcherHostManager* java_bridge_dispatcher_host_manager() const {
+    return java_bridge_dispatcher_host_manager_.get();
+  }
+
+  // RenderViewHostDelegate ----------------------------------------------------
+
+  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
+  virtual RenderViewHostDelegate::RendererManagement*
+      GetRendererManagementDelegate() OVERRIDE;
+  virtual TabContents* GetAsTabContents() OVERRIDE;
+  virtual content::ViewType GetRenderViewType() const OVERRIDE;
+  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewReady(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RenderViewGone(RenderViewHost* render_view_host,
+                              base::TerminationStatus status,
+                              int error_code) OVERRIDE;
+  virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidNavigate(
+      RenderViewHost* render_view_host,
+      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+  virtual void UpdateState(RenderViewHost* render_view_host,
+                           int32 page_id,
+                           const std::string& state) OVERRIDE;
+  virtual void UpdateTitle(RenderViewHost* render_view_host,
+                           int32 page_id,
+                           const string16& title,
+                           base::i18n::TextDirection title_direction) OVERRIDE;
+  virtual void UpdateEncoding(RenderViewHost* render_view_host,
+                              const std::string& encoding) OVERRIDE;
+  virtual void UpdateTargetURL(int32 page_id, const GURL& url) OVERRIDE;
+  virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void RequestMove(const gfx::Rect& new_bounds) OVERRIDE;
+  virtual void SwappedOut(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DidStartLoading() OVERRIDE;
+  virtual void DidStopLoading() OVERRIDE;
+  virtual void DidCancelLoading() OVERRIDE;
+  virtual void DidChangeLoadProgress(double progress) OVERRIDE;
+  virtual void DocumentAvailableInMainFrame(
+      RenderViewHost* render_view_host) OVERRIDE;
+  virtual void DocumentOnLoadCompletedInMainFrame(
+      RenderViewHost* render_view_host,
+      int32 page_id) OVERRIDE;
+  virtual void RequestOpenURL(const GURL& url,
+                              const content::Referrer& referrer,
+                              WindowOpenDisposition disposition,
+                              int64 source_frame_id) OVERRIDE;
+  virtual void RequestTransferURL(
+      const GURL& url,
+      const content::Referrer& referrer,
+      WindowOpenDisposition disposition,
+      int64 source_frame_id,
+      const GlobalRequestID& transferred_global_request_id) OVERRIDE;
+  virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
+                                    const string16& message,
+                                    const string16& default_prompt,
+                                    const GURL& frame_url,
+                                    const int flags,
+                                    IPC::Message* reply_msg,
+                                    bool* did_suppress_message) OVERRIDE;
+  virtual void RunBeforeUnloadConfirm(const RenderViewHost* rvh,
+                                      const string16& message,
+                                      IPC::Message* reply_msg) OVERRIDE;
+  virtual content::RendererPreferences GetRendererPrefs(
+      content::BrowserContext* browser_context) const OVERRIDE;
+  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
+  virtual void OnUserGesture() OVERRIDE;
+  virtual void OnIgnoredUIEvent() OVERRIDE;
+  virtual void RendererUnresponsive(RenderViewHost* render_view_host,
+                                    bool is_during_unload) OVERRIDE;
+  virtual void RendererResponsive(RenderViewHost* render_view_host) OVERRIDE;
+  virtual void LoadStateChanged(const GURL& url,
+                                const net::LoadStateWithParam& load_state,
+                                uint64 upload_position,
+                                uint64 upload_size) OVERRIDE;
+  virtual void WorkerCrashed() OVERRIDE;
+  virtual void Activate() OVERRIDE;
+  virtual void Deactivate() OVERRIDE;
+  virtual void LostCapture() OVERRIDE;
+  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
+                                      bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void HandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void HandleMouseDown() OVERRIDE;
+  virtual void HandleMouseUp() OVERRIDE;
+  virtual void HandleMouseActivate() OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void RunFileChooser(
+      RenderViewHost* render_view_host,
+      const content::FileChooserParams& params) OVERRIDE;
+  virtual void ToggleFullscreenMode(bool enter_fullscreen) OVERRIDE;
+  virtual bool IsFullscreenForCurrentTab() const OVERRIDE;
+  virtual void UpdatePreferredSize(const gfx::Size& pref_size) OVERRIDE;
+  virtual void WebUISend(RenderViewHost* render_view_host,
+                       const GURL& source_url,
+                       const std::string& name,
+                       const base::ListValue& args) OVERRIDE;
+  virtual void RequestToLockMouse() OVERRIDE;
+  virtual void LostMouseLock() OVERRIDE;
 
  protected:
   friend class TabContentsObserver;
@@ -512,6 +603,14 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   friend class TestTabContents;
 
   // Message handlers.
+  void OnRegisterIntentService(const string16& action,
+                               const string16& type,
+                               const string16& href,
+                               const string16& title,
+                               const string16& disposition);
+  void OnWebIntentDispatch(const IPC::Message& message,
+                           const webkit_glue::WebIntentData& intent,
+                           int intent_id);
   void OnDidStartProvisionalLoadForFrame(int64 frame_id,
                                          bool main_frame,
                                          const GURL& opener_url,
@@ -530,25 +629,24 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   void OnDidRunInsecureContent(const std::string& security_origin,
                                const GURL& target_url);
   void OnDocumentLoadedInFrame(int64 frame_id);
-  void OnDidFinishLoad(int64 frame_id);
+  void OnDidFinishLoad(int64 frame_id,
+                       const GURL& validated_url,
+                       bool is_main_frame);
+  void OnDidFailLoadWithError(int64 frame_id,
+                              const GURL& validated_url,
+                              bool is_main_frame,
+                              int error_code,
+                              const string16& error_description);
   void OnUpdateContentRestrictions(int restrictions);
   void OnGoToEntryAtOffset(int offset);
   void OnUpdateZoomLimits(int minimum_percent,
                           int maximum_percent,
                           bool remember);
-  void OnFocusedNodeChanged(bool is_editable_node);
   void OnEnumerateDirectory(int request_id, const FilePath& path);
   void OnJSOutOfMemory();
   void OnRegisterProtocolHandler(const std::string& protocol,
                                  const GURL& url,
                                  const string16& title);
-  void OnRegisterIntentHandler(const string16& action,
-                               const string16& type,
-                               const string16& href,
-                               const string16& title);
-  void OnWebIntentDispatch(const IPC::Message& message,
-                           const webkit_glue::WebIntentData& intent,
-                           int intent_id);
   void OnFindReply(int request_id, int number_of_matches,
                    const gfx::Rect& selection_rect, int active_match_ordinal,
                    bool final_update);
@@ -619,101 +717,21 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   void NotifyConnected();
   void NotifyDisconnected();
 
-  // RenderViewHostDelegate ----------------------------------------------------
-
-  // RenderViewHostDelegate implementation.
-  virtual RenderViewHostDelegate::View* GetViewDelegate() OVERRIDE;
-  virtual RenderViewHostDelegate::RendererManagement*
-      GetRendererManagementDelegate() OVERRIDE;
-  virtual TabContents* GetAsTabContents() OVERRIDE;
-  virtual content::ViewType GetRenderViewType() const OVERRIDE;
-  virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderViewReady(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RenderViewGone(RenderViewHost* render_view_host,
-                              base::TerminationStatus status,
-                              int error_code) OVERRIDE;
-  virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void DidNavigate(
-      RenderViewHost* render_view_host,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
-  virtual void UpdateState(RenderViewHost* render_view_host,
-                           int32 page_id,
-                           const std::string& state) OVERRIDE;
-  virtual void UpdateTitle(RenderViewHost* render_view_host,
-                           int32 page_id,
-                           const string16& title,
-                           base::i18n::TextDirection title_direction) OVERRIDE;
-  virtual void UpdateEncoding(RenderViewHost* render_view_host,
-                              const std::string& encoding) OVERRIDE;
-  virtual void UpdateTargetURL(int32 page_id, const GURL& url) OVERRIDE;
-  virtual void Close(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void RequestMove(const gfx::Rect& new_bounds) OVERRIDE;
-  virtual void DidStartLoading() OVERRIDE;
-  virtual void DidStopLoading() OVERRIDE;
-  virtual void DidCancelLoading() OVERRIDE;
-  virtual void DidChangeLoadProgress(double progress) OVERRIDE;
-  virtual void DocumentOnLoadCompletedInMainFrame(
-      RenderViewHost* render_view_host,
-      int32 page_id) OVERRIDE;
-  virtual void RequestOpenURL(const GURL& url,
-                              const GURL& referrer,
-                              WindowOpenDisposition disposition,
-                              int64 source_frame_id) OVERRIDE;
-  virtual void RunJavaScriptMessage(const RenderViewHost* rvh,
-                                    const string16& message,
-                                    const string16& default_prompt,
-                                    const GURL& frame_url,
-                                    const int flags,
-                                    IPC::Message* reply_msg,
-                                    bool* did_suppress_message) OVERRIDE;
-  virtual void RunBeforeUnloadConfirm(const RenderViewHost* rvh,
-                                      const string16& message,
-                                      IPC::Message* reply_msg) OVERRIDE;
-  virtual RendererPreferences GetRendererPrefs(
-      content::BrowserContext* browser_context) const OVERRIDE;
-  virtual WebPreferences GetWebkitPrefs() OVERRIDE;
-  virtual void OnUserGesture() OVERRIDE;
-  virtual void OnIgnoredUIEvent() OVERRIDE;
-  virtual void RendererUnresponsive(RenderViewHost* render_view_host,
-                                    bool is_during_unload) OVERRIDE;
-  virtual void RendererResponsive(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void LoadStateChanged(const GURL& url,
-                                const net::LoadStateWithParam& load_state,
-                                uint64 upload_position,
-                                uint64 upload_size) OVERRIDE;
-  virtual void WorkerCrashed() OVERRIDE;
-  virtual void Activate() OVERRIDE;
-  virtual void Deactivate() OVERRIDE;
-  virtual void LostCapture() OVERRIDE;
-  virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
-                                      bool* is_keyboard_shortcut) OVERRIDE;
-  virtual void HandleKeyboardEvent(
-      const NativeWebKeyboardEvent& event) OVERRIDE;
-  virtual void HandleMouseUp() OVERRIDE;
-  virtual void HandleMouseActivate() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void RunFileChooser(RenderViewHost* render_view_host,
-                              const ViewHostMsg_RunFileChooser_Params& params);
-  virtual void ToggleFullscreenMode(bool enter_fullscreen) OVERRIDE;
-  virtual bool IsFullscreenForCurrentTab() const OVERRIDE;
-  virtual void UpdatePreferredSize(const gfx::Size& pref_size) OVERRIDE;
-  virtual void RequestToLockMouse() OVERRIDE;
-  virtual void LostMouseLock() OVERRIDE;
-
   // RenderViewHostManager::Delegate -------------------------------------------
 
   virtual void BeforeUnloadFiredFromRenderManager(
       bool proceed,
-      bool* proceed_to_fire_unload);
+      bool* proceed_to_fire_unload) OVERRIDE;
   virtual void DidStartLoadingFromRenderManager(
-      RenderViewHost* render_view_host);
+      RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewGoneFromRenderManager(
-      RenderViewHost* render_view_host);
-  virtual void UpdateRenderViewSizeForRenderManager();
-  virtual void NotifySwappedFromRenderManager();
-  virtual NavigationController& GetControllerForRenderManager();
-  virtual WebUI* CreateWebUIForRenderManager(const GURL& url);
-  virtual NavigationEntry* GetLastCommittedNavigationEntryForRenderManager();
+      RenderViewHost* render_view_host) OVERRIDE;
+  virtual void UpdateRenderViewSizeForRenderManager() OVERRIDE;
+  virtual void NotifySwappedFromRenderManager() OVERRIDE;
+  virtual NavigationController& GetControllerForRenderManager() OVERRIDE;
+  virtual WebUI* CreateWebUIForRenderManager(const GURL& url) OVERRIDE;
+  virtual NavigationEntry*
+      GetLastCommittedNavigationEntryForRenderManager() OVERRIDE;
 
   // Initializes the given renderer if necessary and creates the view ID
   // corresponding to this view host. If this method is not called and the
@@ -724,11 +742,11 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // If you are attaching to an already-existing RenderView, you should call
   // InitWithExistingID.
   virtual bool CreateRenderViewForRenderManager(
-      RenderViewHost* render_view_host);
+      RenderViewHost* render_view_host) OVERRIDE;
 
   // Stores random bits of data for others to associate with this object.
   // WARNING: this needs to be deleted after NavigationController.
-  PropertyBag property_bag_;
+  base::PropertyBag property_bag_;
 
   // Data for core operation ---------------------------------------------------
 
@@ -741,10 +759,21 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // The corresponding view.
   scoped_ptr<TabContentsView> view_;
 
+  // A list of observers notified when page state changes. Weak references.
+  // This MUST be listed above render_manager_ since at destruction time the
+  // latter might cause RenderViewHost's destructor to call us and we might use
+  // the observer list then.
+  ObserverList<TabContentsObserver> observers_;
+
   // Helper classes ------------------------------------------------------------
 
   // Manages creation and swapping of render views.
   RenderViewHostManager render_manager_;
+
+  // Manages injecting Java objects into all RenderViewHosts associated with
+  // this TabContents.
+  scoped_ptr<JavaBridgeDispatcherHostManager>
+      java_bridge_dispatcher_host_manager_;
 
   // SavePackage, lazily created.
   scoped_refptr<SavePackage> save_package_;
@@ -824,7 +853,7 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   bool is_showing_before_unload_dialog_;
 
   // Settings that get passed to the renderer process.
-  RendererPreferences renderer_preferences_;
+  content::RendererPreferences renderer_preferences_;
 
   // If this tab was created from a renderer using window.open, this will be
   // non-NULL and represent the WebUI of the opening renderer.
@@ -850,12 +879,12 @@ class CONTENT_EXPORT TabContents : public PageNavigator,
   // remember it.
   bool temporary_zoom_settings_;
 
-  // A list of observers notified when page state changes. Weak references.
-  ObserverList<TabContentsObserver> observers_;
-
   // Content restrictions, used to disable print/copy etc based on content's
   // (full-page plugins for now only) permissions.
   int content_restrictions_;
+
+  // Our view type. Default is VIEW_TYPE_TAB_CONTENTS.
+  content::ViewType view_type_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContents);
 };

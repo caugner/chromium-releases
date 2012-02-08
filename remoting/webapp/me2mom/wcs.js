@@ -13,20 +13,22 @@
 /** @suppress {duplicate} */
 var remoting = remoting || {};
 
-(function() {
+/** @type {remoting.Wcs} */
+remoting.wcs = null;
+
 /**
  * @constructor
  *
  * @param {remoting.WcsIqClient} wcsIqClient The WCS client.
  * @param {string} token An OAuth2 access token.
- * @param {function(): void} onReady A function called when the WCS client has
- *     received a full JID.
- * @param {function(function(string): void): void} refreshToken A function
+ * @param {function(boolean): void} onReady A function called when the WCS
+ *     client has received a full JID.
+ * @param {function(function(string): void): void} tokenRefresh A function
  *     called when this object wants to see whether an updated access token is
  *     available. The passed function will be called asynchronously with a
  *     (possibly updated) access token.
  */
-remoting.Wcs = function(wcsIqClient, token, onReady, refreshToken) {
+remoting.Wcs = function(wcsIqClient, token, onReady, tokenRefresh) {
   /**
    * The WCS client.
    * @type {remoting.WcsIqClient}
@@ -43,7 +45,7 @@ remoting.Wcs = function(wcsIqClient, token, onReady, refreshToken) {
 
   /**
    * The function called when the WCS client has received a full JID.
-   * @type {function(): void}
+   * @type {function(boolean): void}
    * @private
    */
   this.onReady_ = onReady;
@@ -55,6 +57,7 @@ remoting.Wcs = function(wcsIqClient, token, onReady, refreshToken) {
    */
   this.clientFullJid_ = '';
 
+  /** @type {remoting.Wcs} */
   var that = this;
   /**
    * A timer that polls for an updated access token.
@@ -62,18 +65,24 @@ remoting.Wcs = function(wcsIqClient, token, onReady, refreshToken) {
    * @private
    */
   this.pollForUpdatedToken_ = setInterval(
-      function() { refreshToken(that.setToken_); },
+      function() {
+        /** @param {string} token */
+        var setToken = function(token) { that.setToken_(token); }
+        tokenRefresh(setToken);
+      },
       60 * 1000);
 
   /**
    * A function called when an IQ stanza is received.
-   * @type {function(string): void}
+   * @param {string} stanza The IQ stanza.
    * @private
    */
   this.onIq_ = function(stanza) {};
 
   // Handle messages from the WcsIqClient.
-  this.wcsIqClient_.setOnMessage(function(msg) { that.onMessage_(msg); });
+  /** @param {Array.<string>} msg An array of message strings. */
+  var onMessage = function(msg) { that.onMessage_(msg); };
+  this.wcsIqClient_.setOnMessage(onMessage);
 
   // Start the WcsIqClient.
   this.wcsIqClient_.connectChannel();
@@ -96,7 +105,7 @@ remoting.Wcs.prototype.setToken_ = function(tokenNew) {
 /**
  * Handles a message coming from the WcsIqClient.
  *
- * @param {Array} msg The message.
+ * @param {Array.<string>} msg The message.
  * @return {void} Nothing.
  * @private
  */
@@ -106,8 +115,8 @@ remoting.Wcs.prototype.onMessage_ = function(msg) {
   } else if (msg[0] == 'cfj') {
     this.clientFullJid_ = msg[1];
     remoting.debug.log('Received JID: ' + this.clientFullJid_);
-    this.onReady_();
-    this.onReady_ = function() {};
+    this.onReady_(true);
+    this.onReady_ = function(success) {};
   }
 };
 
@@ -140,5 +149,3 @@ remoting.Wcs.prototype.sendIq = function(stanza) {
 remoting.Wcs.prototype.setOnIq = function(onIq) {
   this.onIq_ = onIq;
 };
-
-}());

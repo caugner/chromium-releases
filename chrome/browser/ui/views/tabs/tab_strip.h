@@ -6,14 +6,15 @@
 #define CHROME_BROWSER_UI_VIEWS_TABS_TAB_STRIP_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/timer.h"
 #include "chrome/browser/ui/views/tabs/base_tab_strip.h"
 #include "ui/base/animation/animation_container.h"
 #include "ui/gfx/point.h"
 #include "ui/gfx/rect.h"
-#include "views/controls/button/image_button.h"
-#include "views/mouse_watcher.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/mouse_watcher.h"
 
 class Tab;
 class TabStripSelectionModel;
@@ -127,7 +128,7 @@ class TabStrip : public BaseTabStrip,
   int GetMiniTabCount() const;
 
  private:
-  friend class DraggedTabController;
+  friend class DefaultTabDragController;
 
   // Used during a drop session of a url. Tracks the position of the drop as
   // well as a window used to highlight where the drop occurs.
@@ -213,13 +214,13 @@ class TabStrip : public BaseTabStrip,
 
   // Generates the ideal bounds of the TabStrip when all Tabs have finished
   // animating to their desired position/bounds. This is used by the standard
-  // Layout method and other callers like the DraggedTabController that need
+  // Layout method and other callers like the TabDragController that need
   // stable representations of Tab positions.
-  virtual void GenerateIdealBounds();
+  virtual void GenerateIdealBounds() OVERRIDE;
 
   // Starts various types of TabStrip animations.
   void StartResizeLayoutAnimation();
-  virtual void StartMiniTabAnimation();
+  virtual void StartMiniTabAnimation() OVERRIDE;
   void StartMouseInitiatedRemoveTabAnimation(int model_index);
 
   // Returns true if the specified point in TabStrip coords is within the
@@ -258,13 +259,8 @@ class TabStrip : public BaseTabStrip,
   // able to lay it out before we are able to get its image from the
   // ui::ThemeProvider.  It also makes sense to do this, because the size of the
   // new tab button should not need to be calculated dynamically.
-#if defined(TOUCH_UI)
-  static const int kNewTabButtonWidth = 66;
-  static const int kNewTabButtonHeight = 39;
-#else
   static const int kNewTabButtonWidth = 28;
   static const int kNewTabButtonHeight = 18;
-#endif
 
   // Valid for the lifetime of a drag over us.
   scoped_ptr<DropInfo> drop_info_;

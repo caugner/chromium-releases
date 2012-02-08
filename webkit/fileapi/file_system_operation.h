@@ -5,6 +5,7 @@
 #ifndef WEBKIT_FILEAPI_FILE_SYSTEM_OPERATION_H_
 #define WEBKIT_FILEAPI_FILE_SYSTEM_OPERATION_H_
 
+#include <string>
 #include <vector>
 
 #include "base/file_path.h"
@@ -13,7 +14,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_callback_factory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/process.h"
@@ -39,23 +39,19 @@ class FileSystemCallbackDispatcher;
 class FileSystemContext;
 class FileWriterDelegate;
 class FileSystemOperationTest;
-class FileSystemQuotaUtil;
 
 // This class is designed to serve one-time file system operation per instance.
 // Only one method(CreateFile, CreateDirectory, Copy, Move, DirectoryExists,
 // GetMetadata, ReadDirectory and Remove) may be called during the lifetime of
 // this object and it should be called no more than once.
-// This class is self-destructed and an instance automatically gets deleted
-// when its operation is finished.
+// This class is self-destructed, or get deleted via base::Owned() fater the
+// operation finishes and completion callback is called.
 class FileSystemOperation {
  public:
   // |dispatcher| will be owned by this class.
-  // |file_util| is optional; if supplied, it will not be deleted by
-  // the class.  It's expecting a pointer to a singleton.
   FileSystemOperation(FileSystemCallbackDispatcher* dispatcher,
                       scoped_refptr<base::MessageLoopProxy> proxy,
-                      FileSystemContext* file_system_context,
-                      FileSystemFileUtil* file_util);
+                      FileSystemContext* file_system_context);
   virtual ~FileSystemOperation();
 
   void OpenFileSystem(const GURL& origin_url,
@@ -87,6 +83,7 @@ class FileSystemOperation {
       const GURL& path,
       int file_flags,
       base::ProcessHandle peer_handle);
+  void SyncGetPlatformPath(const GURL& path, FilePath* platform_path);
 
   // Try to cancel the current operation [we support cancelling write or
   // truncate only].  Report failure for the current operation, then tell the
@@ -97,11 +94,11 @@ class FileSystemOperation {
   class ScopedQuotaUtilHelper;
 
   FileSystemContext* file_system_context() const {
-    return file_system_operation_context_.file_system_context();
+    return operation_context_.file_system_context();
   }
 
   FileSystemOperationContext* file_system_operation_context() {
-    return &file_system_operation_context_;
+    return &operation_context_;
   }
 
   friend class FileSystemOperationTest;
@@ -110,13 +107,23 @@ class FileSystemOperation {
   friend class FileSystemTestOriginHelper;
   friend class FileSystemQuotaTest;
 
+  // The unit tests that need to specify and control the lifetime of the
+  // file_util on their own should call this before performing the actual
+  // operation. If it is given it will not be overwritten by the class.
+  void set_override_file_util(FileSystemFileUtil* file_util) {
+    operation_context_.set_src_file_util(file_util);
+    operation_context_.set_dest_file_util(file_util);
+  }
+
   void GetUsageAndQuotaThenCallback(
       const GURL& origin_url,
-      quota::QuotaManager::GetUsageAndQuotaCallback* callback);
+      const quota::QuotaManager::GetUsageAndQuotaCallback& callback);
 
-  void DelayedCreateFileForQuota(quota::QuotaStatusCode status,
+  void DelayedCreateFileForQuota(bool exclusive,
+                                 quota::QuotaStatusCode status,
                                  int64 usage, int64 quota);
-  void DelayedCreateDirectoryForQuota(quota::QuotaStatusCode status,
+  void DelayedCreateDirectoryForQuota(bool exclusive, bool recursive,
+                                      quota::QuotaStatusCode status,
                                       int64 usage, int64 quota);
   void DelayedCopyForQuota(quota::QuotaStatusCode status,
                            int64 usage, int64 quota);
@@ -124,9 +131,11 @@ class FileSystemOperation {
                            int64 usage, int64 quota);
   void DelayedWriteForQuota(quota::QuotaStatusCode status,
                             int64 usage, int64 quota);
-  void DelayedTruncateForQuota(quota::QuotaStatusCode status,
+  void DelayedTruncateForQuota(int64 length,
+                               quota::QuotaStatusCode status,
                                int64 usage, int64 quota);
-  void DelayedOpenFileForQuota(quota::QuotaStatusCode status,
+  void DelayedOpenFileForQuota(int file_flags,
+                               quota::QuotaStatusCode status,
                                int64 usage, int64 quota);
 
   // A callback used for OpenFileSystem.
@@ -209,6 +218,21 @@ class FileSystemOperation {
                                     FilePath* virtual_path,
                                     FileSystemFileUtil** file_util);
 
+  // Common internal routine for VerifyFileSystemPathFor{Read,Write}.
+  bool VerifyFileSystemPath(const GURL& path,
+                            GURL* root_url,
+                            FileSystemType* type,
+                            FilePath* virtual_path,
+                            FileSystemFileUtil** file_util);
+
+  // Setup*Context*() functions will call the appropriate VerifyFileSystem
+  // function and store the results to operation_context_ and
+  // *_virtual_path_.
+  // Return the result of VerifyFileSystem*().
+  bool SetupSrcContextForRead(const GURL& path);
+  bool SetupSrcContextForWrite(const GURL& path, bool create);
+  bool SetupDestContextForWrite(const GURL& path, bool create);
+
 #ifndef NDEBUG
   enum OperationType {
     kOperationNone,
@@ -237,12 +261,10 @@ class FileSystemOperation {
   // Proxy for calling file_util_proxy methods.
   scoped_refptr<base::MessageLoopProxy> proxy_;
 
+  // This can be NULL if the operation is cancelled on the way.
   scoped_ptr<FileSystemCallbackDispatcher> dispatcher_;
 
-  FileSystemOperationContext file_system_operation_context_;
-
-  base::ScopedCallbackFactory<FileSystemOperation> callback_factory_;
-  base::WeakPtrFactory<FileSystemOperation> weak_factory_;
+  FileSystemOperationContext operation_context_;
 
   scoped_ptr<ScopedQuotaUtilHelper> quota_util_helper_;
 
@@ -261,16 +283,6 @@ class FileSystemOperation {
   // write.
   FilePath src_virtual_path_;
   FilePath dest_virtual_path_;
-
-  // Options for CreateFile and CreateDirectory.
-  bool exclusive_;
-  bool recursive_;
-
-  // Options for OpenFile.
-  int file_flags_;
-
-  // Length to be truncated.
-  int64 length_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemOperation);
 };

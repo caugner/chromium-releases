@@ -7,7 +7,8 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "content/common/content_client.h"
+#include "content/public/common/content_client.h"
+#include "ui/base/resource/data_pack.h"
 
 class TestContentClient : public content::ContentClient {
  public:
@@ -16,9 +17,11 @@ class TestContentClient : public content::ContentClient {
 
   // content::ContentClient:
   virtual void SetActiveURL(const GURL& url) OVERRIDE;
-  virtual void SetGpuInfo(const GPUInfo& gpu_info) OVERRIDE;
+  virtual void SetGpuInfo(const content::GPUInfo& gpu_info) OVERRIDE;
   virtual void AddPepperPlugins(
-      std::vector<PepperPluginInfo>* plugins) OVERRIDE;
+      std::vector<content::PepperPluginInfo>* plugins) OVERRIDE;
+  virtual void AddNPAPIPlugins(
+      webkit::npapi::PluginList* plugin_list) OVERRIDE;
   virtual bool CanSendWhileSwappedOut(const IPC::Message* msg) OVERRIDE;
   virtual bool CanHandleWhileSwappedOut(const IPC::Message& msg) OVERRIDE;
   virtual std::string GetUserAgent(bool* overriding) const OVERRIDE;
@@ -28,8 +31,15 @@ class TestContentClient : public content::ContentClient {
   virtual bool SandboxPlugin(CommandLine* command_line,
                              sandbox::TargetPolicy* policy) OVERRIDE;
 #endif
+#if defined(OS_MACOSX)
+  virtual bool GetSandboxProfileForSandboxType(
+      int sandbox_type,
+      int* sandbox_profile_resource_id) const OVERRIDE;
+#endif
 
  private:
+  ui::DataPack data_pack_;
+
   DISALLOW_COPY_AND_ASSIGN(TestContentClient);
 };
 

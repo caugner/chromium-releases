@@ -7,6 +7,7 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "printing/page_setup.h"
+#include "printing/page_size_margins.h"
 #include "printing/print_settings_initializer.h"
 
 namespace printing {
@@ -46,13 +47,13 @@ PrintingContext::Result PrintingContext::UpdatePrintSettings(
     const PageRanges& ranges) {
   ResetSettings();
 
-  if (!job_settings.GetBoolean(printing::kSettingHeaderFooterEnabled,
+  if (!job_settings.GetBoolean(kSettingHeaderFooterEnabled,
                                &settings_.display_header_footer)) {
     NOTREACHED();
   }
 
   int margin_type = DEFAULT_MARGINS;
-  if (!job_settings.GetInteger(printing::kSettingMarginsType, &margin_type) ||
+  if (!job_settings.GetInteger(kSettingMarginsType, &margin_type) ||
       (margin_type != DEFAULT_MARGINS &&
        margin_type != NO_MARGINS &&
        margin_type != CUSTOM_MARGINS &&
@@ -62,36 +63,21 @@ PrintingContext::Result PrintingContext::UpdatePrintSettings(
   settings_.margin_type = static_cast<MarginType>(margin_type);
 
   if (margin_type == CUSTOM_MARGINS) {
-    double top_margin_in_points = 0;
-    double bottom_margin_in_points = 0;
-    double left_margin_in_points = 0;
-    double right_margin_in_points = 0;
-    DictionaryValue* custom_margins;
-    if (!job_settings.GetDictionary(printing::kSettingMarginsCustom,
-                                    &custom_margins) ||
-        !custom_margins->GetDouble(printing::kSettingMarginTop,
-                                   &top_margin_in_points) ||
-        !custom_margins->GetDouble(printing::kSettingMarginBottom,
-                                   &bottom_margin_in_points) ||
-        !custom_margins->GetDouble(printing::kSettingMarginLeft,
-                                   &left_margin_in_points) ||
-        !custom_margins->GetDouble(printing::kSettingMarginRight,
-                                   &right_margin_in_points)) {
-      NOTREACHED();
-    }
+    printing::PageSizeMargins page_size_margins;
+    GetCustomMarginsFromJobSettings(job_settings, &page_size_margins);
+
     PageMargins margins_in_points;
     margins_in_points.Clear();
-    margins_in_points.top = top_margin_in_points;
-    margins_in_points.bottom = bottom_margin_in_points;
-    margins_in_points.left = left_margin_in_points;
-    margins_in_points.right = right_margin_in_points;
+    margins_in_points.top = page_size_margins.margin_top;
+    margins_in_points.bottom = page_size_margins.margin_bottom;
+    margins_in_points.left = page_size_margins.margin_left;
+    margins_in_points.right = page_size_margins.margin_right;
 
     settings_.SetCustomMargins(margins_in_points);
   }
 
   PrintingContext::Result result = UpdatePrinterSettings(job_settings, ranges);
-  printing::PrintSettingsInitializer::InitHeaderFooterStrings(job_settings,
-                                                              &settings_);
+  PrintSettingsInitializer::InitHeaderFooterStrings(job_settings, &settings_);
   return result;
 }
 

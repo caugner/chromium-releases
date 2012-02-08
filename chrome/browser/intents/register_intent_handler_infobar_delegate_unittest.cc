@@ -9,17 +9,20 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/web_intent_service_data.h"
+
+using content::BrowserThread;
 
 namespace {
 
 class MockWebIntentsRegistry : public WebIntentsRegistry {
  public:
-  MOCK_METHOD1(RegisterIntentProvider, void(const WebIntentServiceData&));
+  MOCK_METHOD1(RegisterIntentProvider,
+               void(const webkit_glue::WebIntentServiceData&));
 };
 
 ProfileKeyedService* BuildMockWebIntentsRegistry(Profile* profile) {
@@ -54,20 +57,20 @@ class RegisterIntentHandlerInfoBarDelegateTest
   MockWebIntentsRegistry* web_intents_registry_;
 
  private:
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(RegisterIntentHandlerInfoBarDelegateTest);
 };
 
 TEST_F(RegisterIntentHandlerInfoBarDelegateTest, Accept) {
-  WebIntentServiceData service;
+  webkit_glue::WebIntentServiceData service;
   service.service_url = GURL("google.com");
   service.action = ASCIIToUTF16("http://webintents.org/share");
   service.type = ASCIIToUTF16("text/url");
   RegisterIntentHandlerInfoBarDelegate delegate(
       contents_wrapper()->infobar_tab_helper(),
       WebIntentsRegistryFactory::GetForProfile(profile()),
-      service);
+      service, NULL, GURL());
 
   EXPECT_CALL(*web_intents_registry_, RegisterIntentProvider(service));
   delegate.Accept();

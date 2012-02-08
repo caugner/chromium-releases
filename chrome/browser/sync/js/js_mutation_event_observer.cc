@@ -15,28 +15,24 @@
 
 namespace browser_sync {
 
-JsMutationEventObserver::JsMutationEventObserver() {}
+JsMutationEventObserver::JsMutationEventObserver()
+    : weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {}
 
 JsMutationEventObserver::~JsMutationEventObserver() {
   DCHECK(non_thread_safe_.CalledOnValidThread());
 }
 
+base::WeakPtr<JsMutationEventObserver> JsMutationEventObserver::AsWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
+void JsMutationEventObserver::InvalidateWeakPtrs() {
+  weak_ptr_factory_.InvalidateWeakPtrs();
+}
+
 void JsMutationEventObserver::SetJsEventHandler(
     const WeakHandle<JsEventHandler>& event_handler) {
   event_handler_ = event_handler;
-}
-
-void JsMutationEventObserver::OnTransactionStart(
-    const tracked_objects::Location& location,
-    const syncable::WriterTag& writer) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  if (!event_handler_.IsInitialized()) {
-    return;
-  }
-  DictionaryValue details;
-  details.SetString("location", location.ToString());
-  details.SetString("writer", syncable::WriterTagToString(writer));
-  HandleJsEvent(FROM_HERE, "onTransactionStart", JsEventDetails(&details));
 }
 
 namespace {
@@ -100,19 +96,6 @@ void JsMutationEventObserver::OnTransactionWrite(
   details.Set("modelsWithChanges",
               syncable::ModelTypeBitSetToValue(models_with_changes));
   HandleJsEvent(FROM_HERE, "onTransactionWrite", JsEventDetails(&details));
-}
-
-void JsMutationEventObserver::OnTransactionEnd(
-    const tracked_objects::Location& location,
-    const syncable::WriterTag& writer) {
-  DCHECK(non_thread_safe_.CalledOnValidThread());
-  if (!event_handler_.IsInitialized()) {
-    return;
-  }
-  DictionaryValue details;
-  details.SetString("location", location.ToString());
-  details.SetString("writer", syncable::WriterTagToString(writer));
-  HandleJsEvent(FROM_HERE, "onTransactionEnd", JsEventDetails(&details));
 }
 
 void JsMutationEventObserver::HandleJsEvent(

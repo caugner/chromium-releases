@@ -72,8 +72,13 @@ void DebugInfoEventListener::OnClearServerDataSucceeded() {
   NOTREACHED();
 }
 
-void DebugInfoEventListener::OnEncryptionComplete(
-    const syncable::ModelTypeSet& encrypted_types) {
+void DebugInfoEventListener::OnEncryptedTypesChanged(
+    const syncable::ModelTypeSet& encrypted_types,
+    bool encrypt_everything) {
+  CreateAndAddEvent(sync_pb::DebugEventInfo::ENCRYPTED_TYPES_CHANGED);
+}
+
+void DebugInfoEventListener::OnEncryptionComplete() {
   CreateAndAddEvent(sync_pb::DebugEventInfo::ENCRYPTION_COMPLETE);
 }
 
@@ -107,8 +112,8 @@ void DebugInfoEventListener::CreateAndAddEvent(
 void DebugInfoEventListener::AddEventToQueue(
   const sync_pb::DebugEventInfo& event_info) {
   if (events_.size() >= sync_api::kMaxEntries) {
-    VLOG(1) << "DebugInfoEventListener::AddEventToQueue Dropping an old event "
-            << "because of full queue";
+    DVLOG(1) << "DebugInfoEventListener::AddEventToQueue Dropping an old event "
+             << "because of full queue";
 
     events_.pop();
     events_dropped_ = true;

@@ -8,32 +8,25 @@
 #include <deque>
 #include <vector>
 
-#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
+#include "base/threading/non_thread_safe.h"
 #include "remoting/protocol/session.h"
 #include "remoting/protocol/video_writer.h"
-
-namespace base {
-class MessageLoopProxy;
-}  // namespace base
 
 namespace remoting {
 namespace protocol {
 
-class ClientControlSender;
 class ClientStub;
 class HostStub;
 class InputStub;
-class HostMessageDispatcher;
+class HostControlDispatcher;
+class HostEventDispatcher;
 
-// This class represents a remote viewer connected to the chromoting host
-// through a libjingle connection. A viewer object is responsible for sending
-// screen updates and other messages to the remote viewer. It is also
-// responsible for receiving and parsing data from the remote viewer and
-// delegating events to the event handler.
-class ConnectionToClient :
-    public base::RefCountedThreadSafe<ConnectionToClient> {
+// This class represents a remote viewer connection to the chromoting
+// host. It sets up all protocol channels and connects them to the
+// stubs.
+class ConnectionToClient : public base::NonThreadSafe {
  public:
   class EventHandler {
    public:
@@ -46,29 +39,28 @@ class ConnectionToClient :
     virtual void OnConnectionClosed(ConnectionToClient* connection) = 0;
 
     // Called when the network connection has failed.
-    virtual void OnConnectionFailed(ConnectionToClient* connection) = 0;
+    virtual void OnConnectionFailed(ConnectionToClient* connection,
+                                    Session::Error error) = 0;
 
     // Called when sequence number is updated.
     virtual void OnSequenceNumberUpdated(ConnectionToClient* connection,
                                          int64 sequence_number) = 0;
   };
 
-  // Constructs a ConnectionToClient object. |message_loop| is the message loop
-  // that this object runs on. A viewer object receives events and messages from
-  // a libjingle channel, these events are delegated to |handler|.
-  // It is guaranteed that |handler| is called only on the |message_loop|.
-  ConnectionToClient(base::MessageLoopProxy* message_loop,
-                     EventHandler* handler);
+  // Constructs a ConnectionToClient object for the |session|. Takes
+  // ownership of |session|.
+  explicit ConnectionToClient(Session* session);
+  virtual ~ConnectionToClient();
 
-  virtual void Init(Session* session);
+  // Set |event_handler| for connection events. |event_handler| is
+  // guaranteed to be used only on the network thread. Must be called
+  // once when this object is created.
+  void SetEventHandler(EventHandler* event_handler);
 
   // Returns the connection in use.
   virtual Session* session();
 
-  // Disconnect the client connection. This method is allowed to be called
-  // more than once and calls after the first one will be ignored.
-  //
-  // After this method is called all the send method calls will be ignored.
+  // Disconnect the client connection.
   virtual void Disconnect();
 
   // Update the sequence number when received from the client. EventHandler
@@ -85,16 +77,12 @@ class ConnectionToClient :
   virtual void set_host_stub(HostStub* host_stub);
   virtual void set_input_stub(InputStub* input_stub);
 
- protected:
-  friend class base::RefCountedThreadSafe<ConnectionToClient>;
-  virtual ~ConnectionToClient();
-
  private:
   // Callback for protocol Session.
   void OnSessionStateChange(Session::State state);
 
-  // Callback for VideoReader::Init().
-  void OnVideoInitialized(bool successful);
+  // Callback for channel initialization.
+  void OnChannelInitialized(bool successful);
 
   void NotifyIfChannelsReady();
 
@@ -102,9 +90,6 @@ class ConnectionToClient :
 
   // Stops writing in the channels.
   void CloseChannels();
-
-  // The message loop that this object runs on.
-  scoped_refptr<base::MessageLoopProxy> message_loop_;
 
   // Event handler for handling events sent from this object.
   EventHandler* handler_;
@@ -116,17 +101,9 @@ class ConnectionToClient :
   // The libjingle channel used to send and receive data from the remote client.
   scoped_ptr<Session> session_;
 
-  // Writers for outgoing channels.
+  scoped_ptr<HostControlDispatcher> control_dispatcher_;
+  scoped_ptr<HostEventDispatcher> event_dispatcher_;
   scoped_ptr<VideoWriter> video_writer_;
-  scoped_ptr<ClientControlSender> client_control_sender_;
-
-  // Dispatcher for incoming messages.
-  scoped_ptr<HostMessageDispatcher> dispatcher_;
-
-  // State of the channels.
-  bool control_connected_;
-  bool input_connected_;
-  bool video_connected_;
 
   DISALLOW_COPY_AND_ASSIGN(ConnectionToClient);
 };

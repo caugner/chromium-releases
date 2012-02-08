@@ -6,6 +6,7 @@
 
 #include <cert.h>
 #include <cryptohi.h>
+#include <keyhi.h>
 #include <nss.h>
 #include <pk11pub.h>
 #include <prerror.h>
@@ -21,8 +22,10 @@
 #include "base/time.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
+#include "net/base/asn1_util.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
+#include "net/base/crl_set.h"
 #include "net/base/ev_root_ca_metadata.h"
 #include "net/base/net_errors.h"
 #include "net/base/x509_util_nss.h"
@@ -226,6 +229,67 @@ bool IsKnownRoot(CERTCertificate* root) {
   // http://bonsai.mozilla.org/cvsblame.cgi?file=mozilla/security/nss/lib/ckfw/builtins/constants.c&rev=1.13&mark=86,89#79
   return 0 == strcmp(PK11_GetSlotName(root->slot),
                      "NSS Builtin Objects");
+}
+
+enum CRLSetResult {
+  kCRLSetRevoked,
+  kCRLSetOk,
+  kCRLSetError,
+};
+
+// CheckRevocationWithCRLSet attempts to check each element of |cert_list|
+// against |crl_set|. It returns:
+//   kCRLSetRevoked: if any element of the chain is known to have been revoked.
+//   kCRLSetError: if an error occurs in processing.
+//   kCRLSetOk: if no element in the chain is known to have been revoked.
+CRLSetResult CheckRevocationWithCRLSet(CERTCertList* cert_list,
+                                       CERTCertificate* root,
+                                       CRLSet* crl_set) {
+  std::vector<CERTCertificate*> certs;
+  for (CERTCertListNode* node = CERT_LIST_HEAD(cert_list);
+       !CERT_LIST_END(node, cert_list);
+       node = CERT_LIST_NEXT(node)) {
+    certs.push_back(node->cert);
+  }
+  certs.push_back(root);
+
+  CERTCertificate* prev = NULL;
+  for (std::vector<CERTCertificate*>::iterator i = certs.begin();
+       i != certs.end(); ++i) {
+    CERTCertificate* cert = *i;
+    CERTCertificate* child = prev;
+    prev = cert;
+    if (child == NULL)
+      continue;
+
+    base::StringPiece der(reinterpret_cast<char*>(cert->derCert.data),
+                          cert->derCert.len);
+
+    base::StringPiece spki;
+    if (!asn1::ExtractSPKIFromDERCert(der, &spki)) {
+      NOTREACHED();
+      return kCRLSetError;
+    }
+
+    std::string serial_number(
+        reinterpret_cast<char*>(child->serialNumber.data),
+        child->serialNumber.len);
+
+    CRLSet::Result result = crl_set->CheckCertificate(serial_number, spki);
+
+    switch (result) {
+      case CRLSet::REVOKED:
+        return kCRLSetRevoked;
+      case CRLSet::UNKNOWN:
+      case CRLSet::GOOD:
+        continue;
+      default:
+        NOTREACHED();
+        return kCRLSetError;
+    }
+  }
+
+  return kCRLSetOk;
 }
 
 void ParsePrincipal(CERTName* name,
@@ -614,13 +678,95 @@ void X509Certificate::Initialize() {
   ParseDate(&cert_handle_->validity.notAfter, &valid_expiry_);
 
   fingerprint_ = CalculateFingerprint(cert_handle_);
+  ca_fingerprint_ = CalculateCAFingerprint(intermediate_ca_certs_);
 
   serial_number_ = std::string(
       reinterpret_cast<char*>(cert_handle_->serialNumber.data),
       cert_handle_->serialNumber.len);
-  // Remove leading zeros.
-  while (serial_number_.size() > 1 && serial_number_[0] == 0)
-    serial_number_ = serial_number_.substr(1, serial_number_.size() - 1);
+}
+
+// static
+X509Certificate* X509Certificate::CreateFromBytesWithNickname(
+    const char* data,
+    int length,
+    const char* nickname) {
+  OSCertHandle cert_handle = CreateOSCertHandleFromBytesWithNickname(data,
+                                                                     length,
+                                                                     nickname);
+  if (!cert_handle)
+    return NULL;
+
+  X509Certificate* cert = CreateFromHandle(cert_handle, OSCertHandles());
+  FreeOSCertHandle(cert_handle);
+
+  if (nickname)
+    cert->default_nickname_ = nickname;
+
+  return cert;
+}
+
+std::string X509Certificate::GetDefaultNickname(CertType type) const {
+  if (!default_nickname_.empty())
+    return default_nickname_;
+
+  std::string result;
+  if (type == USER_CERT && cert_handle_->slot) {
+    // Find the private key for this certificate and see if it has a
+    // nickname.  If there is a private key, and it has a nickname, then
+    // we return that nickname.
+    SECKEYPrivateKey* private_key = PK11_FindPrivateKeyFromCert(
+        cert_handle_->slot,
+        cert_handle_,
+        NULL);  // wincx
+    if (private_key) {
+      char* private_key_nickname = PK11_GetPrivateKeyNickname(private_key);
+      if (private_key_nickname) {
+        result = private_key_nickname;
+        PORT_Free(private_key_nickname);
+        SECKEY_DestroyPrivateKey(private_key);
+        return result;
+      }
+      SECKEY_DestroyPrivateKey(private_key);
+    }
+  }
+
+  switch (type) {
+    case CA_CERT: {
+      char* nickname = CERT_MakeCANickname(cert_handle_);
+      result = nickname;
+      PORT_Free(nickname);
+      break;
+    }
+    case USER_CERT: {
+      // Create a nickname for a user certificate.
+      // We use the scheme used by Firefox:
+      // --> <subject's common name>'s <issuer's common name> ID.
+      // TODO(gspencer): internationalize this: it's wrong to
+      // hard code English.
+
+      std::string username, ca_name;
+      char* temp_username = CERT_GetCommonName(
+          &cert_handle_->subject);
+      char* temp_ca_name = CERT_GetCommonName(&cert_handle_->issuer);
+      if (temp_username) {
+        username = temp_username;
+        PORT_Free(temp_username);
+      }
+      if (temp_ca_name) {
+        ca_name = temp_ca_name;
+        PORT_Free(temp_ca_name);
+      }
+      result = username + "'s " + ca_name + " ID";
+      break;
+    }
+    case SERVER_CERT:
+      result = subject_.GetDisplayName();
+      break;
+    case UNKNOWN_CERT:
+    default:
+      break;
+  }
+  return result;
 }
 
 // static
@@ -640,8 +786,10 @@ X509Certificate* X509Certificate::CreateSelfSigned(
   if (!cert)
     return NULL;
 
-  return X509Certificate::CreateFromHandle(cert,
-                                           X509Certificate::OSCertHandles());
+  X509Certificate* x509_cert = X509Certificate::CreateFromHandle(
+      cert, X509Certificate::OSCertHandles());
+  CERT_DestroyCertificate(cert);
+  return x509_cert;
 }
 
 void X509Certificate::GetSubjectAltName(
@@ -689,6 +837,7 @@ void X509Certificate::GetSubjectAltName(
 
 int X509Certificate::VerifyInternal(const std::string& hostname,
                                     int flags,
+                                    CRLSet* crl_set,
                                     CertVerifyResult* verify_result) const {
   // Make sure that the hostname matches with the common name of the cert.
   SECStatus status = CERT_VerifyCertName(cert_handle_, hostname.c_str());
@@ -721,7 +870,34 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
     // EV requires revocation checking.
     flags &= ~VERIFY_EV_CERT;
   }
-  status = PKIXVerifyCert(cert_handle_, check_revocation, NULL, 0, cvout);
+
+  if (check_revocation && crl_set) {
+    // We have a CRLSet so we build a chain without revocation checking in
+    // order to try and check it ourselves.
+    status = PKIXVerifyCert(cert_handle_, false /* no revocation checking */,
+                            NULL, 0, cvout);
+    if (status == SECSuccess) {
+      CRLSetResult crl_set_result = CheckRevocationWithCRLSet(
+          cvout[cvout_cert_list_index].value.pointer.chain,
+          cvout[cvout_trust_anchor_index].value.pointer.cert,
+          crl_set);
+      if (crl_set_result == kCRLSetError) {
+        // An error occured during processing so we fall back to standard
+        // revocation checking.
+        status = PKIXVerifyCert(cert_handle_, check_revocation, NULL, 0, cvout);
+      } else {
+        DCHECK(crl_set_result == kCRLSetRevoked || crl_set_result == kCRLSetOk);
+        if (crl_set_result == kCRLSetRevoked) {
+          PORT_SetError(SEC_ERROR_REVOKED_CERTIFICATE);
+          status = SECFailure;
+        }
+      }
+    }
+  } else {
+    status = PKIXVerifyCert(cert_handle_, check_revocation,
+                            NULL, 0, cvout);
+  }
+
   if (status != SECSuccess) {
     int err = PORT_GetError();
     LOG(ERROR) << "CERT_PKIXVerifyCert for " << hostname
@@ -808,12 +984,13 @@ bool X509Certificate::VerifyEV() const {
   return false;
 }
 
-bool X509Certificate::GetDEREncoded(std::string* encoded) {
-  if (!cert_handle_->derCert.len)
+// static
+bool X509Certificate::GetDEREncoded(X509Certificate::OSCertHandle cert_handle,
+                                    std::string* encoded) {
+  if (!cert_handle->derCert.len)
     return false;
-  encoded->clear();
-  encoded->append(reinterpret_cast<char*>(cert_handle_->derCert.data),
-                  cert_handle_->derCert.len);
+  encoded->assign(reinterpret_cast<char*>(cert_handle->derCert.data),
+                  cert_handle->derCert.len);
   return true;
 }
 
@@ -830,6 +1007,15 @@ bool X509Certificate::IsSameOSCert(X509Certificate::OSCertHandle a,
 // static
 X509Certificate::OSCertHandle X509Certificate::CreateOSCertHandleFromBytes(
     const char* data, int length) {
+  return CreateOSCertHandleFromBytesWithNickname(data, length, NULL);
+}
+
+// static
+X509Certificate::OSCertHandle
+X509Certificate::CreateOSCertHandleFromBytesWithNickname(
+    const char* data,
+    int length,
+    const char* nickname) {
   if (length < 0)
     return NULL;
 
@@ -844,13 +1030,16 @@ X509Certificate::OSCertHandle X509Certificate::CreateOSCertHandleFromBytes(
   der_cert.type = siDERCertBuffer;
 
   // Parse into a certificate structure.
-  return CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &der_cert, NULL,
+  return CERT_NewTempCertificate(CERT_GetDefaultCertDB(), &der_cert,
+                                 const_cast<char*>(nickname),
                                  PR_FALSE, PR_TRUE);
 }
 
 // static
 X509Certificate::OSCertHandles X509Certificate::CreateOSCertHandlesFromBytes(
-    const char* data, int length, Format format) {
+    const char* data,
+    int length,
+    Format format) {
   OSCertHandles results;
   if (length < 0)
     return results;
@@ -908,6 +1097,27 @@ SHA1Fingerprint X509Certificate::CalculateFingerprint(
   SECStatus rv = HASH_HashBuf(HASH_AlgSHA1, sha1.data,
                               cert->derCert.data, cert->derCert.len);
   DCHECK_EQ(SECSuccess, rv);
+
+  return sha1;
+}
+
+// static
+SHA1Fingerprint X509Certificate::CalculateCAFingerprint(
+    const OSCertHandles& intermediates) {
+  SHA1Fingerprint sha1;
+  memset(sha1.data, 0, sizeof(sha1.data));
+
+  HASHContext* sha1_ctx = HASH_Create(HASH_AlgSHA1);
+  if (!sha1_ctx)
+    return sha1;
+  HASH_Begin(sha1_ctx);
+  for (size_t i = 0; i < intermediates.size(); ++i) {
+    CERTCertificate* ca_cert = intermediates[i];
+    HASH_Update(sha1_ctx, ca_cert->derCert.data, ca_cert->derCert.len);
+  }
+  unsigned int result_len;
+  HASH_End(sha1_ctx, sha1.data, &result_len, HASH_ResultLenContext(sha1_ctx));
+  HASH_Destroy(sha1_ctx);
 
   return sha1;
 }

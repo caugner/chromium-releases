@@ -8,14 +8,13 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/callback_old.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/shell_dialogs.h"
+#include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
@@ -27,6 +26,8 @@
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -48,7 +49,8 @@ class TracingMessageHandler
     : public WebUIMessageHandler,
       public SelectFileDialog::Listener,
       public base::SupportsWeakPtr<TracingMessageHandler>,
-      public TraceSubscriber {
+      public TraceSubscriber,
+      public GpuDataManager::Observer {
  public:
   TracingMessageHandler();
   virtual ~TracingMessageHandler();
@@ -63,8 +65,11 @@ class TracingMessageHandler
 
   // TraceSubscriber implementation.
   virtual void OnEndTracingComplete();
-  virtual void OnTraceDataCollected(const std::string& json_events);
+  virtual void OnTraceDataCollected(const std::string& trace_fragment);
   virtual void OnTraceBufferPercentFullReply(float percent_full);
+
+  // GpuDataManager::Observer implementation.
+  virtual void OnGpuInfoUpdate() OVERRIDE;
 
   // Messages.
   void OnTracingControllerInitialized(const ListValue* list);
@@ -73,9 +78,6 @@ class TracingMessageHandler
   void OnBeginRequestBufferPercentFull(const ListValue* list);
   void OnLoadTraceFile(const ListValue* list);
   void OnSaveTraceFile(const ListValue* list);
-
-  // Callbacks.
-  void OnGpuInfoUpdate();
 
   // Callbacks.
   void LoadTraceFileComplete(std::string* file_contents);
@@ -97,9 +99,6 @@ class TracingMessageHandler
 
   // Cache the Singleton for efficiency.
   GpuDataManager* gpu_data_manager_;
-
-  // Callback called when the GPU info is updated.
-  Callback0::Type* gpu_info_update_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(TracingMessageHandler);
 };
@@ -138,17 +137,13 @@ class TaskProxy : public base::RefCountedThreadSafe<TaskProxy> {
 
 TracingMessageHandler::TracingMessageHandler()
   : select_trace_file_dialog_type_(SelectFileDialog::SELECT_NONE),
-    trace_enabled_(false),
-    gpu_info_update_callback_(NULL) {
+    trace_enabled_(false) {
   gpu_data_manager_ = GpuDataManager::GetInstance();
   DCHECK(gpu_data_manager_);
 }
 
 TracingMessageHandler::~TracingMessageHandler() {
-  if (gpu_info_update_callback_) {
-    gpu_data_manager_->RemoveGpuInfoUpdateCallback(gpu_info_update_callback_);
-    delete gpu_info_update_callback_;
-  }
+  gpu_data_manager_->RemoveObserver(this);
 
   if (select_trace_file_dialog_)
     select_trace_file_dialog_->ListenerDestroyed();
@@ -190,12 +185,8 @@ void TracingMessageHandler::OnTracingControllerInitialized(
     const ListValue* args) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  DCHECK(!gpu_info_update_callback_);
-
   // Watch for changes in GPUInfo
-  gpu_info_update_callback_ =
-      NewCallback(this, &TracingMessageHandler::OnGpuInfoUpdate);
-  gpu_data_manager_->AddGpuInfoUpdateCallback(gpu_info_update_callback_);
+  gpu_data_manager_->AddObserver(this);
 
   // Tell GpuDataManager it should have full GpuInfo. If the
   // Gpu process has not run yet, this will trigger its launch.
@@ -255,75 +246,47 @@ void TracingMessageHandler::OnGpuInfoUpdate() {
       *(gpu_info_val.get()));
 }
 
-// A task used for asynchronously reading a file to a string. Calls the
+// A callback used for asynchronously reading a file to a string. Calls the
 // TaskProxy callback when reading is complete.
-class ReadTraceFileTask : public Task {
- public:
-  ReadTraceFileTask(TaskProxy* proxy, const FilePath& path)
-      : proxy_(proxy),
-        path_(path) {}
+void ReadTraceFileCallback(TaskProxy* proxy, const FilePath& path) {
+  scoped_ptr<std::string> file_contents(new std::string());
+  if (!file_util::ReadFileToString(path, file_contents.get()))
+    return;
 
-  virtual void Run() {
-    std::string* file_contents = new std::string();
-    if (!file_util::ReadFileToString(path_, file_contents)) {
-      delete file_contents;
-      return;
-    }
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&TaskProxy::LoadTraceFileCompleteProxy, proxy_.get(),
-                   file_contents));
-  }
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&TaskProxy::LoadTraceFileCompleteProxy, proxy,
+                 file_contents.release()));
+}
 
- private:
-  // The proxy that defines the completion callback.
-  scoped_refptr<TaskProxy> proxy_;
-
-  // Path of the file to open.
-  const FilePath path_;
-};
-
-// A task used for asynchronously writing a file from a string. Calls the
+// A callback used for asynchronously writing a file from a string. Calls the
 // TaskProxy callback when writing is complete.
-class WriteTraceFileTask : public Task {
- public:
-  WriteTraceFileTask(TaskProxy* proxy,
-                     const FilePath& path,
-                     std::string* contents)
-      : proxy_(proxy)
-      , path_(path)
-      , contents_(contents) {}
+void WriteTraceFileCallback(TaskProxy* proxy,
+                            const FilePath& path,
+                            std::string* contents) {
+  if (!file_util::WriteFile(path, contents->c_str(), contents->size()))
+    return;
 
-  virtual void Run() {
-    if (!file_util::WriteFile(path_, contents_->c_str(), contents_->size()))
-      return;
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&TaskProxy::SaveTraceFileCompleteProxy, proxy_.get()));
-  }
-
- private:
-  // The proxy that defines the completion callback.
-  scoped_refptr<TaskProxy> proxy_;
-
-  // Path of the file to save.
-  const FilePath path_;
-
-  // What to save
-  scoped_ptr<std::string> contents_;
-};
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&TaskProxy::SaveTraceFileCompleteProxy, proxy));
+}
 
 void TracingMessageHandler::FileSelected(
     const FilePath& path, int index, void* params) {
-  if (select_trace_file_dialog_type_ == SelectFileDialog::SELECT_OPEN_FILE)
+  if (select_trace_file_dialog_type_ == SelectFileDialog::SELECT_OPEN_FILE) {
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        new ReadTraceFileTask(new TaskProxy(AsWeakPtr()), path));
-  else
+        base::Bind(&ReadTraceFileCallback,
+                   make_scoped_refptr(new TaskProxy(AsWeakPtr())), path));
+  } else {
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        new WriteTraceFileTask(new TaskProxy(AsWeakPtr()), path,
-                               trace_data_to_save_.release()));
+        base::Bind(&WriteTraceFileCallback,
+                   make_scoped_refptr(new TaskProxy(AsWeakPtr())), path,
+                   trace_data_to_save_.release()));
+  }
+
   select_trace_file_dialog_.release();
 }
 
@@ -419,13 +382,20 @@ void TracingMessageHandler::OnEndTracingComplete() {
 }
 
 void TracingMessageHandler::OnTraceDataCollected(
-    const std::string& json_events) {
+    const std::string& trace_fragment) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  std::string javascript = "tracingController.onTraceDataCollected("
-      + json_events + ");";
+
+  base::debug::TraceResultBuffer::SimpleOutput output;
+  base::debug::TraceResultBuffer trace_buffer;
+  trace_buffer.SetOutputCallback(output.GetCallback());
+  output.Append("tracingController.onTraceDataCollected(");
+  trace_buffer.Start();
+  trace_buffer.AddFragment(trace_fragment);
+  trace_buffer.Finish();
+  output.Append(");");
 
   web_ui_->tab_contents()->render_view_host()->
-      ExecuteJavascriptInWebFrame(string16(), UTF8ToUTF16(javascript));
+      ExecuteJavascriptInWebFrame(string16(), UTF8ToUTF16(output.json_output));
 }
 
 void TracingMessageHandler::OnTraceBufferPercentFullReply(float percent_full) {

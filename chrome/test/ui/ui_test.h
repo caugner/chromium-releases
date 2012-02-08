@@ -33,7 +33,6 @@ class AutomationProxy;
 class BrowserProxy;
 class FilePath;
 class GURL;
-class ScopedTempDir;
 class TabProxy;
 
 namespace base {
@@ -356,12 +355,6 @@ class UITestBase {
   // PID file for websocket server.
   FilePath websocket_pid_file_;
 
-  // Whether to force use of mesa for GL rendering.
-  bool force_use_osmesa_;
-
-  // Whether to disable accelerated compositing for this test.
-  bool disable_accelerated_compositing_;
-
  private:
   // Time the test was started (so we can check for new crash dumps)
   base::Time test_start_time_;
@@ -374,10 +367,10 @@ class UITest : public UITestBase, public PlatformTest {
     : UITestBase(), PlatformTest(), message_loop_(msg_loop_type) {
   }
 
-  virtual void SetUp();
-  virtual void TearDown();
+  virtual void SetUp() OVERRIDE;
+  virtual void TearDown() OVERRIDE;
 
-  virtual ProxyLauncher* CreateProxyLauncher();
+  virtual ProxyLauncher* CreateProxyLauncher() OVERRIDE;
 
   // Count the number of active browser processes launched by this test.
   // The count includes browser sub-processes.

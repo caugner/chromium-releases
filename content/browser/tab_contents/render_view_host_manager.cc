@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "content/browser/content_browser_client.h"
+#include "content/browser/debugger/devtools_manager_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
@@ -17,9 +17,9 @@
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/webui/web_ui.h"
 #include "content/browser/webui/web_ui_factory.h"
-#include "content/common/content_client.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
@@ -70,7 +70,7 @@ void RenderViewHostManager::Init(content::BrowserContext* browser_context,
 
   // Keep track of renderer processes as they start to shut down.
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 RenderWidgetHostView* RenderViewHostManager::GetRenderWidgetHostView() const {
@@ -113,11 +113,11 @@ RenderViewHost* RenderViewHostManager::Navigate(const NavigationEntry& entry) {
       RenderViewHostSwitchedDetails details;
       details.new_host = render_view_host_;
       details.old_host = NULL;
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-          Source<NavigationController>(
+          content::Source<NavigationController>(
               &delegate_->GetControllerForRenderManager()),
-          Details<RenderViewHostSwitchedDetails>(&details));
+          content::Details<RenderViewHostSwitchedDetails>(&details));
     }
   }
 
@@ -167,7 +167,7 @@ bool RenderViewHostManager::ShouldCloseTabOnUnresponsiveRenderer() {
     // CrossSiteResourceHandler will already be cleaned up.)
     ViewMsg_SwapOut_Params params;
     params.new_render_process_host_id =
-        pending_render_view_host_->process()->id();
+        pending_render_view_host_->process()->GetID();
     params.new_request_id = pending_request_id;
     current_host()->process()->CrossSiteSwapOutACK(params);
   }
@@ -194,7 +194,7 @@ void RenderViewHostManager::DidNavigateMainFrame(
     // then we still need to swap out the old RVH first and run its unload
     // handler.  OK for that to happen in the background.
     if (pending_render_view_host_->GetPendingRequestId() == -1) {
-      OnCrossSiteResponse(pending_render_view_host_->process()->id(),
+      OnCrossSiteResponse(pending_render_view_host_->process()->GetID(),
                           pending_render_view_host_->routing_id());
     }
 
@@ -231,7 +231,7 @@ void RenderViewHostManager::RendererAbortedProvisionalLoad(
 }
 
 void RenderViewHostManager::RendererProcessClosing(
-    RenderProcessHost* render_process_host) {
+    content::RenderProcessHost* render_process_host) {
   // Remove any swapped out RVHs from this process, so that we don't try to
   // swap them back in while the process is exiting.  Start by finding them,
   // since there could be more than one.
@@ -307,19 +307,14 @@ void RenderViewHostManager::OnCrossSiteResponse(int new_render_process_host_id,
                                                            new_request_id);
 }
 
-void RenderViewHostManager::OnCrossSiteNavigationCanceled() {
-  DCHECK(cross_navigation_pending_);
-  cross_navigation_pending_ = false;
-  if (pending_render_view_host_)
-    CancelPending();
-}
-
-void RenderViewHostManager::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void RenderViewHostManager::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RENDERER_PROCESS_CLOSING:
-      RendererProcessClosing(Source<RenderProcessHost>(source).ptr());
+      RendererProcessClosing(
+          content::Source<content::RenderProcessHost>(source).ptr());
       break;
 
     default:
@@ -387,15 +382,9 @@ SiteInstance* RenderViewHostManager::GetSiteInstanceForEntry(
   NavigationController& controller = delegate_->GetControllerForRenderManager();
   content::BrowserContext* browser_context = controller.browser_context();
 
-  // If the entry has an instance already we should use it, unless the URL
-  // is part of an app that has been installed or uninstalled since the last
-  // visit.
-  if (entry.site_instance()) {
-    if (entry.site_instance()->HasWrongProcessForURL(dest_url))
-      return curr_instance->GetRelatedSiteInstance(dest_url);
-    else
-      return entry.site_instance();
-  }
+  // If the entry has an instance already we should use it.
+  if (entry.site_instance())
+    return entry.site_instance();
 
   // (UGLY) HEURISTIC, process-per-site only:
   //
@@ -613,10 +602,11 @@ void RenderViewHostManager::CommitPending() {
   RenderViewHostSwitchedDetails details;
   details.new_host = render_view_host_;
   details.old_host = old_render_view_host;
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       content::NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
-      Source<NavigationController>(&delegate_->GetControllerForRenderManager()),
-      Details<RenderViewHostSwitchedDetails>(&details));
+      content::Source<NavigationController>(
+          &delegate_->GetControllerForRenderManager()),
+      content::Details<RenderViewHostSwitchedDetails>(&details));
 
   // If the pending view was on the swapped out list, we can remove it.
   swapped_out_hosts_.erase(render_view_host_->site_instance()->id());
@@ -704,29 +694,41 @@ RenderViewHost* RenderViewHostManager::UpdateRendererStateForNavigate(
     }
     // Otherwise, it's safe to treat this as a pending cross-site transition.
 
-    // Make sure the old render view stops, in case a load is in progress.
-    render_view_host_->Send(new ViewMsg_Stop(render_view_host_->routing_id()));
+    // It is possible that a previous cross-site navigation caused
+    // render_view_host_ to be swapped out and we are still waiting for
+    // the old pending_render_view_host_ to inform us about the committed
+    // navigation.
+    if (!render_view_host_->is_swapped_out()) {
+      // Make sure the old render view stops, in case a load is in progress.
+      render_view_host_->Send(
+          new ViewMsg_Stop(render_view_host_->routing_id()));
 
-    // Suspend the new render view (i.e., don't let it send the cross-site
-    // Navigate message) until we hear back from the old renderer's
-    // onbeforeunload handler.  If the handler returns false, we'll have to
-    // cancel the request.
-    DCHECK(!pending_render_view_host_->are_navigations_suspended());
-    pending_render_view_host_->SetNavigationsSuspended(true);
+      // Suspend the new render view (i.e., don't let it send the cross-site
+      // Navigate message) until we hear back from the old renderer's
+      // onbeforeunload handler.  If the handler returns false, we'll have to
+      // cancel the request.
+      DCHECK(!pending_render_view_host_->are_navigations_suspended());
+      pending_render_view_host_->SetNavigationsSuspended(true);
 
-    // Tell the CrossSiteRequestManager that this RVH has a pending cross-site
-    // request, so that ResourceDispatcherHost will know to tell us to run the
-    // old page's onunload handler before it sends the response.
-    pending_render_view_host_->SetHasPendingCrossSiteRequest(true, -1);
+      // Tell the CrossSiteRequestManager that this RVH has a pending cross-site
+      // request, so that ResourceDispatcherHost will know to tell us to run the
+      // old page's onunload handler before it sends the response.
+      pending_render_view_host_->SetHasPendingCrossSiteRequest(true, -1);
+
+      // Tell the old render view to run its onbeforeunload handler, since it
+      // doesn't otherwise know that the cross-site request is happening.  This
+      // will trigger a call to ShouldClosePage with the reply.
+      render_view_host_->FirePageBeforeUnload(true);
+    } else {
+      // As the render_view_host_ is already swapped out, we do not need
+      // to instruct it to run its beforeunload or unload handlers.  Therefore,
+      // we also do not need to suspend outgoing navigation messages and can
+      // just let the new pending_render_view_host_ immediately navigate.
+    }
 
     // We now have a pending RVH.
     DCHECK(!cross_navigation_pending_);
     cross_navigation_pending_ = true;
-
-    // Tell the old render view to run its onbeforeunload handler, since it
-    // doesn't otherwise know that the cross-site request is happening.  This
-    // will trigger a call to ShouldClosePage with the reply.
-    render_view_host_->FirePageBeforeUnload(true);
 
     return pending_render_view_host_;
   } else {
@@ -750,6 +752,10 @@ RenderViewHost* RenderViewHostManager::UpdateRendererStateForNavigate(
 void RenderViewHostManager::CancelPending() {
   RenderViewHost* pending_render_view_host = pending_render_view_host_;
   pending_render_view_host_ = NULL;
+
+  content::DevToolsManagerImpl::GetInstance()->OnCancelPendingNavigation(
+      pending_render_view_host,
+      render_view_host_);
 
   // We no longer need to prevent the process from exiting.
   pending_render_view_host->process()->RemovePendingView();

@@ -29,16 +29,21 @@ class ExternalExtensionProviderInterface {
         const std::string& id,
         const Version* version,
         const FilePath& path,
-        Extension::Location location) = 0;
+        Extension::Location location,
+        int creation_flags) = 0;
 
     virtual void OnExternalExtensionUpdateUrlFound(
         const std::string& id,
         const GURL& update_url,
         Extension::Location location) = 0;
 
-     // Called after all the external extensions have been reported through
-     // the above two methods.
-    virtual void OnExternalProviderReady() = 0;
+    // Called after all the external extensions have been reported
+    // through the above two methods. |provider| is a pointer to the
+    // provider that is now ready (typically this), and the
+    // implementation of OnExternalProviderReady() should be able to
+    // safely assert that provider->IsReady().
+    virtual void OnExternalProviderReady(
+      const ExternalExtensionProviderInterface* provider) = 0;
 
    protected:
     virtual ~VisitorInterface() {}
@@ -52,7 +57,7 @@ class ExternalExtensionProviderInterface {
   // Enumerate registered extensions, calling
   // OnExternalExtension(File|UpdateUrl)Found on the |visitor| object for each
   // registered extension found.
-  virtual void VisitRegisteredExtension() const = 0;
+  virtual void VisitRegisteredExtension() = 0;
 
   // Test if this provider has an extension with id |id| registered.
   virtual bool HasExtension(const std::string& id) const = 0;
@@ -67,7 +72,7 @@ class ExternalExtensionProviderInterface {
 
   // Determines if this provider had loaded the list of external extensions
   // from its source.
-  virtual bool IsReady() = 0;
+  virtual bool IsReady() const = 0;
 };
 
 typedef std::vector<linked_ptr<ExternalExtensionProviderInterface> >

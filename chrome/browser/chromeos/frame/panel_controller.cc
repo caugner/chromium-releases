@@ -18,7 +18,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -28,16 +28,16 @@
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/events/event.h"
-#include "views/painter.h"
-#include "views/view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/events/event.h"
+#include "ui/views/painter.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 
 #if defined(TOUCH_UI)
@@ -267,7 +267,7 @@ bool PanelController::TitleMousePressed(const views::MouseEvent& event) {
   mouse_down_offset_y_ = event.y();
   dragging_ = false;
 
-#if !defined(TOUCH_UI) && !defined(USE_AURA)
+#if defined(TOOLKIT_USES_GTK)
   const GdkEvent* gdk_event = event.gdk_event();
   GdkEventButton last_button_event = gdk_event->button;
   mouse_down_abs_x_ = last_button_event.x_root;
@@ -396,10 +396,10 @@ bool PanelController::PanelClientEvent(GdkEventClient* event) {
     if (expanded_ != new_state) {
       expanded_ = new_state;
       State state = new_state ? EXPANDED : MINIMIZED;
-      NotificationService::current()->Notify(
+      content::NotificationService::current()->Notify(
           chrome::NOTIFICATION_PANEL_STATE_CHANGED,
-          Source<PanelController>(this),
-          Details<State>(&state));
+          content::Source<PanelController>(this),
+          content::Details<State>(&state));
     }
   }
 #endif

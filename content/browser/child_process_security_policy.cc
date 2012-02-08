@@ -6,9 +6,11 @@
 
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/platform_file.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
+#include "content/browser/site_instance.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -33,6 +35,8 @@ class ChildProcessSecurityPolicy::SecurityState {
       can_read_raw_cookies_(false) { }
   ~SecurityState() {
     scheme_policy_.clear();
+    UMA_HISTOGRAM_COUNTS("ChildProcessSecurityPolicy.PerChildFilePermissions",
+                         file_permissions_.size());
   }
 
   // Grant permission to request URLs with the specified scheme.
@@ -47,7 +51,10 @@ class ChildProcessSecurityPolicy::SecurityState {
 
   // Grant certain permissions to a file.
   void GrantPermissionsForFile(const FilePath& file, int permissions) {
-    file_permissions_[file.StripTrailingSeparators()] |= permissions;
+    FilePath stripped = file.StripTrailingSeparators();
+    file_permissions_[stripped] |= permissions;
+    UMA_HISTOGRAM_COUNTS("ChildProcessSecurityPolicy.FilePermissionPathLength",
+                         stripped.value().size());
   }
 
   // Revokes all permissions granted to a file.
@@ -92,6 +99,17 @@ class ChildProcessSecurityPolicy::SecurityState {
     return false;
   }
 
+  bool CanUseCookiesForOrigin(const GURL& gurl) {
+    if (origin_lock_.is_empty())
+      return true;
+    GURL site_gurl = SiteInstance::GetSiteForURL(NULL, gurl);
+    return origin_lock_ == site_gurl;
+  }
+
+  void LockToOrigin(const GURL& gurl) {
+    origin_lock_ = gurl;
+  }
+
   bool has_web_ui_bindings() const {
     return enabled_bindings_ & content::BINDINGS_POLICY_WEB_UI;
   }
@@ -117,6 +135,8 @@ class ChildProcessSecurityPolicy::SecurityState {
   int enabled_bindings_;
 
   bool can_read_raw_cookies_;
+
+  GURL origin_lock_;
 
   DISALLOW_COPY_AND_ASSIGN(SecurityState);
 };
@@ -443,3 +463,22 @@ bool ChildProcessSecurityPolicy::ChildProcessHasPermissionsForFile(
     return false;
   return state->second->HasPermissionsForFile(file, permissions);
 }
+
+bool ChildProcessSecurityPolicy::CanUseCookiesForOrigin(int child_id,
+                                                        const GURL& gurl) {
+  base::AutoLock lock(lock_);
+  SecurityStateMap::iterator state = security_state_.find(child_id);
+  if (state == security_state_.end())
+    return false;
+  return state->second->CanUseCookiesForOrigin(gurl);
+}
+
+void ChildProcessSecurityPolicy::LockToOrigin(int child_id, const GURL& gurl) {
+  // "gurl" can be currently empty in some cases, such as file://blah.
+  DCHECK(SiteInstance::GetSiteForURL(NULL, gurl) == gurl);
+  base::AutoLock lock(lock_);
+  SecurityStateMap::iterator state = security_state_.find(child_id);
+  DCHECK(state != security_state_.end());
+  state->second->LockToOrigin(gurl);
+}
+

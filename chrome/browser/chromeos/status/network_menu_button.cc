@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <limits>
+#include <vector>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -14,21 +16,24 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
 #include "chrome/browser/chromeos/sim_dialog_delegate.h"
-#include "chrome/browser/chromeos/status/status_area_host.h"
+#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
+#include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/pref_names.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -94,15 +99,14 @@ namespace chromeos {
 ////////////////////////////////////////////////////////////////////////////////
 // NetworkMenuButton
 
-NetworkMenuButton::NetworkMenuButton(StatusAreaHost* host)
-    : StatusAreaButton(host, this),
+NetworkMenuButton::NetworkMenuButton(StatusAreaButton::Delegate* delegate)
+    : StatusAreaButton(delegate, this),
       mobile_data_bubble_(NULL),
-      is_browser_mode_(false),
       check_for_promo_(true),
       was_sim_locked_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
-  is_browser_mode_ = (host->GetScreenMode() == StatusAreaHost::kBrowserMode);
-  network_menu_.reset(new NetworkMenu(this, is_browser_mode_));
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)) {
+  set_id(VIEW_ID_STATUS_BUTTON_NETWORK_MENU);
+  network_menu_.reset(new NetworkMenu(this));
   network_icon_.reset(
       new NetworkMenuIcon(this, NetworkMenuIcon::MENU_MODE));
 
@@ -126,7 +130,7 @@ NetworkMenuButton::~NetworkMenuButton() {
   if (!cellular_device_path_.empty())
     netlib->RemoveNetworkDeviceObserver(cellular_device_path_, this);
   if (mobile_data_bubble_)
-    mobile_data_bubble_->Close();
+    mobile_data_bubble_->GetWidget()->Close();
 }
 
 // static
@@ -192,15 +196,24 @@ views::MenuButton* NetworkMenuButton::GetMenuButton() {
 }
 
 gfx::NativeWindow NetworkMenuButton::GetNativeWindow() const {
-  return host_->GetNativeWindow();
+  if (BaseLoginDisplayHost::default_host()) {
+    // When not in browser mode i.e. login screen, status area is hosted in
+    // a separate widget.
+    return BaseLoginDisplayHost::default_host()->GetNativeWindow();
+  } else {
+    // This must always have a parent, which must have a widget ancestor.
+    return parent()->GetWidget()->GetNativeWindow();
+  }
 }
 
 void NetworkMenuButton::OpenButtonOptions() {
-  host_->OpenButtonOptions(this);
+  delegate()->ExecuteStatusAreaCommand(
+      this, StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS);
 }
 
 bool NetworkMenuButton::ShouldOpenButtonOptions() const {
-  return host_->ShouldOpenButtonOptions(this);
+  return delegate()->ShouldExecuteStatusAreaCommand(
+      this, StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -226,21 +239,19 @@ void NetworkMenuButton::NetworkMenuIconChanged() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// MessageBubbleDelegate implementation:
+// views::Widget::Observer implementation:
 
-void NetworkMenuButton::BubbleClosing(Bubble* bubble, bool closed_by_escape) {
+void NetworkMenuButton::OnWidgetClosing(views::Widget* widget) {
+  if (!mobile_data_bubble_ || mobile_data_bubble_->GetWidget() != widget)
+    return;
+
   mobile_data_bubble_ = NULL;
   deal_info_url_.clear();
   deal_topup_url_.clear();
 }
 
-bool NetworkMenuButton::CloseOnEscape() {
-  return true;
-}
-
-bool NetworkMenuButton::FadeInOnShow() {
-  return false;
-}
+////////////////////////////////////////////////////////////////////////////////
+// MessageBubbleLinkListener implementation:
 
 void NetworkMenuButton::OnLinkActivated(size_t index) {
   // If we have deal info URL defined that means that there're
@@ -248,7 +259,7 @@ void NetworkMenuButton::OnLinkActivated(size_t index) {
   // to navigate to second link.
   // mobile_data_bubble_ will be set to NULL in BubbleClosing callback.
   if (deal_info_url_.empty() && mobile_data_bubble_)
-    mobile_data_bubble_->Close();
+    mobile_data_bubble_->GetWidget()->Close();
 
   std::string deal_url_to_open;
   if (index == 0) {
@@ -352,7 +363,8 @@ void NetworkMenuButton::ShowOptionalMobileDataPromoNotification(
   // Display one-time notification for non-Guest users on first use
   // of Mobile Data connection or if there's a carrier deal defined
   // show that even if user has already seen generic promo.
-  if (is_browser_mode_ && !UserManager::Get()->IsLoggedInAsGuest() &&
+  if (StatusAreaViewChromeos::IsBrowserMode() &&
+      !UserManager::Get()->IsLoggedInAsGuest() &&
       check_for_promo_ && BrowserList::GetLastActive() &&
       cros->cellular_connected() && !cros->ethernet_connected() &&
       !cros->wifi_connected()) {
@@ -385,10 +397,11 @@ void NetworkMenuButton::ShowOptionalMobileDataPromoNotification(
     if (!screen_bounds.Contains(button_bounds)) {
       // If we're not on screen yet, delay notification display.
       // It may be shown earlier, on next NetworkLibrary callback processing.
-      if (method_factory_.empty()) {
+      if (!weak_ptr_factory_.HasWeakPtrs()) {
         MessageLoop::current()->PostDelayedTask(FROM_HERE,
-            method_factory_.NewRunnableMethod(
+            base::Bind(
                 &NetworkMenuButton::ShowOptionalMobileDataPromoNotification,
+                weak_ptr_factory_.GetWeakPtr(),
                 cros),
             kPromoShowDelayMs);
       }
@@ -396,13 +409,12 @@ void NetworkMenuButton::ShowOptionalMobileDataPromoNotification(
     }
 
     // Add deal text if it's defined.
-    std::wstring notification_text;
-    std::wstring default_text =
-        UTF16ToWide(l10n_util::GetStringUTF16(IDS_3G_NOTIFICATION_MESSAGE));
+    string16 notification_text;
+    string16 default_text =
+        l10n_util::GetStringUTF16(IDS_3G_NOTIFICATION_MESSAGE);
     if (!deal_text.empty()) {
-      notification_text = StringPrintf(L"%ls\n\n%ls",
-                                       UTF8ToWide(deal_text).c_str(),
-                                       default_text.c_str());
+      notification_text =
+          UTF8ToUTF16(deal_text) + UTF8ToUTF16("\n\n") + default_text;
     } else {
       notification_text = default_text;
     }
@@ -414,18 +426,20 @@ void NetworkMenuButton::ShowOptionalMobileDataPromoNotification(
     else
       link_message_id = IDS_STATUSBAR_NETWORK_VIEW_ACCOUNT;
 
-    std::vector<std::wstring> links;
-    links.push_back(UTF16ToWide(l10n_util::GetStringUTF16(link_message_id)));
+    std::vector<string16> links;
+    links.push_back(l10n_util::GetStringUTF16(link_message_id));
     if (!deal_info_url_.empty())
-      links.push_back(UTF16ToWide(l10n_util::GetStringUTF16(IDS_LEARN_MORE)));
-    mobile_data_bubble_ = MessageBubble::ShowWithLinks(
-        GetWidget(),
-        button_bounds,
-        views::BubbleBorder::TOP_RIGHT ,
+      links.push_back(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
+    mobile_data_bubble_ = new MessageBubble(
+        this,
+        views::BubbleBorder::TOP_RIGHT,
         ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_NOTIFICATION_3G),
         notification_text,
-        links,
-        this);
+        links);
+    mobile_data_bubble_->set_link_listener(this);
+    browser::CreateViewsBubbleAboveLockScreen(mobile_data_bubble_);
+    mobile_data_bubble_->Show();
+    mobile_data_bubble_->GetWidget()->AddObserver(this);
 
     check_for_promo_ = false;
     SetShow3gPromoNotification(false);

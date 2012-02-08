@@ -4,6 +4,7 @@
 
 #include "chrome/browser/automation/automation_provider.h"
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/debug/trace_event.h"
 #include "base/json/json_reader.h"
@@ -24,31 +25,21 @@
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/page_zoom.h"
-#include "content/common/view_messages.h"
+#include "content/public/common/page_zoom.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/focus/accelerator_handler.h"
-#include "views/widget/root_view.h"
+#include "ui/views/focus/accelerator_handler.h"
+#include "ui/views/widget/root_view.h"
 
-// This task just adds another task to the event queue.  This is useful if
-// you want to ensure that any tasks added to the event queue after this one
-// have already been processed by the time |task| is run.
-class InvokeTaskLaterTask : public Task {
- public:
-  explicit InvokeTaskLaterTask(Task* task) : task_(task) {}
-  virtual ~InvokeTaskLaterTask() {}
+namespace {
 
-  virtual void Run() {
-    MessageLoop::current()->PostTask(FROM_HERE, task_);
-  }
+// This callback just adds another callback to the event queue. This is useful
+// if you want to ensure that any callbacks added to the event queue after this
+// one have already been processed by the time |callback| is run.
+void InvokeCallbackLater(const base::Closure& callback) {
+  MessageLoop::current()->PostTask(FROM_HERE, callback);
+}
 
- private:
-  Task* task_;
-
-  DISALLOW_COPY_AND_ASSIGN(InvokeTaskLaterTask);
-};
-
-static void MoveMouse(const POINT& point) {
+void MoveMouse(const POINT& point) {
   SetCursorPos(point.x, point.y);
 
   // Now, make sure that GetMessagePos returns the values we just set by
@@ -75,78 +66,18 @@ BOOL CALLBACK EnumThreadWndProc(HWND hwnd, LPARAM l_param) {
   return TRUE;
 }
 
-// This task enqueues a mouse event on the event loop, so that the view
-// that it's being sent to can do the requisite post-processing.
-class MouseEventTask : public Task {
- public:
-  MouseEventTask(views::View* view,
-                 ui::EventType type,
-                 const gfx::Point& point,
-                 int flags)
-      : view_(view), type_(type), point_(point), flags_(flags) {}
-  virtual ~MouseEventTask() {}
+// This callback sends a WindowDragResponse message with the appropriate routing
+// ID to the automation proxy.  This is implemented as a task so that we know
+// that the mouse events (and any tasks that they spawn on the message loop)
+// have been processed by the time this is sent.
+void WindowDragResponseCallback(AutomationProvider* provider,
+                                IPC::Message* reply_message) {
+  DCHECK(reply_message != NULL);
+  AutomationMsg_WindowDrag::WriteReplyParams(reply_message, true);
+  provider->Send(reply_message);
+}
 
-  virtual void Run() {
-    views::MouseEvent event(type_, point_.x(), point_.y(), flags_);
-    // We need to set the cursor position before we process the event because
-    // some code (tab dragging, for instance) queries the actual cursor location
-    // rather than the location of the mouse event. Note that the reason why
-    // the drag code moved away from using mouse event locations was because
-    // our conversion to screen location doesn't work well with multiple
-    // monitors, so this only works reliably in a single monitor setup.
-    gfx::Point screen_location(point_.x(), point_.y());
-    view_->ConvertPointToScreen(view_, &screen_location);
-    MoveMouse(screen_location.ToPOINT());
-    switch (type_) {
-      case ui::ET_MOUSE_PRESSED:
-        view_->OnMousePressed(event);
-        break;
-
-      case ui::ET_MOUSE_DRAGGED:
-        view_->OnMouseDragged(event);
-        break;
-
-      case ui::ET_MOUSE_RELEASED:
-        view_->OnMouseReleased(event);
-        break;
-
-      default:
-        NOTREACHED();
-    }
-  }
-
- private:
-  views::View* view_;
-  ui::EventType type_;
-  gfx::Point point_;
-  int flags_;
-
-  DISALLOW_COPY_AND_ASSIGN(MouseEventTask);
-};
-
-// This task sends a WindowDragResponse message with the appropriate
-// routing ID to the automation proxy.  This is implemented as a task so that
-// we know that the mouse events (and any tasks that they spawn on the message
-// loop) have been processed by the time this is sent.
-class WindowDragResponseTask : public Task {
- public:
-  WindowDragResponseTask(AutomationProvider* provider,
-                         IPC::Message* reply_message)
-      : provider_(provider), reply_message_(reply_message) {}
-  virtual ~WindowDragResponseTask() {}
-
-  virtual void Run() {
-    DCHECK(reply_message_ != NULL);
-    AutomationMsg_WindowDrag::WriteReplyParams(reply_message_, true);
-    provider_->Send(reply_message_);
-  }
-
- private:
-  AutomationProvider* provider_;
-  IPC::Message* reply_message_;
-
-  DISALLOW_COPY_AND_ASSIGN(WindowDragResponseTask);
-};
+}  // namespace
 
 void AutomationProvider::WindowSimulateDrag(
     int handle,
@@ -217,14 +148,16 @@ void AutomationProvider::WindowSimulateDrag(
       bool did_allow_task_nesting = loop->NestableTasksAllowed();
       loop->SetNestableTasksAllowed(true);
       views::AcceleratorHandler handler;
-      loop->Run(&handler);
+      loop->RunWithDispatcher(&handler);
       loop->SetNestableTasksAllowed(did_allow_task_nesting);
     }
     SendMessage(top_level_hwnd, up_message, wparam_flags,
                 MAKELPARAM(end.x, end.y));
 
-    MessageLoop::current()->PostTask(FROM_HERE, new InvokeTaskLaterTask(
-        new WindowDragResponseTask(this, reply_message)));
+    MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(
+            &InvokeCallbackLater,
+            base::Bind(&WindowDragResponseCallback, this, reply_message)));
   } else {
     AutomationMsg_WindowDrag::WriteReplyParams(reply_message, false);
     Send(reply_message);
@@ -410,9 +343,7 @@ void AutomationProvider::ConnectExternalTab(
 
 void AutomationProvider::OnBrowserMoved(int tab_handle) {
   ExternalTabContainer* external_tab = GetExternalTabForHandle(tab_handle);
-  if (external_tab) {
-    external_tab->WindowMoved();
-  } else {
+  if (!external_tab) {
     DLOG(WARNING) <<
       "AutomationProvider::OnBrowserMoved called with invalid tab handle.";
   }
@@ -437,7 +368,10 @@ void AutomationProvider::NavigateInExternalTab(
 
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
-    tab->LoadURL(url, referrer, content::PAGE_TRANSITION_TYPED, std::string());
+    tab->LoadURL(
+        url,
+        content::Referrer(referrer, WebKit::WebReferrerPolicyDefault),
+        content::PAGE_TRANSITION_TYPED, std::string());
     *status = AUTOMATION_MSG_NAVIGATION_SUCCESS;
   }
 }
@@ -467,7 +401,7 @@ void AutomationProvider::OnSetZoomLevel(int handle, int zoom_level) {
     NavigationController* tab = tab_tracker_->GetResource(handle);
     if (tab->tab_contents() && tab->tab_contents()->render_view_host()) {
       RenderViewHost* host = tab->tab_contents()->render_view_host();
-      PageZoom::Function zoom = static_cast<PageZoom::Function>(zoom_level);
+      content::PageZoom zoom = static_cast<content::PageZoom>(zoom_level);
       host->Zoom(zoom);
     }
   }

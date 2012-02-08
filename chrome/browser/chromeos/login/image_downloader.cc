@@ -11,7 +11,10 @@
 #include "base/string_util.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/url_fetcher.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -27,11 +30,12 @@ ImageDownloader::ImageDownloader(ImageDecoder::Delegate* delegate,
                                  const std::string& auth_token)
     : delegate_(delegate) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  image_fetcher_.reset(new URLFetcher(GURL(image_url), URLFetcher::GET, this));
-  image_fetcher_->set_request_context(
+  image_fetcher_.reset(content::URLFetcher::Create(
+      GURL(image_url), content::URLFetcher::GET, this));
+  image_fetcher_->SetRequestContext(
       ProfileManager::GetDefaultProfile()->GetRequestContext());
   if (!auth_token.empty()) {
-    image_fetcher_->set_extra_request_headers(
+    image_fetcher_->SetExtraRequestHeaders(
         base::StringPrintf(kAuthorizationHeader, auth_token.c_str()));
   }
   image_fetcher_->Start();
@@ -39,16 +43,13 @@ ImageDownloader::ImageDownloader(ImageDecoder::Delegate* delegate,
 
 ImageDownloader::~ImageDownloader() {}
 
-void ImageDownloader::OnURLFetchComplete(const URLFetcher* source,
-                                         const GURL& url,
-                                         const net::URLRequestStatus& status,
-                                         int response_code,
-                                         const net::ResponseCookies& cookies,
-                                         const std::string& data) {
+void ImageDownloader::OnURLFetchComplete(const content::URLFetcher* source) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (response_code != 200) {
-    LOG(ERROR) << "Response code is " << response_code;
-    LOG(ERROR) << "Url is " << url.spec();
+  std::string data;
+  source->GetResponseAsString(&data);
+  if (source->GetResponseCode() != 200) {
+    LOG(ERROR) << "Response code is " << source->GetResponseCode();
+    LOG(ERROR) << "Url is " << source->GetURL().spec();
     LOG(ERROR) << "Data is " << data;
     MessageLoop::current()->DeleteSoon(FROM_HERE, this);
     return;

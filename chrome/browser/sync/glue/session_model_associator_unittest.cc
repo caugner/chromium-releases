@@ -22,7 +22,9 @@ TEST_F(SessionModelAssociatorTest, SessionWindowHasNoTabsToSync) {
   scoped_ptr<SessionTab> tab(new SessionTab());
   win.tabs.push_back(tab.release());
   ASSERT_TRUE(SessionWindowHasNoTabsToSync(win));
-  TabNavigation nav(0, GURL("about:bubba"), GURL("about:referrer"),
+  TabNavigation nav(0, GURL("about:bubba"),
+                    content::Referrer(GURL("about:referrer"),
+                                      WebKit::WebReferrerPolicyDefault),
                     string16(ASCIIToUTF16("title")),
                     std::string("state"), content::PageTransitionFromInt(0));
   win.tabs[0]->navigations.push_back(nav);
@@ -33,14 +35,16 @@ TEST_F(SessionModelAssociatorTest, IsValidSessionTab) {
   SessionTab tab;
   ASSERT_FALSE(IsValidSessionTab(tab));
   TabNavigation nav(0, GURL(chrome::kChromeUINewTabURL),
-                    GURL("about:referrer"),
+                    content::Referrer(GURL("about:referrer"),
+                                      WebKit::WebReferrerPolicyDefault),
                     string16(ASCIIToUTF16("title")),
                     std::string("state"), content::PageTransitionFromInt(0));
   tab.navigations.push_back(nav);
   // NewTab does not count as valid if it's the only navigation.
   ASSERT_FALSE(IsValidSessionTab(tab));
   TabNavigation nav2(0, GURL("about:bubba"),
-                    GURL("about:referrer"),
+                     content::Referrer(GURL("about:referrer"),
+                                       WebKit::WebReferrerPolicyDefault),
                     string16(ASCIIToUTF16("title")),
                     std::string("state"), content::PageTransitionFromInt(0));
   tab.navigations.push_back(nav2);
@@ -53,7 +57,8 @@ TEST_F(SessionModelAssociatorTest, IsValidSessionTabIgnoresFragmentForNtp) {
   ASSERT_FALSE(IsValidSessionTab(tab));
   TabNavigation nav(0, GURL(std::string(chrome::kChromeUINewTabURL) +
                             "#bookmarks"),
-                    GURL("about:referrer"),
+                    content::Referrer(GURL("about:referrer"),
+                                      WebKit::WebReferrerPolicyDefault),
                     string16(ASCIIToUTF16("title")),
                     std::string("state"), content::PageTransitionFromInt(0));
   tab.navigations.push_back(nav);
@@ -118,28 +123,11 @@ TEST_F(SessionModelAssociatorTest, PopulateSessionTab) {
   ASSERT_TRUE(tab.pinned);
   ASSERT_EQ("app_id", tab.extension_app_id);
   ASSERT_EQ(12, tab.navigations[0].index());
-  ASSERT_EQ(GURL("referrer"), tab.navigations[0].referrer());
+  ASSERT_EQ(GURL("referrer"), tab.navigations[0].referrer().url);
   ASSERT_EQ(string16(ASCIIToUTF16("title")), tab.navigations[0].title());
   ASSERT_EQ(content::PAGE_TRANSITION_TYPED, tab.navigations[0].transition());
   ASSERT_EQ(GURL("http://foo/1"), tab.navigations[0].virtual_url());
 }
-
-#if defined(OS_WIN)
-// The test is somewhat silly, and just verifies that we return a computer name.
-TEST(SessionModelAssociatorTest, TestGetComputerName) {
-  std::string computer_name = SessionModelAssociator::GetComputerName();
-  EXPECT_TRUE(!computer_name.empty());
-}
-#endif
-
-#if defined(OS_MACOSX)
-// The test is somewhat silly, and just verifies that we return a hardware
-// model name.
-TEST_F(SessionModelAssociatorTest, GetHardwareModelName) {
-  std::string hardware_model = SessionModelAssociator::GetHardwareModelName();
-  EXPECT_TRUE(!hardware_model.empty());
-}
-#endif
 
 TEST_F(SessionModelAssociatorTest, TabNodePool) {
   SessionModelAssociator::TabNodePool pool(NULL);

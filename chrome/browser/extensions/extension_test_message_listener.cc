@@ -7,7 +7,7 @@
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 ExtensionTestMessageListener::ExtensionTestMessageListener(
     const std::string& expected_message,
@@ -17,7 +17,7 @@ ExtensionTestMessageListener::ExtensionTestMessageListener(
       waiting_(false),
       will_reply_(will_reply) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_MESSAGE,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 ExtensionTestMessageListener::~ExtensionTestMessageListener() {}
@@ -40,11 +40,11 @@ void ExtensionTestMessageListener::Reply(const std::string& message) {
 
 void ExtensionTestMessageListener::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
-  const std::string& content = *Details<std::string>(details).ptr();
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
+  const std::string& content = *content::Details<std::string>(details).ptr();
   if (!satisfied_ && content == expected_message_) {
-    function_ = Source<ExtensionTestSendMessageFunction>(source).ptr();
+    function_ = content::Source<ExtensionTestSendMessageFunction>(source).ptr();
     satisfied_ = true;
     registrar_.RemoveAll();  // Stop listening for more messages.
     if (!will_reply_) {

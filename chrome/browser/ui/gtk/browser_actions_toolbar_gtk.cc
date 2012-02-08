@@ -17,7 +17,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/gtk/cairo_cached_surface.h"
 #include "chrome/browser/ui/gtk/extensions/extension_popup_gtk.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_button.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_shrinkable_hbox.h"
@@ -32,12 +31,12 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/gtk_util.h"
 
@@ -60,12 +59,11 @@ const int kSeparatorPadding = 2;
 // Width of the invisible gripper for resizing the toolbar.
 const int kResizeGripperWidth = 4;
 
-const char* kDragTarget = "application/x-chrome-browseraction";
+const char kDragTarget[] = "application/x-chrome-browseraction";
 
 GtkTargetEntry GetDragTargetEntry() {
-  static std::string drag_target_string(kDragTarget);
   GtkTargetEntry drag_target;
-  drag_target.target = const_cast<char*>(drag_target_string.c_str());
+  drag_target.target = const_cast<char*>(kDragTarget);
   drag_target.flags = GTK_TARGET_SAME_APP;
   drag_target.info = 0;
   return drag_target;
@@ -82,7 +80,7 @@ gint WidthForIconCount(gint icon_count) {
 
 using ui::SimpleMenuModel;
 
-class BrowserActionButton : public NotificationObserver,
+class BrowserActionButton : public content::NotificationObserver,
                             public ImageLoadingTracker::Observer,
                             public ExtensionContextMenuModel::PopupDelegate,
                             public MenuGtk::Delegate {
@@ -130,8 +128,9 @@ class BrowserActionButton : public NotificationObserver,
     signals_.ConnectAfter(widget(), "expose-event",
                           G_CALLBACK(OnExposeEvent), this);
 
-    registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
-                   Source<ExtensionAction>(extension->browser_action()));
+    registrar_.Add(
+        this, chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED,
+        content::Source<ExtensionAction>(extension->browser_action()));
   }
 
   ~BrowserActionButton() {
@@ -152,8 +151,8 @@ class BrowserActionButton : public NotificationObserver,
 
   // NotificationObserver implementation.
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) {
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     if (type == chrome::NOTIFICATION_EXTENSION_BROWSER_ACTION_UPDATED)
       UpdateState();
     else
@@ -354,7 +353,7 @@ class BrowserActionButton : public NotificationObserver,
   SkBitmap default_skbitmap_;
 
   ui::GtkSignalRegistrar signals_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // The context menu view and model for this extension action.
   scoped_ptr<MenuGtk> context_menu_;
@@ -452,7 +451,7 @@ BrowserActionsToolbarGtk::BrowserActionsToolbarGtk(Browser* browser)
 
   registrar_.Add(this,
                  chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 }
 
@@ -478,9 +477,10 @@ void BrowserActionsToolbarGtk::Update() {
   }
 }
 
-void BrowserActionsToolbarGtk::Observe(int type,
-                                       const NotificationSource& source,
-                                       const NotificationDetails& details) {
+void BrowserActionsToolbarGtk::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(chrome::NOTIFICATION_BROWSER_THEME_CHANGED == type);
   gtk_widget_set_visible(separator_, theme_service_->UsingNativeTheme());
 }
@@ -802,7 +802,7 @@ gboolean BrowserActionsToolbarGtk::OnDragFailed(GtkWidget* widget,
 void BrowserActionsToolbarGtk::OnHierarchyChanged(
     GtkWidget* widget, GtkWidget* previous_toplevel) {
   GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
-  if (!GTK_WIDGET_TOPLEVEL(toplevel))
+  if (!gtk_widget_is_toplevel(toplevel))
     return;
 
   signals_.Connect(toplevel, "set-focus", G_CALLBACK(OnSetFocusThunk), this);
@@ -850,7 +850,7 @@ gboolean BrowserActionsToolbarGtk::OnGripperExpose(GtkWidget* gripper,
 // dragging.
 gboolean BrowserActionsToolbarGtk::OnGripperEnterNotify(
     GtkWidget* gripper, GdkEventCrossing* event) {
-  gdk_window_set_cursor(gripper->window,
+  gdk_window_set_cursor(gtk_widget_get_window(gripper),
                         gfx::GetCursor(GDK_SB_H_DOUBLE_ARROW));
   return FALSE;
 }
@@ -858,7 +858,7 @@ gboolean BrowserActionsToolbarGtk::OnGripperEnterNotify(
 gboolean BrowserActionsToolbarGtk::OnGripperLeaveNotify(
     GtkWidget* gripper, GdkEventCrossing* event) {
   if (!(event->state & GDK_BUTTON1_MASK))
-    gdk_window_set_cursor(gripper->window, NULL);
+    gdk_window_set_cursor(gtk_widget_get_window(gripper), NULL);
   return FALSE;
 }
 
@@ -868,7 +868,7 @@ gboolean BrowserActionsToolbarGtk::OnGripperButtonRelease(
                          gripper->allocation.width, gripper->allocation.height);
   gfx::Point release_point(event->x, event->y);
   if (!gripper_rect.Contains(release_point))
-    gdk_window_set_cursor(gripper->window, NULL);
+    gdk_window_set_cursor(gtk_widget_get_window(gripper), NULL);
 
   // After the user resizes the toolbar, we want to smartly resize it to be
   // the perfect size to fit the buttons.

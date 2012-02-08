@@ -161,19 +161,19 @@ class BASE_EXPORT FieldTrial : public RefCounted<FieldTrial> {
 
  private:
   // Allow tests to access our innards for testing purposes.
-  FRIEND_TEST(FieldTrialTest, Registration);
-  FRIEND_TEST(FieldTrialTest, AbsoluteProbabilities);
-  FRIEND_TEST(FieldTrialTest, RemainingProbability);
-  FRIEND_TEST(FieldTrialTest, FiftyFiftyProbability);
-  FRIEND_TEST(FieldTrialTest, MiddleProbabilities);
-  FRIEND_TEST(FieldTrialTest, OneWinner);
-  FRIEND_TEST(FieldTrialTest, DisableProbability);
-  FRIEND_TEST(FieldTrialTest, Save);
-  FRIEND_TEST(FieldTrialTest, DuplicateRestore);
-  FRIEND_TEST(FieldTrialTest, MakeName);
-  FRIEND_TEST(FieldTrialTest, HashClientId);
-  FRIEND_TEST(FieldTrialTest, HashClientIdIsUniform);
-  FRIEND_TEST(FieldTrialTest, UseOneTimeRandomization);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, Registration);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, AbsoluteProbabilities);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, RemainingProbability);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, FiftyFiftyProbability);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, MiddleProbabilities);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, OneWinner);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, DisableProbability);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, Save);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, DuplicateRestore);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, MakeName);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, HashClientId);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, HashClientIdIsUniform);
+  FRIEND_TEST_ALL_PREFIXES(FieldTrialTest, UseOneTimeRandomization);
 
   friend class base::FieldTrialList;
 
@@ -183,9 +183,6 @@ class BASE_EXPORT FieldTrial : public RefCounted<FieldTrial> {
 
   // Returns the group_name. A winner need not have been chosen.
   std::string group_name_internal() const { return group_name_; }
-
-  // Get build time.
-  static Time GetBuildTime();
 
   // Calculates a uniformly-distributed double between [0.0, 1.0) given
   // a |client_id| and a |trial_name| (the latter is used as salt to avoid

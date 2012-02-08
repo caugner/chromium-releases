@@ -13,11 +13,10 @@
 #include "base/task.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
 #include "chrome/browser/chromeos/login/login_status_consumer.h"
-#include "chrome/browser/chromeos/login/signed_settings_helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 namespace chromeos {
 
@@ -52,9 +51,7 @@ namespace chromeos {
 // 1. ScreenLock active (pending correct new password input)
 // 2. Pending online auth request.
 class LoginPerformer : public LoginStatusConsumer,
-                       public SignedSettingsHelper::Callback,
-                       public NotificationObserver,
-                       public ProfileManagerObserver {
+                       public content::NotificationObserver {
  public:
   // Delegate class to get notifications from the LoginPerformer.
   class Delegate : public LoginStatusConsumer {
@@ -123,17 +120,14 @@ class LoginPerformer : public LoginStatusConsumer,
   AuthorizationMode auth_mode() const { return auth_mode_; }
 
  private:
-  // NotificationObserver implementation:
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  // SignedSettingsHelper::Callback implementation:
-  virtual void OnCheckWhitelistCompleted(SignedSettings::ReturnCode code,
-                                         const std::string& email) OVERRIDE;
-
-  // ProfileManagerObserver implementation:
-  virtual void OnProfileCreated(Profile* profile, Status status) OVERRIDE;
+  // Callback for asynchronous profile creation.
+  void OnProfileCreated(Profile* profile,
+                        Profile::CreateStatus status);
 
   // Requests screen lock and subscribes to screen lock notifications.
   void RequestScreenLock();
@@ -193,7 +187,7 @@ class LoginPerformer : public LoginStatusConsumer,
   bool password_changed_;
 
   // Used for ScreenLock notifications.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // True if LoginPerformer has requested screen lock. Used to distinguish
   // such requests with cases when screen is locked on its own.

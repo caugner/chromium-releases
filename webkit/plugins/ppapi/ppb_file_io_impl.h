@@ -22,13 +22,10 @@
 
 struct PP_CompletionCallback;
 struct PPB_FileIO;
-struct PPB_FileIOTrusted;
 
 namespace webkit {
 namespace ppapi {
 
-class PluginModule;
-class PPB_FileRef_Impl;
 class QuotaFileIO;
 
 class PPB_FileIO_Impl : public ::ppapi::Resource,
@@ -124,8 +121,6 @@ class PPB_FileIO_Impl : public ::ppapi::Resource,
   void WriteCallback(base::PlatformFileError error_code, int bytes_written);
   void WillWriteCallback(base::PlatformFileError error_code, int bytes_written);
 
-  base::WeakPtrFactory<PPB_FileIO_Impl> weak_factory_;
-
   base::PlatformFile file_;
   PP_FileSystemType file_system_type_;
 
@@ -143,7 +138,7 @@ class PPB_FileIO_Impl : public ::ppapi::Resource,
   // of type PP_FILESYSTEMTYPE_LOCAL{PERSISTENT,TEMPORARY} is opened.
   scoped_ptr<QuotaFileIO> quota_file_io_;
 
-  base::WeakPtrFactory<PPB_FileIO_Impl> weak_ptr_factory_;
+  base::WeakPtrFactory<PPB_FileIO_Impl> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PPB_FileIO_Impl);
 };

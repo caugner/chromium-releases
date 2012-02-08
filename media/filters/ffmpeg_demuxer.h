@@ -32,20 +32,19 @@
 #include "media/base/buffers.h"
 #include "media/base/demuxer.h"
 #include "media/base/pipeline.h"
+#include "media/base/video_decoder_config.h"
 #include "media/filters/ffmpeg_glue.h"
 
 // FFmpeg forward declarations.
 struct AVFormatContext;
 struct AVPacket;
 struct AVRational;
+struct AVStream;
 
 namespace media {
 
 class BitstreamConverter;
 class FFmpegDemuxer;
-
-// Forward declaration for scoped_ptr_malloc.
-class ScopedPtrAVFree;
 
 class FFmpegDemuxerStream : public DemuxerStream {
  public:
@@ -81,8 +80,8 @@ class FFmpegDemuxerStream : public DemuxerStream {
   // |lock_| is held throughout the life of the callback.
   virtual void Read(const ReadCallback& read_callback) OVERRIDE;
   virtual void EnableBitstreamConverter() OVERRIDE;
-  virtual AVStream* GetAVStream() OVERRIDE;
   virtual const AudioDecoderConfig& audio_decoder_config() OVERRIDE;
+  virtual const VideoDecoderConfig& video_decoder_config() OVERRIDE;
 
  private:
   virtual ~FFmpegDemuxerStream();
@@ -102,6 +101,7 @@ class FFmpegDemuxerStream : public DemuxerStream {
   FFmpegDemuxer* demuxer_;
   AVStream* stream_;
   AudioDecoderConfig audio_config_;
+  VideoDecoderConfig video_config_;
   Type type_;
   base::TimeDelta duration_;
   bool discontinuous_;
@@ -128,7 +128,7 @@ class FFmpegDemuxerStream : public DemuxerStream {
 
 class MEDIA_EXPORT FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
  public:
-  explicit FFmpegDemuxer(MessageLoop* message_loop);
+  FFmpegDemuxer(MessageLoop* message_loop, bool local_source);
   virtual ~FFmpegDemuxer();
 
   // Posts a task to perform additional demuxing.
@@ -147,9 +147,12 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
       DemuxerStream::Type type) OVERRIDE;
   virtual void SetPreload(Preload preload) OVERRIDE;
   virtual base::TimeDelta GetStartTime() const OVERRIDE;
+  virtual int GetBitrate() OVERRIDE;
+  virtual bool IsLocalSource() OVERRIDE;
+  virtual bool IsSeekable() OVERRIDE;
 
-  // FFmpegProtocol implementation.
-  virtual int Read(int size, uint8* data) OVERRIDE;
+  // FFmpegURLProtocol implementation.
+  virtual size_t Read(size_t size, uint8* data) OVERRIDE;
   virtual bool GetPosition(int64* position_out) OVERRIDE;
   virtual bool SetPosition(int64 position) OVERRIDE;
   virtual bool GetSize(int64* size_out) OVERRIDE;
@@ -160,10 +163,6 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
 
   // For testing purposes.
   void disable_first_seek_hack_for_testing() { first_seek_hack_ = false; }
-
-  // Returns the bitrate of media file. May be obtained from container or
-  // approximated. Returns 0 if it is unknown.
-  int GetBitrate();
 
  private:
   // Only allow a factory to create this class.
@@ -210,6 +209,10 @@ class MEDIA_EXPORT FFmpegDemuxer : public Demuxer, public FFmpegURLProtocol {
   virtual void SignalReadCompleted(size_t size);
 
   MessageLoop* message_loop_;
+
+  // True if the media is a local resource, false if the media require network
+  // access to be loaded.
+  bool local_source_;
 
   // FFmpeg context handle.
   AVFormatContext* format_context_;

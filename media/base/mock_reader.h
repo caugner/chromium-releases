@@ -8,7 +8,6 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "media/base/filters.h"
 
@@ -50,7 +49,7 @@ class MockReader
   bool expecting_call() { return expecting_call_; }
 
  private:
-  void OnReadComplete(BufferType* buffer) {
+  void OnReadComplete(const scoped_refptr<BufferType>& buffer) {
     DCHECK(!called_);
     DCHECK(expecting_call_);
     expecting_call_ = false;

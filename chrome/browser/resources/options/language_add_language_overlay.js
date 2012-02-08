@@ -47,6 +47,7 @@ cr.define('options', function() {
         if (language.displayName != language.nativeDisplayName) {
           displayText += ' - ' + language.nativeDisplayName;
         }
+
         if (cr.isChromeOS) {
           var button = document.createElement('button');
           button.className = 'link-button';

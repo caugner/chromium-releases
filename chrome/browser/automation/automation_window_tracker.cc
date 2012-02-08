@@ -4,8 +4,8 @@
 
 #include "chrome/browser/automation/automation_window_tracker.h"
 
+#include "chrome/browser/native_window_notification_source.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/native_window_notification_source.h"
 
 AutomationWindowTracker::AutomationWindowTracker(
     IPC::Message::Sender* automation)
@@ -17,10 +17,10 @@ AutomationWindowTracker::~AutomationWindowTracker() {
 
 void AutomationWindowTracker::AddObserver(gfx::NativeWindow resource) {
   registrar_.Add(this, chrome::NOTIFICATION_WINDOW_CLOSED,
-                 Source<gfx::NativeWindow>(resource));
+                 content::Source<gfx::NativeWindow>(resource));
 }
 
 void AutomationWindowTracker::RemoveObserver(gfx::NativeWindow resource) {
   registrar_.Remove(this, chrome::NOTIFICATION_WINDOW_CLOSED,
-                    Source<gfx::NativeWindow>(resource));
+                    content::Source<gfx::NativeWindow>(resource));
 }

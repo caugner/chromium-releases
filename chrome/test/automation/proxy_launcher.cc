@@ -23,11 +23,15 @@
 #include "chrome/test/base/test_launcher_utils.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/common/child_process_info.h"
 #include "content/common/debug_flags.h"
+#include "content/public/common/process_type.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_descriptors.h"
 #include "sql/connection.h"
+
+#if defined(OS_POSIX)
+#include <signal.h>
+#endif
 
 namespace {
 
@@ -423,9 +427,6 @@ void ProxyLauncher::PrepareTestCommandline(CommandLine* command_line,
   command_line->AppendSwitch(switches::kDebugOnStart);
 #endif
 
-  // The tests assume that file:// URIs can freely access other file:// URIs.
-  command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
-
   // Disable TabCloseableStateWatcher for tests.
   command_line->AppendSwitch(switches::kDisableTabCloseableStateWatcher);
 
@@ -442,7 +443,7 @@ bool ProxyLauncher::LaunchBrowserHelper(const LaunchState& state,
   // Add command line arguments that should be applied to all UI tests.
   PrepareTestCommandline(&command_line, state.include_testing_id);
   DebugFlags::ProcessDebugFlags(
-      &command_line, ChildProcessInfo::UNKNOWN_PROCESS, false);
+      &command_line, content::PROCESS_TYPE_UNKNOWN, false);
 
   // Sometimes one needs to run the browser under a special environment
   // (e.g. valgrind) without also running the test harness (e.g. python)

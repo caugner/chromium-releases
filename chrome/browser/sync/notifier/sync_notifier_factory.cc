@@ -14,12 +14,14 @@
 #include "chrome/browser/sync/notifier/p2p_notifier.h"
 #include "chrome/browser/sync/notifier/sync_notifier.h"
 #include "chrome/common/chrome_switches.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "jingle/notifier/base/const_communicator.h"
 #include "jingle/notifier/base/notifier_options.h"
 #include "jingle/notifier/listener/mediator_thread_impl.h"
 #include "jingle/notifier/listener/talk_mediator_impl.h"
 #include "net/base/host_port_pair.h"
+
+using content::BrowserThread;
 
 namespace sync_notifier {
 namespace {
@@ -66,25 +68,25 @@ SyncNotifier* CreateDefaultSyncNotifier(
       notifier_options.xmpp_host_port =
           StringToHostPortPair(value, notifier::kDefaultXmppPort);
     }
-    VLOG(1) << "Using " << notifier_options.xmpp_host_port.ToString()
-            << " for test sync notification server.";
+    DVLOG(1) << "Using " << notifier_options.xmpp_host_port.ToString()
+             << " for test sync notification server.";
   }
 
   notifier_options.try_ssltcp_first =
       command_line.HasSwitch(switches::kSyncTrySsltcpFirstForXmpp);
   if (notifier_options.try_ssltcp_first)
-    VLOG(1) << "Trying SSL/TCP port before XMPP port for notifications.";
+    DVLOG(1) << "Trying SSL/TCP port before XMPP port for notifications.";
 
   notifier_options.invalidate_xmpp_login =
       command_line.HasSwitch(switches::kSyncInvalidateXmppLogin);
   if (notifier_options.invalidate_xmpp_login) {
-    VLOG(1) << "Invalidating sync XMPP login.";
+    DVLOG(1) << "Invalidating sync XMPP login.";
   }
 
   notifier_options.allow_insecure_connection =
       command_line.HasSwitch(switches::kSyncAllowInsecureXmppConnection);
   if (notifier_options.allow_insecure_connection) {
-    VLOG(1) << "Allowing insecure XMPP connections.";
+    DVLOG(1) << "Allowing insecure XMPP connections.";
   }
 
   if (command_line.HasSwitch(switches::kSyncNotificationMethod)) {

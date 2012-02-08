@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/views/frame/native_browser_frame.h"
 #include "chrome/common/chrome_switches.h"
 #include "ui/base/theme_provider.h"
-#include "views/widget/native_widget.h"
+#include "ui/views/widget/native_widget.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/ui/views/frame/glass_browser_frame_view.h"
@@ -59,7 +59,7 @@ void BrowserFrame::InitBrowserFrame() {
     params.keep_on_top = true;
   }
   Init(params);
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
   // On ChromeOS we always want top-level windows to appear active.
   if (!browser_view_->IsBrowserTypePopup())
     DisableInactiveRendering();
@@ -148,4 +148,8 @@ void BrowserFrame::OnNativeWidgetActivationChanged(bool active) {
     BrowserList::SetLastActive(browser_view_->browser());
   }
   Widget::OnNativeWidgetActivationChanged(active);
+}
+
+AvatarMenuButton* BrowserFrame::GetAvatarMenuButton() {
+  return browser_frame_view_->avatar_button();
 }

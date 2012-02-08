@@ -16,8 +16,9 @@
 #include "chrome/browser/ui/gtk/rounded_window.h"
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "ui/base/animation/slide_animation.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/text/text_elider.h"
 
@@ -52,7 +53,7 @@ StatusBubbleGtk::StatusBubbleGtk(Profile* profile)
 
   theme_service_->InitThemesFor(this);
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
 }
 
 StatusBubbleGtk::~StatusBubbleGtk() {
@@ -93,10 +94,12 @@ void StatusBubbleGtk::SetStatusTextToURL() {
   GtkWidget* parent = gtk_widget_get_parent(container_.get());
 
   // It appears that parent can be NULL (probably only during shutdown).
-  if (!parent || !GTK_WIDGET_REALIZED(parent))
+  if (!parent || !gtk_widget_get_realized(parent))
     return;
 
-  int desired_width = parent->allocation.width;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(parent, &allocation);
+  int desired_width = allocation.width;
   if (!expanded()) {
     expand_timer_.Stop();
     expand_timer_.Start(FROM_HERE,
@@ -166,11 +169,11 @@ void StatusBubbleGtk::MouseMoved(
   last_mouse_location_ = location;
   last_mouse_left_content_ = left_content;
 
-  if (!GTK_WIDGET_REALIZED(container_.get()))
+  if (!gtk_widget_get_realized(container_.get()))
     return;
 
   GtkWidget* parent = gtk_widget_get_parent(container_.get());
-  if (!parent || !GTK_WIDGET_REALIZED(parent))
+  if (!parent || !gtk_widget_get_realized(parent))
     return;
 
   int old_y_offset = y_offset_;
@@ -181,13 +184,16 @@ void StatusBubbleGtk::MouseMoved(
     y_offset_ = 0;
   } else {
     GtkWidget* toplevel = gtk_widget_get_toplevel(container_.get());
-    if (!toplevel || !GTK_WIDGET_REALIZED(toplevel))
+    if (!toplevel || !gtk_widget_get_realized(toplevel))
       return;
 
     bool ltr = !base::i18n::IsRTL();
 
     GtkRequisition requisition;
     gtk_widget_size_request(container_.get(), &requisition);
+
+    GtkAllocation parent_allocation;
+    gtk_widget_get_allocation(parent, &parent_allocation);
 
     // Get our base position (that is, not including the current offset)
     // relative to the origin of the root window.
@@ -197,9 +203,9 @@ void StatusBubbleGtk::MouseMoved(
         gtk_util::GetWidgetRectRelativeToToplevel(parent);
     gfx::Rect bubble_rect(
         toplevel_x + parent_rect.x() +
-            (ltr ? 0 : parent->allocation.width - requisition.width),
+            (ltr ? 0 : parent_allocation.width - requisition.width),
         toplevel_y + parent_rect.y() +
-            parent->allocation.height - requisition.height,
+            parent_allocation.height - requisition.height,
         requisition.width,
         requisition.height);
 
@@ -238,8 +244,8 @@ void StatusBubbleGtk::UpdateDownloadShelfVisibility(bool visible) {
 }
 
 void StatusBubbleGtk::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     UserChangedTheme();
   }
@@ -327,7 +333,9 @@ void StatusBubbleGtk::SetFlipHorizontally(bool flip_horizontally) {
 }
 
 void StatusBubbleGtk::ExpandURL() {
-  start_width_ = label_.get()->allocation.width;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(label_.get(), &allocation);
+  start_width_ = allocation.width;
   expand_animation_.reset(new ui::SlideAnimation(this));
   expand_animation_->SetTweenType(ui::Tween::LINEAR);
   expand_animation_->Show();

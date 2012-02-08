@@ -4,9 +4,11 @@
 
 #include "chrome/renderer/chrome_render_process_observer.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
+#include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/native_library.h"
@@ -59,7 +61,7 @@ static const unsigned int kCacheStatsDelayMS = 2000 /* milliseconds */;
 class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
  public:
   RendererResourceDelegate()
-      : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   }
 
   virtual webkit_glue::ResourceLoaderBridge::Peer* OnRequestComplete(
@@ -68,11 +70,11 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
       const net::URLRequestStatus& status) {
     // Update the browser about our cache.
     // Rate limit informing the host of our cache stats.
-    if (method_factory_.empty()) {
+    if (!weak_factory_.HasWeakPtrs()) {
       MessageLoop::current()->PostDelayedTask(
          FROM_HERE,
-         method_factory_.NewRunnableMethod(
-             &RendererResourceDelegate::InformHostOfCacheStats),
+         base::Bind(&RendererResourceDelegate::InformHostOfCacheStats,
+                    weak_factory_.GetWeakPtr()),
          kCacheStatsDelayMS);
     }
 
@@ -101,33 +103,9 @@ class RendererResourceDelegate : public content::ResourceDispatcherDelegate {
     RenderThread::Get()->Send(new ChromeViewHostMsg_UpdatedCacheStats(stats));
   }
 
-  ScopedRunnableMethodFactory<RendererResourceDelegate> method_factory_;
+  base::WeakPtrFactory<RendererResourceDelegate> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererResourceDelegate);
-};
-
-class RenderViewContentSettingsSetter : public content::RenderViewVisitor {
- public:
-  RenderViewContentSettingsSetter(const GURL& url,
-                                  const ContentSettings& content_settings)
-      : url_(url),
-        content_settings_(content_settings) {
-  }
-
-  virtual bool Visit(content::RenderView* render_view) {
-    if (GURL(render_view->GetWebView()->mainFrame()->document().url()) ==
-        url_) {
-      ContentSettingsObserver::Get(render_view)->SetContentSettings(
-          content_settings_);
-    }
-    return true;
-  }
-
- private:
-  GURL url_;
-  ContentSettings content_settings_;
-
-  DISALLOW_COPY_AND_ASSIGN(RenderViewContentSettingsSetter);
 };
 
 #if defined(OS_WIN)
@@ -263,10 +241,6 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderProcessObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetIsIncognitoProcess,
                         OnSetIsIncognitoProcess)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetDefaultContentSettings,
-                        OnSetDefaultContentSettings)
-    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetContentSettingsForCurrentURL,
-                        OnSetContentSettingsForCurrentURL)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetCacheCapacities, OnSetCacheCapacities)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_ClearCache, OnClearCache)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_SetFieldTrialGroup, OnSetFieldTrialGroup)
@@ -282,6 +256,8 @@ bool ChromeRenderProcessObserver::OnControlMessageReceived(
     IPC_MESSAGE_HANDLER(ChromeViewMsg_GetCacheResourceStats,
                         OnGetCacheResourceStats)
     IPC_MESSAGE_HANDLER(ChromeViewMsg_PurgeMemory, OnPurgeMemory)
+    IPC_MESSAGE_HANDLER(ChromeViewMsg_SetContentSettingRules,
+                        OnSetContentSettingRules)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -296,16 +272,9 @@ void ChromeRenderProcessObserver::OnSetIsIncognitoProcess(
   is_incognito_process_ = is_incognito_process;
 }
 
-void ChromeRenderProcessObserver::OnSetContentSettingsForCurrentURL(
-    const GURL& url,
-    const ContentSettings& content_settings) {
-  RenderViewContentSettingsSetter setter(url, content_settings);
-  content::RenderView::ForEach(&setter);
-}
-
-void ChromeRenderProcessObserver::OnSetDefaultContentSettings(
-    const ContentSettings& content_settings) {
-  ContentSettingsObserver::SetDefaultContentSettings(content_settings);
+void ChromeRenderProcessObserver::OnSetContentSettingRules(
+    const RendererContentSettingRules& rules) {
+  content_setting_rules_ = rules;
 }
 
 void ChromeRenderProcessObserver::OnSetCacheCapacities(size_t min_dead_capacity,
@@ -400,12 +369,7 @@ void ChromeRenderProcessObserver::OnPurgeMemory() {
   while (sqlite3_release_memory(std::numeric_limits<int>::max()) > 0) {
   }
 
-  // Repeatedly call the V8 idle notification until it returns true ("nothing
-  // more to free").  Note that it makes more sense to do this than to implement
-  // a new "delete everything" pass because object references make it difficult
-  // to free everything possible in just one pass.
-  while (!v8::V8::IdleNotification()) {
-  }
+  v8::V8::LowMemoryNotification();
 
 #if !defined(OS_MACOSX) && defined(USE_TCMALLOC)
   // Tell tcmalloc to release any free pages it's still holding.
@@ -421,4 +385,9 @@ void ChromeRenderProcessObserver::ExecutePendingClearCache() {
     clear_cache_pending_ = false;
     WebCache::clear();
   }
+}
+
+const RendererContentSettingRules*
+ChromeRenderProcessObserver::content_setting_rules() const {
+  return &content_setting_rules_;
 }

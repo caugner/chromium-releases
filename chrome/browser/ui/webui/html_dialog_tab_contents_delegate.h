@@ -9,7 +9,6 @@
 #include "base/compiler_specific.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
 
-class Browser;
 class Profile;
 
 // This class implements (and mostly ignores) most of TabContentsDelegate for
@@ -34,14 +33,6 @@ class HtmlDialogTabContentsDelegate : public TabContentsDelegate {
 
   // TabContentsDelegate declarations.
 
-  // Deprecated. Use two-arguments variant instead.
-  // TODO(adriansc): Remove this method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(
-      TabContents* source,
-      const GURL& url,
-      const GURL& referrer,
-      WindowOpenDisposition disposition,
-      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
 
@@ -49,11 +40,11 @@ class HtmlDialogTabContentsDelegate : public TabContentsDelegate {
                               TabContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
-                              bool user_gesture);
-  virtual bool IsPopup(const TabContents* source) const;
+                              bool user_gesture) OVERRIDE;
+  virtual bool IsPopupOrPanel(const TabContents* source) const OVERRIDE;
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
-      content::NavigationType navigation_type);
+      content::NavigationType navigation_type) OVERRIDE;
 
  private:
   Profile* profile_;  // Weak pointer.  Always an original profile.

@@ -25,7 +25,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
 #include "chrome/browser/extensions/extension_webrequest_api.h"
-#include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/off_the_record_profile_io_data.h"
@@ -45,7 +44,6 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/chrome_blob_storage_context.h"
 #include "content/browser/download/download_manager.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
@@ -54,7 +52,7 @@
 #include "content/browser/ssl/ssl_host_state.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/locale_settings.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/database/database_tracker.h"
@@ -132,11 +130,7 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
                                      IDS_SPELLCHECK_DICTIONARY,
                                      PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSpellCheckUseSpellingService,
-#if defined(GOOGLE_CHROME_BUILD)
-                             true,
-#else
                              false,
-#endif
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kEnableSpellCheck,
                              true,
@@ -146,6 +140,9 @@ void Profile::RegisterUserPrefs(PrefService* prefs) {
                              PrefService::UNSYNCABLE_PREF);
   prefs->RegisterBooleanPref(prefs::kSpeechInputFilterProfanities,
                              true,
+                             PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterBooleanPref(prefs::kSpeechInputTrayNotificationShown,
+                             false,
                              PrefService::UNSYNCABLE_PREF);
 #if defined(TOOLKIT_USES_GTK)
   prefs->RegisterBooleanPref(prefs::kUsesSystemTheme,

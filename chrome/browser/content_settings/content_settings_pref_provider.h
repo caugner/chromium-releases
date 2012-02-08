@@ -16,8 +16,8 @@
 #include "chrome/browser/content_settings/content_settings_observable_provider.h"
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class PrefService;
 
@@ -30,7 +30,7 @@ namespace content_settings {
 // Content settings provider that provides content settings from the user
 // preference.
 class PrefProvider : public ObservableProvider,
-                     public NotificationObserver {
+                     public content::NotificationObserver {
  public:
   static void RegisterUserPrefs(PrefService* prefs);
 
@@ -44,22 +44,22 @@ class PrefProvider : public ObservableProvider,
       const ResourceIdentifier& resource_identifier,
       bool incognito) const OVERRIDE;
 
-  virtual void SetContentSetting(
+  virtual bool SetWebsiteSetting(
       const ContentSettingsPattern& primary_pattern,
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
-      ContentSetting content_setting) OVERRIDE;
+      Value* value) OVERRIDE;
 
   virtual void ClearAllContentSettingsRules(
       ContentSettingsType content_type) OVERRIDE;
 
   virtual void ShutdownOnUIThread() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   friend class DeadlockCheckerThread;  // For testing.
@@ -77,7 +77,7 @@ class PrefProvider : public ObservableProvider,
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
-      ContentSetting setting);
+      const base::Value* value);
 
   // Updates the given |pattern_pairs_settings| dictionary value.
   void UpdatePatternPairsSettings(
@@ -85,7 +85,7 @@ class PrefProvider : public ObservableProvider,
       const ContentSettingsPattern& secondary_pattern,
       ContentSettingsType content_type,
       const ResourceIdentifier& resource_identifier,
-      ContentSetting setting,
+      const base::Value* value,
       DictionaryValue* pattern_pairs_settings);
 
   // Updates the preferences prefs::kContentSettingsPatterns. This preferences
@@ -140,6 +140,11 @@ class PrefProvider : public ObservableProvider,
 
   static void CanonicalizeContentSettingsExceptions(
       base::DictionaryValue* all_settings_dictionary);
+
+  // In the debug mode, asserts that |lock_| is not held by this thread. It's
+  // ok if some other thread holds |lock_|, as long as it will eventually
+  // release it.
+  void AssertLockNotHeld() const;
 
   // Weak; owned by the Profile and reset in ShutdownOnUIThread.
   PrefService* prefs_;

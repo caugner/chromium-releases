@@ -8,20 +8,21 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "chrome/browser/chromeos/notifications/balloon_collection_impl.h"
 #include "chrome/browser/chromeos/notifications/balloon_view.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/background.h"
-#include "views/controls/native/native_view_host.h"
-#include "views/controls/scroll_view.h"
-#include "views/widget/native_widget_gtk.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/native/native_view_host.h"
+#include "ui/views/controls/scroll_view.h"
+#include "ui/views/widget/native_widget_gtk.h"
 
 #define SET_STATE(state) SetState(state, __PRETTY_FUNCTION__)
 
@@ -421,7 +422,6 @@ NotificationPanel::NotificationPanel()
       panel_widget_(NULL),
       container_host_(NULL),
       state_(CLOSED),
-      task_factory_(this),
       min_bounds_(0, 0, kBalloonMinWidth, kBalloonMinHeight),
       stale_timeout_(1000 * kStaleTimeoutInSeconds),
       active_(NULL),
@@ -459,7 +459,7 @@ void NotificationPanel::Show() {
 
     panel_widget_->SetContentsView(scroll_view_.get());
 
-#if defined(USE_ONLY_PURE_VIEWS)
+#if defined(USE_AURA)
     native->AttachToView(balloon_container_.get());
 #else
     // Add the view port after scroll_view is attached to the panel widget.
@@ -480,7 +480,7 @@ void NotificationPanel::Show() {
                             gfx::Rect(0, 0, kBalloonMinWidth, 1), 0,
                             WM_IPC_PANEL_USER_RESIZE_VERTICALLY);
     registrar_.Add(this, chrome::NOTIFICATION_PANEL_STATE_CHANGED,
-                   Source<PanelController>(panel_controller_.get()));
+                   content::Source<PanelController>(panel_controller_.get()));
   }
   panel_widget_->Show();
 }
@@ -630,11 +630,11 @@ void NotificationPanel::ActivatePanel() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// NotificationObserver overrides.
+// content::NotificationObserver overrides.
 
 void NotificationPanel::Observe(int type,
-                                const NotificationSource& source,
-                                const NotificationDetails& details) {
+                                const content::NotificationSource& source,
+                                const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_PANEL_STATE_CHANGED);
   PanelController::State* state =
       reinterpret_cast<PanelController::State*>(details.map_key());
@@ -706,9 +706,11 @@ void NotificationPanel::Init() {
 }
 
 void NotificationPanel::UnregisterNotification() {
-  if (panel_controller_.get())
-    registrar_.Remove(this, chrome::NOTIFICATION_PANEL_STATE_CHANGED,
-                      Source<PanelController>(panel_controller_.get()));
+  if (panel_controller_.get()) {
+    registrar_.Remove(
+        this, chrome::NOTIFICATION_PANEL_STATE_CHANGED,
+        content::Source<PanelController>(panel_controller_.get()));
+  }
 }
 
 void NotificationPanel::ScrollBalloonToVisible(Balloon* balloon) {
@@ -810,8 +812,7 @@ void NotificationPanel::StartStaleTimer(Balloon* balloon) {
   BalloonViewImpl* view = GetBalloonViewOf(balloon);
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      task_factory_.NewRunnableMethod(
-          &NotificationPanel::OnStale, view),
+      base::Bind(&NotificationPanel::OnStale, AsWeakPtr(), view),
       stale_timeout_);
 }
 

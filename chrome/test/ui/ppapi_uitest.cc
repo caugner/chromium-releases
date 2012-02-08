@@ -6,13 +6,18 @@
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
+#include "content/browser/plugin_service.h"
 #include "content/public/common/content_switches.h"
+#include "content/common/pepper_plugin_registry.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
 #include "webkit/plugins/plugin_switches.h"
+
 
 namespace {
 
@@ -27,24 +32,9 @@ const char library_name[] = "libppapi_tests.so";
 
 }  // namespace
 
-// In-process plugin test runner.  See OutOfProcessPPAPITest below for the
-// out-of-process version.
-class PPAPITest : public UITest {
+class PPAPITestBase : public UITest {
  public:
-  PPAPITest() {
-    // Append the switch to register the pepper plugin.
-    // library name = <out dir>/<test_name>.<library_extension>
-    // MIME type = application/x-ppapi-<test_name>
-    FilePath plugin_dir;
-    PathService::Get(base::DIR_EXE, &plugin_dir);
-
-    FilePath plugin_lib = plugin_dir.Append(library_name);
-    EXPECT_TRUE(file_util::PathExists(plugin_lib));
-    FilePath::StringType pepper_plugin = plugin_lib.value();
-    pepper_plugin.append(FILE_PATH_LITERAL(";application/x-ppapi-tests"));
-    launch_arguments_.AppendSwitchNative(switches::kRegisterPepperPlugins,
-                                         pepper_plugin);
-
+  PPAPITestBase() {
     // The test sends us the result via a cookie.
     launch_arguments_.AppendSwitch(switches::kEnableFileCookies);
 
@@ -56,9 +46,12 @@ class PPAPITest : public UITest {
     launch_arguments_.AppendSwitch(switches::kDisableSmoothScrolling);
   }
 
+  virtual std::string BuildQuery(const std::string& base,
+                                 const std::string& test_case)=0;
+
   void RunTest(const std::string& test_case) {
     FilePath test_path;
-    PathService::Get(base::DIR_SOURCE_ROOT, &test_path);
+    EXPECT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &test_path));
     test_path = test_path.Append(FILE_PATH_LITERAL("ppapi"));
     test_path = test_path.Append(FILE_PATH_LITERAL("tests"));
     test_path = test_path.Append(FILE_PATH_LITERAL("test_case.html"));
@@ -67,20 +60,61 @@ class PPAPITest : public UITest {
     EXPECT_TRUE(file_util::PathExists(test_path));
 
     GURL::Replacements replacements;
-    std::string query("testcase=");
-    query += test_case;
+    std::string query = BuildQuery("", test_case);
     replacements.SetQuery(query.c_str(), url_parse::Component(0, query.size()));
     GURL test_url = net::FilePathToFileURL(test_path);
     RunTestURL(test_url.ReplaceComponents(replacements));
   }
 
   void RunTestViaHTTP(const std::string& test_case) {
-    net::TestServer test_server(
-        net::TestServer::TYPE_HTTP,
-        FilePath(FILE_PATH_LITERAL("ppapi/tests")));
+    // For HTTP tests, we use the output DIR to grab the generated files such
+    // as the NEXEs.
+    FilePath exe_dir = CommandLine::ForCurrentProcess()->GetProgram().DirName();
+    FilePath src_dir;
+    ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
+
+    // TestServer expects a path relative to source. So we must first
+    // generate absolute paths to SRC and EXE and from there generate
+    // a relative path.
+    if (!exe_dir.IsAbsolute()) file_util::AbsolutePath(&exe_dir);
+    if (!src_dir.IsAbsolute()) file_util::AbsolutePath(&src_dir);
+    ASSERT_TRUE(exe_dir.IsAbsolute());
+    ASSERT_TRUE(src_dir.IsAbsolute());
+
+    size_t match, exe_size, src_size;
+    std::vector<FilePath::StringType> src_parts, exe_parts;
+
+    // Determine point at which src and exe diverge, and create a relative path.
+    exe_dir.GetComponents(&exe_parts);
+    src_dir.GetComponents(&src_parts);
+    exe_size = exe_parts.size();
+    src_size = src_parts.size();
+    for (match = 0; match < exe_size && match < src_size; ++match) {
+      if (exe_parts[match] != src_parts[match])
+        break;
+    }
+    FilePath web_dir;
+    for (size_t tmp_itr = match; tmp_itr < src_size; ++tmp_itr) {
+      web_dir = web_dir.Append(FILE_PATH_LITERAL(".."));
+    }
+    for (; match < exe_size; ++match) {
+      web_dir = web_dir.Append(exe_parts[match]);
+    }
+
+    net::TestServer test_server(net::TestServer::TYPE_HTTP, web_dir);
     ASSERT_TRUE(test_server.Start());
-    RunTestURL(
-        test_server.GetURL("files/test_case.html?testcase=" + test_case));
+    std::string query = BuildQuery("files/test_case.html?", test_case);
+    RunTestURL(test_server.GetURL(query));
+  }
+
+  void RunTestWithWebSocketServer(const std::string& test_case) {
+    FilePath websocket_root_dir;
+    ASSERT_TRUE(
+        PathService::Get(chrome::DIR_LAYOUT_TESTS, &websocket_root_dir));
+
+    ui_test_utils::TestWebSocketServer server;
+    ASSERT_TRUE(server.Start(websocket_root_dir));
+    RunTest(test_case);
   }
 
  private:
@@ -119,6 +153,34 @@ class PPAPITest : public UITest {
   }
 };
 
+// In-process plugin test runner.  See OutOfProcessPPAPITest below for the
+// out-of-process version.
+class PPAPITest : public PPAPITestBase {
+ public:
+  PPAPITest() {
+    // Append the switch to register the pepper plugin.
+    // library name = <out dir>/<test_name>.<library_extension>
+    // MIME type = application/x-ppapi-<test_name>
+    FilePath plugin_dir;
+    EXPECT_TRUE(PathService::Get(base::DIR_EXE, &plugin_dir));
+
+    FilePath plugin_lib = plugin_dir.Append(library_name);
+    EXPECT_TRUE(file_util::PathExists(plugin_lib));
+    FilePath::StringType pepper_plugin = plugin_lib.value();
+    pepper_plugin.append(FILE_PATH_LITERAL(";application/x-ppapi-tests"));
+    launch_arguments_.AppendSwitchNative(switches::kRegisterPepperPlugins,
+                                         pepper_plugin);
+    launch_arguments_.AppendSwitchASCII(switches::kAllowNaClSocketAPI,
+                                        "127.0.0.1");
+  }
+
+  std::string BuildQuery(const std::string& base,
+                         const std::string& test_case){
+    return StringPrintf("%stestcase=%s", base.c_str(), test_case.c_str());
+  }
+
+};
+
 // Variant of PPAPITest that runs plugins out-of-process to test proxy
 // codepaths.
 class OutOfProcessPPAPITest : public PPAPITest {
@@ -128,6 +190,29 @@ class OutOfProcessPPAPITest : public PPAPITest {
     launch_arguments_.AppendSwitch(switches::kPpapiOutOfProcess);
   }
 };
+
+// NaCl plugin test runner.
+class PPAPINaClTest : public PPAPITestBase {
+ public:
+  PPAPINaClTest() {
+    FilePath plugin_lib;
+    EXPECT_TRUE(PathService::Get(chrome::FILE_NACL_PLUGIN, &plugin_lib));
+    EXPECT_TRUE(file_util::PathExists(plugin_lib));
+
+    // Enable running NaCl outside of the store.
+    launch_arguments_.AppendSwitch(switches::kEnableNaCl);
+    launch_arguments_.AppendSwitchASCII(switches::kAllowNaClSocketAPI,
+                                        "127.0.0.1");
+  }
+
+  // Append the correct mode and testcase string
+  std::string BuildQuery(const std::string& base,
+                         const std::string& test_case) {
+    return StringPrintf("%smode=nacl&testcase=%s", base.c_str(),
+                        test_case.c_str());
+  }
+};
+
 
 // Use these macros to run the tests for a specific interface.
 // Most interfaces should be tested with both macros.
@@ -150,10 +235,37 @@ class OutOfProcessPPAPITest : public PPAPITest {
       RunTestViaHTTP(#test_name); \
     }
 
+// Similar macros that test with WebSocket server
+#define TEST_PPAPI_IN_PROCESS_WITH_WS(test_name) \
+    TEST_F(PPAPITest, test_name) { \
+      RunTestWithWebSocketServer(#test_name); \
+    }
+#define TEST_PPAPI_OUT_OF_PROCESS_WITH_WS(test_name) \
+    TEST_F(OutOfProcessPPAPITest, test_name) { \
+      RunTestWithWebSocketServer(#test_name); \
+    }
+
+
+#if defined(DISABLE_NACL)
+#define TEST_PPAPI_NACL_VIA_HTTP(test_name)
+#else
+
+// NaCl based PPAPI tests
+#define TEST_PPAPI_NACL_VIA_HTTP(test_name) \
+    TEST_F(PPAPINaClTest, test_name) { \
+  RunTestViaHTTP(#test_name); \
+}
+#endif
+
 
 //
 // Interface tests.
 //
+
+// Disable tests under ASAN.  http://crbug.com/104832.
+// This is a bit heavy handed, but the majority of these tests fail under ASAN.
+// See bug for history.
+#if !defined(ADDRESS_SANITIZER)
 
 TEST_PPAPI_IN_PROCESS(Broker)
 TEST_PPAPI_OUT_OF_PROCESS(Broker)
@@ -163,6 +275,10 @@ TEST_PPAPI_OUT_OF_PROCESS(Core)
 
 TEST_PPAPI_IN_PROCESS(CursorControl)
 TEST_PPAPI_OUT_OF_PROCESS(CursorControl)
+TEST_PPAPI_NACL_VIA_HTTP(CursorControl)
+
+TEST_PPAPI_IN_PROCESS(InputEvent)
+TEST_PPAPI_OUT_OF_PROCESS(InputEvent)
 
 TEST_PPAPI_IN_PROCESS(Instance)
 // http://crbug.com/91729
@@ -170,35 +286,43 @@ TEST_PPAPI_OUT_OF_PROCESS(DISABLED_Instance)
 
 TEST_PPAPI_IN_PROCESS(Graphics2D)
 TEST_PPAPI_OUT_OF_PROCESS(Graphics2D)
+TEST_PPAPI_NACL_VIA_HTTP(Graphics2D)
 
 TEST_PPAPI_IN_PROCESS(ImageData)
 TEST_PPAPI_OUT_OF_PROCESS(ImageData)
+TEST_PPAPI_NACL_VIA_HTTP(ImageData)
 
 TEST_PPAPI_IN_PROCESS(Buffer)
 TEST_PPAPI_OUT_OF_PROCESS(Buffer)
 
+// TODO(ygorshenin): investigate why
+// TEST_PPAPI_IN_PROCESS(TCPSocketPrivateShared) fails,
+// http://crbug.com/105860.
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(TCPSocketPrivateShared)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(TCPSocketPrivateShared)
+TEST_PPAPI_NACL_VIA_HTTP(TCPSocketPrivateShared)
+
+// TODO(ygorshenin): investigate why
+// TEST_PPAPI_IN_PROCESS(UDPSocketPrivateShared) fails,
+// http://crbug.com/105860.
+TEST_PPAPI_IN_PROCESS_VIA_HTTP(UDPSocketPrivateShared)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivateShared)
+TEST_PPAPI_NACL_VIA_HTTP(UDPSocketPrivateShared)
+
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(URLLoader)
-
-// http://crbug.com/89961
-#if defined(OS_WIN)
-// It often takes too long time (and fails otherwise) on Windows.
-#define MAYBE_URLLoader DISABLED_URLLoader
-#else
-#define MAYBE_URLLoader FAILS_URLLoader
-#endif
-
-TEST_F(OutOfProcessPPAPITest, MAYBE_URLLoader) {
-  RunTestViaHTTP("URLLoader");
-}
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(URLLoader)
+TEST_PPAPI_NACL_VIA_HTTP(URLLoader)
 
 TEST_PPAPI_IN_PROCESS(PaintAggregator)
 TEST_PPAPI_OUT_OF_PROCESS(PaintAggregator)
+TEST_PPAPI_NACL_VIA_HTTP(PaintAggregator)
 
 TEST_PPAPI_IN_PROCESS(Scrollbar)
 // http://crbug.com/89961
 TEST_F(OutOfProcessPPAPITest, FAILS_Scrollbar) {
   RunTest("Scrollbar");
 }
+TEST_PPAPI_NACL_VIA_HTTP(Scrollbar)
 
 TEST_PPAPI_IN_PROCESS(URLUtil)
 TEST_PPAPI_OUT_OF_PROCESS(URLUtil)
@@ -210,10 +334,8 @@ TEST_PPAPI_IN_PROCESS(Crypto)
 TEST_PPAPI_OUT_OF_PROCESS(Crypto)
 
 TEST_PPAPI_IN_PROCESS(Var)
-// http://crbug.com/89961
-TEST_F(OutOfProcessPPAPITest, FAILS_Var) {
-  RunTest("Var");
-}
+TEST_PPAPI_OUT_OF_PROCESS(Var)
+TEST_PPAPI_NACL_VIA_HTTP(Var)
 
 TEST_PPAPI_IN_PROCESS(VarDeprecated)
 // Disabled because it times out: http://crbug.com/89961
@@ -223,17 +345,24 @@ TEST_PPAPI_IN_PROCESS(VarDeprecated)
 #ifdef PostMessage
 #undef PostMessage
 #endif
-TEST_PPAPI_IN_PROCESS(PostMessage)
+TEST_PPAPI_IN_PROCESS(PostMessage_SendInInit)
+TEST_PPAPI_IN_PROCESS(PostMessage_SendingData)
+TEST_PPAPI_IN_PROCESS(PostMessage_MessageEvent)
+TEST_PPAPI_IN_PROCESS(PostMessage_NoHandler)
+TEST_PPAPI_IN_PROCESS(PostMessage_ExtraParam)
+TEST_PPAPI_OUT_OF_PROCESS(PostMessage_SendInInit)
+TEST_PPAPI_OUT_OF_PROCESS(PostMessage_SendingData)
+TEST_PPAPI_OUT_OF_PROCESS(PostMessage_MessageEvent)
+TEST_PPAPI_OUT_OF_PROCESS(PostMessage_NoHandler)
+TEST_PPAPI_OUT_OF_PROCESS(PostMessage_ExtraParam)
 #if !defined(OS_WIN)
 // Times out on Windows XP: http://crbug.com/95557
-TEST_PPAPI_OUT_OF_PROCESS(PostMessage)
+TEST_PPAPI_OUT_OF_PROCESS(PostMessage_NonMainThread)
 #endif
 
 TEST_PPAPI_IN_PROCESS(Memory)
 TEST_PPAPI_OUT_OF_PROCESS(Memory)
-
-TEST_PPAPI_IN_PROCESS(QueryPolicy)
-//TEST_PPAPI_OUT_OF_PROCESS(QueryPolicy)
+TEST_PPAPI_NACL_VIA_HTTP(Memory)
 
 TEST_PPAPI_IN_PROCESS(VideoDecoder)
 TEST_PPAPI_OUT_OF_PROCESS(VideoDecoder)
@@ -242,23 +371,36 @@ TEST_PPAPI_OUT_OF_PROCESS(VideoDecoder)
 TEST_F(PPAPITest, FAILS_FileIO) {
   RunTestViaHTTP("FileIO");
 }
-TEST_F(OutOfProcessPPAPITest, FAILS_FileIO) {
+// http://crbug.com/101154
+TEST_F(OutOfProcessPPAPITest, DISABLED_FileIO) {
   RunTestViaHTTP("FileIO");
 }
+TEST_PPAPI_NACL_VIA_HTTP(DISABLED_FileIO)
+
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileRef)
 // Disabled because it times out: http://crbug.com/89961
 //TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileRef)
+TEST_PPAPI_NACL_VIA_HTTP(FileRef)
+
 
 TEST_PPAPI_IN_PROCESS_VIA_HTTP(FileSystem)
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(FileSystem)
+TEST_PPAPI_NACL_VIA_HTTP(FileSystem)
 
-// http://crbug.com/96767
-#if !defined(OS_MACOSX)
-TEST_F(PPAPITest, FLAKY_FlashFullscreen) {
+// http://crbug.com/96767 and 104384 for aura.
+#if !defined(OS_MACOSX) && !defined(USE_AURA)
+#define MAYBE_FlashFullscreen FLAKY_FlashFullscreen
+#define MAYBE_FlashFullscreen FLAKY_FlashFullscreen
+#else
+#define MAYBE_FlashFullscreen DISABLED_FlashFullscreen
+#define MAYBE_FlashFullscreen DISABLED_FlashFullscreen
+#endif
+
+TEST_F(PPAPITest, MAYBE_FlashFullscreen) {
   RunTestViaHTTP("FlashFullscreen");
 }
-TEST_F(OutOfProcessPPAPITest, FLAKY_FlashFullscreen) {
+TEST_F(OutOfProcessPPAPITest, MAYBE_FlashFullscreen) {
   RunTestViaHTTP("FlashFullscreen");
 }
 // New implementation only honors fullscreen requests within a context of
@@ -274,7 +416,9 @@ TEST_F(PPAPITest, DISABLED_Fullscreen) {
 TEST_F(OutOfProcessPPAPITest, DISABLED_Fullscreen) {
   RunTestViaHTTP("Fullscreen");
 }
-#endif
+
+TEST_PPAPI_IN_PROCESS(FlashClipboard)
+TEST_PPAPI_OUT_OF_PROCESS(FlashClipboard)
 
 #if defined(OS_POSIX)
 #define MAYBE_DirectoryReader FLAKY_DirectoryReader
@@ -283,11 +427,8 @@ TEST_F(OutOfProcessPPAPITest, DISABLED_Fullscreen) {
 #endif
 
 // Flaky on Mac + Linux, maybe http://codereview.chromium.org/7094008
+// Not implemented out of process: http://crbug.com/106129
 TEST_F(PPAPITest, MAYBE_DirectoryReader) {
-  RunTestViaHTTP("DirectoryReader");
-}
-// http://crbug.com/89961
-TEST_F(OutOfProcessPPAPITest, FAILS_DirectoryReader) {
   RunTestViaHTTP("DirectoryReader");
 }
 
@@ -302,8 +443,56 @@ TEST_F(OutOfProcessPPAPITest, FAILS_Transport) {
 }
 #endif // ENABLE_P2P_APIS
 
+// There is no proxy. This is used for PDF metrics reporting, and PDF only
+// runs in process, so there's currently no need for a proxy.
 TEST_PPAPI_IN_PROCESS(UMA)
-// There is no proxy.
-TEST_F(OutOfProcessPPAPITest, FAILS_UMA) {
-  RunTest("UMA");
+
+TEST_PPAPI_IN_PROCESS(NetAddressPrivate_AreEqual)
+TEST_PPAPI_IN_PROCESS(NetAddressPrivate_AreHostsEqual)
+TEST_PPAPI_IN_PROCESS(NetAddressPrivate_Describe)
+TEST_PPAPI_IN_PROCESS(NetAddressPrivate_ReplacePort)
+TEST_PPAPI_IN_PROCESS(NetAddressPrivate_GetAnyAddress)
+TEST_PPAPI_IN_PROCESS(NetAddressPrivate_DescribeIPv6)
+TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_AreEqual)
+TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_AreHostsEqual)
+TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_Describe)
+TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_ReplacePort)
+TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_GetAnyAddress)
+TEST_PPAPI_OUT_OF_PROCESS(NetAddressPrivate_DescribeIPv6)
+
+// PPB_TCPSocket_Private currently isn't supported in-process.
+TEST_F(OutOfProcessPPAPITest, TCPSocketPrivate) {
+  RunTestViaHTTP("TCPSocketPrivate");
 }
+
+TEST_PPAPI_IN_PROCESS(Flash_SetInstanceAlwaysOnTop)
+TEST_PPAPI_IN_PROCESS(Flash_GetProxyForURL)
+TEST_PPAPI_IN_PROCESS(Flash_MessageLoop)
+TEST_PPAPI_IN_PROCESS(Flash_GetLocalTimeZoneOffset)
+TEST_PPAPI_IN_PROCESS(Flash_GetCommandLineArgs)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_SetInstanceAlwaysOnTop)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_GetProxyForURL)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_MessageLoop)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_GetLocalTimeZoneOffset)
+TEST_PPAPI_OUT_OF_PROCESS(Flash_GetCommandLineArgs)
+
+TEST_PPAPI_IN_PROCESS(WebSocket_IsWebSocket)
+TEST_PPAPI_IN_PROCESS(WebSocket_InvalidConnect)
+TEST_PPAPI_IN_PROCESS(WebSocket_GetURL)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_ValidConnect)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_GetProtocol)
+TEST_PPAPI_IN_PROCESS_WITH_WS(WebSocket_TextSendReceive)
+
+TEST_PPAPI_IN_PROCESS(AudioConfig_ValidConfigs)
+TEST_PPAPI_IN_PROCESS(AudioConfig_InvalidConfigs)
+TEST_PPAPI_OUT_OF_PROCESS(AudioConfig_ValidConfigs)
+TEST_PPAPI_OUT_OF_PROCESS(AudioConfig_InvalidConfigs)
+
+TEST_PPAPI_IN_PROCESS(Audio_Creation)
+TEST_PPAPI_IN_PROCESS(Audio_DestroyNoStop)
+TEST_PPAPI_IN_PROCESS(Audio_Failures)
+TEST_PPAPI_OUT_OF_PROCESS(Audio_Creation)
+TEST_PPAPI_OUT_OF_PROCESS(Audio_DestroyNoStop)
+TEST_PPAPI_OUT_OF_PROCESS(Audio_Failures)
+
+#endif // ADDRESS_SANITIZER

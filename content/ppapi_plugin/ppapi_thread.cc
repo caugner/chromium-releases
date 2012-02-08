@@ -11,11 +11,11 @@
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "content/common/child_process.h"
-#include "content/common/sandbox_init_wrapper.h"
 #include "content/ppapi_plugin/broker_process_dispatcher.h"
 #include "content/ppapi_plugin/plugin_process_dispatcher.h"
 #include "content/ppapi_plugin/ppapi_webkit_thread.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/sandbox_init.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ppapi/c/dev/ppp_network_state_dev.h"
@@ -27,6 +27,8 @@
 
 #if defined(OS_WIN)
 #include "sandbox/src/sandbox.h"
+#elif defined(OS_MACOSX)
+#include "content/common/sandbox_init_mac.h"
 #endif
 
 #if defined(OS_WIN)
@@ -73,19 +75,19 @@ bool PpapiThread::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(PpapiThread, msg)
     IPC_MESSAGE_HANDLER(PpapiMsg_LoadPlugin, OnMsgLoadPlugin)
     IPC_MESSAGE_HANDLER(PpapiMsg_CreateChannel, OnMsgCreateChannel)
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashTCPSocket_ConnectACK,
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ConnectACK,
                                 OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashTCPSocket_SSLHandshakeACK,
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_SSLHandshakeACK,
                                 OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashTCPSocket_ReadACK,
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_ReadACK,
                                 OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashTCPSocket_WriteACK,
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBTCPSocket_WriteACK,
                                 OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashUDPSocket_RecvFromACK,
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_RecvFromACK,
                                 OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashUDPSocket_SendToACK,
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_SendToACK,
                                 OnPluginDispatcherMessageReceived(msg))
-    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBFlashUDPSocket_BindACK,
+    IPC_MESSAGE_HANDLER_GENERIC(PpapiMsg_PPBUDPSocket_BindACK,
                                 OnPluginDispatcherMessageReceived(msg))
     IPC_MESSAGE_HANDLER(PpapiMsg_SetNetworkState, OnMsgSetNetworkState)
   IPC_END_MESSAGE_MAP()
@@ -201,11 +203,9 @@ void PpapiThread::OnMsgLoadPlugin(const FilePath& path) {
     // We need to do this after getting |PPP_GetInterface()| (or presumably
     // doing something nontrivial with the library), else the sandbox
     // intercedes.
-    CommandLine* parsed_command_line = CommandLine::ForCurrentProcess();
-    SandboxInitWrapper sandbox_wrapper;
-    if (!sandbox_wrapper.InitializeSandbox(*parsed_command_line,
-                                           switches::kPpapiPluginProcess))
+    if (!content::InitializeSandbox()) {
       LOG(WARNING) << "Failed to initialize sandbox";
+    }
 #endif
 
     // Get the InitializeModule function (required).
@@ -299,9 +299,15 @@ bool PpapiThread::SetupRendererChannel(base::ProcessHandle host_process_handle,
 
   handle->name = plugin_handle.name;
 #if defined(OS_POSIX)
-  // On POSIX, pass the renderer-side FD.
-  handle->socket = base::FileDescriptor(::dup(dispatcher->GetRendererFD()),
-                                        true);
+  // On POSIX, transfer ownership of the renderer-side (client) FD.
+  // This ensures this process will be notified when it is closed even if a
+  // connection is not established.
+  handle->socket = base::FileDescriptor(dispatcher->TakeRendererFD(), true);
+  // Check the validity of fd for bug investigation. Remove after fixed.
+  // See for details: crbug.com/103957.
+  CHECK_NE(-1, handle->socket.fd);
+  if (handle->socket.fd == -1)
+    return false;
 #endif
 
   // From here, the dispatcher will manage its own lifetime according to the

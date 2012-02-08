@@ -10,16 +10,18 @@
 #include "base/platform_file.h"
 #include "base/process_util.h"
 #include "content/browser/browser_context.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/pepper_file_messages.h"
+#include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_platform_file.h"
 #include "webkit/plugins/ppapi/file_path.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
 #endif
+
+using content::BrowserThread;
 
 // Used to check if the renderer has permission for the requested operation.
 // TODO(viettrungluu): Verify these. They don't necessarily quite make sense,
@@ -220,16 +222,10 @@ FilePath PepperFileMessageFilter::ValidateAndConvertPepperFilePath(
   FilePath file_path;  // Empty path returned on error.
   switch(pepper_path.domain()) {
     case webkit::ppapi::PepperFilePath::DOMAIN_ABSOLUTE:
-// TODO(viettrungluu): This could be dangerous if not 100% right, so let's be
-// conservative and only enable it when requested.
-#if defined(ENABLE_FLAPPER_HACKS)
       if (pepper_path.path().IsAbsolute() &&
           ChildProcessSecurityPolicy::GetInstance()->HasPermissionsForFile(
               child_id(), pepper_path.path(), flags))
         file_path = pepper_path.path();
-#else
-      NOTIMPLEMENTED();
-#endif  // ENABLE_FLAPPER_HACKS
       break;
     case webkit::ppapi::PepperFilePath::DOMAIN_MODULE_LOCAL:
       if (!pepper_path.path().IsAbsolute() &&

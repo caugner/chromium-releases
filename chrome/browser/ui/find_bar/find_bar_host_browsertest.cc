@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/message_loop.h"
+#include "base/string16.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,14 +22,16 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "net/test/test_server.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/ui/views/find_bar_host.h"
-#include "views/focus/focus_manager.h"
-#include "views/widget/widget.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/widget/widget.h"
 #elif defined(TOOLKIT_GTK)
 #include "chrome/browser/ui/gtk/slide_animator_gtk.h"
 #elif defined(OS_MACOSX)
@@ -584,7 +587,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindDisappearOnNavigate) {
   // Reload the tab and make sure Find window doesn't go away.
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
-      Source<NavigationController>(
+      content::Source<NavigationController>(
           &browser()->GetSelectedTabContentsWrapper()->controller()));
   browser()->Reload(CURRENT_TAB);
   observer.Wait();
@@ -702,11 +705,11 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindMovesWhenObscuring) {
 // See http://crbug.com/43070
 #define MAYBE_FindNextInNewTabUsesPrepopulate \
     DISABLED_FindNextInNewTabUsesPrepopulate
-#elif defined (OS_WIN)
-// Occasionally times-out on Windows, too.
-// See http://crbug.com/43070 and http://crbug.com/88316
+#elif defined(OS_WIN) || defined(USE_AURA)
+// Occasionally times-out on Windows or aura, too.
+// See http://crbug.com/43070
 #define MAYBE_FindNextInNewTabUsesPrepopulate \
-    FLAKY_FindNextInNewTabUsesPrepopulate
+    DISABLED_FindNextInNewTabUsesPrepopulate
 #else
 #define MAYBE_FindNextInNewTabUsesPrepopulate FindNextInNewTabUsesPrepopulate
 #endif
@@ -762,15 +765,15 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, AcceleratorRestoring) {
   views::FocusManager* focus_manager = widget->GetFocusManager();
 
   // See where Escape is registered.
-  views::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
-  views::AcceleratorTarget* old_target =
+  ui::Accelerator escape(ui::VKEY_ESCAPE, false, false, false);
+  ui::AcceleratorTarget* old_target =
       focus_manager->GetCurrentTargetForAccelerator(escape);
   EXPECT_TRUE(old_target != NULL);
 
   browser()->ShowFindBar();
 
   // Our Find bar should be the new target.
-  views::AcceleratorTarget* new_target =
+  ui::AcceleratorTarget* new_target =
       focus_manager->GetCurrentTargetForAccelerator(escape);
 
   EXPECT_TRUE(new_target != NULL);
@@ -955,7 +958,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, PrepopulateInNewTab) {
   // in the first tab.
   EXPECT_EQ(ASCIIToUTF16("page"), GetFindBarText());
   // But it should not seem like a search has been issued.
-  EXPECT_EQ(ASCIIToUTF16(""), GetMatchCountText());
+  EXPECT_EQ(string16(), GetMatchCountText());
 }
 
 // This makes sure that we can search for A in tabA, then for B in tabB and
@@ -1061,7 +1064,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, MAYBE_NoIncognitoPrepopulate) {
   Profile* incognito_profile = browser()->profile()->GetOffTheRecordProfile();
   Browser* incognito_browser = Browser::Create(incognito_profile);
   ui_test_utils::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+      content::NOTIFICATION_LOAD_STOP,
+      content::NotificationService::AllSources());
   incognito_browser->AddSelectedTabWithURL(
       url, content::PAGE_TRANSITION_START_PAGE);
   observer.Wait();
@@ -1109,7 +1113,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, ActivateLinkNavigatesPage) {
   // End the find session, click on the link.
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
-      Source<NavigationController>(&tab->controller()));
+      content::Source<NavigationController>(&tab->controller()));
   tab->find_tab_helper()->StopFinding(FindBarController::kActivateSelection);
   observer.Wait();
 }
@@ -1120,7 +1124,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FitWindow) {
   params.initial_bounds = gfx::Rect(0, 0, 250, 500);
   Browser* popup = Browser::CreateWithParams(params);
   ui_test_utils::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+      content::NOTIFICATION_LOAD_STOP,
+      content::NotificationService::AllSources());
   popup->AddSelectedTabWithURL(GURL(chrome::kAboutBlankURL),
                                content::PAGE_TRANSITION_LINK);
   // Wait for the page to finish loading.

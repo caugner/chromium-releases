@@ -11,8 +11,8 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
-#include "content/common/view_message_enums.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/common/stop_find_action.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
 
 using WebKit::WebFindOptions;
@@ -104,22 +104,22 @@ void FindTabHelper::StopFinding(
   find_op_aborted_ = true;
   last_search_result_ = FindNotificationDetails();
 
-  ViewMsg_StopFinding_Params params;
+  content::StopFindAction action;
   switch (selection_action) {
     case FindBarController::kClearSelection:
-      params.action = ViewMsg_StopFinding_Params::kClearSelection;
+      action = content::STOP_FIND_ACTION_CLEAR_SELECTION;
       break;
     case FindBarController::kKeepSelection:
-      params.action = ViewMsg_StopFinding_Params::kKeepSelection;
+      action = content::STOP_FIND_ACTION_KEEP_SELECTION;
       break;
     case FindBarController::kActivateSelection:
-      params.action = ViewMsg_StopFinding_Params::kActivateSelection;
+      action = content::STOP_FIND_ACTION_ACTIVATE_SELECTION;
       break;
     default:
       NOTREACHED();
-      params.action = ViewMsg_StopFinding_Params::kKeepSelection;
+      action = content::STOP_FIND_ACTION_KEEP_SELECTION;
   }
-  tab_contents()->render_view_host()->StopFinding(params);
+  tab_contents()->render_view_host()->StopFinding(action);
 }
 
 void FindTabHelper::HandleFindReply(int request_id,
@@ -146,9 +146,9 @@ void FindTabHelper::HandleFindReply(int request_id,
     last_search_result_ = FindNotificationDetails(
         request_id, number_of_matches, selection, active_match_ordinal,
         final_update);
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_FIND_RESULT_AVAILABLE,
-        Source<TabContents>(tab_contents()),
-        Details<FindNotificationDetails>(&last_search_result_));
+        content::Source<TabContents>(tab_contents()),
+        content::Details<FindNotificationDetails>(&last_search_result_));
   }
 }

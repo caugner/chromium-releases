@@ -17,8 +17,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabaseError.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyRange.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 using WebKit::WebDOMStringList;
 using WebKit::WebExceptionCode;
@@ -42,6 +42,10 @@ bool IndexedDBDispatcher::OnMessageReceived(const IPC::Message& msg) {
   IPC_BEGIN_MESSAGE_MAP(IndexedDBDispatcher, msg)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIDBCursor,
                         OnSuccessOpenCursor)
+    IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessCursorContinue,
+                        OnSuccessCursorContinue)
+    IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessCursorPrefetch,
+                        OnSuccessCursorPrefetch)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIDBDatabase,
                         OnSuccessIDBDatabase)
     IPC_MESSAGE_HANDLER(IndexedDBMsg_CallbacksSuccessIndexedDBKey,
@@ -63,15 +67,20 @@ bool IndexedDBDispatcher::OnMessageReceived(const IPC::Message& msg) {
   return handled;
 }
 
+void IndexedDBDispatcher::Send(IPC::Message* msg) {
+  ChildThread::current()->Send(msg);
+}
+
 void IndexedDBDispatcher::RequestIDBCursorUpdate(
-    const SerializedScriptValue& value,
+    const content::SerializedScriptValue& value,
     WebIDBCallbacks* callbacks_ptr,
     int32 idb_cursor_id,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
+  Send(
       new IndexedDBHostMsg_CursorUpdate(idb_cursor_id, response_id, value, ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
@@ -82,16 +91,20 @@ void IndexedDBDispatcher::RequestIDBCursorContinue(
     WebIDBCallbacks* callbacks_ptr,
     int32 idb_cursor_id,
     WebExceptionCode* ec) {
+  // Reset all cursor prefetch caches except for this cursor.
+  ResetCursorPrefetchCaches(idb_cursor_id);
+
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
+  Send(
       new IndexedDBHostMsg_CursorContinue(idb_cursor_id, response_id, key, ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
 
-void IndexedDBDispatcher::RequestIDBCursorDelete(
+void IndexedDBDispatcher::RequestIDBCursorPrefetch(
+    int n,
     WebIDBCallbacks* callbacks_ptr,
     int32 idb_cursor_id,
     WebExceptionCode* ec) {
@@ -99,7 +112,27 @@ void IndexedDBDispatcher::RequestIDBCursorDelete(
 
   int32 response_id = pending_callbacks_.Add(callbacks.release());
   RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_CursorDelete(idb_cursor_id, response_id, ec));
+      new IndexedDBHostMsg_CursorPrefetch(idb_cursor_id, response_id, n, ec));
+  if (*ec)
+    pending_callbacks_.Remove(response_id);
+}
+
+void IndexedDBDispatcher::RequestIDBCursorPrefetchReset(
+    int used_prefetches, int unused_prefetches, int32 idb_cursor_id) {
+  RenderThreadImpl::current()->Send(
+      new IndexedDBHostMsg_CursorPrefetchReset(idb_cursor_id, used_prefetches,
+                                               unused_prefetches));
+}
+
+void IndexedDBDispatcher::RequestIDBCursorDelete(
+    WebIDBCallbacks* callbacks_ptr,
+    int32 idb_cursor_id,
+    WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
+  scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
+
+  int32 response_id = pending_callbacks_.Add(callbacks.release());
+  Send(new IndexedDBHostMsg_CursorDelete(idb_cursor_id, response_id, ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
@@ -109,6 +142,7 @@ void IndexedDBDispatcher::RequestIDBFactoryOpen(
     WebIDBCallbacks* callbacks_ptr,
     const string16& origin,
     WebFrame* web_frame) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   if (!web_frame)
@@ -118,17 +152,17 @@ void IndexedDBDispatcher::RequestIDBFactoryOpen(
     return; // We must be shutting down.
 
   IndexedDBHostMsg_FactoryOpen_Params params;
-  params.routing_id = render_view->routing_id();
   params.response_id = pending_callbacks_.Add(callbacks.release());
   params.origin = origin;
   params.name = name;
-  RenderThreadImpl::current()->Send(new IndexedDBHostMsg_FactoryOpen(params));
+  Send(new IndexedDBHostMsg_FactoryOpen(params));
 }
 
 void IndexedDBDispatcher::RequestIDBFactoryGetDatabaseNames(
     WebIDBCallbacks* callbacks_ptr,
     const string16& origin,
     WebFrame* web_frame) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   if (!web_frame)
@@ -138,11 +172,9 @@ void IndexedDBDispatcher::RequestIDBFactoryGetDatabaseNames(
     return; // We must be shutting down.
 
   IndexedDBHostMsg_FactoryGetDatabaseNames_Params params;
-  params.routing_id = render_view->routing_id();
   params.response_id = pending_callbacks_.Add(callbacks.release());
   params.origin = origin;
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_FactoryGetDatabaseNames(params));
+  Send(new IndexedDBHostMsg_FactoryGetDatabaseNames(params));
 }
 
 void IndexedDBDispatcher::RequestIDBFactoryDeleteDatabase(
@@ -150,6 +182,7 @@ void IndexedDBDispatcher::RequestIDBFactoryDeleteDatabase(
     WebIDBCallbacks* callbacks_ptr,
     const string16& origin,
     WebFrame* web_frame) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   if (!web_frame)
@@ -159,28 +192,26 @@ void IndexedDBDispatcher::RequestIDBFactoryDeleteDatabase(
     return; // We must be shutting down.
 
   IndexedDBHostMsg_FactoryDeleteDatabase_Params params;
-  params.routing_id = render_view->routing_id();
   params.response_id = pending_callbacks_.Add(callbacks.release());
   params.origin = origin;
   params.name = name;
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_FactoryDeleteDatabase(params));
+  Send(new IndexedDBHostMsg_FactoryDeleteDatabase(params));
 }
 
 void IndexedDBDispatcher::RequestIDBDatabaseClose(int32 idb_database_id) {
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_DatabaseClose(idb_database_id));
+  ResetCursorPrefetchCaches();
+  Send(new IndexedDBHostMsg_DatabaseClose(idb_database_id));
   pending_database_callbacks_.Remove(idb_database_id);
 }
 
-  void IndexedDBDispatcher::RequestIDBDatabaseOpen(
+void IndexedDBDispatcher::RequestIDBDatabaseOpen(
       WebIDBDatabaseCallbacks* callbacks_ptr,
       int32 idb_database_id) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBDatabaseCallbacks> callbacks(callbacks_ptr);
 
   int32 response_id = pending_database_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(new IndexedDBHostMsg_DatabaseOpen(
-      response_id, idb_database_id));
+  Send(new IndexedDBHostMsg_DatabaseOpen(response_id, idb_database_id));
 }
 
 void IndexedDBDispatcher::RequestIDBDatabaseSetVersion(
@@ -188,12 +219,12 @@ void IndexedDBDispatcher::RequestIDBDatabaseSetVersion(
     WebIDBCallbacks* callbacks_ptr,
     int32 idb_database_id,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_DatabaseSetVersion(idb_database_id, response_id,
-                                            version, ec));
+  Send(new IndexedDBHostMsg_DatabaseSetVersion(idb_database_id, response_id,
+                                               version, ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
@@ -205,6 +236,7 @@ void IndexedDBDispatcher::RequestIDBIndexOpenObjectCursor(
     int32 idb_index_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
   IndexedDBHostMsg_IndexOpenCursor_Params params;
   params.response_id = pending_callbacks_.Add(callbacks.release());
@@ -215,8 +247,7 @@ void IndexedDBDispatcher::RequestIDBIndexOpenObjectCursor(
   params.direction = direction;
   params.idb_index_id = idb_index_id;
   params.transaction_id = TransactionId(transaction);
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_IndexOpenObjectCursor(params, ec));
+  Send(new IndexedDBHostMsg_IndexOpenObjectCursor(params, ec));
   if (*ec)
     pending_callbacks_.Remove(params.response_id);
 }
@@ -228,6 +259,7 @@ void IndexedDBDispatcher::RequestIDBIndexOpenKeyCursor(
     int32 idb_index_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
   IndexedDBHostMsg_IndexOpenCursor_Params params;
   params.response_id = pending_callbacks_.Add(callbacks.release());
@@ -240,8 +272,7 @@ void IndexedDBDispatcher::RequestIDBIndexOpenKeyCursor(
   params.direction = direction;
   params.idb_index_id = idb_index_id;
   params.transaction_id = TransactionId(transaction);
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_IndexOpenKeyCursor(params, ec));
+  Send(new IndexedDBHostMsg_IndexOpenKeyCursor(params, ec));
   if (*ec)
     pending_callbacks_.Remove(params.response_id);
 }
@@ -252,12 +283,11 @@ void IndexedDBDispatcher::RequestIDBIndexGetObject(
     int32 idb_index_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_IndexGetObject(
-          idb_index_id, response_id, key,
-          TransactionId(transaction), ec));
+  Send(new IndexedDBHostMsg_IndexGetObject(idb_index_id, response_id, key,
+                                           TransactionId(transaction), ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
@@ -268,12 +298,12 @@ void IndexedDBDispatcher::RequestIDBIndexGetKey(
     int32 idb_index_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_IndexGetKey(
-          idb_index_id, response_id, key,
-          TransactionId(transaction), ec));
+  Send(new IndexedDBHostMsg_IndexGetKey(
+           idb_index_id, response_id, key,
+           TransactionId(transaction), ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
@@ -284,25 +314,26 @@ void IndexedDBDispatcher::RequestIDBObjectStoreGet(
     int32 idb_object_store_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_ObjectStoreGet(
-          idb_object_store_id, response_id,
-          key, TransactionId(transaction), ec));
+  Send(new IndexedDBHostMsg_ObjectStoreGet(
+           idb_object_store_id, response_id,
+           key, TransactionId(transaction), ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
 
 void IndexedDBDispatcher::RequestIDBObjectStorePut(
-    const SerializedScriptValue& value,
+    const content::SerializedScriptValue& value,
     const IndexedDBKey& key,
     WebKit::WebIDBObjectStore::PutMode put_mode,
     WebIDBCallbacks* callbacks_ptr,
     int32 idb_object_store_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
   IndexedDBHostMsg_ObjectStorePut_Params params;
   params.idb_object_store_id = idb_object_store_id;
@@ -311,8 +342,7 @@ void IndexedDBDispatcher::RequestIDBObjectStorePut(
   params.key = key;
   params.put_mode = put_mode;
   params.transaction_id = TransactionId(transaction);
-  RenderThreadImpl::current()->Send(new IndexedDBHostMsg_ObjectStorePut(
-      params, ec));
+  Send(new IndexedDBHostMsg_ObjectStorePut(params, ec));
   if (*ec)
     pending_callbacks_.Remove(params.response_id);
 }
@@ -323,13 +353,12 @@ void IndexedDBDispatcher::RequestIDBObjectStoreDelete(
     int32 idb_object_store_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_ObjectStoreDelete(
-          idb_object_store_id, response_id,
-          key, TransactionId(transaction), ec));
+  Send(new IndexedDBHostMsg_ObjectStoreDelete(
+      idb_object_store_id, response_id, key, TransactionId(transaction), ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
@@ -339,13 +368,12 @@ void IndexedDBDispatcher::RequestIDBObjectStoreClear(
     int32 idb_object_store_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
 
   int32 response_id = pending_callbacks_.Add(callbacks.release());
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_ObjectStoreClear(
-          idb_object_store_id, response_id,
-          TransactionId(transaction), ec));
+  Send(new IndexedDBHostMsg_ObjectStoreClear(
+      idb_object_store_id, response_id, TransactionId(transaction), ec));
   if (*ec)
     pending_callbacks_.Remove(response_id);
 }
@@ -357,6 +385,7 @@ void IndexedDBDispatcher::RequestIDBObjectStoreOpenCursor(
     int32 idb_object_store_id,
     const WebIDBTransaction& transaction,
     WebExceptionCode* ec) {
+  ResetCursorPrefetchCaches();
   scoped_ptr<WebIDBCallbacks> callbacks(callbacks_ptr);
   IndexedDBHostMsg_ObjectStoreOpenCursor_Params params;
   params.response_id = pending_callbacks_.Add(callbacks.release());
@@ -367,8 +396,7 @@ void IndexedDBDispatcher::RequestIDBObjectStoreOpenCursor(
   params.direction = direction;
   params.idb_object_store_id = idb_object_store_id;
   params.transaction_id = TransactionId(transaction);
-  RenderThreadImpl::current()->Send(
-      new IndexedDBHostMsg_ObjectStoreOpenCursor(params, ec));
+  Send(new IndexedDBHostMsg_ObjectStoreOpenCursor(params, ec));
   if (*ec)
     pending_callbacks_.Remove(params.response_id);
 }
@@ -377,6 +405,10 @@ void IndexedDBDispatcher::RegisterWebIDBTransactionCallbacks(
     WebIDBTransactionCallbacks* callbacks,
     int32 id) {
   pending_transaction_callbacks_.AddWithID(callbacks, id);
+}
+
+void IndexedDBDispatcher::CursorDestroyed(int32 cursor_id) {
+  cursors_.erase(cursor_id);
 }
 
 int32 IndexedDBDispatcher::TransactionId(
@@ -389,6 +421,8 @@ int32 IndexedDBDispatcher::TransactionId(
 void IndexedDBDispatcher::OnSuccessIDBDatabase(int32 response_id,
                                                int32 object_id) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  if (!callbacks)
+    return;
   callbacks->onSuccess(new RendererWebIDBDatabaseImpl(object_id));
   pending_callbacks_.Remove(response_id);
 }
@@ -396,6 +430,8 @@ void IndexedDBDispatcher::OnSuccessIDBDatabase(int32 response_id,
 void IndexedDBDispatcher::OnSuccessIndexedDBKey(int32 response_id,
                                                 const IndexedDBKey& key) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  if (!callbacks)
+    return;
   callbacks->onSuccess(key);
   pending_callbacks_.Remove(response_id);
 }
@@ -403,6 +439,8 @@ void IndexedDBDispatcher::OnSuccessIndexedDBKey(int32 response_id,
 void IndexedDBDispatcher::OnSuccessIDBTransaction(int32 response_id,
                                                   int32 object_id) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  if (!callbacks)
+    return;
   callbacks->onSuccess(new RendererWebIDBTransactionImpl(object_id));
   pending_callbacks_.Remove(response_id);
 }
@@ -410,6 +448,8 @@ void IndexedDBDispatcher::OnSuccessIDBTransaction(int32 response_id,
 void IndexedDBDispatcher::OnSuccessStringList(
     int32 response_id, const std::vector<string16>& value) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  if (!callbacks)
+    return;
   WebDOMStringList string_list;
   for (std::vector<string16>::const_iterator it = value.begin();
        it != value.end(); ++it)
@@ -419,20 +459,61 @@ void IndexedDBDispatcher::OnSuccessStringList(
 }
 
 void IndexedDBDispatcher::OnSuccessSerializedScriptValue(
-    int32 response_id, const SerializedScriptValue& value) {
+    int32 response_id, const content::SerializedScriptValue& value) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  if (!callbacks)
+    return;
   callbacks->onSuccess(value);
   pending_callbacks_.Remove(response_id);
 }
 
 void IndexedDBDispatcher::OnSuccessOpenCursor(int32 repsonse_id,
-    int32 object_id, const IndexedDBKey& key, const IndexedDBKey& primaryKey,
-    const SerializedScriptValue& value) {
+    int32 object_id, const IndexedDBKey& key, const IndexedDBKey& primary_key,
+    const content::SerializedScriptValue& value) {
   WebIDBCallbacks* callbacks =
       pending_callbacks_.Lookup(repsonse_id);
-  callbacks->onSuccess(new RendererWebIDBCursorImpl(object_id, key,
-                       primaryKey, value));
+  if (!callbacks)
+    return;
+
+  RendererWebIDBCursorImpl* cursor = new RendererWebIDBCursorImpl(object_id);
+  cursors_[object_id] = cursor;
+  cursor->SetKeyAndValue(key, primary_key, value);
+  callbacks->onSuccess(cursor);
+
   pending_callbacks_.Remove(repsonse_id);
+}
+
+void IndexedDBDispatcher::OnSuccessCursorContinue(
+    int32 response_id,
+    int32 cursor_id,
+    const IndexedDBKey& key,
+    const IndexedDBKey& primary_key,
+    const content::SerializedScriptValue& value) {
+  RendererWebIDBCursorImpl* cursor = cursors_[cursor_id];
+  DCHECK(cursor);
+  cursor->SetKeyAndValue(key, primary_key, value);
+
+  WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  if (!callbacks)
+    return;
+  callbacks->onSuccessWithContinuation();
+
+  pending_callbacks_.Remove(response_id);
+}
+
+void IndexedDBDispatcher::OnSuccessCursorPrefetch(
+      int32 response_id,
+      int32 cursor_id,
+      const std::vector<IndexedDBKey>& keys,
+      const std::vector<IndexedDBKey>& primary_keys,
+      const std::vector<content::SerializedScriptValue>& values) {
+  RendererWebIDBCursorImpl* cursor = cursors_[cursor_id];
+  DCHECK(cursor);
+  cursor->SetPrefetchData(keys, primary_keys, values);
+
+  WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  cursor->CachedContinue(callbacks);
+  pending_callbacks_.Remove(response_id);
 }
 
 void IndexedDBDispatcher::OnBlocked(int32 response_id) {
@@ -443,6 +524,8 @@ void IndexedDBDispatcher::OnBlocked(int32 response_id) {
 void IndexedDBDispatcher::OnError(int32 response_id, int code,
                                   const string16& message) {
   WebIDBCallbacks* callbacks = pending_callbacks_.Lookup(response_id);
+  if (!callbacks)
+    return;
   callbacks->onError(WebIDBDatabaseError(code, message));
   pending_callbacks_.Remove(response_id);
 }
@@ -450,6 +533,8 @@ void IndexedDBDispatcher::OnError(int32 response_id, int code,
 void IndexedDBDispatcher::OnAbort(int32 transaction_id) {
   WebIDBTransactionCallbacks* callbacks =
       pending_transaction_callbacks_.Lookup(transaction_id);
+  if (!callbacks)
+    return;
   callbacks->onAbort();
   pending_transaction_callbacks_.Remove(transaction_id);
 }
@@ -457,6 +542,8 @@ void IndexedDBDispatcher::OnAbort(int32 transaction_id) {
 void IndexedDBDispatcher::OnComplete(int32 transaction_id) {
   WebIDBTransactionCallbacks* callbacks =
       pending_transaction_callbacks_.Lookup(transaction_id);
+  if (!callbacks)
+    return;
   callbacks->onComplete();
   pending_transaction_callbacks_.Remove(transaction_id);
 }
@@ -467,6 +554,16 @@ void IndexedDBDispatcher::OnVersionChange(int32 database_id,
       pending_database_callbacks_.Lookup(database_id);
   // callbacks would be NULL if a versionchange event is received after close
   // has been called.
-  if (callbacks)
-    callbacks->onVersionChange(newVersion);
+  if (!callbacks)
+    return;
+  callbacks->onVersionChange(newVersion);
+}
+
+void IndexedDBDispatcher::ResetCursorPrefetchCaches(int32 exception_cursor_id) {
+  typedef std::map<int32, RendererWebIDBCursorImpl*>::iterator Iterator;
+  for (Iterator i = cursors_.begin(); i != cursors_.end(); ++i) {
+    if (i->first == exception_cursor_id)
+      continue;
+    i->second->ResetPrefetchCache();
+  }
 }

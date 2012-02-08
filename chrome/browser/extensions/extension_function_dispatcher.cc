@@ -11,38 +11,34 @@
 #include "base/process_util.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/accessibility/accessibility_extension_api.h"
+#include "chrome/browser/bookmarks/bookmark_extension_api.h"
+#include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
+#include "chrome/browser/download/download_extension_api.h"
+#include "chrome/browser/extensions/api/socket/socket_api.h"
 #include "chrome/browser/extensions/execute_code_in_tab_function.h"
-#include "chrome/browser/extensions/extension_accessibility_api.h"
 #include "chrome/browser/extensions/extension_app_api.h"
-#include "chrome/browser/extensions/extension_bookmark_manager_api.h"
-#include "chrome/browser/extensions/extension_bookmarks_module.h"
 #include "chrome/browser/extensions/extension_browser_actions_api.h"
-#include "chrome/browser/extensions/extension_clear_api.h"
-#include "chrome/browser/extensions/extension_clipboard_api.h"
 #include "chrome/browser/extensions/extension_chrome_auth_private_api.h"
+#include "chrome/browser/extensions/extension_clear_api.h"
 #include "chrome/browser/extensions/extension_content_settings_api.h"
 #include "chrome/browser/extensions/extension_context_menu_api.h"
 #include "chrome/browser/extensions/extension_cookies_api.h"
 #include "chrome/browser/extensions/extension_debugger_api.h"
-#include "chrome/browser/extensions/extension_downloads_api.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "chrome/browser/extensions/extension_history_api.h"
 #include "chrome/browser/extensions/extension_i18n_api.h"
 #include "chrome/browser/extensions/extension_idle_api.h"
-#include "chrome/browser/extensions/extension_infobar_module.h"
 #include "chrome/browser/extensions/extension_management_api.h"
 #include "chrome/browser/extensions/extension_metrics_module.h"
 #include "chrome/browser/extensions/extension_module.h"
 #include "chrome/browser/extensions/extension_omnibox_api.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
+#include "chrome/browser/extensions/extension_page_capture_api.h"
 #include "chrome/browser/extensions/extension_permissions_api.h"
 #include "chrome/browser/extensions/extension_preference_api.h"
 #include "chrome/browser/extensions/extension_processes_api.h"
 #include "chrome/browser/extensions/extension_proxy_api.h"
-#include "chrome/browser/extensions/extension_rlz_module.h"
-#include "chrome/browser/extensions/extension_save_page_api.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_settings_api.h"
 #include "chrome/browser/extensions/extension_sidebar_api.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_test_api.h"
@@ -54,15 +50,21 @@
 #include "chrome/browser/extensions/extension_webrequest_api.h"
 #include "chrome/browser/extensions/extension_webstore_private_api.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
-#include "chrome/browser/extensions/speech_input/extension_speech_input_api.h"
+#include "chrome/browser/extensions/process_map.h"
+#include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
+#include "chrome/browser/history/history_extension_api.h"
+#include "chrome/browser/history/top_sites_extension_api.h"
+#include "chrome/browser/infobars/infobar_extension_api.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_render_message_filter.h"
+#include "chrome/browser/rlz/rlz_extension_api.h"
+#include "chrome/browser/speech/speech_input_extension_api.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
@@ -72,7 +74,7 @@
 #include "chrome/browser/extensions/extension_input_api.h"
 #endif
 
-#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
+#if defined(OS_CHROMEOS) && defined(USE_VIRTUAL_KEYBOARD)
 #include "chrome/browser/extensions/extension_input_ui_api.h"
 #endif
 
@@ -83,6 +85,8 @@
 #include "chrome/browser/extensions/extension_input_method_api.h"
 #include "chrome/browser/extensions/extension_mediaplayer_private_api.h"
 #endif
+
+using extensions::ExtensionAPI;
 
 // FactoryRegistry -------------------------------------------------------------
 
@@ -231,8 +235,6 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<GetProcessIdForTabFunction>();
 
   // Metrics.
-  RegisterFunction<MetricsGetEnabledFunction>();
-  RegisterFunction<MetricsSetEnabledFunction>();
   RegisterFunction<MetricsRecordUserActionFunction>();
   RegisterFunction<MetricsRecordValueFunction>();
   RegisterFunction<MetricsRecordPercentageFunction>();
@@ -326,7 +328,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<UpdateMenuItemsFunction>();
 
   RegisterFunction<InputEventHandled>();
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
   RegisterFunction<CandidateClickedInputUiFunction>();
   RegisterFunction<CursorUpInputUiFunction>();
   RegisterFunction<CursorDownInputUiFunction>();
@@ -358,6 +360,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<SetStoreLoginFunction>();
   RegisterFunction<BeginInstallWithManifestFunction>();
   RegisterFunction<CompleteInstallFunction>();
+  RegisterFunction<SilentlyInstallFunction>();
 
   // WebNavigation.
   RegisterFunction<GetFrameFunction>();
@@ -379,6 +382,8 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<GetChromeosInfoFunction>();
 
   // FileBrowserPrivate functions.
+  // TODO(jamescook): Expose these on non-ChromeOS platforms so we can use
+  // the extension-based file picker on Aura. crbug.com/97424
   RegisterFunction<CancelFileDialogFunction>();
   RegisterFunction<ExecuteTasksFileBrowserFunction>();
   RegisterFunction<FileDialogStringsFunction>();
@@ -406,7 +411,7 @@ void FactoryRegistry::ResetFunctions() {
   // InputMethod
   RegisterFunction<GetInputMethodFunction>();
 
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
   // Input
   RegisterFunction<SendHandwritingStrokeFunction>();
   RegisterFunction<CancelHandwritingStrokesFunction>();
@@ -420,13 +425,13 @@ void FactoryRegistry::ResetFunctions() {
   // Debugger
   RegisterFunction<AttachDebuggerFunction>();
   RegisterFunction<DetachDebuggerFunction>();
-  RegisterFunction<SendRequestDebuggerFunction>();
+  RegisterFunction<SendCommandDebuggerFunction>();
 
   // Settings
-  RegisterFunction<GetSettingsFunction>();
-  RegisterFunction<SetSettingsFunction>();
-  RegisterFunction<RemoveSettingsFunction>();
-  RegisterFunction<ClearSettingsFunction>();
+  RegisterFunction<extensions::GetSettingsFunction>();
+  RegisterFunction<extensions::SetSettingsFunction>();
+  RegisterFunction<extensions::RemoveSettingsFunction>();
+  RegisterFunction<extensions::ClearSettingsFunction>();
 
   // Content settings.
   RegisterFunction<GetResourceIdentifiersFunction>();
@@ -459,13 +464,18 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<DownloadsShowFunction>();
   RegisterFunction<DownloadsDragFunction>();
 
-  // SavePage
-  RegisterFunction<SavePageAsMHTMLFunction>();
+  // PageCapture
+  RegisterFunction<PageCaptureSaveAsMHTMLFunction>();
 
-  // Clipboard
-  RegisterFunction<WriteDataClipboardFunction>();
-  RegisterFunction<ReadDataClipboardFunction>();
-  RegisterFunction<GetAvailableMimeTypesClipboardFunction>();
+  // TopSites
+  RegisterFunction<GetTopSitesFunction>();
+
+  // Sockets
+  RegisterFunction<extensions::SocketCreateFunction>();
+  RegisterFunction<extensions::SocketDestroyFunction>();
+  RegisterFunction<extensions::SocketConnectFunction>();
+  RegisterFunction<extensions::SocketCloseFunction>();
+  RegisterFunction<extensions::SocketWriteFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -514,25 +524,19 @@ void ExtensionFunctionDispatcher::ResetFunctions() {
 
 // static
 void ExtensionFunctionDispatcher::DispatchOnIOThread(
-    const ExtensionInfoMap* extension_info_map,
+    ExtensionInfoMap* extension_info_map,
     void* profile,
     int render_process_id,
     base::WeakPtr<ChromeRenderMessageFilter> ipc_sender,
     int routing_id,
     const ExtensionHostMsg_Request_Params& params) {
   const Extension* extension =
-      extension_info_map->extensions().GetByURL(params.source_url);
+      extension_info_map->extensions().GetByID(params.extension_id);
 
-  if (!extension_info_map->AreBindingsEnabledForProcess(render_process_id)) {
-    // TODO(aa): Allow content scripts access to low-threat extension APIs.
-    // See: crbug.com/80308.
-    LOG(ERROR) << "Extension API called from non-extension process.";
-    SendAccessDenied(ipc_sender, routing_id, params.request_id);
-    return;
-  }
-
-  scoped_refptr<ExtensionFunction> function(CreateExtensionFunction(
-      params, extension, profile, ipc_sender, routing_id));
+  scoped_refptr<ExtensionFunction> function(
+      CreateExtensionFunction(params, extension, render_process_id,
+                              extension_info_map->process_map(), profile,
+                              ipc_sender, routing_id));
   if (!function)
     return;
 
@@ -546,7 +550,14 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
   function_io->set_extension_info_map(extension_info_map);
   function->set_include_incognito(
       extension_info_map->IsIncognitoEnabled(extension->id()));
-  function->Run();
+
+  ExtensionsQuotaService* quota = extension_info_map->quota_service();
+  if (quota->Assess(extension->id(), function, &params.arguments,
+                    base::TimeTicks::Now())) {
+    function->Run();
+  } else {
+    function->OnQuotaExceeded();
+  }
 }
 
 ExtensionFunctionDispatcher::ExtensionFunctionDispatcher(Profile* profile,
@@ -572,7 +583,7 @@ Browser* ExtensionFunctionDispatcher::GetCurrentBrowser(
   // we will search the incognito version only, regardless of the value of
   // |include_incognito|.
   Profile* profile = Profile::FromBrowserContext(
-      render_view_host->process()->browser_context());
+      render_view_host->process()->GetBrowserContext());
   browser = BrowserList::FindTabbedBrowser(profile, include_incognito);
 
   // NOTE(rafaelw): This can return NULL in some circumstances. In particular,
@@ -588,36 +599,20 @@ void ExtensionFunctionDispatcher::Dispatch(
     const ExtensionHostMsg_Request_Params& params,
     RenderViewHost* render_view_host) {
   ExtensionService* service = profile()->GetExtensionService();
-  ExtensionProcessManager* extension_process_manager =
-      profile()->GetExtensionProcessManager();
-  if (!service || !extension_process_manager)
+  extensions::ProcessMap* process_map = service->process_map();
+  if (!service || !process_map)
     return;
 
-  if (!service->ExtensionBindingsAllowed(params.source_url)) {
-    LOG(ERROR) << "Extension bindings not allowed for URL: "
-               << params.source_url.spec();
-    SendAccessDenied(render_view_host, render_view_host->routing_id(),
-                     params.request_id);
-    return;
-  }
-  if (!extension_process_manager->AreBindingsEnabledForProcess(
-      render_view_host->process()->id())) {
-    // TODO(aa): Allow content scripts access to low-threat extension APIs.
-    // See: crbug.com/80308.
-    LOG(ERROR) << "Extension API called from non-extension process.";
-    SendAccessDenied(render_view_host, render_view_host->routing_id(),
-                     params.request_id);
-    return;
-  }
-
-  // TODO(aa): When we allow content scripts to call extension APIs, we will
-  // have to pass the extension ID explicitly here, not use the source URL.
-  const Extension* extension = service->GetExtensionByURL(params.source_url);
+  const Extension* extension = service->GetExtensionById(
+      params.extension_id, false);
   if (!extension)
     extension = service->GetExtensionByWebExtent(params.source_url);
 
   scoped_refptr<ExtensionFunction> function(
-      CreateExtensionFunction(params, extension, profile(), render_view_host,
+      CreateExtensionFunction(params, extension,
+                              render_view_host->process()->GetID(),
+                              *(service->process_map()),
+                              profile(), render_view_host,
                               render_view_host->routing_id()));
   if (!function)
     return;
@@ -641,9 +636,7 @@ void ExtensionFunctionDispatcher::Dispatch(
 
     function->Run();
   } else {
-    render_view_host->Send(new ExtensionMsg_Response(
-        render_view_host->routing_id(), function->request_id(), false,
-        std::string(), QuotaLimitHeuristic::kGenericOverQuotaError));
+    function->OnQuotaExceeded();
   }
 }
 
@@ -651,12 +644,22 @@ void ExtensionFunctionDispatcher::Dispatch(
 ExtensionFunction* ExtensionFunctionDispatcher::CreateExtensionFunction(
     const ExtensionHostMsg_Request_Params& params,
     const Extension* extension,
+    int requesting_process_id,
+    const extensions::ProcessMap& process_map,
     void* profile,
     IPC::Message::Sender* ipc_sender,
     int routing_id) {
   if (!extension) {
-    LOG(ERROR) << "Extension does not exist for URL: "
-               << params.source_url.spec();
+    LOG(ERROR) << "Specified extension does not exist.";
+    SendAccessDenied(ipc_sender, routing_id, params.request_id);
+    return NULL;
+  }
+
+  if (ExtensionAPI::GetInstance()->IsPrivileged(params.name) &&
+      !process_map.Contains(extension->id(), requesting_process_id)) {
+    LOG(ERROR) << "Extension API called from incorrect process "
+               << requesting_process_id
+               << " from URL " << params.source_url.spec();
     SendAccessDenied(ipc_sender, routing_id, params.request_id);
     return NULL;
   }

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H
-#define REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H
+#ifndef REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H_
+#define REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H_
 
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
@@ -15,7 +15,6 @@ class MessageLoop;
 namespace remoting {
 
 class FrameConsumer;
-class VideoPacketFormat;
 class VideoPacket;
 
 namespace protocol {
@@ -38,10 +37,7 @@ class RectangleUpdateDecoder :
   // regsitered as data is avaialable. DecodePacket may keep a reference to
   // |packet| so the |packet| must remain alive and valid until |done| is
   // executed.
-  //
-  // TODO(ajwong): Should packet be a const pointer to make the lifetime
-  // more clear?
-  void DecodePacket(const VideoPacket* packet, Task* done);
+  void DecodePacket(const VideoPacket* packet, const base::Closure& done);
 
   // Set the scale ratio for the decoded video frame. Scale ratio greater
   // than 1.0 is not supported.
@@ -64,8 +60,8 @@ class RectangleUpdateDecoder :
 
   ~RectangleUpdateDecoder();
 
-  void AllocateFrame(const VideoPacket* packet, Task* done);
-  void ProcessPacketData(const VideoPacket* packet, Task* done);
+  void AllocateFrame(const VideoPacket* packet, const base::Closure& done);
+  void ProcessPacketData(const VideoPacket* packet, const base::Closure& done);
   void RefreshRects(const RectVector& rects);
 
   // Obtain updated rectangles from decoder and submit it to the consumer.
@@ -75,9 +71,8 @@ class RectangleUpdateDecoder :
   // When done the affected rectangles are submitted to the consumer.
   void DoRefresh();
 
-  // Called by PartialFrameCleanup when consumer has finished using our
-  // internal frame.
-  void OnFrameConsumed();
+  // Callback for FrameConsumer::OnPartialFrameOutput()
+  void OnFrameConsumed(RectVector* rects);
 
   // Pointers to infrastructure objects.  Not owned.
   MessageLoop* message_loop_;
@@ -99,6 +94,4 @@ class RectangleUpdateDecoder :
 
 }  // namespace remoting
 
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::RectangleUpdateDecoder);
-
-#endif  // REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H
+#endif  // REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H_

@@ -6,12 +6,13 @@
 #include <vector>
 
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "chrome/browser/ui/intents/web_intent_picker.h"
+#include "chrome/browser/ui/intents/web_intent_picker_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/views/bubble/bubble.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/browser/ui/views/window.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -21,10 +22,11 @@
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/image/image.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/layout/box_layout.h"
+#include "ui/views/bubble/bubble_delegate.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/box_layout.h"
 
 namespace {
 
@@ -36,14 +38,6 @@ const int kContentAreaBorder = 12;
 
 // The space in pixels between controls in a group.
 const int kControlSpacing = 6;
-
-// The horizontal offset of the browser favicon. Used to position the arrow of
-// the bubble.
-const int kIconHorizontalOffset = 27;
-
-// The vertical offset of the browser favicon. Used to position the arrow of the
-// bubble.
-const int kIconVerticalOffset = -7;
 
 // The size, relative to default, of the Chrome Web store label.
 const int kWebStoreLabelFontDelta = -2;
@@ -87,12 +81,11 @@ void SetButtonImages(views::ImageButton* button,
 }  // namespace
 
 // Views implementation of WebIntentPicker.
-class WebIntentPickerView : public views::View,
+class WebIntentPickerView : public views::BubbleDelegateView,
                             public views::ButtonListener,
-                            public WebIntentPicker,
-                            public BubbleDelegate {
+                            public WebIntentPicker {
  public:
-  WebIntentPickerView(Browser* browser,
+  WebIntentPickerView(views::View* anchor_view,
                       TabContentsWrapper* tab_contents,
                       WebIntentPickerDelegate* delegate);
   virtual ~WebIntentPickerView();
@@ -101,27 +94,24 @@ class WebIntentPickerView : public views::View,
   virtual void ButtonPressed(views::Button* sender,
                              const views::Event& event) OVERRIDE;
 
-  // BubbleDelegate implementation.
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
-  virtual bool CloseOnEscape() OVERRIDE;
-  virtual bool FadeInOnShow() OVERRIDE;
+  // views::WidgetDelegate implementation.
+  virtual void WindowClosing() OVERRIDE;
 
   // WebIntentPicker implementation.
   virtual void SetServiceURLs(const std::vector<GURL>& urls) OVERRIDE;
   virtual void SetServiceIcon(size_t index, const SkBitmap& icon) OVERRIDE;
   virtual void SetDefaultServiceIcon(size_t index) OVERRIDE;
   virtual void Close() OVERRIDE;
+  virtual TabContents* SetInlineDisposition(const GURL& url) OVERRIDE;
+
+ protected:
+  // views::BubbleDelegateView overrides:
+  void Init() OVERRIDE;
 
  private:
-  // Create and initialize all of the views displayed in the bubble.
-  void InitContents();
-
   // A weak pointer to the WebIntentPickerDelegate to notify when the user
   // chooses a service or cancels.
   WebIntentPickerDelegate* delegate_;
-
-  // A weak pointer to the bubble view.
-  Bubble* bubble_;
 
   // A weak pointer to the hbox that contains the buttons used to choose the
   // service.
@@ -141,34 +131,24 @@ class WebIntentPickerView : public views::View,
 WebIntentPicker* WebIntentPicker::Create(Browser* browser,
                                          TabContentsWrapper* wrapper,
                                          WebIntentPickerDelegate* delegate) {
-  return new WebIntentPickerView(browser, wrapper, delegate);
-}
-
-WebIntentPickerView::WebIntentPickerView(Browser* browser,
-                                         TabContentsWrapper* wrapper,
-                                         WebIntentPickerDelegate* delegate)
-    : delegate_(delegate),
-      button_hbox_(NULL) {
-  InitContents();
-
   // Find where to point the bubble at.
   BrowserView* browser_view =
       BrowserView::GetBrowserViewForBrowser(browser);
-  gfx::Point point;
-  if (base::i18n::IsRTL()) {
-    int width = browser_view->toolbar()->location_bar()->width();
-    point = gfx::Point(width - kIconHorizontalOffset, 0);
-  }
-  point.Offset(0, kIconVerticalOffset);
-  views::View::ConvertPointToScreen(browser_view->toolbar()->location_bar(),
-                                    &point);
-  gfx::Rect bounds = browser_view->toolbar()->location_bar()->bounds();
-  bounds.set_origin(point);
-  bounds.set_width(kIconHorizontalOffset);
-
-  bubble_ = Bubble::Show(browser_view->GetWidget(), bounds,
-                         views::BubbleBorder::TOP_LEFT, this, this);
+  views::View* anchor_view =
+      browser_view->toolbar()->location_bar()->location_icon_view();
+  WebIntentPickerView* bubble_delegate =
+      new WebIntentPickerView(anchor_view, wrapper, delegate);
+  browser::CreateViewsBubble(bubble_delegate);
+  bubble_delegate->Show();
+  return bubble_delegate;
 }
+
+WebIntentPickerView::WebIntentPickerView(views::View* anchor_view,
+                                         TabContentsWrapper* wrapper,
+                                         WebIntentPickerDelegate* delegate)
+    : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
+      delegate_(delegate),
+      button_hbox_(NULL) {}
 
 WebIntentPickerView::~WebIntentPickerView() {
 }
@@ -188,16 +168,8 @@ void WebIntentPickerView::ButtonPressed(views::Button* sender,
   delegate_->OnServiceChosen(index);
 }
 
-void WebIntentPickerView::BubbleClosing(Bubble* bubble, bool closed_by_escape) {
+void WebIntentPickerView::WindowClosing() {
   delegate_->OnCancelled();
-}
-
-bool WebIntentPickerView::CloseOnEscape() {
-  return true;
-}
-
-bool WebIntentPickerView::FadeInOnShow() {
-  return false;
 }
 
 void WebIntentPickerView::SetServiceURLs(const std::vector<GURL>& urls) {
@@ -225,7 +197,7 @@ void WebIntentPickerView::SetServiceIcon(size_t index, const SkBitmap& icon) {
       IDR_BROWSER_ACTION, IDR_BROWSER_ACTION_H, IDR_BROWSER_ACTION_P);
 
   Layout();
-  bubble_->SizeToContents();
+  SizeToContents();
 }
 
 void WebIntentPickerView::SetDefaultServiceIcon(size_t index) {
@@ -234,10 +206,15 @@ void WebIntentPickerView::SetDefaultServiceIcon(size_t index) {
 }
 
 void WebIntentPickerView::Close() {
-  bubble_->Close();
+  GetWidget()->Close();
 }
 
-void WebIntentPickerView::InitContents() {
+TabContents* WebIntentPickerView::SetInlineDisposition(const GURL& url) {
+  // TODO(gbillock): add support here.
+  return NULL;
+}
+
+void WebIntentPickerView::Init() {
   SetLayoutManager(new views::BoxLayout(
       views::BoxLayout::kHorizontal,
       kContentAreaBorder,  // inside border horizontal spacing

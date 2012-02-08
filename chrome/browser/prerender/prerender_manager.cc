@@ -9,10 +9,12 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/time.h"
-#include "base/values.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/history/top_sites.h"
@@ -22,8 +24,8 @@
 #include "chrome/browser/prerender/prerender_final_status.h"
 #include "chrome/browser/prerender/prerender_histograms.h"
 #include "chrome/browser/prerender/prerender_history.h"
-#include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
+#include "chrome/browser/prerender/prerender_tab_helper.h"
 #include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -32,18 +34,21 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/cancelable_request.h"
-#include "content/browser/debugger/render_view_devtools_agent_host.h"
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/in_process_webkit/session_storage_namespace.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/render_view_host_manager.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/devtools_agent_host_registry.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/browser/render_process_host.h"
+
+using content::BrowserThread;
 
 namespace prerender {
 
@@ -74,20 +79,49 @@ const char* const kValidHttpMethods[] = {
 // Length of prerender history, for display in chrome://net-internals
 const int kHistoryLength = 100;
 
+// Indicates whether a Prerender has been cancelled such that we need
+// a dummy replacement for the purpose of recording the correct PPLT for
+// the Match Complete case.
+
+bool NeedMatchCompleteDummyForFinalStatus(FinalStatus final_status) {
+  return final_status != FINAL_STATUS_USED &&
+      final_status != FINAL_STATUS_TIMED_OUT &&
+      final_status != FINAL_STATUS_EVICTED &&
+      final_status != FINAL_STATUS_MANAGER_SHUTDOWN &&
+      final_status != FINAL_STATUS_APP_TERMINATING &&
+      final_status != FINAL_STATUS_RENDERER_CRASHED &&
+      final_status != FINAL_STATUS_WINDOW_OPENER &&
+      final_status != FINAL_STATUS_FRAGMENT_MISMATCH &&
+      final_status != FINAL_STATUS_CACHE_OR_HISTORY_CLEARED &&
+      final_status != FINAL_STATUS_CANCELLED &&
+      final_status != FINAL_STATUS_MATCH_COMPLETE_DUMMY;
+}
+
 }  // namespace
 
-class PrerenderManager::OnCloseTabContentsDeleter : public TabContentsDelegate {
+class PrerenderManager::OnCloseTabContentsDeleter
+    : public TabContentsDelegate,
+      public base::SupportsWeakPtr<
+          PrerenderManager::OnCloseTabContentsDeleter> {
  public:
   OnCloseTabContentsDeleter(PrerenderManager* manager,
                             TabContentsWrapper* tab)
       : manager_(manager),
         tab_(tab) {
     tab_->tab_contents()->set_delegate(this);
+    MessageLoop::current()->PostDelayedTask(FROM_HERE,
+        base::Bind(&OnCloseTabContentsDeleter::ScheduleTabContentsForDeletion,
+                   this->AsWeakPtr(), true), kDeleteWithExtremePrejudiceTimeMs);
   }
 
   virtual void CloseContents(TabContents* source) OVERRIDE {
-    tab_->tab_contents()->set_delegate(NULL);
-    manager_->ScheduleDeleteOldTabContents(tab_.release(), this);
+    DCHECK_EQ(tab_->tab_contents(), source);
+    ScheduleTabContentsForDeletion(false);
+  }
+
+  virtual void SwappedOut(TabContents* source) OVERRIDE {
+    DCHECK_EQ(tab_->tab_contents(), source);
+    ScheduleTabContentsForDeletion(false);
   }
 
   virtual bool ShouldSuppressDialogs() OVERRIDE {
@@ -95,6 +129,14 @@ class PrerenderManager::OnCloseTabContentsDeleter : public TabContentsDelegate {
   }
 
  private:
+  static const int kDeleteWithExtremePrejudiceTimeMs = 3000;
+
+  void ScheduleTabContentsForDeletion(bool timeout) {
+    tab_->tab_contents()->set_delegate(NULL);
+    manager_->ScheduleDeleteOldTabContents(tab_.release(), this);
+    UMA_HISTOGRAM_BOOLEAN("Prerender.TabContentsDeleterTimeout", timeout);
+  }
+
   PrerenderManager* manager_;
   scoped_ptr<TabContentsWrapper> tab_;
 
@@ -122,12 +164,23 @@ void PrerenderManager::SetMode(PrerenderManagerMode mode) {
 bool PrerenderManager::IsPrerenderingPossible() {
   return GetMode() == PRERENDER_MODE_ENABLED ||
          GetMode() == PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP ||
-         GetMode() == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP;
+         GetMode() == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP ||
+         GetMode() == PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP;
+}
+
+// static
+bool PrerenderManager::ActuallyPrerendering() {
+  return IsPrerenderingPossible() && !IsControlGroup();
 }
 
 // static
 bool PrerenderManager::IsControlGroup() {
   return GetMode() == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP;
+}
+
+// static
+bool PrerenderManager::IsNoUseGroup() {
+  return GetMode() == PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP;
 }
 
 // static
@@ -162,14 +215,15 @@ struct PrerenderManager::NavigationRecord {
   }
 };
 
-class PrerenderManager::MostVisitedSites : public NotificationObserver {
+class PrerenderManager::MostVisitedSites
+    : public content::NotificationObserver {
  public:
   explicit MostVisitedSites(Profile* profile) :
       profile_(profile) {
     history::TopSites* top_sites = GetTopSites();
     if (top_sites) {
       registrar_.Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
-                     Source<history::TopSites>(top_sites));
+                     content::Source<history::TopSites>(top_sites));
     }
 
     UpdateMostVisited();
@@ -192,8 +246,8 @@ class PrerenderManager::MostVisitedSites : public NotificationObserver {
   }
 
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) {
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     DCHECK_EQ(type, chrome::NOTIFICATION_TOP_SITES_CHANGED);
     UpdateMostVisited();
   }
@@ -211,7 +265,7 @@ class PrerenderManager::MostVisitedSites : public NotificationObserver {
 
   CancelableRequestConsumer topsites_consumer_;
   Profile* profile_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   std::set<GURL> urls_;
 };
 
@@ -263,50 +317,55 @@ void PrerenderManager::SetPrerenderContentsFactory(
   prerender_contents_factory_.reset(prerender_contents_factory);
 }
 
-bool PrerenderManager::AddPrerenderFromLinkRelPrerender(int process_id,
-                                                        int route_id,
-                                                        const GURL& url,
-                                                        const GURL& referrer) {
+bool PrerenderManager::AddPrerenderFromLinkRelPrerender(
+    int process_id,
+    int route_id,
+    const GURL& url,
+    const content::Referrer& referrer) {
   std::pair<int, int> child_route_id_pair = std::make_pair(process_id,
                                                            route_id);
 
   return AddPrerender(ORIGIN_LINK_REL_PRERENDER, child_route_id_pair,
-                      url, referrer);
+                      url, referrer, NULL);
 }
 
-bool PrerenderManager::AddPrerenderFromOmnibox(const GURL& url) {
+bool PrerenderManager::AddPrerenderFromOmnibox(
+    const GURL& url,
+    SessionStorageNamespace* session_storage_namespace) {
+  DCHECK(session_storage_namespace);
   if (!IsOmniboxEnabled(profile_))
     return false;
 
   Origin origin = ORIGIN_MAX;
   switch (GetOmniboxHeuristicToUse()) {
-    case OMNIBOX_HEURISTIC_ORIGINAL:
-      origin = ORIGIN_OMNIBOX_ORIGINAL;
+    case OMNIBOX_HEURISTIC_EXACT:
+      origin = ORIGIN_OMNIBOX_EXACT;
       break;
 
-    case OMNIBOX_HEURISTIC_CONSERVATIVE:
-      origin = ORIGIN_OMNIBOX_CONSERVATIVE;
+    case OMNIBOX_HEURISTIC_EXACT_FULL:
+      origin = ORIGIN_OMNIBOX_EXACT_FULL;
       break;
 
     default:
       NOTREACHED();
       break;
   };
-
-  return AddPrerender(origin, std::make_pair(-1, -1), url, GURL());
+  return AddPrerender(origin, std::make_pair(-1, -1), url, content::Referrer(),
+                      session_storage_namespace);
 }
 
 bool PrerenderManager::AddPrerender(
     Origin origin,
     const std::pair<int, int>& child_route_id_pair,
     const GURL& url_arg,
-    const GURL& referrer) {
+    const content::Referrer& referrer,
+    SessionStorageNamespace* session_storage_namespace) {
   DCHECK(CalledOnValidThread());
 
-  if (origin == ORIGIN_LINK_REL_PRERENDER && IsGoogleSearchResultURL(referrer))
+  if (origin == ORIGIN_LINK_REL_PRERENDER &&
+      IsGoogleSearchResultURL(referrer.url)) {
     origin = ORIGIN_GWS_PRERENDER;
-
-  histograms_->RecordPrerender(origin, url_arg);
+  }
 
   // If the referring page is prerendering, defer the prerender.
   std::list<PrerenderContentsData>::iterator source_prerender =
@@ -322,14 +381,19 @@ bool PrerenderManager::AddPrerender(
 
   GURL url = url_arg;
   GURL alias_url;
-  if (IsControlGroup() && MaybeGetQueryStringBasedAliasURL(url, &alias_url)) {
+  if (IsControlGroup() && MaybeGetQueryStringBasedAliasURL(url, &alias_url))
     url = alias_url;
-  }
 
-  if (FindEntry(url))
-    return false;
+  // From here on, we will record a FinalStatus so we need to register with the
+  // histogram tracking.
+  histograms_->RecordPrerender(origin, url_arg);
 
   uint8 experiment = GetQueryStringBasedExperiment(url_arg);
+
+  if (FindEntry(url)) {
+    RecordFinalStatus(origin, experiment, FINAL_STATUS_DUPLICATE);
+    return false;
+  }
 
   // Do not prerender if there are too many render processes, and we would
   // have to use an existing one.  We do not want prerendering to happen in
@@ -339,8 +403,8 @@ bool PrerenderManager::AddPrerender(
   // true, so that case needs to be explicitly checked for.
   // TODO(tburkard): Figure out how to cancel prerendering in the opposite
   // case, when a new tab is added to a process used for prerendering.
-  if (RenderProcessHost::ShouldTryToUseExistingProcessHost() &&
-      !RenderProcessHost::run_renderer_in_process()) {
+  if (content::RenderProcessHost::ShouldTryToUseExistingProcessHost() &&
+      !content::RenderProcessHost::run_renderer_in_process()) {
     RecordFinalStatus(origin, experiment, FINAL_STATUS_TOO_MANY_PROCESSES);
     return false;
   }
@@ -355,7 +419,6 @@ bool PrerenderManager::AddPrerender(
   }
 
   RenderViewHost* source_render_view_host = NULL;
-  // This test should fail only during unit tests.
   if (child_route_id_pair.first != -1) {
     source_render_view_host =
         RenderViewHost::FromID(child_route_id_pair.first,
@@ -369,10 +432,17 @@ bool PrerenderManager::AddPrerender(
     }
   }
 
-  PrerenderContents* prerender_contents =
-      CreatePrerenderContents(url, referrer, origin, experiment);
+  if (!session_storage_namespace && source_render_view_host) {
+    session_storage_namespace =
+        source_render_view_host->session_storage_namespace();
+  }
+
+  PrerenderContents* prerender_contents = CreatePrerenderContents(
+      url, referrer, origin, experiment);
   if (!prerender_contents || !prerender_contents->Init())
     return false;
+
+  histograms_->RecordPrerenderStarted(origin);
 
   // TODO(cbentzel): Move invalid checks here instead of PrerenderContents?
   PrerenderContentsData data(prerender_contents, GetCurrentTime());
@@ -383,7 +453,8 @@ bool PrerenderManager::AddPrerender(
     data.contents_->set_final_status(FINAL_STATUS_CONTROL_GROUP);
   } else {
     last_prerender_start_time_ = GetCurrentTimeTicks();
-    data.contents_->StartPrerendering(source_render_view_host);
+    data.contents_->StartPrerendering(source_render_view_host,
+                                      session_storage_namespace);
   }
   while (prerender_list_.size() > config_.max_elements) {
     data = prerender_list_.front();
@@ -521,7 +592,7 @@ bool PrerenderManager::MaybeUsePrerenderedPage(TabContents* tab_contents,
 
   // Don't use prerendered pages if debugger is attached to the tab.
   // See http://crbug.com/98541
-  if (RenderViewDevToolsAgentHost::IsDebuggerAttached(tab_contents)) {
+  if (content::DevToolsAgentHostRegistry::IsDebuggerAttached(tab_contents)) {
     prerender_contents.release()->Destroy(FINAL_STATUS_DEVTOOLS_ATTACHED);
     return false;
   }
@@ -531,6 +602,28 @@ bool PrerenderManager::MaybeUsePrerenderedPage(TabContents* tab_contents,
   if (prerender_contents->IsCrossSiteNavigationPending()) {
     prerender_contents.release()->Destroy(
         FINAL_STATUS_CROSS_SITE_NAVIGATION_PENDING);
+    return false;
+  }
+
+  // If the session storage namespaces don't match, cancel the prerender.
+  RenderViewHost* old_render_view_host = tab_contents->render_view_host();
+  RenderViewHost* new_render_view_host =
+      prerender_contents->prerender_contents()->render_view_host();
+  DCHECK(old_render_view_host);
+  DCHECK(new_render_view_host);
+  if (old_render_view_host->session_storage_namespace() !=
+      new_render_view_host->session_storage_namespace()) {
+    prerender_contents.release()->Destroy(
+        FINAL_STATUS_SESSION_STORAGE_NAMESPACE_MISMATCH);
+    return false;
+  }
+
+  // If we don't want to use prerenders at all, we are done.
+  // For bookkeeping purposes, we need to mark this TabContents to
+  // reflect that it would have been prerendered.
+  if (GetMode() == PRERENDER_MODE_EXPERIMENT_NO_USE_GROUP) {
+    MarkTabContentsAsWouldBePrerendered(tab_contents);
+    prerender_contents.release()->Destroy(FINAL_STATUS_NO_USE_GROUP);
     return false;
   }
 
@@ -551,13 +644,11 @@ bool PrerenderManager::MaybeUsePrerenderedPage(TabContents* tab_contents,
   }
 
   histograms_->RecordPerSessionCount(++prerenders_per_session_count_);
+  histograms_->RecordUsedPrerender(prerender_contents->origin());
   prerender_contents->set_final_status(FINAL_STATUS_USED);
 
-  RenderViewHost* render_view_host =
-      prerender_contents->prerender_contents()->render_view_host();
-  DCHECK(render_view_host);
-  render_view_host->Send(
-      new ChromeViewMsg_SetIsPrerendering(render_view_host->routing_id(),
+  new_render_view_host->Send(
+      new ChromeViewMsg_SetIsPrerendering(new_render_view_host->routing_id(),
                                           false));
 
   TabContentsWrapper* new_tab_contents =
@@ -613,14 +704,48 @@ bool PrerenderManager::MaybeUsePrerenderedPage(TabContents* tab_contents,
   return true;
 }
 
-void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry) {
+void PrerenderManager::MoveEntryToPendingDelete(PrerenderContents* entry,
+                                                FinalStatus final_status) {
   DCHECK(CalledOnValidThread());
+  DCHECK(entry);
   DCHECK(!IsPendingDelete(entry));
+
   for (std::list<PrerenderContentsData>::iterator it = prerender_list_.begin();
        it != prerender_list_.end();
        ++it) {
     if (it->contents_ == entry) {
-      prerender_list_.erase(it);
+      bool swapped_in_dummy_replacement = false;
+
+      // If this PrerenderContents is being deleted due to a cancellation,
+      // we need to create a dummy replacement for PPLT accounting purposes
+      // for the Match Complete group.
+      // This is the case if the cancellation is for any reason that would not
+      // occur in the control group case.
+      if (NeedMatchCompleteDummyForFinalStatus(final_status)) {
+        // TODO(tburkard): I'd like to DCHECK that we are actually prerendering.
+        // However, what if new conditions are added and
+        // NeedMatchCompleteDummyForFinalStatus, is not being updated.  Not sure
+        // what's the best thing to do here.  For now, I will just check whether
+        // we are actually prerendering.
+        if (ActuallyPrerendering()) {
+          PrerenderContents* dummy_replacement_prerender_contents =
+              CreatePrerenderContents(
+                  entry->prerender_url(),
+                  entry->referrer(),
+                  entry->origin(),
+                  entry->experiment_id());
+          if (dummy_replacement_prerender_contents &&
+              dummy_replacement_prerender_contents->Init()) {
+            dummy_replacement_prerender_contents->
+                AddAliasURLsFromOtherPrerenderContents(entry);
+            it->contents_ = dummy_replacement_prerender_contents;
+            it->contents_->set_final_status(FINAL_STATUS_MATCH_COMPLETE_DUMMY);
+            swapped_in_dummy_replacement = true;
+          }
+        }
+      }
+      if (!swapped_in_dummy_replacement)
+        prerender_list_.erase(it);
       break;
     }
   }
@@ -648,12 +773,13 @@ bool PrerenderManager::IsPrerenderElementFresh(const base::Time start) const {
 
 PrerenderContents* PrerenderManager::CreatePrerenderContents(
     const GURL& url,
-    const GURL& referrer,
+    const content::Referrer& referrer,
     Origin origin,
     uint8 experiment_id) {
   DCHECK(CalledOnValidThread());
   return prerender_contents_factory_->CreatePrerenderContents(
-      this, prerender_tracker_, profile_, url, referrer, origin, experiment_id);
+      this, prerender_tracker_, profile_, url,
+      referrer, origin, experiment_id);
 }
 
 bool PrerenderManager::IsPendingDelete(PrerenderContents* entry) const {
@@ -691,12 +817,11 @@ void PrerenderManager::RecordPerceivedPageLoadTime(
   if (!prerender_manager->is_enabled())
     return;
   bool was_prerender =
-      ((mode_ == PRERENDER_MODE_EXPERIMENT_CONTROL_GROUP &&
-        prerender_manager->WouldTabContentsBePrerendered(tab_contents)) ||
-       (mode_ == PRERENDER_MODE_EXPERIMENT_PRERENDER_GROUP &&
-        prerender_manager->IsTabContentsPrerendered(tab_contents)));
+      prerender_manager->IsTabContentsPrerendered(tab_contents);
+  bool was_complete_prerender = was_prerender ||
+      prerender_manager->WouldTabContentsBePrerendered(tab_contents);
   prerender_manager->histograms_->RecordPerceivedPageLoadTime(
-      perceived_page_load_time, was_prerender, url);
+      perceived_page_load_time, was_prerender, was_complete_prerender, url);
 }
 
 bool PrerenderManager::is_enabled() const {
@@ -934,13 +1059,23 @@ DictionaryValue* PrerenderManager::GetAsValue() const {
   dict_value->SetBoolean("enabled", enabled_);
   dict_value->SetBoolean("omnibox_enabled", IsOmniboxEnabled(profile_));
   if (IsOmniboxEnabled(profile_)) {
-    dict_value->SetString("omnibox_heuristic",
-        GetOmniboxHeuristicToUse() == OMNIBOX_HEURISTIC_ORIGINAL ?
-            "(original)" : "(conservative)");
+    switch (GetOmniboxHeuristicToUse()) {
+      case OMNIBOX_HEURISTIC_EXACT:
+        dict_value->SetString("omnibox_heuristic", "(exact)");
+        break;
+      case OMNIBOX_HEURISTIC_EXACT_FULL:
+        dict_value->SetString("omnibox_heuristic", "(exact full)");
+        break;
+      default:
+        NOTREACHED();
+        break;
+    }
   }
   // If prerender is disabled via a flag this method is not even called.
   if (IsControlGroup())
     dict_value->SetString("disabled_reason", "(Disabled for testing)");
+  if (IsNoUseGroup())
+    dict_value->SetString("disabled_reason", "(Not using prerendered pages)");
   return dict_value;
 }
 
@@ -1002,15 +1137,15 @@ void PrerenderManager::RecordFinalStatus(Origin origin,
 PrerenderManager* FindPrerenderManagerUsingRenderProcessId(
     int render_process_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  RenderProcessHost* render_process_host =
-      RenderProcessHost::FromID(render_process_id);
+  content::RenderProcessHost* render_process_host =
+      content::RenderProcessHost::FromID(render_process_id);
   // Each render process is guaranteed to only hold RenderViews owned by the
   // same BrowserContext. This is enforced by
   // RenderProcessHost::GetExistingProcessHost.
-  if (!render_process_host || !render_process_host->browser_context())
+  if (!render_process_host || !render_process_host->GetBrowserContext())
     return NULL;
   Profile* profile = Profile::FromBrowserContext(
-      render_process_host->browser_context());
+      render_process_host->GetBrowserContext());
   if (!profile)
     return NULL;
   return PrerenderManagerFactory::GetInstance()->GetForProfile(profile);

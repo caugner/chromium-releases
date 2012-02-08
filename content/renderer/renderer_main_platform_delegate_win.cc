@@ -9,7 +9,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/common/injection_test_dll.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/renderer/render_thread.h"
 #include "sandbox/src/sandbox.h"
+#include "skia/ext/skia_sandbox_support_win.h"
 #include "unicode/timezone.h"
 
 namespace {
@@ -59,10 +61,18 @@ void EnableThemeSupportForRenderer(bool no_sandbox) {
   }
 }
 
+// Windows-only skia sandbox support
+void SkiaPreCacheFont(LOGFONT logfont) {
+  content::RenderThread* render_thread = content::RenderThread::Get();
+  if (render_thread) {
+    render_thread->PreCacheFont(logfont);
+  }
+}
+
 }  // namespace
 
 RendererMainPlatformDelegate::RendererMainPlatformDelegate(
-    const MainFunctionParams& parameters)
+    const content::MainFunctionParams& parameters)
         : parameters_(parameters),
           sandbox_test_module_(NULL) {
 }
@@ -73,7 +83,7 @@ RendererMainPlatformDelegate::~RendererMainPlatformDelegate() {
 void RendererMainPlatformDelegate::PlatformInitialize() {
   // Be mindful of what resources you acquire here. They can be used by
   // malicious code if the renderer gets compromised.
-  const CommandLine& command_line = parameters_.command_line_;
+  const CommandLine& command_line = parameters_.command_line;
   bool no_sandbox = command_line.HasSwitch(switches::kNoSandbox);
   EnableThemeSupportForRenderer(no_sandbox);
 
@@ -85,6 +95,7 @@ void RendererMainPlatformDelegate::PlatformInitialize() {
     // cached and there's no more need to access the registry. If the sandbox
     // is disabled, we don't have to make this dummy call.
     scoped_ptr<icu::TimeZone> zone(icu::TimeZone::createDefault());
+    SetSkiaEnsureTypefaceAccessible(SkiaPreCacheFont);
   }
 }
 
@@ -92,12 +103,12 @@ void RendererMainPlatformDelegate::PlatformUninitialize() {
 }
 
 bool RendererMainPlatformDelegate::InitSandboxTests(bool no_sandbox) {
-  const CommandLine& command_line = parameters_.command_line_;
+  const CommandLine& command_line = parameters_.command_line;
 
   DVLOG(1) << "Started renderer with " << command_line.GetCommandLineString();
 
   sandbox::TargetServices* target_services =
-      parameters_.sandbox_info_.TargetServices();
+      parameters_.sandbox_info->target_services;
 
   if (target_services && !no_sandbox) {
       std::wstring test_dll_name =
@@ -115,7 +126,7 @@ bool RendererMainPlatformDelegate::InitSandboxTests(bool no_sandbox) {
 
 bool RendererMainPlatformDelegate::EnableSandbox() {
   sandbox::TargetServices* target_services =
-      parameters_.sandbox_info_.TargetServices();
+      parameters_.sandbox_info->target_services;
 
   if (target_services) {
     // Cause advapi32 to load before the sandbox is turned on.

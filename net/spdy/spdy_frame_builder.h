@@ -28,15 +28,19 @@ namespace spdy {
 // track of the type of data written to it.
 class NET_EXPORT_PRIVATE SpdyFrameBuilder {
  public:
+  ~SpdyFrameBuilder();
+
   SpdyFrameBuilder();
+
+  // Initiailizes a SpdyFrameBuilder with a buffer of given size.
+  // The buffer will still be resized as necessary.
+  explicit SpdyFrameBuilder(size_t size);
 
   // Initializes a SpdyFrameBuilder from a const block of data.  The data is
   // not copied; instead the data is merely referenced by this
   // SpdyFrameBuilder.  Only const methods should be used when initialized
   // this way.
   SpdyFrameBuilder(const char* data, int data_len);
-
-  ~SpdyFrameBuilder();
 
   // Returns the size of the SpdyFrameBuilder's data.
   int length() const { return length_; }
@@ -73,7 +77,7 @@ class NET_EXPORT_PRIVATE SpdyFrameBuilder {
     return WriteBytes(&value, sizeof(value));
   }
   bool WriteString(const std::string& value);
-  bool WriteBytes(const void* data, uint16 data_len);
+  bool WriteBytes(const void* data, uint32 data_len);
 
   // Write an integer to a particular offset in the data buffer.
   bool WriteUInt32ToOffset(int offset, uint32 value) {

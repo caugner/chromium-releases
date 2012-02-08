@@ -4,14 +4,18 @@
 
 #include "content/browser/download/drag_download_file.h"
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
 #include "content/browser/browser_context.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_stats.h"
+#include "content/browser/download/download_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/file_stream.h"
+
+using content::BrowserThread;
 
 DragDownloadFile::DragDownloadFile(
     const FilePath& file_name_or_path,
@@ -110,8 +114,7 @@ void DragDownloadFile::InitiateDownload() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this,
-                          &DragDownloadFile::InitiateDownload));
+        base::Bind(&DragDownloadFile::InitiateDownload, this));
     return;
   }
 #endif
@@ -138,9 +141,7 @@ void DragDownloadFile::DownloadCompleted(bool is_successful) {
   if (drag_message_loop_ != MessageLoop::current()) {
     drag_message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &DragDownloadFile::DownloadCompleted,
-                          is_successful));
+        base::Bind(&DragDownloadFile::DownloadCompleted, this, is_successful));
     return;
   }
 #endif
@@ -173,7 +174,7 @@ void DragDownloadFile::ModelChanged() {
   download_manager_->GetTemporaryDownloads(file_path_.DirName(), &downloads);
   for (std::vector<DownloadItem*>::const_iterator i = downloads.begin();
        i != downloads.end(); ++i) {
-    if ((*i)->original_url() == url_) {
+    if ((*i)->GetOriginalUrl() == url_) {
       download_item_ = *i;
       download_item_->AddObserver(this);
       break;
@@ -183,7 +184,8 @@ void DragDownloadFile::ModelChanged() {
 
 void DragDownloadFile::OnDownloadUpdated(DownloadItem* download) {
   AssertCurrentlyOnUIThread();
-  if (download->IsCancelled() || download->state() == DownloadItem::REMOVING) {
+  if (download->IsCancelled() ||
+      (download->GetState() == DownloadItem::REMOVING)) {
     RemoveObservers();
     DownloadCompleted(false);
   } else if (download->IsComplete()) {

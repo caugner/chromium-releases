@@ -26,8 +26,8 @@ class MEDIA_EXPORT AudioManagerLinux : public AudioManagerBase {
   virtual bool HasAudioInputDevices() OVERRIDE;
   virtual AudioOutputStream* MakeAudioOutputStream(
       const AudioParameters& params) OVERRIDE;
-  virtual AudioInputStream* MakeAudioInputStream(const AudioParameters& params)
-      OVERRIDE;
+  virtual AudioInputStream* MakeAudioInputStream(
+      const AudioParameters& params, const std::string& device_id) OVERRIDE;
   virtual bool CanShowAudioInputSettings() OVERRIDE;
   virtual void ShowAudioInputSettings() OVERRIDE;
   virtual void GetAudioInputDeviceNames(media::AudioDeviceNames* device_names)
@@ -42,8 +42,22 @@ class MEDIA_EXPORT AudioManagerLinux : public AudioManagerBase {
   virtual ~AudioManagerLinux();
 
  private:
-  // Helper method to query if there is any valid input device
-  bool HasAnyValidAudioInputDevice(void** hint);
+  enum StreamType {
+    kStreamPlayback = 0,
+    kStreamCapture,
+  };
+
+  // Gets a list of available ALSA input devices.
+  void GetAlsaAudioInputDevices(media::AudioDeviceNames* device_names);
+
+  // Gets the ALSA devices' names and ids.
+  void GetAlsaDevicesInfo(void** hint, media::AudioDeviceNames* device_names);
+
+  // Checks if the specific ALSA device is available.
+  bool IsAlsaDeviceAvailable(const char* device_name);
+
+  // Returns true if a device is present for the given stream type.
+  bool HasAnyAlsaAudioDevice(StreamType stream);
 
   scoped_ptr<AlsaWrapper> wrapper_;
 

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "base/shared_memory.h"
+#include "base/string16.h"
 #include "content/public/renderer/render_thread.h"
 #include "ipc/ipc_test_sink.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
@@ -28,6 +29,10 @@ class MockRenderThread : public content::RenderThread {
 
   // Provides access to the messages that have been received by this thread.
   IPC::TestSink& sink() { return sink_; }
+
+  // Helpers for embedders to know when content IPC messages are received, since
+  // they don't have access to content IPC files.
+  void VerifyRunJavaScriptMessageSend(const string16& expected_alert_message);
 
   // content::RenderThread implementation:
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -56,11 +61,11 @@ class MockRenderThread : public content::RenderThread {
   virtual void RegisterExtension(v8::Extension* extension) OVERRIDE;
   virtual bool IsRegisteredExtension(
       const std::string& v8_extension_name) const OVERRIDE;
-  virtual void ScheduleIdleHandler(double initial_delay_s) OVERRIDE;
+  virtual void ScheduleIdleHandler(int64 initial_delay_ms) OVERRIDE;
   virtual void IdleHandler() OVERRIDE;
-  virtual double GetIdleNotificationDelayInS() const OVERRIDE;
-  virtual void SetIdleNotificationDelayInS(
-      double idle_notification_delay_in_s) OVERRIDE;
+  virtual int64 GetIdleNotificationDelayInMs() const OVERRIDE;
+  virtual void SetIdleNotificationDelayInMs(
+      int64 idle_notification_delay_in_ms) OVERRIDE;
 #if defined(OS_WIN)
   virtual void PreCacheFont(const LOGFONT& log_font) OVERRIDE;
   virtual void ReleaseCachedFonts() OVERRIDE;

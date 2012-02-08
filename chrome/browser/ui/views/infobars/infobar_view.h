@@ -11,9 +11,9 @@
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_container.h"
 #include "third_party/skia/include/core/SkPath.h"
-#include "views/controls/button/button.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/focus/focus_manager.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/focus/focus_manager.h"
 
 namespace ui {
 class MenuModel;
@@ -113,8 +113,10 @@ class InfoBarView : public InfoBar,
   virtual void PaintChildren(gfx::Canvas* canvas) OVERRIDE;
 
   // views::FocusChangeListener:
-  virtual void FocusWillChange(View* focused_before,
-                               View* focused_now) OVERRIDE;
+  virtual void OnWillChangeFocus(View* focused_before,
+                                 View* focused_now) OVERRIDE;
+  virtual void OnDidChangeFocus(View* focused_before,
+                                View* focused_now) OVERRIDE;
 
   // The optional icon at the left edge of the InfoBar.
   views::ImageView* icon_;

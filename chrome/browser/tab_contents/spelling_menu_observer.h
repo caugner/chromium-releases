@@ -7,22 +7,26 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/timer.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_observer.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 
-class GURL;
 class RenderViewContextMenuProxy;
+
+namespace net {
+class URLRequestContextGetter;
+}
 
 // An observer that listens to events from the RenderViewContextMenu class and
 // shows suggestions from the Spelling ("do you mean") service to a context menu
 // while we show it. This class implements two interfaces:
 // * RenderViewContextMenuObserver
 //   This interface is used for adding a menu item and update it while showing.
-// * URLFetcher::Delegate
+// * content::URLFetcherDelegate
 //   This interface is used for sending a JSON_RPC request to the Spelling
 //   service and retrieving its response.
 // These interfaces allow this class to make a JSON-RPC call to the Spelling
@@ -37,7 +41,7 @@ class RenderViewContextMenuProxy;
 //   }
 //
 class SpellingMenuObserver : public RenderViewContextMenuObserver,
-                             public URLFetcher::Delegate {
+                             public content::URLFetcherDelegate {
  public:
   explicit SpellingMenuObserver(RenderViewContextMenuProxy* proxy);
   virtual ~SpellingMenuObserver();
@@ -48,13 +52,8 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver,
   virtual bool IsCommandIdEnabled(int command_id) OVERRIDE;
   virtual void ExecuteCommand(int command_id) OVERRIDE;
 
-  // URLFetcher::Delegate implementation.
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data) OVERRIDE;
+  // content::URLFetcherDelegate implementation.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
  private:
   // Invokes a JSON-RPC call in the background. This function sends a JSON-RPC
@@ -75,6 +74,11 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver,
   // this interface to avoid accesing context-menu items directly.
   RenderViewContextMenuProxy* proxy_;
 
+  // Suggested words from the local spellchecker. If the spelling service
+  // returns a word in this list, we hide the context-menu item to prevent
+  // showing the same word twice.
+  std::vector<string16> suggestions_;
+
   // The string used for animation until we receive a response from the Spelling
   // service. The current animation just adds periods at the end of this string:
   //   'Loading' -> 'Loading.' -> 'Loading..' -> 'Loading...' (-> 'Loading')
@@ -86,6 +90,10 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver,
   // words. ('spelling_menu_observer.cc' describes its format.)
   bool succeeded_;
 
+  // The misspelled word. When we choose the "Add to dictionary" item, we add
+  // this word to the custom-word dictionary.
+  string16 misspelled_word_;
+
   // The string representing the result of this call. This string is a
   // suggestion when this call finished successfully. Otherwise it is error
   // text. Until we receive a response from the Spelling service, this string
@@ -95,7 +103,7 @@ class SpellingMenuObserver : public RenderViewContextMenuObserver,
   string16 result_;
 
   // The URLFetcher object used for sending a JSON-RPC request.
-  scoped_ptr<URLFetcher> fetcher_;
+  scoped_ptr<content::URLFetcher> fetcher_;
 
   // A timer used for loading animation.
   base::RepeatingTimer<SpellingMenuObserver> animation_timer_;

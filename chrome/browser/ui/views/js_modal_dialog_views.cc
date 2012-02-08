@@ -5,15 +5,16 @@
 #include "chrome/browser/ui/views/js_modal_dialog_views.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
+#include "chrome/browser/ui/app_modal_dialogs/js_modal_dialog.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
-#include "views/controls/message_box_view.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/message_box_view.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/widget/widget.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // JSModalDialogViews, public:
@@ -28,7 +29,7 @@ JSModalDialogViews::JSModalDialogViews(
   DCHECK(message_box_view_);
 
   message_box_view_->AddAccelerator(
-      views::Accelerator(ui::VKEY_C, false, true, false));
+      ui::Accelerator(ui::VKEY_C, false, true, false));
   if (parent->display_suppress_checkbox()) {
     message_box_view_->SetCheckBoxLabel(
         l10n_util::GetStringUTF16(IDS_JAVASCRIPT_MESSAGEBOX_SUPPRESS_OPTION));
@@ -71,21 +72,21 @@ void JSModalDialogViews::CancelAppModalDialog() {
 
 int JSModalDialogViews::GetDefaultDialogButton() const {
   if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasOKButton)
-    return ui::MessageBoxFlags::DIALOGBUTTON_OK;
+    return ui::DIALOG_BUTTON_OK;
 
   if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasCancelButton)
-    return ui::MessageBoxFlags::DIALOGBUTTON_CANCEL;
+    return ui::DIALOG_BUTTON_CANCEL;
 
-  return ui::MessageBoxFlags::DIALOGBUTTON_NONE;
+  return ui::DIALOG_BUTTON_NONE;
 }
 
 int JSModalDialogViews::GetDialogButtons() const {
-  int dialog_buttons = 0;
+  int dialog_buttons = ui::DIALOG_BUTTON_NONE;
   if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasOKButton)
-    dialog_buttons = ui::MessageBoxFlags::DIALOGBUTTON_OK;
+    dialog_buttons = ui::DIALOG_BUTTON_OK;
 
   if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasCancelButton)
-    dialog_buttons |= ui::MessageBoxFlags::DIALOGBUTTON_CANCEL;
+    dialog_buttons |= ui::DIALOG_BUTTON_CANCEL;
 
   return dialog_buttons;
 }
@@ -99,7 +100,6 @@ void JSModalDialogViews::WindowClosing() {
 }
 
 void JSModalDialogViews::DeleteDelegate() {
-  delete parent_;
   delete this;
 }
 
@@ -127,12 +127,12 @@ const views::Widget* JSModalDialogViews::GetWidget() const {
 }
 
 string16 JSModalDialogViews::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
+    ui::DialogButton button) const {
   if (parent_->is_before_unload_dialog()) {
-    if (button == ui::MessageBoxFlags::DIALOGBUTTON_OK) {
+    if (button == ui::DIALOG_BUTTON_OK) {
       return l10n_util::GetStringUTF16(
           IDS_BEFOREUNLOAD_MESSAGEBOX_OK_BUTTON_LABEL);
-    } else if (button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL) {
+    } else if (button == ui::DIALOG_BUTTON_CANCEL) {
       return l10n_util::GetStringUTF16(
           IDS_BEFOREUNLOAD_MESSAGEBOX_CANCEL_BUTTON_LABEL);
     }
@@ -166,6 +166,6 @@ NativeAppModalDialog* NativeAppModalDialog::CreateNativeJavaScriptPrompt(
     gfx::NativeWindow parent_window) {
   JSModalDialogViews* d = new JSModalDialogViews(dialog);
 
-  browser::CreateViewsWindow(parent_window, d);
+  browser::CreateViewsWindow(parent_window, d, STYLE_GENERIC);
   return d;
 }

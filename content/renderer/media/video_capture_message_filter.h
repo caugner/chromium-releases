@@ -15,6 +15,7 @@
 #include "base/message_loop_proxy.h"
 #include "base/shared_memory.h"
 #include "content/common/content_export.h"
+#include "content/common/media/video_capture.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "media/video/capture/video_capture.h"
 
@@ -32,7 +33,7 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
 
     // Called when state of a video capture device has changed in the browser
     // process.
-    virtual void OnStateChanged(const media::VideoCapture::State& state) = 0;
+    virtual void OnStateChanged(video_capture::State state) = 0;
 
     // Called when device info is received from video capture device in the
     // browser process.
@@ -66,10 +67,10 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
   typedef std::map<int32, Delegate*> Delegates;
 
   // IPC::ChannelProxy::MessageFilter override. Called on IO thread.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void OnFilterAdded(IPC::Channel* channel);
-  virtual void OnFilterRemoved();
-  virtual void OnChannelClosing();
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void OnFilterAdded(IPC::Channel* channel) OVERRIDE;
+  virtual void OnFilterRemoved() OVERRIDE;
+  virtual void OnChannelClosing() OVERRIDE;
 
   // Receive a newly created buffer from browser process.
   void OnBufferCreated(int device_id,
@@ -82,7 +83,7 @@ class CONTENT_EXPORT VideoCaptureMessageFilter
 
   // State of browser process' video capture device has changed.
   void OnDeviceStateChanged(int device_id,
-                            const media::VideoCapture::State& state);
+                            video_capture::State state);
 
   // Receive device info from browser process.
   void OnDeviceInfoReceived(int device_id,

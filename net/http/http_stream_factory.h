@@ -7,6 +7,7 @@
 
 #include <list>
 #include <string>
+#include <vector>
 
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
@@ -18,18 +19,17 @@ class GURL;
 
 namespace net {
 
+class AuthCredentials;
 class BoundNetLog;
 class HostMappingRules;
 class HostPortPair;
 class HttpAuthController;
-class HttpNetworkSession;
 class HttpResponseInfo;
 class HttpServerProperties;
 class HttpStream;
 class ProxyInfo;
 class SSLCertRequestInfo;
 class SSLInfo;
-class X509Certificate;
 struct HttpRequestInfo;
 struct SSLConfig;
 
@@ -130,8 +130,8 @@ class NET_EXPORT_PRIVATE HttpStreamRequest {
   // will have been called.  It now becomes the delegate's responsibility
   // to collect the necessary credentials, and then call this method to
   // resume the HttpStream creation process.
-  virtual int RestartTunnelWithProxyAuth(const string16& username,
-                                         const string16& password) = 0;
+  virtual int RestartTunnelWithProxyAuth(
+      const AuthCredentials& credentials) = 0;
 
   // Returns the LoadState for the request.
   virtual LoadState GetLoadState() const = 0;
@@ -175,13 +175,19 @@ class NET_EXPORT HttpStreamFactory {
   virtual bool IsTLSIntolerantServer(const HostPortPair& server) const = 0;
 
   // Static settings
+
+  // Reset all static settings to initialized values. Used to init test suite.
+  static void ResetStaticSettingsToInit();
+
   static GURL ApplyHostMappingRules(const GURL& url, HostPortPair* endpoint);
 
   // Turns spdy on or off.
   static void set_spdy_enabled(bool value) {
     spdy_enabled_ = value;
-    if (value == false)
-      set_next_protos("");
+    if (!spdy_enabled_) {
+      delete next_protos_;
+      next_protos_ = NULL;
+    }
   }
   static bool spdy_enabled() { return spdy_enabled_; }
 
@@ -211,11 +217,15 @@ class NET_EXPORT HttpStreamFactory {
   static bool HasSpdyExclusion(const HostPortPair& endpoint);
 
   // Sets the next protocol negotiation value used during the SSL handshake.
-  static void set_next_protos(const std::string& value) {
-    delete next_protos_;
-    next_protos_ = new std::string(value);
+  static void set_next_protos(const std::vector<std::string>& value) {
+    if (!next_protos_)
+      next_protos_ = new std::vector<std::string>;
+    *next_protos_ = value;
   }
-  static const std::string* next_protos() { return next_protos_; }
+  static bool has_next_protos() { return next_protos_ != NULL; }
+  static const std::vector<std::string>& next_protos() {
+    return *next_protos_;
+  }
 
   // Sets the HttpStreamFactoryImpl into a mode where it can ignore certificate
   // errors.  This is for testing.
@@ -228,6 +238,11 @@ class NET_EXPORT HttpStreamFactory {
 
   static void SetHostMappingRules(const std::string& rules);
 
+  static void set_http_pipelining_enabled(bool value) {
+    http_pipelining_enabled_ = value;
+  }
+  static bool http_pipelining_enabled() { return http_pipelining_enabled_; }
+
  protected:
   HttpStreamFactory();
 
@@ -235,13 +250,14 @@ class NET_EXPORT HttpStreamFactory {
   static const HostMappingRules& host_mapping_rules();
 
   static const HostMappingRules* host_mapping_rules_;
-  static const std::string* next_protos_;
+  static std::vector<std::string>* next_protos_;
   static bool spdy_enabled_;
   static bool use_alternate_protocols_;
   static bool force_spdy_over_ssl_;
   static bool force_spdy_always_;
   static std::list<HostPortPair>* forced_spdy_exclusions_;
   static bool ignore_certificate_errors_;
+  static bool http_pipelining_enabled_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpStreamFactory);
 };

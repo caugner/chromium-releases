@@ -21,20 +21,20 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/table_model_observer.h"
-#include "views/accelerator.h"
-#include "views/background.h"
-#include "views/context_menu_controller.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/link.h"
-#include "views/controls/link_listener.h"
-#include "views/controls/menu/menu.h"
-#include "views/controls/table/group_table_view.h"
-#include "views/controls/table/table_view_observer.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/background.h"
+#include "ui/views/context_menu_controller.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/link_listener.h"
+#include "ui/views/controls/menu/menu.h"
+#include "ui/views/controls/table/group_table_view.h"
+#include "ui/views/controls/table/table_view_observer.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 // The task manager window default size.
 static const int kDefaultWidth = 460;
@@ -463,8 +463,8 @@ void TaskManagerView::Init() {
   }
   kill_button_ = new views::NativeTextButton(
       this, UTF16ToWide(l10n_util::GetStringUTF16(IDS_TASK_MANAGER_KILL)));
-  kill_button_->AddAccelerator(views::Accelerator(ui::VKEY_E,
-                                                  false, false, false));
+  kill_button_->AddAccelerator(ui::Accelerator(ui::VKEY_E, false, false,
+                                               false));
   kill_button_->SetAccessibleKeyboardShortcut(L"E");
   kill_button_->set_prefix_type(views::TextButtonBase::PREFIX_SHOW);
   about_memory_link_ = new views::Link(
@@ -661,7 +661,7 @@ std::string TaskManagerView::GetWindowName() const {
 }
 
 int TaskManagerView::GetDialogButtons() const {
-  return MessageBoxFlags::DIALOGBUTTON_NONE;
+  return ui::DIALOG_BUTTON_NONE;
 }
 
 void TaskManagerView::WindowClosing() {

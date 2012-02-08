@@ -4,21 +4,23 @@
 
 #include "webkit/appcache/mock_appcache_service.h"
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 
 namespace appcache {
 
-static void DeferredCallCallback(net::OldCompletionCallback* callback, int rv) {
-  callback->Run(rv);
+static void DeferredCallCallback(
+    const net::CompletionCallback& callback, int rv) {
+  callback.Run(rv);
 }
 
 void MockAppCacheService::DeleteAppCachesForOrigin(
-    const GURL& origin, net::OldCompletionCallback* callback) {
+    const GURL& origin, const net::CompletionCallback& callback) {
   ++delete_called_count_;
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      NewRunnableFunction(&DeferredCallCallback, callback,
-                          mock_delete_appcaches_for_origin_result_));
+      base::Bind(&DeferredCallCallback, callback,
+                 mock_delete_appcaches_for_origin_result_));
 }
 
 }  // namespace appcache

@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_BROWSING_DATA_REMOVER_H_
 #pragma once
 
-#include <vector>
+#include <set>
 
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
@@ -15,14 +15,17 @@
 #include "chrome/browser/prefs/pref_member.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/cancelable_request.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "webkit/quota/quota_types.h"
 
 class ExtensionSpecialStoragePolicy;
 class IOThread;
-class PluginDataRemover;
 class Profile;
+
+namespace content {
+class PluginDataRemover;
+}
 
 namespace disk_cache {
 class Backend;
@@ -32,10 +35,6 @@ namespace net {
 class URLRequestContextGetter;
 }
 
-namespace webkit_database {
-class DatabaseTracker;
-}
-
 namespace quota {
 class QuotaManager;
 }
@@ -43,7 +42,7 @@ class QuotaManager;
 // BrowsingDataRemover is responsible for removing data related to browsing:
 // visits in url database, downloads, cookies ...
 
-class BrowsingDataRemover : public NotificationObserver,
+class BrowsingDataRemover : public content::NotificationObserver,
                             public base::WaitableEventWatcher::Delegate {
  public:
   // Time period ranges available when doing browsing data removals.
@@ -129,16 +128,18 @@ class BrowsingDataRemover : public NotificationObserver,
   friend class DeleteTask<BrowsingDataRemover>;
   virtual ~BrowsingDataRemover();
 
-  // NotificationObserver method. Callback when TemplateURLService has finished
-  // loading. Deletes the entries from the model, and if we're not waiting on
-  // anything else notifies observers and deletes this BrowsingDataRemover.
+  // content::NotificationObserver method. Callback when TemplateURLService has
+  // finished loading. Deletes the entries from the model, and if we're not
+  // waiting on anything else notifies observers and deletes this
+  // BrowsingDataRemover.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // WaitableEventWatcher implementation.
   // Called when plug-in data has been cleared. Invokes NotifyAndDeleteIfDone.
-  virtual void OnWaitableEventSignaled(base::WaitableEvent* waitable_event);
+  virtual void OnWaitableEventSignaled(
+      base::WaitableEvent* waitable_event) OVERRIDE;
 
   // If we're not waiting on anything, notifies observers and deletes this
   // object.
@@ -206,7 +207,7 @@ class BrowsingDataRemover : public NotificationObserver,
   // already removing, and vice-versa.
   static void set_removing(bool removing);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Profile we're to remove from.
   Profile* profile_;
@@ -237,7 +238,7 @@ class BrowsingDataRemover : public NotificationObserver,
   scoped_refptr<net::URLRequestContextGetter> media_context_getter_;
 
   // Used to delete plugin data.
-  scoped_refptr<PluginDataRemover> plugin_data_remover_;
+  scoped_ptr<content::PluginDataRemover> plugin_data_remover_;
   base::WaitableEventWatcher watcher_;
 
   // True if we're waiting for various data to be deleted.

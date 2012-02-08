@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_PLUGIN_OBSERVER_H_
 #pragma once
 
+#include "base/memory/weak_ptr.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
 
-class FilePath;
 class GURL;
 class InfoBarDelegate;
-class PluginInstallerInfoBarDelegate;
+class PluginInstaller;
 class TabContentsWrapper;
 
 class PluginObserver : public TabContentsObserver {
@@ -20,13 +20,22 @@ class PluginObserver : public TabContentsObserver {
   virtual ~PluginObserver();
 
   // IPC::Channel::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   void OnBlockedOutdatedPlugin(const string16& name, const GURL& update_url);
+  void OnFindMissingPlugin(int placeholder_id, const std::string& mime_type);
+
+  void FoundMissingPlugin(int placeholder_id,
+                          const std::string& mime_type,
+                          PluginInstaller* installer);
+  void DidNotFindMissingPlugin(int placeholder_id,
+                               const std::string& mime_type);
+  void InstallMissingPlugin(PluginInstaller* installer);
+
+  base::WeakPtrFactory<PluginObserver> weak_ptr_factory_;
 
   TabContentsWrapper* tab_contents_;
-  scoped_ptr<InfoBarDelegate> plugin_installer_;  // Lazily created.
 
   DISALLOW_COPY_AND_ASSIGN(PluginObserver);
 };

@@ -5,6 +5,8 @@
 #ifndef REMOTING_PROTOCOL_PROTOCOL_MOCK_OBJECTS_H_
 #define REMOTING_PROTOCOL_PROTOCOL_MOCK_OBJECTS_H_
 
+#include <string>
+
 #include "remoting/proto/internal.pb.h"
 #include "remoting/protocol/client_stub.h"
 #include "remoting/protocol/connection_to_client.h"
@@ -17,11 +19,9 @@
 namespace remoting {
 namespace protocol {
 
-class ChromotocolConnection;
-
 class MockConnectionToClient : public ConnectionToClient {
  public:
-  MockConnectionToClient(EventHandler* handler,
+  MockConnectionToClient(Session* session,
                          HostStub* host_stub,
                          InputStub* input_stub);
   virtual ~MockConnectionToClient();
@@ -44,7 +44,8 @@ class MockConnectionToClientEventHandler :
 
   MOCK_METHOD1(OnConnectionOpened, void(ConnectionToClient* connection));
   MOCK_METHOD1(OnConnectionClosed, void(ConnectionToClient* connection));
-  MOCK_METHOD1(OnConnectionFailed, void(ConnectionToClient* connection));
+  MOCK_METHOD2(OnConnectionFailed, void(ConnectionToClient* connection,
+                                        Session::Error error));
   MOCK_METHOD2(OnSequenceNumberUpdated, void(ConnectionToClient* connection,
                                              int64 sequence_number));
 
@@ -67,11 +68,7 @@ class MockInputStub : public InputStub {
 class MockHostStub : public HostStub {
  public:
   MockHostStub();
-  ~MockHostStub();
-
-  MOCK_METHOD2(BeginSessionRequest,
-               void(const LocalLoginCredentials* credentials,
-                    const base::Closure&  done));
+  virtual ~MockHostStub();
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockHostStub);
@@ -81,11 +78,6 @@ class MockClientStub : public ClientStub {
  public:
   MockClientStub();
   virtual ~MockClientStub();
-
-  MOCK_METHOD2(NotifyResolution, void(const NotifyResolutionRequest* msg,
-                                      const base::Closure& done));
-  MOCK_METHOD2(BeginSessionResponse, void(const LocalLoginStatus* msg,
-                                          const base::Closure& done));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockClientStub);
@@ -116,6 +108,7 @@ class MockSession : public Session {
       const std::string& name, const StreamChannelCallback& callback));
   MOCK_METHOD2(CreateDatagramChannel, void(
       const std::string& name, const DatagramChannelCallback& callback));
+  MOCK_METHOD1(CancelChannelCreation, void(const std::string& name));
   MOCK_METHOD0(control_channel, net::Socket*());
   MOCK_METHOD0(event_channel, net::Socket*());
   MOCK_METHOD0(video_channel, net::Socket*());

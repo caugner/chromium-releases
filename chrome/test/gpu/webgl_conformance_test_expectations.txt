@@ -17,24 +17,25 @@
 //    This will mark the test as FLAKY_*.
 
 // -----------------------------------------------------------------------------
-// SLOW TESTS
+// TIMEOUT TESTS
 // -----------------------------------------------------------------------------
 
-91530 MAC WIN LINUX : context_lost_restored = TIMEOUT
-91530 LINUX MAC : conformance_quickCheckAPI = TIMEOUT
-91530 WIN : drawingbuffer_static_canvas_test = TIMEOUT
+103804 MAC WIN LINUX : conformance_textures_tex_input_validation = TIMEOUT
 
 // -----------------------------------------------------------------------------
 // FAILING TESTS
 // -----------------------------------------------------------------------------
 
-91532 LINUX : uniform_location = FAIL  // Probably a driver error.
-91533 WIN : gl_min_uniforms = FAIL
-91533 WIN : oes_standard_derivatives = FAIL
-91533 WIN : texture_npot = FAIL
+103573 WIN : conformance_glsl_functions_glsl_function_atan = FAIL
+103573 WIN : conformance_glsl_functions_glsl_function_atan_xy = FAIL
+103573 WIN : conformance_glsl_functions_glsl_function_mod_gentype = FAIL
+
+103759 MAC WIN LINUX : conformance_more_functions_readPixelsBadArgs = FAIL
+103759 MAC WIN LINUX : conformance_more_functions_texImage2DHTML = FAIL
+103759 MAC WIN LINUX : conformance_more_functions_texSubImage2DHTML = FAIL
 
 // -----------------------------------------------------------------------------
 // FLAKY TESTS
 // -----------------------------------------------------------------------------
 
-92587 MAC : tex_image_and_sub_image_2d_with_video = PASS FAIL
+

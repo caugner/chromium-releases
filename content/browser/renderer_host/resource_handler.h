@@ -15,22 +15,25 @@
 
 #include <string>
 
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+class GURL;
+
+namespace content {
+struct ResourceResponse;
+}
 
 namespace net {
 class IOBuffer;
 class URLRequestStatus;
 }  // namespace net
 
-struct ResourceResponse;
-class GURL;
-
 // The resource dispatcher host uses this interface to push load events to the
 // renderer, allowing for differences in the types of IPC messages generated.
 // See the implementations of this interface defined below.
 class ResourceHandler
     : public base::RefCountedThreadSafe<
-          ResourceHandler, BrowserThread::DeleteOnIOThread> {
+            ResourceHandler, content::BrowserThread::DeleteOnIOThread> {
  public:
   // Called as upload progress is made.
   virtual bool OnUploadProgress(int request_id,
@@ -41,12 +44,12 @@ class ResourceHandler
   // false.  Set |*defer| to true to defer the redirect.  The redirect may be
   // followed later on via ResourceDispatcherHost::FollowDeferredRedirect.
   virtual bool OnRequestRedirected(int request_id, const GURL& url,
-                                   ResourceResponse* response,
+                                   content::ResourceResponse* response,
                                    bool* defer) = 0;
 
   // Response headers and meta data are available.
   virtual bool OnResponseStarted(int request_id,
-                                 ResourceResponse* response) = 0;
+                                 content::ResourceResponse* response) = 0;
 
   // Called before the net::URLRequest for |request_id| (whose url is |url|) is
   // to be started. If the handler returns false, then the request is cancelled.
@@ -87,7 +90,7 @@ class ResourceHandler
   virtual void OnDataDownloaded(int request_id, int bytes_downloaded) {}
 
  protected:
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<ResourceHandler>;
 
   virtual ~ResourceHandler() {}

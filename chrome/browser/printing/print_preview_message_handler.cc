@@ -16,15 +16,15 @@
 #include "chrome/browser/printing/print_view_manager.h"
 #include "chrome/browser/printing/printer_query.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/print_preview_handler.h"
 #include "chrome/browser/ui/webui/print_preview_ui.h"
 #include "chrome/common/print_messages.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/content_restriction.h"
+#include "content/public/browser/browser_thread.h"
 #include "printing/page_size_margins.h"
 #include "printing/print_job_constants.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -97,8 +97,11 @@ PrintPreviewUI* PrintPreviewMessageHandler::OnFailure(int document_cookie) {
   return static_cast<PrintPreviewUI*>(print_preview_tab->web_ui());
 }
 
-void PrintPreviewMessageHandler::OnRequestPrintPreview() {
+void PrintPreviewMessageHandler::OnRequestPrintPreview(
+    bool source_is_modifiable) {
   PrintPreviewTabController::PrintPreview(tab_contents_wrapper());
+  PrintPreviewUI::SetSourceIsModifiable(GetPrintPreviewTab(),
+                                        source_is_modifiable);
 }
 
 void PrintPreviewMessageHandler::OnDidGetPreviewPageCount(
@@ -171,8 +174,6 @@ void PrintPreviewMessageHandler::OnMetafileReadyForPrinting(
     return;
   }
 
-  print_preview_tab->print_view_manager()->OverrideTitle(tab_contents());
-
   // TODO(joth): This seems like a good match for using RefCountedStaticMemory
   // to avoid the memory copy, but the SetPrintPreviewData call chain below
   // needs updating to accept the RefCountedMemory* base class.
@@ -242,11 +243,22 @@ bool PrintPreviewMessageHandler::OnMessageReceived(
   return handled;
 }
 
-void PrintPreviewMessageHandler::DidStartLoading() {
-  if (tab_contents()->delegate() &&
-      PrintPreviewTabController::IsPrintPreviewTab(tab_contents_wrapper())) {
-    tab_contents()->SetContentRestrictions(CONTENT_RESTRICTION_PRINT);
+void PrintPreviewMessageHandler::NavigateToPendingEntry(
+    const GURL& url,
+    NavigationController::ReloadType reload_type) {
+  TabContentsWrapper* tab = tab_contents_wrapper();
+  TabContentsWrapper* preview_tab = GetPrintPreviewTab();
+  if (tab == preview_tab) {
+    // Cloud print sign-in reloads the page.
+    DCHECK(PrintPreviewTabController::IsPrintPreviewURL(url));
+    DCHECK_EQ(NavigationController::RELOAD, reload_type);
+    return;
   }
+  // If |tab| is navigating and it has a print preview tab, notify |tab| to
+  // consider print preview done so it unfreezes the renderer in the case of
+  // window.print().
+  if (preview_tab)
+    tab->print_view_manager()->PrintPreviewDone();
 }
 
 }  // namespace printing

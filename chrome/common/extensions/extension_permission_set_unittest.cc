@@ -142,6 +142,7 @@ TEST(ExtensionAPIPermissionTest, Aliases) {
 TEST(ExtensionAPIPermissionTest, HostedAppPermissions) {
   ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
   ExtensionAPIPermissionSet hosted_perms;
+  hosted_perms.insert(ExtensionAPIPermission::kAppNotifications);
   hosted_perms.insert(ExtensionAPIPermission::kBackground);
   hosted_perms.insert(ExtensionAPIPermission::kClipboardRead);
   hosted_perms.insert(ExtensionAPIPermission::kClipboardWrite);
@@ -158,11 +159,36 @@ TEST(ExtensionAPIPermissionTest, HostedAppPermissions) {
   for (ExtensionAPIPermissionSet::iterator i = perms.begin();
        i != perms.end(); ++i) {
     count += hosted_perms.count(*i);
-    EXPECT_EQ(hosted_perms.count(*i) > 0, info->GetByID(*i)->is_hosted_app());
+    EXPECT_EQ(hosted_perms.count(*i) > 0,
+              info->GetByID(*i)->supports_hosted_apps());
   }
 
   EXPECT_EQ(hosted_perms.size(), count);
-  EXPECT_EQ(hosted_perms.size(), info->get_hosted_app_permission_count());
+}
+
+TEST(ExtensionAPIPermissionTest, PlatformAppPermissions) {
+  ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
+  ExtensionAPIPermissionSet blacklist;
+  blacklist.insert(ExtensionAPIPermission::kAppNotifications);
+  blacklist.insert(ExtensionAPIPermission::kChromeAuthPrivate);
+  blacklist.insert(ExtensionAPIPermission::kChromePrivate);
+  blacklist.insert(ExtensionAPIPermission::kCookie);
+  blacklist.insert(ExtensionAPIPermission::kTab);
+  blacklist.insert(ExtensionAPIPermission::kWebNavigation);
+  blacklist.insert(ExtensionAPIPermission::kWebRequest);
+  blacklist.insert(ExtensionAPIPermission::kWebRequestBlocking);
+  blacklist.insert(ExtensionAPIPermission::kWebSocketProxyPrivate);
+
+  ExtensionAPIPermissionSet perms = info->GetAll();
+  size_t count = 0;
+  for (ExtensionAPIPermissionSet::iterator i = perms.begin();
+       i != perms.end(); ++i) {
+    count += blacklist.count(*i);
+    EXPECT_EQ(blacklist.count(*i) > 0,
+              !info->GetByID(*i)->supports_platform_apps());
+  }
+
+  EXPECT_EQ(blacklist.size(), count);
 }
 
 TEST(ExtensionAPIPermissionTest, ComponentOnlyPermissions) {
@@ -172,6 +198,7 @@ TEST(ExtensionAPIPermissionTest, ComponentOnlyPermissions) {
   private_perms.insert(ExtensionAPIPermission::kChromeosInfoPrivate);
   private_perms.insert(ExtensionAPIPermission::kFileBrowserPrivate);
   private_perms.insert(ExtensionAPIPermission::kMediaPlayerPrivate);
+  private_perms.insert(ExtensionAPIPermission::kMetricsPrivate);
   private_perms.insert(ExtensionAPIPermission::kWebstorePrivate);
 
   ExtensionAPIPermissionSet perms = info->GetAll();
@@ -183,7 +210,7 @@ TEST(ExtensionAPIPermissionTest, ComponentOnlyPermissions) {
               info->GetByID(*i)->is_component_only());
   }
 
-  EXPECT_EQ(5, count);
+  EXPECT_EQ(6, count);
 }
 
 TEST(ExtensionPermissionSetTest, EffectiveHostPermissions) {
@@ -602,10 +629,9 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
   // strings associated with them.
   ExtensionAPIPermissionSet skip;
 
-  skip.insert(ExtensionAPIPermission::kDefault);
-
   // These are considered "nuisance" or "trivial" permissions that don't need
   // a prompt.
+  skip.insert(ExtensionAPIPermission::kAppNotifications);
   skip.insert(ExtensionAPIPermission::kContextMenus);
   skip.insert(ExtensionAPIPermission::kIdle);
   skip.insert(ExtensionAPIPermission::kNotification);
@@ -621,11 +647,11 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
   // permissions.
   skip.insert(ExtensionAPIPermission::kCookie);
 
-  // The proxy, webNavigation, and webRequest permissions are warned as part of
-  // host permission checks.
+  // The proxy, and webRequest permissions are warned as part of host
+  // permission checks.
   skip.insert(ExtensionAPIPermission::kProxy);
-  skip.insert(ExtensionAPIPermission::kWebNavigation);
   skip.insert(ExtensionAPIPermission::kWebRequest);
+  skip.insert(ExtensionAPIPermission::kWebRequestBlocking);
 
   // This permission requires explicit user action (context menu handler)
   // so we won't prompt for it for now.
@@ -639,6 +665,7 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
   skip.insert(ExtensionAPIPermission::kWebstorePrivate);
   skip.insert(ExtensionAPIPermission::kFileBrowserPrivate);
   skip.insert(ExtensionAPIPermission::kMediaPlayerPrivate);
+  skip.insert(ExtensionAPIPermission::kMetricsPrivate);
   skip.insert(ExtensionAPIPermission::kChromeAuthPrivate);
   skip.insert(ExtensionAPIPermission::kChromePrivate);
   skip.insert(ExtensionAPIPermission::kChromeosInfoPrivate);
@@ -647,6 +674,9 @@ TEST(ExtensionPermissionSetTest, PermissionMessages) {
 
   // Warned as part of host permissions.
   skip.insert(ExtensionAPIPermission::kDevtools);
+
+  // Platform apps. TODO(miket): must we skip?
+  skip.insert(ExtensionAPIPermission::kSocket);
 
   ExtensionPermissionsInfo* info = ExtensionPermissionsInfo::GetInstance();
   ExtensionAPIPermissionSet permissions = info->GetAll();

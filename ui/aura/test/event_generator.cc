@@ -12,8 +12,7 @@ namespace {
 gfx::Point CenterOfWindowInDesktopCoordinate(aura::Window* window) {
   gfx::Point center = window->bounds().CenterPoint();
   aura::Desktop* desktop = aura::Desktop::GetInstance();
-  aura::Window::ConvertPointToWindow(
-      window->parent(), desktop->window(), &center);
+  aura::Window::ConvertPointToWindow(window->parent(), desktop, &center);
   return center;
 }
 
@@ -38,34 +37,49 @@ EventGenerator::EventGenerator(Window* window)
 EventGenerator::~EventGenerator() {
 }
 
-void EventGenerator::ClickLeftButton() {
-  PressLeftButton();
-  ReleaseLeftButton();
-}
-
 void EventGenerator::PressLeftButton() {
   if ((flags_ & ui::EF_LEFT_BUTTON_DOWN) == 0) {
     flags_ |= ui::EF_LEFT_BUTTON_DOWN;
-    Dispatch(MouseEvent(ui::ET_MOUSE_PRESSED, current_location_, flags_));
+    MouseEvent mouseev(ui::ET_MOUSE_PRESSED, current_location_, flags_);
+    Dispatch(mouseev);
   }
 }
 
 void EventGenerator::ReleaseLeftButton() {
   if (flags_ & ui::EF_LEFT_BUTTON_DOWN) {
     flags_ ^= ui::EF_LEFT_BUTTON_DOWN;
-    Dispatch(MouseEvent(ui::ET_MOUSE_RELEASED, current_location_, 0));
+    MouseEvent mouseev(ui::ET_MOUSE_RELEASED, current_location_, 0);
+    Dispatch(mouseev);
   }
+}
+
+void EventGenerator::ClickLeftButton() {
+  PressLeftButton();
+  ReleaseLeftButton();
+}
+
+void EventGenerator::DoubleClickLeftButton() {
+  flags_ |= ui::EF_IS_DOUBLE_CLICK;
+  PressLeftButton();
+  flags_ ^= ui::EF_IS_DOUBLE_CLICK;
+  ReleaseLeftButton();
 }
 
 void EventGenerator::MoveMouseTo(const gfx::Point& point) {
   if (flags_ & ui::EF_LEFT_BUTTON_DOWN ) {
-    Dispatch(MouseEvent(
-        ui::ET_MOUSE_DRAGGED, current_location_.Middle(point), flags_));
-    Dispatch(MouseEvent(ui::ET_MOUSE_DRAGGED, point, flags_));
+    MouseEvent middle(
+        ui::ET_MOUSE_DRAGGED, current_location_.Middle(point), flags_);
+    Dispatch(middle);
+
+    MouseEvent mouseev(ui::ET_MOUSE_DRAGGED, point, flags_);
+    Dispatch(mouseev);
   } else {
-    Dispatch(MouseEvent(
-        ui::ET_MOUSE_MOVED, current_location_.Middle(point), flags_));
-    Dispatch(MouseEvent(ui::ET_MOUSE_MOVED, point, flags_));
+    MouseEvent middle(
+        ui::ET_MOUSE_MOVED, current_location_.Middle(point), flags_);
+    Dispatch(middle);
+
+    MouseEvent mouseev(ui::ET_MOUSE_MOVED, point, flags_);
+    Dispatch(mouseev);
   }
   current_location_ = point;
 }
@@ -76,12 +90,12 @@ void EventGenerator::DragMouseTo(const gfx::Point& point) {
   ReleaseLeftButton();
 }
 
-void EventGenerator::Dispatch(const Event& event) {
+void EventGenerator::Dispatch(Event& event) {
   switch (event.type()) {
     case ui::ET_KEY_PRESSED:
     case ui::ET_KEY_RELEASED:
-      aura::Desktop::GetInstance()->OnKeyEvent(
-          *static_cast<const KeyEvent*>(&event));
+      aura::Desktop::GetInstance()->DispatchKeyEvent(
+          static_cast<KeyEvent*>(&event));
       break;
     case ui::ET_MOUSE_PRESSED:
     case ui::ET_MOUSE_DRAGGED:
@@ -90,8 +104,8 @@ void EventGenerator::Dispatch(const Event& event) {
     case ui::ET_MOUSE_ENTERED:
     case ui::ET_MOUSE_EXITED:
     case ui::ET_MOUSEWHEEL:
-      aura::Desktop::GetInstance()->OnMouseEvent(
-          *static_cast<const MouseEvent*>(&event));
+      aura::Desktop::GetInstance()->DispatchMouseEvent(
+          static_cast<MouseEvent*>(&event));
       break;
     default:
       NOTIMPLEMENTED();

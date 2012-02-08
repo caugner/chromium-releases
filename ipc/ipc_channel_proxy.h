@@ -17,7 +17,7 @@
 
 namespace IPC {
 
-class SendTask;
+class SendCallbackHelper;
 
 //-----------------------------------------------------------------------------
 // IPC::ChannelProxy
@@ -120,7 +120,20 @@ class IPC_EXPORT ChannelProxy : public Message::Sender {
                Channel::Listener* listener,
                base::MessageLoopProxy* ipc_thread_loop);
 
+  // Creates an uninitialized channel proxy. Init must be called to receive
+  // or send any messages. This two-step setup allows message filters to be
+  // added before any messages are sent or received.
+  ChannelProxy(Channel::Listener* listener,
+               base::MessageLoopProxy* ipc_thread_loop);
+
   virtual ~ChannelProxy();
+
+  // Initializes the channel proxy. Only call this once to initialize a channel
+  // proxy that was not initialized in its constructor. If create_pipe_now is
+  // true, the pipe is created synchronously. Otherwise it's created on the IO
+  // thread.
+  void Init(const IPC::ChannelHandle& channel_handle, Channel::Mode mode,
+            bool create_pipe_now);
 
   // Close the IPC::Channel.  This operation completes asynchronously, once the
   // background thread processes the command to close the channel.  It is ok to
@@ -134,7 +147,7 @@ class IPC_EXPORT ChannelProxy : public Message::Sender {
 
   // Send a message asynchronously.  The message is routed to the background
   // thread where it is passed to the IPC::Channel's Send method.
-  virtual bool Send(Message* message);
+  virtual bool Send(Message* message) OVERRIDE;
 
   // Used to intercept messages as they are received on the background thread.
   //
@@ -165,13 +178,8 @@ class IPC_EXPORT ChannelProxy : public Message::Sender {
  protected:
   class Context;
   // A subclass uses this constructor if it needs to add more information
-  // to the internal state.  If create_pipe_now is true, the pipe is created
-  // immediately.  Otherwise it's created on the IO thread.
-  ChannelProxy(const IPC::ChannelHandle& channel_handle,
-               Channel::Mode mode,
-               base::MessageLoopProxy* ipc_thread_loop,
-               Context* context,
-               bool create_pipe_now);
+  // to the internal state.
+  ChannelProxy(Context* context);
 
   // Used internally to hold state that is referenced on the IPC thread.
   class Context : public base::RefCountedThreadSafe<Context>,
@@ -214,7 +222,7 @@ class IPC_EXPORT ChannelProxy : public Message::Sender {
 
    private:
     friend class ChannelProxy;
-    friend class SendTask;
+    friend class SendCallbackHelper;
 
     // Create the Channel
     void CreateChannel(const IPC::ChannelHandle& channel_handle,
@@ -255,10 +263,7 @@ class IPC_EXPORT ChannelProxy : public Message::Sender {
   }
 
  private:
-  friend class SendTask;
-
-  void Init(const IPC::ChannelHandle& channel_handle, Channel::Mode mode,
-            base::MessageLoopProxy* ipc_thread_loop, bool create_pipe_now);
+  friend class SendCallbackHelper;
 
   // By maintaining this indirection (ref-counted) to our internal state, we
   // can safely be destroyed while the background thread continues to do stuff
@@ -266,6 +271,9 @@ class IPC_EXPORT ChannelProxy : public Message::Sender {
   scoped_refptr<Context> context_;
 
   OutgoingMessageFilter* outgoing_message_filter_;
+
+  // Whether the channel has been initialized.
+  bool did_init_;
 };
 
 }  // namespace IPC

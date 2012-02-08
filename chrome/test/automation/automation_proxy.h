@@ -12,11 +12,11 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/threading/platform_thread.h"
 #include "base/process_util.h"
-#include "base/time.h"
-#include "base/threading/thread.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/threading/platform_thread.h"
+#include "base/threading/thread.h"
+#include "base/time.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/test/automation/automation_handle_tracker.h"
@@ -25,7 +25,7 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_sync_channel.h"
-#include "ui/base/message_box_flags.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/native_widget_types.h"
 
 class BrowserProxy;
@@ -127,11 +127,10 @@ class AutomationProxy : public IPC::Channel::Listener,
   // Returns whether an app modal dialog window is showing right now (i.e., a
   // javascript alert), and what buttons it contains.
   bool GetShowingAppModalDialog(bool* showing_app_modal_dialog,
-      ui::MessageBoxFlags::DialogButton* button) WARN_UNUSED_RESULT;
+                                ui::DialogButton* button) WARN_UNUSED_RESULT;
 
   // Simulates a click on a dialog button. Synchronous.
-  bool ClickAppModalDialogButton(
-      ui::MessageBoxFlags::DialogButton button) WARN_UNUSED_RESULT;
+  bool ClickAppModalDialogButton(ui::DialogButton button) WARN_UNUSED_RESULT;
 
   // Block the thread until a modal dialog is displayed. Returns true on
   // success.
@@ -204,8 +203,9 @@ class AutomationProxy : public IPC::Channel::Listener,
   scoped_refptr<ExtensionProxy> InstallExtension(const FilePath& extension_path,
                                                  bool with_ui);
 
-  // Asserts that the next extension test result is true.
-  void EnsureExtensionTestResult();
+  // Gets the next extension test result in |result|. Returns false if there
+  // was a problem sending the result querying RPC.
+  bool GetExtensionTestResult(bool* result, std::string* message);
 
   // Resets to the default theme. Returns true on success.
   bool ResetToDefaultTheme();
@@ -221,6 +221,23 @@ class AutomationProxy : public IPC::Channel::Listener,
   bool LoginWithUserAndPass(const std::string& username,
                             const std::string& password) WARN_UNUSED_RESULT;
 #endif
+
+  // Begin tracing specified categories on the browser instance. Blocks until
+  // browser acknowledges that tracing has begun (or failed if false is
+  // returned). |categories| is a comma-delimited list of category wildcards.
+  // A category can have an optional '-' prefix to make it an excluded category.
+  // Either all categories must be included or all must be excluded.
+  //
+  // Example: BeginTracing("test_MyTest*");
+  // Example: BeginTracing("test_MyTest*,test_OtherStuff");
+  // Example: BeginTracing("-excluded_category1,-excluded_category2");
+  //
+  // See base/event_trace.h for documentation of included and excluded
+  // categories.
+  bool BeginTracing(const std::string& categories) WARN_UNUSED_RESULT;
+
+  // End trace and collect the trace output as a json string.
+  bool EndTracing(std::string* json_trace_output) WARN_UNUSED_RESULT;
 
   IPC::SyncChannel* channel();
 

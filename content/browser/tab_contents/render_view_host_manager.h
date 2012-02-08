@@ -10,10 +10,10 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
-#include "content/common/content_export.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
 #include "content/browser/site_instance.h"
+#include "content/common/content_export.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class InterstitialPage;
 class NavigationController;
@@ -31,7 +31,7 @@ class BrowserContext;
 // RenderViewHosts) that can get complex.
 class CONTENT_EXPORT RenderViewHostManager
     : public RenderViewHostDelegate::RendererManagement,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   // Functions implemented by our owner that we need.
   //
@@ -172,15 +172,15 @@ class CONTENT_EXPORT RenderViewHostManager
   }
 
   // RenderViewHostDelegate::RendererManagement implementation.
-  virtual void ShouldClosePage(bool for_cross_site_transition, bool proceed);
+  virtual void ShouldClosePage(bool for_cross_site_transition,
+                               bool proceed) OVERRIDE;
   virtual void OnCrossSiteResponse(int new_render_process_host_id,
-                                   int new_request_id);
-  virtual void OnCrossSiteNavigationCanceled();
+                                   int new_request_id) OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Called when a RenderViewHost is about to be deleted.
   void RenderViewDeleted(RenderViewHost* rvh);
@@ -236,7 +236,7 @@ class CONTENT_EXPORT RenderViewHostManager
 
   // Called when a renderer process is starting to close.  We should not
   // schedule new navigations in its swapped out RenderViewHosts after this.
-  void RendererProcessClosing(RenderProcessHost* render_process_host);
+  void RendererProcessClosing(content::RenderProcessHost* render_process_host);
 
   // Our delegate, not owned by us. Guaranteed non-NULL.
   Delegate* delegate_;
@@ -276,7 +276,7 @@ class CONTENT_EXPORT RenderViewHostManager
   // (the InterstitialPage is self-owned, it deletes itself when hidden).
   InterstitialPage* interstitial_page_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostManager);
 };

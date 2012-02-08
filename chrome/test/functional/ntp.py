@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -311,15 +311,6 @@ class NTPTest(pyauto.PyUITest):
     self.assertEquals(expected, test_utils.StripUnmatchedKeys(
         self.GetNTPRecentlyClosed(), expected))
 
-  def testRecentlyClosedShowsUniqueItems(self):
-    """Tests that the Recently Closed section does not show duplicate items"""
-    self.RemoveNTPDefaultThumbnails()
-    self.AppendTab(pyauto.GURL(self.PAGES[0]['url']))
-    self.AppendTab(pyauto.GURL(self.PAGES[0]['url']))
-    self.GetBrowserWindow(0).GetTab(1).Close(True)
-    self.GetBrowserWindow(0).GetTab(1).Close(True)
-    self.assertEquals(1, len(self.GetNTPRecentlyClosed()))
-
   def testRecentlyClosedIncognito(self):
     """Tests that we don't record closure of Incognito tabs or windows"""
     #self.RemoveNTPDefaultThumbnails()
@@ -379,9 +370,7 @@ class NTPTest(pyauto.PyUITest):
     """
     app_crx_file = os.path.abspath(os.path.join(
         self.DataDir(), 'pyauto_private', 'apps', 'countdown.crx'))
-    installed_app_id = self.InstallApp(app_crx_file)
-    self.assertTrue(installed_app_id, msg='App install failed.')
-    return installed_app_id
+    return self.InstallExtension(app_crx_file)
 
   def testGetAppsInNewProfile(self):
     """Ensures that the only app in a new profile is the Web Store app."""
@@ -405,11 +394,10 @@ class NTPTest(pyauto.PyUITest):
     # Install a regular extension and a theme.
     ext_crx_file = os.path.abspath(os.path.join(self.DataDir(), 'extensions',
                                                 'page_action.crx'))
-    self.assertTrue(self.InstallExtension(ext_crx_file, False),
-                    msg='Extension install failed.')
+    self.InstallExtension(ext_crx_file)
     theme_crx_file = os.path.abspath(os.path.join(self.DataDir(), 'extensions',
                                                   'theme.crx'))
-    self.assertTrue(self.SetTheme(theme_crx_file), msg='Theme install failed.')
+    self.SetTheme(theme_crx_file)
     # Verify that no apps are listed on the NTP except for the Web Store.
     app_info = self.GetNTPApps()
     self._VerifyAppInfo(app_info, self._EXPECTED_DEFAULT_APPS)
@@ -428,8 +416,8 @@ class NTPTest(pyauto.PyUITest):
     self._VerifyAppInfo(app_info, expected_app_info)
 
     # Next, uninstall the app and verify that it is removed from the NTP.
-    self.assertTrue(self.UninstallApp(installed_app_id),
-                    msg='Call to UninstallApp() returned False.')
+    self.assertTrue(self.UninstallExtensionById(installed_app_id),
+                    msg='Call to UninstallExtensionById() returned False.')
     app_info = self.GetNTPApps()
     self._VerifyAppInfo(app_info, self._EXPECTED_DEFAULT_APPS)
 
@@ -444,8 +432,8 @@ class NTPTest(pyauto.PyUITest):
 
     # Attempt to uninstall the WebStore app and verify that it still exists
     # in the App info of the NTP even after we try to uninstall it.
-    self.assertFalse(self.UninstallApp(webstore_id),
-                     msg='Call to UninstallApp() returned True.')
+    self.assertFalse(self.UninstallExtensionById(webstore_id),
+                     msg='Call to UninstallExtensionById() returned True.')
     self._VerifyAppInfo(self.GetNTPApps(), self._EXPECTED_DEFAULT_APPS)
 
   def testLaunchAppWithDefaultSettings(self):
@@ -528,204 +516,6 @@ class NTPTest(pyauto.PyUITest):
     expected_app_url_start = 'chrome-extension://' + installed_app_id
     self.assertTrue(actual_tab_url.startswith(expected_app_url_start),
                     msg='The app was not launched in the new window.')
-
-  def _VerifyThumbnailOrMenuMode(self, actual_info, expected_info):
-    """Verifies that the expected thumbnail/menu info matches the actual info.
-
-    This function verifies that the expected info is contained within the
-    actual info.  It's ok for the expected info to be a subset of the actual
-    info.  Only the specified expected info will be verified.
-
-    Args:
-      actual_info: A dictionary representing the actual thumbnail or menu mode
-                   information for all relevant sections of the NTP.
-      expected_info: A dictionary representing the expected thumbnail or menu
-                     mode information for the relevant sections of the NTP.
-    """
-    for sec_name in expected_info:
-      # Ensure the expected section name is present in the actual info.
-      self.assertTrue(sec_name in actual_info,
-                      msg='The actual info is missing information for section '
-                          '"%s".' % (sec_name))
-      # Ensure the expected section value matches what's in the actual info.
-      self.assertTrue(expected_info[sec_name] == actual_info[sec_name],
-                      msg='For section "%s", expected value %s, but instead '
-                          'was %s.' % (sec_name, expected_info[sec_name],
-                                       actual_info[sec_name]))
-
-  def testGetThumbnailModeInNewProfile(self):
-    """Ensures only the most visited thumbnails are present in a new profile."""
-    thumb_info = self.GetNTPThumbnailMode()
-    self._VerifyThumbnailOrMenuMode(thumb_info,
-                                    self._EXPECTED_DEFAULT_THUMB_INFO)
-
-  def testSetThumbnailModeOn(self):
-    """Ensures that we can turn on thumbnail mode properly."""
-    # Turn on thumbnail mode for the Apps section and verify that only this
-    # section is in thumbnail mode (since at most one section can be in
-    # thumbnail mode at any given time).
-    self.SetNTPThumbnailMode('apps', True)
-    thumb_info = self.GetNTPThumbnailMode()
-    expected_thumb_info = {
-      u'apps': True,
-      u'most_visited': False
-    }
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-
-    # Now turn on thumbnail mode for the Most Visited section, and verify that
-    # it gets turned on while the Apps section has thumbnail mode turned off.
-    self.SetNTPThumbnailMode('most_visited', True)
-    thumb_info = self.GetNTPThumbnailMode()
-    expected_thumb_info = {
-      u'apps': False,
-      u'most_visited': True
-    }
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-
-    # Now turn on thumbnail mode for both sections and verify that only the last
-    # one has thumbnail mode turned on.
-    self.SetNTPThumbnailMode('most_visited', True)
-    self.SetNTPThumbnailMode('apps', True)
-    thumb_info = self.GetNTPThumbnailMode()
-    expected_thumb_info = {
-      u'apps': True,
-      u'most_visited': False
-    }
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-
-  def testSetThumbnailModeOff(self):
-    """Ensures that we can turn off thumbnail mode properly."""
-    # First, ensure that only the Most Visited section is in thumbnail mode.
-    self.SetNTPThumbnailMode('most_visited', True)
-    thumb_info = self.GetNTPThumbnailMode()
-    expected_thumb_info = {
-      u'apps': False,
-      u'most_visited': True
-    }
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-
-    # Turn off thumbnail mode for the Most Visited section and verify.
-    self.SetNTPThumbnailMode('most_visited', False)
-    thumb_info = self.GetNTPThumbnailMode()
-    expected_thumb_info = {
-      u'apps': False,
-      u'most_visited': False
-    }
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-
-    # Turn off thumbnail mode for the Most Visited section and verify that it
-    # remains off.
-    self.SetNTPThumbnailMode('most_visited', False)
-    thumb_info = self.GetNTPThumbnailMode()
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-
-  def testGetMenuModeInNewProfile(self):
-    """Ensures that all NTP sections are not in menu mode in a fresh profile."""
-    menu_info = self.GetNTPMenuMode()
-    self._VerifyThumbnailOrMenuMode(menu_info, self._EXPECTED_DEFAULT_MENU_INFO)
-
-  def testSetMenuModeOn(self):
-    """Ensures that we can turn on menu mode properly."""
-    # Turn on menu mode for the Apps section and verify that it's turned on.
-    self.SetNTPMenuMode('apps', True)
-    menu_info = self.GetNTPMenuMode()
-    expected_menu_info = copy.copy(self._EXPECTED_DEFAULT_MENU_INFO)
-    expected_menu_info[u'apps'] = True
-    self._VerifyThumbnailOrMenuMode(menu_info, expected_menu_info)
-
-    # Turn on menu mode for the remaining sections and verify that they're all
-    # on.
-    self.SetNTPMenuMode('most_visited', True)
-    self.SetNTPMenuMode('recently_closed', True)
-    menu_info = self.GetNTPMenuMode()
-    expected_menu_info[u'most_visited'] = True
-    expected_menu_info[u'recently_closed'] = True
-    self._VerifyThumbnailOrMenuMode(menu_info, expected_menu_info)
-
-  def testSetMenuModeOff(self):
-    # Turn on menu mode for all sections, then turn it off for only the Apps
-    # section, then verify.
-    self.SetNTPMenuMode('apps', True)
-    self.SetNTPMenuMode('most_visited', True)
-    self.SetNTPMenuMode('recently_closed', True)
-    self.SetNTPMenuMode('apps', False)
-    menu_info = self.GetNTPMenuMode()
-    expected_menu_info = {
-      u'apps': False,
-      u'most_visited': True,
-      u'recently_closed': True
-    }
-    self._VerifyThumbnailOrMenuMode(menu_info, expected_menu_info)
-
-    # Turn off menu mode for the remaining sections and verify.
-    self.SetNTPMenuMode('most_visited', False)
-    self.SetNTPMenuMode('recently_closed', False)
-    menu_info = self.GetNTPMenuMode()
-    expected_menu_info[u'most_visited'] = False
-    expected_menu_info[u'recently_closed'] = False
-    self._VerifyThumbnailOrMenuMode(menu_info, expected_menu_info)
-
-    # Turn off menu mode for the Apps section again, and verify that it
-    # remains off.
-    self.SetNTPMenuMode('apps', False)
-    menu_info = self.GetNTPMenuMode()
-    self._VerifyThumbnailOrMenuMode(menu_info, expected_menu_info)
-
-  def testSetThumbnailModeDoesNotAffectMenuModeAndViceVersa(self):
-    """Verifies that setting thumbnail/menu mode does not affect the other."""
-    # Set thumbnail mode for the Apps section, set and unset menu mode for a
-    # few sections, and verify that all sections are in thumbnail/menu mode as
-    # expected.
-    self.SetNTPThumbnailMode('apps', True)
-    self.SetNTPMenuMode('apps', True)
-    self.SetNTPMenuMode('recently_closed', True)
-    self.SetNTPMenuMode('apps', False)
-    self.SetNTPMenuMode('most_visited', True)
-    self.SetNTPMenuMode('recently_closed', False)
-    self.SetNTPMenuMode('apps', True)
-    thumb_info = self.GetNTPThumbnailMode()
-    expected_thumb_info = {
-      u'apps': True,
-      u'most_visited': False
-    }
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-    menu_info = self.GetNTPMenuMode()
-    expected_menu_info = {
-      u'apps': True,
-      u'most_visited': True,
-      u'recently_closed': False
-    }
-    self._VerifyThumbnailOrMenuMode(menu_info, expected_menu_info)
-
-    # Turn off menu mode for all sections.
-    self.SetNTPMenuMode('apps', False)
-    self.SetNTPMenuMode('most_visited', False)
-    self.SetNTPMenuMode('recently_closed', False)
-
-    # Set menu mode for the Most Visited and Recently Closed sections, set and
-    # unset thumbnail mode for a few sections, and verify all is as expected.
-    self.SetNTPMenuMode('most_visited', True)
-    self.SetNTPMenuMode('recently_closed', True)
-    self.SetNTPThumbnailMode('apps', True)
-    self.SetNTPThumbnailMode('most_visited', True)
-    self.SetNTPThumbnailMode('apps', False)
-    self.SetNTPThumbnailMode('most_visited', False)
-    self.SetNTPThumbnailMode('apps', True)
-    self.SetNTPThumbnailMode('most_visited', True)
-    menu_info = self.GetNTPMenuMode()
-    expected_menu_info = {
-      u'apps': False,
-      u'most_visited': True,
-      u'recently_closed': True
-    }
-    self._VerifyThumbnailOrMenuMode(menu_info, expected_menu_info)
-    thumb_info = self.GetNTPThumbnailMode()
-    expected_thumb_info = {
-      u'apps': False,
-      u'most_visited': True
-    }
-    self._VerifyThumbnailOrMenuMode(thumb_info, expected_thumb_info)
-
 
 if __name__ == '__main__':
   pyauto_functional.Main()

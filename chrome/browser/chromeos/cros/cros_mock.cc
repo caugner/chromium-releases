@@ -10,9 +10,7 @@
 #include "chrome/browser/chromeos/cros/mock_cryptohome_library.h"
 #include "chrome/browser/chromeos/cros/mock_library_loader.h"
 #include "chrome/browser/chromeos/cros/mock_network_library.h"
-#include "chrome/browser/chromeos/cros/mock_power_library.h"
 #include "chrome/browser/chromeos/cros/mock_screen_lock_library.h"
-#include "chrome/browser/chromeos/cros/mock_speech_synthesis_library.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -35,9 +33,7 @@ CrosMock::CrosMock()
     : loader_(NULL),
       mock_cryptohome_library_(NULL),
       mock_network_library_(NULL),
-      mock_power_library_(NULL),
-      mock_screen_lock_library_(NULL),
-      mock_speech_synthesis_library_(NULL) {
+      mock_screen_lock_library_(NULL) {
 }
 
 CrosMock::~CrosMock() {
@@ -49,7 +45,6 @@ chromeos::CrosLibrary::TestApi* CrosMock::test_api() {
 
 void CrosMock::InitStatusAreaMocks() {
   InitMockNetworkLibrary();
-  InitMockPowerLibrary();
 }
 
 void CrosMock::InitMockLibraryLoader() {
@@ -78,29 +73,12 @@ void CrosMock::InitMockNetworkLibrary() {
   test_api()->SetNetworkLibrary(mock_network_library_, true);
 }
 
-void CrosMock::InitMockPowerLibrary() {
-  InitMockLibraryLoader();
-  if (mock_power_library_)
-    return;
-  mock_power_library_ = new StrictMock<MockPowerLibrary>();
-  test_api()->SetPowerLibrary(mock_power_library_, true);
-}
-
 void CrosMock::InitMockScreenLockLibrary() {
   InitMockLibraryLoader();
   if (mock_screen_lock_library_)
     return;
   mock_screen_lock_library_ = new StrictMock<MockScreenLockLibrary>();
   test_api()->SetScreenLockLibrary(mock_screen_lock_library_, true);
-}
-
-void CrosMock::InitMockSpeechSynthesisLibrary() {
-  InitMockLibraryLoader();
-  if (mock_speech_synthesis_library_)
-    return;
-  mock_speech_synthesis_library_ =
-      new StrictMock<MockSpeechSynthesisLibrary>();
-  test_api()->SetSpeechSynthesisLibrary(mock_speech_synthesis_library_, true);
 }
 
 // Initialization of mocks.
@@ -112,22 +90,12 @@ MockNetworkLibrary* CrosMock::mock_network_library() {
   return mock_network_library_;
 }
 
-MockPowerLibrary* CrosMock::mock_power_library() {
-  return mock_power_library_;
-}
-
 MockScreenLockLibrary* CrosMock::mock_screen_lock_library() {
   return mock_screen_lock_library_;
 }
 
-MockSpeechSynthesisLibrary* CrosMock::mock_speech_synthesis_library() {
-  return mock_speech_synthesis_library_;
-}
-
 void CrosMock::SetStatusAreaMocksExpectations() {
   SetNetworkLibraryStatusAreaExpectations();
-  SetPowerLibraryStatusAreaExpectations();
-  SetPowerLibraryExpectations();
 }
 
 void CrosMock::SetNetworkLibraryStatusAreaExpectations() {
@@ -226,82 +194,12 @@ void CrosMock::SetNetworkLibraryStatusAreaExpectations() {
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, ethernet_connected())
-      .Times(1)
+      .Times(AnyNumber())
       .WillRepeatedly((Return(false)))
       .RetiresOnSaturation();
   EXPECT_CALL(*mock_network_library_, ethernet_connecting())
-      .Times(1)
+      .Times(AnyNumber())
       .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-}
-
-void CrosMock::SetPowerLibraryStatusAreaExpectations() {
-  EXPECT_CALL(*mock_power_library_, AddObserver(_))
-      .Times(3)
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsBatteryFullyCharged())
-      .Times(1)
-      .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsBatteryPresent())
-      .Times(1)
-      .WillOnce((Return(true)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryPercentage())
-      .Times(1)
-      .WillRepeatedly((Return(42.0)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsLinePowerOn())
-      .Times(1)
-      .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToEmpty())
-      .Times(1)
-      .WillRepeatedly((Return(base::TimeDelta::FromMinutes(42))))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToFull())
-      .Times(1)
-      .WillRepeatedly((Return(base::TimeDelta::FromMinutes(24))))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, RemoveObserver(_))
-      .Times(3)
-      .RetiresOnSaturation();
-}
-
-void CrosMock::SetPowerLibraryExpectations() {
-  // EnableScreenLock is currently bounded with a prefs value and thus is
-  // always called when loading
-  EXPECT_CALL(*mock_power_library_, EnableScreenLock(_))
-      .Times(AnyNumber());
-}
-
-void CrosMock::SetSpeechSynthesisLibraryExpectations() {
-  InSequence s;
-  EXPECT_CALL(*mock_speech_synthesis_library_, StopSpeaking())
-      .WillOnce(Return(true))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_speech_synthesis_library_, SetSpeakProperties(_))
-      .WillOnce(Return(true))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_speech_synthesis_library_, Speak(_))
-      .WillOnce(Return(true))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_speech_synthesis_library_, IsSpeaking())
-      .WillOnce(Return(true))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_speech_synthesis_library_, StopSpeaking())
-      .WillOnce(Return(true))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_speech_synthesis_library_, SetSpeakProperties(_))
-      .WillOnce(Return(true))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_speech_synthesis_library_, Speak(_))
-      .WillOnce(Return(true))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_speech_synthesis_library_, IsSpeaking())
-      .WillOnce(Return(true))
-      .WillOnce(Return(true))
-      .WillOnce(Return(false))
       .RetiresOnSaturation();
 }
 
@@ -313,12 +211,8 @@ void CrosMock::TearDownMocks() {
     test_api()->SetCryptohomeLibrary(NULL, false);
   if (mock_network_library_)
     test_api()->SetNetworkLibrary(NULL, false);
-  if (mock_power_library_)
-    test_api()->SetPowerLibrary(NULL, false);
   if (mock_screen_lock_library_)
     test_api()->SetScreenLockLibrary(NULL, false);
-  if (mock_speech_synthesis_library_)
-    test_api()->SetSpeechSynthesisLibrary(NULL, false);
 }
 
 }  // namespace chromeos

@@ -4,160 +4,150 @@
 
 #include "chrome/browser/chromeos/status/power_menu_button.h"
 
-#include "chrome/browser/chromeos/cros/cros_in_process_browser_test.h"
-#include "chrome/browser/chromeos/cros/mock_power_library.h"
 #include "chrome/browser/chromeos/frame/browser_view.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "grit/theme_resources.h"
+#include "chrome/test/base/in_process_browser_test.h"
+#include "ui/views/view.h"
 
-namespace {
-const int kNumBatteryStates = 20;
-}
+#if defined(USE_AURA)
+#include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
+#endif
+
 namespace chromeos {
-using ::testing::AnyNumber;
-using ::testing::InvokeWithoutArgs;
-using ::testing::Return;
-using ::testing::ReturnRef;
-using ::testing::_;
 
-class PowerMenuButtonTest : public CrosInProcessBrowserTest {
+class PowerMenuButtonTest : public InProcessBrowserTest {
  protected:
-  MockPowerLibrary *mock_power_library_;
-
-  PowerMenuButtonTest() : CrosInProcessBrowserTest(),
-                          mock_power_library_(NULL) {
+  PowerMenuButtonTest() : InProcessBrowserTest() {
   }
 
   virtual void SetUpInProcessBrowserTestFixture() {
-    cros_mock_->InitStatusAreaMocks();
-    cros_mock_->SetStatusAreaMocksExpectations();
-    mock_power_library_ = cros_mock_->mock_power_library();
   }
 
   PowerMenuButton* GetPowerMenuButton() {
-    BrowserView* view = static_cast<BrowserView*>(browser()->window());
-    PowerMenuButton* power = static_cast<StatusAreaView*>(view->
-        GetViewByID(VIEW_ID_STATUS_AREA))->power_view();
-    return power;
+    views::View* view =
+#if defined(USE_AURA)
+        ChromeShellDelegate::instance()->GetStatusArea();
+#else
+        static_cast<BrowserView*>(browser()->window());
+#endif
+    return static_cast<PowerMenuButton*>(
+        view->GetViewByID(VIEW_ID_STATUS_BUTTON_POWER));
   }
 
-  int CallPowerChangedAndGetBatteryIndex() {
+  string16 CallPowerChangedAndGetTooltipText(const PowerSupplyStatus& status) {
     PowerMenuButton* power = GetPowerMenuButton();
-    power->PowerChanged(mock_power_library_);
-    return power->battery_index();
+
+    power->PowerChanged(status);
+    EXPECT_TRUE(power->IsVisible());
+
+    string16 tooltip;
+    // There is static_cast<StatusAreaButton*> because GetTootipText is also
+    // declared in MenuDelegate
+    EXPECT_TRUE(static_cast<StatusAreaButton*>(power)->GetTooltipText(
+        gfx::Point(0, 0), &tooltip));
+    return tooltip;
+  }
+
+  string16 SetBatteryPercentageTo50AndGetTooltipText() {
+    PowerSupplyStatus status;
+    // No battery present.
+    status.battery_is_present    = true;
+    status.battery_percentage    = 50.0;
+    status.battery_is_full       = false;
+    status.line_power_on         = false;
+    status.battery_seconds_to_empty = 42;
+    status.battery_seconds_to_full  = 24;
+    return CallPowerChangedAndGetTooltipText(status);
   }
 };
 
 IN_PROC_BROWSER_TEST_F(PowerMenuButtonTest, BatteryMissingTest) {
-  EXPECT_CALL(*mock_power_library_, IsBatteryPresent())
-      .WillOnce((Return(false)))  // no battery
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryPercentage())
-      .WillOnce((Return(42.0)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsBatteryFullyCharged())
-      .WillOnce((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsLinePowerOn())
-      .WillOnce((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToEmpty())
-      .WillOnce((Return(base::TimeDelta::FromMinutes(42))))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToFull())
-      .WillOnce((Return(base::TimeDelta::FromMinutes(24))))
-      .RetiresOnSaturation();
-  EXPECT_EQ(-1, CallPowerChangedAndGetBatteryIndex());
+  const string16 tooltip_before = SetBatteryPercentageTo50AndGetTooltipText();
+
+  PowerSupplyStatus status;
+  // No battery present.
+  status.battery_is_present    = false;
+  status.battery_percentage    = 42.0;
+  status.battery_is_full       = false;
+  status.line_power_on         = true;
+  status.battery_seconds_to_empty = 42;
+  status.battery_seconds_to_full  = 24;
+
+  PowerMenuButton* power = GetPowerMenuButton();
+  power->PowerChanged(status);
+
+  EXPECT_FALSE(power->IsVisible());
+}
+
+IN_PROC_BROWSER_TEST_F(PowerMenuButtonTest, BatteryNotSupportedTest) {
+  PowerSupplyStatus status;
+  // No battery present.
+  status.battery_is_present    = false;
+  status.battery_percentage    = 42.0;
+  status.battery_is_full       = false;
+  status.line_power_on         = false;
+  status.battery_seconds_to_empty = 42;
+  status.battery_seconds_to_full  = 24;
+
+  PowerMenuButton* power = GetPowerMenuButton();
+  power->PowerChanged(status);
+
+  EXPECT_FALSE(power->IsVisible());
 }
 
 IN_PROC_BROWSER_TEST_F(PowerMenuButtonTest, BatteryChargedTest) {
-  EXPECT_CALL(*mock_power_library_, IsBatteryPresent())
-      .WillOnce((Return(true)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryPercentage())
-      .WillOnce((Return(42.0)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsBatteryFullyCharged())
-      .WillOnce((Return(true)))  // fully charged
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsLinePowerOn())
-      .WillOnce((Return(true)))  // plugged in
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToEmpty())
-      .WillOnce((Return(base::TimeDelta::FromMinutes(42))))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToFull())
-      .WillOnce((Return(base::TimeDelta::FromMinutes(0))))
-      .RetiresOnSaturation();
-  EXPECT_EQ(kNumBatteryStates - 1, CallPowerChangedAndGetBatteryIndex());
+  const string16 tooltip_before = SetBatteryPercentageTo50AndGetTooltipText();
+
+  PowerSupplyStatus status;
+  // The battery is fully charged, and line power is plugged in.
+  status.battery_is_present    = true;
+  status.battery_percentage    = 42.0;
+  status.battery_is_full       = true;
+  status.line_power_on         = true;
+  status.battery_seconds_to_empty = 42;
+  status.battery_seconds_to_full  = 24;
+
+  EXPECT_NE(tooltip_before, CallPowerChangedAndGetTooltipText(status));
 }
 
 IN_PROC_BROWSER_TEST_F(PowerMenuButtonTest, BatteryChargingTest) {
-  const int NUM_TIMES = 19;
-  EXPECT_CALL(*mock_power_library_, IsBatteryPresent())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(true)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsBatteryFullyCharged())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsLinePowerOn())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(true)))  // plugged in
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToEmpty())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(base::TimeDelta::FromMinutes(42))))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToFull())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(base::TimeDelta::FromMinutes(24))))
-      .RetiresOnSaturation();
+  string16 tooltip_before = SetBatteryPercentageTo50AndGetTooltipText();
 
-  int index = 0;
-  for (float percent = 5.0; percent < 100.0; percent += 5.0) {
-    EXPECT_CALL(*mock_power_library_, GetBatteryPercentage())
-        .WillOnce((Return(percent)))
-        .RetiresOnSaturation();
-    EXPECT_EQ(index, CallPowerChangedAndGetBatteryIndex());
-    index++;
+  PowerSupplyStatus status;
+  status.battery_is_present    = true;
+  status.battery_is_full       = false;
+  status.line_power_on         = true;
+  status.battery_seconds_to_empty = 42;
+  status.battery_seconds_to_full  = 24;
+
+  // Simulate various levels of charging.
+  for (double percent = 5.0; percent < 100.0; percent += 5.0) {
+    status.battery_percentage = percent;
+    const string16 tooltip_after = CallPowerChangedAndGetTooltipText(status);
+    EXPECT_NE(tooltip_before, tooltip_after);
+    tooltip_before = tooltip_after;
   }
 }
 
 IN_PROC_BROWSER_TEST_F(PowerMenuButtonTest, BatteryDischargingTest) {
-  const int NUM_TIMES = 19;
-  EXPECT_CALL(*mock_power_library_, IsBatteryPresent())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(true)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsBatteryFullyCharged())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, IsLinePowerOn())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(false)))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToEmpty())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(base::TimeDelta::FromMinutes(42))))
-      .RetiresOnSaturation();
-  EXPECT_CALL(*mock_power_library_, GetBatteryTimeToFull())
-      .Times(NUM_TIMES)
-      .WillRepeatedly((Return(base::TimeDelta::FromMinutes(24))))
-      .RetiresOnSaturation();
+  string16 tooltip_before = SetBatteryPercentageTo50AndGetTooltipText();
 
-  int index = 0;
-  for (float percent = 5.0; percent < 100.0; percent += 5.0) {
-    EXPECT_CALL(*mock_power_library_, GetBatteryPercentage())
-        .WillOnce((Return(percent)))
-        .RetiresOnSaturation();
-    EXPECT_EQ(index, CallPowerChangedAndGetBatteryIndex());
-    index++;
+  PowerSupplyStatus status;
+  status.battery_is_present    = true;
+  status.battery_is_full       = false;
+  status.line_power_on         = false;
+  status.battery_seconds_to_empty = 42;
+  status.battery_seconds_to_full  = 24;
+
+  // Simulate various levels of discharging.
+  for (double percent = 5.0; percent < 100.0; percent += 5.0) {
+    status.battery_percentage = percent;
+    const string16 tooltip_after = CallPowerChangedAndGetTooltipText(status);
+    EXPECT_NE(tooltip_before, tooltip_after);
+    tooltip_before = tooltip_after;
   }
 }
 

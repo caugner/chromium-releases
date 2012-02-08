@@ -12,6 +12,7 @@
 #include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/sync/protocol/app_notification_specifics.pb.h"
+#include "chrome/browser/sync/protocol/app_setting_specifics.pb.h"
 #include "chrome/browser/sync/protocol/app_specifics.pb.h"
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
@@ -102,6 +103,15 @@ DictionaryValue* EncryptedDataToValue(const sync_pb::EncryptedData& proto) {
   return value;
 }
 
+DictionaryValue* AppSettingsToValue(
+    const sync_pb::AppNotificationSettings& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET_BOOL(initial_setup_done);
+  SET_BOOL(disabled);
+  SET_STR(oauth_client_id);
+  return value;
+}
+
 DictionaryValue* SessionHeaderToValue(
     const sync_pb::SessionHeader& proto) {
   DictionaryValue* value = new DictionaryValue();
@@ -178,10 +188,18 @@ DictionaryValue* AppNotificationSpecificsToValue(
   return value;
 }
 
+DictionaryValue* AppSettingSpecificsToValue(
+    const sync_pb::AppSettingSpecifics& proto) {
+  DictionaryValue* value = new DictionaryValue();
+  SET(extension_setting, ExtensionSettingSpecificsToValue);
+  return value;
+}
+
 DictionaryValue* AppSpecificsToValue(
     const sync_pb::AppSpecifics& proto) {
   DictionaryValue* value = new DictionaryValue();
   SET(extension, ExtensionSpecificsToValue);
+  SET(notification_settings, AppSettingsToValue);
   return value;
 }
 
@@ -260,13 +278,14 @@ DictionaryValue* NigoriSpecificsToValue(
   SET_BOOL(encrypt_autofill);
   SET_BOOL(encrypt_themes);
   SET_BOOL(encrypt_typed_urls);
+  SET_BOOL(encrypt_extension_settings);
   SET_BOOL(encrypt_extensions);
   SET_BOOL(encrypt_sessions);
+  SET_BOOL(encrypt_app_settings);
   SET_BOOL(encrypt_apps);
   SET_BOOL(encrypt_search_engines);
   SET_BOOL(sync_tabs);
   SET_BOOL(encrypt_everything);
-  SET_BOOL(encrypt_extension_settings);
   return value;
 }
 
@@ -340,8 +359,9 @@ DictionaryValue* TypedUrlSpecificsToValue(
 DictionaryValue* EntitySpecificsToValue(
     const sync_pb::EntitySpecifics& specifics) {
   DictionaryValue* value = new DictionaryValue();
-  SET_EXTENSION(sync_pb, app_notification, AppNotificationSpecificsToValue);
   SET_EXTENSION(sync_pb, app, AppSpecificsToValue);
+  SET_EXTENSION(sync_pb, app_notification, AppNotificationSpecificsToValue);
+  SET_EXTENSION(sync_pb, app_setting, AppSettingSpecificsToValue);
   SET_EXTENSION(sync_pb, autofill, AutofillSpecificsToValue);
   SET_EXTENSION(sync_pb, autofill_profile, AutofillProfileSpecificsToValue);
   SET_EXTENSION(sync_pb, bookmark, BookmarkSpecificsToValue);

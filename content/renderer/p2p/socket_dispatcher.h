@@ -21,7 +21,7 @@
 
 #include <vector>
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/id_map.h"
 #include "base/observer_list_threadsafe.h"
@@ -76,11 +76,12 @@ class P2PSocketDispatcher : public content::RenderViewObserver {
   void RemoveNetworkListObserver(NetworkListObserver* network_list_observer);
 
   // RenderViewObserver overrides.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   friend class P2PHostAddressRequest;
   friend class P2PSocketClient;
+  class AsyncMessageSender;
 
   base::MessageLoopProxy* message_loop();
 
@@ -113,6 +114,8 @@ class P2PSocketDispatcher : public content::RenderViewObserver {
   bool network_notifications_started_;
   scoped_refptr<ObserverListThreadSafe<NetworkListObserver> >
       network_list_observers_;
+
+  scoped_refptr<AsyncMessageSender> async_message_sender_;
 
   DISALLOW_COPY_AND_ASSIGN(P2PSocketDispatcher);
 };

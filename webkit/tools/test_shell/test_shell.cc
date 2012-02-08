@@ -34,12 +34,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/size.h"
@@ -47,8 +47,6 @@
 #include "webkit/glue/user_agent.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/plugins/npapi/plugin_list.h"
-#include "webkit/plugins/webplugininfo.h"
 #include "webkit/tools/test_shell/notification_presenter.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
@@ -363,6 +361,7 @@ void TestShell::ResetWebPreferences() {
         // LayoutTests/http/tests/local, to access http server.
         if (layout_test_mode_)
           web_prefs_->allow_universal_access_from_file_urls = true;
+        web_prefs_->visual_word_movement_enabled = false;
     }
 }
 
@@ -625,40 +624,3 @@ WebKit::WebGeolocationClientMock* TestShell::geolocation_client_mock() {
   }
   return geolocation_client_mock_.get();
 }
-
-//-----------------------------------------------------------------------------
-
-namespace webkit_glue {
-
-bool IsProtocolSupportedForMedia(const GURL& url) {
-  if (url.SchemeIsFile() ||
-      url.SchemeIs("http") ||
-      url.SchemeIs("https") ||
-      url.SchemeIs("data"))
-    return true;
-  return false;
-}
-
-void GetPlugins(bool refresh,
-                std::vector<webkit::WebPluginInfo>* plugins) {
-  if (refresh)
-    webkit::npapi::PluginList::Singleton()->RefreshPlugins();
-  webkit::npapi::PluginList::Singleton()->GetPlugins(plugins);
-  // Don't load the forked TestNetscapePlugIn in the chromium code, use
-  // the copy in webkit.org's repository instead.
-  const FilePath::StringType kPluginBlackList[] = {
-    FILE_PATH_LITERAL("npapi_layout_test_plugin.dll"),
-    FILE_PATH_LITERAL("WebKitTestNetscapePlugIn.plugin"),
-    FILE_PATH_LITERAL("libnpapi_layout_test_plugin.so"),
-  };
-  for (int i = plugins->size() - 1; i >= 0; --i) {
-    webkit::WebPluginInfo plugin_info = plugins->at(i);
-    for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
-      if (plugin_info.path.BaseName() == FilePath(kPluginBlackList[j])) {
-        plugins->erase(plugins->begin() + i);
-      }
-    }
-  }
-}
-
-}  // namespace webkit_glue

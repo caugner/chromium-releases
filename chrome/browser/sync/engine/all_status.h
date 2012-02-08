@@ -11,6 +11,7 @@
 
 #include <map>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/sync/engine/syncer_types.h"
@@ -20,16 +21,12 @@
 namespace browser_sync {
 
 class ScopedStatusLock;
-class ServerConnectionManager;
-class Syncer;
-class SyncerThread;
 struct AuthWatcherEvent;
 struct ServerConnectionEvent;
 
 class AllStatus : public SyncEngineEventListener {
   friend class ScopedStatusLock;
  public:
-
   AllStatus();
   virtual ~AllStatus();
 
@@ -37,7 +34,7 @@ class AllStatus : public SyncEngineEventListener {
 
   void HandleAuthWatcherEvent(const AuthWatcherEvent& event);
 
-  virtual void OnSyncEngineEvent(const SyncEngineEvent& event);
+  virtual void OnSyncEngineEvent(const SyncEngineEvent& event) OVERRIDE;
 
   sync_api::SyncManager::Status status() const;
 
@@ -50,6 +47,8 @@ class AllStatus : public SyncEngineEventListener {
   void SetEncryptedTypes(const syncable::ModelTypeSet& types);
   void SetCryptographerReady(bool ready);
   void SetCryptoHasPendingKeys(bool has_pending_keys);
+
+  void SetUniqueId(const std::string& guid);
 
  protected:
   // Examines syncer to calculate syncing and the unsynced count,

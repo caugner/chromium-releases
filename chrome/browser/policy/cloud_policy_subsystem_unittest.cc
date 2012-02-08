@@ -19,8 +19,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_pref_service.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/test/test_browser_thread.h"
 #include "policy/policy_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -29,6 +28,7 @@ namespace policy {
 using ::testing::_;
 using ::testing::AtMost;
 using ::testing::InSequence;
+using content::BrowserThread;
 
 namespace em = enterprise_management;
 
@@ -117,7 +117,8 @@ class CloudPolicySubsystemTestBase : public TESTBASE {
     ASSERT_TRUE(temp_user_data_dir_.CreateUniqueTempDir());
     data_store_.reset(CloudPolicyDataStore::CreateForUserPolicies());
     cache_ = new UserPolicyCache(
-        temp_user_data_dir_.path().AppendASCII("CloudPolicyControllerTest"));
+        temp_user_data_dir_.path().AppendASCII("CloudPolicyControllerTest"),
+        false  /* wait_for_policy_fetch */);
     cloud_policy_subsystem_.reset(new TestingCloudPolicySubsystem(
         data_store_.get(), cache_,
         kDeviceManagementUrl, logger_.get()));
@@ -231,8 +232,8 @@ class CloudPolicySubsystemTestBase : public TESTBASE {
   ScopedTempDir temp_user_data_dir_;
 
   MessageLoop loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
 
   scoped_ptr<EventLogger> logger_;
   scoped_ptr<CloudPolicyDataStore> data_store_;

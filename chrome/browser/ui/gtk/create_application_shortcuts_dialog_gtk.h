@@ -7,12 +7,15 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/shell_integration.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/gtk/gtk_signal.h"
+
+using content::BrowserThread;
 
 typedef struct _GdkPixbuf GdkPixbuf;
 typedef struct _GtkWidget GtkWidget;
@@ -83,7 +86,7 @@ class CreateWebApplicationShortcutsDialogGtk
                                          TabContentsWrapper* tab_contents);
   virtual ~CreateWebApplicationShortcutsDialogGtk() {}
 
-  virtual void OnCreatedShortcut(void);
+  virtual void OnCreatedShortcut(void) OVERRIDE;
 
  private:
 
@@ -109,7 +112,7 @@ class CreateChromeApplicationShortcutsDialogGtk
   // it to the "Create Shortcut" dailog box.
   virtual void OnImageLoaded(SkBitmap* image,
                              const ExtensionResource& resource,
-                             int index);
+                             int index) OVERRIDE;
 
  private:
   const Extension* app_;

@@ -8,7 +8,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_menu_bubble_controller.h"
@@ -16,7 +18,7 @@
 #import "chrome/browser/ui/cocoa/image_utils.h"
 #import "chrome/browser/ui/cocoa/menu_controller.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -36,17 +38,17 @@
 
 namespace AvatarButtonControllerInternal {
 
-class Observer : public NotificationObserver {
+class Observer : public content::NotificationObserver {
  public:
   Observer(AvatarButtonController* button) : button_(button) {
     registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
   // NotificationObserver:
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) OVERRIDE {
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) OVERRIDE {
     switch (type) {
       case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
         [button_ updateAvatar];
@@ -59,7 +61,7 @@ class Observer : public NotificationObserver {
   }
 
  private:
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   AvatarButtonController* button_;  // Weak; owns this.
 };
@@ -121,7 +123,8 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
     [self setView:button];
 
     if (browser_->profile()->IsOffTheRecord()) {
-      [self setImage:gfx::GetCachedImageWithName(@"otr_icon.pdf")];
+      [self setImage:[self compositeImageWithShadow:
+          gfx::GetCachedImageWithName(@"otr_icon.pdf")]];
       [self setOpenMenuOnClick:NO];
     } else {
       observer_.reset(new AvatarButtonControllerInternal::Observer(self));
@@ -132,24 +135,32 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
   return self;
 }
 
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter]
+      removeObserver:self
+                name:NSWindowWillCloseNotification
+              object:[menuController_ window]];
+  [super dealloc];
+}
+
 - (NSButton*)buttonView {
   return static_cast<NSButton*>(self.view);
 }
 
 - (void)setImage:(NSImage*)image {
-  [self.buttonView setImage:[self compositeImageWithShadow:image]];
+  [self.buttonView setImage:image];
 }
 
-// Private /////////////////////////////////////////////////////////////////////
-
-- (void)setOpenMenuOnClick:(BOOL)flag {
-  [self.buttonView setEnabled:flag];
-}
-
-- (IBAction)buttonClicked:(id)sender {
-  DCHECK_EQ(self.buttonView, sender);
+- (void)showAvatarBubble {
   if (menuController_)
     return;
+
+  NSWindowController* wc =
+      [browser_->window()->GetNativeHandle() windowController];
+  if ([wc isKindOfClass:[BrowserWindowController class]]) {
+    [static_cast<BrowserWindowController*>(wc)
+        lockBarVisibilityForOwner:self withAnimation:NO delay:NO];
+  }
 
   NSView* view = self.view;
   NSPoint point = NSMakePoint(NSMidX([view bounds]),
@@ -166,9 +177,28 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
              name:NSWindowWillCloseNotification
            object:[menuController_ window]];
   [menuController_ showWindow:self];
+
+  ProfileMetrics::LogProfileOpenMethod(ProfileMetrics::ICON_AVATAR_BUBBLE);
+}
+
+// Private /////////////////////////////////////////////////////////////////////
+
+- (void)setOpenMenuOnClick:(BOOL)flag {
+  [self.buttonView setEnabled:flag];
+}
+
+- (IBAction)buttonClicked:(id)sender {
+  DCHECK_EQ(self.buttonView, sender);
+  [self showAvatarBubble];
 }
 
 - (void)bubbleWillClose:(NSNotification*)notif {
+  NSWindowController* wc =
+      [browser_->window()->GetNativeHandle() windowController];
+  if ([wc isKindOfClass:[BrowserWindowController class]]) {
+    [static_cast<BrowserWindowController*>(wc)
+        releaseBarVisibilityForOwner:self withAnimation:YES delay:NO];
+  }
   menuController_ = nil;
 }
 
@@ -209,7 +239,13 @@ const CGFloat kMenuYOffsetAdjust = 1.0;
   size_t index =
       cache.GetIndexOfProfileWithPath(browser_->profile()->GetPath());
   if (index != std::string::npos) {
-    [self setImage:cache.GetAvatarIconOfProfileAtIndex(index).ToNSImage()];
+    BOOL is_gaia_picture =
+        cache.IsUsingGAIAPictureOfProfileAtIndex(index) &&
+        cache.GetGAIAPictureOfProfileAtIndex(index);
+    gfx::Image icon = profiles::GetAvatarIconForTitleBar(
+        cache.GetAvatarIconOfProfileAtIndex(index), is_gaia_picture,
+        profiles::kAvatarIconWidth, profiles::kAvatarIconHeight);
+    [self setImage:icon.ToNSImage()];
 
     const string16& name = cache.GetNameOfProfileAtIndex(index);
     NSString* nsName = base::SysUTF16ToNSString(name);

@@ -4,13 +4,16 @@
 
 #include <string>
 
+#include "base/message_loop.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/navigation_entry.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -22,7 +25,7 @@ class GeolocationSettingsStateTests : public testing::Test {
 
  protected:
   MessageLoop message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 };
 
 TEST_F(GeolocationSettingsStateTests, ClearOnNewOrigin) {

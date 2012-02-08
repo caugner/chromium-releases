@@ -6,7 +6,9 @@
 
 #include <windows.h>
 
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 // Called only from UI thread.
 // static

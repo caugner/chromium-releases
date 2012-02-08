@@ -10,12 +10,12 @@
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 namespace chromeos {
 
@@ -29,6 +29,9 @@ const double kDefaultHeightRatio = 0.6;
 
 ///////////////////////////////////////////////////////////////////////////////
 // LoginHtmlDialog, public:
+
+void LoginHtmlDialog::Delegate::OnDialogClosed() {
+}
 
 LoginHtmlDialog::LoginHtmlDialog(Delegate* delegate,
                                  gfx::NativeWindow parent_window,
@@ -61,7 +64,7 @@ void LoginHtmlDialog::Show() {
 #else
   if (style_ & STYLE_BUBBLE) {
     views::Widget* bubble_window = BubbleWindow::Create(parent_window_,
-        static_cast<BubbleWindowStyle>(STYLE_XBAR | STYLE_THROBBER),
+        static_cast<DialogStyle>(STYLE_XBAR | STYLE_THROBBER),
         html_view);
     bubble_frame_view_ = static_cast<BubbleFrameView*>(
         bubble_window->non_client_view()->frame_view());
@@ -73,7 +76,8 @@ void LoginHtmlDialog::Show() {
     bubble_frame_view_->StartThrobber();
     notification_registrar_.Add(
         this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-        Source<TabContents>(html_view->dom_contents()->tab_contents()));
+        content::Source<TabContents>(
+            html_view->dom_contents()->tab_contents()));
   }
 #endif
   html_view->GetWidget()->Show();
@@ -136,8 +140,8 @@ bool LoginHtmlDialog::HandleContextMenu(const ContextMenuParams& params) {
 }
 
 void LoginHtmlDialog::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   DCHECK(type == content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME);
 #if defined(USE_AURA)
   // TODO(saintlou): Do we need a throbber for Aura?

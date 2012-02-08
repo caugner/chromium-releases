@@ -46,6 +46,7 @@
         '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
         '<(DEPTH)/webkit/support/webkit_support.gyp:quota',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_gpu',
+        '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_media',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_resources',
         '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support_common',
       ],
@@ -93,8 +94,6 @@
         'test_shell_webthemecontrol.cc',
         'test_shell_webthemeengine.h',
         'test_shell_webthemeengine.cc',
-        'test_web_worker.cc',
-        'test_web_worker.h',
         'test_webview_delegate.cc',
         'test_webview_delegate.h',
         'test_webview_delegate_gtk.cc',
@@ -310,10 +309,8 @@
             },
           ],
           'copies': [
-            # TODO(ajwong): This, and the parallel chromium stanza below
-            # really should find a way to share file paths with
-            # ffmpeg.gyp so they don't diverge. (BUG=23602)
             {
+              # Copy FFmpeg binaries for audio/video support.
               'destination': '<(PRODUCT_DIR)/TestShell.app/Contents/MacOS/',
               'files': [
                 '<(PRODUCT_DIR)/ffmpegsumo.so',
@@ -418,9 +415,6 @@
         '../../glue/dom_serializer_unittest.cc',
         '../../glue/glue_serialize_unittest.cc',
         '../../glue/iframe_redirect_unittest.cc',
-        '../../glue/media/buffered_data_source_unittest.cc',
-        '../../glue/media/buffered_resource_loader_unittest.cc',
-        '../../glue/media/simple_data_source_unittest.cc',
         '../../glue/mimetype_unittest.cc',
         '../../glue/multipart_response_delegate_unittest.cc',
         '../../glue/regular_expression_unittest.cc',
@@ -430,6 +424,11 @@
         '../../glue/webframe_unittest.cc',
         '../../glue/webkit_glue_unittest.cc',
         '../../glue/webview_unittest.cc',
+        '../../media/buffered_data_source_unittest.cc',
+        '../../media/buffered_resource_loader_unittest.cc',
+        '../../media/simple_data_source_unittest.cc',
+        '../../media/test_response_generator.cc',
+        '../../media/test_response_generator.h',
         '../../mocks/mock_resource_loader_bridge.h',
         '../../mocks/mock_webframeclient.h',
         '../../mocks/mock_weburlloader.cc',
@@ -439,13 +438,14 @@
         '../../plugins/npapi/plugin_list_unittest.cc',
         '../../plugins/npapi/webplugin_impl_unittest.cc',
         '../../plugins/ppapi/callbacks_unittest.cc',
+        '../../plugins/ppapi/host_var_tracker_unittest.cc',
         '../../plugins/ppapi/mock_plugin_delegate.cc',
         '../../plugins/ppapi/mock_plugin_delegate.h',
         '../../plugins/ppapi/mock_resource.h',
         '../../plugins/ppapi/ppapi_unittest.cc',
         '../../plugins/ppapi/ppapi_unittest.h',
+        '../../plugins/ppapi/ppb_file_chooser_impl_unittest.cc',
         '../../plugins/ppapi/quota_file_io_unittest.cc',
-        '../../plugins/ppapi/resource_tracker_unittest.cc',
         '../../plugins/ppapi/time_conversion_unittest.cc',
         '../../plugins/ppapi/url_request_info_unittest.cc',
         '../../quota/mock_quota_manager.cc',

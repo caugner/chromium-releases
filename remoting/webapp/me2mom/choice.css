@@ -56,7 +56,6 @@ button[disabled], .button[disabled]:hover {
 h1 {
   font-size: 24px;
   font-weight: normal;
-  margin-__MSG_@@bidi_start_edge__: 10px;
 }
 
 label {
@@ -91,6 +90,11 @@ label {
   text-align: center;
 }
 
+.collapsed {
+  opacity: 0;
+  height: 0 !important;
+}
+
 .choice-header {
   font-size: 24px;
   font-weight: normal;
@@ -104,6 +108,10 @@ label {
 .choice-panel {
   margin-top: 17px;
   padding-bottom: 20px;
+}
+
+.clickable {
+  cursor: pointer;
 }
 
 .description {
@@ -133,6 +141,7 @@ label {
 .icon-label {
   display: inline-block;
   vertical-align: top;
+  margin-__MSG_@@bidi_start_edge__: 10px;
 }
 
 .information-box {
@@ -178,6 +187,77 @@ label {
 
 .hide-scrollbars {
   overflow-y: hidden;
+}
+
+.host-list-container {
+  -webkit-transition: all 0.5s;
+  overflow: hidden;
+}
+
+.host-list-table {
+  margin-__MSG_@@bidi_start_edge__: 30px;
+  width: 610px;  /* width + margin = body width */
+  border-spacing: 0;
+}
+
+.host-list-row {
+  height: 50px;
+  color: black;
+}
+
+.host-list-row td {
+  border-bottom: 1px solid transparent;
+  border-top: 1px solid transparent;
+}
+
+.host-list-row:hover {
+  background-color: #e7eef2;
+}
+
+.host-list-rename-icon, .host-list-remove-icon {
+  opacity: 0;
+}
+
+.host-list-row:hover .host-list-rename-icon {
+  opacity: 0.8;
+}
+
+.host-list-row:hover .host-list-remove-icon {
+  opacity: 0.3;
+}
+
+.host-list-edit:hover .host-list-rename-icon {
+  opacity: 1;
+}
+
+.host-list-edit:hover .host-list-remove-icon {
+  opacity: 0.5;
+}
+
+.host-list-row:hover td {
+  border-bottom: 1px solid #c6c6c6;
+  border-top: 1px solid #c6c6c6;
+}
+
+.host-list-row-end {
+  padding-__MSG_@@bidi_end_edge__: 10px;
+}
+
+.host-list-row-start {
+  padding-__MSG_@@bidi_start_edge__: 10px;
+}
+
+.host-offline {
+  color: #a9a9a9;
+}
+
+.host-offline .host-list-main-icon {
+  opacity: 0.5;
+}
+
+.small-print {
+  font-size: 13px;
+  color: #AAA;
 }
 
 .top-primary {
@@ -260,6 +340,10 @@ label {
   margin: 100px auto 0 auto;
   padding: 10px;
   width: 640px;
+}
+
+#host-list-error {
+  margin-__MSG_@@bidi_start_edge__: 40px;
 }
 
 #session-mode {

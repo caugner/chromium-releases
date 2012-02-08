@@ -9,28 +9,29 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
+#import "chrome/browser/ui/cocoa/bookmarks/bookmark_cell_single_line.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 
 // Simple class to watch for tab creation/destruction and close the bubble.
 // Bridge between Chrome-style notifications and ObjC-style notifications.
-class BookmarkBubbleNotificationBridge : public NotificationObserver {
+class BookmarkBubbleNotificationBridge : public content::NotificationObserver {
  public:
   BookmarkBubbleNotificationBridge(BookmarkBubbleController* controller,
                                    SEL selector);
   virtual ~BookmarkBubbleNotificationBridge() {}
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details);
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details);
  private:
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   BookmarkBubbleController* controller_;  // weak; owns us.
   SEL selector_;   // SEL sent to controller_ on notification.
 };
@@ -41,17 +42,17 @@ BookmarkBubbleNotificationBridge::BookmarkBubbleNotificationBridge(
   // registrar_ will automatically RemoveAll() when destroyed so we
   // don't need to do so explicitly.
   registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 // At this time all notifications instigate the same behavior (go
 // away) so we don't bother checking which notification came in.
 void BookmarkBubbleNotificationBridge::Observe(
   int type,
-  const NotificationSource& source,
-  const NotificationDetails& details) {
+  const content::NotificationSource& source,
+  const content::NotificationDetails& details) {
   [controller_ performSelector:selector_ withObject:controller_];
 }
 
@@ -104,6 +105,17 @@ void BookmarkBubbleNotificationBridge::Observe(
                  object:parentWindow_];
   }
   return self;
+}
+
+- (void)awakeFromNib {
+  // Check if NSTextFieldCell supports the method. This check is in place as
+  // only 10.6 and greater support the setUsesSingleLineMode method.
+  // TODO(kushi.p): Remove this when the project hits a 10.6+ only state.
+  NSTextFieldCell* nameFieldCell_ = [nameTextField_ cell];
+  if ([nameFieldCell_
+          respondsToSelector:@selector(setUsesSingleLineMode:)]) {
+    [nameFieldCell_ setUsesSingleLineMode:YES];
+  }
 }
 
 - (void)dealloc {

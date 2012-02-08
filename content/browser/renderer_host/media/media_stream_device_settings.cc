@@ -6,9 +6,11 @@
 
 #include "base/stl_util.h"
 #include "base/task.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/media/media_stream_settings_requester.h"
 #include "content/common/media/media_stream_options.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace media_stream {
 
@@ -122,6 +124,16 @@ void MediaStreamDeviceSettings::AvailableDevices(
           }
         }
       }
+      if (num_media_requests != devices_to_use.size()) {
+        // Not all requested device types were opened. This happens if all
+        // video capture devices are already opened, |in_use| isn't set for
+        // audio devices. Allow the first video capture device in the list to be
+        // opened for this user too.
+        DCHECK_NE(request->options.video_option, StreamOptions::kNoCamera);
+        StreamDeviceInfoArray device_array = (request->devices[kVideoCapture]);
+        devices_to_use.push_back(*(device_array.begin()));
+      }
+
       // Post result and delete request.
       requester_->DevicesAccepted(label, devices_to_use);
       requests_.erase(request_it);

@@ -12,14 +12,16 @@
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/page_navigator.h"
+#include "content/test/test_browser_thread.h"
 #include "grit/generated_resources.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #endif
+
+using content::BrowserThread;
 
 // PageNavigator implementation that records the URL.
 class TestingPageNavigator : public PageNavigator {
@@ -31,8 +33,9 @@ class TestingPageNavigator : public PageNavigator {
                                const GURL& referrer,
                                WindowOpenDisposition disposition,
                                content::PageTransition transition) OVERRIDE {
-    return OpenURL(OpenURLParams(url, referrer, disposition, transition,
-                                 false));
+    DCHECK(referrer.is_empty());
+    return OpenURL(OpenURLParams(url, content::Referrer(), disposition,
+                                 transition, false));
   }
 
   virtual TabContents* OpenURL(const OpenURLParams& params) OVERRIDE {
@@ -76,8 +79,8 @@ class BookmarkContextMenuControllerTest : public testing::Test {
 
  protected:
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
   scoped_ptr<TestingProfile> profile_;
   BookmarkModel* model_;
   TestingPageNavigator navigator_;
@@ -288,14 +291,7 @@ TEST_F(BookmarkContextMenuControllerTest, EmptyNodesNullParent) {
       controller.IsCommandIdEnabled(IDC_BOOKMARK_BAR_NEW_FOLDER));
 }
 
-// Fails on Linux Aura, probably because clipboard isn't built yet.
-// See http://crbug.com/100347
-#if defined(USE_AURA) && !defined(OS_WIN)
-#define MAYBE_CutCopyPasteNode FAILS_CutCopyPasteNode
-#else
-#define MAYBE_CutCopyPasteNode CutCopyPasteNode
-#endif
-TEST_F(BookmarkContextMenuControllerTest, MAYBE_CutCopyPasteNode) {
+TEST_F(BookmarkContextMenuControllerTest, CutCopyPasteNode) {
   const BookmarkNode* bb_node = model_->bookmark_bar_node();
   std::vector<const BookmarkNode*> nodes;
   nodes.push_back(bb_node->GetChild(0));

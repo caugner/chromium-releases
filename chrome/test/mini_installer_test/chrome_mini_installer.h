@@ -26,9 +26,9 @@ class ChromeMiniInstaller {
     VERSION_FOLDER
   };
 
-  // This method returns path to either program files
-  // or documents and setting based on the install type.
-  bool GetChromeInstallDirectoryLocation(FilePath* path);
+  // Get the location at which Chrome or Chrome Frame is installed.
+  bool GetInstallDirectory(FilePath* path);
+
   // Get the base multi-install command.
   CommandLine GetBaseMultiInstallCommand();
 
@@ -37,7 +37,7 @@ class ChromeMiniInstaller {
 
   void InstallChromeUsingMultiInstall();
   void InstallChromeFrameUsingMultiInstall();
-  void InstallChromeAndChromeFrameReadyMode();
+  void InstallChromeAndChromeFrame(bool ready_mode);
 
   // Installs chrome.
   void Install();
@@ -71,6 +71,10 @@ class ChromeMiniInstaller {
   // This method will perform a over install
   void OverInstall();
 
+  // Launch Chrome, assert process started.
+  // If |kill|, kill process after launch.
+  void LaunchChrome(bool kill);
+
  private:
   // Will clean up the machine if Chrome install is messed up.
   void CleanChromeInstall();
@@ -100,17 +104,13 @@ class ChromeMiniInstaller {
   HKEY GetRootRegistryKey();
 
   // Returns Chrome pv registry key value.
-  bool GetChromeVersionFromRegistry(std::string* reg_key_value);
+  bool GetChromeVersionFromRegistry(std::string* value);
 
   // This method gets the shortcut path from start menu based on install type.
   FilePath GetStartMenuShortcutPath();
 
   // Get user data directory path.
   FilePath GetUserDataDirPath();
-
-  // Launch Chrome, assert process started.
-  // If |kill|, kill process after launch.
-  void LaunchChrome(bool kill);
 
   // This method verifies if Chrome/Chrome Frame installed correctly.
   void VerifyInstall(bool over_install);
@@ -122,7 +122,8 @@ class ChromeMiniInstaller {
   // Launch IE with |navigate_url|.
   void LaunchIE(const std::wstring& navigate_url);
 
-  // Run installer using provided |command|.
+  // Run installer with given |command|. If installer is
+  // system level append "--system-level" flag.
   void RunInstaller(const CommandLine& command);
 
   // Compares the registry key values after overinstall.

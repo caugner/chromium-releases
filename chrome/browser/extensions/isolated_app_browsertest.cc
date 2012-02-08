@@ -11,11 +11,11 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/test_url_constants.h"
+#include "content/public/browser/render_process_host.h"
 #include "net/base/mock_host_resolver.h"
 
 namespace {
@@ -37,7 +37,7 @@ class IsolatedAppTest : public ExtensionBrowserTest {
     ExtensionService* service = profile->GetExtensionService();
     if (service) {
       installed_app = service->GetInstalledAppForRenderer(
-          contents->render_view_host()->process()->id());
+          contents->render_view_host()->process()->GetID());
     }
     return installed_app;
   }
@@ -117,7 +117,7 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, CookieIsolation) {
   ui_test_utils::CrashTab(tab1);
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
-      Source<NavigationController>(
+      content::Source<NavigationController>(
           &browser()->GetSelectedTabContentsWrapper()->controller()));
   browser()->Reload(CURRENT_TAB);
   observer.Wait();
@@ -169,7 +169,7 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, NoCookieIsolationWithoutApp) {
 // RenderProcessHosts even if we hit the process limit.
 IN_PROC_BROWSER_TEST_F(IsolatedAppTest, ProcessOverflow) {
   // Set max renderers to 1 to force running out of processes.
-  RenderProcessHost::SetMaxRendererProcessCountForTest(1);
+  content::RenderProcessHost::SetMaxRendererProcessCountForTest(1);
 
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(test_server()->Start());
@@ -177,6 +177,8 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, ProcessOverflow) {
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("isolated_apps/app1")));
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("isolated_apps/app2")));
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("hosted_app")));
+  ASSERT_TRUE(
+      LoadExtension(test_data_dir_.AppendASCII("api_test/app_process")));
 
   // The app under test acts on URLs whose host is "localhost",
   // so the URLs we navigate to must have host "localhost".
@@ -187,12 +189,18 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, ProcessOverflow) {
   replace_host.SetHostStr(host_str);
   base_url = base_url.ReplaceComponents(replace_host);
 
-  // Create a tab for each type of renderer that might exist.
+  // Load an extension before adding tabs.
+  const Extension* extension1 = LoadExtension(
+      test_data_dir_.AppendASCII("api_test/browser_action/basics"));
+  ASSERT_TRUE(extension1);
+  GURL extension1_url = extension1->url();
+
+  // Create multiple tabs for each type of renderer that might exist.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), base_url.Resolve("isolated_apps/app1/main.html"),
       CURRENT_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   ui_test_utils::NavigateToURLWithDisposition(
-      browser(), GURL(chrome::kTestNewTabURL),
+      browser(), GURL(chrome::kChromeUINewTabURL),
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), base_url.Resolve("hosted_app/main.html"),
@@ -200,32 +208,90 @@ IN_PROC_BROWSER_TEST_F(IsolatedAppTest, ProcessOverflow) {
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), base_url.Resolve("test_file.html"),
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), base_url.Resolve("isolated_apps/app2/main.html"),
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(chrome::kChromeUINewTabURL),
+      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), base_url.Resolve("api_test/app_process/path1/empty.html"),
+      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), base_url.Resolve("test_file_with_body.html"),
+      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
 
-  ASSERT_EQ(5, browser()->tab_count());
-  RenderProcessHost* isolated1_host =
+  // Load another copy of isolated app 1.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), base_url.Resolve("isolated_apps/app1/main.html"),
+      NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+
+  // Load another extension.
+  const Extension* extension2 = LoadExtension(
+      test_data_dir_.AppendASCII("api_test/browser_action/close_background"));
+  ASSERT_TRUE(extension2);
+  GURL extension2_url = extension2->url();
+
+  // Get tab processes.
+  ASSERT_EQ(9, browser()->tab_count());
+  content::RenderProcessHost* isolated1_host =
       browser()->GetTabContentsAt(0)->GetRenderProcessHost();
-  RenderProcessHost* ntp_host =
+  content::RenderProcessHost* ntp1_host =
       browser()->GetTabContentsAt(1)->GetRenderProcessHost();
-  RenderProcessHost* normal_extension_host =
+  content::RenderProcessHost* hosted1_host =
       browser()->GetTabContentsAt(2)->GetRenderProcessHost();
-  RenderProcessHost* web_host =
+  content::RenderProcessHost* web1_host =
       browser()->GetTabContentsAt(3)->GetRenderProcessHost();
-  RenderProcessHost* isolated2_host =
+
+  content::RenderProcessHost* isolated2_host =
       browser()->GetTabContentsAt(4)->GetRenderProcessHost();
+  content::RenderProcessHost* ntp2_host =
+      browser()->GetTabContentsAt(5)->GetRenderProcessHost();
+  content::RenderProcessHost* hosted2_host =
+      browser()->GetTabContentsAt(6)->GetRenderProcessHost();
+  content::RenderProcessHost* web2_host =
+      browser()->GetTabContentsAt(7)->GetRenderProcessHost();
 
-  // Isolated apps shared with each other, but no one else.  They're clannish
-  // like that.
-  ASSERT_EQ(isolated1_host, isolated2_host);
-  ASSERT_NE(isolated1_host, ntp_host);
-  ASSERT_NE(isolated1_host, normal_extension_host);
-  ASSERT_NE(isolated1_host, web_host);
+  content::RenderProcessHost* second_isolated1_host =
+      browser()->GetTabContentsAt(8)->GetRenderProcessHost();
 
-  // And cause we're here, make sure everyone else is also clannish.  This could
-  // technially go in another test, but not worth the extra setup overhead.
-  ASSERT_NE(web_host, ntp_host);
-  ASSERT_NE(web_host, normal_extension_host);
-  ASSERT_NE(normal_extension_host, ntp_host);
+  // Get extension processes.
+  ExtensionProcessManager* process_manager =
+    browser()->GetProfile()->GetExtensionProcessManager();
+  content::RenderProcessHost* extension1_host =
+      process_manager->GetSiteInstanceForURL(extension1_url)->GetProcess();
+  content::RenderProcessHost* extension2_host =
+      process_manager->GetSiteInstanceForURL(extension2_url)->GetProcess();
+
+  // An isolated app only shares with other instances of itself, not other
+  // isolated apps or anything else.
+  EXPECT_EQ(isolated1_host, second_isolated1_host);
+  EXPECT_NE(isolated1_host, isolated2_host);
+  EXPECT_NE(isolated1_host, ntp1_host);
+  EXPECT_NE(isolated1_host, hosted1_host);
+  EXPECT_NE(isolated1_host, web1_host);
+  EXPECT_NE(isolated1_host, extension1_host);
+  EXPECT_NE(isolated2_host, ntp1_host);
+  EXPECT_NE(isolated2_host, hosted1_host);
+  EXPECT_NE(isolated2_host, web1_host);
+  EXPECT_NE(isolated2_host, extension1_host);
+
+  // Everything else is clannish.  WebUI only shares with other WebUI.
+  EXPECT_EQ(ntp1_host, ntp2_host);
+  EXPECT_NE(ntp1_host, hosted1_host);
+  EXPECT_NE(ntp1_host, web1_host);
+  EXPECT_NE(ntp1_host, extension1_host);
+
+  // Hosted apps only share with each other.
+  EXPECT_EQ(hosted1_host, hosted2_host);
+  EXPECT_NE(hosted1_host, web1_host);
+  EXPECT_NE(hosted1_host, extension1_host);
+
+  // Web pages only share with each other.
+  EXPECT_EQ(web1_host, web2_host);
+  EXPECT_NE(web1_host, extension1_host);
+
+  // Extensions only share with each other.
+  EXPECT_EQ(extension1_host, extension2_host);
 }

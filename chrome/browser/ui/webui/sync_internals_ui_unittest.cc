@@ -16,8 +16,8 @@
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -26,6 +26,7 @@ namespace {
 using browser_sync::HasArgsAsList;
 using browser_sync::JsArgList;
 using browser_sync::JsEventDetails;
+using content::BrowserThread;
 using testing::_;
 using testing::Mock;
 using testing::NiceMock;
@@ -66,8 +67,8 @@ class SyncInternalsUITestWithService : public ChromeRenderViewHostTestHarness {
     {
       // Needed by |test_sync_internals_ui_|'s constructor.  The
       // message loop is provided by ChromeRenderViewHostTestHarness.
-      BrowserThread ui_thread_(BrowserThread::UI,
-                               MessageLoopForUI::current());
+      content::TestBrowserThread ui_thread_(BrowserThread::UI,
+                                            MessageLoopForUI::current());
       // |test_sync_internals_ui_|'s constructor triggers all the
       // expectations above.
       test_sync_internals_ui_.reset(new TestSyncInternalsUI(contents()));
@@ -142,8 +143,8 @@ class SyncInternalsUITestWithoutService
     {
       // Needed by |test_sync_internals_ui_|'s constructor.  The
       // message loop is provided by ChromeRenderViewHostTestHarness.
-      BrowserThread ui_thread_(BrowserThread::UI,
-                               MessageLoopForUI::current());
+      content::TestBrowserThread ui_thread_(BrowserThread::UI,
+                                            MessageLoopForUI::current());
       // |test_sync_internals_ui_|'s constructor triggers all the
       // expectations above.
       test_sync_internals_ui_.reset(new TestSyncInternalsUI(contents()));

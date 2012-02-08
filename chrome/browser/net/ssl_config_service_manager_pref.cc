@@ -9,18 +9,18 @@
 
 #include "base/basictypes.h"
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "net/base/ssl_cipher_suite_names.h"
 #include "net/base/ssl_config_service.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -93,6 +93,7 @@ class SSLConfigServicePref : public net::SSLConfigService {
 
 void SSLConfigServicePref::GetSSLConfig(net::SSLConfig* config) {
   *config = cached_config_;
+  config->crl_set = GetCRLSet();
 }
 
 void SSLConfigServicePref::SetNewSSLConfig(
@@ -108,7 +109,7 @@ void SSLConfigServicePref::SetNewSSLConfig(
 // The manager for holding and updating an SSLConfigServicePref instance.
 class SSLConfigServiceManagerPref
     : public SSLConfigServiceManager,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   explicit SSLConfigServiceManagerPref(PrefService* local_state);
   virtual ~SSLConfigServiceManagerPref() {}
@@ -122,8 +123,8 @@ class SSLConfigServiceManagerPref
   // Callback for preference changes.  This will post the changes to the IO
   // thread with SetNewSSLConfig.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
 
   // Store SSL config settings in |config|, directly from the preferences. Must
   // only be called from UI thread.
@@ -137,6 +138,9 @@ class SSLConfigServiceManagerPref
 
   // The prefs (should only be accessed from UI thread)
   BooleanPrefMember rev_checking_enabled_;
+  BooleanPrefMember ssl3_enabled_;
+  BooleanPrefMember tls1_enabled_;
+  BooleanPrefMember origin_bound_certs_enabled_;
 
   // The cached list of disabled SSL cipher suites.
   std::vector<uint16> disabled_cipher_suites_;
@@ -153,6 +157,10 @@ SSLConfigServiceManagerPref::SSLConfigServiceManagerPref(
 
   rev_checking_enabled_.Init(prefs::kCertRevocationCheckingEnabled,
                              local_state, this);
+  ssl3_enabled_.Init(prefs::kSSL3Enabled, local_state, this);
+  tls1_enabled_.Init(prefs::kTLS1Enabled, local_state, this);
+  origin_bound_certs_enabled_.Init(prefs::kEnableOriginBoundCerts,
+                                   local_state, this);
   pref_change_registrar_.Init(local_state);
   pref_change_registrar_.Add(prefs::kCipherSuiteBlacklist, this);
 
@@ -167,20 +175,32 @@ void SSLConfigServiceManagerPref::RegisterPrefs(PrefService* prefs) {
   net::SSLConfig default_config;
   prefs->RegisterBooleanPref(prefs::kCertRevocationCheckingEnabled,
                              default_config.rev_checking_enabled);
+  prefs->RegisterBooleanPref(prefs::kSSL3Enabled,
+                             default_config.ssl3_enabled);
+  prefs->RegisterBooleanPref(prefs::kTLS1Enabled,
+                             default_config.tls1_enabled);
+  prefs->RegisterBooleanPref(prefs::kEnableOriginBoundCerts,
+                             default_config.origin_bound_certs_enabled);
   prefs->RegisterListPref(prefs::kCipherSuiteBlacklist);
+  // The Options menu used to allow changing the ssl.ssl3.enabled and
+  // ssl.tls1.enabled preferences, so some users' Local State may have
+  // these preferences.  Remove them from Local State.
+  prefs->ClearPref(prefs::kSSL3Enabled);
+  prefs->ClearPref(prefs::kTLS1Enabled);
 }
 
 net::SSLConfigService* SSLConfigServiceManagerPref::Get() {
   return ssl_config_service_;
 }
 
-void SSLConfigServiceManagerPref::Observe(int type,
-                                          const NotificationSource& source,
-                                          const NotificationDetails& details) {
+void SSLConfigServiceManagerPref::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-    std::string* pref_name_in = Details<std::string>(details).ptr();
-    PrefService* prefs = Source<PrefService>(source).ptr();
+    std::string* pref_name_in = content::Details<std::string>(details).ptr();
+    PrefService* prefs = content::Source<PrefService>(source).ptr();
     DCHECK(pref_name_in && prefs);
     if (*pref_name_in == prefs::kCipherSuiteBlacklist)
       OnDisabledCipherSuitesChange(prefs);
@@ -203,13 +223,10 @@ void SSLConfigServiceManagerPref::Observe(int type,
 void SSLConfigServiceManagerPref::GetSSLConfigFromPrefs(
     net::SSLConfig* config) {
   config->rev_checking_enabled = rev_checking_enabled_.GetValue();
-
-  config->ssl3_enabled =
-      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableSSL3);
-  config->tls1_enabled =
-      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableTLS1);
-
+  config->ssl3_enabled = ssl3_enabled_.GetValue();
+  config->tls1_enabled = tls1_enabled_.GetValue();
   config->disabled_cipher_suites = disabled_cipher_suites_;
+  config->origin_bound_certs_enabled = origin_bound_certs_enabled_.GetValue();
   SSLConfigServicePref::SetSSLConfigFlags(config);
 }
 

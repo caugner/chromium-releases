@@ -8,16 +8,15 @@
 
 #include <string>
 
-#include "views/controls/button/button.h"
-#include "views/controls/link_listener.h"
-#include "views/view.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/link_listener.h"
+#include "ui/views/view.h"
 
 class SkBitmap;
 
 namespace views {
 class ImageView;
 class TextButton;
-class Throbber;
 }  // namespace views
 
 namespace chromeos {
@@ -93,6 +92,6 @@ class UserView : public views::View,
   DISALLOW_COPY_AND_ASSIGN(UserView);
 };
 
-}  // chromeos
+}  // namespace chromeos
 
 #endif  // CHROME_BROWSER_CHROMEOS_LOGIN_USER_VIEW_H_

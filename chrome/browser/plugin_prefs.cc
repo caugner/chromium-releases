@@ -28,19 +28,21 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/plugin_service.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/webplugininfo.h"
+
+using content::BrowserThread;
 
 namespace {
 
 // Default state for a plug-in (not state of the default plug-in!).
 // Accessed only on the UI thread.
-base::LazyInstance<std::map<FilePath, bool> > g_default_plugin_state(
-    base::LINKER_INITIALIZED);
+base::LazyInstance<std::map<FilePath, bool> > g_default_plugin_state =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -71,17 +73,15 @@ void PluginPrefs::SetPluginListForTesting(
 }
 
 void PluginPrefs::EnablePluginGroup(bool enabled, const string16& group_name) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(&PluginPrefs::EnablePluginGroup, this, enabled, group_name));
-    return;
-  }
+  PluginService::GetInstance()->GetPluginGroups(
+        base::Bind(&PluginPrefs::EnablePluginGroupInternal,
+                   this, enabled, group_name));
+}
 
-  webkit::npapi::PluginList* plugin_list = GetPluginList();
-  std::vector<webkit::npapi::PluginGroup> groups;
-  plugin_list->GetPluginGroups(true, &groups);
-
+void PluginPrefs::EnablePluginGroupInternal(
+    bool enabled,
+    const string16& group_name,
+    const std::vector<webkit::npapi::PluginGroup>& groups) {
   base::AutoLock auto_lock(lock_);
 
   // Set the desired state for the group.
@@ -122,26 +122,20 @@ bool PluginPrefs::EnablePlugin(bool enabled, const FilePath& path) {
     }
   }
 
-  if (BrowserThread::CurrentlyOn(BrowserThread::FILE)) {
-    EnablePluginInternal(enabled, path);
-  } else {
-    BrowserThread::PostTask(
-        BrowserThread::FILE, FROM_HERE,
-        base::Bind(&PluginPrefs::EnablePluginInternal, this, enabled, path));
-  }
+  PluginService::GetInstance()->GetPluginGroups(
+      base::Bind(&PluginPrefs::EnablePluginInternal, this, enabled, path));
   return true;
 }
 
-void PluginPrefs::EnablePluginInternal(bool enabled, const FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+void PluginPrefs::EnablePluginInternal(
+    bool enabled,
+    const FilePath& path,
+    const std::vector<webkit::npapi::PluginGroup>& groups) {
   {
     // Set the desired state for the plug-in.
     base::AutoLock auto_lock(lock_);
     plugin_state_[path] = enabled;
   }
-
-  std::vector<webkit::npapi::PluginGroup> groups;
-  GetPluginList()->GetPluginGroups(true, &groups);
 
   bool found_group = false;
   for (size_t i = 0; i < groups.size(); ++i) {
@@ -243,15 +237,15 @@ bool PluginPrefs::IsPluginEnabled(const webkit::WebPluginInfo& plugin) {
 }
 
 void PluginPrefs::Observe(int type,
-                          const NotificationSource& source,
-                          const NotificationDetails& details) {
+                          const content::NotificationSource& source,
+                          const content::NotificationDetails& details) {
   DCHECK_EQ(chrome::NOTIFICATION_PREF_CHANGED, type);
-  const std::string* pref_name = Details<std::string>(details).ptr();
+  const std::string* pref_name = content::Details<std::string>(details).ptr();
   if (!pref_name) {
     NOTREACHED();
     return;
   }
-  DCHECK_EQ(prefs_, Source<PrefService>(source).ptr());
+  DCHECK_EQ(prefs_, content::Source<PrefService>(source).ptr());
   if (*pref_name == prefs::kPluginsDisabledPlugins) {
     base::AutoLock auto_lock(lock_);
     ListValueToStringSet(prefs_->GetList(prefs::kPluginsDisabledPlugins),
@@ -478,7 +472,7 @@ void PluginPrefs::SetPolicyEnforcedPluginPatterns(
 webkit::npapi::PluginList* PluginPrefs::GetPluginList() {
   if (plugin_list_)
     return plugin_list_;
-  return webkit::npapi::PluginList::Singleton();
+  return PluginService::GetInstance()->plugin_list();
 }
 
 void PluginPrefs::GetPreferencesDataOnFileThread() {
@@ -540,8 +534,8 @@ void PluginPrefs::OnUpdatePreferences(
 
 void PluginPrefs::NotifyPluginStatusChanged() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PLUGIN_ENABLE_STATUS_CHANGED,
-      Source<Profile>(profile_),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_),
+      content::NotificationService::NoDetails());
 }

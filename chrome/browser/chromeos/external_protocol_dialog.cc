@@ -9,6 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
@@ -18,8 +19,8 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
 #include "ui/base/text/text_elider.h"
-#include "views/controls/message_box_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/message_box_view.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -49,11 +50,11 @@ ExternalProtocolDialog::~ExternalProtocolDialog() {
 // ExternalProtocolDialog, views::DialogDelegate implementation:
 
 int ExternalProtocolDialog::GetDialogButtons() const {
-  return ui::MessageBoxFlags::DIALOGBUTTON_OK;
+  return ui::DIALOG_BUTTON_OK;
 }
 
 string16 ExternalProtocolDialog::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
+    ui::DialogButton button) const {
   return l10n_util::GetStringUTF16(IDS_EXTERNAL_PROTOCOL_OK_BUTTON_TEXT);
 }
 
@@ -122,5 +123,5 @@ ExternalProtocolDialog::ExternalProtocolDialog(TabContents* tab_contents,
     // Dialog is top level if we don't have a tab_contents associated with us.
     parent_window = NULL;
   }
-  browser::CreateViewsWindow(parent_window, this)->Show();
+  browser::CreateViewsWindow(parent_window, this, STYLE_GENERIC)->Show();
 }

@@ -21,7 +21,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -40,7 +40,8 @@
 #include "content/browser/tab_contents/page_navigator.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/common/page_transition_types.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -52,14 +53,14 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/text/text_elider.h"
 #include "ui/gfx/canvas_skia.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/label.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/drag_utils.h"
-#include "views/metrics.h"
-#include "views/view_constants.h"
-#include "views/widget/tooltip_manager.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/drag_utils.h"
+#include "ui/views/metrics.h"
+#include "ui/views/view_constants.h"
+#include "ui/views/widget/tooltip_manager.h"
+#include "ui/views/widget/widget.h"
 
 using views::CustomButton;
 using views::DropTargetEvent;
@@ -117,9 +118,6 @@ static const int kInstructionsPadding = 6;
 // Tag for the 'Other bookmarks' button.
 static const int kOtherFolderButtonTag = 1;
 
-// Tag for the sync error button.
-static const int kSyncErrorButtonTag = 2;
-
 namespace {
 
 // BookmarkButton -------------------------------------------------------------
@@ -133,7 +131,7 @@ class BookmarkButton : public views::TextButton {
 
   BookmarkButton(views::ButtonListener* listener,
                  const GURL& url,
-                 const std::wstring& title,
+                 const string16& title,
                  Profile* profile)
       : TextButton(listener, title),
         url_(url),
@@ -149,7 +147,7 @@ class BookmarkButton : public views::TextButton {
   }
 
   virtual bool GetTooltipText(const gfx::Point& p,
-                              string16* tooltip) OVERRIDE {
+                              string16* tooltip) const OVERRIDE {
     gfx::Point location(p);
     ConvertPointToScreen(this, &location);
     *tooltip = BookmarkBarView::CreateToolTipForURLAndTitle(location, url_,
@@ -199,7 +197,7 @@ class BookmarkFolderButton : public views::MenuButton {
   }
 
   virtual bool GetTooltipText(const gfx::Point& p,
-                              string16* tooltip) OVERRIDE {
+                              string16* tooltip) const OVERRIDE {
     if (text_size_.width() > GetTextBounds().width())
       *tooltip = text_;
     return !tooltip->empty();
@@ -370,8 +368,6 @@ BookmarkBarView::BookmarkBarView(Browser* browser)
       bookmark_drop_menu_(NULL),
       other_bookmarked_button_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(show_folder_method_factory_(this)),
-      sync_error_button_(NULL),
-      sync_service_(browser->profile()->GetProfileSyncService()),
       overflow_button_(NULL),
       instructions_(NULL),
       bookmarks_separator_view_(NULL),
@@ -380,9 +376,6 @@ BookmarkBarView::BookmarkBarView(Browser* browser)
       throbbing_view_(NULL),
       bookmark_bar_state_(BookmarkBar::SHOW),
       animating_detached_(false) {
-  if (sync_service_)
-    sync_service_->AddObserver(this);
-
   set_id(VIEW_ID_BOOKMARK_BAR);
   Init();
 
@@ -403,9 +396,6 @@ BookmarkBarView::~BookmarkBarView() {
     context_menu_->SetPageNavigator(NULL);
 
   StopShowFolderDropMenuTimer();
-
-  if (sync_service_)
-    sync_service_->RemoveObserver(this);
 }
 
 void BookmarkBarView::SetPageNavigator(PageNavigator* navigator) {
@@ -593,20 +583,15 @@ gfx::Size BookmarkBarView::GetMinimumSize() {
     width += 2 * static_cast<int>(kNewtabHorizontalPadding * current_state);
   }
 
-  int sync_error_total_width = 0;
-  gfx::Size sync_error_button_pref = sync_error_button_->GetPreferredSize();
-  if (sync_ui_util::ShouldShowSyncErrorButton(sync_service_))
-    sync_error_total_width += kButtonPadding + sync_error_button_pref.width();
-
   gfx::Size other_bookmarked_pref =
       other_bookmarked_button_->GetPreferredSize();
   gfx::Size overflow_pref = overflow_button_->GetPreferredSize();
   gfx::Size bookmarks_separator_pref =
       bookmarks_separator_view_->GetPreferredSize();
 
-  width += (other_bookmarked_pref.width() + kButtonPadding +
+  width += other_bookmarked_pref.width() + kButtonPadding +
       overflow_pref.width() + kButtonPadding +
-      bookmarks_separator_pref.width() + sync_error_total_width);
+      bookmarks_separator_pref.width();
 
   return gfx::Size(width, browser_defaults::kBookmarkBarHeight);
 }
@@ -669,9 +654,7 @@ void BookmarkBarView::PaintChildren(gfx::Canvas* canvas) {
     indicator_bounds.set_x(GetMirroredXForRect(indicator_bounds));
 
     // TODO(sky/glen): make me pretty!
-    canvas->FillRectInt(kDropIndicatorColor, indicator_bounds.x(),
-                        indicator_bounds.y(), indicator_bounds.width(),
-                        indicator_bounds.height());
+    canvas->FillRect(kDropIndicatorColor, indicator_bounds);
   }
 }
 
@@ -826,20 +809,6 @@ void BookmarkBarView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->name = l10n_util::GetStringUTF16(IDS_ACCNAME_BOOKMARKS);
 }
 
-void BookmarkBarView::OnStateChanged() {
-  // When the sync state changes, it is sufficient to invoke View::Layout since
-  // during layout we query the profile sync service and determine whether the
-  // new state requires showing the sync error button so that the user can
-  // re-enter her password. If extension shelf appears along with the bookmark
-  // shelf, it too needs to be layed out. Since both have the same parent, it is
-  // enough to let the parent layout both of these children.
-  // TODO(sky): This should not require Layout() and SchedulePaint(). Needs
-  //            some cleanup.
-  PreferredSizeChanged();
-  Layout();
-  SchedulePaint();
-}
-
 void BookmarkBarView::AnimationProgressed(const ui::Animation* animation) {
   if (browser_)
     browser_->BookmarkBarSizeChanged(true);
@@ -864,15 +833,17 @@ void BookmarkBarView::ShowImportDialog() {
 }
 
 void BookmarkBarView::Loaded(BookmarkModel* model, bool ids_reassigned) {
-  volatile int button_count = GetBookmarkButtonCount();
-  DCHECK(button_count == 0);  // If non-zero it means Load was invoked more than
-                              // once, or we didn't properly clear things.
-                              // Either of which shouldn't happen
+  // There should be no buttons. If non-zero it means Load was invoked more than
+  // once, or we didn't properly clear things. Either of which shouldn't happen.
+  DCHECK_EQ(0, GetBookmarkButtonCount());
   const BookmarkNode* node = model_->bookmark_bar_node();
-  DCHECK(node && model_->other_node());
+  DCHECK(node);
   // Create a button for each of the children on the bookmark bar.
   for (int i = 0, child_count = node->child_count(); i < child_count; ++i)
     AddChildViewAt(CreateBookmarkButton(node->GetChild(i)), i);
+  DCHECK(model_->other_node());
+  other_bookmarked_button_->SetAccessibleName(model_->other_node()->GetTitle());
+  other_bookmarked_button_->SetText(model_->other_node()->GetTitle());
   UpdateColors();
   UpdateOtherBookmarksVisibility();
   other_bookmarked_button_->SetEnabled(true);
@@ -1040,14 +1011,6 @@ void BookmarkBarView::RunMenu(views::View* view, const gfx::Point& pt) {
 
 void BookmarkBarView::ButtonPressed(views::Button* sender,
                                     const views::Event& event) {
-  // Show the login wizard if the user clicked the re-login button.
-  if (sender->tag() == kSyncErrorButtonTag) {
-    DCHECK(sender == sync_error_button_);
-    DCHECK(sync_service_ && !sync_service_->IsManaged());
-    sync_service_->ShowErrorUI();
-    return;
-  }
-
   const BookmarkNode* node;
   if (sender->tag() == kOtherFolderButtonTag) {
     node = model_->other_node();
@@ -1116,13 +1079,13 @@ void BookmarkBarView::ShowContextMenuForView(View* source,
 }
 
 void BookmarkBarView::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   DCHECK(browser_->profile());
   switch (type) {
     case chrome::NOTIFICATION_BOOKMARK_BUBBLE_SHOWN: {
       StopThrobbing(true);
-      GURL url = *(Details<GURL>(details).ptr());
+      GURL url = *(content::Details<GURL>(details).ptr());
       const BookmarkNode* node = model_->GetMostRecentlyAddedNodeForURL(url);
       if (!node)
         return;  // Generally shouldn't happen.
@@ -1152,9 +1115,6 @@ void BookmarkBarView::Init() {
 
   // Child views are traversed in the order they are added. Make sure the order
   // they are added matches the visual order.
-  sync_error_button_ = CreateSyncErrorButton();
-  AddChildView(sync_error_button_);
-
   overflow_button_ = CreateOverflowButton();
   AddChildView(overflow_button_);
 
@@ -1174,7 +1134,7 @@ void BookmarkBarView::Init() {
   size_animation_.reset(new ui::SlideAnimation(this));
 
   Profile* profile = browser_->profile();
-  Source<Profile> ns_source(profile->GetOriginalProfile());
+  content::Source<Profile> ns_source(profile->GetOriginalProfile());
   registrar_.Add(this, chrome::NOTIFICATION_BOOKMARK_BUBBLE_SHOWN, ns_source);
   registrar_.Add(this, chrome::NOTIFICATION_BOOKMARK_BUBBLE_HIDDEN, ns_source);
 
@@ -1189,10 +1149,9 @@ void BookmarkBarView::Init() {
 }
 
 int BookmarkBarView::GetBookmarkButtonCount() {
-  // We contain five non-bookmark button views: other bookmarks, bookmarks
-  // separator, chevrons (for overflow), the instruction label and the sync
-  // error button.
-  return child_count() - 5;
+  // We contain four non-bookmark button views: other bookmarks, bookmarks
+  // separator, chevrons (for overflow), and the instruction label.
+  return child_count() - 4;
 }
 
 views::TextButton* BookmarkBarView::GetBookmarkButton(int index) {
@@ -1210,17 +1169,12 @@ int BookmarkBarView::GetFirstHiddenNodeIndex() {
 }
 
 MenuButton* BookmarkBarView::CreateOtherBookmarkedButton() {
-  MenuButton* button = new BookmarkFolderButton(
-      this,
-      l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_OTHER_BOOKMARKED),
-      this,
-      false);
+  // Title is set in Loaded.
+  MenuButton* button = new BookmarkFolderButton(this, string16(), this, false);
   button->set_id(VIEW_ID_OTHER_BOOKMARKS);
   button->SetIcon(GetFolderIcon());
   button->set_context_menu_controller(this);
   button->set_tag(kOtherFolderButtonTag);
-  button->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_BOOKMARK_BAR_OTHER_BOOKMARKED));
   return button;
 }
 
@@ -1246,27 +1200,10 @@ MenuButton* BookmarkBarView::CreateOverflowButton() {
   return button;
 }
 
-views::TextButton* BookmarkBarView::CreateSyncErrorButton() {
-  views::TextButton* sync_error_button =
-      new views::TextButton(this, UTF16ToWide(
-          l10n_util::GetStringUTF16(IDS_SYNC_BOOKMARK_BAR_ERROR)));
-  sync_error_button->set_tag(kSyncErrorButtonTag);
-
-  // The tooltip is the only way we have to display text explaining the error
-  // to the user.
-  sync_error_button->SetTooltipText(
-      l10n_util::GetStringUTF16(IDS_SYNC_BOOKMARK_BAR_ERROR_DESC));
-  sync_error_button->SetAccessibleName(
-      l10n_util::GetStringUTF16(IDS_ACCNAME_SYNC_ERROR_BUTTON));
-  sync_error_button->SetIcon(
-      *ResourceBundle::GetSharedInstance().GetBitmapNamed(IDR_WARNING));
-  return sync_error_button;
-}
-
 views::View* BookmarkBarView::CreateBookmarkButton(const BookmarkNode* node) {
   if (node->is_url()) {
-    BookmarkButton* button = new BookmarkButton(this, node->url(),
-        UTF16ToWide(node->GetTitle()), browser_->profile());
+    BookmarkButton* button = new BookmarkButton(
+        this, node->url(), node->GetTitle(), browser_->profile());
     ConfigureButton(node, button);
     return button;
   } else {
@@ -1311,9 +1248,10 @@ void BookmarkBarView::BookmarkNodeAddedImpl(BookmarkModel* model,
   }
   DCHECK(index >= 0 && index <= GetBookmarkButtonCount());
   const BookmarkNode* node = parent->GetChild(index);
-  if (!throbbing_view_ && sync_service_ && sync_service_->SetupInProgress()) {
+  ProfileSyncService* sync_service =
+      browser_->profile()->GetProfileSyncService();
+  if (!throbbing_view_ && sync_service && sync_service->SetupInProgress())
     StartThrobbing(node, true);
-  }
   AddChildViewAt(CreateBookmarkButton(node), index);
   UpdateColors();
   Layout();
@@ -1630,13 +1568,8 @@ gfx::Size BookmarkBarView::LayoutItems(bool compute_bounds_only) {
   gfx::Size bookmarks_separator_pref =
       bookmarks_separator_view_->GetPreferredSize();
 
-  int sync_error_total_width = 0;
-  gfx::Size sync_error_button_pref = sync_error_button_->GetPreferredSize();
-  if (sync_ui_util::ShouldShowSyncErrorButton(sync_service_)) {
-    sync_error_total_width += kButtonPadding + sync_error_button_pref.width();
-  }
   int max_x = width - overflow_pref.width() - kButtonPadding -
-      bookmarks_separator_pref.width() - sync_error_total_width;
+      bookmarks_separator_pref.width();
   if (other_bookmarked_button_->IsVisible())
     max_x -= other_bookmarked_pref.width() + kButtonPadding;
 
@@ -1706,21 +1639,6 @@ gfx::Size BookmarkBarView::LayoutItems(bool compute_bounds_only) {
                                           height);
     }
     x += other_bookmarked_pref.width() + kButtonPadding;
-  }
-
-  // Set the real bounds of the sync error button only if it needs to appear on
-  // the bookmarks bar.
-  if (sync_ui_util::ShouldShowSyncErrorButton(sync_service_)) {
-    x += kButtonPadding;
-    if (!compute_bounds_only) {
-      sync_error_button_->SetBounds(
-          x, y, sync_error_button_pref.width(), height);
-      sync_error_button_->SetVisible(true);
-    }
-    x += sync_error_button_pref.width();
-  } else if (!compute_bounds_only) {
-    sync_error_button_->SetBounds(x, y, 0, height);
-    sync_error_button_->SetVisible(false);
   }
 
   // Set the preferred size computed so far.

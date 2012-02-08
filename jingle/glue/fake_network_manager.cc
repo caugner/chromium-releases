@@ -4,6 +4,7 @@
 
 #include "jingle/glue/fake_network_manager.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "net/base/ip_endpoint.h"
@@ -14,12 +15,12 @@ namespace jingle_glue {
 
 FakeNetworkManager::FakeNetworkManager(const net::IPAddressNumber& address)
     : started_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   net::IPEndPoint endpoint(address, 0);
   talk_base::SocketAddress socket_address;
   CHECK(IPEndPointToSocketAddress(endpoint, &socket_address));
   network_.reset(new talk_base::Network("fake", "Fake Network",
-                                        socket_address.ip(), 0));
+                                        socket_address.ip()));
 }
 
 FakeNetworkManager::~FakeNetworkManager() {
@@ -28,8 +29,8 @@ FakeNetworkManager::~FakeNetworkManager() {
 void FakeNetworkManager::StartUpdating() {
   started_ = true;
   MessageLoop::current()->PostTask(
-      FROM_HERE,task_factory_.NewRunnableMethod(
-          &FakeNetworkManager::SendNetworksChangedSignal));
+      FROM_HERE, base::Bind(&FakeNetworkManager::SendNetworksChangedSignal,
+                            weak_factory_.GetWeakPtr()));
 }
 
 void FakeNetworkManager::StopUpdating() {

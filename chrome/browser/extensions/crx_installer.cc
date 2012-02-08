@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/metrics/field_trial.h"
@@ -15,7 +16,6 @@
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/stringprintf.h"
-#include "base/task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
@@ -32,15 +32,17 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_file_util.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -51,13 +53,21 @@ struct Whitelist {
 };
 
 static base::LazyInstance<Whitelist>
-    g_whitelisted_install_data(base::LINKER_INITIALIZED);
+    g_whitelisted_install_data = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
 CrxInstaller::WhitelistEntry::WhitelistEntry()
-  : use_app_installed_bubble(false) {}
+    : use_app_installed_bubble(false),
+      skip_post_install_ui(false) {}
 CrxInstaller::WhitelistEntry::~WhitelistEntry() {}
+
+// static
+scoped_refptr<CrxInstaller> CrxInstaller::Create(
+    ExtensionService* frontend,
+    ExtensionInstallUI* client) {
+  return new CrxInstaller(frontend->AsWeakPtr(), client);
+}
 
 // static
 void CrxInstaller::SetWhitelistedInstallId(const std::string& id) {
@@ -121,7 +131,6 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
       install_source_(Extension::INTERNAL),
       extensions_enabled_(frontend_weak->extensions_enabled()),
       delete_source_(false),
-      is_gallery_install_(false),
       create_app_shortcut_(false),
       page_index_(-1),
       frontend_weak_(frontend_weak),
@@ -129,29 +138,24 @@ CrxInstaller::CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
       client_(client),
       apps_require_extension_mime_type_(false),
       allow_silent_install_(false),
-      install_cause_(extension_misc::INSTALL_CAUSE_UNSET) {
+      install_cause_(extension_misc::INSTALL_CAUSE_UNSET),
+      creation_flags_(Extension::NO_FLAGS) {
 }
 
 CrxInstaller::~CrxInstaller() {
   // Delete the temp directory and crx file as necessary. Note that the
   // destructor might be called on any thread, so we post a task to the file
-  // thread to make sure the delete happens there.
+  // thread to make sure the delete happens there. This is a best effort
+  // operation since the browser can be shutting down so there might not
+  // be a file thread to post to.
   if (!temp_dir_.value().empty()) {
-    if (!BrowserThread::PostTask(
-            BrowserThread::FILE, FROM_HERE,
-            NewRunnableFunction(
-                &extension_file_util::DeleteFile, temp_dir_, true)))
-      NOTREACHED();
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+        base::Bind(&extension_file_util::DeleteFile, temp_dir_, true));
   }
-
   if (delete_source_) {
-    if (!BrowserThread::PostTask(
-            BrowserThread::FILE, FROM_HERE,
-            NewRunnableFunction(
-                &extension_file_util::DeleteFile, source_file_, false)))
-      NOTREACHED();
+    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
+        base::Bind(&extension_file_util::DeleteFile, source_file_, false));
   }
-
   // Make sure the UI is deleted on the ui thread.
   BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE, client_);
   client_ = NULL;
@@ -164,12 +168,14 @@ void CrxInstaller::InstallCrx(const FilePath& source_file) {
       new SandboxedExtensionUnpacker(
           source_file,
           g_browser_process->resource_dispatcher_host(),
+          install_source_,
+          creation_flags_,
           this));
 
   if (!BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(
-              unpacker.get(), &SandboxedExtensionUnpacker::Start)))
+          base::Bind(
+              &SandboxedExtensionUnpacker::Start, unpacker.get())))
     NOTREACHED();
 }
 
@@ -182,8 +188,7 @@ void CrxInstaller::InstallUserScript(const FilePath& source_file,
 
   if (!BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(this,
-                            &CrxInstaller::ConvertUserScriptOnFileThread)))
+          base::Bind(&CrxInstaller::ConvertUserScriptOnFileThread, this)))
     NOTREACHED();
 }
 
@@ -202,8 +207,7 @@ void CrxInstaller::ConvertUserScriptOnFileThread() {
 void CrxInstaller::InstallWebApp(const WebApplicationInfo& web_app) {
   if (!BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(this, &CrxInstaller::ConvertWebAppOnFileThread,
-                            web_app)))
+          base::Bind(&CrxInstaller::ConvertWebAppOnFileThread, this, web_app)))
     NOTREACHED();
 }
 
@@ -274,7 +278,7 @@ bool CrxInstaller::AllowInstall(const Extension* extension,
     // If the client_ is NULL, then the app is either being installed via
     // an internal mechanism like sync, external_extensions, or default apps.
     // In that case, we don't want to enforce things like the install origin.
-    if (!is_gallery_install_ && client_) {
+    if (!is_gallery_install() && client_) {
       // For apps with a gallery update URL, require that they be installed
       // from the gallery.
       // TODO(erikkay) Apply this rule for paid extensions and themes as well.
@@ -359,7 +363,7 @@ void CrxInstaller::OnUnpackSuccess(const FilePath& temp_dir,
 
   if (!BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &CrxInstaller::ConfirmInstall)))
+          base::Bind(&CrxInstaller::ConfirmInstall, this)))
     NOTREACHED();
 }
 
@@ -378,7 +382,7 @@ void CrxInstaller::ConfirmInstall() {
   }
 
   if (!frontend_weak_->extension_prefs()->IsExtensionAllowedByPolicy(
-      extension_->id())) {
+          extension_->id(), install_source_)) {
     ReportFailureFromUIThread(
         l10n_util::GetStringUTF8(IDS_EXTENSION_CANT_INSTALL_POLICY_BLACKLIST));
     return;
@@ -405,7 +409,7 @@ void CrxInstaller::ConfirmInstall() {
   bool whitelisted = false;
   scoped_ptr<CrxInstaller::WhitelistEntry> entry(
       RemoveWhitelistEntry(extension_->id()));
-  if (is_gallery_install_ && entry.get() && original_manifest_.get()) {
+  if (is_gallery_install() && entry.get() && original_manifest_.get()) {
     if (!(original_manifest_->Equals(entry->parsed_manifest.get()))) {
       ReportFailureFromUIThread(
           l10n_util::GetStringUTF8(IDS_EXTENSION_MANIFEST_INVALID));
@@ -414,6 +418,8 @@ void CrxInstaller::ConfirmInstall() {
     whitelisted = true;
     if (entry->use_app_installed_bubble)
       client_->set_use_app_installed_bubble(true);
+    if (entry->skip_post_install_ui)
+      client_->set_skip_post_install_ui(true);
   }
 
   if (client_ &&
@@ -423,7 +429,7 @@ void CrxInstaller::ConfirmInstall() {
   } else {
     if (!BrowserThread::PostTask(
             BrowserThread::FILE, FROM_HERE,
-            NewRunnableMethod(this, &CrxInstaller::CompleteInstall)))
+            base::Bind(&CrxInstaller::CompleteInstall, this)))
       NOTREACHED();
   }
   return;
@@ -432,7 +438,7 @@ void CrxInstaller::ConfirmInstall() {
 void CrxInstaller::InstallUIProceed() {
   if (!BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(this, &CrxInstaller::CompleteInstall)))
+          base::Bind(&CrxInstaller::CompleteInstall, this)))
     NOTREACHED();
 
   Release();  // balanced in ConfirmInstall().
@@ -446,13 +452,14 @@ void CrxInstaller::InstallUIAbort(bool user_initiated) {
       extension_, histogram_name.c_str());
 
   // Kill the theme loading bubble.
-  NotificationService* service = NotificationService::current();
+  content::NotificationService* service =
+      content::NotificationService::current();
   service->Notify(chrome::NOTIFICATION_NO_THEME_DETECTED,
-                  Source<CrxInstaller>(this),
-                  NotificationService::NoDetails());
+                  content::Source<CrxInstaller>(this),
+                  content::NotificationService::NoDetails());
   Release();  // balanced in ConfirmInstall().
 
-  NotifyCrxInstallComplete();
+  NotifyCrxInstallComplete(NULL);
 
   // We're done. Since we don't post any more tasks to ourself, our ref count
   // should go to zero and we die. The destructor will clean up the temp dir.
@@ -496,13 +503,10 @@ void CrxInstaller::CompleteInstall() {
   // TODO(aa): All paths to resources inside extensions should be created
   // lazily and based on the Extension's root path at that moment.
   std::string error;
-  int flags = extension_->creation_flags() | Extension::REQUIRE_KEY;
-  if (is_gallery_install())
-    flags |= Extension::FROM_WEBSTORE;
   extension_ = extension_file_util::LoadExtension(
       version_dir,
       install_source_,
-      flags,
+      extension_->creation_flags() | Extension::REQUIRE_KEY,
       &error);
   CHECK(error.empty()) << error;
 
@@ -513,19 +517,18 @@ void CrxInstaller::ReportFailureFromFileThread(const std::string& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (!BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this,
-                            &CrxInstaller::ReportFailureFromUIThread,
-                            error)))
+          base::Bind(&CrxInstaller::ReportFailureFromUIThread, this, error)))
     NOTREACHED();
 }
 
 void CrxInstaller::ReportFailureFromUIThread(const std::string& error) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  NotificationService* service = NotificationService::current();
+  content::NotificationService* service =
+      content::NotificationService::current();
   service->Notify(chrome::NOTIFICATION_EXTENSION_INSTALL_ERROR,
-                  Source<CrxInstaller>(this),
-                  Details<const std::string>(&error));
+                  content::Source<CrxInstaller>(this),
+                  content::Details<const std::string>(&error));
 
   // This isn't really necessary, it is only used because unit tests expect to
   // see errors get reported via this interface.
@@ -537,7 +540,7 @@ void CrxInstaller::ReportFailureFromUIThread(const std::string& error) {
   if (client_)
     client_->OnInstallFailure(error);
 
-  NotifyCrxInstallComplete();
+  NotifyCrxInstallComplete(NULL);
 }
 
 void CrxInstaller::ReportSuccessFromFileThread() {
@@ -559,8 +562,7 @@ void CrxInstaller::ReportSuccessFromFileThread() {
 
   if (!BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this,
-                            &CrxInstaller::ReportSuccessFromUIThread)))
+          base::Bind(&CrxInstaller::ReportSuccessFromUIThread, this)))
     NOTREACHED();
 }
 
@@ -585,22 +587,23 @@ void CrxInstaller::ReportSuccessFromUIThread() {
   // extension_ to it.
   frontend_weak_->OnExtensionInstalled(extension_, is_gallery_install(),
                                        page_index_);
-  extension_ = NULL;
 
-  NotifyCrxInstallComplete();
+  NotifyCrxInstallComplete(extension_.get());
+
+  extension_ = NULL;
 
   // We're done. We don't post any more tasks to ourselves so we are deleted
   // soon.
 }
 
-void CrxInstaller::NotifyCrxInstallComplete() {
+void CrxInstaller::NotifyCrxInstallComplete(const Extension* extension) {
   // Some users (such as the download shelf) need to know when a
   // CRXInstaller is done.  Listening for the EXTENSION_* events
   // is problematic because they don't know anything about the
-  // extension before it is unpacked, so they can not filter based
+  // extension before it is unpacked, so they cannot filter based
   // on the extension.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_CRX_INSTALLER_DONE,
-      Source<CrxInstaller>(this),
-      NotificationService::NoDetails());
+      content::Source<CrxInstaller>(this),
+      content::Details<const Extension>(extension));
 }

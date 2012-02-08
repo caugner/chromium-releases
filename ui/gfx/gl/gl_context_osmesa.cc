@@ -8,7 +8,8 @@
 
 #include "base/logging.h"
 #include "ui/gfx/gl/gl_bindings.h"
-#include "ui/gfx/gl/gl_surface_osmesa.h"
+#include "ui/gfx/gl/gl_surface.h"
+#include "ui/gfx/size.h"
 
 namespace gfx {
 
@@ -28,8 +29,7 @@ bool GLContextOSMesa::Initialize(
   OSMesaContext share_handle = static_cast<OSMesaContext>(
       share_group() ? share_group()->GetHandle() : NULL);
 
-  GLuint format =
-      static_cast<GLSurfaceOSMesa*>(compatible_surface)->GetFormat();
+  GLuint format = compatible_surface->GetFormat();
   DCHECK_NE(format, (unsigned)0);
   context_ = OSMesaCreateContextExt(format,
                                     0,  // depth bits
@@ -70,6 +70,11 @@ bool GLContextOSMesa::MakeCurrent(GLSurface* surface) {
   OSMesaPixelStore(OSMESA_Y_UP, 0);
 
   SetCurrent(this, surface);
+  if (!InitializeExtensionBindings()) {
+    ReleaseCurrent(surface);
+    return false;
+  }
+
   if (!surface->OnMakeCurrent(this)) {
     LOG(ERROR) << "Could not make current.";
     return false;

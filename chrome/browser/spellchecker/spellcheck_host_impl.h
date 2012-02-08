@@ -9,13 +9,15 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/spellchecker/spellcheck_host.h"
 #include "chrome/browser/spellchecker/spellcheck_profile_provider.h"
-#include "content/common/net/url_fetcher.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 // This class implements the SpellCheckHost interface to provide the
 // functionalities listed below:
@@ -38,32 +40,32 @@
 // Available languages for the checker, which we need to specify via Create(),
 // can be listed using SpellCheckHost::GetAvailableLanguages() static method.
 class SpellCheckHostImpl : public SpellCheckHost,
-                           public URLFetcher::Delegate,
-                           public NotificationObserver {
+                           public content::URLFetcherDelegate,
+                           public content::NotificationObserver {
  public:
   SpellCheckHostImpl(SpellCheckProfileProvider* profile,
                      const std::string& language,
                      net::URLRequestContextGetter* request_context_getter,
                      SpellCheckHostMetrics* metrics);
 
+  virtual ~SpellCheckHostImpl();
+
   void Initialize();
 
   // SpellCheckHost implementation
-  virtual void UnsetProfile();
-  virtual void InitForRenderer(RenderProcessHost* process);
-  virtual void AddWord(const std::string& word);
-  virtual const base::PlatformFile& GetDictionaryFile() const;
-  virtual const std::string& GetLanguage() const;
-  virtual bool IsUsingPlatformChecker() const;
+  virtual void UnsetProfile() OVERRIDE;
+  virtual void InitForRenderer(content::RenderProcessHost* process) OVERRIDE;
+  virtual void AddWord(const std::string& word) OVERRIDE;
+  virtual const base::PlatformFile& GetDictionaryFile() const OVERRIDE;
+  virtual const std::string& GetLanguage() const OVERRIDE;
+  virtual bool IsUsingPlatformChecker() const OVERRIDE;
 
  private:
   typedef SpellCheckProfileProvider::CustomWordList CustomWordList;
 
   // These two classes can destruct us.
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<SpellCheckHostImpl>;
-
-  virtual ~SpellCheckHostImpl();
 
   // Figure out the location for the dictionary. This is only non-trivial for
   // Windows:
@@ -72,12 +74,11 @@ class SpellCheckHostImpl : public SpellCheckHost,
   // this directory may not have permissions for download. In that case, the
   // alternate directory for download is chrome::DIR_USER_DATA.
   void InitializeDictionaryLocation();
+  void InitializeDictionaryLocationComplete();
 
-  // Load and parse the custom words dictionary and open the bdic file.
-  // Executed on the file thread.
-  void InitializeInternal();
-
-  void InitializeOnFileThread();
+  // The reply point for PostTaskAndReply. Called when AddWord is finished
+  // adding a word in the background.
+  void AddWordComplete(const std::string& word);
 
   // Inform |profile_| that initialization has finished.
   // |custom_words| holds the custom word list which was
@@ -92,32 +93,31 @@ class SpellCheckHostImpl : public SpellCheckHost,
   // If |dictionary_file_| is missing, we attempt to download it.
   void DownloadDictionary();
 
+  // Loads a custom dictionary from disk.
+  void LoadCustomDictionary(CustomWordList* custom_words);
+
   // Write a custom dictionary addition to disk.
   void WriteWordToCustomDictionary(const std::string& word);
 
   // Returns a metrics counter associated with this object,
   // or null when metrics recording is disabled.
-  virtual SpellCheckHostMetrics* GetMetrics() const;
+  virtual SpellCheckHostMetrics* GetMetrics() const OVERRIDE;
 
   // Returns true if the dictionary is ready to use.
-  virtual bool IsReady() const;
+  virtual bool IsReady() const OVERRIDE;
 
-  // URLFetcher::Delegate implementation.  Called when we finish downloading the
-  // spellcheck dictionary; saves the dictionary to |data_|.
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data);
+  // content::URLFetcherDelegate implementation.  Called when we finish
+  // downloading the spellcheck dictionary; saves the dictionary to |data_|.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // NotificationProfile implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Saves |data_| to disk. Run on the file thread.
   void SaveDictionaryData();
+  void SaveDictionaryDataComplete();
 
   // Verifies the specified BDict file exists and it is sane. This function
   // should be called before opening the file so we can delete it and download a
@@ -132,6 +132,10 @@ class SpellCheckHostImpl : public SpellCheckHost,
 
   // The location of the custom words file.
   FilePath custom_dictionary_file_;
+
+  // State whether a dictionary has been partially, or fully saved. If the
+  // former, shortcut Initialize.
+  bool dictionary_saved_;
 
   // The language of the dictionary file.
   std::string language_;
@@ -154,12 +158,16 @@ class SpellCheckHostImpl : public SpellCheckHost,
   net::URLRequestContextGetter* request_context_getter_;
 
   // Used for downloading the dictionary file.
-  scoped_ptr<URLFetcher> fetcher_;
+  scoped_ptr<content::URLFetcher> fetcher_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // An optional metrics counter given by the constructor.
   SpellCheckHostMetrics* metrics_;
+
+  base::WeakPtrFactory<SpellCheckHostImpl> weak_ptr_factory_;
+
+  scoped_ptr<CustomWordList> custom_words_;
 
   DISALLOW_COPY_AND_ASSIGN(SpellCheckHostImpl);
 };

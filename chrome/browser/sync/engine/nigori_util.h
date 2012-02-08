@@ -8,6 +8,7 @@
 #define CHROME_BROWSER_SYNC_ENGINE_NIGORI_UTIL_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/sync/protocol/nigori_specifics.pb.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 
@@ -25,7 +26,6 @@ const char kEncryptedString[] = "encrypted";
 
 class BaseTransaction;
 class Entry;
-class ReadTransaction;
 class WriteTransaction;
 
 // Check if our unsyced changes are encrypted if they need to be based on
@@ -55,10 +55,11 @@ bool SpecificsNeedsEncryption(const ModelTypeSet& encrypted_types,
                               const sync_pb::EntitySpecifics& specifics);
 
 // Verifies all data of type |type| is encrypted appropriately.
-bool VerifyDataTypeEncryption(BaseTransaction* const trans,
-                              browser_sync::Cryptographer* cryptographer,
-                              ModelType type,
-                              bool is_encrypted);
+bool VerifyDataTypeEncryptionForTest(
+    BaseTransaction* const trans,
+    browser_sync::Cryptographer* cryptographer,
+    ModelType type,
+    bool is_encrypted) WARN_UNUSED_RESULT;
 
 }  // namespace syncable
 

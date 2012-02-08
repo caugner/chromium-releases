@@ -1,15 +1,19 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/enterprise_extension_observer.h"
 
+#include "base/bind.h"
 #include "base/file_util.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/login_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/session_manager_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -18,25 +22,26 @@ EnterpriseExtensionObserver::EnterpriseExtensionObserver(Profile* profile)
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   registrar_.Add(this,
                  chrome::NOTIFICATION_EXTENSION_INSTALLED,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_));
 }
 
-void EnterpriseExtensionObserver::Observe(int type,
-                                          const NotificationSource& source,
-                                          const NotificationDetails& details) {
+void EnterpriseExtensionObserver::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_INSTALLED);
-  if (Source<Profile>(source).ptr() != profile_) {
+  if (content::Source<Profile>(source).ptr() != profile_) {
     return;
   }
-  Extension* extension = Details<Extension>(details).ptr();
+  Extension* extension = content::Details<Extension>(details).ptr();
   if (extension->location() != Extension::EXTERNAL_POLICY_DOWNLOAD) {
     return;
   }
   BrowserThread::PostTask(
       BrowserThread::FILE,
       FROM_HERE,
-      NewRunnableFunction(
+      base::Bind(
           &EnterpriseExtensionObserver::CheckExtensionAndNotifyEntd,
           extension->path()));
 }
@@ -50,17 +55,14 @@ void EnterpriseExtensionObserver::CheckExtensionAndNotifyEntd(
     BrowserThread::PostTask(
         BrowserThread::UI,
         FROM_HERE,
-        NewRunnableFunction(&EnterpriseExtensionObserver::NotifyEntd));
+        base::Bind(&EnterpriseExtensionObserver::NotifyEntd));
   }
 }
 
 // static
 void EnterpriseExtensionObserver::NotifyEntd() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (CrosLibrary::Get()->EnsureLoaded()) {
-    CrosLibrary::Get()->GetLoginLibrary()->RestartEntd();
-    return;
-  }
+  DBusThreadManager::Get()->GetSessionManagerClient()->RestartEntd();
 }
 
 }  // namespace chromeos

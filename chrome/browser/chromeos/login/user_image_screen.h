@@ -8,20 +8,17 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/camera_controller.h"
-#include "chrome/browser/chromeos/login/profile_image_downloader.h"
 #include "chrome/browser/chromeos/login/user_image_screen_actor.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 namespace chromeos {
 
 class UserImageScreen: public WizardScreen,
                        public CameraController::Delegate,
                        public UserImageScreenActor::Delegate,
-                       public NotificationObserver,
-                       public ProfileImageDownloader::Delegate {
+                       public content::NotificationObserver {
  public:
   UserImageScreen(ScreenObserver* screen_observer,
                   UserImageScreenActor* actor);
@@ -40,29 +37,21 @@ class UserImageScreen: public WizardScreen,
   virtual void StartCamera() OVERRIDE;
   virtual void StopCamera() OVERRIDE;
   virtual void OnPhotoTaken(const SkBitmap& image) OVERRIDE;
-  virtual void OnProfileImageSelected(const SkBitmap& image) OVERRIDE;
+  virtual void OnProfileImageSelected() OVERRIDE;
   virtual void OnDefaultImageSelected(int index) OVERRIDE;
   virtual void OnActorDestroyed(UserImageScreenActor* actor) OVERRIDE;
 
-  // NotificationObserver implementation:
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
-
-  // ProfileImageDownloader::Delegate implementation.
-  virtual void OnDownloadSuccess(const SkBitmap& profile_image) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  // Common method that handles setting photo or profile image.
-  void OnNonDefaultImageSelected(const SkBitmap& image, int image_index);
-
   CameraController camera_controller_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   UserImageScreenActor* actor_;
-
-  scoped_ptr<ProfileImageDownloader> profile_image_downloader_;
 
   DISALLOW_COPY_AND_ASSIGN(UserImageScreen);
 };

@@ -9,7 +9,7 @@
 
 #include <list>
 
-#include "base/task.h"
+#include "base/callback.h"
 #include "base/time.h"
 #include "remoting/base/scoped_thread_proxy.h"
 #include "remoting/client/client_config.h"
@@ -24,11 +24,6 @@
 class MessageLoop;
 
 namespace remoting {
-
-namespace protocol {
-class LocalLoginStatus;
-class NotifyResolutionRequest;
-}  // namespace protocol
 
 class ClientContext;
 class InputHandler;
@@ -46,7 +41,7 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
                    ChromotingView* view,
                    RectangleUpdateDecoder* rectangle_decoder,
                    InputHandler* input_handler,
-                   Task* client_done);
+                   const base::Closure& client_done);
   virtual ~ChromotingClient();
 
   void Start(scoped_refptr<XmppProxy> xmpp_proxy);
@@ -63,10 +58,6 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   virtual void OnConnectionState(
       protocol::ConnectionToHost::State state,
       protocol::ConnectionToHost::Error error) OVERRIDE;
-
-  // ClientStub implementation.
-  virtual void BeginSessionResponse(const protocol::LocalLoginStatus* msg,
-                                    const base::Closure& done) OVERRIDE;
 
   // VideoStub implementation.
   virtual void ProcessVideoPacket(const VideoPacket* packet,
@@ -106,7 +97,7 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
   InputHandler* input_handler_;
 
   // If non-NULL, this is called when the client is done.
-  Task* client_done_;
+  base::Closure client_done_;
 
   // Contains all video packets that have been received, but have not yet been
   // processed.
@@ -130,7 +121,5 @@ class ChromotingClient : public protocol::ConnectionToHost::HostEventCallback,
 };
 
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::ChromotingClient);
 
 #endif  // REMOTING_CLIENT_CHROMOTING_CLIENT_H_

@@ -35,6 +35,7 @@ var netInternalsTest = (function() {
     import: ImportView.TAB_HANDLE_ID,
     proxy: ProxyView.TAB_HANDLE_ID,
     events: EventsView.TAB_HANDLE_ID,
+    timeline: TimelineView.TAB_HANDLE_ID,
     dns: DnsView.TAB_HANDLE_ID,
     sockets: SocketsView.TAB_HANDLE_ID,
     spdy: SpdyView.TAB_HANDLE_ID,
@@ -44,7 +45,8 @@ var netInternalsTest = (function() {
     tests: TestView.TAB_HANDLE_ID,
     hsts: HSTSView.TAB_HANDLE_ID,
     logs: LogsView.TAB_HANDLE_ID,
-    prerender: PrerenderView.TAB_HANDLE_ID
+    prerender: PrerenderView.TAB_HANDLE_ID,
+    chromeos: CrosView.TAB_HANDLE_ID
   };
 
   /**
@@ -94,7 +96,7 @@ var netInternalsTest = (function() {
     var testArguments = Array.prototype.slice.call(arguments, 2);
 
     // If we've already received the constants, start the tests.
-    if (typeof LogEventType != 'undefined') {
+    if (Constants) {
       startNetInternalsTest(testName, testFunction, testArguments);
       return;
     }
@@ -109,7 +111,7 @@ var netInternalsTest = (function() {
       this.testStarted_ = false;
     }
 
-    ConstantsObserver.prototype.onConstantsReceived = function() {
+    ConstantsObserver.prototype.onReceivedConstants = function() {
       if (!this.testStarted_) {
         this.testStarted_ = true;
         startNetInternalsTest(testFunction, testFunction, testArguments);
@@ -139,29 +141,57 @@ var netInternalsTest = (function() {
   }
 
   /**
-   * Finds the first styled table that's a child of |parentId|, and returns the
-   * number of rows it has.  Returns -1 if there's no such table.
-   * @param {string} parentId HTML element id containing a styled table.
+   * Returns the first styled table body that's a descendent of |ancestorId|.
+   * If the specified node is itself a table body node, just returns that node.
+   * Returns null if no such node is found.
+   * @param {string} ancestorId HTML element id containing a styled table.
+   */
+  function getStyledTableDescendent(ancestorId) {
+    if ($(ancestorId).nodeName == 'TBODY')
+      return $(ancestorId);
+    // The tbody element of the first styled table in |parentId|.
+    return document.querySelector('#' + ancestorId + ' .styledTable tbody');
+  }
+
+  /**
+   * Finds the first styled table body that's a descendent of |ancestorId|,
+   * including the |ancestorId| element itself, and returns the number of rows
+   * it has. Returns -1 if there's no such table.
+   * @param {string} ancestorId HTML element id containing a styled table.
    * @return {number} Number of rows the style table's body has.
    */
-  function getStyledTableNumRows(parentId) {
+  function getStyledTableNumRows(ancestorId) {
     // The tbody element of the first styled table in |parentId|.
-    var tbody = document.querySelector('#' + parentId + ' .styledTable tbody');
+    var tbody = getStyledTableDescendent(ancestorId);
     if (!tbody)
       return -1;
     return tbody.children.length;
   }
 
   /**
-   * Finds the first styled table that's a child of the element with the given
-   * id, and checks if it has exactly |expectedRows| rows, not including the
-   * header row.
-   * @param {string} parentId HTML element id containing a styled table.
+   * Finds the first styled table body that's a descendent of |ancestorId|,
+   * including the |ancestorId| element itself, and checks if it has exactly
+   * |expectedRows| rows.  As only table bodies are considered, the header row
+   * will not be included in the count.
+   * @param {string} ancestorId HTML element id containing a styled table.
    * @param {number} expectedRows Expected number of rows in the table.
    */
-  function checkStyledTableRows(parentId, expectedRows) {
-    expectEquals(expectedRows, getStyledTableNumRows(parentId),
-                 'Incorrect number of rows in ' + parentId);
+  function checkStyledTableRows(ancestorId, expectedRows) {
+    expectEquals(expectedRows, getStyledTableNumRows(ancestorId),
+                 'Incorrect number of rows in ' + ancestorId);
+  }
+
+  /**
+   * Finds the first styled table body that's a descendent of |ancestorId|,
+   * including the |ancestorId| element itself, and returns the text of the
+   * specified cell.  If the cell does not exist, throws an exception.
+   * @param {string} ancestorId HTML element id containing a styled table.
+   * @param {number} row Row of the value to retrieve.
+   * @param {number} column Column of the value to retrieve.
+   */
+  function getStyledTableText(ancestorId, row, column) {
+    var tbody = getStyledTableDescendent(ancestorId);
+    return tbody.children[row].children[column].innerText;
   }
 
   /**
@@ -290,6 +320,15 @@ var netInternalsTest = (function() {
     },
 
     /**
+     * Adds a Task to the end of the queue.  The task will call the provided
+     * function, and then complete.
+     * @param {function}: taskFunction The function the task will call.
+     */
+    addFunctionTask: function(taskFunction) {
+      this.addTask(new CallFunctionTask(taskFunction));
+    },
+
+    /**
      * Starts running the Tasks in the queue.  Once called, may not be called
      * again.
      */
@@ -335,6 +374,13 @@ var netInternalsTest = (function() {
     },
 
     /**
+     * @return {bool} True if this task has completed by calling onTaskDone.
+     */
+    isDone: function() {
+      return this.isDone_;
+    },
+
+    /**
      * Sets the TaskQueue used by the task in the onTaskDone function.  May only
      * be called by the TaskQueue.
      * @param {TaskQueue}: taskQueue The TaskQueue |this| has been added to.
@@ -355,15 +401,120 @@ var netInternalsTest = (function() {
     }
   };
 
+  /**
+   * A Task that can be added to a TaskQueue.  A Task is started with a call to
+   * the start function, and must call its own onTaskDone when complete.
+   * @constructor
+   */
+  function CallFunctionTask(taskFunction) {
+    Task.call(this);
+    assertEquals('function', typeof taskFunction);
+    this.taskFunction_ = taskFunction;
+  }
+
+  CallFunctionTask.prototype = {
+    __proto__: Task.prototype,
+
+    /**
+     * Runs the function and then completes.
+     */
+    start: function() {
+      this.taskFunction_();
+      this.onTaskDone();
+    }
+  };
+
+  /**
+   * Returns true if a node does not have a 'display' property of 'none'.
+   * @param {node}: node The node to check.
+   */
+  function isDisplayed(node) {
+    var style = getComputedStyle(node);
+    return style.getPropertyValue('display') != 'none';
+  }
+
+  /**
+   * Creates a new NetLog source.  Note that the id may conflict with events
+   * received from the browser.
+   * @param {int}: type The source type.
+   * @param {int}: id The source id.
+   * @constructor
+   */
+  function Source(type, id) {
+    assertNotEquals(getKeyWithValue(LogSourceType, type), '?');
+    assertGE(id, 0);
+    this.type = type;
+    this.id = id;
+  }
+
+  /**
+   * Creates a new NetLog event.
+   * @param {Source}: source The source associated with the event.
+   * @param {int}: type The event id.
+   * @param {int}: time When the event occurred.
+   * @param {int}: phase The event phase.
+   * @param {object}: params The event parameters.  May be null.
+   * @constructor
+   */
+  function Event(source, type, time, phase, params) {
+    assertNotEquals(getKeyWithValue(LogEventType, type), '?');
+    assertNotEquals(getKeyWithValue(LogEventPhase, phase), '?');
+
+    this.source = source;
+    this.phase = phase;
+    this.type = type;
+    this.time = "" + time;
+    this.phase = phase;
+    if (params)
+      this.params = params;
+  }
+
+  /**
+   * Creates a new NetLog begin event.  Parameters are the same as Event,
+   * except there's no |phase| argument.
+   * @see Event
+   */
+  function CreateBeginEvent(source, type, time, params) {
+    return new Event(source, type, time,  LogEventPhase.PHASE_BEGIN, params);
+  }
+
+  /**
+   * Creates a new NetLog end event.  Parameters are the same as Event,
+   * except there's no |phase| argument.
+   * @see Event
+   */
+  function CreateEndEvent(source, type, time, params) {
+    return new Event(source, type, time,  LogEventPhase.PHASE_END, params);
+  }
+
+  /**
+   * Creates a new NetLog end event matching the given begin event.
+   * @param {Event}: beginEvent The begin event.  Returned event will have the
+   *                 same source and type.
+   * @param {int}: time When the event occurred.
+   * @param {object}: params The event parameters.  May be null.
+   * @see Event
+   */
+  function CreateMatchingEndEvent(beginEvent, time, params) {
+    return CreateEndEvent(beginEvent.source, beginEvent.type, time, params);
+  }
+
   // Exported functions.
   return {
     test: test,
-    runTest: runTest,
     checkStyledTableRows: checkStyledTableRows,
-    switchToView: switchToView,
     checkTabHandleVisibility: checkTabHandleVisibility,
+    getStyledTableText: getStyledTableText,
+    isDisplayed: isDisplayed,
+    runTest: runTest,
+    switchToView: switchToView,
     TaskQueue: TaskQueue,
-    Task: Task
+    Task: Task,
+    Source: Source,
+    Event: Event,
+    CreateBeginEvent: CreateBeginEvent,
+    CreateEndEvent: CreateEndEvent,
+    CreateMatchingEndEvent: CreateMatchingEndEvent
   };
 })();
 

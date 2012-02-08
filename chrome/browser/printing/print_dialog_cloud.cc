@@ -21,17 +21,18 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/print_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webpreferences.h"
@@ -100,6 +101,8 @@
 // http://code.google.com/p/chromium/issues/detail?id=44093 The
 // high-level flow (where the data is generated before even
 // bringing up the dialog) isn't what we want.
+
+using content::BrowserThread;
 
 namespace internal_cloud_print_helpers {
 
@@ -207,10 +210,9 @@ void CloudPrintDataSender::ReadPrintDataFile(const FilePath& path_to_file) {
       base64_data.insert(0, header);
       scoped_ptr<StringValue> new_data(new StringValue(base64_data));
       print_data_.swap(new_data);
-      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                              NewRunnableMethod(
-                                  this,
-                                  &CloudPrintDataSender::SendPrintDataFile));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(&CloudPrintDataSender::SendPrintDataFile, this));
     }
   }
 }
@@ -305,12 +307,13 @@ void CloudPrintFlowHandler::RegisterMessages() {
         CloudPrintURL(profile).GetCloudPrintServiceDialogURL());
   }
   registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
-                 Source<NavigationController>(controller));
+                 content::Source<NavigationController>(controller));
 }
 
-void CloudPrintFlowHandler::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void CloudPrintFlowHandler::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_LOAD_STOP) {
     // Take the opportunity to set some (minimal) additional
     // script permissions required for the web UI.
@@ -371,11 +374,10 @@ void CloudPrintFlowHandler::HandleSendPrintData(const ListValue* args) {
   CancelAnyRunningTask();
   if (web_ui_) {
     print_data_sender_ = CreateCloudPrintDataSender();
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                            NewRunnableMethod(
-                                print_data_sender_.get(),
-                                &CloudPrintDataSender::ReadPrintDataFile,
-                                path_to_file_));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::Bind(&CloudPrintDataSender::ReadPrintDataFile,
+                   print_data_sender_.get(), path_to_file_));
   }
 }
 
@@ -402,7 +404,7 @@ void CloudPrintFlowHandler::HandleSetPageParameters(const ListValue* args) {
   const double kMaxPageShrink = 2.0;
 
   PrintMsg_Print_Params default_settings;
-  default_settings.printable_size = gfx::Size(kWidth, kHeight);
+  default_settings.content_size = gfx::Size(kWidth, kHeight);
   default_settings.dpi = kDPI;
   default_settings.min_shrink = kMinPageShrink;
   default_settings.max_shrink = kMaxPageShrink;
@@ -531,9 +533,9 @@ void CloudPrintHtmlDialogDelegate::OnDialogClosed(
   flow_handler_->StoreDialogClientSize();
 
   if (delete_on_close_) {
-    BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-        NewRunnableFunction(&internal_cloud_print_helpers::Delete,
-                            path_to_file_));
+    BrowserThread::PostTask(
+        BrowserThread::FILE, FROM_HERE,
+        base::Bind(&internal_cloud_print_helpers::Delete, path_to_file_));
   }
 
   // If we're modal we can show the dialog with no browser.
@@ -629,9 +631,9 @@ void CreateDialogImpl(const FilePath& path_to_file,
           file_type, modal, delete_on_close);
   if (modal) {
     DCHECK(browser);
-    browser->BrowserShowHtmlDialog(dialog_delegate, NULL);
+    browser->BrowserShowHtmlDialog(dialog_delegate, NULL, STYLE_GENERIC);
   } else {
-    browser::ShowHtmlDialog(NULL, profile, dialog_delegate);
+    browser::ShowHtmlDialog(NULL, profile, dialog_delegate, STYLE_GENERIC);
   }
 }
 
@@ -661,13 +663,9 @@ void CreatePrintDialogForFile(const FilePath& path_to_file,
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(&internal_cloud_print_helpers::CreateDialogImpl,
-                          path_to_file,
-                          print_job_title,
-                          print_ticket,
-                          file_type,
-                          modal,
-                          delete_on_close));
+      base::Bind(&internal_cloud_print_helpers::CreateDialogImpl, path_to_file,
+                 print_job_title, print_ticket, file_type, modal,
+                 delete_on_close));
 }
 
 void CreatePrintDialogForBytes(scoped_refptr<RefCountedBytes> data,
@@ -681,13 +679,8 @@ void CreatePrintDialogForBytes(scoped_refptr<RefCountedBytes> data,
   scoped_refptr<RefCountedBytes> cloned_data(new RefCountedBytes(data->data()));
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableFunction(
-          &internal_cloud_print_helpers::CreatePrintDialogForBytesImpl,
-          cloned_data,
-          print_job_title,
-          print_ticket,
-          file_type,
-          modal));
+      base::Bind(&internal_cloud_print_helpers::CreatePrintDialogForBytesImpl,
+                 cloned_data, print_job_title, print_ticket, file_type, modal));
 }
 
 bool CreatePrintDialogFromCommandLine(const CommandLine& command_line) {

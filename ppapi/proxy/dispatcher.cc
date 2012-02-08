@@ -21,14 +21,13 @@ Dispatcher::Dispatcher(base::ProcessHandle remote_process_handle,
                        GetInterfaceFunc local_get_interface)
     : ProxyChannel(remote_process_handle),
       disallow_trusted_interfaces_(false),  // TODO(brettw) make this settable.
-      local_get_interface_(local_get_interface),
-      callback_tracker_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      local_get_interface_(local_get_interface) {
 }
 
 Dispatcher::~Dispatcher() {
 }
 
-InterfaceProxy* Dispatcher::GetInterfaceProxy(InterfaceID id) {
+InterfaceProxy* Dispatcher::GetInterfaceProxy(ApiID id) {
   InterfaceProxy* proxy = proxies_[id].get();
   if (!proxy) {
     // Handle the first time for a given API by creating the proxy for it.
@@ -55,24 +54,13 @@ void Dispatcher::AddIOThreadMessageFilter(
 }
 
 bool Dispatcher::OnMessageReceived(const IPC::Message& msg) {
-  // Control messages.
-  if (msg.routing_id() == MSG_ROUTING_CONTROL) {
-    bool handled = true;
-    IPC_BEGIN_MESSAGE_MAP(Dispatcher, msg)
-      IPC_MESSAGE_FORWARD(PpapiMsg_ExecuteCallback, &callback_tracker_,
-                          CallbackTracker::ReceiveExecuteSerializedCallback)
-      IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-    return handled;
-  }
-
-  if (msg.routing_id() <= 0 || msg.routing_id() >= INTERFACE_ID_COUNT) {
+  if (msg.routing_id() <= 0 || msg.routing_id() >= API_ID_COUNT) {
     OnInvalidMessageReceived();
     return true;
   }
 
   InterfaceProxy* proxy = GetInterfaceProxy(
-      static_cast<InterfaceID>(msg.routing_id()));
+      static_cast<ApiID>(msg.routing_id()));
   if (!proxy) {
     NOTREACHED();
     return true;

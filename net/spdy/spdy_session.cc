@@ -21,6 +21,7 @@
 #include "net/base/net_log.h"
 #include "net/base/net_util.h"
 #include "net/http/http_network_session.h"
+#include "net/http/http_server_properties.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_frame_builder.h"
 #include "net/spdy/spdy_http_utils.h"
@@ -234,7 +235,7 @@ size_t SpdySession::max_concurrent_stream_limit_ = 256;
 bool SpdySession::enable_ping_based_connection_checking_ = true;
 
 // static
-int SpdySession::connection_at_risk_of_loss_ms_ = 0;
+int SpdySession::connection_at_risk_of_loss_seconds_ = 10;
 
 // static
 int SpdySession::trailing_ping_delay_time_ms_ = 1000;
@@ -244,7 +245,7 @@ int SpdySession::hung_interval_ms_ = 10000;
 
 SpdySession::SpdySession(const HostPortProxyPair& host_port_proxy_pair,
                          SpdySessionPool* spdy_session_pool,
-                         SpdySettingsStorage* spdy_settings,
+                         HttpServerProperties* http_server_properties,
                          bool verify_domain_authentication,
                          NetLog* net_log)
     : ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -254,7 +255,7 @@ SpdySession::SpdySession(const HostPortProxyPair& host_port_proxy_pair,
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
       host_port_proxy_pair_(host_port_proxy_pair),
       spdy_session_pool_(spdy_session_pool),
-      spdy_settings_(spdy_settings),
+      http_server_properties_(http_server_properties),
       connection_(new ClientSocketHandle),
       read_buffer_(new IOBuffer(kReadBufferSize)),
       read_pending_(false),
@@ -354,7 +355,7 @@ bool SpdySession::VerifyDomainAuthentication(const std::string& domain) {
   if (!GetSSLInfo(&ssl_info, &was_npn_negotiated))
     return true;   // This is not a secure session, so all domains are okay.
 
-  return ssl_info.cert->VerifyNameMatch(domain);
+  return !ssl_info.client_cert_sent && ssl_info.cert->VerifyNameMatch(domain);
 }
 
 int SpdySession::GetPushStream(
@@ -530,9 +531,10 @@ int SpdySession::WriteSynStream(
   }
 
   // Some servers don't like too many pings, so we limit our current sending to
-  // no more than one ping for any syn sent.  To do this, we avoid ever setting
-  // this to true unless we send a syn (which we have just done).  This approach
-  // may change over time as servers change their responses to pings.
+  // no more than two pings for any syn frame or data frame sent.  To do this,
+  // we avoid ever setting this to true unless we send a syn (which we have just
+  // done) or data frame. This approach may change over time as servers change
+  // their responses to pings.
   need_to_send_ping_ = true;
 
   return ERR_IO_PENDING;
@@ -547,8 +549,6 @@ int SpdySession::WriteStreamData(spdy::SpdyStreamId stream_id,
   CHECK_EQ(stream->stream_id(), stream_id);
   if (!stream)
     return ERR_INVALID_SPDY_STREAM;
-
-  SendPrefacePingIfNoneInFlight();
 
   if (len > kMaxSpdyFrameChunkSize) {
     len = kMaxSpdyFrameChunkSize;
@@ -585,10 +585,23 @@ int SpdySession::WriteStreamData(spdy::SpdyStreamId stream_id,
         make_scoped_refptr(new NetLogSpdyDataParameter(stream_id, len, flags)));
   }
 
+  // Send PrefacePing for DATA_FRAMEs with nonzero payload size.
+  if (len > 0)
+    SendPrefacePingIfNoneInFlight();
+
   // TODO(mbelshe): reduce memory copies here.
   scoped_ptr<spdy::SpdyDataFrame> frame(
       spdy_framer_.CreateDataFrame(stream_id, data->data(), len, flags));
   QueueFrame(frame.get(), stream->priority(), stream);
+
+  // Some servers don't like too many pings, so we limit our current sending to
+  // no more than two pings for any syn frame or data frame sent.  To do this,
+  // we avoid ever setting this to true unless we send a syn (which we have just
+  // done) or data frame. This approach may change over time as servers change
+  // their responses to pings.
+  if (len > 0)
+    need_to_send_ping_ = true;
+
   return ERR_IO_PENDING;
 }
 
@@ -702,8 +715,8 @@ void SpdySession::OnWriteComplete(int result) {
         // size.
         if (result > 0) {
           result = in_flight_write_.buffer()->size();
-          DCHECK_GE(result, static_cast<int>(spdy::SpdyFrame::size()));
-          result -= static_cast<int>(spdy::SpdyFrame::size());
+          DCHECK_GE(result, static_cast<int>(spdy::SpdyFrame::kHeaderSize));
+          result -= static_cast<int>(spdy::SpdyFrame::kHeaderSize);
         }
 
         // It is possible that the stream was cancelled while we were writing
@@ -813,7 +826,7 @@ void SpdySession::WriteSocket() {
           return;
         }
 
-        size = compressed_frame->length() + spdy::SpdyFrame::size();
+        size = compressed_frame->length() + spdy::SpdyFrame::kHeaderSize;
 
         DCHECK_GT(size, 0u);
 
@@ -824,7 +837,7 @@ void SpdySession::WriteSocket() {
         // Attempt to send the frame.
         in_flight_write_ = SpdyIOBuffer(buffer, size, 0, next_buffer.stream());
       } else {
-        size = uncompressed_frame.length() + spdy::SpdyFrame::size();
+        size = uncompressed_frame.length() + spdy::SpdyFrame::kHeaderSize;
         in_flight_write_ = next_buffer;
       }
     } else {
@@ -893,7 +906,7 @@ int SpdySession::GetNewStreamId() {
 void SpdySession::QueueFrame(spdy::SpdyFrame* frame,
                              spdy::SpdyPriority priority,
                              SpdyStream* stream) {
-  int length = spdy::SpdyFrame::size() + frame->length();
+  int length = spdy::SpdyFrame::kHeaderSize + frame->length();
   IOBuffer* buffer = new IOBuffer(length);
   memcpy(buffer->data(), frame->data(), length);
   queue_.push(SpdyIOBuffer(buffer, length, priority, stream));
@@ -1400,7 +1413,7 @@ void SpdySession::OnSettings(const spdy::SpdySettingsControlFrame& frame) {
   spdy::SpdySettings settings;
   if (spdy_framer_.ParseSettings(&frame, &settings)) {
     HandleSettings(settings);
-    spdy_settings_->Set(host_port_pair(), settings);
+    http_server_properties_->SetSpdySettings(host_port_pair(), settings);
   }
 
   received_settings_ = true;
@@ -1481,7 +1494,8 @@ void SpdySession::SendSettings() {
   // Note:  we're copying the settings here, so that we can potentially modify
   // the settings for the field trial.  When removing the field trial, make
   // this a reference to the const SpdySettings again.
-  spdy::SpdySettings settings = spdy_settings_->Get(host_port_pair());
+  spdy::SpdySettings settings =
+      http_server_properties_->GetSpdySettings(host_port_pair());
   if (settings.empty())
     return;
 
@@ -1500,7 +1514,7 @@ void SpdySession::SendSettings() {
         if (cwnd != val) {
           i->second = cwnd;
           i->first.set_flags(spdy::SETTINGS_FLAG_PLEASE_PERSIST);
-          spdy_settings_->Set(host_port_pair(), settings);
+          http_server_properties_->SetSpdySettings(host_port_pair(), settings);
         }
         break;
     }
@@ -1540,7 +1554,7 @@ void SpdySession::SendPrefacePingIfNoneInFlight() {
     return;
 
   const base::TimeDelta kConnectionAtRiskOfLoss =
-      base::TimeDelta::FromMilliseconds(connection_at_risk_of_loss_ms_);
+      base::TimeDelta::FromSeconds(connection_at_risk_of_loss_seconds_);
 
   base::TimeTicks now = base::TimeTicks::Now();
   // If we haven't heard from server, then send a preface-PING.
@@ -1551,9 +1565,7 @@ void SpdySession::SendPrefacePingIfNoneInFlight() {
 }
 
 void SpdySession::SendPrefacePing() {
-  // TODO(rtenneti): Send preface pings when more servers support additional
-  // pings.
-  // WritePingFrame(next_ping_id_);
+  WritePingFrame(next_ping_id_);
 }
 
 void SpdySession::PlanToSendTrailingPing() {
@@ -1664,7 +1676,8 @@ void SpdySession::RecordHistograms() {
 
   if (received_settings_) {
     // Enumerate the saved settings, and set histograms for it.
-    const spdy::SpdySettings& settings = spdy_settings_->Get(host_port_pair());
+    const spdy::SpdySettings& settings =
+        http_server_properties_->GetSpdySettings(host_port_pair());
 
     spdy::SpdySettings::const_iterator it;
     for (it = settings.begin(); it != settings.end(); ++it) {

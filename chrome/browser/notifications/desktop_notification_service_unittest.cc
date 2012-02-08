@@ -8,13 +8,14 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -28,10 +29,11 @@ class ThreadProxy : public base::RefCountedThreadSafe<ThreadProxy> {
         permission_(WebKit::WebNotificationPresenter::PermissionAllowed) {
     // The current message loop was already initalized by the test superclass.
     ui_thread_.reset(
-        new BrowserThread(BrowserThread::UI, MessageLoop::current()));
+        new content::TestBrowserThread(BrowserThread::UI,
+                                       MessageLoop::current()));
 
     // Create IO thread, start its message loop.
-    io_thread_.reset(new BrowserThread(BrowserThread::IO));
+    io_thread_.reset(new content::TestBrowserThread(BrowserThread::IO));
     io_thread_->Start();
 
     // Calling PauseIOThread() here isn't safe, because the runnable method
@@ -85,8 +87,8 @@ class ThreadProxy : public base::RefCountedThreadSafe<ThreadProxy> {
 
   base::WaitableEvent io_event_;
   base::WaitableEvent ui_event_;
-  scoped_ptr<BrowserThread> ui_thread_;
-  scoped_ptr<BrowserThread> io_thread_;
+  scoped_ptr<content::TestBrowserThread> ui_thread_;
+  scoped_ptr<content::TestBrowserThread> io_thread_;
 
   WebKit::WebNotificationPresenter::Permission permission_;
 };
@@ -122,7 +124,7 @@ TEST_F(DesktopNotificationServiceTest, SettingsForSchemes) {
   GURL url("file:///html/test.html");
 
   EXPECT_EQ(CONTENT_SETTING_ASK,
-            service_->GetDefaultContentSetting());
+            service_->GetDefaultContentSetting(NULL));
   EXPECT_EQ(WebKit::WebNotificationPresenter::PermissionNotAllowed,
             proxy_->ServiceHasPermission(service_, url));
 
@@ -137,7 +139,7 @@ TEST_F(DesktopNotificationServiceTest, SettingsForSchemes) {
   GURL https_url("https://testurl");
   GURL http_url("http://testurl");
   EXPECT_EQ(CONTENT_SETTING_ASK,
-            service_->GetDefaultContentSetting());
+            service_->GetDefaultContentSetting(NULL));
   EXPECT_EQ(WebKit::WebNotificationPresenter::PermissionNotAllowed,
             proxy_->ServiceHasPermission(service_, http_url));
   EXPECT_EQ(WebKit::WebNotificationPresenter::PermissionNotAllowed,
@@ -162,28 +164,33 @@ TEST_F(DesktopNotificationServiceTest, GetNotificationsSettings) {
   service_->DenyPermission(GURL("http://denied2.com"));
   service_->DenyPermission(GURL("http://denied.com"));
 
-  HostContentSettingsMap::SettingsForOneType settings;
+  ContentSettingsForOneType settings;
   service_->GetNotificationsSettings(&settings);
-  ASSERT_EQ(4u, settings.size());
+  // |settings| contains the default setting and 4 exceptions.
+  ASSERT_EQ(5u, settings.size());
 
   EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(
                 GURL("http://allowed.com")),
-            settings[0].a);
+            settings[0].primary_pattern);
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            settings[0].c);
+            settings[0].setting);
   EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(
                 GURL("http://allowed2.com")),
-            settings[1].a);
+            settings[1].primary_pattern);
   EXPECT_EQ(CONTENT_SETTING_ALLOW,
-            settings[1].c);
+            settings[1].setting);
   EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(
                 GURL("http://denied.com")),
-            settings[2].a);
+            settings[2].primary_pattern);
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            settings[2].c);
+            settings[2].setting);
   EXPECT_EQ(ContentSettingsPattern::FromURLNoWildcard(
                 GURL("http://denied2.com")),
-            settings[3].a);
+            settings[3].primary_pattern);
   EXPECT_EQ(CONTENT_SETTING_BLOCK,
-            settings[3].c);
+            settings[3].setting);
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            settings[4].primary_pattern);
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            settings[4].setting);
 }

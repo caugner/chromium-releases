@@ -6,33 +6,35 @@
 // and a test protocol manager. It is used to test logics in safebrowsing
 // service.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram.h"
 #include "base/scoped_temp_dir.h"
-#include "crypto/sha2.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
+#include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_database.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
-#include "chrome/browser/safe_browsing/protocol_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/test/test_browser_thread.h"
+#include "crypto/sha2.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using base::Histogram;
 using base::StatisticsRecorder;
+using content::BrowserThread;
 
 using ::testing::_;
 using ::testing::Mock;
@@ -217,9 +219,8 @@ class TestProtocolManager :  public SafeBrowsingProtocolManager {
     bool cancache = true;
     BrowserThread::PostDelayedTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            sb_service_, &SafeBrowsingService::HandleGetHashResults,
-            check, full_hashes_, cancache),
+        base::Bind(&SafeBrowsingService::HandleGetHashResults,
+                   sb_service_, check, full_hashes_, cancache),
         delay_ms_);
   }
 
@@ -289,7 +290,7 @@ void QuitUIThread() {
 
 void QuitFromIOThread() {
   BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE, NewRunnableFunction(&QuitUIThread));
+      BrowserThread::UI, FROM_HERE, base::Bind(&QuitUIThread));
 }
 
 }  // namespace
@@ -421,7 +422,7 @@ class SafeBrowsingServiceTest : public InProcessBrowserTest {
   // to wait for the SafeBrowsingService to finish loading/stopping.
   void WaitForIOThread() {
     BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE, NewRunnableFunction(&QuitFromIOThread));
+        BrowserThread::IO, FROM_HERE, base::Bind(&QuitFromIOThread));
     ui_test_utils::RunMessageLoop();  // Will stop from |QuitUIThread|.
   }
 
@@ -525,18 +526,16 @@ class TestSBClient
   void CheckDownloadUrl(const std::vector<GURL>& url_chain) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this,
-                          &TestSBClient::CheckDownloadUrlOnIOThread,
-                          url_chain));
+        base::Bind(&TestSBClient::CheckDownloadUrlOnIOThread,
+                   this, url_chain));
     ui_test_utils::RunMessageLoop();  // Will stop in OnDownloadUrlCheckResult.
   }
 
   void CheckDownloadHash(const std::string& full_hash) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this,
-                          &TestSBClient::CheckDownloadHashOnIOThread,
-                          full_hash));
+        base::Bind(&TestSBClient::CheckDownloadHashOnIOThread,
+                   this, full_hash));
     ui_test_utils::RunMessageLoop();  // Will stop in OnDownloadHashCheckResult.
   }
 
@@ -554,7 +553,7 @@ class TestSBClient
                                 SafeBrowsingService::UrlCheckResult result) {
     result_ = result;
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &TestSBClient::DownloadCheckDone));
+                            base::Bind(&TestSBClient::DownloadCheckDone, this));
   }
 
   // Called when the result of checking a download hash is known.
@@ -562,7 +561,7 @@ class TestSBClient
                                  SafeBrowsingService::UrlCheckResult result) {
     result_ = result;
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &TestSBClient::DownloadCheckDone));
+                            base::Bind(&TestSBClient::DownloadCheckDone, this));
   }
 
   void DownloadCheckDone() {

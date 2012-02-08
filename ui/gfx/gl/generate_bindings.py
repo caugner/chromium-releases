@@ -1,5 +1,4 @@
-#!/usr/bin/python
-#
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,18 +6,20 @@
 """code generator for GL/GLES extension wrangler."""
 
 import os
+import collections
 import re
 import sys
 
 GL_FUNCTIONS = [
 ['void', ['glActiveTexture'], 'GLenum texture'],
 ['void', ['glAttachShader'], 'GLuint program, GLuint shader'],
+['void', ['glBeginQuery'], 'GLenum target, GLuint id'],
 ['void', ['glBindAttribLocation'],
     'GLuint program, GLuint index, const char* name'],
 ['void', ['glBindBuffer'], 'GLenum target, GLuint buffer'],
 ['void', ['glBindFragDataLocation'],
     'GLuint program, GLuint colorNumber, const char* name'],
-['void', ['glBindFragDataLocationIndexedARB'],
+['void', ['glBindFragDataLocationIndexed'],
     'GLuint program, GLuint colorNumber, GLuint index, const char* name'],
 ['void', ['glBindFramebufferEXT', 'glBindFramebuffer'],
     'GLenum target, GLuint framebuffer'],
@@ -32,11 +33,11 @@ GL_FUNCTIONS = [
 ['void', ['glBlendFunc'], 'GLenum sfactor, GLenum dfactor'],
 ['void', ['glBlendFuncSeparate'],
     'GLenum srcRGB, GLenum dstRGB, GLenum srcAlpha, GLenum dstAlpha'],
-['void', ['glBlitFramebufferEXT', 'BlitFramebuffer'],
+['void', ['glBlitFramebufferEXT', 'glBlitFramebuffer'],
     'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
     'GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, '
     'GLbitfield mask, GLenum filter'],
-['void', ['glBlitFramebufferANGLE', 'BlitFramebuffer'],
+['void', ['glBlitFramebufferANGLE', 'glBlitFramebuffer'],
     'GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1, '
     'GLint dstX0, GLint dstY0, GLint dstX1, GLint dstY1, '
     'GLbitfield mask, GLenum filter'],
@@ -74,6 +75,7 @@ GL_FUNCTIONS = [
 ['void', ['glDeleteFramebuffersEXT', 'glDeleteFramebuffers'],
     'GLsizei n, const GLuint* framebuffers'],
 ['void', ['glDeleteProgram'], 'GLuint program'],
+['void', ['glDeleteQueries'], 'GLsizei n, const GLuint* ids'],
 ['void', ['glDeleteRenderbuffersEXT', 'glDeleteRenderbuffers'],
     'GLsizei n, const GLuint* renderbuffers'],
 ['void', ['glDeleteShader'], 'GLuint shader'],
@@ -94,6 +96,7 @@ GL_FUNCTIONS = [
     'GLenum target, GLeglImageOES image'],
 ['void', ['glEnable'], 'GLenum cap'],
 ['void', ['glEnableVertexAttribArray'], 'GLuint index'],
+['void', ['glEndQuery'], 'GLenum target'],
 ['void', ['glFinish'], 'void'],
 ['void', ['glFlush'], 'void'],
 ['void', ['glFramebufferRenderbufferEXT', 'glFramebufferRenderbuffer'],
@@ -104,6 +107,7 @@ GL_FUNCTIONS = [
     'GLint level'],
 ['void', ['glFrontFace'], 'GLenum mode'],
 ['void', ['glGenBuffersARB', 'glGenBuffers'], 'GLsizei n, GLuint* buffers'],
+['void', ['glGenQueries'], 'GLsizei n, GLuint* ids'],
 ['void', ['glGenerateMipmapEXT', 'glGenerateMipmap'], 'GLenum target'],
 ['void', ['glGenFramebuffersEXT', 'glGenFramebuffers'],
     'GLsizei n, GLuint* framebuffers'],
@@ -132,6 +136,12 @@ GL_FUNCTIONS = [
 ['void', ['glGetProgramiv'], 'GLuint program, GLenum pname, GLint* params'],
 ['void', ['glGetProgramInfoLog'],
     'GLuint program, GLsizei bufsize, GLsizei* length, char* infolog'],
+['void', ['glGetQueryiv'], 'GLenum target, GLenum pname, GLint* params'],
+['void', ['glGetQueryObjecti64v'], 'GLuint id, GLenum pname, GLint64* params'],
+['void', ['glGetQueryObjectiv'], 'GLuint id, GLenum pname, GLint* params'],
+['void', ['glGetQueryObjectui64v'],
+    'GLuint id, GLenum pname, GLuint64* params'],
+['void', ['glGetQueryObjectuiv'], 'GLuint id, GLenum pname, GLuint* params'],
 ['void', ['glGetRenderbufferParameterivEXT', 'glGetRenderbufferParameteriv'],
     'GLenum target, GLenum pname, GLint* params'],
 ['void', ['glGetShaderiv'], 'GLuint shader, GLenum pname, GLint* params'],
@@ -171,9 +181,10 @@ GL_FUNCTIONS = [
 ['GLboolean', ['glIsTexture'], 'GLuint texture'],
 ['void', ['glLineWidth'], 'GLfloat width'],
 ['void', ['glLinkProgram'], 'GLuint program'],
-['void*', ['glMapBuffer'], 'GLenum target, GLenum access'],
+['void*', ['glMapBuffer', 'glMapBufferOES'], 'GLenum target, GLenum access'],
 ['void', ['glPixelStorei'], 'GLenum pname, GLint param'],
 ['void', ['glPolygonOffset'], 'GLfloat factor, GLfloat units'],
+['void', ['glQueryCounter'], 'GLuint id, GLenum target'],
 ['void', ['glReadBuffer'], 'GLenum src'],
 ['void', ['glReadPixels'],
     'GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, '
@@ -240,7 +251,7 @@ GL_FUNCTIONS = [
     'GLint location, GLsizei count, GLboolean transpose, const GLfloat* value'],
 ['void', ['glUniformMatrix4fv'],
     'GLint location, GLsizei count, GLboolean transpose, const GLfloat* value'],
-['GLboolean', ['glUnmapBuffer'], 'GLenum target'],
+['GLboolean', ['glUnmapBuffer', 'glUnmapBufferOES'], 'GLenum target'],
 ['void', ['glUseProgram'], 'GLuint program'],
 ['void', ['glValidateProgram'], 'GLuint program'],
 ['void', ['glVertexAttrib1f'], 'GLuint indx, GLfloat x'],
@@ -351,6 +362,11 @@ EGL_FUNCTIONS = [
     'EGLDisplay dpy, EGLSurface surface, EGLNativePixmapType target'],
 ['__eglMustCastToProperFunctionPointerType', ['eglGetProcAddress'],
     'const char* procname'],
+['EGLBoolean', ['eglPostSubBufferNV'],
+    'EGLDisplay dpy, EGLSurface surface, '
+    'EGLint x, EGLint y, EGLint width, EGLint height'],
+['EGLBoolean', ['eglQuerySurfacePointerANGLE'],
+    'EGLDisplay dpy, EGLSurface surface, EGLint attribute, void** value'],
 ]
 
 WGL_FUNCTIONS = [
@@ -364,8 +380,8 @@ WGL_FUNCTIONS = [
 ['BOOL', ['wglShareLists'], 'HGLRC hglrc1, HGLRC hglrc2'],
 ['BOOL', ['wglSwapIntervalEXT'], 'int interval'],
 ['BOOL', ['wglSwapLayerBuffers'], 'HDC hdc, UINT fuPlanes'],
-['const char*', ['wglGetExtensionsStringARB', 'wglGetExtensionsStringEXT'],
-    'HDC hDC'],
+['const char*', ['wglGetExtensionsStringARB'], 'HDC hDC'],
+['const char*', ['wglGetExtensionsStringEXT'], ''],
 ['BOOL', ['wglChoosePixelFormatARB'],
     'HDC dc, const int* int_attrib_list, const float* float_attrib_list, '
     'UINT max_formats, int* formats, UINT* num_formats'],
@@ -382,6 +398,9 @@ WGL_FUNCTIONS = [
 GLX_FUNCTIONS = [
 ['XVisualInfo*', ['glXChooseVisual'],
     'Display* dpy, int screen, int* attribList'],
+['void', ['glXCopySubBufferMESA'],
+    'Display* dpy, GLXDrawable drawable, '
+    'int x, int y, int width, int height'],
 ['GLXContext', ['glXCreateContext'],
     'Display* dpy, XVisualInfo* vis, GLXContext shareList, int direct'],
 ['void', ['glXBindTexImageEXT'],
@@ -452,14 +471,18 @@ GLX_FUNCTIONS = [
 ]
 
 FUNCTION_SETS = [
-  [GL_FUNCTIONS, 'gl'],
-  [OSMESA_FUNCTIONS, 'osmesa'],
-  [EGL_FUNCTIONS, 'egl'],
-  [WGL_FUNCTIONS, 'wgl'],
-  [GLX_FUNCTIONS, 'glx'],
+  [GL_FUNCTIONS, 'gl', ['../../../third_party/mesa/MesaLib/include/GL/glext.h',
+    '../../../third_party/khronos/GLES2/gl2ext.h']],
+  [OSMESA_FUNCTIONS, 'osmesa', []],
+  [EGL_FUNCTIONS, 'egl', ['../../../third_party/khronos/EGL/eglext.h']],
+  [WGL_FUNCTIONS, 'wgl', [
+    '../../../third_party/mesa/MesaLib/include/GL/wglext.h']],
+  [GLX_FUNCTIONS, 'glx', [
+    '../../../third_party/mesa/MesaLib/include/GL/glxext.h']],
 ]
 
-def GenerateHeader(file, functions, set_name):
+
+def GenerateHeader(file, functions, set_name, used_extension_functions):
   """Generates gl_binding_autogen_x.h"""
 
   # Write file header.
@@ -476,8 +499,13 @@ def GenerateHeader(file, functions, set_name):
   file.write('\n')
   file.write('namespace gfx {\n')
   file.write('\n')
+  file.write('class GLContext;\n')
+  file.write('\n')
   file.write('void InitializeGLBindings%s();\n' % set_name.upper())
+  file.write('void InitializeGLExtensionBindings%s(GLContext* context);\n' %
+      set_name.upper())
   file.write('void InitializeDebugGLBindings%s();\n' % set_name.upper())
+  file.write('void ClearGLBindings%s();\n' % set_name.upper())
 
   # Write typedefs for function pointer types. Always use the GL name for the
   # typedef.
@@ -485,6 +513,11 @@ def GenerateHeader(file, functions, set_name):
   for [return_type, names, arguments] in functions:
     file.write('typedef %s (GL_BINDING_CALL *%sProc)(%s);\n' %
         (return_type, names[0], arguments))
+
+  # Write declarations for booleans indicating which extensions are available.
+  file.write('\n')
+  for extension, ext_functions in used_extension_functions:
+    file.write('GL_EXPORT extern bool g_%s;\n' % extension)
 
   # Write declarations for function pointers. Always use the GL name for the
   # declaration.
@@ -506,7 +539,7 @@ def GenerateHeader(file, functions, set_name):
       set_name.upper())
 
 
-def GenerateSource(file, functions, set_name):
+def GenerateSource(file, functions, set_name, used_extension_functions):
   """Generates gl_binding_autogen_x.cc"""
 
   # Write file header.
@@ -517,11 +550,20 @@ def GenerateSource(file, functions, set_name):
   file.write('// This file is automatically generated.\n')
   file.write('\n')
   file.write('#include "ui/gfx/gl/gl_bindings.h"\n')
+  file.write('#include "ui/gfx/gl/gl_context.h"\n')
   file.write('#include "ui/gfx/gl/gl_implementation.h"\n')
+
+  # Write definitions for booleans indicating which extensions are available.
+  file.write('\n')
+  file.write('namespace gfx {\n')
+  file.write('\n')
+  for extension, ext_functions in used_extension_functions:
+    file.write('bool g_%s;\n' % extension)
 
   # Write definitions of function pointers.
   file.write('\n')
-  file.write('namespace gfx {\n')
+  file.write('static bool g_debugBindingsInitialized;\n')
+  file.write('static void UpdateDebugGLExtensionBindings();\n')
   file.write('\n')
   for [return_type, names, arguments] in functions:
     file.write('%sProc g_%s;\n' % (names[0], names[0]))
@@ -530,15 +572,43 @@ def GenerateSource(file, functions, set_name):
   for [return_type, names, arguments] in functions:
     file.write('static %sProc g_debug_%s;\n' % (names[0], names[0]))
 
-  # Write function to initialize the function pointers.
+  # Write function to initialize the core function pointers. The code assumes
+  # any non-NULL pointer returned by GetGLCoreProcAddress() is valid, although
+  # it may be overwritten by an extension function pointer later.
   file.write('\n')
   file.write('void InitializeGLBindings%s() {\n' % set_name.upper())
   for [return_type, names, arguments] in functions:
-    for name in names:
-      file.write('  if (!g_%s)\n' % names[0])
+    for i, name in enumerate(names):
+      if i:
+        file.write('  if (!g_%s)\n  ' % names[0])
       file.write(
-          '    g_%s = reinterpret_cast<%sProc>(GetGLProcAddress("%s"));\n' %
+          '  g_%s = reinterpret_cast<%sProc>(GetGLCoreProcAddress("%s"));\n' %
               (names[0], names[0], name))
+  file.write('}\n')
+  file.write('\n')
+
+  # Write function to initialize the extension function pointers. This function
+  # uses a current context to query which extensions are actually supported.
+  file.write('void InitializeGLExtensionBindings%s(GLContext* context) {\n' %
+      set_name.upper())
+  file.write('  DCHECK(context && context->IsCurrent(NULL));\n')
+  for extension, ext_functions in used_extension_functions:
+    file.write('  if ((g_%s = context->HasExtension("%s"))) {\n' %
+        (extension, extension))
+    queried_entry_points = set()
+    for entry_point_name, function_name in ext_functions:
+      # Replace the pointer unconditionally unless this extension has several
+      # alternatives for the same entry point (e.g.,
+      # GL_ARB_blend_func_extended).
+      if entry_point_name in queried_entry_points:
+        file.write('    if (!g_%s)\n  ' % entry_point_name)
+      file.write(
+         '    g_%s = reinterpret_cast<%sProc>(GetGLProcAddress("%s"));\n' %
+             (entry_point_name, entry_point_name, function_name))
+      queried_entry_points.add(entry_point_name)
+    file.write('  }\n')
+  file.write('  if (g_debugBindingsInitialized)\n')
+  file.write('    UpdateDebugGLExtensionBindings();\n')
   file.write('}\n')
   file.write('\n')
 
@@ -584,19 +654,49 @@ def GenerateSource(file, functions, set_name):
     file.write('}\n')
   file.write('}  // extern "C"\n')
 
-  # Write function to initialize the function pointers.
+  # Write function to initialize the debug function pointers.
   file.write('\n')
   file.write('void InitializeDebugGLBindings%s() {\n' % set_name.upper())
   for [return_type, names, arguments] in functions:
-    for name in names:
-      file.write('  if (!g_debug_%s) {\n' % names[0])
-      file.write('    g_debug_%s = g_%s;\n' % (names[0], names[0]))
-      file.write('    g_%s = Debug_%s;\n' % (names[0], names[0]))
+    file.write('  if (!g_debug_%s) {\n' % names[0])
+    file.write('    g_debug_%s = g_%s;\n' % (names[0], names[0]))
+    file.write('    g_%s = Debug_%s;\n' % (names[0], names[0]))
+    file.write('  }\n')
+  file.write('  g_debugBindingsInitialized = true;\n')
+  file.write('}\n')
+
+  # Write function to update the debug function pointers to extension functions
+  # after the extensions have been initialized.
+  file.write('\n')
+  file.write('static void UpdateDebugGLExtensionBindings() {\n')
+  for extension, ext_functions in used_extension_functions:
+    for name, _ in ext_functions:
+      file.write('  if (g_debug_%s != g_%s &&\n' % (name, name))
+      file.write('      g_%s != Debug_%s) {\n' % (name, name))
+      file.write('    g_debug_%s = g_%s;\n' % (name, name))
+      file.write('    g_%s = Debug_%s;\n' % (name, name))
       file.write('  }\n')
   file.write('}\n')
-  file.write('\n')
 
-  file.write( '}  // namespace gfx\n')
+  # Write function to clear all function pointers.
+  file.write('\n')
+  file.write('void ClearGLBindings%s() {\n' % set_name.upper())
+  # Clear the availability of GL extensions.
+  for extension, ext_functions in used_extension_functions:
+    file.write('  g_%s = false;\n' % extension)
+  # Clear GL bindings.
+  file.write('\n')
+  for [return_type, names, arguments] in functions:
+    file.write('  g_%s = NULL;\n' % names[0])
+  # Clear debug GL bindings.
+  file.write('\n')
+  for [return_type, names, arguments] in functions:
+    file.write('  g_debug_%s = NULL;\n' % names[0])
+  file.write('  g_debugBindingsInitialized = false;\n')
+  file.write('}\n')
+
+  file.write('\n')
+  file.write('}  // namespace gfx\n')
 
 
 def GenerateMockSource(file, functions):
@@ -633,17 +733,140 @@ def GenerateMockSource(file, functions):
           (function_name, argument_names))
     file.write('}\n')
 
+  # Write an 'invalid' function to catch code calling through uninitialized
+  # function pointers or trying to interpret the return value of
+  # GLProcAddress().
+  file.write('\n')
+  file.write('static void MockInvalidFunction() {\n')
+  file.write('  NOTREACHED();\n')
+  file.write('}\n')
+
   # Write a function to lookup a mock GL function based on its name.
   file.write('\n')
   file.write('void* GL_BINDING_CALL GetMockGLProcAddress(const char* name) {\n')
   for [return_type, names, arguments] in functions:
     file.write('  if (strcmp(name, "%s") == 0)\n' % names[0])
     file.write('    return reinterpret_cast<void*>(Mock_%s);\n' % names[0])
-  file.write('  return NULL;\n')
+  # Always return a non-NULL pointer like some EGL implementations do.
+  file.write('  return reinterpret_cast<void*>(&MockInvalidFunction);\n')
   file.write('}\n');
 
   file.write('\n')
   file.write('}  // namespace gfx\n')
+
+
+def ParseExtensionFunctionsFromHeader(header_file):
+  """Parse a C extension header file and return a map from extension names to
+  a list of functions.
+
+  Args:
+    header_file: Line-iterable C header file.
+  Returns:
+    Map of extension name => functions.
+  """
+  extension_start = re.compile(r'#define ([A-Z]+_[A-Z]+_[a-zA-Z]\w+) 1')
+  extension_function = re.compile(r'.+\s+([a-z]+\w+)\s*\(.+\);')
+  typedef = re.compile(r'typedef .*')
+  macro_start = re.compile(r'^#(if|ifdef|ifndef).*')
+  macro_end = re.compile(r'^#endif.*')
+  macro_depth = 0
+  current_extension = None
+  current_extension_depth = 0
+  extensions = collections.defaultdict(lambda: [])
+  for line in header_file:
+    if macro_start.match(line):
+      macro_depth += 1
+    elif macro_end.match(line):
+      macro_depth -= 1
+      if macro_depth < current_extension_depth:
+        current_extension = None
+    match = extension_start.match(line)
+    if match:
+      current_extension = match.group(1)
+      current_extension_depth = macro_depth
+      assert current_extension not in extensions, \
+          "Duplicate extension: " + current_extension
+    match = extension_function.match(line)
+    if match and current_extension and not typedef.match(line):
+      extensions[current_extension].append(match.group(1))
+  return extensions
+
+
+def GetExtensionFunctions(extension_headers):
+  """Parse extension functions from a list of header files.
+
+  Args:
+    extension_headers: List of header file names.
+  Returns:
+    Map of extension name => list of functions.
+  """
+  extensions = {}
+  for header in extension_headers:
+    extensions.update(ParseExtensionFunctionsFromHeader(open(header)))
+  return extensions
+
+
+def GetFunctionToExtensionMap(extensions):
+  """Construct map from a function names to extensions which define the
+  function.
+
+  Args:
+    extensions: Map of extension name => functions.
+  Returns:
+    Map of function name => extension name.
+  """
+  function_to_extension = {}
+  for extension, functions in extensions.items():
+    for function in functions:
+      assert function not in function_to_extension, \
+          "Duplicate function: " + function
+      function_to_extension[function] = extension
+  return function_to_extension
+
+
+def LooksLikeExtensionFunction(function):
+  """Heuristic to see if a function name is consistent with extension function
+  naming."""
+  vendor = re.match(r'\w+?([A-Z][A-Z]+)$', function)
+  return vendor is not None and not vendor.group(1) in ['GL', 'API', 'DC']
+
+
+def GetUsedExtensionFunctions(functions, extension_headers):
+  """Determine which functions belong to extensions.
+
+  Args:
+    functions: List of (return type, function names, arguments).
+    extension_headers: List of header file names.
+  Returns:
+    List of (extension name, [function name alternatives]) sorted with least
+    preferred extensions first.
+  """
+  # Parse known extensions.
+  extensions = GetExtensionFunctions(extension_headers)
+  functions_to_extensions = GetFunctionToExtensionMap(extensions)
+
+  # Collect all used extension functions.
+  used_extension_functions = collections.defaultdict(lambda: [])
+  for [return_type, names, arguments] in functions:
+    for name in names:
+      # Make sure we know about all extension functions.
+      if (LooksLikeExtensionFunction(name) and
+          not name in functions_to_extensions):
+        raise RuntimeError('%s looks like an extension function but does not '
+            'belong to any of the known extensions.' % name)
+      if name in functions_to_extensions:
+        extension = functions_to_extensions[name]
+        used_extension_functions[extension].append((names[0], name))
+
+  def ExtensionSortKey(name):
+    # Prefer ratified extensions and EXTs.
+    preferences = ['_ARB_', '_OES_', '_EXT_', '']
+    for i, category in enumerate(preferences):
+      if category in name:
+        return -i
+  used_extension_functions = sorted(used_extension_functions.items(),
+      key = lambda item: ExtensionSortKey(item[0]))
+  return used_extension_functions
 
 
 def main(argv):
@@ -654,21 +877,25 @@ def main(argv):
   else:
     dir = '.'
 
-  for [functions, set_name] in FUNCTION_SETS:
+  for [functions, set_name, extension_headers] in FUNCTION_SETS:
+    used_extension_functions = GetUsedExtensionFunctions(
+        functions, extension_headers)
+
     header_file = open(
         os.path.join(dir, 'gl_bindings_autogen_%s.h' % set_name), 'wb')
-    GenerateHeader(header_file, functions, set_name)
+    GenerateHeader(header_file, functions, set_name, used_extension_functions)
     header_file.close()
 
     source_file = open(
         os.path.join(dir, 'gl_bindings_autogen_%s.cc' % set_name), 'wb')
-    GenerateSource(source_file, functions, set_name)
+    GenerateSource(source_file, functions, set_name, used_extension_functions)
     source_file.close()
 
   source_file = open(os.path.join(dir, 'gl_bindings_autogen_mock.cc'), 'wb')
   GenerateMockSource(source_file, GL_FUNCTIONS)
   source_file.close()
+  return 0
 
 
 if __name__ == '__main__':
-  main(sys.argv[1:])
+  sys.exit(main(sys.argv[1:]))

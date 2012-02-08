@@ -23,7 +23,7 @@
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/gpu/gpu_info.h"
+#include "content/public/common/gpu_info.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -88,9 +88,9 @@ void ResizeTabContainer(Browser* browser, const gfx::Size& desired_size) {
 // which should be always collected during browser startup, so no need to run
 // GPU information collection here.
 // This will return false if we are running in a virtualized environment.
-bool GetGPUInfo(GPUInfo* client_info) {
+bool GetGPUInfo(content::GPUInfo* client_info) {
   CHECK(client_info);
-  const GPUInfo& info = GpuDataManager::GetInstance()->gpu_info();
+  const content::GPUInfo& info = GpuDataManager::GetInstance()->gpu_info();
   if (info.vendor_id == 0 || info.device_id == 0)
     return false;
   *client_info = info;
@@ -109,29 +109,13 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
     // This enables DOM automation for tab contents.
     EnableDOMAutomation();
 
-    // These tests by default use OSMesa. This can be changed if the |kUseGL|
-    // switch is explicitly set to something else or if |kUseGpuInTests| is
-    // present.
-    if (command_line->HasSwitch(switches::kUseGL)) {
-      using_gpu_ = command_line->GetSwitchValueASCII(switches::kUseGL) !=
-          gfx::kGLImplementationOSMesaName;
-    } else if (command_line->HasSwitch(kUseGpuInTests)) {
-      using_gpu_ = true;
-    } else {
-      // OSMesa will be used by default.
-      EXPECT_TRUE(test_launcher_utils::OverrideGLImplementation(
-          command_line,
-          gfx::kGLImplementationOSMesaName));
-#if defined(OS_MACOSX)
-      // Accelerated compositing does not work with OSMesa. AcceleratedSurface
-      // assumes GL contexts are native.
-      command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
-#endif
-      using_gpu_ = false;
+    // These tests by default use any GL implementation it can find.
+    // This can be changed if the |kUseGL| switch is explicitly set to
+    // something or if |kUseGpuInTests| is present.
+    if (!command_line->HasSwitch(switches::kUseGL) &&
+        !command_line->HasSwitch(kUseGpuInTests)) {
+      command_line->AppendSwitchASCII(switches::kUseGL, "any");
     }
-    // Allow file access from "file://" protocol. Otherwise, test fails with
-    // "Uncaught Error: SECURITY_ERR: DOM Exception 18."
-    command_line->AppendSwitch(switches::kAllowFileAccessFromFiles);
   }
 
   virtual void SetUpInProcessBrowserTestFixture() {
@@ -143,11 +127,6 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
       generated_img_dir_ = command_line->GetSwitchValuePath(kGeneratedDir);
     else
       generated_img_dir_ = test_data_dir_.AppendASCII("generated");
-
-    if (using_gpu_)
-      reference_img_dir_ = test_data_dir_.AppendASCII("gpu_reference");
-    else
-      reference_img_dir_ = test_data_dir_.AppendASCII("sw_reference");
 
     test_name_ = testing::UnitTest::GetInstance()->current_test_info()->name();
     const char* test_status_prefixes[] = {"DISABLED_", "FLAKY_", "FAILS_"};
@@ -172,6 +151,7 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   bool CompareImages(const SkBitmap& gen_bmp, const std::string& postfix) {
     // Determine the name of the image.
     std::string img_name = test_name_;
+    FilePath ref_img_dir;
     if (postfix.length())
       img_name += "_" + postfix;
 #if defined(OS_WIN)
@@ -183,21 +163,25 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
 #else
 #error "Not implemented for this platform"
 #endif
-    if (using_gpu_) {
-      GPUInfo info;
-      if (!GetGPUInfo(&info)) {
-        LOG(ERROR) << "Could not get gpu info";
-        return false;
-      }
+    content::GPUInfo info;
+    if (!GetGPUInfo(&info)) {
+      LOG(ERROR) << "Could not get gpu info";
+      return false;
+    }
+    // TODO(alokp): Why do we treat Mesa differently?
+    bool using_gpu = info.gl_renderer.compare(0, 4, "Mesa") != 0;
+    if (using_gpu) {
+      ref_img_dir = test_data_dir_.AppendASCII("gpu_reference");
       img_name = base::StringPrintf("%s_%s_%04x-%04x.png",
           img_name.c_str(), os_label, info.vendor_id, info.device_id);
     } else {
+      ref_img_dir = test_data_dir_.AppendASCII("sw_reference");
       img_name = base::StringPrintf("%s_%s_mesa.png",
           img_name.c_str(), os_label);
     }
 
     // Read the reference image and verify the images' dimensions are equal.
-    FilePath ref_img_path = reference_img_dir_.AppendASCII(img_name);
+    FilePath ref_img_path = ref_img_dir.AppendASCII(img_name);
     SkBitmap ref_bmp;
     bool should_compare = true;
     if (!ReadPNGFile(ref_img_path, &ref_bmp)) {
@@ -264,29 +248,18 @@ class GpuPixelBrowserTest : public InProcessBrowserTest {
   FilePath test_data_dir_;
 
  private:
-  FilePath reference_img_dir_;
   FilePath generated_img_dir_;
   // The name of the test, with any special prefixes dropped.
   std::string test_name_;
-  // Whether the gpu, or OSMesa is being used for rendering.
-  bool using_gpu_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuPixelBrowserTest);
 };
 
-#if defined(OS_LINUX)
 // Currently fails (and times out) on linux due to a NOTIMPLEMENTED() statement.
 // (http://crbug.com/89964)
-#define MAYBE_WebGLTeapot DISABLED_WebGLTeapot
-#elif defined(OS_WIN)
-// Fails (and times out) on Windows due to pixel mismatch.
+// Fails (and times out) on Windows/Mac due to pixel mismatch.
 // (http://crbug.com/95214)
-#define MAYBE_WebGLTeapot DISABLED_WebGLTeapot
-#else
-#define MAYBE_WebGLTeapot WebGLTeapot
-#endif
-
-IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, MAYBE_WebGLTeapot) {
+IN_PROC_BROWSER_TEST_F(GpuPixelBrowserTest, DISABLED_WebGLTeapot) {
   ui_test_utils::DOMMessageQueue message_queue;
   ui_test_utils::NavigateToURL(
       browser(),

@@ -9,9 +9,12 @@
 #include "base/bind.h"
 #include "base/values.h"
 #include "chrome/common/chrome_utility_messages.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -21,11 +24,13 @@ const char kImageDecodeError[] = "Image decode failed";
 
 WebstoreInstallHelper::WebstoreInstallHelper(
     Delegate* delegate,
+    const std::string& id,
     const std::string& manifest,
     const std::string& icon_data,
     const GURL& icon_url,
     net::URLRequestContextGetter* context_getter)
     : delegate_(delegate),
+      id_(id),
       manifest_(manifest),
       icon_base64_data_(icon_data),
       icon_url_(icon_url),
@@ -51,8 +56,9 @@ void WebstoreInstallHelper::Start() {
 
   if (!icon_url_.is_empty()) {
     CHECK(context_getter_);
-    url_fetcher_.reset(new URLFetcher(icon_url_, URLFetcher::GET, this));
-    url_fetcher_->set_request_context(context_getter_);
+    url_fetcher_.reset(content::URLFetcher::Create(
+        icon_url_, content::URLFetcher::GET, this));
+    url_fetcher_->SetRequestContext(context_getter_);
 
     url_fetcher_->Start();
     // We'll get called back in OnURLFetchComplete.
@@ -71,11 +77,12 @@ void WebstoreInstallHelper::StartWorkOnIOThread() {
   utility_host_->Send(new ChromeUtilityMsg_ParseJSON(manifest_));
 }
 
-void WebstoreInstallHelper::OnURLFetchComplete(const URLFetcher* source) {
+void WebstoreInstallHelper::OnURLFetchComplete(
+    const content::URLFetcher* source) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   CHECK(source == url_fetcher_.get());
-  if (source->status().status() != net::URLRequestStatus::SUCCESS ||
-      source->response_code() != 200) {
+  if (source->GetStatus().status() != net::URLRequestStatus::SUCCESS ||
+      source->GetResponseCode() != 200) {
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
@@ -176,7 +183,7 @@ void WebstoreInstallHelper::ReportResultsIfComplete() {
 void WebstoreInstallHelper::ReportResultFromUIThread() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (error_.empty() && parsed_manifest_.get())
-    delegate_->OnWebstoreParseSuccess(icon_, parsed_manifest_.release());
+    delegate_->OnWebstoreParseSuccess(id_, icon_, parsed_manifest_.release());
   else
-    delegate_->OnWebstoreParseFailure(parse_error_, error_);
+    delegate_->OnWebstoreParseFailure(id_, parse_error_, error_);
 }

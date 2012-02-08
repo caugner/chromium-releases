@@ -6,21 +6,26 @@
 
 #include "chrome/browser/ui/browser_list.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/path_service.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
 
 #if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #endif
 
@@ -64,7 +69,7 @@ class MockAutoHidingDesktopBarImpl :
 
   Observer* observer_;
   MockDesktopBar mock_desktop_bars[3];
-  ScopedRunnableMethodFactory<MockAutoHidingDesktopBarImpl> method_factory_;
+  base::WeakPtrFactory<MockAutoHidingDesktopBarImpl> method_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MockAutoHidingDesktopBarImpl);
 };
@@ -72,8 +77,7 @@ class MockAutoHidingDesktopBarImpl :
 
 MockAutoHidingDesktopBarImpl::MockAutoHidingDesktopBarImpl(
     AutoHidingDesktopBar::Observer* observer)
-    : observer_(observer),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+    : observer_(observer), method_factory_(this) {
   memset(mock_desktop_bars, 0, sizeof(mock_desktop_bars));
 }
 
@@ -116,10 +120,10 @@ void MockAutoHidingDesktopBarImpl::SetVisibility(
   bar->visibility = visibility;
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &MockAutoHidingDesktopBarImpl::NotifyVisibilityChange,
-          alignment,
-          visibility));
+      base::Bind(&MockAutoHidingDesktopBarImpl::NotifyVisibilityChange,
+                 method_factory_.GetWeakPtr(),
+                 alignment,
+                 visibility));
 }
 
 void MockAutoHidingDesktopBarImpl::SetThickness(
@@ -132,8 +136,8 @@ void MockAutoHidingDesktopBarImpl::SetThickness(
   bar->thickness = thickness;
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &MockAutoHidingDesktopBarImpl::NotifyThicknessChange));
+      base::Bind(&MockAutoHidingDesktopBarImpl::NotifyThicknessChange,
+                 method_factory_.GetWeakPtr()));
 }
 
 void MockAutoHidingDesktopBarImpl::NotifyVisibilityChange(
@@ -146,7 +150,15 @@ void MockAutoHidingDesktopBarImpl::NotifyThicknessChange() {
   observer_->OnAutoHidingDesktopBarThicknessChanged();
 }
 
+bool ExistsPanel(Panel* panel) {
+  const PanelManager::Panels& panels = PanelManager::GetInstance()->panels();
+  return find(panels.begin(), panels.end(), panel) != panels.end();
+}
+
 }  // namespace
+
+const FilePath::CharType* BasePanelBrowserTest::kTestDir =
+    FILE_PATH_LITERAL("panels");
 
 BasePanelBrowserTest::BasePanelBrowserTest()
     : InProcessBrowserTest(),
@@ -162,7 +174,6 @@ BasePanelBrowserTest::~BasePanelBrowserTest() {
 
 void BasePanelBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   EnableDOMAutomation();
-  command_line->AppendSwitch(switches::kEnablePanels);
 }
 
 void BasePanelBrowserTest::SetUpOnMainThread() {
@@ -174,24 +185,44 @@ void BasePanelBrowserTest::SetUpOnMainThread() {
   mock_auto_hiding_desktop_bar_ = new MockAutoHidingDesktopBarImpl(
       panel_manager);
   panel_manager->set_auto_hiding_desktop_bar(mock_auto_hiding_desktop_bar_);
-  panel_manager->SetWorkAreaForTesting(testing_work_area_);
+  // Do not use the testing work area if it is empty since we're going to
+  // use the actual work area in some testing scenarios.
+  if (!testing_work_area_.IsEmpty())
+    panel_manager->SetWorkAreaForTesting(testing_work_area_);
   panel_manager->enable_auto_sizing(false);
+  panel_manager->remove_delays_for_testing();
   // This is needed so the subsequently created panels can be activated.
   // On a Mac, it transforms background-only test process into foreground one.
   EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
 }
 
-// TODO(prasadt): If we start having even more of these WaitFor* pattern
-// methods, refactor. The only way to refactor would be to pass in a function
-// pointer, it may not be worth complicating the code till we have more of
-// these.
+void BasePanelBrowserTest::WaitForPanelAdded(Panel* panel) {
+  if (ExistsPanel(panel))
+    return;
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_ADDED,
+      content::Source<Panel>(panel));
+  signal.Wait();
+  EXPECT_TRUE(ExistsPanel(panel));
+}
+
+void BasePanelBrowserTest::WaitForPanelRemoved(Panel* panel) {
+  if (!ExistsPanel(panel))
+    return;
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_REMOVED,
+      content::Source<Panel>(panel));
+  signal.Wait();
+  EXPECT_FALSE(ExistsPanel(panel));
+}
+
 void BasePanelBrowserTest::WaitForPanelActiveState(
     Panel* panel, ActiveState expected_state) {
   DCHECK(expected_state == SHOW_AS_ACTIVE ||
          expected_state == SHOW_AS_INACTIVE);
   ui_test_utils::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_CHANGED_ACTIVE_STATUS,
-      Source<Panel>(panel));
+      content::Source<Panel>(panel));
   if (panel->IsActive() == (expected_state == SHOW_AS_ACTIVE))
     return;  // Already in required state.
   signal.Wait();
@@ -204,7 +235,7 @@ void BasePanelBrowserTest::WaitForWindowSizeAvailable(Panel* panel) {
       NativePanelTesting::Create(panel->native_panel()));
   ui_test_utils::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_WINDOW_SIZE_KNOWN,
-      Source<Panel>(panel));
+      content::Source<Panel>(panel));
   if (panel_testing->IsWindowSizeKnown())
     return;
   signal.Wait();
@@ -216,15 +247,27 @@ void BasePanelBrowserTest::WaitForBoundsAnimationFinished(Panel* panel) {
       NativePanelTesting::Create(panel->native_panel()));
   ui_test_utils::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
-      Source<Panel>(panel));
+      content::Source<Panel>(panel));
   if (!panel_testing->IsAnimatingBounds())
     return;
   signal.Wait();
   EXPECT_TRUE(!panel_testing->IsAnimatingBounds());
 }
 
+void BasePanelBrowserTest::WaitForExpansionStateChanged(
+    Panel* panel, Panel::ExpansionState expansion_state) {
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_PANEL_CHANGED_EXPANSION_STATE,
+      content::Source<Panel>(panel));
+  if (panel->expansion_state() == expansion_state)
+    return;
+  signal.Wait();
+  EXPECT_EQ(expansion_state, panel->expansion_state());
+}
+
 Panel* BasePanelBrowserTest::CreatePanelWithParams(
     const CreatePanelParams& params) {
+#if defined(OS_MACOSX)
   // Opening panels on a Mac causes NSWindowController of the Panel window
   // to be autoreleased. We need a pool drained after it's done so the test
   // can close correctly. The NSWindowController of the Panel window controls
@@ -232,6 +275,7 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
   // possible. In real Chrome, this is done by message pump.
   // On non-Mac platform, this is an empty class.
   base::mac::ScopedNSAutoreleasePool autorelease_pool;
+#endif
 
   Browser* panel_browser = Browser::CreateForApp(Browser::TYPE_PANEL,
                                                  params.name,
@@ -239,30 +283,30 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
                                                  browser()->profile());
   EXPECT_TRUE(panel_browser->is_type_panel());
 
-  if (params.url.is_empty()) {
-    TabContentsWrapper* tab_contents =
-        new TabContentsWrapper(new TestTabContents(browser()->profile(), NULL));
-    panel_browser->AddTab(tab_contents, content::PAGE_TRANSITION_LINK);
-  } else {
+  if (!params.url.is_empty()) {
+    ui_test_utils::WindowedNotificationObserver observer(
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     panel_browser->AddSelectedTabWithURL(params.url,
                                          content::PAGE_TRANSITION_START_PAGE);
-    ui_test_utils::WaitForNavigation(
-        &panel_browser->GetSelectedTabContents()->controller());
+    observer.Wait();
   }
 
   Panel* panel = static_cast<Panel*>(panel_browser->window());
+
+  if (params.bounds.width() || params.bounds.height())
+    EXPECT_FALSE(panel->auto_resizable());
+  else
+    EXPECT_TRUE(panel->auto_resizable());
 
   if (params.show_flag == SHOW_AS_ACTIVE) {
     panel->Show();
   } else {
 #if defined(OS_LINUX)
-    std::string wm_name;
-    bool has_name = ui::GetWindowManagerName(&wm_name);
     // On bots, we might have a simple window manager which always activates new
     // windows, and can't always deactivate them. Activate previously active
     // window back to ensure the new window is inactive.
-    // IceWM has a name string like "IceWM 1.3.6 (Linux 2.6.24-23-server/x86)"
-    if (has_name && wm_name.find("IceWM") != std::string::npos) {
+    if (ui::GuessWindowManager() == ui::WM_ICE_WM) {
       Browser* last_active_browser = BrowserList::GetLastActive();
       EXPECT_TRUE(last_active_browser);
       EXPECT_NE(last_active_browser, panel->browser());
@@ -304,6 +348,12 @@ Panel* BasePanelBrowserTest::CreatePanel(const std::string& panel_name) {
   return CreatePanelWithParams(params);
 }
 
+void BasePanelBrowserTest::CreateTestTabContents(Browser* browser) {
+  TabContentsWrapper* tab_contents =
+      new TabContentsWrapper(new TestTabContents(browser->profile(), NULL));
+  browser->AddTab(tab_contents, content::PAGE_TRANSITION_LINK);
+}
+
 scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
     const FilePath::StringType& path,
     Extension::Location location,
@@ -325,7 +375,7 @@ scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
       Extension::STRICT_ERROR_CHECKS, &error);
   EXPECT_TRUE(extension.get());
   EXPECT_STREQ("", error.c_str());
-  browser()->GetProfile()->GetExtensionService()->OnLoadSingleExtension(
-      extension.get(), false);
+  browser()->GetProfile()->GetExtensionService()->
+      OnExtensionInstalled(extension.get(), false, -1);
   return extension;
 }

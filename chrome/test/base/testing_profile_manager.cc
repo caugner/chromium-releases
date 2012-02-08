@@ -21,7 +21,7 @@ class ProfileManager : public ::ProfileManager {
       : ::ProfileManager(user_data_dir) {}
 
  protected:
-  virtual Profile* CreateProfile(const FilePath& file_path) {
+  virtual Profile* CreateProfileHelper(const FilePath& file_path) OVERRIDE {
     return new TestingProfile(file_path);
   }
 };
@@ -95,6 +95,10 @@ ProfileManager* TestingProfileManager::profile_manager() {
 ProfileInfoCache* TestingProfileManager::profile_info_cache() {
   DCHECK(called_set_up_);
   return &profile_manager_->GetProfileInfoCache();
+}
+
+void TestingProfileManager::DeleteProfileInfoCache() {
+  profile_manager_->profile_info_cache_.reset(NULL);
 }
 
 void TestingProfileManager::SetUpInternal() {

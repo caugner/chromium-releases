@@ -41,6 +41,32 @@ cr.define('login', function() {
         Oobe.showScreen({id: SCREEN_ACCOUNT_PICKER});
         Oobe.resetSigninUI();
       });
+      $('sign-out-user-button').addEventListener('click', function(e) {
+        chrome.send('signOutUser');
+        this.disabled = true;
+      });
+    },
+
+    /**
+     * Tab index value for all button elements.
+     * @type {number}
+     */
+    set buttonsTabIndex(tabIndex) {
+      var buttons = this.getElementsByTagName('button');
+      for (var i = 0, button; button = buttons[i]; ++i) {
+        button.tabIndex = tabIndex;
+      }
+    },
+
+    /**
+     * Disables the header bar and all of its elements.
+     * @type {boolean}
+     */
+    set disabled(value) {
+      var buttons = this.getElementsByTagName('button');
+      for (var i = 0, button; button = buttons[i]; ++i) {
+        button.disabled = value;
+      }
     },
 
     /**
@@ -58,8 +84,9 @@ cr.define('login', function() {
    * @param {Integer} state Current state of the network (see NET_STATE).
    * @param {string} network Name of the network.
    * @param {string} reason Reason the callback was called.
+   * @param {int} last Last active network type.
    */
-  HeaderBar.handleAddUser = function(state, network, reason) {
+  HeaderBar.handleAddUser = function(state, network, reason, last) {
     if (state != NET_STATE.OFFLINE) {
       Oobe.showSigninUI();
     } else {
@@ -68,21 +95,22 @@ cr.define('login', function() {
       chrome.send('loginAddNetworkStateObserver',
                   ['login.HeaderBar.bubbleWatchdog']);
     }
-  }
+  };
 
   /**
    * Observes network state, and close the bubble when network becomes online.
    * @param {Integer} state Current state of the network (see NET_STATE).
    * @param {string} network Name of the network.
    * @param {string} reason Reason the callback was called.
+   * @param {int} last Last active network type.
    */
-  HeaderBar.bubbleWatchdog = function(state, network, reason) {
+  HeaderBar.bubbleWatchdog = function(state, network, reason, last) {
     if (state != NET_STATE.OFFLINE) {
       $('bubble').hideForElement($('add-user-button'));
       chrome.send('loginRemoveNetworkStateObserver',
                   ['login.HeaderBar.bubbleWatchdog']);
     }
-  }
+  };
 
   return {
     HeaderBar: HeaderBar

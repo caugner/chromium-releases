@@ -12,6 +12,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/browser/avatar_button_controller.h"
@@ -29,7 +30,6 @@
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_view.h"
 #import "chrome/browser/ui/cocoa/toolbar/toolbar_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/tab_contents.h"
@@ -357,8 +357,10 @@ willPositionSheet:(NSWindow*)sheet
   // Now lay out incognito badge together with the tab strip.
   if ([self shouldShowAvatar]) {
     NSView* avatarButton = [avatarButtonController_ view];
-    [avatarButton setFrameSize:NSMakeSize(tabStripHeight,
-                                          tabStripHeight - 5.0)];
+    CGFloat buttonHeight = std::min(
+        static_cast<CGFloat>(profiles::kAvatarIconHeight), tabStripHeight);
+    [avatarButton setFrameSize:NSMakeSize(profiles::kAvatarIconWidth,
+                                          buttonHeight)];
 
     // Actually place the badge *above* |maxY|, by +2 to miss the divider.  On
     // Lion or later, shift the badge left to move it away from the fullscreen
@@ -530,10 +532,6 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (BOOL)shouldShowDetachedBookmarkBar {
-  // Don't show detatched bookmarks when NTP4 bookmark features exist.
-  if (NewTabUI::NTP4BookmarkFeaturesEnabled())
-    return NO;
-
   DCHECK(browser_.get());
   TabContentsWrapper* tab = browser_->GetSelectedTabContentsWrapper();
   return (tab && tab->bookmark_tab_helper()->ShouldShowBookmarkBar() &&
@@ -672,7 +670,7 @@ willPositionSheet:(NSWindow*)sheet
     return;
 
   if (presentationMode) {
-    BOOL fullscreen_for_tab = browser_->is_fullscreen_for_tab();
+    BOOL fullscreen_for_tab = browser_->IsFullscreenForTab();
     BOOL showDropdown = !fullscreen_for_tab &&
         (forceDropdown || [self floatingBarHasFocus]);
     NSView* contentView = [[self window] contentView];
@@ -785,7 +783,7 @@ willPositionSheet:(NSWindow*)sheet
 }
 
 - (void)showFullscreenExitBubbleIfNecessary {
-  if (!browser_->is_fullscreen_for_tab()) {
+  if (!browser_->IsFullscreenForTab()) {
     return;
   }
 
@@ -847,13 +845,15 @@ willPositionSheet:(NSWindow*)sheet
   NSWindow* window = [self window];
   savedRegularWindowFrame_ = [window frame];
   BOOL mode = [self shouldUsePresentationModeWhenEnteringFullscreen];
-  mode = mode || browser_->is_fullscreen_for_tab();
+  mode = mode || browser_->IsFullscreenForTab();
+  enteringFullscreen_ = YES;
   [self setPresentationModeInternal:mode forceDropdown:NO];
 }
 
 - (void)windowDidEnterFullScreen:(NSNotification*)notification {
   if (base::mac::IsOSLionOrLater())
     [self deregisterForContentViewResizeNotifications];
+  enteringFullscreen_ = NO;
   [self showFullscreenExitBubbleIfNecessary];
 }
 
@@ -870,6 +870,7 @@ willPositionSheet:(NSWindow*)sheet
 
 - (void)windowDidFailToEnterFullScreen:(NSWindow*)window {
   [self deregisterForContentViewResizeNotifications];
+  enteringFullscreen_ = NO;
   [self setPresentationModeInternal:NO forceDropdown:NO];
 }
 

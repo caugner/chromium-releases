@@ -35,16 +35,17 @@ class PepperFileMessageFilter : public BrowserMessageFilter {
                           content::BrowserContext* browser_context);
 
   // BrowserMessageFilter methods:
-  virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
+  virtual void OverrideThreadForMessage(
+      const IPC::Message& message,
+      content::BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
-  virtual void OnDestruct() const;
+                                 bool* message_was_ok) OVERRIDE;
+  virtual void OnDestruct() const OVERRIDE;
 
   int child_id() const { return child_id_; }
 
  private:
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<PepperFileMessageFilter>;
   virtual ~PepperFileMessageFilter();
 

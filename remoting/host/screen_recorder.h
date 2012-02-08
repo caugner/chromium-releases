@@ -16,6 +16,7 @@
 #include "base/timer.h"
 #include "remoting/base/encoder.h"
 #include "remoting/host/capturer.h"
+#include "remoting/host/capture_scheduler.h"
 #include "remoting/proto/video.pb.h"
 
 namespace base {
@@ -92,18 +93,11 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   // stopped. This object cannot be used again after |task| is executed.
   void Stop(const base::Closure& done_task);
 
-  // Set the maximum capture rate. This is denoted by number of updates
-  // in one second. The actual system may run in a slower rate than the maximum
-  // rate due to various factors, e.g. capture speed, encode speed and network
-  // conditions.
-  // This method should be called before Start() is called.
-  void SetMaxRate(double rate);
-
   // Add a connection to this recording session.
-  void AddConnection(scoped_refptr<protocol::ConnectionToClient> connection);
+  void AddConnection(protocol::ConnectionToClient* connection);
 
   // Remove a connection from receiving screen updates.
-  void RemoveConnection(scoped_refptr<protocol::ConnectionToClient> connection);
+  void RemoveConnection(protocol::ConnectionToClient* connection);
 
   // Remove all connections.
   void RemoveAllConnections();
@@ -138,10 +132,6 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   void DoSendInit(scoped_refptr<protocol::ConnectionToClient> connection,
                   int width, int height);
 
-  void DoAddConnection(scoped_refptr<protocol::ConnectionToClient> connection);
-  void DoRemoveClient(scoped_refptr<protocol::ConnectionToClient> connection);
-  void DoRemoveAllClients();
-
   // Signal network thread to cease activities.
   void DoStopOnNetworkThread(const base::Closure& done_task);
 
@@ -175,8 +165,7 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
 
   // A list of clients connected to this hosts.
   // This member is always accessed on the network thread.
-  typedef std::vector<scoped_refptr<protocol::ConnectionToClient> >
-      ConnectionToClientList;
+  typedef std::vector<protocol::ConnectionToClient*> ConnectionToClientList;
   ConnectionToClientList connections_;
 
   // Flag that indicates recording has been started. This variable should only
@@ -189,7 +178,10 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   bool encoder_stopped_;
 
   // Timer that calls DoCapture.
-  base::RepeatingTimer<ScreenRecorder> capture_timer_;
+  base::OneShotTimer<ScreenRecorder> capture_timer_;
+
+  // Maximum simultaneous recordings allowed.
+  int max_recordings_;
 
   // Count the number of recordings (i.e. capture or encode) happening.
   int recordings_;
@@ -197,9 +189,6 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
   // Set to true if we've skipped last capture because there are too
   // many pending frames.
   int frame_skipped_;
-
-  // Number of captures to perform every second. Written on the capture thread.
-  double max_rate_;
 
   // Time when capture is started.
   base::Time capture_start_time_;
@@ -209,6 +198,9 @@ class ScreenRecorder : public base::RefCountedThreadSafe<ScreenRecorder> {
 
   // This is a number updated by client to trace performance.
   int64 sequence_number_;
+
+  // An object to schedule capturing.
+  CaptureScheduler scheduler_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenRecorder);
 };

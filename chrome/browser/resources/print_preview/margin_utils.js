@@ -17,32 +17,120 @@ cr.define('print_preview', function() {
    *     does not represent a valid number.
    */
   function extractMarginValue(text) {
-    // Remove whitespace anywhere in the string.
-    text.replace(/\s*/g, '');
+    // Removing whitespace anywhere in the string.
+    text = text.replace(/\s*/g, '');
     if (text.length == 0)
       return -1;
-    // Remove the inch(") symbol at end of string if present.
-    if (text.charAt(text.length - 1) == '\"')
-      text = text.slice(0, text.length - 1);
-    var regex = /^\d*(\.\d+)?$/
-    if (regex.test(text))
+    var validationRegex = getValidationRegExp();
+    if (validationRegex.test(text)) {
+      // Replacing decimal point with the dot symbol in order to use
+      // parseFloat() properly.
+      var replacementRegex = new RegExp('\\' +
+          print_preview.MarginSettings.decimalPoint + '{1}');
+      text = text.replace(replacementRegex, '.');
       return parseFloat(text);
+    }
     return -1;
   }
 
   /**
-   * @param {sting} text The text to check (in inches).
+   * @return {RegExp} A regular expression for validating the input of the user.
+   *     It takes into account the user's locale.
+   */
+  function getValidationRegExp() {
+    var regex = new RegExp('(^\\d+)(\\' +
+       print_preview.MarginSettings.thousandsPoint + '\\d{3})*(\\' +
+       print_preview.MarginSettings.decimalPoint + '\\d+)*' +
+       (!print_preview.MarginSettings.useMetricSystem ? '"?' : '(mm)?') + '$');
+    return regex;
+  }
+
+  var marginValidationStates = {
+    TOO_SMALL: 0,
+    WITHIN_RANGE: 1,
+    TOO_BIG: 2,
+    NOT_A_NUMBER: 3
+  };
+
+  /**
+   * Checks  whether |value| is within range [0, limit].
+   * @return {number} An appropriate value from enum |marginValidationStates|.
+   */
+  function validateMarginValue(value, limit) {
+    if (value <= limit && value >= 0)
+      return marginValidationStates.WITHIN_RANGE;
+    else if (value < 0)
+      return marginValidationStates.TOO_SMALL;
+    else (value > limit)
+      return marginValidationStates.TOO_BIG;
+  }
+
+  /**
+   * @param {sting} text The text to check in user's locale units.
    * @param {number} limit The upper bound of the valid margin range (in
    *     points).
-   * @return {boolean} True of |text| can be parsed and it is within the allowed
-   *     range.
+   * @return {number} An appropriate value from enum |marginValidationStates|.
    */
-  function isMarginTextValid(text, limit) {
+  function validateMarginText(text, limit) {
     var value = extractMarginValue(text);
-    if (value ==  -1)
-      return false;
-    value = convertInchesToPoints(value);
-    return value <= limit;
+    if (value == -1)
+      return marginValidationStates.NOT_A_NUMBER;
+    value = print_preview.convertLocaleUnitsToPoints(value);
+    return validateMarginValue(value, limit);
+  }
+
+  /**
+   * @param {number} value The value to convert in points.
+   * @return {number} The corresponding value after converting to user's locale
+   *     units.
+   */
+  function convertPointsToLocaleUnits(value) {
+    return print_preview.MarginSettings.useMetricSystem ?
+        convertPointsToMillimeters(value) : convertPointsToInches(value);
+  }
+
+  /**
+   * @param {number} value The value to convert in user's locale units.
+   * @return {number} The corresponding value after converting to points.
+   */
+  function convertLocaleUnitsToPoints(value) {
+    return print_preview.MarginSettings.useMetricSystem ?
+        convertMillimetersToPoints(value) : convertInchesToPoints(value);
+  }
+
+  /**
+   * Converts |value| to user's locale units and then back to points. Note:
+   * Because of the precision the return value might be different than |value|.
+   * @param {number} value The value in points to convert.
+   * @return {number} The value in points after converting to user's locale
+   *     units  with a certain precision and back.
+   */
+  function convertPointsToLocaleUnitsAndBack(value) {
+    var inLocaleUnits =
+        convertPointsToLocaleUnits(value).toFixed(getDesiredPrecision());
+    return convertLocaleUnitsToPoints(inLocaleUnits);
+  }
+
+  /**
+   * @return {number} The number of decimal digits to keep based on the
+   *     measurement system used.
+   */
+  function getDesiredPrecision() {
+    return print_preview.MarginSettings.useMetricSystem ? 0 : 2;
+  }
+
+  /**
+   * @param {number} toConvert The value to convert in points.
+   * @return {string} The equivalent text in user locale units with precision
+   *     of two digits.
+   */
+  function convertPointsToLocaleUnitsText(value) {
+    var inLocaleUnits =
+        convertPointsToLocaleUnits(value).toFixed(getDesiredPrecision());
+    var inLocaleUnitsText = inLocaleUnits.toString(10).replace(
+        /\./g, print_preview.MarginSettings.decimalPoint);
+    return !print_preview.MarginSettings.useMetricSystem ?
+        inLocaleUnitsText + '"' : inLocaleUnitsText + 'mm';
   }
 
   /**
@@ -62,26 +150,38 @@ cr.define('print_preview', function() {
   };
 
   Rect.prototype = {
+    /**
+     * @type {number} The x coordinate of the right-most point.
+     */
     get right() {
       return this.x + this.width;
     },
 
+    /**
+     * @type {number} The y coordinate of the lower-most point.
+     */
     get bottom() {
       return this.y + this.height;
     },
 
-    get middleX() {
-      return this.x + this.width / 2;
-    },
-
-    get middleY() {
-      return this.y + this.height / 2;
+    /**
+     * Clones |this| and returns the cloned object.
+     * @return {Rect} A copy of |this|.
+     */
+    clone: function() {
+      return new Rect(this.x, this.y, this.width, this.height);
     }
   };
 
   return {
+    convertPointsToLocaleUnitsAndBack:
+        convertPointsToLocaleUnitsAndBack,
+    convertPointsToLocaleUnitsText: convertPointsToLocaleUnitsText,
+    convertLocaleUnitsToPoints: convertLocaleUnitsToPoints,
     extractMarginValue: extractMarginValue,
-    isMarginTextValid: isMarginTextValid,
+    marginValidationStates: marginValidationStates,
     Rect: Rect,
+    validateMarginText: validateMarginText,
+    validateMarginValue: validateMarginValue,
   };
 });

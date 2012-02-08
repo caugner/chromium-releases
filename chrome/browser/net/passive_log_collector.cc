@@ -80,6 +80,9 @@ PassiveLogCollector::PassiveLogCollector()
   trackers_[net::NetLog::SOURCE_DNS_TRANSACTION] = &dns_transaction_tracker_;
   trackers_[net::NetLog::SOURCE_ASYNC_HOST_RESOLVER_REQUEST] =
       &async_host_resolver_request_tracker_;
+  trackers_[net::NetLog::SOURCE_UDP_SOCKET] = &udp_socket_tracker_;
+  trackers_[net::NetLog::SOURCE_CERT_VERIFIER_JOB] =
+      &cert_verifier_job_tracker_;
   // Make sure our mapping is up-to-date.
   for (size_t i = 0; i < arraysize(trackers_); ++i)
     DCHECK(trackers_[i]) << "Unhandled SourceType: " << i;
@@ -719,6 +722,63 @@ PassiveLogCollector::AsyncHostResolverRequestTracker::DoAddEntry(
     SourceInfo* out_info) {
   AddEntryToSourceInfo(entry, out_info);
   if (entry.type == net::NetLog::TYPE_ASYNC_HOST_RESOLVER_REQUEST &&
+      entry.phase == net::NetLog::PHASE_END) {
+    return ACTION_MOVE_TO_GRAVEYARD;
+  }
+  return ACTION_NONE;
+}
+
+//----------------------------------------------------------------------------
+// UDPSocketTracker
+//----------------------------------------------------------------------------
+
+const size_t PassiveLogCollector::UDPSocketTracker::kMaxNumSources = 200;
+const size_t PassiveLogCollector::UDPSocketTracker::kMaxGraveyardSize = 15;
+
+PassiveLogCollector::UDPSocketTracker::UDPSocketTracker()
+    : SourceTracker(kMaxNumSources, kMaxGraveyardSize, NULL) {
+}
+
+PassiveLogCollector::UDPSocketTracker::Action
+PassiveLogCollector::UDPSocketTracker::DoAddEntry(
+    const ChromeNetLog::Entry& entry,
+    SourceInfo* out_info) {
+  if (entry.type == net::NetLog::TYPE_UDP_BYTES_SENT ||
+      entry.type == net::NetLog::TYPE_UDP_BYTES_RECEIVED) {
+    return ACTION_NONE;
+  }
+
+  AddEntryToSourceInfo(entry, out_info);
+
+  if (entry.type == net::NetLog::TYPE_SOCKET_ALIVE &&
+      entry.phase == net::NetLog::PHASE_END) {
+    return ACTION_MOVE_TO_GRAVEYARD;
+  }
+
+  return ACTION_NONE;
+}
+
+//----------------------------------------------------------------------------
+// CertVerifierJobTracker
+//----------------------------------------------------------------------------
+
+const size_t
+PassiveLogCollector::CertVerifierJobTracker::kMaxNumSources = 100;
+
+const size_t
+PassiveLogCollector::CertVerifierJobTracker::kMaxGraveyardSize = 15;
+
+PassiveLogCollector::
+    CertVerifierJobTracker::CertVerifierJobTracker()
+        : SourceTracker(kMaxNumSources, kMaxGraveyardSize, NULL) {
+}
+
+PassiveLogCollector::SourceTracker::Action
+PassiveLogCollector::CertVerifierJobTracker::DoAddEntry(
+    const ChromeNetLog::Entry& entry,
+    SourceInfo* out_info) {
+  AddEntryToSourceInfo(entry, out_info);
+  if (entry.type == net::NetLog::TYPE_CERT_VERIFIER_JOB &&
       entry.phase == net::NetLog::PHASE_END) {
     return ACTION_MOVE_TO_GRAVEYARD;
   }

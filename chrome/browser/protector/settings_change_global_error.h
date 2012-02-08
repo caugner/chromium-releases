@@ -6,86 +6,91 @@
 #define CHROME_BROWSER_PROTECTOR_SETTINGS_CHANGE_GLOBAL_ERROR_H_
 #pragma once
 
-#include <vector>
-
 #include "base/basictypes.h"
-#include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/string16.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/protector/base_setting_change.h"
 #include "chrome/browser/ui/global_error.h"
 
+class Browser;
 class Profile;
+
+namespace protector {
+
+class BaseSettingChange;
+class SettingsChangeGlobalErrorDelegate;
 
 // Global error about unwanted settings changes.
 class SettingsChangeGlobalError : public GlobalError {
  public:
-  enum ChangeType {
-    kSearchEngineChanged = 0,  // Default search engine has been changed.
-    kHomePageChanged,          // Home page has been changed.
-  };
-
-  struct Change {
-    ChangeType type;       // Which setting has been changed.
-    string16 old_setting;  // Old setting value or "" if unknown.
-    string16 new_setting;  // New setting value.
-  };
-
-  typedef std::vector<Change> ChangesVector;
-
-  // Creates new global error about settings changes |changes|.
-  // If user decides to apply changes, |apply_changes_cb| is called.
-  // If user decides to keep previous settings, |revert_changes_cb| is called.
-  SettingsChangeGlobalError(const ChangesVector& changes,
-                            const base::Closure& apply_changes_cb,
-                            const base::Closure& revert_changes_cb);
+  // Creates new global error about setting changes |change| which must not be
+  // deleted until |delegate->OnRemovedFromProfile| is called. Uses |delegate|
+  // to notify about user decision.
+  SettingsChangeGlobalError(BaseSettingChange* change,
+                            SettingsChangeGlobalErrorDelegate* delegate);
   virtual ~SettingsChangeGlobalError();
 
-  // Displays a global error bubble for the default browser profile.
+  // Displays a global error bubble for the given browser profile.
   // Can be called from any thread.
-  void ShowForDefaultProfile();
+  void ShowForProfile(Profile* profile);
+
+  // Removes global error from its profile.
+  void RemoveFromProfile();
+
+  // Browser that the bubble has been last time shown for.
+  Browser* browser() const { return browser_; }
 
   // GlobalError implementation.
   virtual bool HasBadge() OVERRIDE;
+  virtual int GetBadgeResourceID() OVERRIDE;
   virtual bool HasMenuItem() OVERRIDE;
   virtual int MenuItemCommandID() OVERRIDE;
   virtual string16 MenuItemLabel() OVERRIDE;
+  virtual int MenuItemIconResourceID() OVERRIDE;
   virtual void ExecuteMenuItem(Browser* browser) OVERRIDE;
   virtual bool HasBubbleView() OVERRIDE;
+  virtual int GetBubbleViewIconResourceID() OVERRIDE;
   virtual string16 GetBubbleViewTitle() OVERRIDE;
   virtual string16 GetBubbleViewMessage() OVERRIDE;
   virtual string16 GetBubbleViewAcceptButtonLabel() OVERRIDE;
   virtual string16 GetBubbleViewCancelButtonLabel() OVERRIDE;
-  virtual bool IsAcceptButtonDefault() OVERRIDE;
   virtual void BubbleViewDidClose() OVERRIDE;
   virtual void BubbleViewAcceptButtonPressed() OVERRIDE;
   virtual void BubbleViewCancelButtonPressed() OVERRIDE;
 
  private:
-  ChangesVector changes_;
+  // Helper called on the UI thread to add this global error to the default
+  // profile (stored in |profile_|).
+  void AddToProfile(Profile* profile);
 
-  base::Closure apply_changes_cb_;
-  base::Closure revert_changes_cb_;
+  // Displays global error bubble. Must be called on the UI thread.
+  void Show();
+
+  // Called when the wrench menu item has been displayed for enough time
+  // without user interaction.
+  void OnInactiveTimeout();
+
+  // Change to show.
+  BaseSettingChange* change_;
+
+  // Delegate to notify about user actions.
+  SettingsChangeGlobalErrorDelegate* delegate_;
 
   // Profile that we have been added to.
   Profile* profile_;
+
+  // Browser that we have been shown for.
+  Browser* browser_;
 
   // True if user has dismissed the bubble by clicking on one of the buttons.
   bool closed_by_button_;
 
   base::WeakPtrFactory<SettingsChangeGlobalError> weak_factory_;
 
-  // Helper called on the UI thread to add this global error to the default
-  // profile (stored in |profile_|).
-  void AddToDefaultProfile();
-
-  // Displays global error bubble. Must be called on the UI thread.
-  void Show();
-
-  // Removes global error from its profile and deletes |this| later.
-  void RemoveFromProfile();
-
   DISALLOW_COPY_AND_ASSIGN(SettingsChangeGlobalError);
 };
+
+}  // namespace protector
 
 #endif  // CHROME_BROWSER_PROTECTOR_SETTINGS_CHANGE_GLOBAL_ERROR_H_

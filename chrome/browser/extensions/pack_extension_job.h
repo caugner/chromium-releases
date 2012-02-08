@@ -11,7 +11,7 @@
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/string16.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
 
 // Manages packing an extension on the file thread and reporting the result
@@ -57,7 +57,7 @@ class PackExtensionJob : public base::RefCountedThreadSafe<PackExtensionJob> {
   void ReportSuccessOnClientThread();
   void ReportFailureOnClientThread(const std::string& error);
 
-  BrowserThread::ID client_thread_id_;
+  content::BrowserThread::ID client_thread_id_;
   Client* client_;
   FilePath root_directory_;
   FilePath key_file_;

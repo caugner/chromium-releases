@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
@@ -244,7 +245,7 @@ void ExternalProtocolHandler::LaunchUrlWithDelegate(const GURL& url,
 
   // Escape the input scheme to be sure that the command does not
   // have parameters unexpected by the external program.
-  std::string escaped_url_string = EscapeExternalHandlerValue(url.spec());
+  std::string escaped_url_string = net::EscapeExternalHandlerValue(url.spec());
   GURL escaped_url(escaped_url_string);
   BlockState block_state = GetBlockStateWithDelegate(escaped_url.scheme(),
                                                      delegate);
@@ -287,8 +288,7 @@ void ExternalProtocolHandler::LaunchUrlWithoutSecurityCheck(const GURL& url) {
     return;
   }
 
-  loop->PostTask(FROM_HERE,
-      NewRunnableFunction(&platform_util::OpenExternal, url));
+  loop->PostTask(FROM_HERE, base::Bind(&platform_util::OpenExternal, url));
 #endif
 }
 

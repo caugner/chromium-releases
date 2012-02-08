@@ -7,13 +7,17 @@
 #include "base/basictypes.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "content/browser/browser_thread.h"
-#include "testing/gmock/include/gmock/gmock.h"
+#include "chrome/browser/sync/signin_manager.h"
+#include "chrome/test/base/testing_profile.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock-actions.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::Return;
+using ::testing::ReturnRef;
 using ::testing::NiceMock;
+using content::BrowserThread;
 
 namespace {
 
@@ -24,18 +28,11 @@ void VerifySyncGlobalErrorResult(NiceMock<ProfileSyncServiceMock>* service,
                                  GoogleServiceAuthError::State error_state,
                                  bool is_signed_in,
                                  bool is_error) {
-  GoogleServiceAuthError auth_error(error_state);
-  service->UpdateAuthErrorState(auth_error);
-
   EXPECT_CALL(*service, HasSyncSetupCompleted())
               .WillRepeatedly(Return(is_signed_in));
-  if (error_state == GoogleServiceAuthError::SERVICE_UNAVAILABLE) {
-    EXPECT_CALL(*service, GetAuthenticatedUsername())
-                .WillRepeatedly(Return(UTF8ToUTF16("")));
-  } else {
-    EXPECT_CALL(*service, GetAuthenticatedUsername())
-                .WillRepeatedly(Return(UTF8ToUTF16("foo")));
-  }
+
+  GoogleServiceAuthError auth_error(error_state);
+  EXPECT_CALL(*service, GetAuthError()).WillRepeatedly(ReturnRef(auth_error));
 
   error->OnStateChanged();
 
@@ -71,8 +68,10 @@ void VerifySyncGlobalErrorResult(NiceMock<ProfileSyncServiceMock>* service,
 // Test that SyncGlobalError shows an error if a passphrase is required.
 TEST(SyncGlobalErrorTest, PassphraseGlobalError) {
   MessageLoopForUI message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
-  NiceMock<ProfileSyncServiceMock> service;
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  scoped_ptr<Profile> profile(
+      ProfileSyncServiceMock::MakeSignedInTestingProfile());
+  NiceMock<ProfileSyncServiceMock> service(profile.get());
   SyncGlobalError error(&service);
 
   EXPECT_CALL(service, IsPassphraseRequired())
@@ -88,8 +87,10 @@ TEST(SyncGlobalErrorTest, PassphraseGlobalError) {
 // the user.
 TEST(SyncGlobalErrorTest, AuthStateGlobalError) {
   MessageLoopForUI message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
-  NiceMock<ProfileSyncServiceMock> service;
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  scoped_ptr<Profile> profile(
+      ProfileSyncServiceMock::MakeSignedInTestingProfile());
+  NiceMock<ProfileSyncServiceMock> service(profile.get());
   SyncGlobalError error(&service);
 
   browser_sync::SyncBackendHost::Status status;

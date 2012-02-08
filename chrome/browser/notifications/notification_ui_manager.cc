@@ -16,7 +16,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/site_instance.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 namespace {
 const int kUserStatePollingIntervalSeconds = 1;
@@ -51,7 +51,7 @@ NotificationUIManager::NotificationUIManager(PrefService* local_state)
     : balloon_collection_(NULL),
       is_user_active_(true) {
   registrar_.Add(this, content::NOTIFICATION_APP_TERMINATING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   position_pref_.Init(prefs::kDesktopNotificationPosition, local_state, this);
 #if defined(OS_MACOSX)
   InitFullScreenMonitor();
@@ -231,13 +231,23 @@ void NotificationUIManager::SetPositionPreference(
   balloon_collection_->SetPositionPreference(preference);
 }
 
-void NotificationUIManager::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void NotificationUIManager::GetQueuedNotificationsForTesting(
+    std::vector<const Notification*>* notifications) {
+  NotificationDeque::const_iterator queued_iter;
+  for (queued_iter = show_queue_.begin(); queued_iter != show_queue_.end();
+       ++queued_iter) {
+    notifications->push_back(&(*queued_iter)->notification());
+  }
+}
+
+void NotificationUIManager::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_APP_TERMINATING) {
     CancelAll();
   } else if (type == chrome::NOTIFICATION_PREF_CHANGED) {
-    std::string* name = Details<std::string>(details).ptr();
+    std::string* name = content::Details<std::string>(details).ptr();
     if (*name == prefs::kDesktopNotificationPosition)
       balloon_collection_->SetPositionPreference(
           static_cast<BalloonCollection::PositionPreference>(

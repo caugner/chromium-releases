@@ -15,9 +15,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "chrome/common/pref_store.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
-class FilePath;
 class PrefModelAssociator;
 class PrefNotifier;
 class PrefStore;
@@ -154,8 +153,8 @@ class PrefValueStore {
 
    private:
     // PrefStore::Observer implementation.
-    virtual void OnPrefValueChanged(const std::string& key);
-    virtual void OnInitializationCompleted(bool succeeded);
+    virtual void OnPrefValueChanged(const std::string& key) OVERRIDE;
+    virtual void OnInitializationCompleted(bool succeeded) OVERRIDE;
 
     // PrefValueStore this keeper is part of.
     PrefValueStore* pref_value_store_;

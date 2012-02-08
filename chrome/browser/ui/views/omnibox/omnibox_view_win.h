@@ -21,7 +21,7 @@
 #include "chrome/browser/ui/views/autocomplete/autocomplete_popup_contents_view.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/font.h"
-#include "views/controls/menu/menu_2.h"
+#include "ui/views/controls/menu/menu_2.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditController;
@@ -31,6 +31,7 @@ class LocationBarView;
 class TabContents;
 
 namespace views {
+class NativeViewHost;
 class View;
 }
 
@@ -59,11 +60,9 @@ class OmniboxViewWin
 
   DECLARE_WND_CLASS(L"Chrome_OmniboxView");
 
-  OmniboxViewWin(const gfx::Font& font,
-                 AutocompleteEditController* controller,
+  OmniboxViewWin(AutocompleteEditController* controller,
                  ToolbarModel* toolbar_model,
                  LocationBarView* parent_view,
-                 HWND hwnd,
                  CommandUpdater* command_updater,
                  bool popup_window_mode,
                  views::View* location_bar);
@@ -117,7 +116,7 @@ class OmniboxViewWin
   virtual bool IsSelectAll() OVERRIDE;
   virtual bool DeleteAtEndPressed() OVERRIDE;
   virtual void GetSelectionBounds(string16::size_type* start,
-                                  string16::size_type* end) OVERRIDE;
+                                  string16::size_type* end) const OVERRIDE;
   virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void RevertAll() OVERRIDE;
 
@@ -142,14 +141,11 @@ class OmniboxViewWin
   virtual int TextWidth() const OVERRIDE;
   virtual string16 GetInstantSuggestion() const OVERRIDE;
   virtual bool IsImeComposing() const OVERRIDE;
-
+  virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
   virtual views::View* AddToView(views::View* parent) OVERRIDE;
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
 
   int GetPopupMaxYCoordinate();
-
-  // Exposes custom IAccessible implementation to the overall MSAA hierarchy.
-  IAccessible* GetIAccessible();
 
   void SetDropHighlightPosition(int position);
   int drop_highlight_position() const { return drop_highlight_position_; }
@@ -186,6 +182,7 @@ class OmniboxViewWin
     MSG_WM_CUT(OnCut)
     MESSAGE_HANDLER_EX(WM_GETOBJECT, OnGetObject)
     MESSAGE_HANDLER_EX(WM_IME_COMPOSITION, OnImeComposition)
+    MESSAGE_HANDLER_EX(WM_IME_NOTIFY, OnImeNotify)
     MSG_WM_KEYDOWN(OnKeyDown)
     MSG_WM_KEYUP(OnKeyUp)
     MSG_WM_KILLFOCUS(OnKillFocus)
@@ -282,8 +279,9 @@ class OmniboxViewWin
   void OnContextMenu(HWND window, const CPoint& point);
   void OnCopy();
   void OnCut();
-  LRESULT OnGetObject(UINT uMsg, WPARAM wparam, LPARAM lparam);
+  LRESULT OnGetObject(UINT message, WPARAM wparam, LPARAM lparam);
   LRESULT OnImeComposition(UINT message, WPARAM wparam, LPARAM lparam);
+  LRESULT OnImeNotify(UINT message, WPARAM wparam, LPARAM lparam);
   void OnKeyDown(TCHAR key, UINT repeat_count, UINT flags);
   void OnKeyUp(TCHAR key, UINT repeat_count, UINT flags);
   void OnKillFocus(HWND focus_wnd);
@@ -530,6 +528,10 @@ class OmniboxViewWin
   // Position of the drop highlight.  If this is -1, there is no drop highlight.
   int drop_highlight_position_;
 
+  // True if the IME candidate window is open.  When this is true, we want to
+  // avoid showing the popup.
+  bool ime_candidate_window_open_;
+
   // Security UI-related data.
   COLORREF background_color_;
   ToolbarModel::SecurityLevel security_level_;
@@ -543,6 +545,9 @@ class OmniboxViewWin
 
   // Instance of accessibility information and handling.
   mutable base::win::ScopedComPtr<IAccessible> autocomplete_accessibility_;
+
+  // The native view host.
+  views::NativeViewHost* native_view_host_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewWin);
 };

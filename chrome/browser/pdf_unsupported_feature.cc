@@ -21,10 +21,8 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/plugin_service.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/view_messages.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -128,7 +126,7 @@ void PDFEnableAdobeReaderInfoBarDelegate::OnNo() {
 
 // Launch the url to get the latest Adbobe Reader installer.
 void OpenReaderUpdateURL(TabContents* tab) {
-  tab->OpenURL(GURL(kReaderUpdateUrl), GURL(), CURRENT_TAB,
+  tab->OpenURL(GURL(kReaderUpdateUrl), GURL(), NEW_FOREGROUND_TAB,
                content::PAGE_TRANSITION_LINK);
 }
 
@@ -138,7 +136,7 @@ void OpenUsingReader(TabContentsWrapper* tab,
                      InfoBarDelegate* old_delegate,
                      InfoBarDelegate* new_delegate) {
   ChromePluginServiceFilter::GetInstance()->OverridePluginForTab(
-      tab->render_view_host()->process()->id(),
+      tab->render_view_host()->process()->GetID(),
       tab->render_view_host()->routing_id(),
       tab->tab_contents()->GetURL(),
       ASCIIToUTF16(PluginGroup::kAdobeReaderGroupName));
@@ -404,6 +402,6 @@ void PDFHasUnsupportedFeature(TabContentsWrapper* tab) {
 
   PluginService::GetInstance()->GetPluginGroups(
       base::Bind(&GotPluginGroupsCallback,
-          tab->render_view_host()->process()->id(),
+          tab->render_view_host()->process()->GetID(),
           tab->render_view_host()->routing_id()));
 }

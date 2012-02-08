@@ -16,12 +16,13 @@
 
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/glue/webkit_glue_export.h"
 
 namespace WebKit {
 class WebView;
 }
 
-struct WebPreferences {
+struct WEBKIT_GLUE_EXPORT WebPreferences {
   // Map of ISO 15924 four-letter script code to font family.  For example,
   // "Arab" to "My Arabic Font".
   typedef std::vector<std::pair<std::string, string16> > ScriptFontFamilyMap;
@@ -83,6 +84,7 @@ struct WebPreferences {
   bool webaudio_enabled;
   bool experimental_webgl_enabled;
   bool gl_multisampling_enabled;
+  bool privileged_webgl_extensions_enabled;
   bool show_composited_layer_borders;
   bool show_composited_layer_tree;
   bool show_fps_counter;
@@ -92,6 +94,7 @@ struct WebPreferences {
   bool force_compositing_mode;
   bool allow_webui_compositing;
   bool composite_to_texture_enabled;
+  bool fixed_position_compositing_enabled;
   bool accelerated_layers_enabled;
   bool accelerated_video_enabled;
   bool accelerated_2d_canvas_enabled;
@@ -105,6 +108,7 @@ struct WebPreferences {
   bool should_print_backgrounds;
   bool enable_scroll_animator;
   bool hixie76_websocket_protocol_enabled;
+  bool visual_word_movement_enabled;
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for
   // the embedder to use the same default value.

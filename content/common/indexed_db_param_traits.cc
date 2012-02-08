@@ -1,25 +1,25 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/indexed_db_param_traits.h"
 
 #include "content/common/indexed_db_key.h"
-#include "content/common/serialized_script_value.h"
+#include "content/public/common/serialized_script_value.h"
 #include "ipc/ipc_message_utils.h"
 
 namespace IPC {
 
-void ParamTraits<SerializedScriptValue>::Write(Message* m,
-                                               const param_type& p) {
+void ParamTraits<content::SerializedScriptValue>::Write(Message* m,
+                                                        const param_type& p) {
   WriteParam(m, p.is_null());
   WriteParam(m, p.is_invalid());
   WriteParam(m, p.data());
 }
 
-bool ParamTraits<SerializedScriptValue>::Read(const Message* m,
-                                              void** iter,
-                                              param_type* r) {
+bool ParamTraits<content::SerializedScriptValue>::Read(const Message* m,
+                                                       void** iter,
+                                                       param_type* r) {
   bool is_null;
   bool is_invalid;
   string16 data;
@@ -35,8 +35,8 @@ bool ParamTraits<SerializedScriptValue>::Read(const Message* m,
   return true;
 }
 
-void ParamTraits<SerializedScriptValue>::Log(const param_type& p,
-                                             std::string* l) {
+void ParamTraits<content::SerializedScriptValue>::Log(const param_type& p,
+                                                      std::string* l) {
   l->append("<SerializedScriptValue>(");
   LogParam(p.is_null(), l);
   l->append(", ");
@@ -48,40 +48,65 @@ void ParamTraits<SerializedScriptValue>::Log(const param_type& p,
 
 void ParamTraits<IndexedDBKey>::Write(Message* m, const param_type& p) {
   WriteParam(m, int(p.type()));
-  // TODO(jorlow): Technically, we only need to pack the type being used.
-  WriteParam(m, p.string());
-  WriteParam(m, p.date());
-  WriteParam(m, p.number());
+  switch (p.type()) {
+    case WebKit::WebIDBKey::ArrayType:
+      WriteParam(m, p.array());
+      return;
+    case WebKit::WebIDBKey::StringType:
+      WriteParam(m, p.string());
+      return;
+    case WebKit::WebIDBKey::DateType:
+      WriteParam(m, p.date());
+      return;
+    case WebKit::WebIDBKey::NumberType:
+      WriteParam(m, p.number());
+      return;
+    case WebKit::WebIDBKey::InvalidType:
+      return;
+  }
+  NOTREACHED();
 }
 
 bool ParamTraits<IndexedDBKey>::Read(const Message* m,
                                      void** iter,
                                      param_type* r) {
   int type;
-  string16 string;
-  double date;
-  double number;
-  bool ok =
-      ReadParam(m, iter, &type) &&
-      ReadParam(m, iter, &string) &&
-      ReadParam(m, iter, &date) &&
-      ReadParam(m, iter, &number);
-
-  if (!ok)
+  if (!ReadParam(m, iter, &type))
     return false;
+
   switch (type) {
-    case WebKit::WebIDBKey::NullType:
-      r->SetNull();
-      return true;
+    case WebKit::WebIDBKey::ArrayType:
+      {
+        std::vector<IndexedDBKey> array;
+        if (!ReadParam(m, iter, &array))
+          return false;
+        r->SetArray(array);
+        return true;
+      }
     case WebKit::WebIDBKey::StringType:
-      r->SetString(string);
-      return true;
+      {
+        string16 string;
+        if (!ReadParam(m, iter, &string))
+          return false;
+        r->SetString(string);
+        return true;
+      }
     case WebKit::WebIDBKey::DateType:
-      r->SetDate(date);
-      return true;
+      {
+        double date;
+        if (!ReadParam(m, iter, &date))
+          return false;
+        r->SetDate(date);
+        return true;
+      }
     case WebKit::WebIDBKey::NumberType:
-      r->SetNumber(number);
-      return true;
+      {
+        double number;
+        if (!ReadParam(m, iter, &number))
+          return false;
+        r->SetNumber(number);
+        return true;
+      }
     case WebKit::WebIDBKey::InvalidType:
       r->SetInvalid();
       return true;
@@ -94,6 +119,15 @@ void ParamTraits<IndexedDBKey>::Log(const param_type& p, std::string* l) {
   l->append("<IndexedDBKey>(");
   LogParam(int(p.type()), l);
   l->append(", ");
+  l->append("[");
+  std::vector<IndexedDBKey>::const_iterator it = p.array().begin();
+  while (it != p.array().end()) {
+    Log(*it, l);
+    ++it;
+    if (it != p.array().end())
+      l->append(", ");
+  }
+  l->append("], ");
   LogParam(p.string(), l);
   l->append(", ");
   LogParam(p.date(), l);

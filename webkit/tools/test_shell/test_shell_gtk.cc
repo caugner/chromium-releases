@@ -23,14 +23,16 @@
 #include "net/base/mime_util.h"
 #include "net/base/net_util.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPoint.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/resource_loader_bridge.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/tools/test_shell/test_navigation_controller.h"
+#include "webkit/tools/test_shell/test_shell_webkit_init.h"
 #include "webkit/tools/test_shell/test_webview_delegate.h"
 
 using WebKit::WebPoint;
@@ -431,7 +433,7 @@ void TestShell::InteractiveSetFocus(WebWidgetHost* host, bool enable) {
     gtk_widget_grab_focus(widget);
   } else if (gtk_widget_is_focus(widget)) {
     GtkWidget *toplevel = gtk_widget_get_toplevel(widget);
-    if (GTK_WIDGET_TOPLEVEL(toplevel))
+    if (gtk_widget_is_toplevel(toplevel))
       gtk_window_set_focus(GTK_WINDOW(toplevel), NULL);
   }
 }
@@ -561,13 +563,11 @@ base::StringPiece TestShell::ResourceProvider(int key) {
 
 //-----------------------------------------------------------------------------
 
-namespace webkit_glue {
-
-string16 GetLocalizedString(int message_id) {
+string16 TestShellWebKitInit::GetLocalizedString(int message_id) {
   return ResourceBundle::GetSharedInstance().GetLocalizedString(message_id);
 }
 
-base::StringPiece GetDataResource(int resource_id) {
+base::StringPiece TestShellWebKitInit::GetDataResource(int resource_id) {
   switch (resource_id) {
     case IDR_BROKENIMAGE:
       resource_id = IDR_BROKENIMAGE_TESTSHELL;
@@ -578,5 +578,3 @@ base::StringPiece GetDataResource(int resource_id) {
   }
   return TestShell::ResourceProvider(resource_id);
 }
-
-}  // namespace webkit_glue

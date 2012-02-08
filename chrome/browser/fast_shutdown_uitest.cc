@@ -13,7 +13,9 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_test.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
+
+using content::BrowserThread;
 
 class FastShutdown : public UITest {
  protected:
@@ -40,7 +42,8 @@ class FastShutdown : public UITest {
     scoped_refptr<SQLitePersistentCookieStore> cookie_store(
        new SQLitePersistentCookieStore(
            user_data_dir_.AppendASCII(chrome::kInitialProfile)
-                         .Append(chrome::kCookieFilename)));
+                         .Append(chrome::kCookieFilename),
+           false));
     std::vector<net::CookieMonster::CanonicalCookie*> cookies;
     cookie_store->Load(
         base::Bind(&FastShutdown::LoadCookiesCallback,
@@ -70,8 +73,8 @@ class FastShutdown : public UITest {
     to_notify->PostTask(FROM_HERE, new MessageLoop::QuitTask());
   }
 
-  BrowserThread db_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread db_thread_;
+  content::TestBrowserThread io_thread_;
   scoped_refptr<base::ThreadTestHelper> thread_helper_;
   FilePath user_data_dir_;
 
@@ -99,7 +102,8 @@ TEST_F(FastShutdown, FLAKY_SlowTermination) {
       base::Time(),  // last_access
       false,         // secure
       false,         // httponly
-      false);        // has_expires
+      false,         // has_expires
+      false);        // is_persistent
 
   // This page has an unload handler.
   const FilePath dir(FILE_PATH_LITERAL("fast_shutdown"));

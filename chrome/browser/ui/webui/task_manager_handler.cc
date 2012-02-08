@@ -16,8 +16,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/webpreferences.h"
 
@@ -26,6 +26,12 @@ namespace {
 static Value* CreateColumnValue(const TaskManagerModel* tm,
                                 const std::string column_name,
                                 const int i) {
+  if (column_name == "uniqueId")
+    return Value::CreateIntegerValue(tm->GetResourceUniqueId(i));
+  if (column_name == "type")
+    return Value::CreateStringValue(
+        TaskManager::Resource::GetResourceTypeAsString(
+        tm->GetResourceType(i)));
   if (column_name == "processId")
     return Value::CreateStringValue(tm->GetResourceProcessId(i));
   if (column_name == "processIdValue")
@@ -112,6 +118,10 @@ static Value* CreateColumnValue(const TaskManagerModel* tm,
     tm->GetV8Memory(i, &v8_memory);
     return Value::CreateDoubleValue(v8_memory);
   }
+  if (column_name == "canInspect")
+    return Value::CreateBooleanValue(tm->CanInspect(i));
+  if (column_name == "canActivate")
+    return Value::CreateBooleanValue(tm->CanActivate(i));
 
   NOTREACHED();
   return NULL;
@@ -143,15 +153,11 @@ static DictionaryValue* CreateTaskGroupValue(const TaskManagerModel* tm,
   int length = group_range.second;
 
   val->SetInteger("index", index);
-  val->SetInteger("group_range_start", group_range.first);
-  val->SetInteger("group_range_length", group_range.second);
-  val->SetInteger("index_in_group", index - group_range.first);
-  val->SetBoolean("is_resource_first_in_group",
-                  tm->IsResourceFirstInGroup(index));
   val->SetBoolean("isBackgroundResource",
                   tm->IsBackgroundResource(index));
 
   // Columns which have one datum in each group.
+  CreateGroupColumnList(tm, "type", index, 1, val);
   CreateGroupColumnList(tm, "processId", index, 1, val);
   CreateGroupColumnList(tm, "processIdValue", index, 1, val);
   CreateGroupColumnList(tm, "cpuUsage", index, 1, val);
@@ -174,6 +180,7 @@ static DictionaryValue* CreateTaskGroupValue(const TaskManagerModel* tm,
   CreateGroupColumnList(tm, "v8MemoryAllocatedSizeValue", index, 1, val);
 
   // Columns which have some data in each group.
+  CreateGroupColumnList(tm, "uniqueId", index, length, val);
   CreateGroupColumnList(tm, "icon", index, length, val);
   CreateGroupColumnList(tm, "title", index, length, val);
   CreateGroupColumnList(tm, "profileName", index, length, val);
@@ -183,6 +190,8 @@ static DictionaryValue* CreateTaskGroupValue(const TaskManagerModel* tm,
   CreateGroupColumnList(tm, "fpsValue", index, length, val);
   CreateGroupColumnList(tm, "goatsTeleported", index, length, val);
   CreateGroupColumnList(tm, "goatsTeleportedValue", index, length, val);
+  CreateGroupColumnList(tm, "canInspect", index, length, val);
+  CreateGroupColumnList(tm, "canActivate", index, length, val);
 
   return val;
 }
@@ -301,6 +310,12 @@ void TaskManagerHandler::RegisterMessages() {
   web_ui_->RegisterMessageCallback("killProcess",
       base::Bind(&TaskManagerHandler::HandleKillProcess,
                  base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("inspect",
+      base::Bind(&TaskManagerHandler::HandleInspect,
+                 base::Unretained(this)));
+  web_ui_->RegisterMessageCallback("activatePage",
+      base::Bind(&TaskManagerHandler::HandleActivatePage,
+                 base::Unretained(this)));
   web_ui_->RegisterMessageCallback("openAboutMemory",
       base::Bind(&TaskManagerHandler::OpenAboutMemory,
                  base::Unretained(this)));
@@ -312,19 +327,24 @@ void TaskManagerHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
+static int parseIndex(const Value* value) {
+  int index = -1;
+  string16 string16_index;
+  double double_index;
+  if (value->GetAsString(&string16_index)) {
+    base::StringToInt(string16_index, &index);
+  } else if (value->GetAsDouble(&double_index)) {
+    index = static_cast<int>(double_index);
+  } else {
+    value->GetAsInteger(&index);
+  }
+  return index;
+}
+
 void TaskManagerHandler::HandleKillProcess(const ListValue* indexes) {
   for (ListValue::const_iterator i = indexes->begin();
        i != indexes->end(); i++) {
-    int index = -1;
-    string16 string16_index;
-    double double_index;
-    if ((*i)->GetAsString(&string16_index)) {
-      base::StringToInt(string16_index, &index);
-    } else if ((*i)->GetAsDouble(&double_index)) {
-      index = static_cast<int>(double_index);
-    } else {
-      (*i)->GetAsInteger(&index);
-    }
+    int index = parseIndex(*i);
     if (index == -1)
       continue;
 
@@ -334,6 +354,45 @@ void TaskManagerHandler::HandleKillProcess(const ListValue* indexes) {
 
     LOG(INFO) << "kill PID:" << model_->GetResourceProcessId(resource_index);
     task_manager_->KillProcess(resource_index);
+  }
+}
+
+void TaskManagerHandler::HandleActivatePage(const ListValue* resource_index) {
+  for (ListValue::const_iterator i = resource_index->begin();
+       i != resource_index->end(); ++i) {
+    int unique_id = parseIndex(*i);
+    if (unique_id == -1)
+      continue;
+
+    for (int resource_index = 0; resource_index < model_->ResourceCount();
+         ++resource_index) {
+      if (model_->GetResourceUniqueId(resource_index) == unique_id) {
+        task_manager_->ActivateProcess(resource_index);
+        break;
+      }
+    }
+
+    break;
+  }
+}
+
+void TaskManagerHandler::HandleInspect(const ListValue* resource_index) {
+  for (ListValue::const_iterator i = resource_index->begin();
+       i != resource_index->end(); ++i) {
+    int unique_id = parseIndex(*i);
+    if (unique_id == -1)
+      continue;
+
+    for (int resource_index = 0; resource_index < model_->ResourceCount();
+         ++resource_index) {
+      if (model_->GetResourceUniqueId(resource_index) == unique_id) {
+        if (model_->CanInspect(resource_index))
+          model_->Inspect(resource_index);
+        break;
+      }
+    }
+
+    break;
   }
 }
 
@@ -354,10 +413,10 @@ void TaskManagerHandler::EnableTaskManager(const ListValue* indexes) {
   model_->AddObserver(this);
   model_->StartUpdating();
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TASK_MANAGER_WINDOW_READY,
-      Source<TaskManagerModel>(model_),
-      NotificationService::NoDetails());
+      content::Source<TaskManagerModel>(model_),
+      content::NotificationService::NoDetails());
 }
 
 void TaskManagerHandler::OpenAboutMemory(const ListValue* indexes) {
@@ -374,6 +433,10 @@ void TaskManagerHandler::OpenAboutMemory(const ListValue* indexes) {
 }
 
 // TaskManagerHandler, private: -----------------------------------------------
+
+bool TaskManagerHandler::is_alive() {
+  return web_ui_->tab_contents()->render_view_host() != NULL;
+}
 
 void TaskManagerHandler::UpdateResourceGroupTable(int start, int length) {
   if (resource_to_group_table_.size() < static_cast<size_t>(start)) {
@@ -400,7 +463,7 @@ void TaskManagerHandler::OnGroupChanged(const int group_start,
   for (int i = 0; i < group_length; ++i)
     tasks_value.Append(CreateTaskGroupValue(model_, group_start + i));
 
-  if (is_enabled_) {
+  if (is_enabled_ && is_alive()) {
     web_ui_->CallJavascriptFunction("taskChanged",
                                     start_value, length_value, tasks_value);
   }
@@ -414,7 +477,7 @@ void TaskManagerHandler::OnGroupAdded(const int group_start,
   for (int i = 0; i < group_length; ++i)
     tasks_value.Append(CreateTaskGroupValue(model_, group_start + i));
 
-  if (is_enabled_) {
+  if (is_enabled_ && is_alive()) {
     web_ui_->CallJavascriptFunction("taskAdded",
                                     start_value, length_value, tasks_value);
   }
@@ -424,6 +487,6 @@ void TaskManagerHandler::OnGroupRemoved(const int group_start,
                                         const int group_length) {
   base::FundamentalValue start_value(group_start);
   base::FundamentalValue length_value(group_length);
-  if (is_enabled_)
+  if (is_enabled_ && is_alive())
     web_ui_->CallJavascriptFunction("taskRemoved", start_value, length_value);
 }

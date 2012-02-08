@@ -9,12 +9,16 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
 class NavigationController;
+
+namespace net {
+class URLRequestStatus;
+}
 
 // Attempts to get the HEAD of a host name and displays an info bar if the
 // request was successful. This is used for single-word queries where we can't
@@ -32,8 +36,8 @@ class NavigationController;
 //   * The tab is closed before we show an infobar
 //   * The intranet fetch fails
 //   * None of the above apply, so we successfully show an infobar
-class AlternateNavURLFetcher : public NotificationObserver,
-                               public URLFetcher::Delegate {
+class AlternateNavURLFetcher : public content::NotificationObserver,
+                               public content::URLFetcherDelegate {
  public:
   enum State {
     NOT_STARTED,
@@ -48,18 +52,13 @@ class AlternateNavURLFetcher : public NotificationObserver,
   State state() const { return state_; }
 
  private:
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  // URLFetcher::Delegate
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data) OVERRIDE;
+  // content::URLFetcherDelegate
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Sets |controller_| to the supplied pointer and begins fetching
   // |alternate_nav_url_|.
@@ -78,12 +77,12 @@ class AlternateNavURLFetcher : public NotificationObserver,
   void ShowInfobarIfPossible();
 
   GURL alternate_nav_url_;
-  scoped_ptr<URLFetcher> fetcher_;
+  scoped_ptr<content::URLFetcher> fetcher_;
   NavigationController* controller_;
   State state_;
   bool navigated_to_entry_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(AlternateNavURLFetcher);
 };

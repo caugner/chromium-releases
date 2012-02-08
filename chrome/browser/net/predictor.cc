@@ -26,7 +26,7 @@
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
@@ -36,6 +36,7 @@
 #include "net/base/single_request_host_resolver.h"
 
 using base::TimeDelta;
+using content::BrowserThread;
 
 namespace chrome_browser_net {
 
@@ -81,9 +82,7 @@ class Predictor::LookupRequest {
   LookupRequest(Predictor* predictor,
                 net::HostResolver* host_resolver,
                 const GURL& url)
-      : ALLOW_THIS_IN_INITIALIZER_LIST(
-            net_callback_(this, &LookupRequest::OnLookupFinished)),
-        predictor_(predictor),
+      : predictor_(predictor),
         url_(url),
         resolver_(host_resolver) {
   }
@@ -101,16 +100,15 @@ class Predictor::LookupRequest {
     // lets the HostResolver know it can de-prioritize it.
     resolve_info.set_is_speculative(true);
     return resolver_.Resolve(
-        resolve_info, &addresses_, &net_callback_, net::BoundNetLog());
+        resolve_info, &addresses_,
+        base::Bind(&LookupRequest::OnLookupFinished, base::Unretained(this)),
+        net::BoundNetLog());
   }
 
  private:
   void OnLookupFinished(int result) {
     predictor_->OnLookupFinished(this, url_, result == net::OK);
   }
-
-  // HostResolver will call us using this callback when resolution is complete.
-  net::OldCompletionCallbackImpl<LookupRequest> net_callback_;
 
   Predictor* predictor_;  // The predictor which started us.
 
@@ -703,7 +701,8 @@ void Predictor::FinalizeInitializationOnIOThread(
   // on the same thread. The predictor lives on the IO thread and will die
   // from there so now that we're on the IO thread we need to properly
   // initialize the ScopedrunnableMethodFactory.
-  trim_task_factory_.reset(new ScopedRunnableMethodFactory<Predictor>(this));
+  // TODO(groby): Check if WeakPtrFactory has the same constraint.
+  weak_factory_.reset(new base::WeakPtrFactory<Predictor>(this));
 
   // Prefetch these hostnames on startup.
   DnsPrefetchMotivatedList(startup_urls, UrlInfo::STARTUP_LIST_MOTIVATED);
@@ -800,7 +799,7 @@ void Predictor::SaveStateForNextStartupAndTrim(PrefService* prefs) {
         BrowserThread::IO,
         FROM_HERE,
         base::Bind(
-            SaveDnsPrefetchStateForNextStartupAndTrimOnIOThread,
+            &SaveDnsPrefetchStateForNextStartupAndTrimOnIOThread,
             update_startup_list.Get(),
             update_referral_list.Get(),
             &completion,
@@ -1056,8 +1055,8 @@ void Predictor::PostIncrementalTrimTask() {
     return;
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
-      trim_task_factory_->NewRunnableMethod(
-          &Predictor::IncrementalTrimReferrers, false),
+      base::Bind(&Predictor::IncrementalTrimReferrers,
+                 weak_factory_->GetWeakPtr(), false),
       kDurationBetweenTrimmingIncrements.InMilliseconds());
 }
 

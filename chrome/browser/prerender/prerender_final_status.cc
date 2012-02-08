@@ -47,6 +47,11 @@ const char* kFinalStatusNames[] = {
   "SSL Error",
   "Cross-Site Navigation Pending",
   "DevTools Attached To The Tab",
+  "Session Storage Namespace Mismatch",
+  "No Use Group",
+  "Match Complete Dummy",
+  "Duplicate",
+  "OpenURL",
   "Max",
 };
 COMPILE_ASSERT(arraysize(kFinalStatusNames) == FINAL_STATUS_MAX + 1,

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/sync/engine/process_commit_response_command.h"
 
+#include <cstddef>
 #include <set>
 #include <string>
 #include <vector>
@@ -59,6 +60,32 @@ void ResetErrorCounters(StatusController* status) {
 ProcessCommitResponseCommand::ProcessCommitResponseCommand() {}
 ProcessCommitResponseCommand::~ProcessCommitResponseCommand() {}
 
+bool ProcessCommitResponseCommand::HasCustomGroupsToChange() const {
+  // TODO(akalin): Set to true.
+  return false;
+}
+
+std::set<ModelSafeGroup> ProcessCommitResponseCommand::GetGroupsToChange(
+    const sessions::SyncSession& session) const {
+  std::set<ModelSafeGroup> groups_with_commits;
+  syncable::ScopedDirLookup dir(session.context()->directory_manager(),
+                                session.context()->account_name());
+  if (!dir.good()) {
+    LOG(ERROR) << "Scoped dir lookup failed!";
+    return groups_with_commits;
+  }
+
+  syncable::ReadTransaction trans(FROM_HERE, dir);
+  const StatusController& status = session.status_controller();
+  for (size_t i = 0; i < status.commit_ids().size(); ++i) {
+    groups_with_commits.insert(
+        GetGroupForModelType(status.GetUnrestrictedCommitModelTypeAt(i),
+                             session.routing_info()));
+  }
+
+  return groups_with_commits;
+}
+
 bool ProcessCommitResponseCommand::ModelNeutralExecuteImpl(
     sessions::SyncSession* session) {
   ScopedDirLookup dir(session->context()->directory_manager(),
@@ -68,14 +95,14 @@ bool ProcessCommitResponseCommand::ModelNeutralExecuteImpl(
     return false;
   }
 
-  StatusController* status = session->status_controller();
-  const ClientToServerResponse& response(status->commit_response());
-  const vector<syncable::Id>& commit_ids(status->commit_ids());
+  const StatusController& status = session->status_controller();
+  const ClientToServerResponse& response(status.commit_response());
+  const vector<syncable::Id>& commit_ids(status.commit_ids());
 
   if (!response.has_commit()) {
     // TODO(sync): What if we didn't try to commit anything?
     LOG(WARNING) << "Commit response has no commit body!";
-    IncrementErrorCounters(status);
+    IncrementErrorCounters(session->mutable_status_controller());
     return false;
   }
 
@@ -90,7 +117,7 @@ bool ProcessCommitResponseCommand::ModelNeutralExecuteImpl(
       if (cr.entryresponse(i).has_error_message())
         LOG(ERROR) << "  " << cr.entryresponse(i).error_message();
     }
-    IncrementErrorCounters(status);
+    IncrementErrorCounters(session->mutable_status_controller());
     return false;
   }
   return true;
@@ -100,8 +127,8 @@ void ProcessCommitResponseCommand::ModelChangingExecuteImpl(
     SyncSession* session) {
   ProcessCommitResponse(session);
   ExtensionsActivityMonitor* monitor = session->context()->extensions_monitor();
-  if (session->status_controller()->HasBookmarkCommitActivity() &&
-      session->status_controller()->syncer_status()
+  if (session->status_controller().HasBookmarkCommitActivity() &&
+      session->status_controller().syncer_status()
           .num_successful_bookmark_commits == 0) {
     monitor->PutRecords(session->extensions_activity());
     session->mutable_extensions_activity()->clear();
@@ -119,7 +146,7 @@ void ProcessCommitResponseCommand::ProcessCommitResponse(
     return;
   }
 
-  StatusController* status = session->status_controller();
+  StatusController* status = session->mutable_status_controller();
   const ClientToServerResponse& response(status->commit_response());
   const CommitResponse& cr = response.commit();
   const sync_pb::CommitMessage& commit_message =
@@ -159,7 +186,7 @@ void ProcessCommitResponseCommand::ProcessCommitResponse(
         case CommitResponse::SUCCESS:
           // TODO(sync): worry about sync_rate_ rate calc?
           ++successes;
-          if (status->GetCommitIdModelTypeAt(proj[i]) == syncable::BOOKMARKS)
+          if (status->GetCommitModelTypeAt(proj[i]) == syncable::BOOKMARKS)
             status->increment_num_successful_bookmark_commits();
           status->increment_num_successful_commits();
           break;
@@ -230,7 +257,7 @@ ProcessCommitResponseCommand::ProcessSingleCommitResponse(
     return CommitResponse::INVALID_MESSAGE;
   }
   if (CommitResponse::TRANSIENT_ERROR == response) {
-    VLOG(1) << "Transient Error Committing: " << local_entry;
+    DVLOG(1) << "Transient Error Committing: " << local_entry;
     LogServerError(server_entry);
     return CommitResponse::TRANSIENT_ERROR;
   }
@@ -240,7 +267,7 @@ ProcessCommitResponseCommand::ProcessSingleCommitResponse(
     return response;
   }
   if (CommitResponse::CONFLICT == response) {
-    VLOG(1) << "Conflict Committing: " << local_entry;
+    DVLOG(1) << "Conflict Committing: " << local_entry;
     // TODO(nick): conflicting_new_folder_ids is a purposeless anachronism.
     if (!pre_commit_id.ServerKnows() && local_entry.Get(IS_DIR)) {
       conflicting_new_folder_ids->insert(pre_commit_id);
@@ -248,7 +275,7 @@ ProcessCommitResponseCommand::ProcessSingleCommitResponse(
     return response;
   }
   if (CommitResponse::RETRY == response) {
-    VLOG(1) << "Retry Committing: " << local_entry;
+    DVLOG(1) << "Retry Committing: " << local_entry;
     return response;
   }
   if (CommitResponse::OVER_QUOTA == response) {
@@ -323,8 +350,8 @@ bool ProcessCommitResponseCommand::UpdateVersionAfterCommit(
   // here, even if syncing_was_set is false; that's because local changes were
   // on top of the successfully committed version.
   local_entry->Put(BASE_VERSION, new_version);
-  VLOG(1) << "Commit is changing base version of " << local_entry->Get(ID)
-          << " to: " << new_version;
+  DVLOG(1) << "Commit is changing base version of " << local_entry->Get(ID)
+           << " to: " << new_version;
   local_entry->Put(SERVER_VERSION, new_version);
   return true;
 }
@@ -338,8 +365,8 @@ bool ProcessCommitResponseCommand::ChangeIdAfterCommit(
     if (pre_commit_id.ServerKnows()) {
       // The server can sometimes generate a new ID on commit; for example,
       // when committing an undeletion.
-      VLOG(1) << " ID changed while committing an old entry. "
-              << pre_commit_id << " became " << entry_response.id() << ".";
+      DVLOG(1) << " ID changed while committing an old entry. "
+               << pre_commit_id << " became " << entry_response.id() << ".";
     }
     MutableEntry same_id(trans, GET_BY_ID, entry_response.id());
     // We should trap this before this function.
@@ -350,7 +377,7 @@ bool ProcessCommitResponseCommand::ChangeIdAfterCommit(
     }
     SyncerUtil::ChangeEntryIDAndUpdateChildren(
         trans, local_entry, entry_response.id());
-    VLOG(1) << "Changing ID to " << entry_response.id();
+    DVLOG(1) << "Changing ID to " << entry_response.id();
   }
   return true;
 }
@@ -423,8 +450,8 @@ void ProcessCommitResponseCommand::OverrideClientFieldsAfterCommit(
       local_entry->Get(syncable::NON_UNIQUE_NAME);
 
   if (!server_name.empty() && old_name != server_name) {
-    VLOG(1) << "During commit, server changed name: " << old_name
-            << " to new name: " << server_name;
+    DVLOG(1) << "During commit, server changed name: " << old_name
+             << " to new name: " << server_name;
     local_entry->Put(syncable::NON_UNIQUE_NAME, server_name);
   }
 

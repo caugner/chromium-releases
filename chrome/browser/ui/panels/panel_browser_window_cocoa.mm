@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/panels/panel_browser_window_cocoa.h"
 
 #include "base/logging.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
@@ -13,6 +14,7 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #import "chrome/browser/ui/panels/panel_titlebar_view_cocoa.h"
 #import "chrome/browser/ui/panels/panel_window_controller_cocoa.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 
 namespace {
@@ -55,9 +57,11 @@ PanelBrowserWindowCocoa::PanelBrowserWindowCocoa(Browser* browser,
     is_shown_(false),
     has_find_bar_(false) {
   controller_ = [[PanelWindowControllerCocoa alloc] initWithBrowserWindow:this];
+  browser_->tabstrip_model()->AddObserver(this);
 }
 
 PanelBrowserWindowCocoa::~PanelBrowserWindowCocoa() {
+  browser_->tabstrip_model()->RemoveObserver(this);
 }
 
 bool PanelBrowserWindowCocoa::isClosed() {
@@ -99,13 +103,22 @@ gfx::Rect PanelBrowserWindowCocoa::GetPanelBounds() const {
 // |bounds| is the platform-independent screen coordinates, with (0,0) at
 // top-left of the primary screen.
 void PanelBrowserWindowCocoa::SetPanelBounds(const gfx::Rect& bounds) {
+  setBoundsInternal(bounds, true);
+}
+
+void PanelBrowserWindowCocoa::SetPanelBoundsInstantly(const gfx::Rect& bounds) {
+  setBoundsInternal(bounds, false);
+}
+
+void PanelBrowserWindowCocoa::setBoundsInternal(const gfx::Rect& bounds,
+                                                bool animate) {
   if (bounds_ == bounds)
     return;
 
   bounds_ = bounds;
 
   NSRect frame = ConvertCoordinatesToCocoa(bounds);
-  [controller_ setPanelFrame:frame];
+  [controller_ setPanelFrame:frame animate:animate];
 }
 
 void PanelBrowserWindowCocoa::ClosePanel() {
@@ -123,8 +136,7 @@ void PanelBrowserWindowCocoa::ActivatePanel() {
 }
 
 void PanelBrowserWindowCocoa::DeactivatePanel() {
-  // TODO(dcheng): Implement. See crbug.com/51364 for more details.
-  NOTIMPLEMENTED();
+  [controller_ deactivate];
 }
 
 bool PanelBrowserWindowCocoa::IsPanelActive() const {
@@ -235,6 +247,11 @@ void PanelBrowserWindowCocoa::HandlePanelKeyboardEvent(
   }
 }
 
+void PanelBrowserWindowCocoa::FullScreenModeChanged(
+    bool is_full_screen) {
+  [controller_ fullScreenModeChanged:is_full_screen];
+}
+
 Browser* PanelBrowserWindowCocoa::GetPanelBrowser() const {
   return browser();
 }
@@ -243,9 +260,18 @@ void PanelBrowserWindowCocoa::DestroyPanelBrowser() {
   [controller_ close];
 }
 
-void PanelBrowserWindowCocoa::didCloseNativeWindow() {
+gfx::Size PanelBrowserWindowCocoa::IconOnlySize() const {
+  // TODO(dimich): to be implemented.
+  return gfx::Size();
+}
+
+void PanelBrowserWindowCocoa::EnsurePanelFullyVisible() {
+  // TODO(dimich): to be implemented.
+}
+
+void PanelBrowserWindowCocoa::DidCloseNativeWindow() {
   DCHECK(!isClosed());
-  panel_->manager()->Remove(panel_.get());
+  panel_->OnNativePanelClosed();
   controller_ = NULL;
 }
 
@@ -268,6 +294,17 @@ gfx::Size PanelBrowserWindowCocoa::ContentSizeFromWindowSize(
 
 int PanelBrowserWindowCocoa::TitleOnlyHeight() const {
   return [controller_ titlebarHeightInScreenCoordinates];
+}
+
+void PanelBrowserWindowCocoa::TabInsertedAt(TabContentsWrapper* contents,
+                                            int index,
+                                            bool foreground) {
+  [controller_ tabInserted:contents->tab_contents()];
+}
+
+void PanelBrowserWindowCocoa::TabDetachedAt(TabContentsWrapper* contents,
+                                            int index) {
+  [controller_ tabDetached:contents->tab_contents()];
 }
 
 // NativePanelTesting implementation.

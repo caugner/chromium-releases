@@ -4,15 +4,20 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browsing_data_file_system_helper.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -87,8 +92,10 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   bool FileSystemContainsOriginAndType(const GURL& origin,
                                        fileapi::FileSystemType type) {
     sandbox_->ValidateFileSystemRootAndGetURL(
-        origin, type, false, NewCallback(this,
-            &BrowsingDataFileSystemHelperTest::CallbackFindFileSystemPath));
+        origin, type, false,
+        base::Bind(
+            &BrowsingDataFileSystemHelperTest::CallbackFindFileSystemPath,
+            base::Unretained(this)));
     BlockUntilNotified();
     return found_file_system_;
   }
@@ -107,16 +114,18 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   // Calls StartFetching() on the test's BrowsingDataFileSystemHelper
   // object, then blocks until the callback is executed.
   void FetchFileSystems() {
-    helper_->StartFetching(NewCallback(this,
-        &BrowsingDataFileSystemHelperTest::CallbackStartFetching));
+    helper_->StartFetching(
+        base::Bind(&BrowsingDataFileSystemHelperTest::CallbackStartFetching,
+                   base::Unretained(this)));
     BlockUntilNotified();
   }
 
   // Calls StartFetching() on the test's CannedBrowsingDataFileSystemHelper
   // object, then blocks until the callback is executed.
   void FetchCannedFileSystems() {
-    canned_helper_->StartFetching(NewCallback(this,
-        &BrowsingDataFileSystemHelperTest::CallbackStartFetching));
+    canned_helper_->StartFetching(
+        base::Bind(&BrowsingDataFileSystemHelperTest::CallbackStartFetching,
+                   base::Unretained(this)));
     BlockUntilNotified();
   }
 
@@ -167,9 +176,9 @@ class BrowsingDataFileSystemHelperTest : public testing::Test {
   // defined before profile_ to prevent explosions. The threads also must be
   // defined in the order they're listed here. Oh how I love C++.
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
+  content::TestBrowserThread io_thread_;
   TestingProfile profile_;
 
   // We don't own this pointer: don't delete it.

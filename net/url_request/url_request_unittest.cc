@@ -17,6 +17,7 @@
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/format_macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -131,7 +132,7 @@ class BlockingNetworkDelegate : public TestNetworkDelegate {
         auth_retval_(NetworkDelegate::AUTH_REQUIRED_RESPONSE_IO_PENDING),
         auth_callback_retval_(
             NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION),
-        ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {}
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {}
 
   void set_retval(int retval) { retval_ = retval; }
   void set_callback_retval(int retval) { callback_retval_ = retval; }
@@ -145,10 +146,10 @@ class BlockingNetworkDelegate : public TestNetworkDelegate {
   }
 
  private:
-  // TestNetworkDelegate:
+  // TestNetworkDelegate implementation.
   virtual int OnBeforeURLRequest(net::URLRequest* request,
-                                 net::OldCompletionCallback* callback,
-                                 GURL* new_url) {
+                                 const net::CompletionCallback& callback,
+                                 GURL* new_url) OVERRIDE {
     if (redirect_url_ == request->url()) {
       // We've already seen this request and redirected elsewhere.
       return net::OK;
@@ -164,8 +165,8 @@ class BlockingNetworkDelegate : public TestNetworkDelegate {
 
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        method_factory_.NewRunnableMethod(&BlockingNetworkDelegate::DoCallback,
-                                          callback));
+        base::Bind(&BlockingNetworkDelegate::DoCallback,
+                   weak_factory_.GetWeakPtr(), callback));
     return net::ERR_IO_PENDING;
   }
 
@@ -186,16 +187,15 @@ class BlockingNetworkDelegate : public TestNetworkDelegate {
       case NetworkDelegate::AUTH_REQUIRED_RESPONSE_IO_PENDING:
         MessageLoop::current()->PostTask(
             FROM_HERE,
-            method_factory_.NewRunnableMethod(
-                &BlockingNetworkDelegate::DoAuthCallback,
-                callback, credentials));
+            base::Bind(&BlockingNetworkDelegate::DoAuthCallback,
+                       weak_factory_.GetWeakPtr(), callback, credentials));
         break;
     }
     return auth_retval_;
   }
 
-  void DoCallback(net::OldCompletionCallback* callback) {
-    callback->Run(callback_retval_);
+  void DoCallback(const net::CompletionCallback& callback) {
+    callback.Run(callback_retval_);
   }
 
   void DoAuthCallback(const AuthCallback& callback,
@@ -214,7 +214,7 @@ class BlockingNetworkDelegate : public TestNetworkDelegate {
   NetworkDelegate::AuthRequiredResponse auth_retval_;
   NetworkDelegate::AuthRequiredResponse auth_callback_retval_;
   AuthCredentials auth_credentials_;
-  ScopedRunnableMethodFactory<BlockingNetworkDelegate> method_factory_;
+  base::WeakPtrFactory<BlockingNetworkDelegate> weak_factory_;
 };
 
 // A simple Interceptor that returns a pre-built URLRequestJob one time.
@@ -283,6 +283,45 @@ class URLRequestTestHTTP : public URLRequestTest {
   }
 
  protected:
+  // Requests |redirect_url|, which must return a HTTP 3xx redirect.
+  // |request_method| is the method to use for the initial request.
+  // |redirect_method| is the method that is expected to be used for the second
+  // request, after redirection.
+  // If |include_data| is true, data is uploaded with the request.  The
+  // response body is expected to match it exactly, if and only if
+  // |request_method| == |redirect_method|.
+  void HTTPRedirectMethodTest(const GURL& redirect_url,
+                              const std::string& request_method,
+                              const std::string& redirect_method,
+                              bool include_data) {
+    static const char kData[] = "hello world";
+    TestDelegate d;
+    TestURLRequest req(redirect_url, &d);
+    req.set_context(default_context_);
+    req.set_method(request_method);
+    if (include_data) {
+      req.set_upload(CreateSimpleUploadData(kData).get());
+      HttpRequestHeaders headers;
+      headers.SetHeader(HttpRequestHeaders::kContentLength,
+                        base::UintToString(arraysize(kData) - 1));
+      req.SetExtraRequestHeaders(headers);
+    }
+    req.Start();
+    MessageLoop::current()->Run();
+    EXPECT_EQ(redirect_method, req.method());
+    EXPECT_EQ(URLRequestStatus::SUCCESS, req.status().status());
+    EXPECT_EQ(OK, req.status().error());
+    if (include_data) {
+      if (request_method == redirect_method) {
+        EXPECT_EQ(kData, d.data_received());
+      } else {
+        EXPECT_NE(kData, d.data_received());
+      }
+    }
+    if (HasFailure())
+      LOG(WARNING) << "Request method was: " << request_method;
+  }
+
   void HTTPUploadDataOperationTest(const std::string& method) {
     const int kMsgSize = 20000;  // multiple of 10
     const int kIterations = 50;
@@ -384,7 +423,9 @@ TEST_F(URLRequestTestHTTP, ProxyTunnelRedirectTest) {
 
 // This is the same as the previous test, but checks that the network delegate
 // registers the error.
-TEST_F(URLRequestTestHTTP, NetworkDelegateTunnelConnectionFailed) {
+// This test was disabled because it made chrome_frame_net_tests hang
+// (see bug 102991).
+TEST_F(URLRequestTestHTTP, DISABLED_NetworkDelegateTunnelConnectionFailed) {
   ASSERT_TRUE(test_server_.Start());
 
   TestNetworkDelegate network_delegate;  // must outlive URLRequest
@@ -560,8 +601,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateOnAuthRequiredSyncNoAction) {
   context->set_network_delegate(&network_delegate);
   context->Init();
 
-  d.set_username(kUser);
-  d.set_password(kSecret);
+  d.set_credentials(AuthCredentials(kUser, kSecret));
 
   {
     GURL url(test_server_.GetURL("auth-basic"));
@@ -590,10 +630,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateOnAuthRequiredSyncSetAuth) {
   network_delegate.set_auth_retval(
       NetworkDelegate::AUTH_REQUIRED_RESPONSE_SET_AUTH);
 
-  AuthCredentials auth_credentials;
-  auth_credentials.username = kUser;
-  auth_credentials.password = kSecret;
-  network_delegate.set_auth_credentials(auth_credentials);
+  network_delegate.set_auth_credentials(AuthCredentials(kUser, kSecret));
 
   scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
   context->set_network_delegate(&network_delegate);
@@ -665,8 +702,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateOnAuthRequiredAsyncNoAction) {
   context->set_network_delegate(&network_delegate);
   context->Init();
 
-  d.set_username(kUser);
-  d.set_password(kSecret);
+  d.set_credentials(AuthCredentials(kUser, kSecret));
 
   {
     GURL url(test_server_.GetURL("auth-basic"));
@@ -697,9 +733,7 @@ TEST_F(URLRequestTestHTTP, NetworkDelegateOnAuthRequiredAsyncSetAuth) {
   network_delegate.set_auth_callback_retval(
       NetworkDelegate::AUTH_REQUIRED_RESPONSE_SET_AUTH);
 
-  AuthCredentials auth_credentials;
-  auth_credentials.username = kUser;
-  auth_credentials.password = kSecret;
+  AuthCredentials auth_credentials(kUser, kSecret);
   network_delegate.set_auth_credentials(auth_credentials);
 
   scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
@@ -886,7 +920,9 @@ TEST_F(URLRequestTestHTTP, GetZippedTest) {
   }
 }
 
-TEST_F(URLRequestTestHTTP, HTTPSToHTTPRedirectNoRefererTest) {
+// This test was disabled because it made chrome_frame_net_tests hang
+// (see bug 102991).
+TEST_F(URLRequestTestHTTP, DISABLED_HTTPSToHTTPRedirectNoRefererTest) {
   ASSERT_TRUE(test_server_.Start());
 
   TestServer https_test_server(
@@ -948,7 +984,9 @@ class HTTPSRequestTest : public testing::Test {
   scoped_refptr<TestURLRequestContext> default_context_;
 };
 
-TEST_F(HTTPSRequestTest, HTTPSGetTest) {
+// This test was disabled because it made chrome_frame_net_tests hang
+// (see bug 102991).
+TEST_F(HTTPSRequestTest, DISABLED_HTTPSGetTest) {
   TestServer test_server(TestServer::TYPE_HTTPS,
                          FilePath(FILE_PATH_LITERAL("net/data/ssl")));
   ASSERT_TRUE(test_server.Start());
@@ -1039,6 +1077,48 @@ TEST_F(HTTPSRequestTest, HTTPSExpiredTest) {
       }
     }
   }
+}
+
+// This tests that a load of www.google.com with a certificate error sets the
+// is_hsts_host flag correctly. This flag will cause the interstitial to be
+// fatal.
+TEST_F(HTTPSRequestTest, HTTPSPreloadedHSTSTest) {
+  TestServer::HTTPSOptions https_options(
+      TestServer::HTTPSOptions::CERT_MISMATCHED_NAME);
+  TestServer test_server(https_options,
+                         FilePath(FILE_PATH_LITERAL("net/data/ssl")));
+  ASSERT_TRUE(test_server.Start());
+
+  // We require that the URL be www.google.com in order to pick up the
+  // preloaded HSTS entries in the TransportSecurityState. This means that we
+  // have to use a MockHostResolver in order to direct www.google.com to the
+  // testserver.
+
+  MockHostResolver host_resolver;
+  host_resolver.rules()->AddRule("www.google.com", "127.0.0.1");
+  TestNetworkDelegate network_delegate;  // must outlive URLRequest
+  scoped_refptr<TestURLRequestContext> context(new TestURLRequestContext(true));
+  context->set_network_delegate(&network_delegate);
+  context->set_host_resolver(&host_resolver);
+  TransportSecurityState transport_security_state("");
+  context->set_transport_security_state(&transport_security_state);
+  context->Init();
+
+  TestDelegate d;
+  TestURLRequest r(GURL(StringPrintf("https://www.google.com:%d",
+                                     test_server.host_port_pair().port())),
+                   &d);
+  r.set_context(context);
+
+  r.Start();
+  EXPECT_TRUE(r.is_pending());
+
+  MessageLoop::current()->Run();
+
+  EXPECT_EQ(1, d.response_started_count());
+  EXPECT_FALSE(d.received_data_before_response());
+  EXPECT_TRUE(d.have_certificate_errors());
+  EXPECT_TRUE(d.is_hsts_host());
 }
 
 namespace {
@@ -1912,8 +1992,7 @@ TEST_F(URLRequestTestHTTP, BasicAuth) {
   // populate the cache
   {
     TestDelegate d;
-    d.set_username(kUser);
-    d.set_password(kSecret);
+    d.set_credentials(AuthCredentials(kUser, kSecret));
 
     URLRequest r(test_server_.GetURL("auth-basic"), &d);
     r.set_context(default_context_);
@@ -1929,8 +2008,7 @@ TEST_F(URLRequestTestHTTP, BasicAuth) {
   // response should be fetched from the cache.
   {
     TestDelegate d;
-    d.set_username(kUser);
-    d.set_password(kSecret);
+    d.set_credentials(AuthCredentials(kUser, kSecret));
 
     URLRequest r(test_server_.GetURL("auth-basic"), &d);
     r.set_context(default_context_);
@@ -1964,8 +2042,7 @@ TEST_F(URLRequestTestHTTP, BasicAuthWithCookies) {
     context->Init();
 
     TestDelegate d;
-    d.set_username(kUser);
-    d.set_password(kSecret);
+    d.set_credentials(AuthCredentials(kUser, kSecret));
 
     URLRequest r(url_requiring_auth, &d);
     r.set_context(context);
@@ -2443,24 +2520,48 @@ TEST_F(URLRequestTestHTTP, Post302RedirectGet) {
   EXPECT_TRUE(ContainsString(data, "Accept-Charset:"));
 }
 
-TEST_F(URLRequestTestHTTP, Post307RedirectPost) {
+// The following tests check that we handle mutating the request method for
+// HTTP redirects as expected.
+// See http://crbug.com/56373 and http://crbug.com/102130.
+
+TEST_F(URLRequestTestHTTP, Redirect301Tests) {
   ASSERT_TRUE(test_server_.Start());
 
-  const char kData[] = "hello world";
+  const GURL url = test_server_.GetURL("files/redirect301-to-echo");
 
-  TestDelegate d;
-  TestURLRequest req(test_server_.GetURL("files/redirect307-to-echo"), &d);
-  req.set_context(default_context_);
-  req.set_method("POST");
-  req.set_upload(CreateSimpleUploadData(kData).get());
-  HttpRequestHeaders headers;
-  headers.SetHeader(HttpRequestHeaders::kContentLength,
-                    base::UintToString(arraysize(kData) - 1));
-  req.SetExtraRequestHeaders(headers);
-  req.Start();
-  MessageLoop::current()->Run();
-  EXPECT_EQ("POST", req.method());
-  EXPECT_EQ(kData, d.data_received());
+  HTTPRedirectMethodTest(url, "POST", "GET", true);
+  HTTPRedirectMethodTest(url, "PUT", "PUT", true);
+  HTTPRedirectMethodTest(url, "HEAD", "HEAD", false);
+}
+
+TEST_F(URLRequestTestHTTP, Redirect302Tests) {
+  ASSERT_TRUE(test_server_.Start());
+
+  const GURL url = test_server_.GetURL("files/redirect302-to-echo");
+
+  HTTPRedirectMethodTest(url, "POST", "GET", true);
+  HTTPRedirectMethodTest(url, "PUT", "PUT", true);
+  HTTPRedirectMethodTest(url, "HEAD", "HEAD", false);
+}
+
+TEST_F(URLRequestTestHTTP, Redirect303Tests) {
+  ASSERT_TRUE(test_server_.Start());
+
+  const GURL url = test_server_.GetURL("files/redirect303-to-echo");
+
+  HTTPRedirectMethodTest(url, "POST", "GET", true);
+  HTTPRedirectMethodTest(url, "PUT", "GET", true);
+  HTTPRedirectMethodTest(url, "HEAD", "HEAD", false);
+}
+
+TEST_F(URLRequestTestHTTP, Redirect307Tests) {
+  ASSERT_TRUE(test_server_.Start());
+
+  const GURL url = test_server_.GetURL("files/redirect307-to-echo");
+
+  HTTPRedirectMethodTest(url, "POST", "POST", true);
+  HTTPRedirectMethodTest(url, "PUT", "PUT", true);
+  HTTPRedirectMethodTest(url, "HEAD", "HEAD", false);
 }
 
 TEST_F(URLRequestTestHTTP, InterceptPost302RedirectGet) {
@@ -3212,8 +3313,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongPasswordRestart) {
   TestDelegate d;
   // Set correct login credentials. The delegate will be asked for them when
   // the initial login with wrong credentials will fail.
-  d.set_username(kChrome);
-  d.set_password(kChrome);
+  d.set_credentials(AuthCredentials(kChrome, kChrome));
   {
     TestURLRequest r(
         test_server_.GetURLWithUserAndPassword("/LICENSE",
@@ -3276,8 +3376,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCheckWrongUserRestart) {
   TestDelegate d;
   // Set correct login credentials. The delegate will be asked for them when
   // the initial login with wrong credentials will fail.
-  d.set_username(kChrome);
-  d.set_password(kChrome);
+  d.set_credentials(AuthCredentials(kChrome, kChrome));
   {
     TestURLRequest r(
         test_server_.GetURLWithUserAndPassword("/LICENSE",
@@ -3362,8 +3461,7 @@ TEST_F(URLRequestTestFTP, FLAKY_FTPCacheLoginBoxCredentials) {
   scoped_ptr<TestDelegate> d(new TestDelegate);
   // Set correct login credentials. The delegate will be asked for them when
   // the initial login with wrong credentials will fail.
-  d->set_username(kChrome);
-  d->set_password(kChrome);
+  d->set_credentials(AuthCredentials(kChrome, kChrome));
   {
     TestURLRequest r(
         test_server_.GetURLWithUserAndPassword("/LICENSE",

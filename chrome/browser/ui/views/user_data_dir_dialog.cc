@@ -9,15 +9,15 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
-#include "views/controls/message_box_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/message_box_view.h"
+#include "ui/views/widget/widget.h"
 
 // static
 FilePath UserDataDirDialog::RunUserDataDirDialog(
     const FilePath& user_data_dir) {
   // When the window closes, it will delete itself.
   UserDataDirDialog* dlg = new UserDataDirDialog(user_data_dir);
-  MessageLoopForUI::current()->Run(dlg);
+  MessageLoopForUI::current()->RunWithDispatcher(dlg);
   return dlg->user_data_dir();
 }
 
@@ -43,12 +43,12 @@ UserDataDirDialog::~UserDataDirDialog() {
 }
 
 string16 UserDataDirDialog::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
+    ui::DialogButton button) const {
   switch (button) {
-    case ui::MessageBoxFlags::DIALOGBUTTON_OK:
+    case ui::DIALOG_BUTTON_OK:
       return l10n_util::GetStringUTF16(
           IDS_CANT_WRITE_USER_DIRECTORY_CHOOSE_DIRECTORY_BUTTON);
-    case ui::MessageBoxFlags::DIALOGBUTTON_CANCEL:
+    case ui::DIALOG_BUTTON_CANCEL:
       return l10n_util::GetStringUTF16(
           IDS_CANT_WRITE_USER_DIRECTORY_EXIT_BUTTON);
     default:

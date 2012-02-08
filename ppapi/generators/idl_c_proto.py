@@ -20,7 +20,7 @@ Option('cgen_debug', 'Debug generate.')
 
 class CGenError(Exception):
   def __init__(self, msg):
-    self.value = value
+    self.value = msg
 
   def __str__(self):
     return repr(self.value)
@@ -58,7 +58,7 @@ def Comment(node, prefix=None, tabs=0):
       lines = prefix_lines + lines;
   return CommentLines(lines, tabs)
 
-def GetNodeComments(node, prefix=None, tabs=0):
+def GetNodeComments(node, tabs=0):
   # Generate a comment block joining all comment nodes which are children of
   # the provided node.
   comment_txt = ''
@@ -158,8 +158,7 @@ class CGen(object):
   #
   def Log(self, txt):
     if not GetOption('cgen_debug'): return
-    tabs = ''
-    for tab in range(self.dbg_depth): tabs += '  '
+    tabs = '  ' * self.dbg_depth
     print '%s%s' % (tabs, txt)
 
   def LogEnter(self, txt):
@@ -170,12 +169,48 @@ class CGen(object):
     self.dbg_depth -= 1
     if txt: self.Log(txt)
 
+
+  def GetDefine(self, name, value):
+    out = '#define %s %s' % (name, value)
+    if len(out) > 80:
+      out = '#define %s \\\n    %s' % (name, value)
+    return '%s\n' % out
+
+  #
+  # Interface strings
+  #
+  def GetMacroHelper(self, node):
+    macro = node.GetProperty('macro')
+    if macro: return macro
+    name = node.GetName()
+    name = name.upper()
+    return "%s_INTERFACE" % name
+
+  def GetInterfaceMacro(self, node, version = None):
+    name = self.GetMacroHelper(node)
+    if version is None:
+      return name
+    return '%s_%s' % (name, str(version).replace('.', '_'))
+
+  def GetInterfaceString(self, node, version = None):
+    # If an interface name is specified, use that
+    name = node.GetProperty('iname')
+    if not name:
+      # Otherwise, the interface name is the object's name
+      # With '_Dev' replaced by '(Dev)' if it's a Dev interface.
+      name = node.GetName()
+      if name.endswith('_Dev'):
+        name = '%s(Dev)' % name[:-4]
+    if version is None:
+      return name
+    return "%s;%s" % (name, version)
+
+
   #
   # Return the array specification of the object.
   #
   def GetArraySpec(self, node):
     assert(node.cls == 'Array')
-    out = ''
     fixed = node.GetProperty('FIXED')
     if fixed:
       return '[%s]' % fixed
@@ -219,7 +254,11 @@ class CGen(object):
 
     # If it's an enum, or typedef then return the Enum's name
     elif typeref.IsA('Enum', 'Typedef'):
-      name = '%s%s' % (prefix, typeref.GetName())
+      # The enum may have skipped having a typedef, we need prefix with 'enum'.
+      if typeref.GetProperty('notypedef'):
+        name = 'enum %s%s' % (prefix, typeref.GetName())
+      else:
+        name = '%s%s' % (prefix, typeref.GetName())
 
     else:
       raise RuntimeError('Getting name of non-type %s.' % node)
@@ -303,7 +342,7 @@ class CGen(object):
   #   rtype - The store or return type of the object.
   #   name - The name of the object.
   #   arrays - A list of array dimensions as [] or [<fixed_num>].
-  #   args -  None of not a function, otherwise  a list of parameters.
+  #   args -  None if not a function, otherwise a list of parameters.
   #
   def GetComponents(self, node, release, mode):
     self.LogEnter('GetComponents mode %s for %s %s' % (mode, node, release))
@@ -336,17 +375,23 @@ class CGen(object):
     return (rtype, name, arrayspec, callspec)
 
 
-  def Compose(self, rtype, name, arrayspec, callspec, prefix, func_as_ptr):
+  def Compose(self, rtype, name, arrayspec, callspec, prefix, func_as_ptr,
+              ptr_prefix, include_name):
     self.LogEnter('Compose: %s %s' % (rtype, name))
     arrayspec = ''.join(arrayspec)
-    name = '%s%s%s' % (prefix, name, arrayspec)
+    if not include_name:
+      name = prefix + arrayspec
+    else:
+      name = prefix + name + arrayspec
     if callspec is None:
       out = '%s %s' % (rtype, name)
     else:
       params = []
       for ptype, pname, parray, pspec in callspec:
-        params.append(self.Compose(ptype, pname, parray, pspec, '', True))
-      if func_as_ptr: name = '(*%s)' % name
+        params.append(self.Compose(ptype, pname, parray, pspec, '', True,
+                                   ptr_prefix='', include_name=True))
+      if func_as_ptr:
+        name = '(%s*%s)' % (ptr_prefix, name)
       out = '%s %s(%s)' % (rtype, name, ', '.join(params))
     self.LogExit('Exit Compose: %s' % out)
     return out
@@ -357,16 +402,24 @@ class CGen(object):
   # Returns the 'C' style signature of the object
   #  prefix - A prefix for the object's name
   #  func_as_ptr - Formats a function as a function pointer
+  #  ptr_prefix - A prefix that goes before the "*" for a function pointer
+  #  include_name - If true, include member name in the signature.
+  #                 If false, leave it out. In any case, prefix and ptr_prefix
+  #                 are always included.
   #
-  def GetSignature(self, node, release, mode, prefix='', func_as_ptr=True):
-    self.LogEnter('GetSignature %s %s as func=%s' % (node, mode, func_as_ptr))
+  def GetSignature(self, node, release, mode, prefix='', func_as_ptr=True,
+                   ptr_prefix='', include_name=True):
+    self.LogEnter('GetSignature %s %s as func=%s' %
+                  (node, mode, func_as_ptr))
     rtype, name, arrayspec, callspec = self.GetComponents(node, release, mode)
-    out = self.Compose(rtype, name, arrayspec, callspec, prefix, func_as_ptr)
+    out = self.Compose(rtype, name, arrayspec, callspec, prefix,
+                       func_as_ptr, ptr_prefix, include_name)
     self.LogExit('Exit GetSignature: %s' % out)
     return out
 
   # Define a Typedef.
   def DefineTypedef(self, node, releases, prefix='', comment=False):
+    __pychecker__ = 'unusednames=comment'
     release = releases[0]
     out = 'typedef %s;\n' % self.GetSignature(node, release, 'return',
                                               prefix, True)
@@ -375,13 +428,17 @@ class CGen(object):
 
   # Define an Enum.
   def DefineEnum(self, node, releases, prefix='', comment=False):
+    __pychecker__ = 'unusednames=comment,releases'
     self.LogEnter('DefineEnum %s' % node)
-    unnamed =  node.GetProperty('unnamed')
+    name = '%s%s' % (prefix, node.GetName())
+    notypedef = node.GetProperty('notypedef')
+    unnamed = node.GetProperty('unnamed')
     if unnamed:
       out = 'enum {'
+    elif notypedef:
+      out = 'enum %s {' % name
     else:
       out = 'typedef enum {'
-    name = '%s%s' % (prefix, node.GetName())
     enumlist = []
     for child in node.GetListOf('EnumItem'):
       value = child.GetProperty('VALUE')
@@ -393,25 +450,36 @@ class CGen(object):
       enumlist.append('%s  %s' % (comment_txt, item_txt))
     self.LogExit('Exit DefineEnum')
 
-    if unnamed:
+    if unnamed or notypedef:
       out = '%s\n%s\n};\n' % (out, ',\n'.join(enumlist))
     else:
       out = '%s\n%s\n} %s;\n' % (out, ',\n'.join(enumlist), name)
     return out
 
   def DefineMember(self, node, releases, prefix='', comment=False):
+    __pychecker__ = 'unusednames=prefix,comment'
     release = releases[0]
     self.LogEnter('DefineMember %s' % node)
     out = '%s;' % self.GetSignature(node, release, 'store', '', True)
     self.LogExit('Exit DefineMember')
     return out
 
-  def DefineStructInternals(self, node, release, suffix='', comment=True):
+  def GetStructName(self, node, release, include_version=False):
+    suffix = ''
+    if include_version:
+      ver_num = node.GetVersion(release)
+      suffix = ('_%s' % ver_num).replace('.', '_')
+    return node.GetName() + suffix
+
+  def DefineStructInternals(self, node, release,
+                            include_version=False, comment=True):
     out = ''
     if node.GetProperty('union'):
-      out += 'union %s%s {\n' % (node.GetName(), suffix)
+      out += 'union %s {\n' % (
+          self.GetStructName(node, release, include_version))
     else:
-      out += 'struct %s%s {\n' % (node.GetName(), suffix)
+      out += 'struct %s {\n' % (
+          self.GetStructName(node, release, include_version))
 
     # Generate Member Functions
     members = []
@@ -425,18 +493,19 @@ class CGen(object):
 
 
   def DefineStruct(self, node, releases, prefix='', comment=False):
+    __pychecker__ = 'unusednames=comment,prefix'
     self.LogEnter('DefineStruct %s' % node)
     out = ''
     build_list = node.GetUniqueReleases(releases)
 
     # Build the most recent one with comments
-    out = self.DefineStructInternals(node, build_list[-1], comment=True)
+    out = self.DefineStructInternals(node, build_list[-1],
+                                     include_version=False, comment=True)
 
     # Build the rest without comments and with the version number appended
     for rel in build_list[0:-1]:
-      ver_num = node.GetVersion(rel)
-      ver = ("_%s" % ver_num).replace('.', '_')
-      out += '\n' + self.DefineStructInternals(node, rel, suffix=ver,
+      out += '\n' + self.DefineStructInternals(node, rel,
+                                               include_version=True,
                                                comment=False)
 
     self.LogExit('Exit DefineStruct')
@@ -459,17 +528,17 @@ class CGen(object):
       return ''
 
     self.LogEnter('Define %s tab=%d prefix="%s"' % (node,tabs,prefix))
-    declmap = {
-      'Enum' : CGen.DefineEnum,
-      'Function' : CGen.DefineMember,
-      'Interface' : CGen.DefineStruct,
-      'Member' : CGen.DefineMember,
-      'Struct' : CGen.DefineStruct,
-      'Typedef' : CGen.DefineTypedef,
-    }
+    declmap = dict({
+      'Enum': CGen.DefineEnum,
+      'Function': CGen.DefineMember,
+      'Interface': CGen.DefineStruct,
+      'Member': CGen.DefineMember,
+      'Struct': CGen.DefineStruct,
+      'Typedef': CGen.DefineTypedef
+    })
 
     out = ''
-    func = declmap.get(node.cls)
+    func = declmap.get(node.cls, None)
     if not func:
       ErrOut.Log('Failed to define %s named %s' % (node.cls, node.GetName()))
     define_txt = func(self, node, releases, prefix=prefix, comment=comment)

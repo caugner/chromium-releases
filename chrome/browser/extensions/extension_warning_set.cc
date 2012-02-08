@@ -4,14 +4,21 @@
 
 #include "chrome/browser/extensions/extension_warning_set.h"
 
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_global_error_badge.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/global_error_service.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::BrowserThread;
 
 // This class is used to represent warnings if extensions misbehave.
 class ExtensionWarning {
@@ -47,6 +54,10 @@ ExtensionWarning::ExtensionWarning(
     ExtensionWarningSet::WarningType type,
     const std::string& extension_id)
     : type_(type), extension_id_(extension_id) {
+  // These are invalid here because they do not have corresponding warning
+  // messages in the UI.
+  CHECK(type != ExtensionWarningSet::kInvalid);
+  CHECK(type != ExtensionWarningSet::kMaxWarningType);
 }
 
 ExtensionWarning::~ExtensionWarning() {
@@ -62,11 +73,17 @@ bool operator<(const ExtensionWarning& a, const ExtensionWarning& b) {
 string16 ExtensionWarningSet::GetLocalizedWarning(
     ExtensionWarningSet::WarningType warning_type) {
   switch (warning_type) {
-    case ExtensionWarningSet::kInvalid:
-    case ExtensionWarningSet::kMaxWarningType:
+    case kInvalid:
+    case kMaxWarningType:
       NOTREACHED();
       return string16();
-    case ExtensionWarningSet::kNetworkDelay:
+    case kNetworkDelay:
+      return l10n_util::GetStringFUTF16(
+          IDS_EXTENSION_WARNINGS_NETWORK_DELAY,
+          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+    case kNetworkConflict:
+      return l10n_util::GetStringUTF16(IDS_EXTENSION_WARNINGS_NETWORK_CONFLICT);
+    case kRepeatedCacheFlushes:
       return l10n_util::GetStringFUTF16(
           IDS_EXTENSION_WARNINGS_NETWORK_DELAY,
           l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
@@ -120,16 +137,37 @@ void ExtensionWarningSet::GetWarningsAffectingExtension(
   }
 }
 
+// static
+void ExtensionWarningSet::NotifyWarningsOnUI(
+    void* profile_id,
+    std::set<std::string> extension_ids,
+    WarningType warning_type) {
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  Profile* profile = reinterpret_cast<Profile*>(profile_id);
+  if (!profile ||
+      !g_browser_process->profile_manager()->IsValidProfile(profile)) {
+    return;
+  }
+
+  ExtensionWarningSet* warnings =
+      profile->GetExtensionService()->extension_warnings();
+
+  for (std::set<std::string>::const_iterator i = extension_ids.begin();
+       i != extension_ids.end(); ++i) {
+    warnings->SetWarning(warning_type, *i);
+  }
+}
+
 void ExtensionWarningSet::SuppressBadgeForCurrentWarnings() {
   badge_suppressions_.insert(warnings_.begin(), warnings_.end());
   UpdateWarningBadge();
 }
 
 void ExtensionWarningSet::NotifyWarningsChanged() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_WARNING_CHANGED,
-      Source<Profile>(profile_),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_),
+      content::NotificationService::NoDetails());
 }
 
 void ExtensionWarningSet::ActivateBadge() {

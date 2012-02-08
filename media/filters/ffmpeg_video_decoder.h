@@ -7,23 +7,20 @@
 
 #include <deque>
 
-#include "base/gtest_prod_util.h"
-#include "base/time.h"
+#include "base/memory/scoped_ptr.h"
 #include "media/base/filters.h"
 #include "media/base/pts_stream.h"
-#include "media/base/video_frame.h"
-#include "media/video/video_decode_engine.h"
+#include "ui/gfx/size.h"
+
+class MessageLoop;
 
 namespace media {
 
 class VideoDecodeEngine;
 
-class MEDIA_EXPORT FFmpegVideoDecoder
-    : public VideoDecoder,
-      public VideoDecodeEngine::EventHandler {
+class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
  public:
-  FFmpegVideoDecoder(MessageLoop* message_loop,
-                     VideoDecodeContext* decode_context);
+  explicit FFmpegVideoDecoder(MessageLoop* message_loop);
   virtual ~FFmpegVideoDecoder();
 
   // Filter implementation.
@@ -32,78 +29,43 @@ class MEDIA_EXPORT FFmpegVideoDecoder
   virtual void Pause(const base::Closure& callback) OVERRIDE;
   virtual void Flush(const base::Closure& callback) OVERRIDE;
 
-  // Decoder implementation.
+  // VideoDecoder implementation.
   virtual void Initialize(DemuxerStream* demuxer_stream,
                           const base::Closure& callback,
                           const StatisticsCallback& stats_callback) OVERRIDE;
-  virtual void ProduceVideoFrame(
-      scoped_refptr<VideoFrame> video_frame) OVERRIDE;
-  virtual gfx::Size natural_size() OVERRIDE;
+  virtual void Read(const ReadCB& callback) OVERRIDE;
+  virtual const gfx::Size& natural_size() OVERRIDE;
 
  private:
-  // VideoDecodeEngine::EventHandler interface.
-  virtual void OnInitializeComplete(bool success) OVERRIDE;
-  virtual void OnUninitializeComplete() OVERRIDE;
-  virtual void OnFlushComplete() OVERRIDE;
-  virtual void OnSeekComplete() OVERRIDE;
-  virtual void OnError() OVERRIDE;
-  virtual void ProduceVideoSample(scoped_refptr<Buffer> buffer) OVERRIDE;
-  virtual void ConsumeVideoFrame(
-      scoped_refptr<VideoFrame> frame,
-      const PipelineStatistics& statistics) OVERRIDE;
-
-  friend class DecoderPrivateMock;
-  friend class FFmpegVideoDecoderTest;
-  FRIEND_TEST_ALL_PREFIXES(FFmpegVideoDecoderTest, PtsStream);
-  FRIEND_TEST_ALL_PREFIXES(FFmpegVideoDecoderTest,
-                           DoDecode_EnqueueVideoFrameError);
-  FRIEND_TEST_ALL_PREFIXES(FFmpegVideoDecoderTest,
-                           DoDecode_FinishEnqueuesEmptyFrames);
-  FRIEND_TEST_ALL_PREFIXES(FFmpegVideoDecoderTest,
-                           DoDecode_TestStateTransition);
-  FRIEND_TEST_ALL_PREFIXES(FFmpegVideoDecoderTest, DoSeek);
-
   enum DecoderState {
-    kUnInitialized,
-    kInitializing,
+    kUninitialized,
     kNormal,
     kFlushCodec,
     kDecodeFinished,
-    kPausing,
-    kFlushing,
-    kStopped
   };
 
-  void OnFlushComplete(const base::Closure& callback);
-  void OnSeekComplete(const base::Closure& callback);
-  void OnReadComplete(Buffer* buffer);
+  // Carries out the reading operation scheduled by Read().
+  void DoRead(const ReadCB& callback);
 
-  // TODO(jiesun): until demuxer pass scoped_refptr<Buffer>: we could not merge
-  // this with OnReadComplete
-  void OnReadCompleteTask(scoped_refptr<Buffer> buffer);
+  // Reads from the demuxer stream with corresponding callback method.
+  void ReadFromDemuxerStream();
+  void DecodeBuffer(const scoped_refptr<Buffer>& buffer);
 
-  // Flush the output buffers that we had held in Paused state.
-  void FlushBuffers();
+  // Carries out the decoding operation scheduled by DecodeBuffer().
+  void DoDecodeBuffer(const scoped_refptr<Buffer>& buffer);
 
-  // Injection point for unittest to provide a mock engine.  Takes ownership of
-  // the provided engine.
-  virtual void SetVideoDecodeEngineForTest(VideoDecodeEngine* engine);
+  // Delivers the frame to |read_cb_| and resets the callback.
+  void DeliverFrame(const scoped_refptr<VideoFrame>& video_frame);
 
   MessageLoop* message_loop_;
 
-  PtsStream pts_stream_;  // Stream of presentation timestamps.
+  PtsStream pts_stream_;
   DecoderState state_;
   scoped_ptr<VideoDecodeEngine> decode_engine_;
-  scoped_ptr<VideoDecodeContext> decode_context_;
 
-  base::Closure initialize_callback_;
-  base::Closure uninitialize_callback_;
-  base::Closure flush_callback_;
-  FilterStatusCB seek_cb_;
   StatisticsCallback statistics_callback_;
 
-  // Hold video frames when flush happens.
-  std::deque<scoped_refptr<VideoFrame> > frame_queue_flushed_;
+  ReadCB read_cb_;
 
   // TODO(scherkus): I think this should be calculated by VideoRenderers based
   // on information provided by VideoDecoders (i.e., aspect ratio).

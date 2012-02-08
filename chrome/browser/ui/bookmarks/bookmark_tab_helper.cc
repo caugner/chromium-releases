@@ -13,7 +13,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 namespace {
 
@@ -31,9 +31,9 @@ BookmarkTabHelper::BookmarkTabHelper(TabContentsWrapper* tab_contents)
       bookmark_drag_(NULL) {
   // Register for notifications about URL starredness changing on any profile.
   registrar_.Add(this, chrome::NOTIFICATION_URLS_STARRED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
 }
 
 BookmarkTabHelper::~BookmarkTabHelper() {
@@ -60,22 +60,22 @@ bool BookmarkTabHelper::ShouldShowBookmarkBar() {
   return CanShowBookmarkBar(tab_contents()->web_ui());
 }
 
-void BookmarkTabHelper::DidNavigateMainFramePostCommit(
+void BookmarkTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& /*details*/,
-    const ViewHostMsg_FrameNavigate_Params& /*params*/) {
+    const content::FrameNavigateParams& /*params*/) {
   UpdateStarredStateForCurrentURL();
 }
 
 void BookmarkTabHelper::Observe(int type,
-                                const NotificationSource& source,
-                                const NotificationDetails& details) {
+                                const content::NotificationSource& source,
+                                const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_BOOKMARK_MODEL_LOADED:
       // BookmarkModel finished loading, fall through to update starred state.
     case chrome::NOTIFICATION_URLS_STARRED: {
       // Somewhere, a URL has been starred.
       // Ignore notifications for profiles other than our current one.
-      Profile* source_profile = Source<Profile>(source).ptr();
+      Profile* source_profile = content::Source<Profile>(source).ptr();
       if (!source_profile ||
           !source_profile->IsSameProfile(tab_contents_wrapper_->profile()))
         return;

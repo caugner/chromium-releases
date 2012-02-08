@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/sync/glue/non_frontend_data_type_controller.h"
 
@@ -19,25 +20,25 @@ namespace browser_sync {
 class PasswordDataTypeController : public NonFrontendDataTypeController {
  public:
   PasswordDataTypeController(
-      ProfileSyncFactory* profile_sync_factory,
+      ProfileSyncComponentsFactory* profile_sync_factory,
       Profile* profile);
   virtual ~PasswordDataTypeController();
 
   // NonFrontendDataTypeController implementation
-  virtual syncable::ModelType type() const;
-  virtual browser_sync::ModelSafeGroup model_safe_group() const;
+  virtual syncable::ModelType type() const OVERRIDE;
+  virtual browser_sync::ModelSafeGroup model_safe_group() const OVERRIDE;
 
  protected:
   // NonFrontendDataTypeController interface.
-  virtual bool StartModels();
-  virtual bool StartAssociationAsync();
-  virtual void CreateSyncComponents();
-  virtual bool StopAssociationAsync();
+  virtual bool StartModels() OVERRIDE;
+  virtual bool StartAssociationAsync() OVERRIDE;
+  virtual void CreateSyncComponents() OVERRIDE;
+  virtual bool StopAssociationAsync() OVERRIDE;
   virtual void RecordUnrecoverableError(
       const tracked_objects::Location& from_here,
-      const std::string& message);
-  virtual void RecordAssociationTime(base::TimeDelta time);
-  virtual void RecordStartFailure(StartResult result);
+      const std::string& message) OVERRIDE;
+  virtual void RecordAssociationTime(base::TimeDelta time) OVERRIDE;
+  virtual void RecordStartFailure(StartResult result) OVERRIDE;
 
  private:
   scoped_refptr<PasswordStore> password_store_;

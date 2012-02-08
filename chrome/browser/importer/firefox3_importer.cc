@@ -21,12 +21,14 @@
 #include "chrome/browser/importer/nss_decryptor.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/common/time_format.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
 #include "webkit/glue/password_form.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -203,8 +205,6 @@ void Firefox3Importer::ImportBookmarks() {
     return;
   }
 
-  string16 firefox_folder =
-      bridge_->GetLocalizedString(IDS_BOOKMARK_GROUP_FROM_FIREFOX);
   for (size_t i = 0; i < list.size(); ++i) {
     BookmarkItem* item = list[i];
 

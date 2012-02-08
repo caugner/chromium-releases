@@ -23,11 +23,9 @@ class BackgroundModeManager;
 class ChromeNetLog;
 class CRLSetFetcher;
 class ComponentUpdateService;
-class DevToolsManager;
 class DownloadRequestLimiter;
 class DownloadStatusUpdater;
 class ExtensionEventRouterForwarder;
-class GpuBlacklistUpdater;
 class GoogleURLTracker;
 class IconManager;
 class IntranetRedirectDetector;
@@ -53,10 +51,6 @@ class Thread;
 #if defined(OS_CHROMEOS)
 namespace browser {
 class OomPriorityManager;
-}
-
-namespace chromeos {
-class ProxyConfigServiceImpl;
 }
 #endif  // defined(OS_CHROMEOS)
 
@@ -105,16 +99,11 @@ class BrowserProcess {
   virtual MetricsService* metrics_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
-  virtual DevToolsManager* devtools_manager() = 0;
   virtual SidebarManager* sidebar_manager() = 0;
   virtual ui::Clipboard* clipboard() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
 
 #if defined(OS_CHROMEOS)
-  // Returns ChromeOS's ProxyConfigServiceImpl, creating if not yet created.
-  virtual chromeos::ProxyConfigServiceImpl*
-      chromeos_proxy_config_service_impl() = 0;
-
   // Returns the out-of-memory priority manager.
   virtual browser::OomPriorityManager* oom_priority_manager() = 0;
 #endif  // defined(OS_CHROMEOS)
@@ -144,9 +133,6 @@ class BrowserProcess {
   // database. History has its own thread since it has much higher traffic.
   virtual base::Thread* db_thread() = 0;
 
-  // Returns the thread that is used for background cache operations.
-  virtual base::Thread* cache_thread() = 0;
-
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
 
@@ -170,8 +156,6 @@ class BrowserProcess {
       const std::string& ip,
       int port,
       const std::string& frontend_url) = 0;
-
-  virtual void InitDevToolsLegacyProtocolHandler(int port) = 0;
 
   virtual unsigned int AddRefModule() = 0;
   virtual unsigned int ReleaseModule() = 0;
@@ -232,16 +216,7 @@ class BrowserProcess {
 
   virtual prerender::PrerenderTracker* prerender_tracker() = 0;
 
-#if defined(IPC_MESSAGE_LOG_ENABLED)
-  // Enable or disable IPC logging for the browser, all processes
-  // derived from ChildProcess (plugin etc), and all
-  // renderers.
-  virtual void SetIPCLoggingEnabled(bool enable) = 0;
-#endif
-
   virtual MHTMLGenerationManager* mhtml_generation_manager() = 0;
-
-  virtual GpuBlacklistUpdater* gpu_blacklist_updater() = 0;
 
   virtual ComponentUpdateService* component_updater() = 0;
 

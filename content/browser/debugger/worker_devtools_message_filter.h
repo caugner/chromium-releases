@@ -6,8 +6,10 @@
 #define CONTENT_BROWSER_DEBUGGER_WORKER_DEVTOOLS_MESSAGE_FILTER_H_
 #pragma once
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "content/browser/browser_message_filter.h"
+
+namespace content {
 
 class WorkerDevToolsMessageFilter : public BrowserMessageFilter {
  public:
@@ -18,9 +20,9 @@ class WorkerDevToolsMessageFilter : public BrowserMessageFilter {
 
   // BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
   // Message handlers.
-  void OnForwardToClient(const IPC::Message& message);
+  void OnDispatchOnInspectorFrontend(const std::string& message);
   void OnSaveAgentRumtimeState(const std::string& state);
 
   int worker_process_host_id_;
@@ -28,5 +30,7 @@ class WorkerDevToolsMessageFilter : public BrowserMessageFilter {
 
   DISALLOW_COPY_AND_ASSIGN(WorkerDevToolsMessageFilter);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DEBUGGER_WORKER_DEVTOOLS_MESSAGE_FILTER_H_

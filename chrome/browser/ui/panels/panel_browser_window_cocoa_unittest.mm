@@ -21,11 +21,9 @@
 #include "chrome/browser/ui/panels/panel_manager.h"
 #import "chrome/browser/ui/panels/panel_titlebar_view_cocoa.h"
 #import "chrome/browser/ui/panels/panel_window_controller_cocoa.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/test_tab_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/gtest_mac.h"
 
@@ -35,7 +33,7 @@ class PanelAnimatedBoundsObserver :
   PanelAnimatedBoundsObserver(Panel* panel)
     : ui_test_utils::WindowedNotificationObserver(
         chrome::NOTIFICATION_PANEL_BOUNDS_ANIMATIONS_FINISHED,
-        Source<Panel>(panel)) { }
+        content::Source<Panel>(panel)) { }
   virtual ~PanelAnimatedBoundsObserver() { }
 };
 
@@ -44,7 +42,6 @@ class PanelBrowserWindowCocoaTest : public CocoaProfileTest {
  public:
   virtual void SetUp() {
     CocoaProfileTest::SetUp();
-    CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePanels);
   }
 
   Panel* CreateTestPanel(const std::string& panel_name) {
@@ -60,12 +57,6 @@ class PanelBrowserWindowCocoaTest : public CocoaProfileTest {
                                                    panel_name,
                                                    gfx::Rect(),
                                                    profile());
-
-    TabContentsWrapper* tab_contents = new TabContentsWrapper(
-        new TestTabContents(profile(), NULL));
-    panel_browser->AddTab(tab_contents, content::PAGE_TRANSITION_LINK);
-
-    // We just created one new panel.
     EXPECT_EQ(panels_count + 1, manager->num_panels());
 
     Panel* panel = static_cast<Panel*>(panel_browser->window());
@@ -105,7 +96,7 @@ class PanelBrowserWindowCocoaTest : public CocoaProfileTest {
     size_t browser_count = BrowserList::size();
     ui_test_utils::WindowedNotificationObserver signal(
         chrome::NOTIFICATION_BROWSER_CLOSED,
-        Source<Browser>(browser));
+        content::Source<Browser>(browser));
     browser->CloseWindow();
     signal.Wait();
     // Now we have one less browser instance.
@@ -251,8 +242,11 @@ TEST_F(PanelBrowserWindowCocoaTest, TitlebarViewSizing) {
   // content view of the window. They both use the same scale factor.
   EXPECT_EQ(NSWidth([contentView bounds]), NSWidth([titlebar bounds]));
 
+  NSRect oldTitleFrame = [[titlebar title] frame];
+  NSRect oldIconFrame = [[titlebar icon] frame];
+
   // Now resize the Panel, see that titlebar follows.
-  const int kDelta = 153; // random number
+  const int kDelta = 153;  // random number
   gfx::Rect bounds = panel->GetBounds();
   // Grow panel in a way so that its titlebar moves and grows.
   bounds.set_x(bounds.x() - kDelta);
@@ -272,6 +266,15 @@ TEST_F(PanelBrowserWindowCocoaTest, TitlebarViewSizing) {
   // Verify the titlebar is still on top of regular titlebar.
   VerifyTitlebarLocation(contentView, titlebar);
 
+  // Verify that the title/icon frames were updated.
+  NSRect newTitleFrame = [[titlebar title] frame];
+  NSRect newIconFrame = [[titlebar icon] frame];
+
+  EXPECT_EQ(newTitleFrame.origin.x - newIconFrame.origin.x,
+            oldTitleFrame.origin.x - oldIconFrame.origin.x);
+  EXPECT_NE(newTitleFrame.origin.x, oldTitleFrame.origin.x);
+  EXPECT_NE(newIconFrame.origin.x, oldIconFrame.origin.x);
+
   ClosePanelAndWait(panel->browser());
 }
 
@@ -290,7 +293,7 @@ TEST_F(PanelBrowserWindowCocoaTest, TitlebarViewClose) {
   // Simulate clicking Close Button and wait until the Panel closes.
   ui_test_utils::WindowedNotificationObserver signal(
       chrome::NOTIFICATION_BROWSER_CLOSED,
-      Source<Browser>(panel->browser()));
+      content::Source<Browser>(panel->browser()));
   [titlebar simulateCloseButtonClick];
   signal.Wait();
   EXPECT_EQ(0, manager->num_panels());

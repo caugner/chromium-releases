@@ -4,13 +4,16 @@
 
 #include "content/renderer/intents_dispatcher.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "content/common/intents_messages.h"
 #include "content/renderer/render_view_impl.h"
 #include "ipc/ipc_message.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "v8/include/v8.h"
 #include "webkit/glue/cpp_bound_class.h"
 
@@ -49,11 +52,16 @@ class IntentsDispatcher::BoundDeliveredIntent : public CppBoundClass {
                                      frame->windowObject(),
                                      data_val_.get());
 
-    BindProperty("action", &BoundDeliveredIntent::getAction);
-    BindProperty("type", &BoundDeliveredIntent::getType);
-    BindProperty("data", &BoundDeliveredIntent::getData);
-    BindMethod("postResult", &BoundDeliveredIntent::postResult);
-    BindMethod("postFailure", &BoundDeliveredIntent::postFailure);
+    BindGetterCallback("action", base::Bind(&BoundDeliveredIntent::getAction,
+                                            base::Unretained(this)));
+    BindGetterCallback("type", base::Bind(&BoundDeliveredIntent::getType,
+                                          base::Unretained(this)));
+    BindGetterCallback("data", base::Bind(&BoundDeliveredIntent::getData,
+                                          base::Unretained(this)));
+    BindCallback("postResult", base::Bind(&BoundDeliveredIntent::postResult,
+                                          base::Unretained(this)));
+    BindCallback("postFailure", base::Bind(&BoundDeliveredIntent::postFailure,
+                                           base::Unretained(this)));
   }
 
   virtual ~BoundDeliveredIntent() {
@@ -147,8 +155,15 @@ void IntentsDispatcher::OnWebIntentReply(
     const WebKit::WebString& data,
     int intent_id) {
   LOG(INFO) << "RenderView got reply to intent type " << reply_type;
-}
 
+  if (reply_type == webkit_glue::WEB_INTENT_REPLY_SUCCESS) {
+    render_view()->GetWebView()->mainFrame()->handleIntentResult(
+        intent_id, data);
+  } else {
+    render_view()->GetWebView()->mainFrame()->handleIntentFailure(
+        intent_id, data);
+  }
+}
 
 void IntentsDispatcher::OnResult(const WebKit::WebString& data) {
   Send(new IntentsMsg_WebIntentReply(

@@ -32,6 +32,7 @@ class RtpVideoReader : public VideoReader {
   virtual void Init(protocol::Session* session,
                     VideoStub* video_stub,
                     const InitializedCallback& callback) OVERRIDE;
+  virtual bool is_connected() OVERRIDE;
 
  private:
   friend class RtpVideoReaderTest;
@@ -67,6 +68,8 @@ class RtpVideoReader : public VideoReader {
   // OnRtpPacket(). Interval between reports is defined by
   // |kReceiverReportsIntervalMs|.
   void SendReceiverReportIf();
+
+  Session* session_;
 
   bool initialized_;
   InitializedCallback initialized_callback_;

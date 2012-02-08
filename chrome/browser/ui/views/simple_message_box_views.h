@@ -10,7 +10,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "ui/gfx/native_widget_types.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class MessageBoxView;
@@ -50,8 +50,7 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
  protected:
   // Overridden from views::DialogDelegate:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
@@ -74,7 +73,7 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
   // Dispatcher method. This returns true if the menu was canceled, or
   // if the message is such that the menu should be closed.
   virtual bool Dispatch(const MSG& msg) OVERRIDE;
-#elif defined(TOUCH_UI) || defined(USE_AURA)
+#elif defined(USE_AURA)
   virtual base::MessagePumpDispatcher::DispatchStatus Dispatch(
       XEvent* xevent) OVERRIDE;
 #else

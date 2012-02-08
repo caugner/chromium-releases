@@ -1193,7 +1193,7 @@ const PrepopulatedEngine google = {
       L"client=chrome&hl={language}&q={searchTerms}",
   L"{google:baseURL}webhp?{google:RLZ}sourceid=chrome-instant&"
       L"{google:instantFieldTrialGroupParameter}"
-      L"ie={inputEncoding}&ion=1{searchTerms}&nord=1",
+      L"ie={inputEncoding}&ion=1{searchTerms}",
   SEARCH_ENGINE_GOOGLE,
   IDR_SEARCH_ENGINE_LOGO_GOOGLE,
   1,
@@ -1474,32 +1474,6 @@ const PrepopulatedEngine onet = {
   75,
 };
 
-const PrepopulatedEngine pogodak_ba = {
-  L"Pogodak!",
-  L"pogodak.ba",
-  "http://www.pogodak.ba/favicon.ico",
-  L"http://www.pogodak.ba/search.jsp?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_POGODAK,
-  IDR_SEARCH_ENGINE_LOGO_POGODAK,
-  24,
-};
-
-const PrepopulatedEngine pogodak_hr = {
-  L"Pogodak!",
-  L"pogodak.hr",
-  "http://www.pogodak.hr/favicon.ico",
-  L"http://www.pogodak.hr/search.jsp?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_POGODAK,
-  IDR_SEARCH_ENGINE_LOGO_POGODAK,
-  24,
-};
-
 const PrepopulatedEngine pogodak_rs = {
   L"Pogodak!",
   L"pogodak.rs",
@@ -1511,19 +1485,6 @@ const PrepopulatedEngine pogodak_rs = {
   SEARCH_ENGINE_POGODAK,
   IDR_SEARCH_ENGINE_LOGO_POGODAK,
   24,
-};
-
-const PrepopulatedEngine pogodok = {
-  L"\x041f\x043e\x0433\x043e\x0434\x043e\x043a!",
-  L"pogodok.com.mk",
-  "http://www.pogodok.com.mk/favicon.ico",
-  L"http://www.pogodok.com.mk/search.jsp?q={searchTerms}",
-  "UTF-8",
-  NULL,
-  NULL,
-  SEARCH_ENGINE_POGODOK_MK,
-  IDR_SEARCH_ENGINE_LOGO_POGODOK_MK,
-  24,  // Really the same engine as Pogodak, just has a small name change.
 };
 
 const PrepopulatedEngine rambler = {
@@ -2368,7 +2329,7 @@ const PrepopulatedEngine* engines_AU[] =
 
 // Bosnia and Herzegovina
 const PrepopulatedEngine* engines_BA[] =
-    { &google, &pogodak_ba, &yahoo, &bing, };
+    { &google, &yahoo, &bing, };
 
 // Belgium
 const PrepopulatedEngine* engines_BE[] =
@@ -2501,7 +2462,7 @@ const PrepopulatedEngine* engines_HN[] =
 
 // Croatia
 const PrepopulatedEngine* engines_HR[] =
-    { &google, &yahoo, &pogodak_hr, &bing_hr_HR, };
+    { &google, &yahoo, &bing_hr_HR, };
 
 // Hungary
 const PrepopulatedEngine* engines_HU[] =
@@ -2609,7 +2570,7 @@ const PrepopulatedEngine* engines_ME[] =
 
 // Macedonia
 const PrepopulatedEngine* engines_MK[] =
-    { &google, &pogodok, &yahoo, &bing, };
+    { &google, &yahoo, &bing, };
 
 // Mexico
 const PrepopulatedEngine* engines_MX[] =
@@ -2795,17 +2756,16 @@ const PrepopulatedEngine* kAllEngines[] =
       &delfi_lv, &diri, &eniro_fi, &eniro_se, &fonecta_02_fi, &go, &goo,
       &google, &guruji, &hispavista, &in, &jabse, &jubii, &kvasir, &latne,
       &leit, &libero, &mail_ru, &maktoob, &masrawy, &mynet, &najdi, &nate,
-      &naver, &neti, &netsprint, &nur_kz, &ok, &onet, &pogodak_ba, &pogodak_hr,
-      &pogodak_rs, &pogodok, &rambler, &rediff, &rednano, &sanook, &sapo,
-      &search_de_CH, &search_fr_CH, &seznam, &spray, &terra_ar, &terra_es, &tut,
-      &uol, &virgilio, &walla, &wp, &yahoo, &yahoo_ar, &yahoo_at, &yahoo_au,
-      &yahoo_br, &yahoo_ca, &yahoo_ch, &yahoo_cl, &yahoo_cn, &yahoo_co,
-      &yahoo_de, &yahoo_dk, &yahoo_es, &yahoo_fi, &yahoo_fr, &yahoo_hk,
-      &yahoo_id, &yahoo_in, &yahoo_it, &yahoo_jp, &yahoo_kr, &yahoo_malaysia,
-      &yahoo_mx, &yahoo_nl, &yahoo_no, &yahoo_nz, &yahoo_pe, &yahoo_ph,
-      &yahoo_qc, &yahoo_ru, &yahoo_se, &yahoo_sg, &yahoo_th, &yahoo_tw,
-      &yahoo_uk, &yahoo_ve, &yahoo_vn, &yamli, &yandex_ru, &yandex_ua,
-      &zoznam };
+      &naver, &neti, &netsprint, &nur_kz, &ok, &onet, &pogodak_rs, &rambler,
+      &rediff, &rednano, &sanook, &sapo, &search_de_CH, &search_fr_CH, &seznam,
+      &spray, &terra_ar, &terra_es, &tut, &uol, &virgilio, &walla, &wp, &yahoo,
+      &yahoo_ar, &yahoo_at, &yahoo_au, &yahoo_br, &yahoo_ca, &yahoo_ch,
+      &yahoo_cl, &yahoo_cn, &yahoo_co, &yahoo_de, &yahoo_dk, &yahoo_es,
+      &yahoo_fi, &yahoo_fr, &yahoo_hk, &yahoo_id, &yahoo_in, &yahoo_it,
+      &yahoo_jp, &yahoo_kr, &yahoo_malaysia, &yahoo_mx, &yahoo_nl, &yahoo_no,
+      &yahoo_nz, &yahoo_pe, &yahoo_ph, &yahoo_qc, &yahoo_ru, &yahoo_se,
+      &yahoo_sg, &yahoo_th, &yahoo_tw, &yahoo_uk, &yahoo_ve, &yahoo_vn, &yamli,
+      &yandex_ru, &yandex_ua, &zoznam };
 
 
 // Geographic mappings /////////////////////////////////////////////////////////
@@ -3369,7 +3329,7 @@ void RegisterUserPrefs(PrefService* prefs) {
 int GetDataVersion(PrefService* prefs) {
   // Increment this if you change the above data in ways that mean users with
   // existing data should get a new version.
-  const int kCurrentDataVersion = 36;
+  const int kCurrentDataVersion = 37;
   if (!prefs)
     return kCurrentDataVersion;
   // If a version number exist in the preferences file, it overrides the
@@ -3588,6 +3548,14 @@ int GetSearchEngineLogo(const GURL& url_to_find) {
       return kAllEngines[i]->logo_id;
   }
   return kNoSearchEngineLogo;
+}
+
+TemplateURL* FindPrepopulatedEngine(const std::string& search_url) {
+  for (size_t i = 0; i < arraysize(kAllEngines); ++i) {
+    if (search_url == ToUTF8(kAllEngines[i]->search_url))
+      return MakePrepopulateTemplateURLFromPrepopulateEngine(*kAllEngines[i]);
+  }
+  return NULL;
 }
 
 }  // namespace TemplateURLPrepopulateData

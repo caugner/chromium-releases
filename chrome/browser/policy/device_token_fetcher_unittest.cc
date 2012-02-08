@@ -13,7 +13,7 @@
 #include "chrome/browser/policy/mock_device_management_service.h"
 #include "chrome/browser/policy/policy_notifier.h"
 #include "chrome/browser/policy/user_policy_cache.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,6 +21,7 @@ namespace policy {
 
 const char kTestToken[] = "device_token_fetcher_test_auth_token";
 
+using content::BrowserThread;
 using testing::_;
 using testing::AnyNumber;
 using testing::Mock;
@@ -35,7 +36,8 @@ class DeviceTokenFetcherTest : public testing::Test {
 
   virtual void SetUp() {
     cache_.reset(new UserPolicyCache(
-        temp_user_data_dir_.path().AppendASCII("DeviceTokenFetcherTest")));
+        temp_user_data_dir_.path().AppendASCII("DeviceTokenFetcherTest"),
+        false  /* wait_for_policy_fetch */));
     EXPECT_CALL(service_, CreateBackend())
         .Times(AnyNumber())
         .WillRepeatedly(MockDeviceManagementServiceProxyBackend(&backend_));
@@ -54,6 +56,18 @@ class DeviceTokenFetcherTest : public testing::Test {
     fetcher->FetchToken();
   }
 
+  void CreateNewWaitingCache() {
+    cache_.reset(new UserPolicyCache(
+        temp_user_data_dir_.path().AppendASCII("DeviceTokenFetcherTest"),
+        true  /* wait_for_policy_fetch */));
+    // Make this cache's disk cache ready, but have it still waiting for a
+    // policy fetch.
+    cache_->Load();
+    loop_.RunAllPending();
+    ASSERT_TRUE(cache_->last_policy_refresh_time().is_null());
+    ASSERT_FALSE(cache_->IsReady());
+  }
+
   MessageLoop loop_;
   MockDeviceManagementBackend backend_;
   MockDeviceManagementService service_;
@@ -64,8 +78,8 @@ class DeviceTokenFetcherTest : public testing::Test {
   ScopedTempDir temp_user_data_dir_;
 
  private:
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 };
 
 TEST_F(DeviceTokenFetcherTest, FetchToken) {
@@ -122,6 +136,49 @@ TEST_F(DeviceTokenFetcherTest, UnmanagedDevice) {
   Mock::VerifyAndClearExpectations(&observer_);
   EXPECT_EQ("", data_store_->device_token());
   EXPECT_TRUE(cache_->is_unmanaged());
+}
+
+TEST_F(DeviceTokenFetcherTest, DontSetFetchingDone) {
+  CreateNewWaitingCache();
+  DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
+                             &notifier_);
+  EXPECT_FALSE(cache_->IsReady());
+}
+
+TEST_F(DeviceTokenFetcherTest, DontSetFetchingDoneWithoutPolicyFetch) {
+  CreateNewWaitingCache();
+  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
+      MockDeviceManagementBackendSucceedRegister());
+  EXPECT_CALL(observer_, OnDeviceTokenChanged());
+  DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
+                             &notifier_);
+  FetchToken(&fetcher);
+  loop_.RunAllPending();
+  // On successful token fetching the cache isn't set to ready, since the next
+  // step is to fetch policy. Only failures to fetch the token should make
+  // the cache ready.
+  EXPECT_FALSE(cache_->IsReady());
+}
+
+TEST_F(DeviceTokenFetcherTest, SetFetchingDoneWhenUnmanaged) {
+  CreateNewWaitingCache();
+  cache_->SetUnmanaged();
+  DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
+                             &notifier_);
+  EXPECT_TRUE(cache_->IsReady());
+}
+
+TEST_F(DeviceTokenFetcherTest, SetFetchingDoneOnFailures) {
+  CreateNewWaitingCache();
+  EXPECT_CALL(backend_, ProcessRegisterRequest(_, _, _, _, _)).WillOnce(
+      MockDeviceManagementBackendFailRegister(
+          DeviceManagementBackend::kErrorRequestFailed));
+  DeviceTokenFetcher fetcher(&service_, cache_.get(), data_store_.get(),
+                             &notifier_);
+  FetchToken(&fetcher);
+  loop_.RunAllPending();
+  // This is the opposite case of DontSetFetchingDone1.
+  EXPECT_TRUE(cache_->IsReady());
 }
 
 }  // namespace policy

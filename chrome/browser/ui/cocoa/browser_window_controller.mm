@@ -471,6 +471,10 @@ enum {
   return browser_->profile();
 }
 
+- (AvatarButtonController*)avatarButtonController {
+  return avatarButtonController_.get();
+}
+
 - (void)destroyBrowser {
   [NSApp removeWindowsItem:[self window]];
 
@@ -996,9 +1000,12 @@ enum {
       enable = browser_->command_updater()->IsCommandEnabled(tag);
       switch (tag) {
         case IDC_CLOSE_TAB:
-          // Disable "close tab" if we're not the key window or if there's only
-          // one tab.
-          enable &= [[self window] isKeyWindow];
+          // Disable "close tab" if the receiving window is not tabbed.
+          // We simply check whether the item has a keyboard shortcut set here;
+          // app_controller_mac.mm actually determines whether the item should
+          // be enabled.
+          if ([static_cast<NSObject*>(item) isKindOfClass:[NSMenuItem class]])
+            enable &= !![[static_cast<NSMenuItem*>(item) keyEquivalent] length];
           break;
         case IDC_FULLSCREEN: {
           enable &= [self supportsFullscreen];
@@ -1628,17 +1635,10 @@ enum {
   DCHECK(responds);
   if (responds) {
     const BookmarkNode* node = [sender node];
-    if (node) {
-      // A BookmarkEditorController is a sheet that owns itself, and
-      // deallocates itself when closed.
-      [[[BookmarkEditorController alloc]
-         initWithParentWindow:[self window]
-                      profile:browser_->profile()
-                       parent:node->parent()
-                         node:node
-                configuration:BookmarkEditor::SHOW_TREE]
-        runAsModalSheet];
-    }
+    if (node)
+      BookmarkEditor::Show([self window], browser_->profile(),
+          BookmarkEditor::EditDetails::EditNode(node),
+          BookmarkEditor::SHOW_TREE);
   }
 }
 
@@ -1746,7 +1746,7 @@ enum {
 
 // Handle the openLearnMoreAboutCrashLink: action from SadTabController when
 // "Learn more" link in "Aw snap" page (i.e. crash page or sad tab) is
-// clicked. Decoupling the action from its target makes unitestting possible.
+// clicked. Decoupling the action from its target makes unit testing possible.
 - (void)openLearnMoreAboutCrashLink:(id)sender {
   if ([sender isKindOfClass:[SadTabController class]]) {
     SadTabController* sad_tab = static_cast<SadTabController*>(sender);
@@ -1852,6 +1852,11 @@ willAnimateFromState:(bookmarks::VisualState)oldState
   return NSMakeSize(x, y);
 }
 
+// (Private/TestingAPI)
+- (FullscreenExitBubbleController*)fullscreenExitBubbleController {
+  return fullscreenExitBubbleController_.get();
+}
+
 - (void)showInstant:(TabContents*)previewContents {
   [previewableContentsController_ showPreview:previewContents];
   [self updateBookmarkBarVisibilityWithAnimation:NO];
@@ -1951,7 +1956,8 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
 - (BOOL)isFullscreen {
   return (fullscreenWindow_.get() != nil) ||
-         ([[self window] styleMask] & NSFullScreenWindowMask);
+         ([[self window] styleMask] & NSFullScreenWindowMask) ||
+         enteringFullscreen_;
 }
 
 - (void)togglePresentationModeForLionOrLater:(id)sender {
@@ -1982,7 +1988,7 @@ willAnimateFromState:(bookmarks::VisualState)oldState
 
   if (presentationMode) {
     BOOL fullscreen = [self isFullscreen];
-    BOOL fullscreen_for_tab = browser_->is_fullscreen_for_tab();
+    BOOL fullscreen_for_tab = browser_->IsFullscreenForTab();
     if (!fullscreen_for_tab)
       [self setShouldUsePresentationModeWhenEnteringFullscreen:YES];
     enteredPresentationModeFromFullscreen_ = fullscreen;

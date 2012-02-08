@@ -13,6 +13,7 @@
 #include "chrome/browser/extensions/extension_function_dispatcher.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -88,8 +89,8 @@ std::string GetString(base::DictionaryValue* val, const std::string& key) {
 }
 
 base::DictionaryValue* ToDictionary(base::Value* val) {
-  if (!val || !val->IsType(base::Value::TYPE_DICTIONARY))
-    ADD_FAILURE() << "value is null or not a dictionary.";
+  EXPECT_TRUE(val);
+  EXPECT_EQ(base::Value::TYPE_DICTIONARY, val->GetType());
   return static_cast<base::DictionaryValue*>(val);
 }
 
@@ -104,8 +105,7 @@ scoped_refptr<Extension> CreateEmptyExtension() {
       *test_extension_value.get(),
       Extension::NO_FLAGS,
       &error));
-  if (!error.empty())
-    ADD_FAILURE() << "Could not parse test extension " << error;
+  EXPECT_TRUE(error.empty()) << "Could not parse test extension " << error;
   return extension;
 }
 
@@ -120,8 +120,8 @@ std::string RunFunctionAndReturnError(UIThreadExtensionFunction* function,
                                       RunFunctionFlags flags) {
   scoped_refptr<ExtensionFunction> function_owner(function);
   RunFunction(function, args, browser, flags);
-  if (function->GetResultValue())
-    ADD_FAILURE() << function->GetResult();
+  EXPECT_FALSE(function->GetResultValue()) << "Unexpected function result " <<
+      function->GetResult();
   return function->GetError();
 }
 
@@ -136,21 +136,58 @@ base::Value* RunFunctionAndReturnResult(UIThreadExtensionFunction* function,
                                         RunFunctionFlags flags) {
   scoped_refptr<ExtensionFunction> function_owner(function);
   RunFunction(function, args, browser, flags);
-  if (!function->GetError().empty())
-    ADD_FAILURE() << "Unexpected error: " << function->GetError();
-  if (!function->GetResultValue())
-    ADD_FAILURE() << "No result value found";
+  EXPECT_TRUE(function->GetError().empty()) << "Unexpected error: "
+      << function->GetError();
+  EXPECT_TRUE(function->GetResultValue()) << "No result value found";
   return function->GetResultValue()->DeepCopy();
 }
 
-void RunFunction(UIThreadExtensionFunction* function,
+// This helps us be able to wait until an AsyncExtensionFunction calls
+// SendResponse.
+class SendResponseDelegate
+    : public UIThreadExtensionFunction::DelegateForTests {
+ public:
+  SendResponseDelegate() : should_post_quit_(false) {}
+
+  virtual ~SendResponseDelegate() {}
+
+  void set_should_post_quit(bool should_quit) {
+    should_post_quit_ = should_quit;
+  }
+
+  bool HasResponse() {
+    return response_.get() != NULL;
+  }
+
+  bool GetResponse() {
+    EXPECT_TRUE(HasResponse());
+    return *response_.get();
+  }
+
+  virtual void OnSendResponse(UIThreadExtensionFunction* function,
+                              bool success) {
+    ASSERT_FALSE(HasResponse());
+    response_.reset(new bool);
+    *response_ = success;
+    if (should_post_quit_) {
+      MessageLoopForUI::current()->Quit();
+    }
+  }
+
+ private:
+  scoped_ptr<bool> response_;
+  bool should_post_quit_;
+};
+
+bool RunFunction(UIThreadExtensionFunction* function,
                  const std::string& args,
                  Browser* browser,
                  RunFunctionFlags flags) {
+  SendResponseDelegate response_delegate;
+  function->set_test_delegate(&response_delegate);
   scoped_ptr<base::ListValue> parsed_args(ParseList(args));
-  if (!parsed_args.get()) {
-    ADD_FAILURE() << "Could not parse extension function arguments: " << args;
-  }
+  EXPECT_TRUE(parsed_args.get()) <<
+      "Could not parse extension function arguments: " << args;
   function->SetArgs(parsed_args.get());
 
   TestFunctionDispatcherDelegate dispatcher_delegate(browser);
@@ -161,6 +198,16 @@ void RunFunction(UIThreadExtensionFunction* function,
   function->set_profile(browser->profile());
   function->set_include_incognito(flags & INCLUDE_INCOGNITO);
   function->Run();
+
+  // If the RunImpl of |function| didn't already call SendResponse, run the
+  // message loop until they do.
+  if (!response_delegate.HasResponse()) {
+    response_delegate.set_should_post_quit(true);
+    ui_test_utils::RunMessageLoop();
+  }
+
+  EXPECT_TRUE(response_delegate.HasResponse());
+  return response_delegate.GetResponse();
 }
 
 } // namespace extension_function_test_utils

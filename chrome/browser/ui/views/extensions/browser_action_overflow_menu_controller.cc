@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/views/extensions/browser_action_overflow_menu_controller.h"
 
+#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,11 +14,11 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "ui/gfx/canvas_skia.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/controls/menu/submenu_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/widget/widget.h"
 
 BrowserActionOverflowMenuController::BrowserActionOverflowMenuController(
     BrowserActionsContainer* owner,
@@ -41,7 +42,7 @@ BrowserActionOverflowMenuController::BrowserActionOverflowMenuController(
     scoped_ptr<gfx::Canvas> canvas(view->GetIconWithBadge());
     menu_->AppendMenuItemWithIcon(
         command_id,
-        UTF8ToWide(view->button()->extension()->name()),
+        UTF8ToUTF16(view->button()->extension()->name()),
         canvas->AsCanvasSkia()->ExtractBitmap());
 
     // Set the tooltip for this item.

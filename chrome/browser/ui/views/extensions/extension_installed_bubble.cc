@@ -20,22 +20,23 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/link.h"
-#include "views/controls/link_listener.h"
-#include "views/layout/layout_constants.h"
-#include "views/view.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/link_listener.h"
+#include "ui/views/layout/fill_layout.h"
+#include "ui/views/layout/layout_constants.h"
 
 namespace {
 
@@ -90,10 +91,11 @@ class InstalledBubbleContent : public views::View,
   InstalledBubbleContent(Browser* browser,
                          const Extension* extension,
                          ExtensionInstalledBubble::BubbleType type,
-                         SkBitmap* icon)
+                         SkBitmap* icon,
+                         ExtensionInstalledBubble* bubble)
       : browser_(browser),
         extension_id_(extension->id()),
-        bubble_(NULL),
+        bubble_(bubble),
         type_(type),
         info_(NULL) {
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
@@ -172,17 +174,11 @@ class InstalledBubbleContent : public views::View,
     AddChildView(close_button_);
   }
 
-  void set_bubble(Bubble* bubble) { bubble_ = bubble; }
-
-  virtual void ButtonPressed(
-      views::Button* sender,
-      const views::Event& event) {
-    if (sender == close_button_) {
-      bubble_->set_fade_away_on_close(true);
-      GetWidget()->Close();
-    } else {
+  virtual void ButtonPressed(views::Button* sender, const views::Event& event) {
+    if (sender == close_button_)
+      bubble_->StartFade(false);
+    else
       NOTREACHED() << "Unknown view";
-    }
   }
 
   // Implements the views::LinkListener interface.
@@ -258,8 +254,8 @@ class InstalledBubbleContent : public views::View,
   // The id of the extension just installed.
   const std::string extension_id_;
 
-  // The Bubble showing us.
-  Bubble* bubble_;
+  // The ExtensionInstalledBubble showing us.
+  ExtensionInstalledBubble* bubble_;
 
   ExtensionInstalledBubble::BubbleType type_;
   views::ImageView* icon_;
@@ -284,8 +280,6 @@ ExtensionInstalledBubble::ExtensionInstalledBubble(const Extension* extension,
       browser_(browser),
       icon_(icon),
       animation_wait_retries_(0) {
-  AddRef();  // Balanced in BubbleClosing.
-
   if (extension->is_app()) {
     type_ = APP;
   } else if (!extension_->omnibox_keyword().empty()) {
@@ -305,28 +299,31 @@ ExtensionInstalledBubble::ExtensionInstalledBubble(const Extension* extension,
   // be sure that a BrowserAction or PageAction has had views created which we
   // can inspect for the purpose of previewing of pointing to them.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-      Source<Profile>(browser->profile()));
+      content::Source<Profile>(browser->profile()));
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-      Source<Profile>(browser->profile()));
+      content::Source<Profile>(browser->profile()));
 }
 
 ExtensionInstalledBubble::~ExtensionInstalledBubble() {}
 
-void ExtensionInstalledBubble::Observe(int type,
-                                       const NotificationSource& source,
-                                       const NotificationDetails& details) {
+void ExtensionInstalledBubble::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_EXTENSION_LOADED) {
-    const Extension* extension = Details<const Extension>(details).ptr();
+    const Extension* extension =
+        content::Details<const Extension>(details).ptr();
     if (extension == extension_) {
       animation_wait_retries_ = 0;
       // PostTask to ourself to allow all EXTENSION_LOADED Observers to run.
       MessageLoopForUI::current()->PostTask(
           FROM_HERE,
-          base::Bind(&ExtensionInstalledBubble::ShowInternal, this));
+          base::Bind(&ExtensionInstalledBubble::ShowInternal,
+                     base::Unretained(this)));
     }
   } else if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     const Extension* extension =
-        Details<UnloadedExtensionInfo>(details)->extension;
+        content::Details<UnloadedExtensionInfo>(details)->extension;
     if (extension == extension_)
       extension_ = NULL;
   } else {
@@ -337,7 +334,7 @@ void ExtensionInstalledBubble::Observe(int type,
 void ExtensionInstalledBubble::ShowInternal() {
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
 
-  const views::View* reference_view = NULL;
+  views::View* reference_view = NULL;
   if (type_ == APP) {
     if (browser_view->IsTabStripVisible()) {
       AbstractTabStripView* tabstrip = browser_view->tabstrip();
@@ -358,7 +355,8 @@ void ExtensionInstalledBubble::ShowInternal() {
       // animating, so check back in a little while.
       MessageLoopForUI::current()->PostDelayedTask(
           FROM_HERE,
-          base::Bind(&ExtensionInstalledBubble::ShowInternal, this),
+          base::Bind(&ExtensionInstalledBubble::ShowInternal,
+                     base::Unretained(this)),
           kAnimationWaitTime);
       return;
     }
@@ -388,47 +386,39 @@ void ExtensionInstalledBubble::ShowInternal() {
   // Default case.
   if (reference_view == NULL)
     reference_view = browser_view->GetToolbarView()->app_menu();
+  set_anchor_view(reference_view);
 
-  gfx::Point origin;
-  views::View::ConvertPointToScreen(reference_view, &origin);
-  gfx::Rect bounds = reference_view->bounds();
-  bounds.set_origin(origin);
-  views::BubbleBorder::ArrowLocation arrow_location =
-      views::BubbleBorder::TOP_RIGHT;
+  SetLayoutManager(new views::FillLayout());
+  AddChildView(
+      new InstalledBubbleContent(browser_, extension_, type_, &icon_, this));
+  browser::CreateViewsBubble(this);
+  StartFade(true);
+}
 
+gfx::Rect ExtensionInstalledBubble::GetAnchorRect() {
   // For omnibox keyword bubbles, move the arrow to point to the left edge
   // of the omnibox, just to the right of the icon.
   if (type_ == OMNIBOX_KEYWORD) {
-    bounds.set_origin(
-        browser_view->GetLocationBarView()->GetLocationEntryOrigin());
-    bounds.set_width(0);
-    arrow_location = views::BubbleBorder::TOP_LEFT;
+    LocationBarView* location_bar_view =
+        BrowserView::GetBrowserViewForBrowser(browser_)->GetLocationBarView();
+    return gfx::Rect(location_bar_view->GetLocationEntryOrigin().Add(
+        gfx::Point(0, location_bar_view->location_entry_view()->height())),
+        gfx::Size());
   }
-
-  bubble_content_ = new InstalledBubbleContent(
-      browser_, extension_, type_, &icon_);
-  Bubble* bubble = Bubble::Show(browser_view->GetWidget(), bounds,
-                                arrow_location, bubble_content_, this);
-  bubble_content_->set_bubble(bubble);
+  return views::BubbleDelegateView::GetAnchorRect();
 }
 
-// BubbleDelegate
-void ExtensionInstalledBubble::BubbleClosing(Bubble* bubble,
-                                             bool closed_by_escape) {
+views::BubbleBorder::ArrowLocation
+    ExtensionInstalledBubble::GetArrowLocation() const {
+  return type_ == OMNIBOX_KEYWORD ? views::BubbleBorder::TOP_LEFT :
+                                    views::BubbleBorder::TOP_RIGHT;
+}
+
+void ExtensionInstalledBubble::WindowClosing() {
   if (extension_ && type_ == PAGE_ACTION) {
     BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser_);
     browser_view->GetLocationBarView()->SetPreviewEnabledPageAction(
         extension_->page_action(),
         false);  // preview_enabled
   }
-
-  Release();  // Balanced in ctor.
-}
-
-bool ExtensionInstalledBubble::CloseOnEscape() {
-  return true;
-}
-
-bool ExtensionInstalledBubble::FadeInOnShow() {
-  return true;
 }

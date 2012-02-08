@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/gtk/view_id_util.h"
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "views/focus/focus_manager.h"
+#include "ui/views/focus/focus_manager.h"
 #endif
 
 namespace ui_test_utils {
@@ -47,9 +47,9 @@ bool IsViewFocused(const Browser* browser, ViewID vid) {
   DCHECK(browser_window);
 #if defined(TOOLKIT_VIEWS)
   gfx::NativeWindow window = browser_window->GetNativeHandle();
-  views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
+  const views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
   DCHECK(widget);
-  views::FocusManager* focus_manager = widget->GetFocusManager();
+  const views::FocusManager* focus_manager = widget->GetFocusManager();
   DCHECK(focus_manager);
   return focus_manager->GetFocusedView() &&
       focus_manager->GetFocusedView()->id() == vid;
@@ -87,11 +87,10 @@ void HideNativeWindow(gfx::NativeWindow window) {
   gtk_widget_hide(GTK_WIDGET(window));
 }
 
-void ShowAndFocusNativeWindow(gfx::NativeWindow window) {
-  if (gtk_window_has_toplevel_focus(GTK_WINDOW(window)))
-    return;
-
-  gtk_window_present(GTK_WINDOW(window));
+bool ShowAndFocusNativeWindow(gfx::NativeWindow window) {
+  if (!gtk_window_has_toplevel_focus(GTK_WINDOW(window)))
+    gtk_window_present(GTK_WINDOW(window));
+  return true;
 }
 
 }  // namespace ui_test_utils

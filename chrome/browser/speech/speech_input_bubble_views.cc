@@ -6,12 +6,12 @@
 
 #include <algorithm>
 
-#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/views/bubble/bubble.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/location_bar/location_icon_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
+#include "chrome/browser/ui/views/window.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "grit/generated_resources.h"
@@ -19,15 +19,13 @@
 #include "media/audio/audio_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/gfx/canvas.h"
-#include "views/border.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/link.h"
-#include "views/controls/link_listener.h"
-#include "views/layout/layout_constants.h"
-#include "views/view.h"
+#include "ui/views/bubble/bubble_delegate.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/link_listener.h"
+#include "ui/views/layout/layout_constants.h"
 
 namespace {
 
@@ -37,18 +35,27 @@ const int kBubbleHeadingVertMargin = 6;
 const int kIconHorizontalOffset = 27;
 const int kIconVerticalOffset = -7;
 
-// This is the content view which is placed inside a SpeechInputBubble.
-class ContentView
-    : public views::View,
+// This is the SpeechInputBubble content and views bubble delegate.
+class SpeechInputBubbleView
+    : public views::BubbleDelegateView,
       public views::ButtonListener,
       public views::LinkListener {
  public:
-  explicit ContentView(SpeechInputBubbleDelegate* delegate);
+  SpeechInputBubbleView(SpeechInputBubbleDelegate* delegate,
+                        views::View* anchor_view,
+                        const gfx::Rect& element_rect,
+                        TabContents* tab_contents);
 
   void UpdateLayout(SpeechInputBubbleBase::DisplayMode mode,
                     const string16& message_text,
                     const SkBitmap& image);
   void SetImage(const SkBitmap& image);
+
+  // views::BubbleDelegateView methods.
+  virtual void OnWidgetActivationChanged(views::Widget* widget,
+                                         bool active) OVERRIDE;
+  virtual gfx::Rect GetAnchorRect() OVERRIDE;
+  virtual void Init() OVERRIDE;
 
   // views::ButtonListener methods.
   virtual void ButtonPressed(views::Button* source, const views::Event& event);
@@ -62,6 +69,8 @@ class ContentView
 
  private:
   SpeechInputBubbleDelegate* delegate_;
+  gfx::Rect element_rect_;
+  TabContents* tab_contents_;
   views::ImageView* icon_;
   views::Label* heading_;
   views::Label* message_;
@@ -71,14 +80,45 @@ class ContentView
   SpeechInputBubbleBase::DisplayMode display_mode_;
   const int kIconLayoutMinWidth;
 
-  DISALLOW_COPY_AND_ASSIGN(ContentView);
+  DISALLOW_COPY_AND_ASSIGN(SpeechInputBubbleView);
 };
 
-ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
-     : delegate_(delegate),
-       display_mode_(SpeechInputBubbleBase::DISPLAY_MODE_WARM_UP),
-       kIconLayoutMinWidth(ResourceBundle::GetSharedInstance().GetBitmapNamed(
-                           IDR_SPEECH_INPUT_MIC_EMPTY)->width()) {
+SpeechInputBubbleView::SpeechInputBubbleView(
+    SpeechInputBubbleDelegate* delegate,
+    views::View* anchor_view,
+    const gfx::Rect& element_rect,
+    TabContents* tab_contents)
+    : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
+      delegate_(delegate),
+      element_rect_(element_rect),
+      tab_contents_(tab_contents),
+      display_mode_(SpeechInputBubbleBase::DISPLAY_MODE_WARM_UP),
+      kIconLayoutMinWidth(ResourceBundle::GetSharedInstance().GetBitmapNamed(
+                          IDR_SPEECH_INPUT_MIC_EMPTY)->width()) {
+  // The bubble lifetime is managed by its controller; closing on escape or
+  // explicitly closing on deactivation will cause unexpected behavior.
+  set_close_on_esc(false);
+  set_close_on_deactivate(false);
+}
+
+void SpeechInputBubbleView::OnWidgetActivationChanged(views::Widget* widget,
+                                                      bool active) {
+  if (widget == GetWidget() && !active)
+    delegate_->InfoBubbleFocusChanged();
+  BubbleDelegateView::OnWidgetActivationChanged(widget, active);
+}
+
+gfx::Rect SpeechInputBubbleView::GetAnchorRect() {
+  gfx::Rect container_rect;
+  tab_contents_->GetContainerBounds(&container_rect);
+  gfx::Point anchor(container_rect.x() + element_rect_.CenterPoint().x(),
+                    container_rect.y() + element_rect_.bottom());
+  if (!container_rect.Contains(anchor))
+    return BubbleDelegateView::GetAnchorRect();
+  return gfx::Rect(anchor, gfx::Size());
+}
+
+void SpeechInputBubbleView::Init() {
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   const gfx::Font& font = rb.GetFont(ResourceBundle::MediumFont);
 
@@ -103,13 +143,11 @@ ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
   AddChildView(icon_);
 
   cancel_ = new views::NativeTextButton(
-      this,
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_CANCEL)));
+      this, l10n_util::GetStringUTF16(IDS_CANCEL));
   AddChildView(cancel_);
 
   try_again_ = new views::NativeTextButton(
-      this,
-      UTF16ToWide(l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_TRY_AGAIN)));
+      this, l10n_util::GetStringUTF16(IDS_SPEECH_INPUT_TRY_AGAIN));
   AddChildView(try_again_);
 
   mic_settings_ = new views::Link(
@@ -118,9 +156,10 @@ ContentView::ContentView(SpeechInputBubbleDelegate* delegate)
   AddChildView(mic_settings_);
 }
 
-void ContentView::UpdateLayout(SpeechInputBubbleBase::DisplayMode mode,
-                               const string16& message_text,
-                               const SkBitmap& image) {
+void SpeechInputBubbleView::UpdateLayout(
+    SpeechInputBubbleBase::DisplayMode mode,
+    const string16& message_text,
+    const SkBitmap& image) {
   display_mode_ = mode;
   bool is_message = (mode == SpeechInputBubbleBase::DISPLAY_MODE_MESSAGE);
   icon_->SetVisible(!is_message);
@@ -144,14 +183,16 @@ void ContentView::UpdateLayout(SpeechInputBubbleBase::DisplayMode mode,
   // system and we do it ourselves.
   if (GetPreferredSize() == size())  // |size()| here is the current size.
     Layout();
+
+  SizeToContents();
 }
 
-void ContentView::SetImage(const SkBitmap& image) {
+void SpeechInputBubbleView::SetImage(const SkBitmap& image) {
   icon_->SetImage(image);
 }
 
-void ContentView::ButtonPressed(views::Button* source,
-                                const views::Event& event) {
+void SpeechInputBubbleView::ButtonPressed(views::Button* source,
+                                          const views::Event& event) {
   if (source == cancel_) {
     delegate_->InfoBubbleButtonClicked(SpeechInputBubble::BUTTON_CANCEL);
   } else if (source == try_again_) {
@@ -161,12 +202,12 @@ void ContentView::ButtonPressed(views::Button* source,
   }
 }
 
-void ContentView::LinkClicked(views::Link* source, int event_flags) {
+void SpeechInputBubbleView::LinkClicked(views::Link* source, int event_flags) {
   DCHECK_EQ(source, mic_settings_);
   AudioManager::GetAudioManager()->ShowAudioInputSettings();
 }
 
-gfx::Size ContentView::GetPreferredSize() {
+gfx::Size SpeechInputBubbleView::GetPreferredSize() {
   int width = heading_->GetPreferredSize().width();
   int control_width = cancel_->GetPreferredSize().width();
   if (try_again_->IsVisible()) {
@@ -199,7 +240,7 @@ gfx::Size ContentView::GetPreferredSize() {
   return gfx::Size(width, height);
 }
 
-void ContentView::Layout() {
+void SpeechInputBubbleView::Layout() {
   int x = kBubbleHorizMargin;
   int y = kBubbleVertMargin;
   int available_width = width() - kBubbleHorizMargin * 2;
@@ -251,9 +292,7 @@ void ContentView::Layout() {
 }
 
 // Implementation of SpeechInputBubble.
-class SpeechInputBubbleImpl
-    : public SpeechInputBubbleBase,
-      public BubbleDelegate {
+class SpeechInputBubbleImpl : public SpeechInputBubbleBase {
  public:
   SpeechInputBubbleImpl(TabContents* tab_contents,
                         Delegate* delegate,
@@ -268,24 +307,10 @@ class SpeechInputBubbleImpl
   virtual void UpdateLayout() OVERRIDE;
   virtual void UpdateImage() OVERRIDE;
 
-  // Returns the screen rectangle to use as the info bubble's target.
-  // |element_rect| is the html element's bounds in page coordinates.
-  gfx::Rect GetInfoBubbleTarget(const gfx::Rect& element_rect);
-
-  // BubbleDelegate
-  virtual void BubbleClosing(Bubble* bubble, bool closed_by_escape) OVERRIDE;
-  virtual bool CloseOnEscape() OVERRIDE;
-  virtual bool FadeInOnShow() OVERRIDE;
-
  private:
   Delegate* delegate_;
-  Bubble* bubble_;
-  ContentView* bubble_content_;
+  SpeechInputBubbleView* bubble_;
   gfx::Rect element_rect_;
-
-  // Set to true if the object is being destroyed normally instead of the
-  // user clicking outside the window causing it to close automatically.
-  bool did_invoke_close_;
 
   DISALLOW_COPY_AND_ASSIGN(SpeechInputBubbleImpl);
 };
@@ -296,102 +321,49 @@ SpeechInputBubbleImpl::SpeechInputBubbleImpl(TabContents* tab_contents,
     : SpeechInputBubbleBase(tab_contents),
       delegate_(delegate),
       bubble_(NULL),
-      bubble_content_(NULL),
-      element_rect_(element_rect),
-      did_invoke_close_(false) {
+      element_rect_(element_rect) {
 }
 
 SpeechInputBubbleImpl::~SpeechInputBubbleImpl() {
-  did_invoke_close_ = true;
   Hide();
-}
-
-gfx::Rect SpeechInputBubbleImpl::GetInfoBubbleTarget(
-    const gfx::Rect& element_rect) {
-  gfx::Rect container_rect;
-  tab_contents()->GetContainerBounds(&container_rect);
-  return gfx::Rect(
-      container_rect.x() + element_rect.right() - kBubbleTargetOffsetX,
-      container_rect.y() + element_rect.bottom(), 1, 1);
-}
-
-void SpeechInputBubbleImpl::BubbleClosing(Bubble* bubble,
-                                          bool closed_by_escape) {
-  bubble_ = NULL;
-  bubble_content_ = NULL;
-  if (!did_invoke_close_)
-    delegate_->InfoBubbleFocusChanged();
-}
-
-bool SpeechInputBubbleImpl::CloseOnEscape() {
-  return false;
-}
-
-bool SpeechInputBubbleImpl::FadeInOnShow() {
-  return false;
 }
 
 void SpeechInputBubbleImpl::Show() {
   if (bubble_)
-    return;  // nothing to do, already visible.
+    return;
 
-  bubble_content_ = new ContentView(delegate_);
+  // Anchor to the location icon view, in case |element_rect| is offscreen.
+  Profile* profile =
+      Profile::FromBrowserContext(tab_contents()->browser_context());
+  Browser* browser = Browser::GetOrCreateTabbedBrowser(profile);
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
+  views::View* icon = browser_view->GetLocationBarView() ?
+      browser_view->GetLocationBarView()->location_icon_view() : NULL;
+  bubble_ = new SpeechInputBubbleView(delegate_, icon, element_rect_,
+                                      tab_contents());
+  browser::CreateViewsBubble(bubble_);
   UpdateLayout();
-
-  views::Widget* toplevel_widget =
-      views::Widget::GetTopLevelWidgetForNativeView(
-          tab_contents()->view()->GetNativeView());
-  if (toplevel_widget) {
-    gfx::Rect container_rect;
-    tab_contents()->GetContainerBounds(&container_rect);
-    gfx::Rect target_rect = GetInfoBubbleTarget(element_rect_);
-    if (!container_rect.Contains(target_rect.x(), target_rect.y())) {
-      // Target is not in screen view, so point to page icon in omnibox.
-      Profile* profile =
-          Profile::FromBrowserContext(tab_contents()->browser_context());
-      Browser* browser = Browser::GetOrCreateTabbedBrowser(profile);
-      BrowserView* browser_view =
-          BrowserView::GetBrowserViewForBrowser(browser);
-      gfx::Point point;
-      if (base::i18n::IsRTL()) {
-        int width = browser_view->toolbar()->location_bar()->width();
-        point = gfx::Point(width - kIconHorizontalOffset, 0);
-      }
-      point.Offset(0, kIconVerticalOffset);
-      views::View::ConvertPointToScreen(browser_view->toolbar()->location_bar(),
-                                        &point);
-      target_rect =  browser_view->toolbar()->location_bar()->bounds();
-      target_rect.set_origin(point);
-      target_rect.set_width(kIconHorizontalOffset);
-    }
-    bubble_ = Bubble::Show(toplevel_widget,
-                           target_rect,
-                           views::BubbleBorder::TOP_LEFT, bubble_content_,
-                           this);
-    // We don't want fade outs when closing because it makes speech recognition
-    // appear slower than it is. Also setting it to false allows |Close| to
-    // destroy the bubble immediately instead of waiting for the fade animation
-    // to end so the caller can manage this object's life cycle like a normal
-    // stack based or member variable object.
-    bubble_->set_fade_away_on_close(false);
-  }
+  bubble_->Show();
 }
 
 void SpeechInputBubbleImpl::Hide() {
-  if (bubble_)
-    bubble_->Close();
+  if (bubble_) {
+    // Remove the observer to ignore deactivation when the bubble is explicitly
+    // closed, otherwise SpeechInputController::InfoBubbleFocusChanged fails.
+    bubble_->GetWidget()->RemoveObserver(bubble_);
+    bubble_->GetWidget()->Close();
+  }
+  bubble_ = NULL;
 }
 
 void SpeechInputBubbleImpl::UpdateLayout() {
-  if (bubble_content_)
-    bubble_content_->UpdateLayout(display_mode(), message_text(), icon_image());
-  if (bubble_)  // Will be null on first call.
-    bubble_->SizeToContents();
+  if (bubble_)
+    bubble_->UpdateLayout(display_mode(), message_text(), icon_image());
 }
 
 void SpeechInputBubbleImpl::UpdateImage() {
-  if (bubble_content_)
-    bubble_content_->SetImage(icon_image());
+  if (bubble_)
+    bubble_->SetImage(icon_image());
 }
 
 }  // namespace

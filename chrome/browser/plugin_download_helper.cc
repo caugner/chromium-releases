@@ -4,11 +4,11 @@
 
 #include "chrome/browser/plugin_download_helper.h"
 
-#if defined(OS_WIN) && !defined(USE_AURA)
 #include <windows.h>
 
 #include "base/file_util.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/io_buffer.h"
 
 PluginDownloadUrlHelper::PluginDownloadUrlHelper(
@@ -27,22 +27,23 @@ PluginDownloadUrlHelper::~PluginDownloadUrlHelper() {
 void PluginDownloadUrlHelper::InitiateDownload(
     net::URLRequestContextGetter* request_context,
     base::MessageLoopProxy* file_thread_proxy) {
-  download_file_fetcher_.reset(
-      new URLFetcher(GURL(download_url_), URLFetcher::GET, this));
-  download_file_fetcher_->set_request_context(request_context);
+  download_file_fetcher_.reset(content::URLFetcher::Create(
+      GURL(download_url_), content::URLFetcher::GET, this));
+  download_file_fetcher_->SetRequestContext(request_context);
   download_file_fetcher_->SaveResponseToTemporaryFile(file_thread_proxy);
   download_file_fetcher_->Start();
 }
 
-void PluginDownloadUrlHelper::OnURLFetchComplete(const URLFetcher* source) {
-  bool success = source->status().is_success();
+void PluginDownloadUrlHelper::OnURLFetchComplete(
+    const content::URLFetcher* source) {
+  bool success = source->GetStatus().is_success();
   FilePath response_file;
 
   if (success) {
     if (source->GetResponseAsFilePath(true, &response_file)) {
       FilePath new_download_file_path =
           response_file.DirName().AppendASCII(
-              download_file_fetcher_->url().ExtractFileName());
+              download_file_fetcher_->GetURL().ExtractFileName());
 
       file_util::Delete(new_download_file_path, false);
 
@@ -80,4 +81,3 @@ void PluginDownloadUrlHelper::OnURLFetchComplete(const URLFetcher* source) {
   delete this;
 }
 
-#endif  // defined(OS_WIN) && !defined(USE_AURA)

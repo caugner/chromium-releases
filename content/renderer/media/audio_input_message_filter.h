@@ -16,15 +16,15 @@
 #include "base/id_map.h"
 #include "base/shared_memory.h"
 #include "base/sync_socket.h"
+#include "content/common/content_export.h"
 #include "content/common/media/audio_stream_state.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "media/audio/audio_buffers_state.h"
 
-class MessageLoop;
-
-class AudioInputMessageFilter : public IPC::ChannelProxy::MessageFilter {
+class CONTENT_EXPORT AudioInputMessageFilter
+  : public IPC::ChannelProxy::MessageFilter {
  public:
-  class Delegate {
+  class CONTENT_EXPORT Delegate {
    public:
     // Called when a low-latency audio input stream has been created in the
     // browser process.
@@ -41,7 +41,7 @@ class AudioInputMessageFilter : public IPC::ChannelProxy::MessageFilter {
 
     // Called when the device referenced by the index has been started in
     // the browswer process.
-    virtual void OnDeviceReady(int index) = 0;
+    virtual void OnDeviceReady(const std::string& device_id) = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -61,10 +61,10 @@ class AudioInputMessageFilter : public IPC::ChannelProxy::MessageFilter {
 
  private:
   // IPC::ChannelProxy::MessageFilter override. Called on IO thread.
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void OnFilterAdded(IPC::Channel* channel);
-  virtual void OnFilterRemoved();
-  virtual void OnChannelClosing();
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void OnFilterAdded(IPC::Channel* channel) OVERRIDE;
+  virtual void OnFilterRemoved() OVERRIDE;
+  virtual void OnChannelClosing() OVERRIDE;
 
   // Received when browser process has created an audio input stream of low
   // latency.
@@ -84,7 +84,7 @@ class AudioInputMessageFilter : public IPC::ChannelProxy::MessageFilter {
   void OnStreamStateChanged(int stream_id, AudioStreamState state);
 
   // Notification of the opened device of an audio session.
-  void OnDeviceStarted(int stream_id, int index);
+  void OnDeviceStarted(int stream_id, const std::string& device_id);
 
   // A map of stream ids to delegates.
   IDMap<Delegate> delegates_;

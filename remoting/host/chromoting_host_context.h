@@ -7,17 +7,10 @@
 
 #include <string>
 
-#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "remoting/jingle_glue/jingle_thread.h"
-
-class Task;
-
-namespace tracked_objects {
-class Location;
-}
 
 namespace remoting {
 
@@ -26,7 +19,7 @@ namespace remoting {
 class ChromotingHostContext {
  public:
   // Create a context.
-  ChromotingHostContext(base::MessageLoopProxy* ui_message_loop);
+  explicit ChromotingHostContext(base::MessageLoopProxy* ui_message_loop);
   virtual ~ChromotingHostContext();
 
   // TODO(ajwong): Move the Start/Stop methods out of this class. Then

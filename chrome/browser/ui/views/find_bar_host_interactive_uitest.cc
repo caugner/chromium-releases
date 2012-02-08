@@ -16,12 +16,13 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_service.h"
 #include "net/test/test_server.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/focus/focus_manager.h"
-#include "views/view.h"
-#include "views/views_delegate.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/view.h"
+#include "ui/views/views_delegate.h"
 
 namespace {
 
@@ -163,7 +164,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
 
   // Open another tab (tab B).
   ui_test_utils::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+      content::NOTIFICATION_LOAD_STOP,
+      content::NotificationService::AllSources());
   browser()->AddSelectedTabWithURL(url, content::PAGE_TRANSITION_TYPED);
   observer.Wait();
 
@@ -332,7 +334,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_PasteWithoutTextChange) {
 
   // Press Ctrl-V to paste the content back, it should start finding even if the
   // content is not changed.
-  Source<TabContents> notification_source(browser()->GetSelectedTabContents());
+  content::Source<TabContents> notification_source(
+      browser()->GetSelectedTabContents());
   ui_test_utils::WindowedNotificationObserverWithDetails
       <FindNotificationDetails> observer(
           chrome::NOTIFICATION_FIND_RESULT_AVAILABLE, notification_source);

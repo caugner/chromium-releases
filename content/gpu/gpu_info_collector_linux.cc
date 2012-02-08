@@ -164,35 +164,11 @@ std::string CollectDriverVersionATI() {
   return "";
 }
 
-// Use glXGetClientString to get driver vendor.
-// Return "" on failing.
-std::string CollectDriverVendorGlx() {
-  // TODO(zmo): handle the EGL/GLES2 case.
-  if (gfx::GetGLImplementation() != gfx::kGLImplementationDesktopGL)
-    return "";
-  Display* display = XOpenDisplay(NULL);
-  if (display == NULL)
-    return "";
-  std::string vendor = glXGetClientString(display, GLX_VENDOR);
-  XCloseDisplay(display);
-  return vendor;
-}
-
-// Return 0 on unrecognized vendor.
-uint32 VendorStringToID(const std::string& vendor_string) {
-  if (StartsWithASCII(vendor_string, "NVIDIA", true))
-    return 0x10de;
-  if (StartsWithASCII(vendor_string, "ATI", true))
-    return 0x1002;
-  // TODO(zmo): find a way to identify Intel cards.
-  return 0;
-}
-
 }  // namespace anonymous
 
 namespace gpu_info_collector {
 
-bool CollectGraphicsInfo(GPUInfo* gpu_info) {
+bool CollectGraphicsInfo(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   if (CommandLine::ForCurrentProcess()->HasSwitch(
@@ -206,20 +182,7 @@ bool CollectGraphicsInfo(GPUInfo* gpu_info) {
   }
 
   gpu_info->finalized = true;
-  return CollectGraphicsInfoGL(gpu_info);
-}
-
-bool CollectPreliminaryGraphicsInfo(GPUInfo* gpu_info) {
-  DCHECK(gpu_info);
-
-  if (!gfx::GLSurface::InitializeOneOff()) {
-    LOG(ERROR) << "gfx::GLContext::InitializeOneOff() failed";
-    return false;
-  }
-
-  bool rt = true;
-  if (!CollectVideoCardInfo(gpu_info))
-    rt = false;
+  bool rt = CollectGraphicsInfoGL(gpu_info);
 
   if (gpu_info->vendor_id == 0x1002) {  // ATI
     std::string ati_driver_version = CollectDriverVersionATI();
@@ -232,16 +195,14 @@ bool CollectPreliminaryGraphicsInfo(GPUInfo* gpu_info) {
   return rt;
 }
 
-bool CollectVideoCardInfo(GPUInfo* gpu_info) {
+bool CollectPreliminaryGraphicsInfo(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
-  std::string driver_vendor = CollectDriverVendorGlx();
-  if (!driver_vendor.empty()) {
-    gpu_info->driver_vendor = driver_vendor;
-    uint32 vendor_id = VendorStringToID(driver_vendor);
-    if (vendor_id != 0)
-      gpu_info->vendor_id = vendor_id;
-  }
+  return CollectVideoCardInfo(gpu_info);
+}
+
+bool CollectVideoCardInfo(content::GPUInfo* gpu_info) {
+  DCHECK(gpu_info);
 
   if (IsPciSupported() == false) {
     VLOG(1) << "PCI bus scanning is not supported";
@@ -332,7 +293,7 @@ bool CollectVideoCardInfo(GPUInfo* gpu_info) {
   return (gpu_active != NULL);
 }
 
-bool CollectDriverInfoGL(GPUInfo* gpu_info) {
+bool CollectDriverInfoGL(content::GPUInfo* gpu_info) {
   DCHECK(gpu_info);
 
   std::string gl_version_string = gpu_info->gl_version_string;

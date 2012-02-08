@@ -49,10 +49,6 @@ class AutofillAgent : public content::RenderViewObserver,
                 PasswordAutofillManager* password_autofill_manager);
   virtual ~AutofillAgent();
 
-  // Called when the translate helper has finished translating the page.  We
-  // use this signal to re-scan the page for forms.
-  void FrameTranslated(WebKit::WebFrame* frame);
-
  private:
   enum AutofillAction {
     AUTOFILL_NONE,     // No state set.
@@ -72,6 +68,7 @@ class AutofillAgent : public content::RenderViewObserver,
   virtual bool InputElementClicked(const WebKit::WebInputElement& element,
                                    bool was_focused,
                                    bool is_focused) OVERRIDE;
+  virtual bool InputElementLostFocus() OVERRIDE;
 
   // WebKit::WebAutofillClient:
   virtual void didAcceptAutofillSuggestion(const WebKit::WebNode& node,
@@ -103,6 +100,9 @@ class AutofillAgent : public content::RenderViewObserver,
   void OnFormDataFilled(int query_id, const webkit_glue::FormData& form);
   void OnFieldTypePredictionsAvailable(
       const std::vector<webkit_glue::FormDataPredictions>& forms);
+
+  // For external Autofill selection.
+  void OnSelectAutofillSuggestionAtIndex(int listIndex);
 
   // Called in a posted task by textFieldDidChange() to work-around a WebKit bug
   // http://bugs.webkit.org/show_bug.cgi?id=16976

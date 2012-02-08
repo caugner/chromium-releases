@@ -6,6 +6,7 @@
 #define CHROME_RENDERER_CHROME_CONTENT_RENDERER_CLIENT_H_
 #pragma once
 
+#include <set>
 #include <string>
 
 #include "base/compiler_specific.h"
@@ -14,7 +15,9 @@
 #include "content/public/renderer/content_renderer_client.h"
 
 class ChromeRenderProcessObserver;
+class Extension;
 class ExtensionDispatcher;
+class ExtensionSet;
 class RendererHistogramSnapshots;
 class RendererNetPredictor;
 class SpellCheck;
@@ -88,7 +91,6 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
                                       const GURL& url,
                                       const GURL& first_party_for_cookies,
                                       const std::string& value) OVERRIDE;
-  virtual bool IsProtocolSupportedForMedia(const GURL& url) OVERRIDE;
 
   // TODO(mpcomplete): remove after we collect histogram data.
   // http://crbug.com/100411
@@ -96,6 +98,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   bool IsAdblockPlusInstalled();
   bool IsAdblockWithWebRequestInstalled();
   bool IsAdblockPlusWithWebRequestInstalled();
+  bool IsOtherExtensionWithWebRequestInstalled();
 
   // For testing.
   void SetExtensionDispatcher(ExtensionDispatcher* extension_dispatcher);
@@ -104,22 +107,21 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   // and start over.
   void OnPurgeMemory();
 
+  virtual void RegisterPPAPIInterfaceFactories(
+      webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) OVERRIDE;
+
+  virtual bool AllowSocketAPI(const GURL& url) OVERRIDE;
+
  private:
   WebKit::WebPlugin* CreatePlugin(
       content::RenderView* render_view,
       WebKit::WebFrame* frame,
       const WebKit::WebPluginParams& params);
 
-  WebKit::WebPlugin* CreatePluginPlaceholder(
-      content::RenderView* render_view,
-      WebKit::WebFrame* frame,
-      const webkit::WebPluginInfo& plugin,
-      const WebKit::WebPluginParams& params,
-      const webkit::npapi::PluginGroup* group,
-      int resource_id,
-      int message_id,
-      bool is_blocked_for_prerendering,
-      bool allow_loading);
+  // Returns the extension for the given URL.  Excludes extension objects for
+  // bookmark apps, which do not use the app process model.
+  const Extension* GetNonBookmarkAppExtension(const ExtensionSet* extensions,
+                                              const GURL& url);
 
   // Returns true if the frame is navigating to an URL either into or out of an
   // extension app's extent.
@@ -132,6 +134,7 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   bool IsNaClAllowed(const webkit::WebPluginInfo& plugin,
                      const GURL& url,
                      const std::string& actual_mime_type,
+                     bool is_nacl_mime_type,
                      bool enable_nacl,
                      WebKit::WebPluginParams& params);
 
@@ -145,6 +148,9 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   SpellCheckProvider* spellcheck_provider_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
+
+  // Set of origins that can use TCP/UDP private APIs from NaCl.
+  std::set<std::string> allowed_socket_origins_;
 };
 
 }  // namespace chrome

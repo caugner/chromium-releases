@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
@@ -14,8 +15,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/table_model_observer.h"
 
@@ -85,8 +86,8 @@ class KeywordEditorControllerTest : public testing::Test,
         prefs::kDefaultSearchProviderPrepopulateID, new StringValue(""));
     model_->Observe(
         chrome::NOTIFICATION_PREF_CHANGED,
-        Source<PrefService>(profile_->GetTestingPrefService()),
-        Details<std::string>(NULL));
+        content::Source<PrefService>(profile_->GetTestingPrefService()),
+        content::Details<std::string>(NULL));
   }
 
   TemplateURLTableModel* table_model() const {

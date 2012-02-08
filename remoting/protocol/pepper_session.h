@@ -5,6 +5,7 @@
 #ifndef REMOTING_PROTOCOL_PEPPER_SESSION_H_
 #define REMOTING_PROTOCOL_PEPPER_SESSION_H_
 
+#include <list>
 #include <map>
 #include <string>
 
@@ -17,16 +18,9 @@
 #include "remoting/protocol/session_config.h"
 
 namespace net {
-class CertVerifier;
-class ClientSocketFactory;
 class Socket;
 class StreamSocket;
-class X509Certificate;
 }  // namespace net
-
-namespace pp {
-class Instance;
-}  // namespace pp
 
 namespace remoting {
 
@@ -34,9 +28,9 @@ class IqRequest;
 
 namespace protocol {
 
+class Authenticator;
 class PepperChannel;
 class PepperSessionManager;
-class SocketWrapper;
 
 // Implements the protocol::Session interface using the Pepper P2P
 // Transport API. Created by PepperSessionManager for incoming and
@@ -55,18 +49,11 @@ class PepperSession : public Session {
   virtual void CreateDatagramChannel(
       const std::string& name,
       const DatagramChannelCallback& callback) OVERRIDE;
-  virtual net::Socket* control_channel() OVERRIDE;
-  virtual net::Socket* event_channel() OVERRIDE;
+  virtual void CancelChannelCreation(const std::string& name) OVERRIDE;
   virtual const std::string& jid() OVERRIDE;
   virtual const CandidateSessionConfig* candidate_config() OVERRIDE;
   virtual const SessionConfig& config() OVERRIDE;
   virtual void set_config(const SessionConfig& config) OVERRIDE;
-  virtual const std::string& initiator_token() OVERRIDE;
-  virtual void set_initiator_token(const std::string& initiator_token) OVERRIDE;
-  virtual const std::string& receiver_token() OVERRIDE;
-  virtual void set_receiver_token(const std::string& receiver_token) OVERRIDE;
-  virtual void set_shared_secret(const std::string& secret) OVERRIDE;
-  virtual const std::string& shared_secret() OVERRIDE;
   virtual void Close() OVERRIDE;
 
  private:
@@ -75,12 +62,11 @@ class PepperSession : public Session {
 
   typedef std::map<std::string, PepperChannel*> ChannelsMap;
 
-  PepperSession(PepperSessionManager* session_manager);
+  explicit PepperSession(PepperSessionManager* session_manager);
 
   // Start cs connection by sending session-initiate message.
   void StartConnection(const std::string& peer_jid,
-                       const std::string& peer_public_key,
-                       const std::string& client_token,
+                       Authenticator* authenticator,
                        CandidateSessionConfig* config,
                        const StateChangeCallback& state_change_callback);
 
@@ -108,12 +94,7 @@ class PepperSession : public Session {
   void OnDeleteChannel(PepperChannel* channel);
 
   void SendTransportInfo();
-
-  // Helper methods to create event and control channels.
-  // TODO(sergeyu): Remove these methods.
-  void CreateChannels();
-  void OnChannelConnected(scoped_ptr<net::Socket>* socket_container,
-                          net::StreamSocket* socket);
+  void OnTransportInfoResponse(const buzz::XmlElement* response);
 
   // Close all the channels and terminate the session.
   void CloseInternal(bool failed);
@@ -123,7 +104,6 @@ class PepperSession : public Session {
 
   PepperSessionManager* session_manager_;
   std::string peer_jid_;
-  std::string peer_public_key_;
   scoped_ptr<CandidateSessionConfig> candidate_config_;
   StateChangeCallback state_change_callback_;
 
@@ -131,19 +111,14 @@ class PepperSession : public Session {
   State state_;
   Error error_;
 
-  std::string remote_cert_;
   SessionConfig config_;
 
-  std::string shared_secret_;
-  std::string initiator_token_;
-  std::string receiver_token_;
+  scoped_ptr<Authenticator> authenticator_;
 
   scoped_ptr<IqRequest> initiate_request_;
+  scoped_ptr<IqRequest> transport_info_request_;
 
   ChannelsMap channels_;
-
-  scoped_ptr<net::Socket> control_channel_socket_;
-  scoped_ptr<net::Socket> event_channel_socket_;
 
   base::OneShotTimer<PepperSession> transport_infos_timer_;
   std::list<cricket::Candidate> pending_candidates_;

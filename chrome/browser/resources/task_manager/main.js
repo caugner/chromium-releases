@@ -12,22 +12,25 @@ cr.addSingletonGetter(TaskManager);
  * @const
  */
 var DEFAULT_COLUMNS = [
-    ['title', 'PAGE_COLUMN', 300, true],
-    ['profileName', 'PROFILE_NAME_COLUMN', 120, false],
-    ['physicalMemory', 'PHYSICAL_MEM_COLUMN', 80, true],
-    ['sharedMemory', 'SHARED_MEM_COLUMN', 80, false],
-    ['privateMemory', 'PRIVATE_MEM_COLUMN', 80, false],
-    ['cpuUsage', 'CPU_COLUMN', 80, true],
-    ['networkUsage', 'NET_COLUMN', 85, true],
-    ['processId', 'PROCESS_ID_COLUMN', 100, false],
-    ['webCoreImageCacheSize', 'WEBCORE_IMAGE_CACHE_COLUMN', 120, false],
-    ['webCoreScriptsCacheSize', 'WEBCORE_SCRIPTS_CACHE_COLUMN', 120, false],
-    ['webCoreCSSCacheSize', 'WEBCORE_CSS_CACHE_COLUMN', 120, false],
-    ['fps', 'FPS_COLUMN', 50, true],
-    ['sqliteMemoryUsed', 'SQLITE_MEMORY_USED_COLUMN', 80, false],
-    ['goatsTeleported', 'GOATS_TELEPORTED_COLUMN', 80, false],
-    ['v8MemoryAllocatedSize', 'JAVASCRIPT_MEMORY_ALLOCATED_COLUMN', 120, false],
+    ['title', 'pageColumn', 300, true],
+    ['profileName', 'profileNameColumn', 120, false],
+    ['physicalMemory', 'physicalMemColumn', 80, true],
+    ['sharedMemory', 'sharedMemColumn', 80, false],
+    ['privateMemory', 'privateMemColumn', 80, false],
+    ['cpuUsage', 'cpuColumn', 80, true],
+    ['networkUsage', 'netColumn', 85, true],
+    ['processId', 'processIDColumn', 100, false],
+    ['webCoreImageCacheSize', 'webcoreImageCacheColumn', 120, false],
+    ['webCoreScriptsCacheSize', 'webcoreScriptsCacheColumn', 120, false],
+    ['webCoreCSSCacheSize', 'webcoreCSSCacheColumn', 120, false],
+    ['fps', 'fpsColumn', 50, true],
+    ['sqliteMemoryUsed', 'sqliteMemoryUsedColumn', 80, false],
+    ['goatsTeleported', 'goatsTeleportedColumn', 80, false],
+    ['v8MemoryAllocatedSize', 'javascriptMemoryAllocatedColumn', 120, false],
 ];
+
+var COMMAND_CONTEXTMENU_COLUMN_PREFIX = 'columnContextMenu';
+var COMMAND_CONTEXTMENU_TABLE_PREFIX = 'tableContextMenu';
 
 var localStrings = new LocalStrings();
 
@@ -40,6 +43,35 @@ TaskManager.prototype = {
     if (!this.disabled_) {
       this.disabled_ = true;
       this.disableTaskManager();
+    }
+  },
+
+  /**
+   * Handle selection change.
+   * This is also called when data of tasks are refleshed, even if selection
+   * has not been changed.
+   * @public
+   */
+  onSelectionChange: function () {
+    var sm = this.selectionModel_;
+    var dm = this.dataModel_;
+    var selectedIndexes = sm.selectedIndexes;
+    var is_end_process_enabled = true;
+    if (selectedIndexes.length == 0)
+      is_end_process_enabled = false;
+    for (var i = 0; i < selectedIndexes.length; i++) {
+      var index = selectedIndexes[i];
+      var task = dm.item(index);
+      if (task['type'] == 'BROWSER')
+        is_end_process_enabled = false;
+    }
+    if (this.is_end_process_enabled_ != is_end_process_enabled) {
+      if (is_end_process_enabled)
+        $('kill-process').removeAttribute("disabled");
+      else
+        $('kill-process').setAttribute("disabled", "true");
+
+      this.is_end_process_enabled_ = is_end_process_enabled;
     }
   },
 
@@ -59,6 +91,14 @@ TaskManager.prototype = {
   killProcess: function () {
     var selectedIndexes = this.selectionModel_.selectedIndexes;
     chrome.send('killProcess', selectedIndexes);
+  },
+
+  /**
+   * Sends command to initiate resource inspection.
+   * @public
+   */
+  inspect: function (uniqueId) {
+    chrome.send('inspect', [uniqueId]);
   },
 
   /**
@@ -83,6 +123,14 @@ TaskManager.prototype = {
    */
   enableTaskManager: function () {
     chrome.send('enableTaskManager');
+  },
+
+  /**
+   * Sends command to activate a page.
+   * @public
+   */
+  activatePage: function (uniqueId) {
+    chrome.send('activatePage', [uniqueId]);
   },
 
   /**
@@ -128,6 +176,9 @@ TaskManager.prototype = {
     this.selectionModel_ = new cr.ui.ListSelectionModel();
     this.dataModel_ = new cr.ui.ArrayDataModel([]);
 
+    this.selectionModel_.addEventListener('change',
+                                          this.onSelectionChange.bind(this));
+
     // Initializes compare functions for column sort.
     var dm = this.dataModel_;
     // Columns to sort by value instead of itself.
@@ -142,8 +193,11 @@ TaskManager.prototype = {
       var compare_func = function() {
           var value_id = column_id + 'Value';
           return function(a, b) {
-              return dm.defaultValuesCompareFunction(a[value_id][0],
-                                                     b[value_id][0]);
+              var aValues = a[value_id];
+              var bValues = b[value_id];
+              var aValue = aValues && aValues[0] || 0;
+              var bvalue = bValues && bValues[0] || 0;
+              return dm.defaultValuesCompareFunction(aValue, bvalue);
           };
       }();
       dm.setCompareFunction(column_id, compare_func);
@@ -158,6 +212,7 @@ TaskManager.prototype = {
 
     this.initTable_();
     this.initColumnMenu_();
+    this.initTableMenu_();
     this.table_.redraw();
   },
 
@@ -192,7 +247,7 @@ TaskManager.prototype = {
 
       // Creates command element to receive event.
       var command = this.document_.createElement('command');
-      command.id = 'columnContextMenu-' + column[0];
+      command.id = COMMAND_CONTEXTMENU_COLUMN_PREFIX + '-' + column[0];
       cr.ui.Command.decorate(command);
       this.column_menu_commands_[command.id] = command;
       this.commandsElement_.appendChild(command);
@@ -213,10 +268,41 @@ TaskManager.prototype = {
     cr.ui.contextMenuHandler.addContextMenuProperty(this.table_.header);
     this.table_.header.contextMenu = this.columnSelectContextMenu_;
 
+    cr.ui.contextMenuHandler.addContextMenuProperty(this.table_.list);
+    this.table_.list.contextMenu = this.columnSelectContextMenu_;
+
     this.document_.addEventListener('command', this.onCommand_.bind(this));
     this.document_.addEventListener('canExecute',
                                     this.onCommandCanExecute_.bind(this));
 
+  },
+
+  initTableMenu_: function () {
+    this.table_menu_commands_ = [];
+    this.tableContextMenu_ = this.document_.createElement('menu');
+
+    var addMenuItem = function (tm, command_id, string_id, default_label) {
+      // Creates command element to receive event.
+      var command = tm.document_.createElement('command');
+      command.id = COMMAND_CONTEXTMENU_TABLE_PREFIX + '-' + command_id;
+      cr.ui.Command.decorate(command);
+      tm.table_menu_commands_[command.id] = command;
+      tm.commandsElement_.appendChild(command);
+
+      // Creates menuitem element.
+      var item = tm.document_.createElement('menuitem');
+      item.command = command;
+      command.menuitem = item;
+      var localized_label = localStrings.getString(string_id);
+      item.textContent = localized_label || default_label;
+      tm.tableContextMenu_.appendChild(item);
+    };
+
+    addMenuItem(this, 'inspect', 'inspect', "Inspect");
+    addMenuItem(this, 'activate', 'activate', "Activate");
+
+    this.document_.body.appendChild(this.tableContextMenu_);
+    cr.ui.Menu.decorate(this.tableContextMenu_);
   },
 
   initTable_: function () {
@@ -235,6 +321,10 @@ TaskManager.prototype = {
     // Expands height of row when a process has some tasks.
     this.table_.autoExpands = true;
 
+    this.table_.list.addEventListener('contextmenu',
+                                      this.onTableContextMenuOpened_.bind(this),
+                                      true);
+
     // Sets custom row render function.
     this.table_.setRenderFunction(this.renderRow_.bind(this));
   },
@@ -244,7 +334,7 @@ TaskManager.prototype = {
     var listItem = new cr.ui.ListItem({label: ''});
 
     listItem.className = 'table-row';
-    if (this.opt_.isBackgroundMode_ && dataItem.isBackgroundResource)
+    if (this.opt_.isBackgroundMode && dataItem.isBackgroundResource)
       listItem.className += ' table-background-row';
 
     for (var i = 0; i < cm.size; i++) {
@@ -256,6 +346,7 @@ TaskManager.prototype = {
 
       listItem.appendChild(cell);
     }
+    listItem.data = dataItem;
 
     return listItem;
   },
@@ -277,6 +368,16 @@ TaskManager.prototype = {
           text.className = 'detail-title-text';
           text.textContent = entry['title'][i];
           label.appendChild(text);
+
+          cr.ui.contextMenuHandler.addContextMenuProperty(label);
+          label.contextMenu = this.tableContextMenu_;
+
+          label.addEventListener('dblclick', (function(uniqueId) {
+              this.activatePage(uniqueId);
+          }).bind(this, entry['uniqueId'][i]));
+
+          label.data = entry;
+          label.index_in_group = i;
         } else {
           label.textContent = entry[columnId][i];
         }
@@ -329,14 +430,70 @@ TaskManager.prototype = {
    */
   onCommand_: function(event) {
     var command = event.command;
-    if (command.id.substr(0, 18) == 'columnContextMenu-') {
-      console.log(command.id.substr(18));
-      this.onColumnContextMenu_(command.id.substr(18), command);
+    var command_id = command.id.split('-', 2);
+
+    var main_command = command_id[0];
+    var sub_command = command_id[1];
+
+    if (main_command == COMMAND_CONTEXTMENU_COLUMN_PREFIX) {
+      this.onColumnContextMenu_(sub_command, command);
+    } else if (main_command == COMMAND_CONTEXTMENU_TABLE_PREFIX) {
+      var target_unique_id = this.currentContextMenuTarget_;
+
+      if (!target_unique_id)
+        return;
+
+      if (sub_command == 'inspect')
+        this.inspect(target_unique_id);
+      else if (sub_command == 'activate')
+        this.activatePage(target_unique_id);
+
+      this.currentContextMenuTarget_ = undefined;
     }
   },
 
   onCommandCanExecute_: function(event) {
     event.canExecute = true;
+  },
+
+  /**
+   * Store resourceIndex of target resource of context menu, because resource
+   * will be replaced when it is refleshed.
+   */
+  onTableContextMenuOpened_: function (e) {
+    var mc = this.table_menu_commands_;
+    var inspect_menuitem =
+        mc[COMMAND_CONTEXTMENU_TABLE_PREFIX + '-inspect'].menuitem;
+    var activate_menuitem =
+        mc[COMMAND_CONTEXTMENU_TABLE_PREFIX + '-activate'].menuitem;
+
+    // Disabled by default.
+    inspect_menuitem.disabled = true;
+    activate_menuitem.disabled = true;
+
+    var target = e.target;
+    var classes = target.classList;
+    while (target &&
+        Array.prototype.indexOf.call(classes, 'detail-title') == -1) {
+      target = target.parentNode;
+      classes = target.classList;
+    }
+
+    if (!target)
+      return;
+
+    var index_in_group = target.index_in_group;
+
+    // Sets the uniqueId for current target page under the mouse corsor.
+    this.currentContextMenuTarget_ = target.data['uniqueId'][index_in_group];
+
+    // Enables if the page can be inspected.
+    if (target.data['canInspect'][index_in_group])
+      inspect_menuitem.disabled = false;
+
+    // Enables if the page can be activated.
+    if (target.data['canActivate'][index_in_group])
+      activate_menuitem.disabled = false;
   },
 
   onColumnContextMenu_: function(id, command) {

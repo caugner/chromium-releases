@@ -5,23 +5,26 @@
 #include "base/compiler_specific.h"
 #include "base/stl_util.h"
 #include "base/string16.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/mock_content_browser_client.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/empty_web_ui_factory.h"
-#include "content/common/content_client.h"
-#include "content/common/content_constants.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
 #include "content/test/test_browser_context.h"
 #include "googleurl/src/url_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
+using content::BrowserThreadImpl;
 
 namespace {
 
@@ -43,12 +46,7 @@ class SiteInstanceTestWebUIFactory : public content::EmptyWebUIFactory {
 class SiteInstanceTestBrowserClient : public content::MockContentBrowserClient {
  public:
   SiteInstanceTestBrowserClient()
-      : old_browser_client_(NULL),
-        privileged_process_id_(-1) {
-  }
-
-  virtual TabContentsView* CreateTabContentsView(TabContents* tab_contents) {
-    return old_browser_client_->CreateTabContentsView(tab_contents);
+      : privileged_process_id_(-1) {
   }
 
   virtual content::WebUIFactory* GetWebUIFactory() OVERRIDE {
@@ -65,28 +63,18 @@ class SiteInstanceTestBrowserClient : public content::MockContentBrowserClient {
            url == GURL(chrome::kAboutCrashURL);
   }
 
-  virtual bool IsSuitableHost(RenderProcessHost* process_host,
+  virtual bool IsSuitableHost(content::RenderProcessHost* process_host,
                               const GURL& site_url) OVERRIDE {
-    return (privileged_process_id_ == process_host->id()) ==
+    return (privileged_process_id_ == process_host->GetID()) ==
         site_url.SchemeIs(kPrivilegedScheme);
   }
 
-  virtual GURL GetEffectiveURL(content::BrowserContext* browser_context,
-                               const GURL& url) OVERRIDE {
-    return url;
-  }
-
-  void SetOriginalClient(content::ContentBrowserClient* old_browser_client) {
-    old_browser_client_ = old_browser_client;
-  }
-
-  void SetPrivilegedProcessId(int process_id) {
+  void set_privileged_process_id(int process_id) {
     privileged_process_id_ = process_id;
   }
 
  private:
   SiteInstanceTestWebUIFactory factory_;
-  content::ContentBrowserClient* old_browser_client_;
   int privileged_process_id_;
 };
 
@@ -99,7 +87,6 @@ class SiteInstanceTest : public testing::Test {
 
   virtual void SetUp() {
     old_browser_client_ = content::GetContentClient()->browser();
-    browser_client_.SetOriginalClient(old_browser_client_);
     content::GetContentClient()->set_browser(&browser_client_);
     url_util::AddStandardScheme(kPrivilegedScheme);
     url_util::AddStandardScheme(chrome::kChromeUIScheme);
@@ -109,13 +96,13 @@ class SiteInstanceTest : public testing::Test {
     content::GetContentClient()->set_browser(old_browser_client_);
   }
 
-  void SetPrivilegedProcessId(int process_id) {
-    browser_client_.SetPrivilegedProcessId(process_id);
+  void set_privileged_process_id(int process_id) {
+    browser_client_.set_privileged_process_id(process_id);
   }
 
  private:
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  BrowserThreadImpl ui_thread_;
 
   SiteInstanceTestBrowserClient browser_client_;
   content::ContentBrowserClient* old_browser_client_;
@@ -186,7 +173,8 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
                                                &browsingDeleteCounter);
   EXPECT_EQ(0, siteDeleteCounter);
 
-  NavigationEntry* e1 = new NavigationEntry(instance, 0, url, GURL(),
+  NavigationEntry* e1 = new NavigationEntry(instance, 0, url,
+                                            content::Referrer(),
                                             string16(),
                                             content::PAGE_TRANSITION_LINK,
                                             false);
@@ -197,7 +185,7 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
 
   // Add a second reference
   NavigationEntry* e2 = new NavigationEntry(instance, 0, url,
-                                            GURL(), string16(),
+                                            content::Referrer(), string16(),
                                             content::PAGE_TRANSITION_LINK,
                                             false);
 
@@ -252,8 +240,8 @@ TEST_F(SiteInstanceTest, CloneNavigationEntry) {
       TestSiteInstance::CreateTestSiteInstance(NULL, &siteDeleteCounter2,
                                                &browsingDeleteCounter);
 
-  NavigationEntry* e1 = new NavigationEntry(instance1, 0, url, GURL(),
-                                            string16(),
+  NavigationEntry* e1 = new NavigationEntry(instance1, 0, url,
+                                            content::Referrer(), string16(),
                                             content::PAGE_TRANSITION_LINK,
                                             false);
   // Clone the entry
@@ -292,7 +280,7 @@ TEST_F(SiteInstanceTest, UpdateMaxPageID) {
 TEST_F(SiteInstanceTest, GetProcess) {
   // Ensure that GetProcess returns a process.
   scoped_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
-  scoped_ptr<RenderProcessHost> host1;
+  scoped_ptr<content::RenderProcessHost> host1;
   scoped_refptr<SiteInstance> instance(
       SiteInstance::CreateSiteInstance(browser_context.get()));
   host1.reset(instance->GetProcess());
@@ -301,7 +289,7 @@ TEST_F(SiteInstanceTest, GetProcess) {
   // Ensure that GetProcess creates a new process.
   scoped_refptr<SiteInstance> instance2(
       SiteInstance::CreateSiteInstance(browser_context.get()));
-  scoped_ptr<RenderProcessHost> host2(instance2->GetProcess());
+  scoped_ptr<content::RenderProcessHost> host2(instance2->GetProcess());
   EXPECT_TRUE(host2.get() != NULL);
   EXPECT_NE(host1.get(), host2.get());
 }
@@ -511,8 +499,8 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
   // browsing_instances will be deleted when their SiteInstances are deleted
 }
 
-static SiteInstance* CreateSiteInstance(RenderProcessHostFactory* factory,
-                                        const GURL& url) {
+static SiteInstance* CreateSiteInstance(
+    content::RenderProcessHostFactory* factory, const GURL& url) {
   SiteInstance* instance = SiteInstance::CreateSiteInstanceForURL(NULL, url);
   instance->set_render_process_host_factory(factory);
   return instance;
@@ -534,13 +522,13 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   scoped_refptr<SiteInstance> extension1_instance(
       CreateSiteInstance(&rph_factory,
       GURL(kPrivilegedScheme + std::string("://foo/bar"))));
-  SetPrivilegedProcessId(extension1_instance->GetProcess()->id());
+  set_privileged_process_id(extension1_instance->GetProcess()->GetID());
 
   scoped_refptr<SiteInstance> extension2_instance(
       CreateSiteInstance(&rph_factory,
       GURL(kPrivilegedScheme + std::string("://baz/bar"))));
 
-  scoped_ptr<RenderProcessHost> extension_host(
+  scoped_ptr<content::RenderProcessHost> extension_host(
       extension1_instance->GetProcess());
   EXPECT_EQ(extension1_instance->GetProcess(),
             extension2_instance->GetProcess());
@@ -548,12 +536,13 @@ TEST_F(SiteInstanceTest, ProcessSharingByType) {
   // Create some WebUI instances and make sure they share a process.
   scoped_refptr<SiteInstance> webui1_instance(CreateSiteInstance(&rph_factory,
       GURL(chrome::kChromeUIScheme + std::string("://newtab"))));
-  policy->GrantWebUIBindings(webui1_instance->GetProcess()->id());
+  policy->GrantWebUIBindings(webui1_instance->GetProcess()->GetID());
 
   scoped_refptr<SiteInstance> webui2_instance( CreateSiteInstance(&rph_factory,
       GURL(chrome::kChromeUIScheme + std::string("://history"))));
 
-  scoped_ptr<RenderProcessHost> dom_host(webui1_instance->GetProcess());
+  scoped_ptr<content::RenderProcessHost> dom_host(
+      webui1_instance->GetProcess());
   EXPECT_EQ(webui1_instance->GetProcess(), webui2_instance->GetProcess());
 
   // Make sure none of differing privilege processes are mixed.

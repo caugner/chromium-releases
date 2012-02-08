@@ -13,7 +13,7 @@
 #include "chrome/browser/webdata/token_service_table.h"
 #include "chrome/browser/webdata/web_apps_table.h"
 #include "chrome/browser/webdata/web_intents_table.h"
-#include "content/common/notification_service.h"
+#include "content/browser/notification_service_impl.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -22,8 +22,8 @@ namespace {
 // Current version number.  Note: when changing the current version number,
 // corresponding changes must happen in the unit tests, and new migration test
 // added.  See |WebDatabaseMigrationTest::kCurrentTestedVersionNumber|.
-const int kCurrentVersionNumber = 40;
-const int kCompatibleVersionNumber = 40;
+const int kCurrentVersionNumber = 42;
+const int kCompatibleVersionNumber = 42;
 
 // Change the version number and possibly the compatibility version of
 // |meta_table_|.
@@ -91,8 +91,8 @@ sql::Connection* WebDatabase::GetSQLConnection() {
 sql::InitStatus WebDatabase::Init(const FilePath& db_name) {
   // When running in unit tests, there is already a NotificationService object.
   // Since only one can exist at a time per thread, check first.
-  if (!NotificationService::current())
-    notification_service_.reset(new NotificationService);
+  if (!content::NotificationService::current())
+    notification_service_.reset(new NotificationServiceImpl);
 
   // Set the exceptional sqlite error handler.
   db_.set_error_delegate(GetErrorHandlerForWebDb());
@@ -305,10 +305,25 @@ sql::InitStatus WebDatabase::MigrateOldVersionsAsNeeded() {
       // FALL THROUGH
 
     case 39:
-      if (!keyword_table_->MigrateToVersion40AddDefaultSearchEngineBackup())
+      if (!keyword_table_->MigrateToVersion40AddDefaultSearchProviderBackup())
         return FailedMigrationTo(40);
 
       ChangeVersion(&meta_table_, 40, true);
+      // FALL THROUGH
+
+    case 40:
+      if (!keyword_table_->
+              MigrateToVersion41RewriteDefaultSearchProviderBackup())
+        return FailedMigrationTo(41);
+
+      ChangeVersion(&meta_table_, 41, true);
+      // FALL THROUGH
+
+    case 41:
+      if (!keyword_table_->MigrateToVersion42AddKeywordsBackupTable())
+        return FailedMigrationTo(42);
+
+      ChangeVersion(&meta_table_, 42, true);
       // FALL THROUGH
 
     // Add successive versions here.  Each should set the version number and

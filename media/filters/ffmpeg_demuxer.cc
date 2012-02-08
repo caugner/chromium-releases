@@ -73,6 +73,7 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
       break;
     case AVMEDIA_TYPE_VIDEO:
       type_ = VIDEO;
+      AVStreamToVideoDecoderConfig(stream, &video_config_);
       break;
     default:
       NOTREACHED();
@@ -254,13 +255,14 @@ void FFmpegDemuxerStream::EnableBitstreamConverter() {
   }
 }
 
-AVStream* FFmpegDemuxerStream::GetAVStream() {
-  return stream_;
-}
-
 const AudioDecoderConfig& FFmpegDemuxerStream::audio_decoder_config() {
   CHECK_EQ(type_, AUDIO);
   return audio_config_;
+}
+
+const VideoDecoderConfig& FFmpegDemuxerStream::video_decoder_config() {
+  CHECK_EQ(type_, VIDEO);
+  return video_config_;
 }
 
 // static
@@ -275,8 +277,9 @@ base::TimeDelta FFmpegDemuxerStream::ConvertStreamTimestamp(
 //
 // FFmpegDemuxer
 //
-FFmpegDemuxer::FFmpegDemuxer(MessageLoop* message_loop)
+FFmpegDemuxer::FFmpegDemuxer(MessageLoop* message_loop, bool local_source)
     : message_loop_(message_loop),
+      local_source_(local_source),
       format_context_(NULL),
       read_event_(false, false),
       read_has_failed_(false),
@@ -368,7 +371,7 @@ base::TimeDelta FFmpegDemuxer::GetStartTime() const {
   return start_time_;
 }
 
-int FFmpegDemuxer::Read(int size, uint8* data) {
+size_t FFmpegDemuxer::Read(size_t size, uint8* data) {
   DCHECK(data_source_);
 
   // If read has ever failed, return with an error.
@@ -479,20 +482,12 @@ void FFmpegDemuxer::InitializeTask(DataSource* data_source,
   // Create demuxer streams for all supported streams.
   streams_.resize(DemuxerStream::NUM_TYPES);
   base::TimeDelta max_duration;
-  const bool kDemuxerIsWebm = !strcmp("webm", format_context_->iformat->name);
   bool no_supported_streams = true;
   for (size_t i = 0; i < format_context_->nb_streams; ++i) {
     AVCodecContext* codec_context = format_context_->streams[i]->codec;
     AVMediaType codec_type = codec_context->codec_type;
     if (codec_type == AVMEDIA_TYPE_AUDIO || codec_type == AVMEDIA_TYPE_VIDEO) {
       AVStream* stream = format_context_->streams[i];
-      // WebM is currently strictly VP8 and Vorbis.
-      if (kDemuxerIsWebm && (stream->codec->codec_id != CODEC_ID_VP8 &&
-                             stream->codec->codec_id != CODEC_ID_VORBIS)) {
-        packet_streams_.push_back(NULL);
-        continue;
-      }
-
       scoped_refptr<FFmpegDemuxerStream> demuxer_stream(
           new FFmpegDemuxerStream(this, stream));
       if (!streams_[demuxer_stream->type()]) {
@@ -575,6 +570,14 @@ int FFmpegDemuxer::GetBitrate() {
 
   // Bitrate could not be determined.
   return 0;
+}
+
+bool FFmpegDemuxer::IsLocalSource() {
+  return local_source_;
+}
+
+bool FFmpegDemuxer::IsSeekable() {
+  return !IsStreaming();
 }
 
 void FFmpegDemuxer::SeekTask(base::TimeDelta time, const FilterStatusCB& cb) {
@@ -692,8 +695,7 @@ void FFmpegDemuxer::DisableAudioStreamTask() {
     // If the codec type is audio, remove the reference. DemuxTask() will
     // look for such reference, and this will result in deleting the
     // audio packets after they are demuxed.
-    if (packet_streams_[i]->GetAVStream()->codec->codec_type ==
-        AVMEDIA_TYPE_AUDIO) {
+    if (packet_streams_[i]->type() == DemuxerStream::AUDIO) {
       packet_streams_[i] = NULL;
     }
   }

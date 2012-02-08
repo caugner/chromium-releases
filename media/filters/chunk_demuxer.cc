@@ -11,8 +11,10 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "media/base/audio_decoder_config.h"
 #include "media/base/filter_host.h"
 #include "media/base/data_buffer.h"
+#include "media/base/video_decoder_config.h"
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/chunk_demuxer_client.h"
 #include "media/filters/ffmpeg_glue.h"
@@ -29,8 +31,8 @@ namespace media {
 // we are making the INFO & TRACKS data look like a small WebM
 // file so we can use FFmpeg to initialize the AVFormatContext.
 //
-// TODO(acolwell): Remove this once GetAVStream() has been removed from
-// the DemuxerStream interface.
+// TODO(acolwell): Remove this when we construct AudioDecoderConfig and
+// VideoDecoderConfig without requiring an AVStream object.
 static const uint8 kWebMHeader[] = {
   0x1A, 0x45, 0xDF, 0xA3, 0x9F,  // EBML (size = 0x1f)
   0x42, 0x86, 0x81, 0x01,  // EBMLVersion = 1
@@ -79,13 +81,14 @@ class ChunkDemuxerStream : public DemuxerStream {
   virtual void Read(const ReadCallback& read_callback);
   virtual Type type();
   virtual void EnableBitstreamConverter();
-  virtual AVStream* GetAVStream();
   virtual const AudioDecoderConfig& audio_decoder_config();
+  virtual const VideoDecoderConfig& video_decoder_config();
 
  private:
   Type type_;
   AVStream* av_stream_;
   AudioDecoderConfig audio_config_;
+  VideoDecoderConfig video_config_;
 
   mutable base::Lock lock_;
   ReadCBQueue read_cbs_;
@@ -109,6 +112,8 @@ ChunkDemuxerStream::ChunkDemuxerStream(Type type, AVStream* stream)
       last_buffer_timestamp_(kNoTimestamp) {
   if (type_ == AUDIO) {
     AVCodecContextToAudioDecoderConfig(stream->codec, &audio_config_);
+  } else if (type_ == VIDEO) {
+    AVStreamToVideoDecoderConfig(stream, &video_config_);
   }
 }
 
@@ -219,11 +224,10 @@ bool ChunkDemuxerStream::GetLastBufferTimestamp(
 // Helper function that makes sure |read_callback| runs on |message_loop|.
 static void RunOnMessageLoop(const DemuxerStream::ReadCallback& read_callback,
                              MessageLoop* message_loop,
-                             Buffer* buffer) {
+                             const scoped_refptr<Buffer>& buffer) {
   if (MessageLoop::current() != message_loop) {
     message_loop->PostTask(FROM_HERE, base::Bind(
-        &RunOnMessageLoop, read_callback, message_loop,
-        scoped_refptr<Buffer>(buffer)));
+        &RunOnMessageLoop, read_callback, message_loop, buffer));
     return;
   }
 
@@ -271,11 +275,14 @@ DemuxerStream::Type ChunkDemuxerStream::type() { return type_; }
 
 void ChunkDemuxerStream::EnableBitstreamConverter() {}
 
-AVStream* ChunkDemuxerStream::GetAVStream() { return av_stream_; }
-
 const AudioDecoderConfig& ChunkDemuxerStream::audio_decoder_config() {
   CHECK_EQ(type_, AUDIO);
   return audio_config_;
+}
+
+const VideoDecoderConfig& ChunkDemuxerStream::video_decoder_config() {
+  CHECK_EQ(type_, VIDEO);
+  return video_config_;
 }
 
 ChunkDemuxer::ChunkDemuxer(ChunkDemuxerClient* client)
@@ -317,6 +324,7 @@ void ChunkDemuxer::Init(const PipelineStatusCB& cb) {
 }
 
 void ChunkDemuxer::set_host(FilterHost* filter_host) {
+  DCHECK_EQ(state_, INITIALIZED);
   Demuxer::set_host(filter_host);
   filter_host->SetDuration(duration_);
   filter_host->SetCurrentReadPosition(0);
@@ -355,6 +363,21 @@ void ChunkDemuxer::OnAudioRendererDisabled() {
 }
 
 void ChunkDemuxer::SetPreload(Preload preload) {}
+
+int ChunkDemuxer::GetBitrate() {
+  // TODO(acolwell): Implement bitrate reporting.
+  return 0;
+}
+
+bool ChunkDemuxer::IsLocalSource() {
+  // TODO(acolwell): Report whether source is local or not.
+  return false;
+}
+
+bool ChunkDemuxer::IsSeekable() {
+  // TODO(acolwell): Report whether source is seekable or not.
+  return true;
+}
 
 // Demuxer implementation.
 scoped_refptr<DemuxerStream> ChunkDemuxer::GetStream(
@@ -570,8 +593,41 @@ int ChunkDemuxer::ParseInfoAndTracks_Locked(const uint8* data, int size) {
   const uint8* cur = data;
   int cur_size = size;
   int bytes_parsed = 0;
+
+  int id;
+  int64 element_size;
+  int result = WebMParseElementHeader(cur, cur_size, &id, &element_size);
+
+  if (result <= 0)
+    return result;
+
+  switch (id) {
+    case kWebMIdEBML :
+    case kWebMIdSeekHead :
+    case kWebMIdVoid :
+    case kWebMIdCRC32 :
+    case kWebMIdCues :
+      if (cur_size < (result + element_size)) {
+        // We don't have the whole element yet. Signal we need more data.
+        return 0;
+      }
+      // Skip the element.
+      return result + element_size;
+      break;
+    case kWebMIdSegment :
+      // Just consume the segment header.
+      return result;
+      break;
+    case kWebMIdInfo :
+      // We've found the element we are looking for.
+      break;
+    default:
+      VLOG(1) << "Unexpected ID 0x" << std::hex << id;
+      return -1;
+  }
+
   WebMInfoParser info_parser;
-  int result = info_parser.Parse(cur, cur_size);
+  result = info_parser.Parse(cur, cur_size);
 
   if (result <= 0)
     return result;
@@ -678,6 +734,25 @@ int ChunkDemuxer::ParseCluster_Locked(const uint8* data, int size) {
   lock_.AssertAcquired();
   if (!cluster_parser_.get())
     return -1;
+
+  int id;
+  int64 element_size;
+  int result = WebMParseElementHeader(data, size, &id, &element_size);
+
+  if (result <= 0)
+    return result;
+
+  if (id == kWebMIdCues) {
+    if (size < (result + element_size)) {
+      // We don't have the whole element yet. Signal we need more data.
+      return 0;
+    }
+    // Skip the element.
+    return result + element_size;
+  } else if (id != kWebMIdCluster) {
+    VLOG(1) << "Unexpected ID 0x" << std::hex << id;
+    return -1;
+  }
 
   int bytes_parsed = cluster_parser_->Parse(data, size);
 

@@ -11,10 +11,11 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "chrome/common/content_settings_types.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "views/controls/button/button.h"
-#include "views/controls/link_listener.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "ui/views/bubble/bubble_delegate.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/link_listener.h"
 
 // ContentSettingBubbleContents is used when the user turns on different kinds
 // of content blocking (e.g. "block images").  When viewing a page with blocked
@@ -26,7 +27,6 @@
 // get to a more comprehensive settings management dialog.  A few types have
 // more or fewer controls than this.
 
-class Bubble;
 class ContentSettingBubbleModel;
 class Profile;
 class TabContents;
@@ -36,43 +36,44 @@ class TextButton;
 class RadioButton;
 }
 
-class ContentSettingBubbleContents : public views::View,
+class ContentSettingBubbleContents : public views::BubbleDelegateView,
                                      public views::ButtonListener,
                                      public views::LinkListener,
-                                     public NotificationObserver {
+                                     public content::NotificationObserver {
  public:
   ContentSettingBubbleContents(
       ContentSettingBubbleModel* content_setting_bubble_model,
-      Profile* profile, TabContents* tab_contents);
+      Profile* profile,
+      TabContents* tab_contents,
+      views::View* anchor_view,
+      views::BubbleBorder::ArrowLocation arrow_location);
   virtual ~ContentSettingBubbleContents();
 
-  // Sets |bubble_|, so we can close the bubble if needed.  The caller owns
-  // the bubble and must keep it alive.
-  void set_bubble(Bubble* bubble) { bubble_ = bubble; }
+  virtual gfx::Size GetPreferredSize() OVERRIDE;
 
-  virtual gfx::Size GetPreferredSize();
+  // views::BubbleDelegateView:
+  virtual gfx::Rect GetAnchorRect() OVERRIDE;
+
+ protected:
+  // views::BubbleDelegateView:
+  virtual void Init() OVERRIDE;
 
  private:
   class Favicon;
 
   typedef std::map<views::Link*, int> PopupLinks;
 
-  // Overridden from views::View:
-  virtual void ViewHierarchyChanged(bool is_add, View* parent, View* child);
-
   // views::ButtonListener:
-  virtual void ButtonPressed(views::Button* sender, const views::Event& event);
+  virtual void ButtonPressed(views::Button* sender,
+                             const views::Event& event) OVERRIDE;
 
   // views::LinkListener:
   virtual void LinkClicked(views::Link* source, int event_flags) OVERRIDE;
 
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
-
-  // Creates the child views.
-  void InitControlLayout();
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Provides data for this bubble.
   scoped_ptr<ContentSettingBubbleModel> content_setting_bubble_model_;
@@ -84,10 +85,7 @@ class ContentSettingBubbleContents : public views::View,
   TabContents* tab_contents_;
 
   // A registrar for listening for TAB_CONTENTS_DESTROYED notifications.
-  NotificationRegistrar registrar_;
-
-  // The Bubble holding us.
-  Bubble* bubble_;
+  content::NotificationRegistrar registrar_;
 
   // Some of our controls, so we can tell what's been clicked when we get a
   // message.

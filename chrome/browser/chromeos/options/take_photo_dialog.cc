@@ -8,13 +8,13 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/layout/layout_constants.h"
+#include "ui/views/layout/layout_constants.h"
 
 namespace chromeos {
 
@@ -35,17 +35,16 @@ TakePhotoDialog::TakePhotoDialog(Delegate* delegate)
   registrar_.Add(
       this,
       chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
 }
 
 TakePhotoDialog::~TakePhotoDialog() {
 }
 
-bool TakePhotoDialog::IsDialogButtonEnabled(
-    MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_CANCEL)
+bool TakePhotoDialog::IsDialogButtonEnabled(ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_CANCEL)
     return true;
-  else if (button == MessageBoxFlags::DIALOGBUTTON_OK)
+  else if (button == ui::DIALOG_BUTTON_OK)
     return !take_photo_view_->is_capturing();
   NOTREACHED();
   return false;
@@ -139,12 +138,12 @@ void TakePhotoDialog::NotifyOnCapturingStopped() {
 }
 
 void TakePhotoDialog::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   if (type != chrome::NOTIFICATION_SCREEN_LOCK_STATE_CHANGED)
     return;
 
-  bool is_screen_locked = *Details<bool>(details).ptr();
+  bool is_screen_locked = *content::Details<bool>(details).ptr();
   if (is_screen_locked)
     camera_controller_.Stop();
   else

@@ -5,7 +5,6 @@
 #ifndef CONTENT_RENDERER_MEDIA_RTC_VIDEO_DECODER_H_
 #define CONTENT_RENDERER_MEDIA_RTC_VIDEO_DECODER_H_
 
-#include <deque>
 #include <string>
 
 #include "base/compiler_specific.h"
@@ -36,6 +35,7 @@ class CONTENT_EXPORT RTCVideoDecoder
   virtual void Seek(base::TimeDelta time,
                     const media::FilterStatusCB& cb) OVERRIDE;
   virtual void Pause(const base::Closure& callback) OVERRIDE;
+  virtual void Flush(const base::Closure& callback) OVERRIDE;
   virtual void Stop(const base::Closure& callback) OVERRIDE;
 
   // Decoder implementation.
@@ -43,9 +43,8 @@ class CONTENT_EXPORT RTCVideoDecoder
       media::DemuxerStream* demuxer_stream,
       const base::Closure& filter_callback,
       const media::StatisticsCallback& stat_callback) OVERRIDE;
-  virtual void ProduceVideoFrame(
-      scoped_refptr<media::VideoFrame> video_frame) OVERRIDE;
-  virtual gfx::Size natural_size() OVERRIDE;
+  virtual void Read(const ReadCB& callback) OVERRIDE;
+  virtual const gfx::Size& natural_size() OVERRIDE;
 
   // cricket::VideoRenderer implementation
   virtual bool SetSize(int width, int height, int reserved) OVERRIDE;
@@ -55,13 +54,13 @@ class CONTENT_EXPORT RTCVideoDecoder
   friend class RTCVideoDecoderTest;
   FRIEND_TEST_ALL_PREFIXES(RTCVideoDecoderTest, Initialize_Successful);
   FRIEND_TEST_ALL_PREFIXES(RTCVideoDecoderTest, DoSeek);
+  FRIEND_TEST_ALL_PREFIXES(RTCVideoDecoderTest, DoFlush);
   FRIEND_TEST_ALL_PREFIXES(RTCVideoDecoderTest, DoRenderFrame);
   FRIEND_TEST_ALL_PREFIXES(RTCVideoDecoderTest, DoSetSize);
 
   enum DecoderState {
     kUnInitialized,
     kNormal,
-    kSeeking,
     kPaused,
     kStopped
   };
@@ -70,8 +69,9 @@ class CONTENT_EXPORT RTCVideoDecoder
   gfx::Size visible_size_;
   std::string url_;
   DecoderState state_;
-  std::deque<scoped_refptr<media::VideoFrame> > frame_queue_available_;
-  // Used for accessing frame queue from another thread.
+  ReadCB read_cb_;
+
+  // Used for accessing |read_cb_| from another thread.
   base::Lock lock_;
 
   DISALLOW_COPY_AND_ASSIGN(RTCVideoDecoder);

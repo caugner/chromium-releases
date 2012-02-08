@@ -10,13 +10,13 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_status.h"
 
@@ -274,26 +274,10 @@ void AppsPromo::ExpireDefaultApps() {
   SetPromoCounter(kDefaultAppsCounterMax + 1);
 }
 
-void AppsPromo::MaximizeAppsIfNecessary() {
-  PromoData promo = GetPromo();
-
-  // Maximize the apps section of the NTP if this is the first time viewing the
-  // specific promo and the current user group is targetted.
-  if (GetLastPromoId() != promo.id) {
-    if ((promo.user_group & GetCurrentUserGroup()) != 0)
-      ShownSectionsHandler::SetShownSection(prefs_, APPS);
-    SetLastPromoId(promo.id);
-  }
-}
-
 void AppsPromo::HidePromo() {
   UMA_HISTOGRAM_ENUMERATION(extension_misc::kAppsPromoHistogram,
                             extension_misc::PROMO_CLOSE,
                             extension_misc::PROMO_BUCKET_BOUNDARY);
-
-  // Put the apps section into menu mode, and maximize the recent section.
-  ShownSectionsHandler::SetShownSection(prefs_, MENU_APPS);
-  ShownSectionsHandler::SetShownSection(prefs_, THUMB);
 
   ExpireDefaultApps();
 }
@@ -347,15 +331,16 @@ AppsPromoLogoFetcher::AppsPromoLogoFetcher(
 
 AppsPromoLogoFetcher::~AppsPromoLogoFetcher() {}
 
-void AppsPromoLogoFetcher::OnURLFetchComplete(const URLFetcher* source) {
+void AppsPromoLogoFetcher::OnURLFetchComplete(
+    const content::URLFetcher* source) {
   std::string data;
   std::string base64_data;
 
   CHECK(source == url_fetcher_.get());
-  CHECK(source->GetResponseAsString(&data));
+  source->GetResponseAsString(&data);
 
-  if (source->status().is_success() &&
-      source->response_code() == kHttpSuccess &&
+  if (source->GetStatus().is_success() &&
+      source->GetResponseCode() == kHttpSuccess &&
       base::Base64Encode(data, &base64_data)) {
     AppsPromo::SetSourcePromoLogoURL(promo_data_.logo);
     promo_data_.logo = GURL(kPNGDataURLPrefix + base64_data);
@@ -372,12 +357,12 @@ void AppsPromoLogoFetcher::OnURLFetchComplete(const URLFetcher* source) {
 void AppsPromoLogoFetcher::FetchLogo() {
   CHECK(promo_data_.logo.scheme() == chrome::kHttpsScheme);
 
-  url_fetcher_.reset(URLFetcher::Create(
-      0, promo_data_.logo, URLFetcher::GET, this));
-  url_fetcher_->set_request_context(
+  url_fetcher_.reset(content::URLFetcher::Create(
+      0, promo_data_.logo, content::URLFetcher::GET, this));
+  url_fetcher_->SetRequestContext(
       g_browser_process->system_request_context());
-  url_fetcher_->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES |
-                               net::LOAD_DO_NOT_SAVE_COOKIES);
+  url_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                             net::LOAD_DO_NOT_SAVE_COOKIES);
   url_fetcher_->Start();
 }
 
@@ -388,10 +373,10 @@ bool AppsPromoLogoFetcher::HaveCachedLogo() {
 void AppsPromoLogoFetcher::SavePromo() {
   AppsPromo::SetPromo(promo_data_);
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_WEB_STORE_PROMO_LOADED,
-      Source<Profile>(profile_),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_),
+      content::NotificationService::NoDetails());
 }
 
 bool AppsPromoLogoFetcher::SupportsLogoURL() {

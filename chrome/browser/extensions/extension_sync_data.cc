@@ -13,25 +13,33 @@ ExtensionSyncData::ExtensionSyncData()
     : uninstalled_(false),
       enabled_(false),
       incognito_enabled_(false),
-      type_(Extension::SYNC_TYPE_NONE) {
+      type_(Extension::SYNC_TYPE_NONE),
+      notifications_disabled_(false) {
 }
 
 ExtensionSyncData::ExtensionSyncData(const SyncData& sync_data)
     : uninstalled_(false),
       enabled_(false),
       incognito_enabled_(false),
-      type_(Extension::SYNC_TYPE_NONE) {
+      type_(Extension::SYNC_TYPE_NONE),
+      notifications_disabled_(false) {
   PopulateFromSyncData(sync_data);
 }
 
 ExtensionSyncData::ExtensionSyncData(const SyncChange& sync_change)
-    : uninstalled_(sync_change.change_type() == SyncChange::ACTION_DELETE) {
+    : uninstalled_(sync_change.change_type() == SyncChange::ACTION_DELETE),
+      enabled_(false),
+      incognito_enabled_(false),
+      type_(Extension::SYNC_TYPE_NONE),
+      notifications_disabled_(false) {
   PopulateFromSyncData(sync_change.sync_data());
 }
 
 ExtensionSyncData::ExtensionSyncData(const Extension& extension,
                                      bool enabled,
-                                     bool incognito_enabled)
+                                     bool incognito_enabled,
+                                     const std::string& notifications_client_id,
+                                     bool notifications_disabled)
   : id_(extension.id()),
     uninstalled_(false),
     enabled_(enabled),
@@ -39,10 +47,23 @@ ExtensionSyncData::ExtensionSyncData(const Extension& extension,
     type_(extension.GetSyncType()),
     version_(*extension.version()),
     update_url_(extension.update_url()),
-    name_(extension.name()) {
+    name_(extension.name()),
+    notifications_client_id_(notifications_client_id),
+    notifications_disabled_(notifications_disabled) {
 }
 
 ExtensionSyncData::~ExtensionSyncData() {}
+
+void ExtensionSyncData::PopulateAppSpecifics(
+    sync_pb::AppSpecifics* specifics) const {
+  DCHECK(specifics);
+  sync_pb::AppNotificationSettings* notif_settings =
+      specifics->mutable_notification_settings();
+  if (!notifications_client_id_.empty())
+    notif_settings->set_oauth_client_id(notifications_client_id_);
+  notif_settings->set_disabled(notifications_disabled_);
+  PopulateSyncSpecifics(specifics->mutable_extension());
+}
 
 void ExtensionSyncData::PopulateSyncSpecifics(
     sync_pb::ExtensionSpecifics* specifics) const {
@@ -57,21 +78,17 @@ void ExtensionSyncData::PopulateSyncSpecifics(
 
 SyncData ExtensionSyncData::GetSyncData() const {
   sync_pb::EntitySpecifics specifics;
-  sync_pb::ExtensionSpecifics* extension_specifics = NULL;
 
   switch (type_) {
     case Extension::SYNC_TYPE_EXTENSION:
-      extension_specifics = specifics.MutableExtension(sync_pb::extension);
+      PopulateSyncSpecifics(specifics.MutableExtension(sync_pb::extension));
       break;
     case Extension::SYNC_TYPE_APP:
-      extension_specifics =
-          specifics.MutableExtension(sync_pb::app)->mutable_extension();
+      PopulateAppSpecifics(specifics.MutableExtension(sync_pb::app));
       break;
     default:
       LOG(FATAL) << "Attempt to get non-syncable data.";
   }
-
-  PopulateSyncSpecifics(extension_specifics);
 
   return SyncData::CreateLocalData(id_, name_, specifics);
 }
@@ -112,12 +129,22 @@ void ExtensionSyncData::PopulateFromSyncData(const SyncData& sync_data) {
     extension_expecifics = entity_specifics.GetExtension(sync_pb::extension);
     type_ = Extension::SYNC_TYPE_EXTENSION;
   } else if (entity_specifics.HasExtension(sync_pb::app)) {
-    extension_expecifics =
-        entity_specifics.GetExtension(sync_pb::app).extension();
+    sync_pb::AppSpecifics app_specifics = entity_specifics.GetExtension(
+        sync_pb::app);
+    extension_expecifics = app_specifics.extension();
     type_ = Extension::SYNC_TYPE_APP;
+    if (app_specifics.has_notification_settings() &&
+        app_specifics.notification_settings().has_oauth_client_id()) {
+      notifications_client_id_ =
+          app_specifics.notification_settings().oauth_client_id();
+    }
+
+    notifications_disabled_ =
+        app_specifics.has_notification_settings() &&
+        app_specifics.notification_settings().has_disabled() &&
+        app_specifics.notification_settings().disabled();
   } else {
     LOG(FATAL) << "Attempt to sync bad EntitySpecifics.";
   }
   PopulateFromExtensionSpecifics(extension_expecifics);
 }
-

@@ -6,11 +6,14 @@
 
 #include <algorithm>   // For max().
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/environment.h"
 #include "base/event_recorder.h"
 #include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string_number_conversions.h"
@@ -31,8 +34,8 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
 #include "chrome/browser/first_run/first_run.h"
-#include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/net/crl_set_fetcher.h"
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
@@ -44,6 +47,7 @@
 #include "chrome/browser/printing/print_dialog_cloud.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -69,11 +73,10 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -94,49 +97,26 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/mount_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/enterprise_extension_observer.h"
 #include "chrome/browser/chromeos/gview_request_interceptor.h"
 #include "chrome/browser/chromeos/low_battery_observer.h"
 #include "chrome/browser/chromeos/network_message_observer.h"
 #include "chrome/browser/chromeos/sms_observer.h"
-#include "chrome/browser/chromeos/update_observer.h"
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_message_listener.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_message_listener.h"
 #endif
 #endif
 
-#if defined(TOUCH_UI)
+#if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
 #include "ui/base/touch/touch_factory.h"
 #endif
 
+using content::BrowserThread;
+
 namespace {
-
-// SetAsDefaultBrowserTask ----------------------------------------------------
-
-class SetAsDefaultBrowserTask : public Task {
- public:
-  SetAsDefaultBrowserTask();
-  virtual ~SetAsDefaultBrowserTask();
-
- private:
-  virtual void Run();
-
-  DISALLOW_COPY_AND_ASSIGN(SetAsDefaultBrowserTask);
-};
-
-SetAsDefaultBrowserTask::SetAsDefaultBrowserTask() {
-}
-
-SetAsDefaultBrowserTask::~SetAsDefaultBrowserTask() {
-}
-
-void SetAsDefaultBrowserTask::Run() {
-  ShellIntegration::SetAsDefaultBrowser();
-}
-
 
 // DefaultBrowserInfoBarDelegate ----------------------------------------------
 
@@ -171,7 +151,7 @@ class DefaultBrowserInfoBarDelegate : public ConfirmInfoBarDelegate {
   bool should_expire_;
 
   // Used to delay the expiration of the info-bar.
-  ScopedRunnableMethodFactory<DefaultBrowserInfoBarDelegate> method_factory_;
+  base::WeakPtrFactory<DefaultBrowserInfoBarDelegate> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultBrowserInfoBarDelegate);
 };
@@ -183,12 +163,13 @@ DefaultBrowserInfoBarDelegate::DefaultBrowserInfoBarDelegate(
       prefs_(prefs),
       action_taken_(false),
       should_expire_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   // We want the info-bar to stick-around for few seconds and then be hidden
   // on the next navigation after that.
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &DefaultBrowserInfoBarDelegate::AllowExpiry), 8000);  // 8 seconds.
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE, base::Bind(&DefaultBrowserInfoBarDelegate::AllowExpiry,
+                            weak_factory_.GetWeakPtr()),
+      8000);  // 8 seconds.
 }
 
 DefaultBrowserInfoBarDelegate::~DefaultBrowserInfoBarDelegate() {
@@ -224,8 +205,10 @@ bool DefaultBrowserInfoBarDelegate::NeedElevation(InfoBarButton button) const {
 bool DefaultBrowserInfoBarDelegate::Accept() {
   action_taken_ = true;
   UMA_HISTOGRAM_COUNTS("DefaultBrowserWarning.SetAsDefault", 1);
-  g_browser_process->file_thread()->message_loop()->PostTask(FROM_HERE,
-      new SetAsDefaultBrowserTask());
+  g_browser_process->file_thread()->message_loop()->PostTask(
+      FROM_HERE,
+      base::IgnoreReturn<bool>(
+          base::Bind(&ShellIntegration::SetAsDefaultBrowser)));
   return true;
 }
 
@@ -237,27 +220,7 @@ bool DefaultBrowserInfoBarDelegate::Cancel() {
   return true;
 }
 
-
-// NotifyNotDefaultBrowserTask ------------------------------------------------
-
-class NotifyNotDefaultBrowserTask : public Task {
- public:
-  NotifyNotDefaultBrowserTask();
-  virtual ~NotifyNotDefaultBrowserTask();
-
- private:
-  virtual void Run();
-
-  DISALLOW_COPY_AND_ASSIGN(NotifyNotDefaultBrowserTask);
-};
-
-NotifyNotDefaultBrowserTask::NotifyNotDefaultBrowserTask() {
-}
-
-NotifyNotDefaultBrowserTask::~NotifyNotDefaultBrowserTask() {
-}
-
-void NotifyNotDefaultBrowserTask::Run() {
+void NotifyNotDefaultBrowserCallback() {
   Browser* browser = BrowserList::GetLastActive();
   if (!browser)
     return;  // Reached during ui tests.
@@ -278,33 +241,13 @@ void NotifyNotDefaultBrowserTask::Run() {
                                         tab->profile()->GetPrefs()));
 }
 
-
-// CheckDefaultBrowserTask ----------------------------------------------------
-
-class CheckDefaultBrowserTask : public Task {
- public:
-  CheckDefaultBrowserTask();
-  virtual ~CheckDefaultBrowserTask();
-
- private:
-  virtual void Run();
-
-  DISALLOW_COPY_AND_ASSIGN(CheckDefaultBrowserTask);
-};
-
-CheckDefaultBrowserTask::CheckDefaultBrowserTask() {
-}
-
-CheckDefaultBrowserTask::~CheckDefaultBrowserTask() {
-}
-
-void CheckDefaultBrowserTask::Run() {
+void CheckDefaultBrowserCallback() {
   if (ShellIntegration::IsDefaultBrowser() ||
       !ShellIntegration::CanSetAsDefaultBrowser()) {
     return;
   }
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          new NotifyNotDefaultBrowserTask());
+                          base::Bind(&NotifyNotDefaultBrowserCallback));
 }
 
 
@@ -391,8 +334,10 @@ bool IncognitoIsForced(const CommandLine& command_line,
 SessionStartupPref GetSessionStartupPref(const CommandLine& command_line,
                                          Profile* profile) {
   SessionStartupPref pref = SessionStartupPref::GetStartupPref(profile);
-  if (command_line.HasSwitch(switches::kRestoreLastSession))
+  if (command_line.HasSwitch(switches::kRestoreLastSession) ||
+      BrowserInit::WasRestarted()) {
     pref.type = SessionStartupPref::LAST;
+  }
   if (pref.type == SessionStartupPref::LAST &&
       IncognitoIsForced(command_line, profile->GetPrefs())) {
     // We don't store session information when incognito. If the user has
@@ -527,7 +472,7 @@ void RecordAppLaunches(
   }
 }
 
-void RegisterComponentsForUpdate() {
+void RegisterComponentsForUpdate(const CommandLine& command_line) {
   ComponentUpdateService* cus = g_browser_process->component_updater();
   if (!cus)
     return;
@@ -538,10 +483,10 @@ void RegisterComponentsForUpdate() {
   RegisterPepperFlashComponent(cus);
   RegisterNPAPIFlashComponent(cus);
 
-  // CRLSetFetcher attempts to load a CRL set from either the local disk
-  // or network.
-  // TODO(agl): this is disabled for now while it's plumbed in.
-  // g_browser_process->crl_set_fetcher()->StartInitialLoad(cus);
+  // CRLSetFetcher attempts to load a CRL set from either the local disk or
+  // network.
+  if (command_line.HasSwitch(switches::kEnableCRLSets))
+    g_browser_process->crl_set_fetcher()->StartInitialLoad(cus);
 
   cus->Start();
 }
@@ -550,6 +495,9 @@ void RegisterComponentsForUpdate() {
 
 
 // BrowserInit ----------------------------------------------------------------
+
+bool BrowserInit::was_restarted_ = false;
+bool BrowserInit::was_restarted_read_ = false;
 
 BrowserInit::BrowserInit() {}
 
@@ -614,13 +562,8 @@ bool BrowserInit::LaunchBrowser(const CommandLine& command_line,
     // in a static so that it isn't reported as a leak.
     static chromeos::LowBatteryObserver* low_battery_observer =
         new chromeos::LowBatteryObserver(profile);
-    chromeos::CrosLibrary::Get()->GetPowerLibrary()->AddObserver(
+    chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(
         low_battery_observer);
-
-    static chromeos::UpdateObserver* update_observer =
-        new chromeos::UpdateObserver(profile);
-    chromeos::CrosLibrary::Get()->GetUpdateLibrary()->AddObserver(
-        update_observer);
 
     static chromeos::NetworkMessageObserver* network_message_observer =
         new chromeos::NetworkMessageObserver(profile);
@@ -642,6 +585,17 @@ bool BrowserInit::LaunchBrowser(const CommandLine& command_line,
   return true;
 }
 
+// static
+bool BrowserInit::WasRestarted() {
+  if (!was_restarted_read_) {
+    PrefService* pref_service = g_browser_process->local_state();
+    was_restarted_ = pref_service->GetBoolean(prefs::kWasRestarted);
+    pref_service->SetBoolean(prefs::kWasRestarted, false);
+    pref_service->ScheduleSavePersistentPrefs();
+    was_restarted_read_ = true;
+  }
+  return was_restarted_;
+}
 
 // BrowserInit::LaunchWithProfile::Tab ----------------------------------------
 
@@ -695,26 +649,21 @@ bool BrowserInit::LaunchWithProfile::Launch(
   if (command_line_.HasSwitch(switches::kDumpHistogramsOnExit))
     base::StatisticsRecorder::set_dump_on_exit(true);
 
-  if (command_line_.HasSwitch(switches::kRemoteShellPort)) {
-    std::string port_str =
-        command_line_.GetSwitchValueASCII(switches::kRemoteShellPort);
-    int64 port;
-    if (base::StringToInt64(port_str, &port) && port > 0 && port < 65535) {
-      g_browser_process->InitDevToolsLegacyProtocolHandler(
-          static_cast<int>(port));
-    } else {
-      DLOG(WARNING) << "Invalid remote shell port number " << port;
-    }
-  } else if (command_line_.HasSwitch(switches::kRemoteDebuggingPort)) {
+  if (command_line_.HasSwitch(switches::kRemoteDebuggingPort)) {
     std::string port_str =
         command_line_.GetSwitchValueASCII(switches::kRemoteDebuggingPort);
     int64 port;
     if (base::StringToInt64(port_str, &port) && port > 0 && port < 65535) {
+      std::string frontend_str;
+      if (command_line_.HasSwitch(switches::kRemoteDebuggingFrontend)) {
+        frontend_str = command_line_.GetSwitchValueASCII(
+            switches::kRemoteDebuggingFrontend);
+      }
       g_browser_process->InitDevToolsHttpProtocolHandler(
           profile,
           "127.0.0.1",
           static_cast<int>(port),
-          "");
+          frontend_str);
     } else {
       DLOG(WARNING) << "Invalid http debugger port number " << port;
     }
@@ -817,7 +766,7 @@ bool BrowserInit::LaunchWithProfile::OpenApplicationTab(Profile* profile) {
 
   RecordCmdLineAppHistogram();
 
-  TabContents* app_tab = Browser::OpenApplicationTab(profile, extension,
+  TabContents* app_tab = Browser::OpenApplicationTab(profile, extension, GURL(),
                                                      NEW_FOREGROUND_TAB);
   return (app_tab != NULL);
 }
@@ -846,7 +795,7 @@ bool BrowserInit::LaunchWithProfile::OpenApplicationWindow(Profile* profile) {
 
     RecordCmdLineAppHistogram();
     TabContents* tab_in_app_window = Browser::OpenApplication(
-        profile, extension, launch_container, NEW_WINDOW);
+        profile, extension, launch_container, GURL(), NEW_WINDOW);
     return (tab_in_app_window != NULL);
   }
 
@@ -1055,7 +1004,7 @@ Browser* BrowserInit::LaunchWithProfile::OpenTabsInBrowser(
   if (!browser || !browser->is_type_tabbed()) {
     browser = Browser::Create(profile_);
   } else {
-#if defined(TOOLKIT_GTK) && !defined(USE_AURA)
+#if defined(TOOLKIT_GTK)
     // Setting the time of the last action on the window here allows us to steal
     // focus, which is what the user wants when opening a new tab in an existing
     // browser window.
@@ -1294,11 +1243,31 @@ void BrowserInit::LaunchWithProfile::AddStartupURLs(
     }
   }
 
-  // If the sync promo page is going to be displayed then replace the first
-  // startup URL with the sync promo page.
+  // If the sync promo page is going to be displayed then insert it at the front
+  // of the list.
   if (SyncPromoUI::ShouldShowSyncPromoAtStartup(profile_, is_first_run_)) {
     SyncPromoUI::DidShowSyncPromoAtStartup(profile_);
-    (*startup_urls)[0] = SyncPromoUI::GetSyncPromoURL((*startup_urls)[0], true);
+    GURL old_url = (*startup_urls)[0];
+    (*startup_urls)[0] =
+        SyncPromoUI::GetSyncPromoURL(GURL(chrome::kChromeUINewTabURL), true);
+
+    // An empty URL means to go to the home page.
+    if (old_url.is_empty() &&
+        profile_->GetHomePage() == GURL(chrome::kChromeUINewTabURL)) {
+      old_url = GURL(chrome::kChromeUINewTabURL);
+    }
+
+    // If the old URL is not the NTP then insert it right after the sync promo.
+    if (old_url != GURL(chrome::kChromeUINewTabURL))
+      startup_urls->insert(startup_urls->begin() + 1, old_url);
+
+    // If we have more than two startup tabs then skip the welcome page.
+    if (startup_urls->size() > 2) {
+      std::vector<GURL>::iterator it = std::find(
+          startup_urls->begin(), startup_urls->end(), GetWelcomePageURL());
+      if (it != startup_urls->end())
+        startup_urls->erase(it);
+    }
   }
 }
 
@@ -1316,8 +1285,9 @@ void BrowserInit::LaunchWithProfile::CheckDefaultBrowser(Profile* profile) {
     if (g_browser_process->local_state()->GetBoolean(
         prefs::kDefaultBrowserSettingEnabled)) {
       BrowserThread::PostTask(
-          BrowserThread::FILE, FROM_HERE, NewRunnableFunction(
-              &ShellIntegration::SetAsDefaultBrowser));
+          BrowserThread::FILE, FROM_HERE,
+          base::IgnoreReturn<bool>(
+              base::Bind(&ShellIntegration::SetAsDefaultBrowser)));
     } else {
       // TODO(pastarmovj): We can't really do anything meaningful here yet but
       // just prevent showing the infobar.
@@ -1325,7 +1295,7 @@ void BrowserInit::LaunchWithProfile::CheckDefaultBrowser(Profile* profile) {
     return;
   }
   BrowserThread::PostTask(
-      BrowserThread::FILE, FROM_HERE, new CheckDefaultBrowserTask());
+      BrowserThread::FILE, FROM_HERE, base::Bind(&CheckDefaultBrowserCallback));
 }
 
 std::vector<GURL> BrowserInit::GetURLsFromCommandLine(
@@ -1395,7 +1365,7 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
     if (command_line.HasSwitch(switches::kDisablePromptOnRepost))
       NavigationController::DisablePromptOnRepost();
 
-    RegisterComponentsForUpdate();
+    RegisterComponentsForUpdate(command_line);
 
     // Look for the testing channel ID ONLY during process startup
     if (command_line.HasSwitch(switches::kTestingChannelID)) {
@@ -1487,10 +1457,10 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
   }
 #endif
 
-#if defined(TOUCH_UI)
+#if defined(TOOLKIT_VIEWS) && defined(OS_LINUX)
   // Get a list of pointer-devices that should be treated as touch-devices.
-  // TODO(sad): Instead of/in addition to getting the list from the
-  // command-line, query X for a list of touch devices.
+  // This is primarily used for testing/debugging touch-event processing when a
+  // touch-device isn't available.
   std::string touch_devices =
     command_line.GetSwitchValueASCII(switches::kTouchDevices);
 
@@ -1501,11 +1471,10 @@ bool BrowserInit::ProcessCmdLineImpl(const CommandLine& command_line,
     base::SplitString(touch_devices, ',', &devs);
     for (std::vector<std::string>::iterator iter = devs.begin();
         iter != devs.end(); ++iter) {
-      if (base::StringToInt(*iter, reinterpret_cast<int*>(&devid))) {
+      if (base::StringToInt(*iter, reinterpret_cast<int*>(&devid)))
         device_ids.push_back(devid);
-      } else {
+      else
         DLOG(WARNING) << "Invalid touch-device id: " << *iter;
-      }
     }
     ui::TouchFactory::GetInstance()->SetTouchDeviceList(device_ids);
   }
@@ -1540,4 +1509,37 @@ bool BrowserInit::CreateAutomationProvider(const std::string& channel_id,
   list->AddProvider(automation);
 
   return true;
+}
+
+// static
+void BrowserInit::ProcessCommandLineOnProfileCreated(
+    const CommandLine& cmd_line,
+    const FilePath& cur_dir,
+    Profile* profile,
+    Profile::CreateStatus status) {
+  if (status == Profile::CREATE_STATUS_INITIALIZED)
+    ProcessCmdLineImpl(cmd_line, cur_dir, false, profile, NULL, NULL);
+}
+
+// static
+void BrowserInit::ProcessCommandLineAlreadyRunning(const CommandLine& cmd_line,
+                                                   const FilePath& cur_dir) {
+  if (cmd_line.HasSwitch(switches::kProfileDirectory)) {
+    ProfileManager* profile_manager = g_browser_process->profile_manager();
+    FilePath path = cmd_line.GetSwitchValuePath(switches::kProfileDirectory);
+    path = profile_manager->user_data_dir().Append(path);
+    profile_manager->CreateProfileAsync(path,
+        base::Bind(&BrowserInit::ProcessCommandLineOnProfileCreated,
+                   cmd_line, cur_dir));
+    return;
+  }
+
+  Profile* profile = ProfileManager::GetLastUsedProfile();
+  if (!profile) {
+    // We should only be able to get here if the profile already exists and
+    // has been created.
+    NOTREACHED();
+    return;
+  }
+  ProcessCmdLineImpl(cmd_line, cur_dir, false, profile, NULL, NULL);
 }

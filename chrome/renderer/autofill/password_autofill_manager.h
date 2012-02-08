@@ -62,16 +62,17 @@ class PasswordAutofillManager : public content::RenderViewObserver,
   typedef std::map<WebKit::WebElement, PasswordInfo> LoginToPasswordInfoMap;
 
   // RenderViewObserver:
-  virtual bool OnMessageReceived(const IPC::Message& message);
-  virtual void DidFinishDocumentLoad(WebKit::WebFrame* frame);
-  virtual void DidFinishLoad(WebKit::WebFrame* frame);
-  virtual void FrameDetached(WebKit::WebFrame* frame);
-  virtual void FrameWillClose(WebKit::WebFrame* frame);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void DidFinishDocumentLoad(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void DidFinishLoad(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void FrameDetached(WebKit::WebFrame* frame) OVERRIDE;
+  virtual void FrameWillClose(WebKit::WebFrame* frame) OVERRIDE;
 
   // PageClickListener:
   virtual bool InputElementClicked(const WebKit::WebInputElement& element,
                                    bool was_focused,
-                                   bool is_focused);
+                                   bool is_focused) OVERRIDE;
+  virtual bool InputElementLostFocus() OVERRIDE;
 
   // RenderView IPC handlers:
   void OnFillPasswordForm(const webkit_glue::PasswordFormFillData& form_data);

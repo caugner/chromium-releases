@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <GLES2/gl2.h>
 
 #include <algorithm>
 
@@ -12,10 +11,12 @@
 // solved yet so exclude building on Mac.
 #if !defined(OS_MACOSX)
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/renderer/gpu/renderer_gl_context.h"
 #include "content/renderer/gpu/transport_texture_service.h"
+#include "third_party/khronos/GLES2/gl2.h"
 
 TransportTextureHost::TransportTextureHost(MessageLoop* io_message_loop,
                                            MessageLoop* render_message_loop,
@@ -41,7 +42,7 @@ void TransportTextureHost::Init(Task* done_task) {
   if (MessageLoop::current() != io_message_loop_) {
     io_message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &TransportTextureHost::Init, done_task));
+        base::Bind(&TransportTextureHost::Init, this, done_task));
     return;
   }
 
@@ -102,8 +103,7 @@ void TransportTextureHost::ReleaseTexturesInternal() {
   if (MessageLoop::current() != render_message_loop_) {
     render_message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this,
-                          &TransportTextureHost::ReleaseTexturesInternal));
+        base::Bind(&TransportTextureHost::ReleaseTexturesInternal, this));
     return;
   }
 
@@ -118,8 +118,8 @@ void TransportTextureHost::SendTexturesInternal(
   if (MessageLoop::current() != io_message_loop_) {
     io_message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &TransportTextureHost::SendTexturesInternal,
-                          textures));
+        base::Bind(&TransportTextureHost::SendTexturesInternal, this,
+                   textures));
     return;
   }
 
@@ -134,7 +134,7 @@ void TransportTextureHost::SendDestroyInternal() {
   if (MessageLoop::current() != io_message_loop_) {
     io_message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &TransportTextureHost::SendDestroyInternal));
+        base::Bind(&TransportTextureHost::SendDestroyInternal, this));
     return;
   }
 
@@ -157,8 +157,8 @@ void TransportTextureHost::OnCreateTextures(int32 n, uint32 width,
   if (MessageLoop::current() != render_message_loop_) {
     render_message_loop_->PostTask(
         FROM_HERE,
-        NewRunnableMethod(this, &TransportTextureHost::OnCreateTextures,
-                          n, width, height, format));
+        base::Bind(&TransportTextureHost::OnCreateTextures, this, n, width,
+                   height, format));
     return;
   }
 

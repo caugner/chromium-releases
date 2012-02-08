@@ -55,27 +55,27 @@ class CONTENT_EXPORT VideoCaptureHost
   explicit VideoCaptureHost(const content::ResourceContext* resource_context);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing();
-  virtual void OnDestruct() const;
+  virtual void OnChannelClosing() OVERRIDE;
+  virtual void OnDestruct() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   // VideoCaptureControllerEventHandler implementation.
-  virtual void OnError(const VideoCaptureControllerID& id);
+  virtual void OnError(const VideoCaptureControllerID& id) OVERRIDE;
   virtual void OnBufferCreated(const VideoCaptureControllerID& id,
                                base::SharedMemoryHandle handle,
-                               int length, int buffer_id);
+                               int length, int buffer_id) OVERRIDE;
   virtual void OnBufferReady(const VideoCaptureControllerID& id,
                              int buffer_id,
-                             base::Time timestamp);
+                             base::Time timestamp) OVERRIDE;
   virtual void OnFrameInfo(const VideoCaptureControllerID& id,
                            int width,
                            int height,
-                           int frame_per_second);
-  virtual void OnReadyToDelete(const VideoCaptureControllerID& id);
+                           int frame_per_second) OVERRIDE;
+  virtual void OnReadyToDelete(const VideoCaptureControllerID& id) OVERRIDE;
 
  private:
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<VideoCaptureHost>;
   friend class MockVideoCaptureHost;
   friend class VideoCaptureHostTest;
@@ -88,6 +88,12 @@ class CONTENT_EXPORT VideoCaptureHost
   // between a VideCaptureMessageFilter and a VideoCaptureHost.
   void OnStartCapture(int device_id,
                       const media::VideoCaptureParams& params);
+  void OnControllerAdded(
+      int device_id, const media::VideoCaptureParams& params,
+      VideoCaptureController* controller);
+  void DoControllerAddedOnIOThread(
+      int device_id, const media::VideoCaptureParams params,
+      VideoCaptureController* controller);
 
   // IPC message: Stop capture on device referenced by |device_id|.
   void OnStopCapture(int device_id);
@@ -125,11 +131,12 @@ class CONTENT_EXPORT VideoCaptureHost
   // Handle error coming from VideoCaptureDevice.
   void DoHandleError(int device_id);
 
-  typedef std::map<VideoCaptureControllerID,
-                   scoped_refptr<VideoCaptureController> >EntryMap;
+  // Helpers.
+  media_stream::VideoCaptureManager* GetVideoCaptureManager();
 
-  // A map of VideoCaptureControllerID to VideoCaptureController
-  // objects that is currently active.
+  struct Entry;
+  typedef std::map<VideoCaptureControllerID, Entry*> EntryMap;
+  // A map of VideoCaptureControllerID to its state and VideoCaptureController.
   EntryMap entries_;
 
   // Used to get a pointer to VideoCaptureManager to start/stop capture devices.

@@ -10,15 +10,14 @@
 #include "base/logging.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/views/frame/native_browser_frame_delegate.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
-class AeroGlassNonClientView;
+class AvatarMenuButton;
 class BrowserNonClientFrameView;
 class BrowserRootView;
 class BrowserView;
 class NativeBrowserFrame;
 class NonClientFrameView;
-class Profile;
 
 namespace gfx {
 class Font;
@@ -75,6 +74,8 @@ class BrowserFrame : public views::Widget {
                               ui::Accelerator* accelerator) OVERRIDE;
   virtual ui::ThemeProvider* GetThemeProvider() const OVERRIDE;
   virtual void OnNativeWidgetActivationChanged(bool active) OVERRIDE;
+
+  AvatarMenuButton* GetAvatarMenuButton();
 
  private:
   NativeBrowserFrame* native_browser_frame_;

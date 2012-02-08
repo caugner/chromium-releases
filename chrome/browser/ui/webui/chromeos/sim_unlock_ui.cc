@@ -10,6 +10,7 @@
 #include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop.h"
 #include "base/string_piece.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
@@ -20,13 +21,15 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -461,17 +464,17 @@ void SimUnlockHandler::EnterCode(const std::string& code,
 }
 
 void SimUnlockHandler::NotifyOnEnterPinEnded(bool cancelled) {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_ENTER_PIN_ENDED,
-      NotificationService::AllSources(),
-      Details<bool>(&cancelled));
+      content::NotificationService::AllSources(),
+      content::Details<bool>(&cancelled));
 }
 
 void SimUnlockHandler::NotifyOnRequirePinChangeEnded(bool new_value) {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED,
-      NotificationService::AllSources(),
-      Details<bool>(&new_value));
+      content::NotificationService::AllSources(),
+      content::Details<bool>(&new_value));
 }
 
 void SimUnlockHandler::HandleCancel(const ListValue* args) {

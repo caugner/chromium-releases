@@ -37,8 +37,8 @@ struct PrintDebugDumpPath {
   FilePath debug_dump_path;
 };
 
-static base::LazyInstance<PrintDebugDumpPath> g_debug_dump_info(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<PrintDebugDumpPath> g_debug_dump_info =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -229,5 +229,12 @@ PrintedDocument::Immutable::Immutable(const PrintSettings& settings,
 
 PrintedDocument::Immutable::~Immutable() {
 }
+
+#if defined(OS_POSIX) && defined(USE_AURA)
+// This function is not used on aura linux/chromeos.
+void PrintedDocument::RenderPrintedPage(const PrintedPage& page,
+                                        PrintingContext* context) const {
+}
+#endif
 
 }  // namespace printing

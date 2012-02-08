@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef TEST_SHELL_DEVTOOLS_CLIENT_H_
-#define TEST_SHELL_DEVTOOLS_CLIENT_H_
+#ifndef WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_DEVTOOLS_CLIENT_H_
+#define WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_DEVTOOLS_CLIENT_H_
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -14,24 +14,20 @@
 namespace WebKit {
 
 class WebDevToolsFrontend;
-struct WebDevToolsMessageData;
 
-} // namespace WebKit
+}  // namespace WebKit
 
 class TestShellDevToolsCallArgs;
 class TestShellDevToolsAgent;
 
 class TestShellDevToolsClient: public WebKit::WebDevToolsFrontendClient {
-
  public:
   TestShellDevToolsClient(TestShellDevToolsAgent* agent,
                           WebKit::WebView* web_view);
   virtual ~TestShellDevToolsClient();
 
   // WebDevToolsFrontendClient implementation
-  virtual void sendFrontendLoaded();
   virtual void sendMessageToBackend(const WebKit::WebString& data);
-  virtual void sendDebuggerCommandToAgent(const WebKit::WebString& command);
 
   virtual void activateWindow();
   virtual void closeWindow();
@@ -53,4 +49,4 @@ class TestShellDevToolsClient: public WebKit::WebDevToolsFrontendClient {
   DISALLOW_COPY_AND_ASSIGN(TestShellDevToolsClient);
 };
 
-#endif  // TEST_SHELL_DEVTOOLS_CLIENT_H_
+#endif  // WEBKIT_TOOLS_TEST_SHELL_TEST_SHELL_DEVTOOLS_CLIENT_H_

@@ -7,14 +7,16 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/simple_message_box.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/controls/message_box_view.h"
-#include "views/widget/widget.h"
+#include "ui/base/message_box_flags.h"
+#include "ui/views/controls/message_box_view.h"
+#include "ui/views/widget/widget.h"
 
-#if defined(TOUCH_UI) || defined(USE_AURA)
-#include "views/focus/accelerator_handler.h"
+#if defined(USE_AURA)
+#include "ui/views/focus/accelerator_handler.h"
 #endif
 
 namespace browser {
@@ -64,7 +66,7 @@ bool SimpleMessageBoxViews::ShowYesNoBox(gfx::NativeWindow parent_window,
 
   bool old_state = MessageLoopForUI::current()->NestableTasksAllowed();
   MessageLoopForUI::current()->SetNestableTasksAllowed(true);
-  MessageLoopForUI::current()->Run(dialog);
+  MessageLoopForUI::current()->RunWithDispatcher(dialog);
   MessageLoopForUI::current()->SetNestableTasksAllowed(old_state);
 
   g_browser_process->ReleaseModule();
@@ -85,17 +87,20 @@ bool SimpleMessageBoxViews::Accept() {
 int SimpleMessageBoxViews::GetDialogButtons() const {
   // NOTE: It seems unsafe to assume that the flags for OK/cancel will always
   // have the same value as the button ids.
-  return (dialog_flags_ & ui::MessageBoxFlags::kFlagHasOKButton
-      ? ui::MessageBoxFlags::DIALOGBUTTON_OK : 0) |
-      (dialog_flags_ & ui::MessageBoxFlags::kFlagHasCancelButton
-          ? ui::MessageBoxFlags::DIALOGBUTTON_CANCEL : 0);
+  int dialog_buttons = ui::DIALOG_BUTTON_NONE;
+  if (dialog_flags_ & ui::MessageBoxFlags::kFlagHasOKButton)
+    dialog_buttons = ui::DIALOG_BUTTON_OK;
+
+  if (dialog_flags_ & ui::MessageBoxFlags::kFlagHasCancelButton)
+    dialog_buttons |= ui::DIALOG_BUTTON_CANCEL;
+
+  return dialog_buttons;
 }
 
 string16 SimpleMessageBoxViews::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  return button == ui::MessageBoxFlags::DIALOGBUTTON_OK ?
-      l10n_util::GetStringUTF16(IDS_OK) :
-      l10n_util::GetStringUTF16(IDS_CLOSE);
+    ui::DialogButton button) const {
+  return button == ui::DIALOG_BUTTON_OK ? l10n_util::GetStringUTF16(IDS_OK)
+                                        : l10n_util::GetStringUTF16(IDS_CLOSE);
 }
 
 bool SimpleMessageBoxViews::ShouldShowWindowTitle() const {
@@ -139,7 +144,7 @@ SimpleMessageBoxViews::SimpleMessageBoxViews(gfx::NativeWindow parent_window,
   message_box_view_ = new views::MessageBoxView(dialog_flags,
                                                 message,
                                                 string16());
-  browser::CreateViewsWindow(parent_window, this)->Show();
+  browser::CreateViewsWindow(parent_window, this, STYLE_GENERIC)->Show();
 
   // Add reference to be released in DeleteDelegate().
   AddRef();
@@ -154,7 +159,7 @@ bool SimpleMessageBoxViews::Dispatch(const MSG& msg) {
   DispatchMessage(&msg);
   return disposition_ == DISPOSITION_UNKNOWN;
 }
-#elif defined(TOUCH_UI) || defined(USE_AURA)
+#elif defined(USE_AURA)
 base::MessagePumpDispatcher::DispatchStatus
     SimpleMessageBoxViews::Dispatch(XEvent* xev) {
   if (!views::DispatchXEvent(xev))

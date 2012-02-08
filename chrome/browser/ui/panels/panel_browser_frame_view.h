@@ -12,12 +12,13 @@
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "ui/base/animation/animation_delegate.h"
-#include "views/controls/button/button.h"
-#include "views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 class Extension;
 class PanelBrowserView;
 class PanelSettingsMenuModel;
+class SkPaint;
 namespace gfx {
 class Font;
 }
@@ -53,6 +54,10 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   // the size of the client area.
   gfx::Size NonClientAreaSize() const;
 
+  // Returns the size of the non-client area upon which only the title icon
+  // is drawn.
+  gfx::Size IconOnlySize() const;
+
  protected:
   // Overridden from BrowserNonClientFrameView:
   virtual gfx::Rect GetBoundsForTabStrip(views::View* tabstrip) const OVERRIDE;
@@ -66,7 +71,6 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
   virtual void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask)
       OVERRIDE;
-  virtual void EnableClose(bool enable) OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
 
@@ -115,7 +119,7 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
 
     virtual bool IsCursorInViewBounds() const;
 
-  #if defined(OS_WIN) || defined(TOUCH_UI) || defined(USE_AURA)
+  #if defined(OS_WIN) || defined(USE_AURA)
     virtual base::EventStatus WillProcessEvent(
         const base::NativeEvent& event) OVERRIDE;
     virtual void DidProcessEvent(const base::NativeEvent& event) OVERRIDE;
@@ -137,19 +141,22 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   // borders, including both the window frame and any client edge.
   int NonClientBorderThickness() const;
 
+  // Returns the width of the panel that is showing only an icon.
+  int IconOnlyWidth() const;
+
   // Update control styles to indicate if the titlebar is active or not.
   void UpdateControlStyles(PaintState paint_state);
 
   // Custom draw the frame.
   void PaintFrameBorder(gfx::Canvas* canvas);
-  void PaintClientEdge(gfx::Canvas* canvas);
 
   // Called by MouseWatcher to notify if the mouse enters or leaves the window.
   void OnMouseEnterOrLeaveWindow(bool mouse_entered);
 
   // Retrieves the drawing metrics based on the current painting state.
+  SkColor GetDefaultTitleColor(PaintState paint_state) const;
   SkColor GetTitleColor(PaintState paint_state) const;
-  gfx::Font* GetTitleFont() const;
+  const SkPaint& GetDefaultFrameTheme(PaintState paint_state) const;
   SkBitmap* GetFrameTheme(PaintState paint_state) const;
 
   // Make settings button visible if either of the conditions is met:
@@ -157,9 +164,13 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   // 2) The mouse is over the panel.
   void UpdateSettingsButtonVisibility(bool active, bool cursor_in_view);
 
+  bool UsingDefaultTheme() const;
+
   const Extension* GetExtension() const;
 
   bool EnsureSettingsMenuCreated();
+
+  string16 GetTitleText() const;
 
 #ifdef UNIT_TEST
   PanelSettingsMenuModel* settings_menu_model() const {
@@ -171,14 +182,10 @@ class PanelBrowserFrameView : public BrowserNonClientFrameView,
   }
 #endif
 
-  // The frame that hosts this view. This is a weak reference such that frame_
-  // will always be valid in the lifetime of this view.
-  BrowserFrame* frame_;
-
   // The client view hosted within this non-client frame view that is
   // guaranteed to be freed before the client view.
   // (see comments about view hierarchies in non_client_view.h)
-  PanelBrowserView* browser_view_;
+  PanelBrowserView* panel_browser_view_;
 
   PaintState paint_state_;
   views::MenuButton* settings_button_;

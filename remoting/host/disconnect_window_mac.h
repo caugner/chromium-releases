@@ -6,20 +6,30 @@
 
 namespace remoting {
 class ChromotingHost;
-class DisconnectWindowMac;
 }
 
+// Controller for the disconnect window which allows the host user to
+// quickly disconnect a session.
 @interface DisconnectWindowController : NSWindowController {
  @private
   remoting::ChromotingHost* host_;
-  remoting::DisconnectWindowMac* disconnectWindow_;
   NSString* username_;
   IBOutlet NSTextField* connectedToField_;
   IBOutlet NSButton* disconnectButton_;
 }
 
-- (IBAction)stopSharing:(id)sender;
 - (id)initWithHost:(remoting::ChromotingHost*)host
-            window:(remoting::DisconnectWindowMac*)window
           username:(NSString*)username;
+- (IBAction)stopSharing:(id)sender;
+@end
+
+// A floating window with a custom border. The custom border and background
+// content is defined by DisconnectView. Declared here so that it can be
+// instantiated via a xib.
+@interface DisconnectWindow : NSWindow
+@end
+
+// The custom background/border for the DisconnectWindow. Declared here so that
+// it can be instantiated via a xib.
+@interface DisconnectView : NSView
 @end

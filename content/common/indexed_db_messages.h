@@ -8,7 +8,7 @@
 
 #include "content/common/indexed_db_key.h"
 #include "content/common/indexed_db_param_traits.h"
-#include "content/common/serialized_script_value.h"
+#include "content/public/common/serialized_script_value.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_param_traits.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebExceptionCode.h"
@@ -22,8 +22,6 @@ IPC_ENUM_TRAITS(WebKit::WebIDBObjectStore::PutMode)
 
 // Used to enumerate indexed databases.
 IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryGetDatabaseNames_Params)
-  // The routing ID of the view initiating the open.
-  IPC_STRUCT_MEMBER(int32, routing_id)
   // The response should have this id.
   IPC_STRUCT_MEMBER(int32, response_id)
   // The origin doing the initiating.
@@ -32,8 +30,6 @@ IPC_STRUCT_END()
 
 // Used to open an indexed database.
 IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryOpen_Params)
-  // The routing ID of the view initiating the open.
-  IPC_STRUCT_MEMBER(int32, routing_id)
   // The response should have this id.
   IPC_STRUCT_MEMBER(int32, response_id)
   // The origin doing the initiating.
@@ -44,8 +40,6 @@ IPC_STRUCT_END()
 
 // Used to delete an indexed database.
 IPC_STRUCT_BEGIN(IndexedDBHostMsg_FactoryDeleteDatabase_Params)
-  // The routing ID of the view initiating the deletion.
-  IPC_STRUCT_MEMBER(int32, routing_id)
   // The response should have this id.
   IPC_STRUCT_MEMBER(int32, response_id)
   // The origin doing the initiating.
@@ -95,7 +89,7 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_ObjectStorePut_Params)
   // The id any response should contain.
   IPC_STRUCT_MEMBER(int32, response_id)
   // The value to set.
-  IPC_STRUCT_MEMBER(SerializedScriptValue, serialized_value)
+  IPC_STRUCT_MEMBER(content::SerializedScriptValue, serialized_value)
   // The key to set it on (may not be "valid"/set in some cases).
   IPC_STRUCT_MEMBER(IndexedDBKey, key)
   // Whether this is an add or a put.
@@ -112,6 +106,8 @@ IPC_STRUCT_BEGIN(IndexedDBHostMsg_ObjectStoreCreateIndex_Params)
   IPC_STRUCT_MEMBER(NullableString16, key_path)
   // Whether the index created has unique keys.
   IPC_STRUCT_MEMBER(bool, unique)
+  // Whether the index created produces keys for each array entry.
+  IPC_STRUCT_MEMBER(bool, multi_entry)
   // The transaction this is associated with.
   IPC_STRUCT_MEMBER(int32, transaction_id)
   // The object store the index belongs to.
@@ -146,7 +142,19 @@ IPC_MESSAGE_CONTROL5(IndexedDBMsg_CallbacksSuccessIDBCursor,
                      int32 /* cursor_id */,
                      IndexedDBKey /* key */,
                      IndexedDBKey /* primary key */,
-                     SerializedScriptValue /* script_value */)
+                     content::SerializedScriptValue /* script_value */)
+IPC_MESSAGE_CONTROL5(IndexedDBMsg_CallbacksSuccessCursorContinue,
+                     int32 /* response_id */,
+                     int32 /* cursor_id */,
+                     IndexedDBKey /* key */,
+                     IndexedDBKey /* primary key */,
+                     content::SerializedScriptValue /* script_value */)
+IPC_MESSAGE_CONTROL5(IndexedDBMsg_CallbacksSuccessCursorPrefetch,
+                     int32 /* response_id */,
+                     int32 /* cursor_id */,
+                     std::vector<IndexedDBKey> /* keys */,
+                     std::vector<IndexedDBKey> /* primary keys */,
+                     std::vector<content::SerializedScriptValue> /* values */)
 IPC_MESSAGE_CONTROL2(IndexedDBMsg_CallbacksSuccessIDBDatabase,
                      int32 /* response_id */,
                      int32 /* idb_database_id */)
@@ -158,7 +166,7 @@ IPC_MESSAGE_CONTROL2(IndexedDBMsg_CallbacksSuccessIDBTransaction,
                      int32 /* idb_transaction_id */)
 IPC_MESSAGE_CONTROL2(IndexedDBMsg_CallbacksSuccessSerializedScriptValue,
                      int32 /* response_id */,
-                     SerializedScriptValue /* serialized_script_value */)
+                     content::SerializedScriptValue /* value */)
 IPC_MESSAGE_CONTROL2(IndexedDBMsg_CallbacksSuccessStringList,
                      int32 /* response_id */,
                      std::vector<string16> /* dom_string_list */)
@@ -190,7 +198,7 @@ IPC_SYNC_MESSAGE_CONTROL1_1(IndexedDBHostMsg_CursorDirection,
 IPC_SYNC_MESSAGE_CONTROL3_1(IndexedDBHostMsg_CursorUpdate,
                      int32, /* idb_cursor_id */
                      int32, /* response_id */
-                     SerializedScriptValue, /* value */
+                     content::SerializedScriptValue, /* value */
                      WebKit::WebExceptionCode /* ec */)
 
 // WebIDBCursor::continue() message.
@@ -199,6 +207,19 @@ IPC_SYNC_MESSAGE_CONTROL3_1(IndexedDBHostMsg_CursorContinue,
                      int32, /* response_id */
                      IndexedDBKey, /* key */
                      WebKit::WebExceptionCode /* ec */)
+
+// WebIDBCursor::prefetchContinue() message.
+IPC_SYNC_MESSAGE_CONTROL3_1(IndexedDBHostMsg_CursorPrefetch,
+                     int32, /* idb_cursor_id */
+                     int32, /* response_id */
+                     int32, /* n */
+                     WebKit::WebExceptionCode /* ec */)
+
+// WebIDBCursor::prefetchReset() message.
+IPC_SYNC_MESSAGE_CONTROL3_0(IndexedDBHostMsg_CursorPrefetchReset,
+                     int32, /* idb_cursor_id */
+                     int32, /* used_prefetches */
+                     int32  /* used_prefetches */)
 
 // WebIDBCursor::remove() message.
 IPC_SYNC_MESSAGE_CONTROL2_1(IndexedDBHostMsg_CursorDelete,

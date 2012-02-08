@@ -10,9 +10,9 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
-#include "views/controls/menu/menu_delegate.h"
-#include "views/controls/menu/view_menu_delegate.h"
-#include "views/view.h"
+#include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
+#include "ui/views/view.h"
 
 class WizardControllerTest_SwitchLanguage_Test;
 
@@ -24,7 +24,6 @@ class MenuRunner;
 namespace chromeos {
 
 class LanguageList;
-class ScreenObserver;
 
 class LanguageSwitchMenu : public views::ViewMenuDelegate,
                            public views::MenuDelegate {

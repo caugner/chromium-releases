@@ -26,7 +26,6 @@ class MessageLoopProxy;
 namespace remoting {
 
 class ChromotingInstance;
-class ClientContext;
 
 class PepperViewProxy : public base::RefCountedThreadSafe<PepperViewProxy>,
                         public ChromotingView,
@@ -45,8 +44,6 @@ class PepperViewProxy : public base::RefCountedThreadSafe<PepperViewProxy>,
   virtual void SetConnectionState(
       protocol::ConnectionToHost::State state,
       protocol::ConnectionToHost::Error error) OVERRIDE;
-  virtual void UpdateLoginStatus(bool success, const std::string& info)
-      OVERRIDE;
 
   // This method returns a value, so must run synchronously, so must be
   // called only on the pepper thread.
@@ -55,16 +52,13 @@ class PepperViewProxy : public base::RefCountedThreadSafe<PepperViewProxy>,
 
   // FrameConsumer implementation.
   virtual void AllocateFrame(media::VideoFrame::Format format,
-                             size_t width,
-                             size_t height,
-                             base::TimeDelta timestamp,
-                             base::TimeDelta duration,
+                             const SkISize& size,
                              scoped_refptr<media::VideoFrame>* frame_out,
-                             Task* done);
-  virtual void ReleaseFrame(media::VideoFrame* frame);
+                             const base::Closure& done) OVERRIDE;
+  virtual void ReleaseFrame(media::VideoFrame* frame) OVERRIDE;
   virtual void OnPartialFrameOutput(media::VideoFrame* frame,
                                     RectVector* rects,
-                                    Task* done);
+                                    const base::Closure& done) OVERRIDE;
 
   // Remove the reference to |instance_| and |view_| by setting the value to
   // NULL.

@@ -9,7 +9,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 static bool IsLastNormalBrowser(Browser* browser) {
   for (BrowserList::const_iterator i = BrowserList::begin();
@@ -27,22 +27,22 @@ PinnedTabService::PinnedTabService(Profile* profile)
       got_exiting_(false),
       has_normal_browser_(false) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_OPENED,
-                 NotificationService::AllBrowserContextsAndSources());
+                 content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_APP_EXITING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 void PinnedTabService::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   if (got_exiting_)
     return;
 
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_OPENED: {
-      Browser* browser = Source<Browser>(source).ptr();
+      Browser* browser = content::Source<Browser>(source).ptr();
       if (!has_normal_browser_ && browser->is_type_tabbed() &&
           browser->profile() == profile_) {
         has_normal_browser_ = true;
@@ -51,9 +51,9 @@ void PinnedTabService::Observe(int type,
     }
 
     case chrome::NOTIFICATION_BROWSER_CLOSING: {
-      Browser* browser = Source<Browser>(source).ptr();
+      Browser* browser = content::Source<Browser>(source).ptr();
       if (has_normal_browser_ && browser->profile() == profile_) {
-        if (*(Details<bool>(details)).ptr()) {
+        if (*(content::Details<bool>(details)).ptr()) {
           GotExit();
         } else if (IsLastNormalBrowser(browser)) {
           has_normal_browser_ = false;

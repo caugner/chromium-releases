@@ -6,7 +6,8 @@
 #define WEBKIT_GLUE_RESOURCE_TYPE_H__
 
 #include "base/basictypes.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "webkit/glue/webkit_glue_export.h"
 
 class ResourceType {
  public:
@@ -39,7 +40,8 @@ class ResourceType {
     return static_cast<Type>(type);
   }
 
-  static Type FromTargetType(WebKit::WebURLRequest::TargetType type);
+  WEBKIT_GLUE_EXPORT static Type FromTargetType(
+      WebKit::WebURLRequest::TargetType type);
 
   static bool IsFrame(ResourceType::Type type) {
     return type == MAIN_FRAME || type == SUB_FRAME;

@@ -7,8 +7,8 @@
 #pragma once
 
 #include "ui/aura_shell/aura_shell_export.h"
-#include "views/controls/button/button.h"
-#include "views/window/non_client_view.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/window/non_client_view.h"
 
 namespace aura_shell {
 namespace internal {
@@ -56,7 +56,6 @@ class AURA_SHELL_EXPORT ToplevelFrameView : public views::NonClientFrameView {
   virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
   virtual void GetWindowMask(const gfx::Size& size,
                              gfx::Path* window_mask) OVERRIDE;
-  virtual void EnableClose(bool enable) OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
 

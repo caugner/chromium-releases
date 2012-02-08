@@ -7,7 +7,9 @@
 #include "base/bind.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 ChromeSpeechInputPreferences::ChromeSpeechInputPreferences(
     PrefService* pref_service)

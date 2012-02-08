@@ -14,11 +14,12 @@
 #include "net/base/cookie_monster.h"
 #include "net/http/http_cache.h"
 #include "net/test/test_server.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebAudioDevice.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebAudioDevice.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCache.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDatabase.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGamepads.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
@@ -26,12 +27,12 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptController.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSerializedScriptValue.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageArea.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageNamespace.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "v8/include/v8.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/database/vfs_backend.h"
@@ -42,25 +43,28 @@
 #include "webkit/glue/webkitplatformsupport_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/support/simple_database_system.h"
+#include "webkit/support/test_webmessageportchannel.h"
 #include "webkit/support/webkit_support.h"
 #include "webkit/support/weburl_loader_mock_factory.h"
 #include "webkit/support/web_audio_device_mock.h"
 #include "webkit/tools/test_shell/mock_webclipboard_impl.h"
 #include "webkit/tools/test_shell/simple_appcache_system.h"
 #include "webkit/tools/test_shell/simple_file_system.h"
+#include "webkit/tools/test_shell/simple_socket_stream_bridge.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 #include "webkit/tools/test_shell/simple_webcookiejar_impl.h"
 #include "webkit/tools/test_shell/test_shell_request_context.h"
 #include "webkit/tools/test_shell/test_shell_webblobregistry_impl.h"
 
 #if defined(OS_WIN)
-#include "third_party/WebKit/Source/WebKit/chromium/public/win/WebThemeEngine.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/win/WebThemeEngine.h"
 #include "webkit/tools/test_shell/test_shell_webthemeengine.h"
 #elif defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
 #elif defined(OS_POSIX) && !defined(OS_ANDROID)
-#include "third_party/WebKit/Source/WebKit/chromium/public/linux/WebThemeEngine.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/linux/WebThemeEngine.h"
 #endif
 
 using WebKit::WebScriptController;
@@ -83,6 +87,7 @@ TestWebKitPlatformSupport::TestWebKitPlatformSupport(bool unit_test_mode)
   WebKit::WebRuntimeFeatures::enablePushState(true);
   WebKit::WebRuntimeFeatures::enableNotifications(true);
   WebKit::WebRuntimeFeatures::enableTouch(true);
+  WebKit::WebRuntimeFeatures::enableGamepad(true);
 
   // Load libraries for media and enable the media player.
   bool enable_media = false;
@@ -224,7 +229,7 @@ bool TestWebKitPlatformSupport::isLinkVisited(unsigned long long linkHash) {
 
 WebKit::WebMessagePortChannel*
 TestWebKitPlatformSupport::createMessagePortChannel() {
-  return NULL;
+  return new TestWebMessagePortChannel();
 }
 
 void TestWebKitPlatformSupport::prefetchHostName(const WebKit::WebString&) {
@@ -394,4 +399,48 @@ WebKit::WebAudioDevice* TestWebKitPlatformSupport::createAudioDevice(
     size_t bufferSize, unsigned numberOfChannels, double sampleRate,
     WebKit::WebAudioDevice::RenderCallback*) {
   return new WebAudioDeviceMock(sampleRate);
+}
+
+void TestWebKitPlatformSupport::sampleGamepads(WebKit::WebGamepads& data) {
+  data = gamepad_data_;
+}
+
+void TestWebKitPlatformSupport::setGamepadData(
+    const WebKit::WebGamepads& data) {
+  gamepad_data_ = data;
+}
+
+void TestWebKitPlatformSupport::GetPlugins(
+    bool refresh, std::vector<webkit::WebPluginInfo>* plugins) {
+  if (refresh)
+    webkit::npapi::PluginList::Singleton()->RefreshPlugins();
+  webkit::npapi::PluginList::Singleton()->GetPlugins(plugins);
+  // Don't load the forked npapi_layout_test_plugin in DRT, we only want to
+  // use the upstream version TestNetscapePlugIn.
+  const FilePath::StringType kPluginBlackList[] = {
+    FILE_PATH_LITERAL("npapi_layout_test_plugin.dll"),
+    FILE_PATH_LITERAL("WebKitTestNetscapePlugIn.plugin"),
+    FILE_PATH_LITERAL("libnpapi_layout_test_plugin.so"),
+  };
+  for (int i = plugins->size() - 1; i >= 0; --i) {
+    webkit::WebPluginInfo plugin_info = plugins->at(i);
+    for (size_t j = 0; j < arraysize(kPluginBlackList); ++j) {
+      if (plugin_info.path.BaseName() == FilePath(kPluginBlackList[j])) {
+        plugins->erase(plugins->begin() + i);
+      }
+    }
+  }
+}
+
+webkit_glue::ResourceLoaderBridge*
+TestWebKitPlatformSupport::CreateResourceLoader(
+    const webkit_glue::ResourceLoaderBridge::RequestInfo& request_info) {
+  return SimpleResourceLoaderBridge::Create(request_info);
+}
+
+webkit_glue::WebSocketStreamHandleBridge*
+TestWebKitPlatformSupport::CreateWebSocketBridge(
+    WebKit::WebSocketStreamHandle* handle,
+    webkit_glue::WebSocketStreamHandleDelegate* delegate) {
+  return SimpleSocketStreamBridge::Create(handle, delegate);
 }

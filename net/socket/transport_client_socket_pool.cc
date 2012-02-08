@@ -61,22 +61,16 @@ bool AddressListOnlyContainsIPv6Addresses(const AddressList& addrlist) {
 TransportSocketParams::TransportSocketParams(
     const HostPortPair& host_port_pair,
     RequestPriority priority,
-    const GURL& referrer,
     bool disable_resolver_cache,
     bool ignore_limits)
     : destination_(host_port_pair), ignore_limits_(ignore_limits) {
-  Initialize(priority, referrer, disable_resolver_cache);
+  Initialize(priority, disable_resolver_cache);
 }
 
 TransportSocketParams::~TransportSocketParams() {}
 
 void TransportSocketParams::Initialize(RequestPriority priority,
-                                       const GURL& referrer,
                                        bool disable_resolver_cache) {
-  // The referrer is used by the DNS prefetch system to correlate resolutions
-  // with the page that triggered them. It doesn't impact the actual addresses
-  // that we resolve to.
-  destination_.set_referrer(referrer);
   destination_.set_priority(priority);
   if (disable_resolver_cache)
     destination_.set_allow_cached_response(false);
@@ -205,8 +199,10 @@ int TransportConnectJob::DoLoop(int result) {
 
 int TransportConnectJob::DoResolveHost() {
   next_state_ = STATE_RESOLVE_HOST_COMPLETE;
-  return resolver_.Resolve(params_->destination(), &addresses_, &callback_,
-                           net_log());
+  return resolver_.Resolve(
+      params_->destination(), &addresses_,
+      base::Bind(&TransportConnectJob::OnIOComplete, base::Unretained(this)),
+      net_log());
 }
 
 int TransportConnectJob::DoResolveHostComplete(int result) {

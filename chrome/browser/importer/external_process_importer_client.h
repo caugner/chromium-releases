@@ -14,8 +14,8 @@
 #include "base/string16.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/profile_writer.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/utility_process_host.h"
+#include "content/public/browser/browser_thread.h"
 
 class ExternalProcessImporterHost;
 class InProcessImporterBridge;
@@ -50,7 +50,7 @@ class ExternalProcessImporterClient : public UtilityProcessHost::Client {
   virtual void Start();
 
   // Creates a new UtilityProcessHost, which launches the import process.
-  virtual void StartProcessOnIOThread(BrowserThread::ID thread_id);
+  virtual void StartProcessOnIOThread(content::BrowserThread::ID thread_id);
 
   // Called by the ExternalProcessImporterHost on import cancel.
   virtual void Cancel();

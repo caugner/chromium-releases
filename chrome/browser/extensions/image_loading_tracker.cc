@@ -6,14 +6,16 @@
 
 #include "base/bind.h"
 #include "base/file_util.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/browser_thread.h"
-#include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "webkit/glue/image_decoder.h"
+
+using content::BrowserThread;
 
 ImageLoadingTracker::Observer::~Observer() {}
 
@@ -123,7 +125,7 @@ ImageLoadingTracker::ImageLoadingTracker(Observer* observer)
     : observer_(observer),
       next_id_(0) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 ImageLoadingTracker::~ImageLoadingTracker() {
@@ -181,12 +183,12 @@ void ImageLoadingTracker::OnImageLoaded(
 }
 
 void ImageLoadingTracker::Observe(int type,
-                                  const NotificationSource& source,
-                                  const NotificationDetails& details) {
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_EXTENSION_UNLOADED);
 
   const Extension* extension =
-      Details<UnloadedExtensionInfo>(details)->extension;
+      content::Details<UnloadedExtensionInfo>(details)->extension;
 
   // Remove all entries in the load_map_ referencing the extension. This ensures
   // we don't attempt to cache the image when the load completes.

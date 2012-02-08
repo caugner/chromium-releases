@@ -10,7 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -29,17 +29,17 @@ struct TestURLResponse {
 
 // Creates mock URLFetchers whose behavior can be controlled in tests. To do so
 // set mock expectations on the method |Intercept|.
-class TestingPolicyURLFetcherFactory : public URLFetcher::Factory,
+class TestingPolicyURLFetcherFactory : public content::URLFetcherFactory,
                                        public ScopedURLFetcherFactory {
  public:
   explicit TestingPolicyURLFetcherFactory(EventLogger* logger);
   virtual ~TestingPolicyURLFetcherFactory();
 
-  virtual URLFetcher* CreateURLFetcher(
+  virtual content::URLFetcher* CreateURLFetcher(
       int id,
       const GURL& url,
-      URLFetcher::RequestType request_type,
-      URLFetcher::Delegate* delegate) OVERRIDE;
+      content::URLFetcher::RequestType request_type,
+      content::URLFetcherDelegate* delegate) OVERRIDE;
 
   LoggingWorkScheduler* scheduler();
 

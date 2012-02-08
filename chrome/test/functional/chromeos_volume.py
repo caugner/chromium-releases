@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -17,6 +17,8 @@ class ChromeosVolume(pyauto.PyUITest):
   Test volume and mute changes with different state like, login,
   lock, logout, etc...
   """
+
+  DEFAULT_VOLUME = {u'volume': 77.134215500945189, u'is_mute': False}
 
   def setUp(self):
     # We want a clean session_manager instance for every run,
@@ -39,6 +41,14 @@ class ChromeosVolume(pyauto.PyUITest):
     logging.info('Logged in as %s' % credentials['username'])   
     login_info = self.GetLoginInfo()
     self.assertTrue(login_info['is_logged_in'], msg='Login failed.')
+
+  def testDefaultVolume(self):
+    """Test the default volume settings"""
+    self._Login()
+    volume = self.GetVolumeInfo()
+    self.assertEqual(volume, self.DEFAULT_VOLUME,
+        msg='Volume settings are set to %s, not matching with default '\
+        'volume settings %s.' % (volume, self.DEFAULT_VOLUME))
 
   def testLoginLogoutVolume(self):
     """Test that volume settings are preserved after login and logout"""

@@ -4,10 +4,11 @@
 
 #include "chrome/browser/ui/views/collected_cookies_win.h"
 
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/cookies_tree_model.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/constrained_window.h"
@@ -15,23 +16,23 @@
 #include "chrome/browser/ui/views/constrained_window_views.h"
 #include "chrome/browser/ui/views/cookie_info_view.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "chrome/common/pref_names.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/color_utils.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/separator.h"
-#include "views/controls/tabbed_pane/tabbed_pane.h"
-#include "views/layout/box_layout.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/tabbed_pane/tabbed_pane.h"
+#include "ui/views/layout/box_layout.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 namespace browser {
 
@@ -178,7 +179,7 @@ CollectedCookiesWin::CollectedCookiesWin(gfx::NativeWindow parent_window,
       status_changed_(false) {
   TabSpecificContentSettings* content_settings = wrapper->content_settings();
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
-                 Source<TabSpecificContentSettings>(content_settings));
+                 content::Source<TabSpecificContentSettings>(content_settings));
 
   Init();
 
@@ -287,13 +288,12 @@ views::View* CollectedCookiesWin::CreateAllowedPane() {
 views::View* CollectedCookiesWin::CreateBlockedPane() {
   TabSpecificContentSettings* content_settings = wrapper_->content_settings();
 
-  HostContentSettingsMap* host_content_settings_map =
-      wrapper_->profile()->GetHostContentSettingsMap();
+  PrefService* prefs = wrapper_->profile()->GetPrefs();
 
   // Create the controls that go into the pane.
   blocked_label_ = new views::Label(
       l10n_util::GetStringUTF16(
-          host_content_settings_map->BlockThirdPartyCookies() ?
+          prefs->GetBoolean(prefs::kBlockThirdPartyCookies) ?
               IDS_COLLECTED_COOKIES_BLOCKED_THIRD_PARTY_BLOCKING_ENABLED :
               IDS_COLLECTED_COOKIES_BLOCKED_COOKIES_LABEL));
   blocked_label_->SetMultiLine(true);
@@ -359,11 +359,11 @@ string16 CollectedCookiesWin::GetWindowTitle() const {
 }
 
 int CollectedCookiesWin::GetDialogButtons() const {
-  return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  return ui::DIALOG_BUTTON_CANCEL;
 }
 
 string16 CollectedCookiesWin::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
+    ui::DialogButton button) const {
   return l10n_util::GetStringUTF16(IDS_CLOSE);
 }
 
@@ -481,7 +481,7 @@ void CollectedCookiesWin::AddContentException(views::TreeView* tree_view,
   CookieTreeOriginNode* origin_node =
       static_cast<CookieTreeOriginNode*>(tree_view->GetSelectedNode());
   Profile* profile = wrapper_->profile();
-  origin_node->CreateContentException(profile->GetHostContentSettingsMap(),
+  origin_node->CreateContentException(CookieSettings::GetForProfile(profile),
                                       setting);
   infobar_->UpdateVisibility(true, setting, origin_node->GetTitle());
   gfx::Rect bounds = GetWidget()->GetClientAreaScreenBounds();
@@ -503,11 +503,11 @@ void CollectedCookiesWin::AddContentException(views::TreeView* tree_view,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// NotificationObserver implementation.
+// content::NotificationObserver implementation.
 
 void CollectedCookiesWin::Observe(int type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
   window_->CloseConstrainedWindow();
 }

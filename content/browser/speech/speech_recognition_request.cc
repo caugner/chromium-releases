@@ -10,6 +10,8 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/values.h"
+#include "content/common/net/url_fetcher_impl.h"
+#include "content/public/common/speech_input_result.h"
 #include "net/base/escape.h"
 #include "net/base/load_flags.h"
 #include "net/url_request/url_request_context.h"
@@ -30,7 +32,7 @@ const char* const kConfidenceString = "confidence";
 const int kMaxResults = 6;
 
 bool ParseServerResponse(const std::string& response_body,
-                         speech_input::SpeechInputResult* result) {
+                         content::SpeechInputResult* result) {
   if (response_body.empty()) {
     LOG(WARNING) << "ParseServerResponse: Response was empty.";
     return false;
@@ -64,9 +66,9 @@ bool ParseServerResponse(const std::string& response_body,
 
   // Process the status.
   switch (status) {
-  case speech_input::kErrorNone:
-  case speech_input::kErrorNoSpeech:
-  case speech_input::kErrorNoMatch:
+  case content::SPEECH_INPUT_ERROR_NONE:
+  case content::SPEECH_INPUT_ERROR_NO_SPEECH:
+  case content::SPEECH_INPUT_ERROR_NO_MATCH:
     break;
 
   default:
@@ -75,7 +77,7 @@ bool ParseServerResponse(const std::string& response_body,
     return false;
   }
 
-  result->error = static_cast<speech_input::SpeechInputError>(status);
+  result->error = static_cast<content::SpeechInputError>(status);
 
   // Get the hypotheses.
   Value* hypotheses_value = NULL;
@@ -119,7 +121,7 @@ bool ParseServerResponse(const std::string& response_body,
     double confidence = 0.0;
     hypothesis_value->GetDouble(kConfidenceString, &confidence);
 
-    result->hypotheses.push_back(speech_input::SpeechInputHypothesis(
+    result->hypotheses.push_back(content::SpeechInputHypothesis(
         utterance, confidence));
   }
 
@@ -181,19 +183,19 @@ void SpeechRecognitionRequest::Start(const std::string& language,
 
   GURL url(std::string(kDefaultSpeechRecognitionUrl) + JoinString(parts, '&'));
 
-  url_fetcher_.reset(URLFetcher::Create(url_fetcher_id_for_tests,
-                                        url,
-                                        URLFetcher::POST,
-                                        this));
-  url_fetcher_->set_chunked_upload(content_type);
-  url_fetcher_->set_request_context(url_context_);
-  url_fetcher_->set_referrer(origin_url);
+  url_fetcher_.reset(URLFetcherImpl::Create(url_fetcher_id_for_tests,
+                                            url,
+                                            URLFetcherImpl::POST,
+                                            this));
+  url_fetcher_->SetChunkedUpload(content_type);
+  url_fetcher_->SetRequestContext(url_context_);
+  url_fetcher_->SetReferrer(origin_url);
 
   // The speech recognition API does not require user identification as part
   // of requests, so we don't send cookies or auth data for these requests to
   // prevent any accidental connection between users who are logged into the
   // domain for other services (e.g. bookmark sync) with the speech requests.
-  url_fetcher_->set_load_flags(
+  url_fetcher_->SetLoadFlags(
       net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES |
       net::LOAD_DO_NOT_SEND_AUTH_DATA);
   url_fetcher_->Start();
@@ -205,13 +207,16 @@ void SpeechRecognitionRequest::UploadAudioChunk(const std::string& audio_data,
   url_fetcher_->AppendChunkToUpload(audio_data, is_last_chunk);
 }
 
-void SpeechRecognitionRequest::OnURLFetchComplete(const URLFetcher* source) {
+void SpeechRecognitionRequest::OnURLFetchComplete(
+    const content::URLFetcher* source) {
   DCHECK_EQ(url_fetcher_.get(), source);
 
-  SpeechInputResult result;
-  if (!source->status().is_success() || source->response_code() != 200 ||
-      !ParseServerResponse(source->GetResponseStringRef(), &result)) {
-    result.error = kErrorNetwork;
+  content::SpeechInputResult result;
+  std::string data;
+  if (!source->GetStatus().is_success() || source->GetResponseCode() != 200 ||
+      !source->GetResponseAsString(&data) ||
+      !ParseServerResponse(data, &result)) {
+    result.error = content::SPEECH_INPUT_ERROR_NETWORK;
   }
 
   DVLOG(1) << "SpeechRecognitionRequest: Invoking delegate with result.";

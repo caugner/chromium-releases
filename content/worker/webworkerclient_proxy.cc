@@ -4,6 +4,7 @@
 
 #include "content/worker/webworkerclient_proxy.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
 #include "content/common/file_system/file_system_dispatcher.h"
@@ -16,7 +17,7 @@
 // don't support nested workers anyways.
 //#include "content/renderer/webworker_proxy.h"
 #include "content/worker/shared_worker_devtools_agent.h"
-#include "content/worker/webworker_stub_base.h"
+#include "content/worker/websharedworker_stub.h"
 #include "content/worker/worker_thread.h"
 #include "content/worker/worker_webapplicationcachehost_impl.h"
 #include "ipc/ipc_logging.h"
@@ -24,8 +25,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWorker.h"
 
 using WebKit::WebApplicationCacheHost;
@@ -41,11 +42,11 @@ using WebKit::WebWorkerClient;
 #define kMaxTimeForRunawayWorkerMs 3000
 
 WebWorkerClientProxy::WebWorkerClientProxy(int route_id,
-                                           WebWorkerStubBase* stub)
+                                           WebSharedWorkerStub* stub)
     : route_id_(route_id),
       appcache_host_id_(0),
       stub_(stub),
-      ALLOW_THIS_IN_INITIALIZER_LIST(kill_process_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       devtools_agent_(NULL) {
 }
 
@@ -152,7 +153,7 @@ bool WebWorkerClientProxy::allowDatabase(WebFrame* frame,
                                          const WebString& display_name,
                                          unsigned long estimated_size) {
   WebSecurityOrigin origin = frame->document().securityOrigin();
-  if (origin.isEmpty())
+  if (origin.isUnique())
     return false;
 
   bool result = false;
@@ -209,7 +210,8 @@ void WebWorkerClientProxy::EnsureWorkerContextTerminates() {
   // page. It's ok to post several of theese, because the first executed task
   // will exit the message loop and subsequent ones won't be executed.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      kill_process_factory_.NewRunnableMethod(
-          &WebWorkerClientProxy::workerContextDestroyed),
-          kMaxTimeForRunawayWorkerMs);
+      base::Bind(
+          &WebWorkerClientProxy::workerContextDestroyed,
+          weak_factory_.GetWeakPtr()),
+      kMaxTimeForRunawayWorkerMs);
 }

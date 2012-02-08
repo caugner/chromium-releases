@@ -1,9 +1,10 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/default_plugin/plugin_install_job_monitor.h"
 
+#include "base/bind.h"
 #include "base/message_loop.h"
 #include "chrome/default_plugin/plugin_impl.h"
 
@@ -16,6 +17,10 @@ PluginInstallationJobMonitorThread::PluginInstallationJobMonitorThread()
 }
 
 PluginInstallationJobMonitorThread::~PluginInstallationJobMonitorThread() {
+  // The way this class is used, Thread::Stop() has always been called
+  // by the time we reach this point, so we do not need to call it
+  // again.
+  DCHECK(!Thread::IsRunning());
   if (install_job_) {
     ::CloseHandle(install_job_);
     install_job_ = NULL;
@@ -37,9 +42,9 @@ bool PluginInstallationJobMonitorThread::Initialize() {
 }
 
 void PluginInstallationJobMonitorThread::Init() {
-  this->message_loop()->PostTask(FROM_HERE,
-    NewRunnableMethod(this,
-                      &PluginInstallationJobMonitorThread::WaitForJobThread));
+  this->message_loop()->PostTask(
+      FROM_HERE,
+      base::Bind(&PluginInstallationJobMonitorThread::WaitForJobThread, this));
 }
 
 void PluginInstallationJobMonitorThread::WaitForJobThread() {

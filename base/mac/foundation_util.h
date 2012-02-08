@@ -13,6 +13,7 @@
 
 #include "base/base_export.h"
 #include "base/logging.h"
+#include "base/mac/scoped_cftyperef.h"
 
 #if defined(__OBJC__)
 #import <Foundation/Foundation.h>
@@ -96,11 +97,21 @@ BASE_EXPORT FilePath GetUserLibraryPath();
 //   returns - path to the application bundle, or empty on error
 BASE_EXPORT FilePath GetAppBundlePath(const FilePath& exec_name);
 
-// Utility function to pull out a value from a dictionary, check its type, and
-// return it.  Returns NULL if the key is not present or of the wrong type.
-BASE_EXPORT CFTypeRef GetValueFromDictionary(CFDictionaryRef dict,
-                                             CFStringRef key,
-                                             CFTypeID expected_type);
+#define TYPE_NAME_FOR_CF_TYPE_DECL(TypeCF) \
+std::string TypeNameForCFType(TypeCF##Ref);
+
+TYPE_NAME_FOR_CF_TYPE_DECL(CFArray);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFBag);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFBoolean);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFData);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFDate);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFDictionary);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFNull);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFNumber);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFSet);
+TYPE_NAME_FOR_CF_TYPE_DECL(CFString);
+
+#undef TYPE_NAME_FOR_CF_TYPE_DECL
 
 // Retain/release calls for memory management in C++.
 BASE_EXPORT void NSObjectRetain(void* obj);
@@ -164,7 +175,7 @@ namespace mac { \
 BASE_EXPORT TypeNS* CFToNSCast(TypeCF##Ref cf_val); \
 BASE_EXPORT TypeCF##Ref NSToCFCast(TypeNS* ns_val); \
 } \
-} \
+}
 
 #define CF_TO_NS_MUTABLE_CAST_DECL(name) \
 CF_TO_NS_CAST_DECL(CF##name, NS##name) \
@@ -175,7 +186,7 @@ namespace mac { \
 BASE_EXPORT NSMutable##name* CFToNSCast(CFMutable##name##Ref cf_val); \
 BASE_EXPORT CFMutable##name##Ref NSToCFCast(NSMutable##name* ns_val); \
 } \
-} \
+}
 
 // List of toll-free bridged types taken from:
 // http://www.cocoadev.com/index.pl?TollFreeBridged
@@ -197,6 +208,100 @@ CF_TO_NS_CAST_DECL(CFReadStream, NSInputStream);
 CF_TO_NS_CAST_DECL(CFWriteStream, NSOutputStream);
 CF_TO_NS_MUTABLE_CAST_DECL(String);
 CF_TO_NS_CAST_DECL(CFURL, NSURL);
+
+#undef CF_TO_NS_CAST_DECL
+#undef CF_TO_NS_MUTABLE_CAST_DECL
+#undef OBJC_CPP_CLASS_DECL
+
+namespace base {
+namespace mac {
+
+// CFCast<>() and CFCastStrict<>() cast a basic CFTypeRef to a more
+// specific CoreFoundation type. The compatibility of the passed
+// object is found by comparing its opaque type against the
+// requested type identifier. If the supplied object is not
+// compatible with the requested return type, CFCast<>() returns
+// NULL and CFCastStrict<>() will DCHECK. Providing a NULL pointer
+// to either variant results in NULL being returned without
+// triggering any DCHECK.
+//
+// Example usage:
+// CFNumberRef some_number = base::mac::CFCast<CFNumberRef>(
+//     CFArrayGetValueAtIndex(array, index));
+//
+// CFTypeRef hello = CFSTR("hello world");
+// CFStringRef some_string = base::mac::CFCastStrict<CFStringRef>(hello);
+BASE_EXPORT template<typename T>
+T CFCast(const CFTypeRef& cf_val);
+
+BASE_EXPORT template<typename T>
+T CFCastStrict(const CFTypeRef& cf_val);
+
+#if defined(__OBJC__)
+
+// ObjCCast<>() and ObjCCastStrict<>() cast a basic id to a more
+// specific (NSObject-derived) type. The compatibility of the passed
+// object is found by checking if it's a kind of the requested type
+// identifier. If the supplied object is not compatible with the
+// requested return type, ObjCCast<>() returns nil and
+// ObjCCastStrict<>() will DCHECK. Providing a nil pointer to either
+// variant results in nil being returned without triggering any DCHECK.
+//
+// The strict variant is useful when retrieving a value from a
+// collection which only has values of a specific type, e.g. an
+// NSArray of NSStrings. The non-strict variant is useful when
+// retrieving values from data that you can't fully control. For
+// example, a plist read from disk may be beyond your exclusive
+// control, so you'd only want to check that the values you retrieve
+// from it are of the expected types, but not crash if they're not.
+//
+// Example usage:
+// NSString* version = base::mac::ObjCCast<NSString>(
+//     [bundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"]);
+//
+// NSString* str = base::mac::ObjCCastStrict<NSString>(
+//     [ns_arr_of_ns_strs objectAtIndex:0]);
+BASE_EXPORT template<typename T>
+T* ObjCCast(id objc_val) {
+  if ([objc_val isKindOfClass:[T class]]) {
+    return reinterpret_cast<T*>(objc_val);
+  }
+  return nil;
+}
+
+BASE_EXPORT template<typename T>
+T* ObjCCastStrict(id objc_val) {
+  T* rv = ObjCCast<T>(objc_val);
+  DCHECK(objc_val == nil || rv);
+  return rv;
+}
+
+#endif  // defined(__OBJC__)
+
+// Helper function for GetValueFromDictionary to create the error message
+// that appears when a type mismatch is encountered.
+std::string GetValueFromDictionaryErrorMessage(
+    CFStringRef key, const std::string& expected_type, CFTypeRef value);
+
+// Utility function to pull out a value from a dictionary, check its type, and
+// return it. Returns NULL if the key is not present or of the wrong type.
+BASE_EXPORT template<typename T>
+T GetValueFromDictionary(CFDictionaryRef dict, CFStringRef key) {
+  CFTypeRef value = CFDictionaryGetValue(dict, key);
+  T value_specific = CFCast<T>(value);
+
+  if (value && !value_specific) {
+    std::string expected_type = TypeNameForCFType(value_specific);
+    DLOG(WARNING) << GetValueFromDictionaryErrorMessage(key,
+                                                        expected_type,
+                                                        value);
+  }
+
+  return value_specific;
+}
+
+}  // namespace mac
+}  // namespace base
 
 // Stream operations for CFTypes. They can be used with NSTypes as well
 // by using the NSToCFCast methods above.

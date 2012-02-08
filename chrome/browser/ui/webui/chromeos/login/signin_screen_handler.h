@@ -13,6 +13,7 @@
 #include "base/task.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "content/browser/webui/web_ui.h"
@@ -27,6 +28,7 @@ class ListValue;
 namespace chromeos {
 
 class NetworkStateInformer;
+class User;
 
 // An interface for WebUILoginDisplay to call SigninScreenHandler.
 class LoginDisplayWebUIHandler {
@@ -34,6 +36,7 @@ class LoginDisplayWebUIHandler {
   virtual void ClearAndEnablePassword() = 0;
   virtual void OnLoginSuccess(const std::string& username) = 0;
   virtual void OnUserRemoved(const std::string& username) = 0;
+  virtual void OnUserImageChanged(const User& user) = 0;
   virtual void ShowError(int login_attempts,
                          const std::string& error_text,
                          const std::string& help_link_text,
@@ -76,6 +79,19 @@ class SigninScreenHandlerDelegate {
   // Let the delegate know about the handler it is supposed to be using.
   virtual void SetWebUIHandler(LoginDisplayWebUIHandler* webui_handler) = 0;
 
+  // Returns users list to be shown.
+  virtual const UserList& GetUsers() const = 0;
+
+  // Whether login as guest is available.
+  virtual bool IsShowGuest() const = 0;
+
+  // Whether new user pod is available.
+  virtual bool IsShowNewUser() const = 0;
+
+  // Sets the displayed email for the next login attempt. If it succeeds,
+  // user's displayed email value will be updated to |email|.
+  virtual void SetDisplayEmail(const std::string& email) = 0;
+
  protected:
   virtual ~SigninScreenHandlerDelegate() {}
 };
@@ -94,6 +110,10 @@ class SigninScreenHandler : public BaseScreenHandler,
   // screen is for OOBE or usual sign-in flow.
   void Show(bool oobe_ui);
 
+  // Sets delegate to be used by the handler. It is guaranteed that valid
+  // delegate is set before Show() method will be called.
+  void SetDelegate(SigninScreenHandlerDelegate* delegate);
+
  private:
   friend class ReportDnsCacheClearedOnUIThread;
 
@@ -109,6 +129,7 @@ class SigninScreenHandler : public BaseScreenHandler,
   virtual void ClearAndEnablePassword() OVERRIDE;
   virtual void OnLoginSuccess(const std::string& username) OVERRIDE;
   virtual void OnUserRemoved(const std::string& username) OVERRIDE;
+  virtual void OnUserImageChanged(const User& user) OVERRIDE;
   virtual void ShowError(int login_attempts,
                          const std::string& error_text,
                          const std::string& help_link_text,
@@ -124,6 +145,12 @@ class SigninScreenHandler : public BaseScreenHandler,
 
   // Shows signin screen after dns cache and cookie cleanup operations finish.
   void ShowSigninScreenIfReady();
+
+  // Tells webui to load authentication extension. |force| is used to force the
+  // extension reloading, if it has already been loaded. |silent_load| is true
+  // for cases when extension should be loaded in the background and it
+  // shouldn't grab the focus.
+  void LoadAuthExtension(bool force, bool silent_load);
 
   // Handles confirmation message of user authentication that was performed by
   // the authentication extension.
@@ -160,6 +187,9 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Handle 'createAccount' request.
   void HandleCreateAccount(const base::ListValue* args);
 
+  // Handle 'accountPickerReady' request.
+  void HandleAccountPickerReady(const base::ListValue* args);
+
   // Handle 'loginWebuiReady' request.
   void HandleLoginWebuiReady(const base::ListValue* args);
 
@@ -171,6 +201,9 @@ class SigninScreenHandler : public BaseScreenHandler,
 
   // Handle 'loginRemoveNetworkStateObserver' request.
   void HandleLoginRemoveNetworkStateObserver(const base::ListValue* args);
+
+  // Handle 'signOutUser' request.
+  void HandleSignOutUser(const base::ListValue* args);
 
   // Sends user list to account picker.
   void SendUserList(bool animated);
@@ -191,6 +224,12 @@ class SigninScreenHandler : public BaseScreenHandler,
   // Keeps whether screen should be shown for OOBE.
   bool oobe_ui_;
 
+  // Whether webui has been loaded for the first time.
+  bool is_first_webui_ready_;
+
+  // Whether it is the first attempt to load the gaia extension.
+  bool is_first_attempt_;
+
   // True if dns cache cleanup is done.
   bool dns_cleared_;
 
@@ -199,9 +238,6 @@ class SigninScreenHandler : public BaseScreenHandler,
 
   // True if cookie jar cleanup is done.
   bool cookies_cleared_;
-
-  // True if new user sign in flow is driven by the extension.
-  bool extension_driven_;
 
   // Help application used for help dialogs.
   scoped_refptr<HelpAppLauncher> help_app_;

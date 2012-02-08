@@ -32,10 +32,11 @@ PrintingContextMac::~PrintingContextMac() {
   ReleaseContext();
 }
 
-void PrintingContextMac::AskUserForSettings(gfx::NativeView parent_view,
-                                            int max_pages,
-                                            bool has_selection,
-                                            PrintSettingsCallback* callback) {
+void PrintingContextMac::AskUserForSettings(
+    gfx::NativeView parent_view,
+    int max_pages,
+    bool has_selection,
+    const PrintSettingsCallback& callback) {
   // Third-party print drivers seem to be an area prone to raising exceptions.
   // This will allow exceptions to be raised, but does not handle them.  The
   // NSPrintPanel appears to have appropriate NSException handlers.
@@ -80,9 +81,9 @@ void PrintingContextMac::AskUserForSettings(gfx::NativeView parent_view,
   if (selection == NSOKButton) {
     print_info_.reset([[panel printInfo] retain]);
     InitPrintSettingsFromPrintInfo(GetPageRangesFromPrintInfo());
-    callback->Run(OK);
+    callback.Run(OK);
   } else {
-    callback->Run(CANCEL);
+    callback.Run(CANCEL);
   }
 }
 
@@ -123,7 +124,8 @@ PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
     return OnError();
   }
 
-  bool print_to_cloud = job_settings.HasKey(printing::kSettingCloudPrintId);
+  bool print_to_cloud = job_settings.HasKey(kSettingCloudPrintId);
+  bool open_pdf_in_preview = job_settings.HasKey(kSettingOpenPDFInPreview);
 
   if (!print_to_pdf && !print_to_cloud && !is_cloud_dialog) {
     if (!SetPrinter(device_name))
@@ -143,6 +145,13 @@ PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
     if (!SetOutputColor(color))
       return OnError();
   }
+  if (open_pdf_in_preview) {
+    if (!SetPrintPreviewJob())
+      return OnError();
+  }
+
+  if (!UpdatePageFormatWithPaperInfo())
+    return OnError();
 
   if (!SetOrientationIsLandscape(landscape))
     return OnError();
@@ -151,6 +160,16 @@ PrintingContext::Result PrintingContextMac::UpdatePrinterSettings(
 
   InitPrintSettingsFromPrintInfo(ranges);
   return OK;
+}
+
+bool PrintingContextMac::SetPrintPreviewJob() {
+  PMPrintSession print_session =
+      static_cast<PMPrintSession>([print_info_.get() PMPrintSession]);
+  PMPrintSettings print_settings =
+      static_cast<PMPrintSettings>([print_info_.get() PMPrintSettings]);
+  return PMSessionSetDestination(
+      print_session, print_settings, kPMDestinationPreview,
+      NULL, NULL) == noErr;
 }
 
 void PrintingContextMac::InitPrintSettingsFromPrintInfo(
@@ -197,6 +216,95 @@ bool PrintingContextMac::SetPrinter(const std::string& device_name) {
   return status == noErr;
 }
 
+bool PrintingContextMac::UpdatePageFormatWithPaperInfo() {
+  PMPrintSession print_session =
+      static_cast<PMPrintSession>([print_info_.get() PMPrintSession]);
+
+  PMPageFormat default_page_format =
+      static_cast<PMPageFormat>([print_info_.get() PMPageFormat]);
+
+  PMPaper default_paper;
+  if (PMGetPageFormatPaper(default_page_format, &default_paper) != noErr)
+    return false;
+
+  double default_page_width, default_page_height;
+  if (PMPaperGetWidth(default_paper, &default_page_width) != noErr)
+    return false;
+
+  if (PMPaperGetHeight(default_paper, &default_page_height) != noErr)
+    return false;
+
+  PMPrinter current_printer = NULL;
+  if (PMSessionGetCurrentPrinter(print_session, &current_printer) != noErr)
+    return false;
+
+  if (current_printer == nil)
+    return false;
+
+  CFArrayRef paper_list = NULL;
+  if (PMPrinterGetPaperList(current_printer, &paper_list) != noErr)
+    return false;
+
+  PMPaper best_matching_paper = kPMNoData;
+  int num_papers = CFArrayGetCount(paper_list);
+  for (int i = 0; i < num_papers; ++i) {
+    PMPaper paper = (PMPaper) [(NSArray* ) paper_list objectAtIndex: i];
+    double paper_width, paper_height;
+    PMPaperGetWidth(paper, &paper_width);
+    PMPaperGetHeight(paper, &paper_height);
+    if (default_page_width == paper_width &&
+        default_page_height == paper_height) {
+      best_matching_paper = paper;
+      break;
+    }
+    // Trying to find the best matching paper.
+    if (fabs(default_page_width - paper_width) < 2 &&
+        fabs(default_page_height - paper_height) < 2) {
+      best_matching_paper = paper;
+    }
+  }
+
+  if (best_matching_paper == kPMNoData) {
+    PMPaper paper = kPMNoData;
+    // Create a custom paper for the specified default page size.
+    PMPaperMargins default_margins;
+    if (PMPaperGetMargins(default_paper, &default_margins) != noErr)
+      return false;
+
+    const PMPaperMargins margins =
+        {default_margins.top, default_margins.left, default_margins.bottom,
+         default_margins.right};
+    CFStringRef paper_id = CFSTR("Custom paper ID");
+    CFStringRef paper_name = CFSTR("Custom paper");
+    if (PMPaperCreateCustom(current_printer, paper_id, paper_name,
+            default_page_width, default_page_height, &margins, &paper) !=
+            noErr) {
+      return false;
+    }
+    [print_info_.get() updateFromPMPageFormat];
+    PMRelease(paper);
+  } else {
+    PMPageFormat chosen_page_format = NULL;
+    if (PMCreatePageFormat((PMPageFormat*) &chosen_page_format) != noErr)
+      return false;
+
+    // Create page format from that paper.
+    if (PMCreatePageFormatWithPMPaper(&chosen_page_format,
+            best_matching_paper) != noErr) {
+      PMRelease(chosen_page_format);
+      return false;
+    }
+    // Copy over the original format with the new page format.
+    if (PMCopyPageFormat(chosen_page_format, default_page_format) != noErr) {
+      PMRelease(chosen_page_format);
+      return false;
+    }
+    [print_info_.get() updateFromPMPageFormat];
+    PMRelease(chosen_page_format);
+  }
+  return true;
+}
+
 bool PrintingContextMac::SetCopiesInPrintSettings(int copies) {
   if (copies < 1)
     return false;
@@ -220,6 +328,11 @@ bool PrintingContextMac::SetOrientationIsLandscape(bool landscape) {
 
   if (PMSetOrientation(page_format, orientation, false) != noErr)
     return false;
+
+  PMPrintSession print_session =
+      static_cast<PMPrintSession>([print_info_.get() PMPrintSession]);
+
+  PMSessionValidatePageFormat(print_session, page_format, kPMDontWantBoolean);
 
   [print_info_.get() updateFromPMPageFormat];
   return true;
@@ -251,7 +364,7 @@ bool PrintingContextMac::SetOutputColor(int color_mode) {
       static_cast<PMPrintSettings>([print_info_.get() PMPrintSettings]);
   std::string color_setting_name;
   std::string color_value;
-  printing::GetColorModelForMode(color_mode, &color_setting_name, &color_value);
+  GetColorModelForMode(color_mode, &color_setting_name, &color_value);
   base::mac::ScopedCFTypeRef<CFStringRef> color_setting(
       base::SysUTF8ToCFStringRef(color_setting_name));
   base::mac::ScopedCFTypeRef<CFStringRef> output_color(

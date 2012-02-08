@@ -29,7 +29,17 @@ namespace {
 
 // The number of days by which the expiration threshold is advanced for items
 // that we want to expire early, such as those of AUTO_SUBFRAME transition type.
-const int kEarlyExpirationAdvanceDays = 30;
+//
+// Early expiration stuff is kept around only for edge cases, as subframes
+// don't appear in history and the vast majority of them are ads anyway. The
+// main use case for these is if you're on a site with links to different
+// frames, you'll be able to see those links as visited, and we'll also be
+// able to get redirect information for those URLs.
+//
+// But since these uses are most valuable when you're actually on the site,
+// and because these can take up the bulk of your history, we get a lot of
+// space savings by deleting them quickly.
+const int kEarlyExpirationAdvanceDays = 3;
 
 // Reads all types of visits starting from beginning of time to the given end
 // time. This is the most general reader.
@@ -111,7 +121,7 @@ bool ShouldArchiveVisit(const VisitRow& visit) {
 
 // The number of visits we will expire very time we check for old items. This
 // Prevents us from doing too much work any given time.
-const int kNumExpirePerIteration = 10;
+const int kNumExpirePerIteration = 32;
 
 // The number of seconds between checking for items that should be expired when
 // we think there might be more items to expire. This timeout is used when the
@@ -131,7 +141,7 @@ const int kIndexExpirationDelayMin = 2;
 
 // The number of the most recent months for which we do not want to delete
 // the history index files.
-const int kStoreHistoryIndexesForMonths = 12;
+const int kStoreHistoryIndexesForMonths = 3;
 
 }  // namespace
 
@@ -341,12 +351,8 @@ void ExpireHistoryBackend::BroadcastDeleteNotifications(
     // determine if they care whether anything was deleted).
     URLsDeletedDetails* deleted_details = new URLsDeletedDetails;
     deleted_details->all_history = false;
-    std::vector<URLRow> typed_urls_changed;  // Collect this for later.
-    for (size_t i = 0; i < dependencies->deleted_urls.size(); i++) {
+    for (size_t i = 0; i < dependencies->deleted_urls.size(); i++)
       deleted_details->urls.insert(dependencies->deleted_urls[i].url());
-      if (dependencies->deleted_urls[i].typed_count() > 0)
-        typed_urls_changed.push_back(dependencies->deleted_urls[i]);
-    }
     delegate_->BroadcastNotifications(
         chrome::NOTIFICATION_HISTORY_URLS_DELETED, deleted_details);
   }

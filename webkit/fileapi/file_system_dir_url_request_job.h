@@ -11,7 +11,7 @@
 
 #include "base/file_path.h"
 #include "base/file_util_proxy.h"
-#include "base/memory/scoped_callback_factory.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/task.h"
@@ -30,13 +30,15 @@ class FileSystemDirURLRequestJob : public net::URLRequestJob {
       scoped_refptr<base::MessageLoopProxy> file_thread_proxy);
 
   // URLRequestJob methods:
-  virtual void Start();
-  virtual void Kill();
-  virtual bool ReadRawData(net::IOBuffer* buf, int buf_size, int* bytes_read);
-  virtual bool GetCharset(std::string* charset);
+  virtual void Start() OVERRIDE;
+  virtual void Kill() OVERRIDE;
+  virtual bool ReadRawData(net::IOBuffer* buf,
+                           int buf_size,
+                           int* bytes_read) OVERRIDE;
+  virtual bool GetCharset(std::string* charset) OVERRIDE;
 
   // FilterContext methods (via URLRequestJob):
-  virtual bool GetMimeType(std::string* mime_type) const;
+  virtual bool GetMimeType(std::string* mime_type) const OVERRIDE;
   // TODO(adamk): Implement GetResponseInfo and GetResponseCode to simulate
   // an HTTP response.
 
@@ -53,8 +55,7 @@ class FileSystemDirURLRequestJob : public net::URLRequestJob {
   std::string data_;
   FileSystemContext* file_system_context_;
   scoped_refptr<base::MessageLoopProxy> file_thread_proxy_;
-  ScopedRunnableMethodFactory<FileSystemDirURLRequestJob> method_factory_;
-  base::ScopedCallbackFactory<FileSystemDirURLRequestJob> callback_factory_;
+  base::WeakPtrFactory<FileSystemDirURLRequestJob> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FileSystemDirURLRequestJob);
 };

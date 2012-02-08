@@ -11,8 +11,8 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/string16.h"
-#include "views/view.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/view.h"
+#include "ui/views/window/dialog_delegate.h"
 
 class Browser;
 
@@ -33,9 +33,8 @@ class DownloadInProgressDialogView : public views::DialogDelegateView {
   // views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
 
-  // views::DialogDelegate:
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  // views::DialogDelegateView:
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE;
   virtual bool Cancel() OVERRIDE;
   virtual bool Accept() OVERRIDE;

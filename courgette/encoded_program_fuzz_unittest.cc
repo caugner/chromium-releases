@@ -36,11 +36,12 @@ void DecodeFuzzTest::FuzzExe(const char* file_name) const {
   std::string file1 = FileContents(file_name);
 
   const void* original_buffer = file1.c_str();
-  size_t original_length = file1.size();
+  size_t original_length = file1.length();
 
   courgette::AssemblyProgram* program = NULL;
   const courgette::Status parse_status =
-      courgette::ParseWin32X86PE(original_buffer, original_length, &program);
+      courgette::ParseDetectedExecutable(original_buffer, original_length,
+                                         &program);
   EXPECT_EQ(courgette::C_OK, parse_status);
 
   courgette::EncodedProgram* encoded = NULL;
@@ -198,6 +199,7 @@ bool DecodeFuzzTest::TryAssemble(const std::string& buffer,
 
 TEST_F(DecodeFuzzTest, All) {
   FuzzExe("setup1.exe");
+  FuzzExe("elf-32-1.exe");
 }
 
 int main(int argc, char** argv) {

@@ -18,7 +18,7 @@
 #include "ipc/ipc_channel.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositionUnderline.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidgetClient.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -34,11 +34,9 @@ class SyncMessage;
 }
 
 namespace WebKit {
-class WebInputEvent;
 class WebMouseEvent;
 class WebTouchEvent;
 class WebWidget;
-struct WebPopupMenuInfo;
 }
 
 namespace gfx {
@@ -98,16 +96,19 @@ class CONTENT_EXPORT RenderWidget
   bool is_fullscreen() const { return is_fullscreen_; }
 
   // IPC::Channel::Listener
-  virtual bool OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // IPC::Message::Sender
-  virtual bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // WebKit::WebWidgetClient
   virtual void didInvalidateRect(const WebKit::WebRect&);
   virtual void didScrollRect(int dx, int dy, const WebKit::WebRect& clipRect);
+  virtual void didAutoResize(const WebKit::WebSize& new_size);
   virtual void didActivateCompositor(int compositorIdentifier);
   virtual void didDeactivateCompositor();
+  virtual void didCommitAndDrawCompositorFrame();
+  virtual void didCompleteSwapBuffers();
   virtual void scheduleComposite();
   virtual void scheduleAnimation();
   virtual void didFocus();
@@ -270,6 +271,9 @@ class CONTENT_EXPORT RenderWidget
 
   bool is_hidden() const { return is_hidden_; }
 
+  void WillToggleFullscreen();
+  void DidToggleFullscreen();
+
   // True if an UpdateRect_ACK message is pending.
   bool update_reply_pending() const {
     return update_reply_pending_;
@@ -292,7 +296,7 @@ class CONTENT_EXPORT RenderWidget
   // Override point to obtain that the current input method state and caret
   // position.
   virtual ui::TextInputType GetTextInputType();
-  virtual gfx::Rect GetCaretBounds();
+  virtual void GetSelectionBounds(gfx::Rect* start, gfx::Rect* end);
 
   // Override point to obtain that the current input method state about
   // composition text.
@@ -454,9 +458,6 @@ class CONTENT_EXPORT RenderWidget
   WebKit::WebRect pending_window_rect_;
 
   scoped_ptr<IPC::Message> pending_input_event_ack_;
-
-  // Indicates if the next sequence of Char events should be suppressed or not.
-  bool suppress_next_char_events_;
 
   // Set to true if painting to the window is handled by the accelerated
   // compositor.

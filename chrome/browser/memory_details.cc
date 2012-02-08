@@ -4,6 +4,7 @@
 
 #include "chrome/browser/memory_details.h"
 
+#include "base/bind.h"
 #include "base/file_version_info.h"
 #include "base/metrics/histogram.h"
 #include "base/process_util.h"
@@ -12,32 +13,69 @@
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/chrome_view_types.h"
 #include "content/browser/browser_child_process_host.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/backing_store_manager.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_process_host.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/common/process_type.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-#include "content/browser/zygote_host_linux.h"
 #include "content/browser/renderer_host/render_sandbox_host_linux.h"
+#include "content/browser/zygote_host_linux.h"
 #endif
+
+using content::BrowserThread;
+
+// static
+std::string ProcessMemoryInformation::GetRendererTypeNameInEnglish(
+    RendererProcessType type) {
+  switch (type) {
+    case RENDERER_NORMAL:
+      return "Tab";
+    case RENDERER_CHROME:
+      return "Tab (Chrome)";
+    case RENDERER_EXTENSION:
+      return "Extension";
+    case RENDERER_DEVTOOLS:
+      return "Devtools";
+    case RENDERER_INTERSTITIAL:
+      return "Interstitial";
+    case RENDERER_NOTIFICATION:
+      return "Notification";
+    case RENDERER_BACKGROUND_APP:
+      return "Background App";
+    case RENDERER_UNKNOWN:
+    default:
+      NOTREACHED() << "Unknown renderer process type!";
+      return "Unknown";
+  }
+}
+
+// static
+std::string ProcessMemoryInformation::GetFullTypeNameInEnglish(
+    content::ProcessType type,
+    RendererProcessType rtype) {
+  if (type == content::PROCESS_TYPE_RENDERER)
+    return GetRendererTypeNameInEnglish(rtype);
+  return content::GetProcessTypeNameInEnglish(type);
+}
 
 ProcessMemoryInformation::ProcessMemoryInformation()
     : pid(0),
       num_processes(0),
       is_diagnostics(false),
-      type(ChildProcessInfo::UNKNOWN_PROCESS),
-      renderer_type(ChildProcessInfo::RENDERER_UNKNOWN) {
+      type(content::PROCESS_TYPE_UNKNOWN),
+      renderer_type(RENDERER_UNKNOWN) {
 }
 
 ProcessMemoryInformation::~ProcessMemoryInformation() {}
@@ -80,7 +118,7 @@ void MemoryDetails::StartFetch() {
   // However, plugin process information is only available from the IO thread.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &MemoryDetails::CollectChildInfoOnIOThread));
+      base::Bind(&MemoryDetails::CollectChildInfoOnIOThread, this));
 }
 
 MemoryDetails::~MemoryDetails() {}
@@ -98,7 +136,7 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
       continue;
 
     info.type = iter->type();
-    info.renderer_type = iter->renderer_type();
+    info.renderer_type = ProcessMemoryInformation::RENDERER_UNKNOWN;
     info.titles.push_back(iter->name());
     child_info.push_back(info);
   }
@@ -106,7 +144,7 @@ void MemoryDetails::CollectChildInfoOnIOThread() {
   // Now go do expensive memory lookups from the file thread.
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this, &MemoryDetails::CollectProcessData, child_info));
+      base::Bind(&MemoryDetails::CollectProcessData, this, child_info));
 }
 
 void MemoryDetails::CollectChildInfoOnUIThread() {
@@ -127,22 +165,24 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
     ProcessMemoryInformation& process =
         chrome_browser->processes[index];
 
-    for (RenderProcessHost::iterator renderer_iter(
-         RenderProcessHost::AllHostsIterator()); !renderer_iter.IsAtEnd();
-         renderer_iter.Advance()) {
-      RenderProcessHost* render_process_host = renderer_iter.GetCurrentValue();
+    for (content::RenderProcessHost::iterator renderer_iter(
+            content::RenderProcessHost::AllHostsIterator());
+         !renderer_iter.IsAtEnd(); renderer_iter.Advance()) {
+      content::RenderProcessHost* render_process_host =
+          renderer_iter.GetCurrentValue();
       DCHECK(render_process_host);
       // Ignore processes that don't have a connection, such as crashed tabs.
       if (!render_process_host->HasConnection() ||
           process.pid != base::GetProcId(render_process_host->GetHandle())) {
         continue;
       }
-      process.type = ChildProcessInfo::RENDER_PROCESS;
+      process.type = content::PROCESS_TYPE_RENDERER;
       Profile* profile =
-          Profile::FromBrowserContext(render_process_host->browser_context());
+          Profile::FromBrowserContext(
+              render_process_host->GetBrowserContext());
       ExtensionService* extension_service = profile->GetExtensionService();
-      ExtensionProcessManager* extension_process_manager =
-          profile->GetExtensionProcessManager();
+      extensions::ProcessMap* extension_process_map =
+          extension_service->process_map();
 
       // The RenderProcessHost may host multiple TabContents.  Any
       // of them which contain diagnostics information make the whole
@@ -151,7 +191,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
       // NOTE: This is a bit dangerous.  We know that for now, listeners
       //       are always RenderWidgetHosts.  But in theory, they don't
       //       have to be.
-      RenderProcessHost::listeners_iterator iter(
+      content::RenderProcessHost::listeners_iterator iter(
           render_process_host->ListenersIterator());
       for (; !iter.IsAtEnd(); iter.Advance()) {
         const RenderWidgetHost* widget =
@@ -169,17 +209,29 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
           // TODO(erikkay) the type for devtools doesn't actually appear to
           // be set.
           if (type == content::VIEW_TYPE_DEV_TOOLS_UI)
-            process.renderer_type = ChildProcessInfo::RENDERER_DEVTOOLS;
+            process.renderer_type = ProcessMemoryInformation::RENDERER_DEVTOOLS;
           else
-            process.renderer_type = ChildProcessInfo::RENDERER_CHROME;
-        } else if (extension_process_manager->AreBindingsEnabledForProcess(
-                   host->process()->id())) {
-          process.renderer_type = ChildProcessInfo::RENDERER_EXTENSION;
+            process.renderer_type = ProcessMemoryInformation::RENDERER_CHROME;
+        } else if (extension_process_map->Contains(host->process()->GetID())) {
+          // For our purposes, don't count processes containing only hosted apps
+          // as extension processes. See also: crbug.com/102533.
+          std::set<std::string> extension_ids =
+              extension_process_map->GetExtensionsInProcess(
+                  host->process()->GetID());
+          for (std::set<std::string>::iterator iter = extension_ids.begin();
+               iter != extension_ids.end(); ++iter) {
+            const Extension* extension =
+                extension_service->GetExtensionById(*iter, false);
+            if (extension && !extension->is_hosted_app()) {
+              process.renderer_type =
+                  ProcessMemoryInformation::RENDERER_EXTENSION;
+              break;
+            }
+          }
         }
         TabContents* contents = host_delegate->GetAsTabContents();
         if (!contents) {
-          if (extension_process_manager->IsExtensionProcess(
-              host->process()->id())) {
+          if (extension_process_map->Contains(host->process()->GetID())) {
             const Extension* extension =
                 extension_service->GetExtensionByURL(url);
             if (extension) {
@@ -187,21 +239,24 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
               process.titles.push_back(title);
             }
           } else if (process.renderer_type ==
-                     ChildProcessInfo::RENDERER_UNKNOWN) {
+                     ProcessMemoryInformation::RENDERER_UNKNOWN) {
             process.titles.push_back(UTF8ToUTF16(url.spec()));
             switch (type) {
               case chrome::VIEW_TYPE_BACKGROUND_CONTENTS:
                 process.renderer_type =
-                    ChildProcessInfo::RENDERER_BACKGROUND_APP;
+                    ProcessMemoryInformation::RENDERER_BACKGROUND_APP;
                 break;
               case content::VIEW_TYPE_INTERSTITIAL_PAGE:
-                process.renderer_type = ChildProcessInfo::RENDERER_INTERSTITIAL;
+                process.renderer_type =
+                    ProcessMemoryInformation::RENDERER_INTERSTITIAL;
                 break;
               case chrome::VIEW_TYPE_NOTIFICATION:
-                process.renderer_type = ChildProcessInfo::RENDERER_NOTIFICATION;
+                process.renderer_type =
+                    ProcessMemoryInformation::RENDERER_NOTIFICATION;
                 break;
               default:
-                process.renderer_type = ChildProcessInfo::RENDERER_UNKNOWN;
+                process.renderer_type =
+                    ProcessMemoryInformation::RENDERER_UNKNOWN;
                 break;
             }
           }
@@ -210,8 +265,8 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
 
         // Since We have a TabContents and and the renderer type hasn't been
         // set yet, it must be a normal tabbed renderer.
-        if (process.renderer_type == ChildProcessInfo::RENDERER_UNKNOWN)
-          process.renderer_type = ChildProcessInfo::RENDERER_NORMAL;
+        if (process.renderer_type == ProcessMemoryInformation::RENDERER_UNKNOWN)
+          process.renderer_type = ProcessMemoryInformation::RENDERER_NORMAL;
 
         string16 title = contents->GetTitle();
         if (!title.length())
@@ -245,9 +300,9 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
     if (process.pid == zygote_pid) {
-      process.type = ChildProcessInfo::ZYGOTE_PROCESS;
+      process.type = content::PROCESS_TYPE_ZYGOTE;
     } else if (process.pid == sandbox_helper_pid) {
-      process.type = ChildProcessInfo::SANDBOX_HELPER_PROCESS;
+      process.type = content::PROCESS_TYPE_SANDBOX_HELPER;
     }
 #endif
   }
@@ -256,7 +311,7 @@ void MemoryDetails::CollectChildInfoOnUIThread() {
   for (size_t index = 0; index < chrome_browser->processes.size();
       index++) {
     if (chrome_browser->processes[index].type ==
-        ChildProcessInfo::UNKNOWN_PROCESS) {
+        content::PROCESS_TYPE_UNKNOWN) {
       chrome_browser->processes.erase(
           chrome_browser->processes.begin() + index);
       index--;
@@ -285,25 +340,25 @@ void MemoryDetails::UpdateHistograms() {
     int sample = static_cast<int>(browser.processes[index].working_set.priv);
     aggregate_memory += sample;
     switch (browser.processes[index].type) {
-      case ChildProcessInfo::BROWSER_PROCESS:
+      case content::PROCESS_TYPE_BROWSER:
         UMA_HISTOGRAM_MEMORY_KB("Memory.Browser", sample);
         break;
-      case ChildProcessInfo::RENDER_PROCESS: {
-        ChildProcessInfo::RendererProcessType renderer_type =
+      case content::PROCESS_TYPE_RENDERER: {
+        ProcessMemoryInformation::RendererProcessType renderer_type =
             browser.processes[index].renderer_type;
         switch (renderer_type) {
-          case ChildProcessInfo::RENDERER_EXTENSION:
+          case ProcessMemoryInformation::RENDERER_EXTENSION:
             UMA_HISTOGRAM_MEMORY_KB("Memory.Extension", sample);
             extension_count++;
             break;
-          case ChildProcessInfo::RENDERER_CHROME:
+          case ProcessMemoryInformation::RENDERER_CHROME:
             UMA_HISTOGRAM_MEMORY_KB("Memory.Chrome", sample);
             chrome_count++;
             break;
-          case ChildProcessInfo::RENDERER_UNKNOWN:
+          case ProcessMemoryInformation::RENDERER_UNKNOWN:
             NOTREACHED() << "Unknown renderer process type.";
             break;
-          case ChildProcessInfo::RENDERER_NORMAL:
+          case ProcessMemoryInformation::RENDERER_NORMAL:
           default:
             // TODO(erikkay): Should we bother splitting out the other subtypes?
             UMA_HISTOGRAM_MEMORY_KB("Memory.Renderer", sample);
@@ -312,39 +367,39 @@ void MemoryDetails::UpdateHistograms() {
         }
         break;
       }
-      case ChildProcessInfo::PLUGIN_PROCESS:
+      case content::PROCESS_TYPE_PLUGIN:
         UMA_HISTOGRAM_MEMORY_KB("Memory.Plugin", sample);
         plugin_count++;
         break;
-      case ChildProcessInfo::WORKER_PROCESS:
+      case content::PROCESS_TYPE_WORKER:
         UMA_HISTOGRAM_MEMORY_KB("Memory.Worker", sample);
         worker_count++;
         break;
-      case ChildProcessInfo::UTILITY_PROCESS:
+      case content::PROCESS_TYPE_UTILITY:
         UMA_HISTOGRAM_MEMORY_KB("Memory.Utility", sample);
         other_count++;
         break;
-      case ChildProcessInfo::ZYGOTE_PROCESS:
+      case content::PROCESS_TYPE_ZYGOTE:
         UMA_HISTOGRAM_MEMORY_KB("Memory.Zygote", sample);
         other_count++;
         break;
-      case ChildProcessInfo::SANDBOX_HELPER_PROCESS:
+      case content::PROCESS_TYPE_SANDBOX_HELPER:
         UMA_HISTOGRAM_MEMORY_KB("Memory.SandboxHelper", sample);
         other_count++;
         break;
-      case ChildProcessInfo::NACL_LOADER_PROCESS:
+      case content::PROCESS_TYPE_NACL_LOADER:
         UMA_HISTOGRAM_MEMORY_KB("Memory.NativeClient", sample);
         other_count++;
         break;
-      case ChildProcessInfo::NACL_BROKER_PROCESS:
+      case content::PROCESS_TYPE_NACL_BROKER:
         UMA_HISTOGRAM_MEMORY_KB("Memory.NativeClientBroker", sample);
         other_count++;
         break;
-      case ChildProcessInfo::GPU_PROCESS:
+      case content::PROCESS_TYPE_GPU:
         UMA_HISTOGRAM_MEMORY_KB("Memory.Gpu", sample);
         other_count++;
         break;
-      case ChildProcessInfo::PPAPI_PLUGIN_PROCESS:
+      case content::PROCESS_TYPE_PPAPI_PLUGIN:
         UMA_HISTOGRAM_MEMORY_KB("Memory.PepperPlugin", sample);
         pepper_plugin_count++;
         break;

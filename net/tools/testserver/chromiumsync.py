@@ -1,4 +1,3 @@
-#!/usr/bin/python2.4
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -16,10 +15,12 @@ import pickle
 import random
 import sys
 import threading
+import time
 import urlparse
 
-import app_specifics_pb2
 import app_notification_specifics_pb2
+import app_setting_specifics_pb2
+import app_specifics_pb2
 import autofill_specifics_pb2
 import bookmark_specifics_pb2
 import extension_setting_specifics_pb2
@@ -41,6 +42,7 @@ ALL_TYPES = (
     TOP_LEVEL,  # The type of the 'Google Chrome' folder.
     APPS,
     APP_NOTIFICATION,
+    APP_SETTINGS,
     AUTOFILL,
     AUTOFILL_PROFILE,
     BOOKMARK,
@@ -52,7 +54,7 @@ ALL_TYPES = (
     SESSION,
     THEME,
     TYPED_URL,
-    EXTENSION_SETTINGS) = range(15)
+    EXTENSION_SETTINGS) = range(16)
 
 # Well-known server tag of the top level 'Google Chrome' folder.
 TOP_LEVEL_FOLDER_TAG = 'google_chrome'
@@ -60,8 +62,9 @@ TOP_LEVEL_FOLDER_TAG = 'google_chrome'
 # Given a sync type from ALL_TYPES, find the extension token corresponding
 # to that datatype.  Note that TOP_LEVEL has no such token.
 SYNC_TYPE_TO_EXTENSION = {
-    APPS: app_specifics_pb2.app,
     APP_NOTIFICATION: app_notification_specifics_pb2.app_notification,
+    APP_SETTINGS: app_setting_specifics_pb2.app_setting,
+    APPS: app_specifics_pb2.app,
     AUTOFILL: autofill_specifics_pb2.autofill,
     AUTOFILL_PROFILE: autofill_specifics_pb2.autofill_profile,
     BOOKMARK: bookmark_specifics_pb2.bookmark,
@@ -79,6 +82,9 @@ SYNC_TYPE_TO_EXTENSION = {
 # The parent ID used to indicate a top-level node.
 ROOT_ID = '0'
 
+# Unix time epoch in struct_time format. The tuple corresponds to UTC Wednesday
+# Jan 1 1970, 00:00:00, non-dst.
+UNIX_TIME_EPOCH = (1970, 1, 1, 0, 0, 0, 3, 1, 0)
 
 class Error(Exception):
   """Error class for this module."""
@@ -394,6 +400,9 @@ class SyncDataModel(object):
                     parent_tag='google_chrome', sync_type=AUTOFILL),
       PermanentItem('google_chrome_autofill_profiles', name='Autofill Profiles',
                     parent_tag='google_chrome', sync_type=AUTOFILL_PROFILE),
+      PermanentItem('google_chrome_app_settings',
+                    name='App Settings',
+                    parent_tag='google_chrome', sync_type=APP_SETTINGS),
       PermanentItem('google_chrome_extension_settings',
                     name='Extension Settings',
                     parent_tag='google_chrome', sync_type=EXTENSION_SETTINGS),
@@ -456,6 +465,9 @@ class SyncDataModel(object):
       entry.originator_client_item_id = base_entry.originator_client_item_id
 
     self._entries[entry.id_string] = copy.deepcopy(entry)
+    # Store the current time since the Unix epoch in milliseconds.
+    self._entries[entry.id_string].mtime = (int((time.mktime(time.gmtime()) -
+        time.mktime(UNIX_TIME_EPOCH))*1000))
 
   def _ServerTagToId(self, tag):
     """Determine the server ID from a server-unique tag.

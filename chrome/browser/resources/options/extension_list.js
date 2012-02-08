@@ -25,7 +25,21 @@ cr.define('options', function() {
    */
   var ExtensionsList = cr.ui.define('div');
 
-  var handleInstalled = false;
+  var handlersInstalled = false;
+
+  /**
+   * @type {Object.<string, boolean>} A map from extension id to a boolean
+   *     indicating whether its details section is expanded. This persists
+   *     between calls to decorate.
+   */
+  var showingDetails = {};
+
+  /**
+   * @type {Object.<string, boolean>} A map from extension id to a boolean
+   *     indicating whether the incognito warning is showing. This persists
+   *     between calls to decorate.
+   */
+  var showingWarning = {};
 
   ExtensionsList.prototype = {
     __proto__: HTMLDivElement.prototype,
@@ -34,11 +48,9 @@ cr.define('options', function() {
     decorate: function() {
       this.initControlsAndHandlers_();
 
-      var showingDetails = [];
-      var showingWarning = [];
-      this.deleteExistingExtensionNodes_(showingDetails, showingWarning);
+      this.deleteExistingExtensionNodes_();
 
-      this.showExtensionNodes_(showingDetails, showingWarning);
+      this.showExtensionNodes_();
     },
 
     /**
@@ -59,58 +71,47 @@ cr.define('options', function() {
         toggleSection.classList.add('dev-closed');
       }
 
-      // Install handler for key presses.
-      if (!handleInstalled) {
-        this.ownerDocument.addEventListener('keyup',
-                                            this.upEventHandler_.bind(this));
-        this.ownerDocument.addEventListener('mouseup',
-                                            this.upEventHandler_.bind(this));
-        handleInstalled = true;
+      // Instal global event handlers.
+      if (!handlersInstalled) {
+        var searchPage = SearchPage.getInstance();
+        searchPage.addEventListener('searchChanged',
+                                    this.searchChangedHandler_.bind(this));
+
+        // Support full keyboard accessibility without making things ugly
+        // for users who click, by hiding some focus outlines when the user
+        // clicks anywhere, but showing them when the user presses any key.
+        this.ownerDocument.body.classList.add('hide-some-focus-outlines');
+        this.ownerDocument.addEventListener('click', (function(e) {
+          this.ownerDocument.body.classList.add('hide-some-focus-outlines');
+          return true;
+        }).bind(this), true);
+        this.ownerDocument.addEventListener('keydown', (function(e) {
+          this.ownerDocument.body.classList.remove('hide-some-focus-outlines');
+          return true;
+        }).bind(this), true);
+
+        handlersInstalled = true;
       }
     },
 
     /**
      * Deletes the existing Extension nodes from the page to make room for new
-     * ones. It also keeps track of who was showing details so when the
-     * extension list gets recreated we can recreate that state.
-     *     @param {Array} showingDetails An array that will contain the list of
-     *                    id's of extension that had the details section
-     *                    expanded.
-     *     @param {Array} showingWarning An array that will contain the list of
-     *                    id's of extension that were showing a warning.
+     * ones.
      * @private
      */
-     deleteExistingExtensionNodes_: function(showingDetails, showingWarning) {
-      // Delete all child nodes before adding them back and while we are at it
-      // make a note of which ones were in expanded state (and which showing
-      // the warning) so we can restore those to the same state afterwards.
+     deleteExistingExtensionNodes_: function() {
       while (this.hasChildNodes()){
-        var child = this.firstChild;
-
-        // See if the item is expanded.
-        if (child.classList.contains('extension-list-item-expanded'))
-          showingDetails.push(child.id);
-
-        // See if the butterbar is showing.
-        var butterBar = document.getElementById(child.id + '_incognitoWarning');
-        if (butterBar && !butterBar.hidden)
-          showingWarning.push(child.id);
-
-        // Now we can delete it.
-        this.removeChild(child);
+        this.removeChild(this.firstChild);
       }
     },
 
     /**
      * Handles decorating the details section.
      * @param {Element} details The div that the details should be attached to.
-     * @param {Object} extension The extension we are shoting the details for.
-     * @param {boolean} expanded Whether to show the details expanded or not.
-     * @param {boolean} showButterbar Whether to show the incognito warning or
-     *                  not.
+     * @param {Object} extension The extension we are showing the details for.
      * @private
      */
-     showExtensionNodes_: function(showingDetails, showingWarning) {
+     showExtensionNodes_: function() {
       // Iterate over the extension data and add each item to the list.
       for (var i = 0; i < this.data_.extensions.length; i++) {
         var extension = this.data_.extensions[i];
@@ -118,25 +119,8 @@ cr.define('options', function() {
 
         var wrapper = this.ownerDocument.createElement('div');
 
-        // Figure out if the item should open expanded or not based on the state
-        // of things before we deleted the items.
-        var iter = showingDetails.length;
-        var expanded = false;
-        while (iter--) {
-          if (showingDetails[iter] == id) {
-            expanded = true;
-            break;
-          }
-        }
-        // Figure out if the butterbar should be showing.
-        iter = showingWarning.length;
-        var butterbar = false;
-        while (iter--) {
-          if (showingWarning[iter] == id) {
-            butterbar = true;
-            break;
-          }
-        }
+        var expanded = showingDetails[id];
+        var butterbar = showingWarning[id];
 
         wrapper.classList.add(expanded ? 'extension-list-item-expanded' :
                                          'extension-list-item-collaped');
@@ -158,7 +142,16 @@ cr.define('options', function() {
         var container = this.ownerDocument.createElement('div');
         // Clicking anywhere on the div expands/collapses the details.
         container.classList.add('extension-zippy-container');
+        container.title = expanded ?
+            localStrings.getString('extensionSettingsHideDetails') :
+            localStrings.getString('extensionSettingsShowDetails');
+        container.tabIndex = 0;
+        container.setAttribute('role', 'button');
+        container.setAttribute('aria-controls', extension.id + '_details');
+        container.setAttribute('aria-expanded', expanded);
         container.addEventListener('click', this.handleZippyClick_.bind(this));
+        container.addEventListener('keydown',
+                                   this.handleZippyKeyDown_.bind(this));
         hbox.appendChild(container);
 
         // On the far left we have the zippy icon.
@@ -522,6 +515,14 @@ cr.define('options', function() {
 
       var zippy = extension.id + '_zippy';
       $(zippy).hidden = !itemsShown;
+
+      // If this isn't expanded now, make sure the newly-added controls
+      // are not part of the tab order.
+      if (!expanded) {
+        var detailsControls = details.querySelectorAll('a, input');
+        for (var i = 0; i < detailsControls.length; i++)
+          detailsControls[i].tabIndex = -1;
+      }
     },
 
     /**
@@ -552,9 +553,19 @@ cr.define('options', function() {
     },
 
     /**
+     * Handles a key down on the zippy icon.
+     * @param {Event} e Key event.
+     * @private
+     */
+    handleZippyKeyDown_: function(e) {
+      if (e.keyCode == 13 || e.keyCode == 32)  // Enter or Space.
+        this.handleZippyClick_(e);
+    },
+
+    /**
      * Handles the mouseclick on the zippy icon (that expands and collapses the
      * details section).
-     * @param {Event} e Change event.
+     * @param {Event} e Mouse event.
      * @private
      */
     handleZippyClick_: function(e) {
@@ -563,30 +574,47 @@ cr.define('options', function() {
       while (iter) {
         var zippy = $(iter.id + '_zippy');
         var details = $(iter.id + '_details');
+        var container = zippy.parentElement;
         if (iter.id == node.id) {
           // Toggle visibility.
           if (iter.classList.contains('extension-list-item-expanded')) {
             // Hide yo kids! Hide yo wife!
+            showingDetails[iter.id] = false;
             zippy.classList.remove('extension-zippy-expanded');
             zippy.classList.add('extension-zippy-collapsed');
             details.classList.remove('extension-details-visible');
             details.classList.add('extension-details-hidden');
             iter.classList.remove('extension-list-item-expanded');
             iter.classList.add('extension-list-item-collaped');
+            container.setAttribute('aria-expanded', 'false');
+            container.title =
+                localStrings.getString('extensionSettingsShowDetails');
+            var detailsControls = details.querySelectorAll('a, input');
+            for (var i = 0; i < detailsControls.length; i++)
+              detailsControls[i].tabIndex = -1;
 
             // Hide yo incognito warning.
             var butterBar =
                 this.querySelector('#' + iter.id + '_incognitoWarning');
-            if (!(butterBar === null))
+            if (butterBar !== null) {
               butterBar.hidden = true;
+              showingWarning[iter.id] = false;
+            }
           } else {
             // Show the contents.
+            showingDetails[iter.id] = true;
             zippy.classList.remove('extension-zippy-collapsed');
             zippy.classList.add('extension-zippy-expanded');
             details.classList.remove('extension-details-hidden');
             details.classList.add('extension-details-visible');
             iter.classList.remove('extension-list-item-collaped');
             iter.classList.add('extension-list-item-expanded');
+            container.setAttribute('aria-expanded', 'true');
+            container.title =
+                localStrings.getString('extensionSettingsHideDetails');
+            var detailsControls = details.querySelectorAll('a, input');
+            for (var i = 0; i < detailsControls.length; i++)
+              detailsControls[i].tabIndex = 0;
           }
         }
         iter = iter.nextSibling;
@@ -594,18 +622,18 @@ cr.define('options', function() {
     },
 
     /**
-     * Handles the mouse-up and keyboard-up events. This is used to limit the
-     * number of items to show in the list, when the user is searching for items
-     * with the search box. Otherwise, if one match is found, the whole list of
+     * Handles the 'searchChanged' event. This is used to limit the number of
+     * items to show in the list, when the user is searching for items with the
+     * search box. Otherwise, if one match is found, the whole list of
      * extensions would be shown when we only want the matching items to be
      * found.
      * @param {Event} e Change event.
      * @private
      */
-    upEventHandler_: function(e) {
-      var searchString = $('search-field').value.toLowerCase();
+    searchChangedHandler_: function(e) {
+      var searchString = e.searchText;
       var child = this.firstChild;
-      while (child){
+      while (child) {
         var extension = this.getExtensionWithId_(child.id);
         if (searchString.length == 0) {
           // Show all.
@@ -692,6 +720,7 @@ cr.define('options', function() {
       var node = findIdNode(e.target);
       var butterBar = document.getElementById(node.id + '_incognitoWarning');
       butterBar.hidden = !e.target.checked;
+      showingWarning[node.id] = e.target.checked;
       chrome.send('extensionSettingsEnableIncognito',
                   [node.id, String(e.target.checked)]);
     },

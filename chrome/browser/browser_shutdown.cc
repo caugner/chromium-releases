@@ -7,14 +7,15 @@
 #include <map>
 #include <string>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time.h"
@@ -33,11 +34,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/switch_utils.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/plugin_process_host.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_process_host.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
@@ -53,11 +54,15 @@
 
 using base::Time;
 using base::TimeDelta;
+using content::BrowserThread;
 
 namespace browser_shutdown {
 
 // Whether the browser is trying to quit (e.g., Quit chosen from menu).
 bool g_trying_to_quit = false;
+
+// Whether the browser should quit without closing browsers.
+bool g_shutting_down_without_closing_browsers = false;
 
 Time shutdown_started_;
 ShutdownType shutdown_type_ = NOT_VALID;
@@ -94,7 +99,8 @@ void OnShutdownStarting(ShutdownType type) {
   // shutdown path for the ones that didn't exit here.
   shutdown_num_processes_ = 0;
   shutdown_num_processes_slow_ = 0;
-  for (RenderProcessHost::iterator i(RenderProcessHost::AllHostsIterator());
+  for (content::RenderProcessHost::iterator i(
+          content::RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance()) {
     ++shutdown_num_processes_;
     if (!i.GetCurrentValue()->FastShutdownIfPossible())
@@ -108,7 +114,7 @@ FilePath GetShutdownMsPath() {
   return shutdown_ms_file.AppendASCII(kShutdownMsFile);
 }
 
-void Shutdown() {
+bool ShutdownPreThreadsStop() {
 #if defined(OS_CHROMEOS)
   chromeos::BootTimesLoader::Get()->AddLogoutTimeMarker(
       "BrowserShutdownStarted", false);
@@ -156,6 +162,10 @@ void Shutdown() {
   RLZTracker::CleanupRlz();
 #endif
 
+  return restart_last_session;
+}
+
+void ShutdownPostThreadsStop(bool restart_last_session) {
   // The jank'o'meter requires that the browser process has been destroyed
   // before calling UninstallJankometer().
   delete g_browser_process;
@@ -208,10 +218,6 @@ void Shutdown() {
       else
         new_cl->AppendSwitch(i->first);
     }
-    // Ensure restore last session is set.
-    if (!new_cl->HasSwitch(switches::kRestoreLastSession))
-      new_cl->AppendSwitch(switches::kRestoreLastSession);
-
     upgrade_util::RelaunchChromeBrowser(*new_cl.get());
 #else
     NOTIMPLEMENTED();
@@ -296,8 +302,7 @@ void ReadLastShutdownInfo() {
   // Read and delete the file on the file thread.
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableFunction(
-          &ReadLastShutdownFile, type, num_procs, num_procs_slow));
+      base::Bind(&ReadLastShutdownFile, type, num_procs, num_procs_slow));
 }
 
 void SetTryingToQuit(bool quitting) {
@@ -309,11 +314,11 @@ bool IsTryingToQuit() {
 }
 
 bool ShuttingDownWithoutClosingBrowsers() {
-#if defined(USE_X11)
-  if (GetShutdownType() == browser_shutdown::END_SESSION)
-    return true;
-#endif
-  return false;
+  return g_shutting_down_without_closing_browsers;
+}
+
+void SetShuttingDownWithoutClosingBrowsers(bool without_close) {
+  g_shutting_down_without_closing_browsers = without_close;
 }
 
 }  // namespace browser_shutdown

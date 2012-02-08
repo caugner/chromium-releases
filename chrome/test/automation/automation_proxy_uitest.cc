@@ -10,6 +10,7 @@
 #include "base/file_util.h"
 #include "base/i18n/rtl.h"
 #include "base/json/json_value_serializer.h"
+#include "base/md5.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string_util.h"
@@ -38,8 +39,8 @@
 #define GMOCK_MUTANT_INCLUDE_LATE_OBJECT_BINDING
 #include "testing/gmock_mutant.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "ui/base/message_box_flags.h"
 #include "ui/base/ui_base_switches.h"
+#include "ui/base/ui_base_types.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/rect.h"
 
@@ -709,9 +710,11 @@ void ExternalTabUITestMockClient::ReplyEnd(const net::URLRequestStatus& status,
 }
 
 void ExternalTabUITestMockClient::Reply404(int tab_handle, int request_id) {
-  const AutomationURLResponse notfound("", "HTTP/1.1 404\r\n\r\n", 0,
-                                       base::Time(), "", 0,
-                                       net::HostPortPair());
+  AutomationURLResponse notfound;
+  notfound.headers = "HTTP/1.1 404\r\n\r\n";
+  notfound.content_length = 0;
+  notfound.redirect_status = 0;
+
   ReplyStarted(&notfound, tab_handle, request_id);
   ReplyEOF(tab_handle, request_id);
 }
@@ -724,7 +727,7 @@ void ExternalTabUITestMockClient::ServeHTMLData(int tab_handle,
       testing::Field(&AutomationURLRequest::method, StrEq("GET")))))
     .Times(1)
     .WillOnce(testing::WithArgs<0, 0>(testing::Invoke(CreateFunctor(this,
-        &ExternalTabUITestMockClient::ReplyStarted, &http_200))));
+        &ExternalTabUITestMockClient::ReplyStarted, &GetHttp200Response()))));
 
   EXPECT_CALL(*this, OnRequestRead(tab_handle, testing::Gt(0)))
       .Times(2)
@@ -757,27 +760,27 @@ void ExternalTabUITestMockClient::InvalidateHandle(
   HandleClosed(handle);
 }
 
-// Most of the time we need external tab with these settings.
-const ExternalTabSettings ExternalTabUITestMockClient::default_settings(
-    NULL, gfx::Rect(),  // will be replaced by CreateHostWindowAndTab
-    WS_CHILD | WS_VISIBLE,
-    false,   // is_incognito
-    true,    // load_requests_via_automation
-    true,    // handle_top_level_requests
-    GURL(),  // initial_url
-    GURL(),  // referrer
-    false,   // infobars_enabled
-    false);  // route_all_top_level_navigations
+// static
+ExternalTabSettings ExternalTabUITestMockClient::GetDefaultSettings() {
+  ExternalTabSettings settings;
+  settings.parent = NULL;
+  settings.style = WS_CHILD | WS_VISIBLE;
+  settings.is_incognito = false;
+  settings.load_requests_via_automation = true;
+  settings.handle_top_level_requests = true;
+  settings.infobars_enabled = false;
+  settings.route_all_top_level_navigations = false;
+  return settings;
+}
 
 // static
-const AutomationURLResponse ExternalTabUITestMockClient::http_200(
-    "",
-    "HTTP/0.9 200\r\n\r\n",
-    0,
-    base::Time(),
-    "",
-    0,
-    net::HostPortPair());
+AutomationURLResponse ExternalTabUITestMockClient::GetHttp200Response() {
+  AutomationURLResponse response;
+  response.headers = "HTTP/0.9 200\r\n\r\n";
+  response.content_length = 0;
+  response.redirect_status = 0;
+  return response;
+}
 
 bool ExternalTabUITestMockClient::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
@@ -826,8 +829,7 @@ scoped_refptr<TabProxy> ExternalTabUITestMockClient::CreateHostWindowAndTab(
 
 scoped_refptr<TabProxy> ExternalTabUITestMockClient::CreateTabWithUrl(
     const GURL& initial_url) {
-  ExternalTabSettings settings =
-      ExternalTabUITestMockClient::default_settings;
+  ExternalTabSettings settings = GetDefaultSettings();
   settings.initial_url = initial_url;
   return CreateHostWindowAndTab(settings);
 }
@@ -852,7 +854,7 @@ void ExternalTabUITestMockClient::ConnectToExternalTab(gfx::NativeWindow parent,
 
   RECT rect;
   ::GetClientRect(parent, &rect);
-  Reposition_Params params = {0};
+  Reposition_Params params;
   params.window = tab_container;
   params.flags = SWP_NOZORDER | SWP_SHOWWINDOW;
   params.width = rect.right - rect.left;
@@ -968,7 +970,7 @@ TEST_F(ExternalTabUITest, FLAKY_IncognitoMode) {
   EXPECT_CALL(*mock_, HandleClosed(1)).Times(1);
 
   ExternalTabSettings incognito =
-      ExternalTabUITestMockClient::default_settings;
+      ExternalTabUITestMockClient::GetDefaultSettings();
   incognito.is_incognito = true;
   // SetCookie is a sync call and deadlock can happen if window is visible,
   // since it shares same thread with AutomationProxy.
@@ -1078,7 +1080,7 @@ TEST_F(ExternalTabUITest, FLAKY_PostMessageTarget)  {
 
   EXPECT_CALL(*mock_, HandleClosed(1)).Times(1);
 
-  ExternalTabSettings s = ExternalTabUITestMockClient::default_settings;
+  ExternalTabSettings s = ExternalTabUITestMockClient::GetDefaultSettings();
   s.load_requests_via_automation = false;
   s.initial_url = GURL("http://localhost:1337/files/post_message.html");
   tab = mock_->CreateHostWindowAndTab(s);
@@ -1101,11 +1103,12 @@ TEST_F(ExternalTabUITest, DISABLED_HostNetworkStack) {
           testing::Field(&AutomationURLRequest::url, StrEq(url + "/")),
           testing::Field(&AutomationURLRequest::method, StrEq("GET")))))
       .Times(1)
-      // We can simply do CreateFunctor(1, 2, &http_200) since we know the
-      // tab handle and request id, but using WithArgs<> is much more fancy :)
+      // We can simply do CreateFunctor(1, 2, &GetHttp200Response()) since we
+      // know the tab handle and request id, but using WithArgs<> is much more
+      // fancy :)
       .WillOnce(testing::WithArgs<0, 0>(testing::Invoke(CreateFunctor(mock_,
           &ExternalTabUITestMockClient::ReplyStarted,
-          &ExternalTabUITestMockClient::http_200))));
+          &ExternalTabUITestMockClient::GetHttp200Response()))));
 
   // Return some trivial page, that have a link to a "logo.gif" image
   const std::string data = "<!DOCTYPE html><title>Hello</title>"
@@ -1171,11 +1174,12 @@ TEST_F(ExternalTabUITest, DISABLED_HostNetworkStackAbortRequest) {
           testing::Field(&AutomationURLRequest::url, StrEq(url + "/")),
           testing::Field(&AutomationURLRequest::method, StrEq("GET")))))
       .Times(1)
-      // We can simply do CreateFunctor(1, 2, &http_200) since we know the
-      // tab handle and request id, but using WithArgs<> is much more fancy :)
+      // We can simply do CreateFunctor(1, 2, &GetHttp200Response()) since we
+      // know the tab handle and request id, but using WithArgs<> is much more
+      // fancy :)
       .WillOnce(testing::WithArgs<0, 0>(testing::Invoke(CreateFunctor(mock_,
           &ExternalTabUITestMockClient::ReplyStarted,
-          &ExternalTabUITestMockClient::http_200))));
+          &ExternalTabUITestMockClient::GetHttp200Response()))));
 
   // Return some trivial page, that have a link to a "logo.gif" image
   const std::string data = "<!DOCTYPE html><title>Hello";
@@ -1218,11 +1222,12 @@ TEST_F(ExternalTabUITest, DISABLED_HostNetworkStackUnresponsiveRenderer) {
           testing::Field(&AutomationURLRequest::url, StrEq(url + "/")),
           testing::Field(&AutomationURLRequest::method, StrEq("GET")))))
       .Times(1)
-      // We can simply do CreateFunctor(1, 2, &http_200) since we know the
-      // tab handle and request id, but using WithArgs<> is much more fancy :)
+      // We can simply do CreateFunctor(1, 2, &GetHttp200Response()) since we
+      // know the tab handle and request id, but using WithArgs<> is much more
+      // fancy :)
       .WillOnce(testing::WithArgs<0, 0>(testing::Invoke(CreateFunctor(mock_,
           &ExternalTabUITestMockClient::ReplyStarted,
-          &ExternalTabUITestMockClient::http_200))));
+          &ExternalTabUITestMockClient::GetHttp200Response()))));
 
   const std::string head = "<html><title>Hello</title><body>";
 
@@ -1396,12 +1401,11 @@ TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
   ASSERT_TRUE(tab.get());
 
   bool modal_dialog_showing = false;
-  ui::MessageBoxFlags::DialogButton button =
-      ui::MessageBoxFlags::DIALOGBUTTON_NONE;
+  ui::DialogButton button = ui::DIALOG_BUTTON_NONE;
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_FALSE(modal_dialog_showing);
-  EXPECT_EQ(ui::MessageBoxFlags::DIALOGBUTTON_NONE, button);
+  EXPECT_EQ(ui::DIALOG_BUTTON_NONE, button);
 
   // Show a simple alert.
   std::string content =
@@ -1414,19 +1418,19 @@ TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_TRUE(modal_dialog_showing);
-  EXPECT_EQ(ui::MessageBoxFlags::DIALOGBUTTON_OK, button);
+  EXPECT_EQ(ui::DIALOG_BUTTON_OK, button);
 
   // Test that clicking missing button fails graciously and does not close the
   // dialog.
   EXPECT_FALSE(automation()->ClickAppModalDialogButton(
-      ui::MessageBoxFlags::DIALOGBUTTON_CANCEL));
+      ui::DIALOG_BUTTON_CANCEL));
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_TRUE(modal_dialog_showing);
 
   // Now click OK, that should close the dialog.
   EXPECT_TRUE(automation()->ClickAppModalDialogButton(
-      ui::MessageBoxFlags::DIALOGBUTTON_OK));
+      ui::DIALOG_BUTTON_OK));
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_FALSE(modal_dialog_showing);
@@ -1442,12 +1446,10 @@ TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_TRUE(modal_dialog_showing);
-  EXPECT_EQ(ui::MessageBoxFlags::DIALOGBUTTON_OK |
-            ui::MessageBoxFlags::DIALOGBUTTON_CANCEL, button);
+  EXPECT_EQ(ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL, button);
 
   // Click OK.
-  EXPECT_TRUE(automation()->ClickAppModalDialogButton(
-      ui::MessageBoxFlags::DIALOGBUTTON_OK));
+  EXPECT_TRUE(automation()->ClickAppModalDialogButton(ui::DIALOG_BUTTON_OK));
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_FALSE(modal_dialog_showing);
@@ -1464,12 +1466,11 @@ TEST_F(AutomationProxyTest, FLAKY_AppModalDialogTest) {
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_TRUE(modal_dialog_showing);
-  EXPECT_EQ(ui::MessageBoxFlags::DIALOGBUTTON_OK |
-            ui::MessageBoxFlags::DIALOGBUTTON_CANCEL, button);
+  EXPECT_EQ(ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL, button);
 
   // Click Cancel this time.
   EXPECT_TRUE(automation()->ClickAppModalDialogButton(
-      ui::MessageBoxFlags::DIALOGBUTTON_CANCEL));
+      ui::DIALOG_BUTTON_CANCEL));
   EXPECT_TRUE(automation()->GetShowingAppModalDialog(&modal_dialog_showing,
                                                      &button));
   EXPECT_FALSE(modal_dialog_showing);
@@ -1525,8 +1526,7 @@ class AutomationProxySnapshotTest : public UITest {
 
   // Asserts that the given png file can be read and decoded into the given
   // bitmap.
-  void AssertReadPNG(const FilePath& filename, SkBitmap* bitmap) {
-    DCHECK(bitmap);
+  void AssertReadPNG(const FilePath& filename, std::string* data) {
     ASSERT_TRUE(file_util::PathExists(filename));
 
     int64 size64;
@@ -1536,13 +1536,9 @@ class AutomationProxySnapshotTest : public UITest {
 
     // Read and decode image.
     int size = static_cast<int>(size64);
-    scoped_array<char> data(new char[size]);
-    int bytes_read = file_util::ReadFile(filename, &data[0], size);
+    data->resize(size);
+    int bytes_read = file_util::ReadFile(filename, &(*data)[0], size);
     ASSERT_EQ(size, bytes_read);
-    ASSERT_TRUE(gfx::PNGCodec::Decode(
-        reinterpret_cast<unsigned char*>(&data[0]),
-        bytes_read,
-        bitmap));
   }
 
   // Returns the file path for the directory for these tests appended with
@@ -1562,113 +1558,26 @@ class AutomationProxySnapshotTest : public UITest {
   ScopedTempDir snapshot_dir_;
 };
 
-// See http://crbug.com/63022.
-#if defined(OS_LINUX)
-#define MAYBE_ContentLargerThanView FAILS_ContentLargerThanView
-#else
-#define MAYBE_ContentLargerThanView ContentLargerThanView
-#endif
 // Tests that taking a snapshot when the content is larger than the view
 // produces a snapshot equal to the content size.
-TEST_F(AutomationProxySnapshotTest, MAYBE_ContentLargerThanView) {
+TEST_F(AutomationProxySnapshotTest, ContentLargerThanView) {
+  const char kReferenceMd5[] = "3d594850fd25cb116338cb3610afe18e";
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
-
-  // Resize the window to guarantee that the content is larger than the view.
-  scoped_refptr<WindowProxy> window(browser->GetWindow());
-  ASSERT_TRUE(window.get());
-  ASSERT_TRUE(window->SetBounds(gfx::Rect(300, 400)));
-
   scoped_refptr<TabProxy> tab(browser->GetTab(0));
   ASSERT_TRUE(tab.get());
 
   ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
-            tab->NavigateToURL(GetTestUrl("set_size.html", "600,800")));
+            tab->NavigateToURL(GetTestUrl("set_size.html", "2000,2500")));
 
   ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
 
-  SkBitmap bitmap;
-  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &bitmap));
-  ASSERT_EQ(600, bitmap.width());
-  ASSERT_EQ(800, bitmap.height());
-}
-
-// Tests taking a large snapshot works.
-#if defined(OS_LINUX)
-// See http://code.google.com/p/chromium/issues/detail?id=89777
-#define MAYBE_LargeSnapshot DISABLED_LargeSnapshot
-#else
-#define MAYBE_LargeSnapshot LargeSnapshot
-#endif
-TEST_F(AutomationProxySnapshotTest, MAYBE_LargeSnapshot) {
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  ASSERT_TRUE(browser.get());
-
-  scoped_refptr<TabProxy> tab(browser->GetTab(0));
-  ASSERT_TRUE(tab.get());
-
-  // 2000x2000 creates an approximately 15 MB bitmap.
-  // Don't increase this too much. At least my linux box has SHMMAX set at
-  // 32 MB.
-  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
-            tab->NavigateToURL(GetTestUrl("set_size.html", "2000,2000")));
-
-  ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
-
-  SkBitmap bitmap;
-  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &bitmap));
-  ASSERT_EQ(2000, bitmap.width());
-  ASSERT_EQ(2000, bitmap.height());
-}
-
-#if defined(OS_MACOSX)
-// Most pixels on mac are slightly off.
-#define MAYBE_ContentsCorrect DISABLED_ContentsCorrect
-#elif defined(OS_LINUX)
-// See http://crbug.com/63022.
-#define MAYBE_ContentsCorrect FAILS_ContentsCorrect
-#else
-#define MAYBE_ContentsCorrect ContentsCorrect
-#endif
-
-// Tests that the snapshot contents are correct.
-TEST_F(AutomationProxySnapshotTest, MAYBE_ContentsCorrect) {
-  scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
-  ASSERT_TRUE(browser.get());
-
-  const gfx::Size img_size(400, 300);
-  scoped_refptr<WindowProxy> window(browser->GetWindow());
-  ASSERT_TRUE(window.get());
-  ASSERT_TRUE(window->SetBounds(gfx::Rect(img_size)));
-
-  scoped_refptr<TabProxy> tab(browser->GetTab(0));
-  ASSERT_TRUE(tab.get());
-
-  ASSERT_EQ(AUTOMATION_MSG_NAVIGATION_SUCCESS,
-            tab->NavigateToURL(GetTestUrl("just_image.html", "")));
-
-  ASSERT_TRUE(tab->CaptureEntirePageAsPNG(snapshot_path_));
-
-  SkBitmap snapshot_bmp;
-  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &snapshot_bmp));
-  ASSERT_EQ(img_size.width(), snapshot_bmp.width());
-  ASSERT_EQ(img_size.height(), snapshot_bmp.height());
-
-  SkBitmap reference_bmp;
-  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(GetTestFilePath("image.png"),
-                                        &reference_bmp));
-  ASSERT_EQ(img_size.width(), reference_bmp.width());
-  ASSERT_EQ(img_size.height(), reference_bmp.height());
-
-  SkAutoLockPixels lock_snapshot(snapshot_bmp);
-  SkAutoLockPixels lock_reference(reference_bmp);
-  int diff_pixels_count = 0;
-  for (int x = 0; x < img_size.width(); ++x) {
-    for (int y = 0; y < img_size.height(); ++y) {
-      if (*snapshot_bmp.getAddr32(x, y) != *reference_bmp.getAddr32(x, y)) {
-        ++diff_pixels_count;
-      }
-    }
+  std::string data;
+  ASSERT_NO_FATAL_FAILURE(AssertReadPNG(snapshot_path_, &data));
+  EXPECT_STREQ(kReferenceMd5, base::MD5String(data).c_str());
+  if (CommandLine::ForCurrentProcess()->HasSwitch("dump-test-image")) {
+    FilePath path(FILE_PATH_LITERAL("snapshot.png"));
+    EXPECT_EQ(file_util::WriteFile(path, &data[0], data.length()),
+              static_cast<int>(data.length()));
   }
-  ASSERT_EQ(diff_pixels_count, 0);
 }

@@ -32,7 +32,6 @@ SSLHostInfo::SSLHostInfo(
       cert_verification_error_(ERR_CERT_INVALID),
       hostname_(hostname),
       cert_parsing_failed_(false),
-      cert_verification_callback_(NULL),
       rev_checking_enabled_(ssl_config.rev_checking_enabled),
       verify_ev_cert_(ssl_config.verify_ev_cert),
       verifier_(cert_verifier),
@@ -128,13 +127,15 @@ bool SSLHostInfo::ParseInner(const std::string& data) {
       verification_start_time_ = base::TimeTicks::Now();
       verification_end_time_ = base::TimeTicks();
       int rv = verifier_.Verify(
-          cert_.get(), hostname_, flags, &cert_verify_result_,
-          base::Bind(&SSLHostInfo::VerifyCallback, weak_factory_.GetWeakPtr()));
+          cert_.get(), hostname_, flags, crl_set_, &cert_verify_result_,
+          base::Bind(&SSLHostInfo::VerifyCallback, weak_factory_.GetWeakPtr()),
+          // TODO(willchan): Figure out how to use NetLog here.
+          BoundNetLog());
       if (rv != ERR_IO_PENDING)
         VerifyCallback(rv);
     } else {
       cert_parsing_failed_ = true;
-      DCHECK(!cert_verification_callback_);
+      DCHECK(cert_verification_callback_.is_null());
     }
   }
 
@@ -179,11 +180,12 @@ const CertVerifyResult& SSLHostInfo::cert_verify_result() const {
   return cert_verify_result_;
 }
 
-int SSLHostInfo::WaitForCertVerification(OldCompletionCallback* callback) {
+int SSLHostInfo::WaitForCertVerification(const CompletionCallback& callback) {
   if (cert_verification_complete_)
     return cert_verification_error_;
+
   DCHECK(!cert_parsing_failed_);
-  DCHECK(!cert_verification_callback_);
+  DCHECK(cert_verification_callback_.is_null());
   DCHECK(!state_.certs.empty());
   cert_verification_callback_ = callback;
   return ERR_IO_PENDING;
@@ -204,10 +206,10 @@ void SSLHostInfo::VerifyCallback(int rv) {
   verification_end_time_ = now;
   cert_verification_complete_ = true;
   cert_verification_error_ = rv;
-  if (cert_verification_callback_) {
-    OldCompletionCallback* callback = cert_verification_callback_;
-    cert_verification_callback_ = NULL;
-    callback->Run(rv);
+  if (!cert_verification_callback_.is_null()) {
+    CompletionCallback callback = cert_verification_callback_;
+    cert_verification_callback_.Reset();
+    callback.Run(rv);
   }
 }
 

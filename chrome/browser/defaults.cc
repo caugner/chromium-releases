@@ -6,6 +6,12 @@
 
 namespace browser_defaults {
 
+#if defined(USE_AURA) || defined(OS_CHROMEOS)
+const bool kOSSupportsOtherBrowsers = false;
+#else
+const bool kOSSupportsOtherBrowsers = true;
+#endif
+
 #if defined(OS_CHROMEOS)
 
 // Make the regular omnibox text two points larger than the nine-point font
@@ -21,7 +27,6 @@ const bool kCanToggleSystemTitleBar = false;
 const bool kRestorePopups = false;
 const bool kShowImportOnBookmarkBar = false;
 const bool kShowExitMenuItem = true;
-const bool kOSSupportsOtherBrowsers = false;
 const bool kDownloadPageHasShowInFolder = true;
 const bool kSizeTabButtonToTopOfTabStrip = true;
 const bool kBootstrapSyncAuthentication = true;
@@ -60,7 +65,6 @@ const bool kShowExitMenuItem = false;
 #else
 const bool kShowExitMenuItem = true;
 #endif
-const bool kOSSupportsOtherBrowsers = true;
 const bool kSizeTabButtonToTopOfTabStrip = false;
 const bool kBootstrapSyncAuthentication = false;
 const bool kShowOtherBrowsersInAboutMemory = true;
@@ -74,34 +78,15 @@ const bool kBrowserAliveWithNoWindows = true;
 const bool kBrowserAliveWithNoWindows = false;
 #endif
 
-#ifdef TOUCH_UI
-const int kBookmarkBarHeight = 50;
-const int kNewtabBookmarkBarHeight = 72;
-// TouchUI issue with opening too many tabs.
-const int kMaxTabCount = 4;
-#else
 const int kBookmarkBarHeight = 28;
 const int kNewtabBookmarkBarHeight = 57;
-const int kMaxTabCount = INT_MAX;
-#endif
 
-#ifdef TOUCH_UI
-const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle =
-    ui::ResourceBundle::LargeBoldFont;
-#else
 const ui::ResourceBundle::FontStyle kAssociatedNetworkFontStyle =
     ui::ResourceBundle::BoldFont;
-#endif
 
-#ifdef TOUCH_UI
-const int kInfoBarBorderPaddingVertical = 12;
-#else
 const int kInfoBarBorderPaddingVertical = 5;
-#endif
 
 bool bookmarks_enabled = true;
-
-bool skip_restore = false;
 
 bool enable_help_app = true;
 

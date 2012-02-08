@@ -17,12 +17,18 @@
 #import "chrome/browser/ui/panels/panel_window_controller_cocoa.h"
 #include "grit/theme_resources_standard.h"
 #import "third_party/GTM/AppKit/GTMNSBezierPath+RoundRect.h"
+#import "third_party/GTM/AppKit/GTMNSColor+Luminance.h"
 #include "ui/gfx/mac/nsimage_cache.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
 const int kRoundedCornerSize = 3;
 const int kButtonPadding = 8;
 const int kIconAndTextPadding = 5;
+
+// Distance that user needs to move the mouse in order to start the drag.
+// Threshold is needed to differentiate drags from attempts to click the
+// titlebar with a twitch of the mouse pointer.
+const int kDragThreshold = 3;
 
 // Used to implement TestingAPI
 static NSEvent* MakeMouseEvent(NSEventType type,
@@ -70,90 +76,99 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 }
 
 - (void)drawRect:(NSRect)rect {
-  NSBezierPath* path =
-      [NSBezierPath gtm_bezierPathWithRoundRect:[self bounds]
-                            topLeftCornerRadius:kRoundedCornerSize
-                           topRightCornerRadius:kRoundedCornerSize
-                         bottomLeftCornerRadius:0.0
-                        bottomRightCornerRadius:0.0];
-  [path addClip];
-
-  NSPoint phase = [[self window] themePatternPhase];
-  [[NSGraphicsContext currentContext] setPatternPhase:phase];
-
   ThemeService* theme =
       static_cast<ThemeService*>([[self window] themeProvider]);
 
-  NSColor* backgroundColor = nil;
-  if (isDrawingAttention_) {
-    // The color 0xfffa983a is provided by designers. It's basically orange-ish.
-    backgroundColor = [NSColor colorWithCalibratedRed:0xfa/255.0
-                                                green:0x98/255.0
-                                                 blue:0x3a/255.0
-                                                alpha:1.0];
-  } else if (theme && !theme->UsingDefaultTheme()) {
-      // When using the default theme, we fall back to the default system colors
-      // instead of trying to use the tab coloring, since using the tab coloring
-      // results in focused panel titlebars that are light and unfocused panel
-      // titlebars that are dark, which is the opposite of all other window
-      // titlebars on Mac.
-      if ([[self window] isMainWindow]) {
-        backgroundColor = theme->GetNSImageColorNamed(IDR_THEME_TOOLBAR, true);
-      } else {
-        // Based on -[TabView drawRect:], we need to make sure the theme has an
-        // IDR_THEME_TAB_BACKGROUND or IDR_THEME_FRAME resource; otherwise,
-        // we'll potentially end up with a bizarre looking blue background for
-        // inactive tabs, which looks really out of place on a Mac.
-        BOOL hasBackgroundImage =
-            (theme->HasCustomImage(IDR_THEME_TAB_BACKGROUND) ||
-             theme->HasCustomImage(IDR_THEME_FRAME));
-        if (hasBackgroundImage) {
-          backgroundColor =
-              theme->GetNSImageColorNamed(IDR_THEME_TAB_BACKGROUND, true);
-        }
-      }
-  }
+  [title_ setAlphaValue:1.0];
+  [icon_ setAlphaValue:1.0];
 
-  if (backgroundColor) {
+  NSColor* strokeColor = nil;
+  NSColor* titleColor = nil;
+
+  if (isDrawingAttention_) {
+    // Use system highlight color for DrawAttention state.
+    NSColor* attentionColor = [NSColor selectedTextBackgroundColor];
+    [attentionColor set];
+    NSRectFillUsingOperation([self bounds], NSCompositeSourceOver);
+    // Cover it with semitransparent gradient for better look.
+    NSColor* startColor = [NSColor colorWithCalibratedWhite:1.0 alpha:0.2];
+    NSColor* endColor = [NSColor colorWithCalibratedWhite:0.0 alpha:0.2];
+    scoped_nsobject<NSGradient> gradient(
+      [[NSGradient alloc] initWithStartingColor:startColor
+                                    endingColor:endColor]);
+    [gradient drawInRect:[self bounds] angle:270.0];
+
+    strokeColor = [NSColor colorWithCalibratedWhite:0.6 alpha:1.0];
+    titleColor = [attentionColor gtm_legibleTextColor];
+  } else if (theme && !theme->UsingDefaultTheme()) {
+    NSColor* backgroundColor = nil;
+    if ([[self window] isMainWindow]) {
+      backgroundColor = theme->GetNSImageColorNamed(IDR_THEME_TOOLBAR, true);
+    } else {
+      // Based on -[TabView drawRect:], we need to check if the theme has an
+      // IDR_THEME_TAB_BACKGROUND or IDR_THEME_FRAME resource; otherwise,
+      // we'll potentially end up with a bizarre looking blue background for
+      // inactive tabs, which looks really out of place on a Mac.
+      if (theme->HasCustomImage(IDR_THEME_TAB_BACKGROUND) ||
+          theme->HasCustomImage(IDR_THEME_FRAME)) {
+        backgroundColor =
+            theme->GetNSImageColorNamed(IDR_THEME_TAB_BACKGROUND, true);
+      } else {
+        backgroundColor = [[self window] backgroundColor];  // Fallback.
+      }
+    }
+    // Fill with white to avoid bleeding the system titlebar through
+    // semitransparent theme images.
+    [[NSColor whiteColor] set];
+    NSRectFill([self bounds]);
+
+    NSPoint phase = [[self window] themePatternPhase];
+    [[NSGraphicsContext currentContext] setPatternPhase:phase];
+    DCHECK(backgroundColor);
     [backgroundColor set];
     NSRectFillUsingOperation([self bounds], NSCompositeSourceOver);
-  } else {
-    // Temporarily reset the pattern phase to (0, 0). We want to anchor the
-    // titlebar gradient to match the default system look.
-    gfx::ScopedNSGraphicsContextSaveGState scopedGState;
-    [[NSGraphicsContext currentContext] setPatternPhase:NSMakePoint(0, 0)];
-    [[[self window] backgroundColor] set];
-    NSRectFillUsingOperation([self bounds], NSCompositeSourceOver);
-  }
 
-
-  // Draw the divider stroke.
-  NSColor* strokeColor = nil;
-  if (theme) {
     strokeColor = [[self window] isMainWindow]
         ? theme->GetNSColor(ThemeService::COLOR_TOOLBAR_STROKE, true)
         : theme->GetNSColor(ThemeService::COLOR_TOOLBAR_STROKE_INACTIVE, true);
-  } else {
-    strokeColor = [NSColor blackColor];
-  }
-  NSRect borderRect, contentRect;
-  NSDivideRect([self bounds], &borderRect, &contentRect, [self cr_lineWidth],
-               NSMinYEdge);
-  [strokeColor set];
-  NSRectFillUsingOperation(borderRect, NSCompositeSourceOver);
 
-  // Update the panel title text color as appropriate.
-  NSColor* titleColor = nil;
-  if (isDrawingAttention_) {
-    titleColor = [NSColor whiteColor];
-  } else if (theme) {
     titleColor = [[self window] isMainWindow]
         ? theme->GetNSColor(ThemeService::COLOR_TAB_TEXT, true)
         : theme->GetNSColor(ThemeService::COLOR_BACKGROUND_TAB_TEXT, true);
   } else {
-    titleColor = [NSColor textColor];
+    // Default theme or no theme.
+    BOOL isActive = [[self window] isMainWindow];
+    // Use grayish gradient similar to that of regular OSX window.
+    double startWhite = isActive ? 0.8 : 1.0;
+    double endWhite = isActive ? 0.65 : 0.8;
+    NSColor* startColor = [NSColor colorWithCalibratedWhite:startWhite
+                                                      alpha:1.0];
+    NSColor* endColor = [NSColor colorWithCalibratedWhite:endWhite
+                                                    alpha:1.0];
+    scoped_nsobject<NSGradient> gradient(
+      [[NSGradient alloc] initWithStartingColor:startColor
+                                    endingColor:endColor]);
+    [gradient drawInRect:[self bounds] angle:270.0];
+
+    strokeColor = [NSColor colorWithCalibratedWhite:0.6 alpha:1.0];
+    titleColor = [startColor gtm_legibleTextColor];
+    if (!isActive) {
+      [title_ setAlphaValue:0.5];
+      if (icon_)
+        [icon_ setAlphaValue:0.5];
+    }
   }
+
+  DCHECK(titleColor);
   [title_ setTextColor:titleColor];
+
+  // Draw the divider stroke.
+  DCHECK(strokeColor);
+  [strokeColor set];
+  NSRect borderRect, contentRect;
+  NSDivideRect([self bounds], &borderRect, &contentRect, [self cr_lineWidth],
+               NSMinYEdge);
+  NSRectFillUsingOperation(borderRect, NSCompositeSourceOver);
 }
 
 - (void)attach {
@@ -181,6 +196,11 @@ static NSEvent* MakeMouseEvent(NSEventType type,
                  NSMaxY(rootViewBounds) - NSMaxY(contentFrame));
   [self setFrame:titlebarFrame];
 
+  [title_ setWantsLayer:YES];
+  [title_ setFont:[NSFont boldSystemFontOfSize:[NSFont systemFontSize]]];
+  // This draws nice tight shadow, 'sinking' text into the background.
+  [[title_ cell] setBackgroundStyle:NSBackgroundStyleRaised];
+
   // Initialize the settings button.
   NSImage* image = gfx::GetCachedImageWithName(@"balloon_wrench.pdf");
   [settingsButton_ setDefaultImage:image];
@@ -192,9 +212,7 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   [[settingsButton_ cell] setHighlightsBy:NSNoCellMask];
   [self checkMouseAndUpdateSettingsButtonVisibility];
 
-  // Update layout of controls in the titlebar.
   [self updateCloseButtonLayout];
-  [self updateIconAndTitleLayout];
 
   // Set autoresizing behavior: glued to edges on left, top and right.
   [self setAutoresizingMask:(NSViewMinYMargin | NSViewWidthSizable)];
@@ -204,8 +222,11 @@ static NSEvent* MakeMouseEvent(NSEventType type,
          selector:@selector(didChangeTheme:)
              name:kBrowserThemeDidChangeNotification
            object:nil];
-  // Register for various window focus changes, so we can update our custom
-  // titlebar appropriately.
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(didChangeFrame:)
+             name:NSViewFrameDidChangeNotification
+           object:self];
   [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(didChangeMainWindow:)
@@ -226,8 +247,10 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 - (void)setIcon:(NSView*)newIcon {
   [icon_ removeFromSuperview];
   icon_ = newIcon;
-  if (icon_)
-    [self addSubview:icon_];
+  if (icon_) {
+    [self addSubview:icon_ positioned:NSWindowBelow relativeTo:overlay_];
+    [icon_ setWantsLayer:YES];
+  }
   [self updateIconAndTitleLayout];
 }
 
@@ -240,19 +263,20 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   NSRect bounds = [self bounds];
 
   buttonFrame.origin.x = kButtonPadding;
-  buttonFrame.origin.y = (NSHeight(bounds) - NSHeight(buttonFrame)) / 2;
+  // Lower Close Button's frame 1 px to avoid it 'peeking' in MINIMIZED mode.
+  buttonFrame.origin.y = (NSHeight(bounds) - NSHeight(buttonFrame)) / 2 - 1;
   [closeButton_ setFrame:buttonFrame];
-
-  DCHECK(!closeButtonTrackingArea_.get());
-  closeButtonTrackingArea_.reset(
-      [[CrTrackingArea alloc] initWithRect:buttonFrame
-                                   options:(NSTrackingMouseEnteredAndExited |
-                                            NSTrackingActiveAlways)
-                              proxiedOwner:self
-                                  userInfo:nil]);
-  NSWindow* panelWindow = [self window];
-  [closeButtonTrackingArea_.get() clearOwnerWhenWindowWillClose:panelWindow];
-  [self addTrackingArea:closeButtonTrackingArea_.get()];
+  if (!closeButtonTrackingArea_.get()) {
+    closeButtonTrackingArea_.reset(
+        [[CrTrackingArea alloc] initWithRect:[closeButton_ bounds]
+                                     options:(NSTrackingMouseEnteredAndExited |
+                                              NSTrackingActiveAlways)
+                                proxiedOwner:self
+                                    userInfo:nil]);
+    NSWindow* panelWindow = [self window];
+    [closeButtonTrackingArea_.get() clearOwnerWhenWindowWillClose:panelWindow];
+    [closeButton_ addTrackingArea:closeButtonTrackingArea_.get()];
+  }
 }
 
 - (void)updateIconAndTitleLayout {
@@ -278,7 +302,9 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   [icon_ setFrame:iconFrame];
 
   titleFrame.origin.x = startX + iconWidthWithPadding;
-  titleFrame.origin.y = (NSHeight(bounds) - NSHeight(titleFrame)) / 2;
+  // In bottom-heavy text labels, let's compensate for occasional integer
+  // rounding to avoid text label to feel too low.
+  titleFrame.origin.y = (NSHeight(bounds) - NSHeight(titleFrame)) / 2 + 1;
   titleFrame.size.width = titleWidth;
   [title_ setFrame:titleFrame];
 }
@@ -300,6 +326,10 @@ static NSEvent* MakeMouseEvent(NSEventType type,
   [[closeButton_ cell] setHighlighted:NO];
 }
 
+- (void)didChangeFrame:(NSNotification*)notification {
+  [self updateIconAndTitleLayout];
+}
+
 - (void)didChangeTheme:(NSNotification*)notification {
   [self setNeedsDisplay:YES];
 }
@@ -311,13 +341,20 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 
 - (void)mouseDown:(NSEvent*)event {
   dragState_ = PANEL_DRAG_CAN_START;
+  dragStartLocation_ = [event locationInWindow];
 }
 
 - (void)mouseUp:(NSEvent*)event {
   DCHECK(dragState_ != PANEL_DRAG_IN_PROGRESS);
 
   if ([event clickCount] == 1)
-    [controller_ tryFlipExpansionState];
+    [controller_ onTitlebarMouseClicked];
+}
+
+- (BOOL)exceedsDragThreshold:(NSPoint)mouseLocation {
+  float deltaX = dragStartLocation_.x - mouseLocation.x;
+  float deltaY = dragStartLocation_.y - mouseLocation.y;
+  return deltaX > kDragThreshold || deltaY > kDragThreshold;
 }
 
 - (void)mouseDragged:(NSEvent*)event {
@@ -339,8 +376,11 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 
     switch ([event type]) {
       case NSLeftMouseDragged:
-        if (dragState_ == PANEL_DRAG_CAN_START)
+        if (dragState_ == PANEL_DRAG_CAN_START) {
+          if (![self exceedsDragThreshold:[event locationInWindow]])
+            return;  // Don't start real drag yet.
           [self startDrag];
+        }
         [self dragWithDeltaX:[event deltaX]];
         break;
 
@@ -352,7 +392,10 @@ static NSEvent* MakeMouseEvent(NSEventType type,
         break;
 
       case NSLeftMouseUp:
-        [self endDrag:NO];
+        if (dragState_ == PANEL_DRAG_CAN_START)
+          [self mouseUp:event];  // Drag didn't really start, minimize instead.
+        else
+          [self endDrag:NO];
         keepGoing = NO;
         break;
 
@@ -409,6 +452,10 @@ static NSEvent* MakeMouseEvent(NSEventType type,
 // (Private/TestingAPI)
 - (PanelWindowControllerCocoa*)controller {
   return controller_;
+}
+
+- (NSTextField*)title {
+  return title_;
 }
 
 - (void)simulateCloseButtonClick {

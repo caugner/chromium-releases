@@ -5,6 +5,7 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
+#include "base/string16.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -18,9 +19,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 static std::ostream& operator<<(std::ostream& os,
@@ -105,7 +106,7 @@ void TestProvider::AddResults(int start_at, int num) {
 }
 
 class AutocompleteProviderTest : public testing::Test,
-                                 public NotificationObserver {
+                                 public content::NotificationObserver {
  protected:
   void ResetControllerWithTestProviders(bool same_destinations);
 
@@ -122,14 +123,14 @@ class AutocompleteProviderTest : public testing::Test,
   AutocompleteResult result_;
 
  private:
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details);
 
   MessageLoopForUI message_loop_;
   scoped_ptr<AutocompleteController> controller_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   TestingProfile profile_;
 };
 
@@ -161,7 +162,7 @@ void AutocompleteProviderTest::ResetControllerWithTestProviders(
   // notifications.
   registrar_.Add(this,
                  chrome::NOTIFICATION_AUTOCOMPLETE_CONTROLLER_RESULT_READY,
-                 Source<AutocompleteController>(controller));
+                 content::Source<AutocompleteController>(controller));
 }
 
 void AutocompleteProviderTest::
@@ -232,9 +233,10 @@ void AutocompleteProviderTest::RunExactKeymatchTest(
       controller_->result().default_match()->provider);
 }
 
-void AutocompleteProviderTest::Observe(int type,
-                                       const NotificationSource& source,
-                                       const NotificationDetails& details) {
+void AutocompleteProviderTest::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (controller_->done()) {
     result_.CopyFrom(controller_->result());
     MessageLoop::current()->Quit();
@@ -278,7 +280,7 @@ TEST_F(AutocompleteTest, InputType) {
     const string16 input;
     const AutocompleteInput::Type type;
   } input_cases[] = {
-    { ASCIIToUTF16(""), AutocompleteInput::INVALID },
+    { string16(), AutocompleteInput::INVALID },
     { ASCIIToUTF16("?"), AutocompleteInput::FORCED_QUERY },
     { ASCIIToUTF16("?foo"), AutocompleteInput::FORCED_QUERY },
     { ASCIIToUTF16("?foo bar"), AutocompleteInput::FORCED_QUERY },
@@ -290,7 +292,10 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("-foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo-.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("foo.-com"), AutocompleteInput::QUERY },
+    { ASCIIToUTF16("foo/"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo/bar"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("foo/bar/"), AutocompleteInput::URL },
+    { ASCIIToUTF16("foo/bar baz\\"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo.com/bar"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo;bar"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("foo/bar baz"), AutocompleteInput::UNKNOWN },
@@ -300,7 +305,7 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("foo+bar.com"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("\"foo:bar\""), AutocompleteInput::QUERY },
     { ASCIIToUTF16("link:foo.com"), AutocompleteInput::UNKNOWN },
-    { ASCIIToUTF16("foo:81"), AutocompleteInput::UNKNOWN },
+    { ASCIIToUTF16("foo:81"), AutocompleteInput::URL },
     { ASCIIToUTF16("localhost:8080"), AutocompleteInput::URL },
     { ASCIIToUTF16("www.foo.com:81"), AutocompleteInput::URL },
     { ASCIIToUTF16("foo.com:123456"), AutocompleteInput::QUERY },
@@ -327,15 +332,13 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("host#ref"), AutocompleteInput::UNKNOWN },
     { ASCIIToUTF16("host/path?query"), AutocompleteInput::URL },
     { ASCIIToUTF16("host/path#ref"), AutocompleteInput::URL },
-    { ASCIIToUTF16("en.wikipedia.org/wiki/James Bond"),
-        AutocompleteInput::URL },
+    { ASCIIToUTF16("en.wikipedia.org/wiki/Jim Beam"), AutocompleteInput::URL },
     // In Chrome itself, mailto: will get handled by ShellExecute, but in
     // unittest mode, we don't have the data loaded in the external protocol
     // handler to know this.
     // { ASCIIToUTF16("mailto:abuse@foo.com"), AutocompleteInput::URL },
     { ASCIIToUTF16("view-source:http://www.foo.com/"), AutocompleteInput::URL },
-    { ASCIIToUTF16("javascript:alert(\"Hey there!\");"),
-        AutocompleteInput::URL },
+    { ASCIIToUTF16("javascript:alert(\"Hi there\");"), AutocompleteInput::URL },
 #if defined(OS_WIN)
     { ASCIIToUTF16("C:\\Program Files"), AutocompleteInput::URL },
     { ASCIIToUTF16("\\\\Server\\Folder\\File"), AutocompleteInput::URL },
@@ -366,12 +369,10 @@ TEST_F(AutocompleteTest, InputType) {
     { ASCIIToUTF16("127.0.1/"), AutocompleteInput::URL },
     { ASCIIToUTF16("browser.tabs.closeButtons"), AutocompleteInput::UNKNOWN },
     { WideToUTF16(L"\u6d4b\u8bd5"), AutocompleteInput::UNKNOWN },
-    { ASCIIToUTF16("[2001:]"), AutocompleteInput::QUERY },  // Not a valid IP
+    { ASCIIToUTF16("[2001:]"), AutocompleteInput::QUERY },
     { ASCIIToUTF16("[2001:dB8::1]"), AutocompleteInput::URL },
-    { ASCIIToUTF16("192.168.0.256"),
-        AutocompleteInput::QUERY },  // Invalid IPv4 literal.
-    { ASCIIToUTF16("[foo.com]"),
-        AutocompleteInput::QUERY },  // Invalid IPv6 literal.
+    { ASCIIToUTF16("192.168.0.256"), AutocompleteInput::QUERY },
+    { ASCIIToUTF16("[foo.com]"), AutocompleteInput::QUERY },
   };
 
   for (size_t i = 0; i < ARRAYSIZE_UNSAFE(input_cases); ++i) {
@@ -444,7 +445,7 @@ TEST(AutocompleteInput, ParseForEmphasizeComponent) {
     const Component scheme;
     const Component host;
   } input_cases[] = {
-    { ASCIIToUTF16(""), kInvalidComponent, kInvalidComponent },
+    { string16(), kInvalidComponent, kInvalidComponent },
     { ASCIIToUTF16("?"), kInvalidComponent, kInvalidComponent },
     { ASCIIToUTF16("?http://foo.com/bar"), kInvalidComponent,
         kInvalidComponent },

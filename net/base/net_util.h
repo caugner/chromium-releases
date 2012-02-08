@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <ws2tcpip.h>
 #elif defined(OS_POSIX)
+#include <sys/types.h>
 #include <sys/socket.h>
 #endif
 
@@ -75,8 +76,8 @@ NET_EXPORT extern const FormatUrlType kFormatUrlOmitTrailingSlashOnBareHostname;
 // Convenience for omitting all unecessary types.
 NET_EXPORT extern const FormatUrlType kFormatUrlOmitAll;
 
-// Holds a list of ports that should be accepted despite bans.
-NET_EXPORT_PRIVATE extern std::multiset<int> explicitly_allowed_ports;
+// Returns the number of explicitly allowed ports; for testing.
+NET_EXPORT_PRIVATE extern size_t GetCountOfExplicitlyAllowedPorts();
 
 // Given the full path to a file name, creates a file: URL. The returned URL
 // may not be valid if the input is malformed.
@@ -276,7 +277,7 @@ NET_EXPORT string16 GetSuggestedFilename(const GURL& url,
                                          const std::string& referrer_charset,
                                          const std::string& suggested_name,
                                          const std::string& mime_type,
-                                         const string16& default_name);
+                                         const std::string& default_name);
 
 // Similar to GetSuggestedFilename(), but returns a FilePath.
 NET_EXPORT FilePath GenerateFileName(const GURL& url,
@@ -284,7 +285,7 @@ NET_EXPORT FilePath GenerateFileName(const GURL& url,
                                      const std::string& referrer_charset,
                                      const std::string& suggested_name,
                                      const std::string& mime_type,
-                                     const string16& default_name);
+                                     const std::string& default_name);
 
 // Ensures that the filename and extension is safe to use in the filesystem.
 //
@@ -307,13 +308,12 @@ NET_EXPORT void GenerateSafeFileName(const std::string& mime_type,
                                      bool ignore_extension,
                                      FilePath* file_path);
 
-// Checks the given port against a list of ports which are restricted by
-// default.  Returns true if the port is allowed, false if it is restricted.
-bool IsPortAllowedByDefault(int port);
+// Checks |port| against a list of ports which are restricted by default.
+// Returns true if |port| is allowed, false if it is restricted.
+NET_EXPORT bool IsPortAllowedByDefault(int port);
 
-// Checks the given port against a list of ports which are restricted by the
-// FTP protocol.  Returns true if the port is allowed, false if it is
-// restricted.
+// Checks |port| against a list of ports which are restricted by the FTP
+// protocol.  Returns true if |port| is allowed, false if it is restricted.
 bool IsPortAllowedByFtp(int port);
 
 // Check if banned |port| has been overriden by an entry in

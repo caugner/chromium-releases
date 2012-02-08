@@ -12,6 +12,7 @@
 #include "ui/gfx/gl/gpu_preference.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gfx/rect.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 
 // TODO(port): this typedef is obviously incorrect on non-Windows
 // platforms, but now a lot of code now accidentally depends on them
@@ -21,22 +22,16 @@ typedef void* HANDLE;
 class GURL;
 struct NPObject;
 
-namespace WebKit {
-class WebFrame;
-}
-
 namespace webkit {
 namespace npapi {
 
-class WebPluginDelegate;
-class WebPluginParentView;
 class WebPluginResourceClient;
 #if defined(OS_MACOSX)
 class WebPluginAcceleratedSurface;
 #endif
 
 // Describes the new location for a plugin window.
-struct WebPluginGeometry {
+struct WEBKIT_PLUGINS_EXPORT WebPluginGeometry {
   WebPluginGeometry();
   ~WebPluginGeometry();
 
@@ -146,10 +141,10 @@ class WebPlugin {
 
 #if defined(OS_MACOSX)
   // Called to inform the WebPlugin that the plugin has gained or lost focus.
-  virtual void FocusChanged(bool focused) {};
+  virtual void FocusChanged(bool focused) {}
 
   // Starts plugin IME.
-  virtual void StartIme() {};
+  virtual void StartIme() {}
 
   // Synthesize a fake window handle for the plug-in to identify the instance
   // to the browser, allowing mapping to a surface for hardware accelleration
@@ -162,6 +157,13 @@ class WebPlugin {
   // Returns the accelerated surface abstraction for accelerated plugins.
   virtual WebPluginAcceleratedSurface* GetAcceleratedSurface(
       gfx::GpuPreference gpu_preference);
+
+  // Composited Core Animation plugin support.
+  virtual void AcceleratedPluginEnabledRendering() = 0;
+  virtual void AcceleratedPluginAllocatedIOSurface(int32 width,
+                                                   int32 height,
+                                                   uint32 surface_id) = 0;
+  virtual void AcceleratedPluginSwappedIOSurface() = 0;
 #endif
 
   // Handles NPN_URLRedirectResponse calls issued by plugins in response to

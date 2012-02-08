@@ -20,12 +20,14 @@
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -33,7 +35,7 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -56,7 +58,7 @@ PersonalOptionsHandler::PersonalOptionsHandler() {
 #if defined(OS_CHROMEOS)
   registrar_.Add(this,
                  chrome::NOTIFICATION_LOGIN_USER_IMAGE_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 #endif
 }
 
@@ -110,6 +112,13 @@ void PersonalOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_NEVERSAVE));
   localized_strings->SetString("manage_passwords",
       l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_MANAGE_PASSWORDS));
+#if defined(OS_MACOSX)
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  if (profile_manager->GetNumberOfProfiles() > 1) {
+    localized_strings->SetString("macPasswordsWarning",
+        l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_MAC_WARNING));
+  }
+#endif
   localized_strings->SetString("autologinEnabled",
       l10n_util::GetStringUTF16(IDS_OPTIONS_PASSWORDS_AUTOLOGIN));
 
@@ -185,8 +194,6 @@ void PersonalOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_THEMES));
   localized_strings->SetString("syncapps",
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_APPS));
-  localized_strings->SetString("syncsearchengines",
-      l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_SEARCH_ENGINES));
   localized_strings->SetString("syncsessions",
       l10n_util::GetStringUTF16(IDS_SYNC_DATATYPE_TABS));
 
@@ -197,8 +204,10 @@ void PersonalOptionsHandler::GetLocalizedValues(
       l10n_util::GetStringUTF16(IDS_OPTIONS_ENABLE_SCREENLOCKER_CHECKBOX));
   localized_strings->SetString("changePicture",
       l10n_util::GetStringUTF16(IDS_OPTIONS_CHANGE_PICTURE));
-  localized_strings->SetString("userEmail",
-      chromeos::UserManager::Get()->logged_in_user().email());
+  if (chromeos::UserManager::Get()->user_is_logged_in()) {
+    localized_strings->SetString("username",
+        chromeos::UserManager::Get()->logged_in_user().email());
+  }
 #endif
 }
 
@@ -220,9 +229,10 @@ void PersonalOptionsHandler::RegisterMessages() {
                  base::Unretained(this)));
 }
 
-void PersonalOptionsHandler::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
+void PersonalOptionsHandler::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     ObserveThemeChanged();
   } else if (multiprofile_ &&
@@ -246,7 +256,8 @@ void PersonalOptionsHandler::OnStateChanged() {
   bool managed = service->IsManaged();
   bool sync_setup_completed = service->HasSyncSetupCompleted();
   bool status_has_error = sync_ui_util::GetStatusLabels(
-      service, &status_label, &link_label) == sync_ui_util::SYNC_ERROR;
+      service, sync_ui_util::WITH_HTML, &status_label, &link_label) ==
+          sync_ui_util::SYNC_ERROR;
 
   string16 start_stop_button_label;
   bool is_start_stop_button_visible = false;
@@ -306,6 +317,12 @@ void PersonalOptionsHandler::OnStateChanged() {
   web_ui_->CallJavascriptFunction("PersonalOptions.setSyncStatusErrorVisible",
                                   *visible);
 
+  enabled.reset(Value::CreateBooleanValue(
+      !service->unrecoverable_error_detected()));
+  web_ui_->CallJavascriptFunction(
+      "PersonalOptions.setCustomizeSyncButtonEnabled",
+      *enabled);
+
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableAutologin)) {
     visible.reset(Value::CreateBooleanValue(
         service->AreCredentialsAvailable()));
@@ -345,10 +362,10 @@ void PersonalOptionsHandler::Initialize() {
 
   // Listen for theme installation.
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(ThemeServiceFactory::GetForProfile(
-                     profile)));
+                 content::Source<ThemeService>(
+                     ThemeServiceFactory::GetForProfile(profile)));
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   ObserveThemeChanged();
 
   ProfileSyncService* sync_service = profile->GetProfileSyncService();
@@ -394,14 +411,25 @@ void PersonalOptionsHandler::SendProfilesInfo() {
       web_ui_->tab_contents()->browser_context()->GetPath();
   for (size_t i = 0, e = cache.GetNumberOfProfiles(); i < e; ++i) {
     DictionaryValue* profile_value = new DictionaryValue();
-    size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
     FilePath profile_path = cache.GetPathOfProfileAtIndex(i);
     profile_value->SetString("name", cache.GetNameOfProfileAtIndex(i));
-    profile_value->SetString("iconURL",
-                             cache.GetDefaultAvatarIconUrl(icon_index));
     profile_value->Set("filePath", base::CreateFilePathValue(profile_path));
     profile_value->SetBoolean("isCurrentProfile",
                               profile_path == current_profile_path);
+
+    bool is_gaia_picture =
+        cache.IsUsingGAIAPictureOfProfileAtIndex(i) &&
+        cache.GetGAIAPictureOfProfileAtIndex(i);
+    if (is_gaia_picture) {
+      gfx::Image icon = profiles::GetAvatarIconForWebUI(
+          cache.GetAvatarIconOfProfileAtIndex(i), true);
+      profile_value->SetString("iconURL", web_ui_util::GetImageDataUrl(icon));
+    } else {
+      size_t icon_index = cache.GetAvatarIconIndexOfProfileAtIndex(i);
+      profile_value->SetString("iconURL",
+                               cache.GetDefaultAvatarIconUrl(icon_index));
+    }
+
     profile_info_list.Append(profile_value);
   }
 

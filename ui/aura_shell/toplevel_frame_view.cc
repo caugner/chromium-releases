@@ -7,15 +7,12 @@
 #include "grit/ui_resources.h"
 #include "ui/aura/cursor.h"
 #include "ui/base/animation/throb_animation.h"
+#include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/controls/button/custom_button.h"
-#include "views/widget/widget.h"
-#include "views/widget/widget_delegate.h"
-
-#if !defined(OS_WIN)
-#include "views/window/hit_test.h"
-#endif
+#include "ui/views/controls/button/custom_button.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace aura_shell {
 namespace internal {
@@ -46,7 +43,7 @@ class WindowControlButton : public views::CustomButton {
 
   // Overridden from views::View:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
-    canvas->FillRectInt(GetBackgroundColor(), 0, 0, width(), height());
+    canvas->FillRect(GetBackgroundColor(), GetLocalBounds());
     canvas->DrawBitmapInt(icon_, 0, 0);
   }
   virtual gfx::Size GetPreferredSize() OVERRIDE {
@@ -116,11 +113,11 @@ class FrameComponent : public views::View,
     // Fill with current opacity value.
     int opacity = animation_->CurrentValueBetween(kFrameBorderHiddenOpacity,
                                                   kFrameBorderVisibleOpacity);
-    canvas->FillRectInt(SkColorSetARGB(opacity,
-                                       SkColorGetR(kFrameColor),
-                                       SkColorGetG(kFrameColor),
-                                       SkColorGetB(kFrameColor)),
-                        0, 0, width(), height());
+    canvas->FillRect(SkColorSetARGB(opacity,
+                                    SkColorGetR(kFrameColor),
+                                    SkColorGetG(kFrameColor),
+                                    SkColorGetB(kFrameColor)),
+                     GetLocalBounds());
   }
 
   // Overridden from ui::AnimationDelegate:
@@ -162,11 +159,6 @@ class WindowCaption : public FrameComponent,
     else if (zoom_button_->GetMirroredBounds().Contains(translated_point))
       return HTMAXBUTTON;
     return HTNOWHERE;
-  }
-
-  // Updates the enabled state of the close button.
-  void EnableClose(bool enable) {
-    close_button_->SetEnabled(enable);
   }
 
   // Overridden from FrameComponent:
@@ -402,10 +394,6 @@ int ToplevelFrameView::NonClientHitTest(const gfx::Point& point) {
 void ToplevelFrameView::GetWindowMask(const gfx::Size& size,
                                       gfx::Path* window_mask) {
   // Nothing.
-}
-
-void ToplevelFrameView::EnableClose(bool enable) {
-  caption_->EnableClose(enable);
 }
 
 void ToplevelFrameView::ResetWindowControls() {

@@ -8,15 +8,15 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
-#include "chrome/browser/chromeos/status/status_area_host.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 #include "ui/base/models/menu_model.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 class PrefService;
 class SkBitmap;
@@ -35,68 +35,69 @@ namespace chromeos {
 
 // A class for the dropdown menu for switching input method and keyboard layout.
 // Since the class provides the views::ViewMenuDelegate interface, it's easy to
-// create a button widget (e.g. views::MenuButton, chromeos::StatusAreaButton)
+// create a button widget (e.g. views::MenuButton, StatusAreaButton)
 // which shows the dropdown menu on click.
 class InputMethodMenu
     : public views::ViewMenuDelegate,
       public ui::MenuModel,
       public input_method::InputMethodManager::Observer,
       public input_method::InputMethodManager::PreferenceObserver,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   InputMethodMenu(PrefService* pref_service,
-                  StatusAreaHost::ScreenMode screen_mode,
                   bool for_out_of_box_experience_dialog);
   virtual ~InputMethodMenu();
 
   // ui::MenuModel implementation.
-  virtual bool HasIcons() const;
-  virtual int GetItemCount() const;
-  virtual ui::MenuModel::ItemType GetTypeAt(int index) const;
-  virtual int GetCommandIdAt(int index) const;
-  virtual string16 GetLabelAt(int index) const;
-  virtual bool IsItemDynamicAt(int index) const;
+  virtual bool HasIcons() const OVERRIDE;
+  virtual int GetItemCount() const OVERRIDE;
+  virtual ui::MenuModel::ItemType GetTypeAt(int index) const OVERRIDE;
+  virtual int GetCommandIdAt(int index) const OVERRIDE;
+  virtual string16 GetLabelAt(int index) const OVERRIDE;
+  virtual bool IsItemDynamicAt(int index) const OVERRIDE;
   virtual bool GetAcceleratorAt(int index,
-                                ui::Accelerator* accelerator) const;
-  virtual bool IsItemCheckedAt(int index) const;
-  virtual int GetGroupIdAt(int index) const;
-  virtual bool GetIconAt(int index, SkBitmap* icon);
-  virtual ui::ButtonMenuItemModel* GetButtonMenuItemAt(int index) const;
-  virtual bool IsEnabledAt(int index) const;
-  virtual ui::MenuModel* GetSubmenuModelAt(int index) const;
-  virtual void HighlightChangedTo(int index);
-  virtual void ActivatedAt(int index);
-  virtual void MenuWillShow();
-  virtual void SetMenuModelDelegate(ui::MenuModelDelegate* delegate);
+                                ui::Accelerator* accelerator) const OVERRIDE;
+  virtual bool IsItemCheckedAt(int index) const OVERRIDE;
+  virtual int GetGroupIdAt(int index) const OVERRIDE;
+  virtual bool GetIconAt(int index, SkBitmap* icon) OVERRIDE;
+  virtual ui::ButtonMenuItemModel* GetButtonMenuItemAt(
+      int index) const OVERRIDE;
+  virtual bool IsEnabledAt(int index) const OVERRIDE;
+  virtual ui::MenuModel* GetSubmenuModelAt(int index) const OVERRIDE;
+  virtual void HighlightChangedTo(int index) OVERRIDE;
+  virtual void ActivatedAt(int index) OVERRIDE;
+  virtual void MenuWillShow() OVERRIDE;
+  virtual void SetMenuModelDelegate(ui::MenuModelDelegate* delegate) OVERRIDE;
 
   // views::ViewMenuDelegate implementation. Sub classes can override the method
   // to adjust the position of the menu.
-  virtual void RunMenu(views::View* source, const gfx::Point& pt);
+  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
 
   // InputMethodManager::Observer implementation.
   virtual void InputMethodChanged(
       input_method::InputMethodManager* manager,
       const input_method::InputMethodDescriptor& current_input_method,
-      size_t num_active_input_methods);
+      size_t num_active_input_methods) OVERRIDE;
   virtual void ActiveInputMethodsChanged(
       input_method::InputMethodManager* manager,
       const input_method::InputMethodDescriptor& current_input_method,
-      size_t num_active_input_methods);
+      size_t num_active_input_methods) OVERRIDE;
   virtual void PropertyListChanged(
       input_method::InputMethodManager* manager,
-      const input_method::ImePropertyList& current_ime_properties);
+      const input_method::ImePropertyList& current_ime_properties) OVERRIDE;
 
   // InputMethodManager::PreferenceObserver implementation.
   virtual void PreferenceUpdateNeeded(
-    input_method::InputMethodManager* manager,
-    const input_method::InputMethodDescriptor& previous_input_method,
-    const input_method::InputMethodDescriptor& current_input_method);
-  virtual void FirstObserverIsAdded(input_method::InputMethodManager* manager);
+      input_method::InputMethodManager* manager,
+      const input_method::InputMethodDescriptor& previous_input_method,
+      const input_method::InputMethodDescriptor& current_input_method) OVERRIDE;
+  virtual void FirstObserverIsAdded(
+      input_method::InputMethodManager* manager) OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Specify menu alignment (default TOPRIGHT).
   void set_menu_alignment(views::MenuItemView::AnchorPosition menu_alignment) {
@@ -168,6 +169,9 @@ class InputMethodMenu
   // Stops observing InputMethodManager.
   void RemoveObservers();
 
+  // Initializes objects for reading/writing Chrome prefs.
+  void InitializePrefMembers();
+
   // The current input method list.
   scoped_ptr<input_method::InputMethodDescriptors> input_method_descriptors_;
 
@@ -190,10 +194,8 @@ class InputMethodMenu
   views::MenuItemView::AnchorPosition menu_alignment_;
 
   PrefService* pref_service_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
-  // The mode of the host screen  (e.g. browser, screen locker, login screen.)
-  const StatusAreaHost::ScreenMode screen_mode_;
   // true if the menu is for a dialog in OOBE screen. In the dialog, we don't
   // use radio buttons.
   const bool for_out_of_box_experience_dialog_;

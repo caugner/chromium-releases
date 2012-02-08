@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef REMOTING_HOST_SUPPORT_HOST_REGISTER_QUERY_H_
-#define REMOTING_HOST_SUPPORT_HOST_REGISTER_QUERY_H_
+#ifndef REMOTING_HOST_REGISTER_SUPPORT_HOST_REQUEST_H_
+#define REMOTING_HOST_REGISTER_SUPPORT_HOST_REQUEST_H_
 
 #include <string>
 
@@ -27,7 +27,7 @@ class TimeDelta;
 namespace remoting {
 
 class IqRequest;
-class MutableHostConfig;
+class IqSender;
 
 // RegisterSupportHostRequest sends support host registeration request
 // to the Chromoting Bot. It listens to the status of the host using
@@ -77,6 +77,7 @@ class RegisterSupportHostRequest : public HostStatusObserver {
 
   MessageLoop* message_loop_;
   RegisterCallback callback_;
+  scoped_ptr<IqSender> iq_sender_;
   scoped_ptr<IqRequest> request_;
   HostKeyPair key_pair_;
 
@@ -85,4 +86,4 @@ class RegisterSupportHostRequest : public HostStatusObserver {
 
 }  // namespace remoting
 
-#endif  // REMOTING_HOST_SUPPORT_HOST_REGISTER_QUERY_H_
+#endif  // REMOTING_HOST_REGISTER_SUPPORT_HOST_REQUEST_H_

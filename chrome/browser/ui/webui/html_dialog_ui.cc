@@ -7,15 +7,16 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
+#include "base/property_bag.h"
 #include "base/values.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/common/bindings_policy.h"
 
-static base::LazyInstance<PropertyAccessor<HtmlDialogUIDelegate*> >
-    g_html_dialog_ui_property_accessor(base::LINKER_INITIALIZED);
+static base::LazyInstance<base::PropertyAccessor<HtmlDialogUIDelegate*> >
+    g_html_dialog_ui_property_accessor = LAZY_INSTANCE_INITIALIZER;
 
 HtmlDialogUI::HtmlDialogUI(TabContents* tab_contents)
     : ChromeWebUI(tab_contents) {
@@ -37,7 +38,8 @@ void HtmlDialogUI::CloseDialog(const base::ListValue* args) {
 }
 
 // static
-PropertyAccessor<HtmlDialogUIDelegate*>& HtmlDialogUI::GetPropertyAccessor() {
+base::PropertyAccessor<HtmlDialogUIDelegate*>&
+    HtmlDialogUI::GetPropertyAccessor() {
   return g_html_dialog_ui_property_accessor.Get();
 }
 
@@ -68,10 +70,12 @@ void HtmlDialogUI::RenderViewCreated(RenderViewHost* render_view_host) {
     AddMessageHandler(*it);
   }
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_HTML_DIALOG_SHOWN,
-      Source<HtmlDialogUI>(this),
-      NotificationService::NoDetails());
+      content::Source<WebUI>(this),
+      content::Details<RenderViewHost>(render_view_host));
+
+  ChromeWebUI::RenderViewCreated(render_view_host);
 }
 
 void HtmlDialogUI::OnDialogClosed(const ListValue* args) {

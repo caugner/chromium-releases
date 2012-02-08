@@ -5,8 +5,10 @@
 #include "net/url_request/url_request.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
+#include "base/lazy_instance.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
 #include "base/metrics/stats_counters.h"
@@ -55,11 +57,13 @@ void StripPostSpecificHeaders(HttpRequestHeaders* headers) {
 uint64 g_next_url_request_identifier = 1;
 
 // This lock protects g_next_url_request_identifier.
-base::Lock g_next_url_request_identifier_lock;
+base::LazyInstance<base::Lock,
+                   base::LeakyLazyInstanceTraits<base::Lock> >
+    g_next_url_request_identifier_lock = LAZY_INSTANCE_INITIALIZER;
 
 // Returns an prior unused identifier for URL requests.
 uint64 GenerateURLRequestIdentifier() {
-  base::AutoLock lock(g_next_url_request_identifier_lock);
+  base::AutoLock lock(g_next_url_request_identifier_lock.Get());
   return g_next_url_request_identifier++;
 }
 
@@ -145,8 +149,9 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
       priority_(LOWEST),
       identifier_(GenerateURLRequestIdentifier()),
       blocked_on_delegate_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          before_request_callback_(this, &URLRequest::BeforeRequestComplete)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(before_request_callback_(
+          base::Bind(&URLRequest::BeforeRequestComplete,
+                     base::Unretained(this)))),
       has_notified_completion_(false) {
   SIMPLE_STATS_COUNTER("URLRequestCount");
 
@@ -414,7 +419,7 @@ void URLRequest::Start() {
   // Only notify the delegate for the initial request.
   if (context_ && context_->network_delegate()) {
     int error = context_->network_delegate()->NotifyBeforeURLRequest(
-        this, &before_request_callback_, &delegate_redirect_url_);
+        this, before_request_callback_, &delegate_redirect_url_);
     if (error != net::OK) {
       if (error == net::ERR_IO_PENDING) {
         // Paused on the delegate, will invoke |before_request_callback_| later.
@@ -616,11 +621,11 @@ void URLRequest::FollowDeferredRedirect() {
   job_->FollowDeferredRedirect();
 }
 
-void URLRequest::SetAuth(const string16& username, const string16& password) {
+void URLRequest::SetAuth(const AuthCredentials& credentials) {
   DCHECK(job_);
   DCHECK(job_->NeedsAuth());
 
-  job_->SetAuth(username, password);
+  job_->SetAuth(credentials);
 }
 
 void URLRequest::CancelAuth() {
@@ -695,17 +700,27 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
     return ERR_UNSAFE_REDIRECT;
   }
 
-  bool strip_post_specific_headers = false;
-  if (http_status_code != 307) {
-    // NOTE: Even though RFC 2616 says to preserve the request method when
-    // following a 302 redirect, normal browsers don't do that.  Instead, they
-    // all convert a POST into a GET in response to a 302 and so shall we.  For
-    // 307 redirects, browsers preserve the method.  The RFC says to prompt the
-    // user to confirm the generation of a new POST request, but IE omits this
-    // prompt and so shall we.
-    strip_post_specific_headers = method_ == "POST";
+  // For 303 redirects, all request methods except HEAD are converted to GET,
+  // as per the latest httpbis draft.  The draft also allows POST requests to
+  // be converted to GETs when following 301/302 redirects, for historical
+  // reasons. Most major browsers do this and so shall we.  Both RFC 2616 and
+  // the httpbis draft say to prompt the user to confirm the generation of new
+  // requests, other than GET and HEAD requests, but IE omits these prompts and
+  // so shall we.
+  // See:  https://tools.ietf.org/html/draft-ietf-httpbis-p2-semantics-17#section-7.3
+  bool was_post = method_ == "POST";
+  if ((http_status_code == 303 && method_ != "HEAD") ||
+      ((http_status_code == 301 || http_status_code == 302) && was_post)) {
     method_ = "GET";
     upload_ = NULL;
+    if (was_post) {
+      // If being switched from POST to GET, must remove headers that were
+      // specific to the POST and don't have meaning in GET. For example
+      // the inclusion of a multipart Content-Type header in GET can cause
+      // problems with some servers:
+      // http://code.google.com/p/chromium/issues/detail?id=843
+      StripPostSpecificHeaders(&extra_request_headers_);
+    }
   }
 
   // Suppress the referrer if we're redirecting out of https.
@@ -714,15 +729,6 @@ int URLRequest::Redirect(const GURL& location, int http_status_code) {
 
   url_chain_.push_back(location);
   --redirect_limit_;
-
-  if (strip_post_specific_headers) {
-    // If being switched from POST to GET, must remove headers that were
-    // specific to the POST and don't have meaning in GET. For example
-    // the inclusion of a multipart Content-Type header in GET can cause
-    // problems with some servers:
-    // http://code.google.com/p/chromium/issues/detail?id=843
-    StripPostSpecificHeaders(&extra_request_headers_);
-  }
 
   if (!final_upload_progress_)
     final_upload_progress_ = job_->GetUploadProgress();
@@ -819,7 +825,7 @@ void URLRequest::NotifyAuthRequiredComplete(
       break;
 
     case NetworkDelegate::AUTH_REQUIRED_RESPONSE_SET_AUTH:
-      SetAuth(credentials.username, credentials.password);
+      SetAuth(credentials);
       break;
 
     case NetworkDelegate::AUTH_REQUIRED_RESPONSE_CANCEL_AUTH:

@@ -14,10 +14,12 @@
 #include "base/string_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -32,7 +34,7 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 // in there, etc.
 
 class UserScriptMasterTest : public testing::Test,
-                             public NotificationObserver {
+                             public content::NotificationObserver {
  public:
   UserScriptMasterTest()
       : message_loop_(MessageLoop::TYPE_UI),
@@ -44,13 +46,13 @@ class UserScriptMasterTest : public testing::Test,
 
     // Register for all user script notifications.
     registrar_.Add(this, chrome::NOTIFICATION_USER_SCRIPTS_UPDATED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
 
     // UserScriptMaster posts tasks to the file thread so make the current
     // thread look like one.
-    file_thread_.reset(new BrowserThread(
+    file_thread_.reset(new content::TestBrowserThread(
         BrowserThread::FILE, MessageLoop::current()));
-    ui_thread_.reset(new BrowserThread(
+    ui_thread_.reset(new content::TestBrowserThread(
         BrowserThread::UI, MessageLoop::current()));
   }
 
@@ -60,11 +62,11 @@ class UserScriptMasterTest : public testing::Test,
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     DCHECK(type == chrome::NOTIFICATION_USER_SCRIPTS_UPDATED);
 
-    shared_memory_ = Details<base::SharedMemory>(details).ptr();
+    shared_memory_ = content::Details<base::SharedMemory>(details).ptr();
     if (MessageLoop::current() == &message_loop_)
       MessageLoop::current()->Quit();
   }
@@ -72,13 +74,13 @@ class UserScriptMasterTest : public testing::Test,
   // Directory containing user scripts.
   ScopedTempDir temp_dir_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // MessageLoop used in tests.
   MessageLoop message_loop_;
 
-  scoped_ptr<BrowserThread> file_thread_;
-  scoped_ptr<BrowserThread> ui_thread_;
+  scoped_ptr<content::TestBrowserThread> file_thread_;
+  scoped_ptr<content::TestBrowserThread> ui_thread_;
 
   // Updated to the script shared memory when we get notified.
   base::SharedMemory* shared_memory_;

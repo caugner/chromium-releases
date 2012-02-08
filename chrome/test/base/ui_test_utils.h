@@ -14,30 +14,33 @@
 
 #include "base/basictypes.h"
 #include "base/message_loop.h"
+#include "base/process.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string16.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/test/automation/dom_element_proxy.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
+#if defined(OS_WIN)
+#include "base/win/scoped_handle.h"
+#endif
+
 class AppModalDialog;
 class BookmarkModel;
-class BookmarkNode;
 class Browser;
 class CommandLine;
-class DownloadManager;
 class ExtensionAction;
 class FilePath;
 class GURL;
 class MessageLoop;
-class NavigationController;
 class Profile;
 class RenderViewHost;
 class RenderWidgetHost;
@@ -86,13 +89,12 @@ void RunMessageLoop();
 // all pending tasks.
 void RunAllPendingInMessageLoop();
 
+// Blocks the current thread until all the pending messages in the loop of the
+// thread |thread_id| have been processed.
+void RunAllPendingInMessageLoop(content::BrowserThread::ID thread_id);
+
 // Puts the current tab title in |title|. Returns true on success.
 bool GetCurrentTabTitle(const Browser* browser, string16* title);
-
-// Waits for |controller| to complete a navigation. This blocks until
-// the navigation finishes. TODO(gbillock): remove this race hazard.
-// Use WindowedNotificationObserver instead.
-void WaitForNavigation(NavigationController* controller);
 
 // Waits for a new tab to be added to |browser|. TODO(gbillock): remove this
 // race hazard. Use WindowedNotificationObserver instead.
@@ -192,13 +194,6 @@ AppModalDialog* WaitForAppModalDialog();
 // Causes the specified tab to crash. Blocks until it is crashed.
 void CrashTab(TabContents* tab);
 
-// Waits for the focus to change in the specified tab.
-void WaitForFocusChange(TabContents* tab_contents);
-
-// Waits for the renderer to return focus to the browser (happens through tab
-// traversal).
-void WaitForFocusInBrowser(Browser* browser);
-
 // Performs a find in the page of the specified tab. Returns the number of
 // matches found.  |ordinal| is an optional parameter which is set to the index
 // of the current match.
@@ -216,9 +211,9 @@ void ClickOnView(const Browser* browser, ViewID vid);
 
 // Register |observer| for the given |type| and |source| and run
 // the message loop until the observer posts a quit task.
-void RegisterAndWait(NotificationObserver* observer,
+void RegisterAndWait(content::NotificationObserver* observer,
                      int type,
-                     const NotificationSource& source);
+                     const content::NotificationSource& source);
 
 // Blocks until |model| finishes loading.
 void WaitForBookmarkModelToLoad(BookmarkModel* model);
@@ -262,7 +257,8 @@ bool SendKeyPressAndWait(const Browser* browser,
                          bool alt,
                          bool command,
                          int type,
-                         const NotificationSource& source) WARN_UNUSED_RESULT;
+                         const content::NotificationSource& source)
+                             WARN_UNUSED_RESULT;
 
 // Run a message loop only for the specified amount of time.
 class TimedMessageLoopRunner {
@@ -338,32 +334,40 @@ class TestWebSocketServer {
   // scope.
   FilePath websocket_pid_file_;
 
+#if defined(OS_POSIX)
+  // ProcessHandle used to terminate child process.
+  base::ProcessHandle process_handle_;
+#elif defined(OS_WIN)
+  // JobObject used to clean up orphaned child process.
+  base::win::ScopedHandle job_handle_;
+#endif
+
   DISALLOW_COPY_AND_ASSIGN(TestWebSocketServer);
 };
 
 // A notification observer which quits the message loop when a notification
 // is received. It also records the source and details of the notification.
-class TestNotificationObserver : public NotificationObserver {
+class TestNotificationObserver : public content::NotificationObserver {
  public:
   TestNotificationObserver();
   virtual ~TestNotificationObserver();
 
-  const NotificationSource& source() const {
+  const content::NotificationSource& source() const {
     return source_;
   }
 
-  const NotificationDetails& details() const {
+  const content::NotificationDetails& details() const {
     return details_;
   }
 
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  NotificationSource source_;
-  NotificationDetails details_;
+  content::NotificationSource source_;
+  content::NotificationDetails details_;
 };
 
 // A WindowedNotificationObserver allows code to watch for a notification
@@ -378,13 +382,13 @@ class TestNotificationObserver : public NotificationObserver {
 //   WindowedNotificationObserver signal(...)
 //   PerformAction()
 //   signal.Wait()
-class WindowedNotificationObserver : public NotificationObserver {
+class WindowedNotificationObserver : public content::NotificationObserver {
  public:
   // Register to listen for notifications of the given type from either a
   // specific source, or from all sources if |source| is
   // NotificationService::AllSources().
   WindowedNotificationObserver(int notification_type,
-                               const NotificationSource& source);
+                               const content::NotificationSource& source);
   virtual ~WindowedNotificationObserver();
 
   // Wait until the specified notification occurs.  If the notification was
@@ -392,17 +396,17 @@ class WindowedNotificationObserver : public NotificationObserver {
   // returns immediately.
   void Wait();
 
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   bool seen_;
   bool running_;
   std::set<uintptr_t> sources_seen_;
-  NotificationSource waiting_for_;
-  NotificationRegistrar registrar_;
+  content::NotificationSource waiting_for_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowedNotificationObserver);
 };
@@ -415,8 +419,9 @@ template <class U>
 class WindowedNotificationObserverWithDetails
     : public WindowedNotificationObserver {
  public:
-  WindowedNotificationObserverWithDetails(int notification_type,
-                                          const NotificationSource& source)
+  WindowedNotificationObserverWithDetails(
+      int notification_type,
+      const content::NotificationSource& source)
       : WindowedNotificationObserver(notification_type, source) {}
 
   // Fills |details| with the details of the notification received for |source|.
@@ -430,9 +435,9 @@ class WindowedNotificationObserverWithDetails
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
-    const U* details_ptr = Details<U>(details).ptr();
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
+    const U* details_ptr = content::Details<U>(details).ptr();
     if (details_ptr)
       details_[source.map_key()] = *details_ptr;
     WindowedNotificationObserver::Observe(type, source, details);
@@ -445,7 +450,7 @@ class WindowedNotificationObserverWithDetails
 };
 
 // Watches title changes on a tab, blocking until an expected title is set.
-class TitleWatcher : public NotificationObserver {
+class TitleWatcher : public content::NotificationObserver {
  public:
   // |tab_contents| must be non-NULL and needs to stay alive for the
   // entire lifetime of |this|. |expected_title| is the title that |this|
@@ -462,14 +467,14 @@ class TitleWatcher : public NotificationObserver {
   const string16& WaitAndGetTitle() WARN_UNUSED_RESULT;
 
  private:
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   TabContents* tab_contents_;
   std::vector<string16> expected_titles_;
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   // The most recently observed expected title, if any.
   string16 observed_title_;
@@ -491,8 +496,8 @@ bool SendKeyPressAndWaitWithDetails(
     bool alt,
     bool command,
     int type,
-    const NotificationSource& source,
-    const Details<U>& details) WARN_UNUSED_RESULT;
+    const content::NotificationSource& source,
+    const content::Details<U>& details) WARN_UNUSED_RESULT;
 
 template <class U>
 bool SendKeyPressAndWaitWithDetails(
@@ -503,8 +508,8 @@ bool SendKeyPressAndWaitWithDetails(
     bool alt,
     bool command,
     int type,
-    const NotificationSource& source,
-    const Details<U>& details) {
+    const content::NotificationSource& source,
+    const content::Details<U>& details) {
   WindowedNotificationObserverWithDetails<U> observer(type, source);
 
   if (!SendKeyPressSync(browser, key, control, shift, alt, command))
@@ -522,12 +527,12 @@ bool SendKeyPressAndWaitWithDetails(
 // Hide a native window.
 void HideNativeWindow(gfx::NativeWindow window);
 
-// Show and focus a native window.
-void ShowAndFocusNativeWindow(gfx::NativeWindow window);
+// Show and focus a native window. Returns true on success.
+bool ShowAndFocusNativeWindow(gfx::NativeWindow window) WARN_UNUSED_RESULT;
 
 // Watches for responses from the DOMAutomationController and keeps them in a
 // queue. Useful for waiting for a message to be received.
-class DOMMessageQueue : public NotificationObserver {
+class DOMMessageQueue : public content::NotificationObserver {
  public:
   // Constructs a DOMMessageQueue and begins listening for messages from the
   // DOMAutomationController. Do not construct this until the browser has
@@ -539,13 +544,13 @@ class DOMMessageQueue : public NotificationObserver {
   // message, if not null. Returns true on success.
   bool WaitForMessage(std::string* message) WARN_UNUSED_RESULT;
 
-  // Overridden NotificationObserver methods.
+  // Overridden content::NotificationObserver methods.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   std::queue<std::string> message_queue_;
   bool waiting_for_message_;
 

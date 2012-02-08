@@ -13,6 +13,7 @@
 #include "chrome/browser/policy/device_management_service.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/common/chrome_version_info.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/escape.h"
 #include "net/url_request/url_request_status.h"
 
@@ -36,6 +37,8 @@ const char DeviceManagementBackendImpl::kParamUserAffiliation[] =
 // String constants for the device and app type we report to the server.
 const char DeviceManagementBackendImpl::kValueAppType[] = "Chrome";
 const char DeviceManagementBackendImpl::kValueDeviceType[] = "2";
+const char DeviceManagementBackendImpl::kValueRequestAutoEnrollment[] =
+    "enterprise_check";
 const char DeviceManagementBackendImpl::kValueRequestPolicy[] = "policy";
 const char DeviceManagementBackendImpl::kValueRequestRegister[] = "register";
 const char DeviceManagementBackendImpl::kValueRequestUnregister[] =
@@ -134,7 +137,7 @@ class DeviceManagementJobBase
                               const net::ResponseCookies& cookies,
                               const std::string& data);
   virtual GURL GetURL(const std::string& server_url);
-  virtual void ConfigureRequest(URLFetcher* fetcher);
+  virtual void ConfigureRequest(content::URLFetcher* fetcher);
 
  protected:
   // Constructs a device management job running for the given backend.
@@ -281,14 +284,14 @@ GURL DeviceManagementJobBase::GetURL(
   return GURL(server_url + '?' + query_params_.Encode());
 }
 
-void DeviceManagementJobBase::ConfigureRequest(URLFetcher* fetcher) {
-  fetcher->set_upload_data(kPostContentType, payload_);
+void DeviceManagementJobBase::ConfigureRequest(content::URLFetcher* fetcher) {
+  fetcher->SetUploadData(kPostContentType, payload_);
   std::string extra_headers;
   if (!gaia_auth_token_.empty())
     extra_headers += kServiceTokenAuthHeader + gaia_auth_token_ + "\n";
   if (!device_management_token_.empty())
     extra_headers += kDMTokenAuthHeader + device_management_token_ + "\n";
-  fetcher->set_extra_request_headers(extra_headers);
+  fetcher->SetExtraRequestHeaders(extra_headers);
 }
 
 // Handles device registration jobs.
@@ -456,6 +459,43 @@ class DeviceManagementPolicyJob : public DeviceManagementJobBase {
   DISALLOW_COPY_AND_ASSIGN(DeviceManagementPolicyJob);
 };
 
+// Handles auto enrollment request jobs. These are used to determine if a new
+// ChromiumOS device should automatically enter the enterprise enrollment screen
+// during the OOBE flow.
+class DeviceManagementAutoEnrollmentJob : public DeviceManagementJobBase {
+ public:
+  DeviceManagementAutoEnrollmentJob(
+      DeviceManagementBackendImpl* backend_impl,
+      const std::string& device_id,
+      const em::DeviceAutoEnrollmentRequest& request,
+      DeviceManagementBackend::DeviceAutoEnrollmentResponseDelegate* delegate)
+      : DeviceManagementJobBase(
+          backend_impl,
+          DeviceManagementBackendImpl::kValueRequestAutoEnrollment,
+          device_id),
+        delegate_(delegate) {
+    em::DeviceManagementRequest request_wrapper;
+    request_wrapper.mutable_auto_enrollment_request()->CopyFrom(request);
+    SetPayload(request_wrapper);
+  }
+  virtual ~DeviceManagementAutoEnrollmentJob() {}
+
+ private:
+  // DeviceManagementJobBase overrides.
+  virtual void OnError(DeviceManagementBackend::ErrorCode error) OVERRIDE {
+    delegate_->OnError(error);
+  }
+  virtual void OnResponse(
+      const em::DeviceManagementResponse& response) OVERRIDE {
+    delegate_->HandleAutoEnrollmentResponse(
+        response.auto_enrollment_response());
+  }
+
+  DeviceManagementBackend::DeviceAutoEnrollmentResponseDelegate* delegate_;
+
+  DISALLOW_COPY_AND_ASSIGN(DeviceManagementAutoEnrollmentJob);
+};
+
 DeviceManagementBackendImpl::DeviceManagementBackendImpl(
     DeviceManagementService* service)
     : service_(service) {
@@ -472,7 +512,7 @@ DeviceManagementBackendImpl::~DeviceManagementBackendImpl() {
 }
 
 std::string DeviceManagementBackendImpl::GetAgentString() {
-  static std::string agent;
+  CR_DEFINE_STATIC_LOCAL(std::string, agent, ());
   if (!agent.empty())
     return agent;
 
@@ -485,7 +525,7 @@ std::string DeviceManagementBackendImpl::GetAgentString() {
 }
 
 std::string DeviceManagementBackendImpl::GetPlatformString() {
-  static std::string platform;
+  CR_DEFINE_STATIC_LOCAL(std::string, platform, ());
   if (!platform.empty())
     return platform;
 
@@ -568,6 +608,14 @@ void DeviceManagementBackendImpl::ProcessPolicyRequest(
   AddJob(new DeviceManagementPolicyJob(this, device_management_token, device_id,
                                        UserAffiliationToString(affiliation),
                                        request, delegate));
+}
+
+void DeviceManagementBackendImpl::ProcessAutoEnrollmentRequest(
+    const std::string& device_id,
+    const em::DeviceAutoEnrollmentRequest& request,
+    DeviceAutoEnrollmentResponseDelegate* delegate) {
+  AddJob(new DeviceManagementAutoEnrollmentJob(this, device_id, request,
+                                               delegate));
 }
 
 // static

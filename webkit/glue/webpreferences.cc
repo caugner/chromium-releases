@@ -8,12 +8,13 @@
 
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebCompositor.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNetworkStateNotifier.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSettings.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -69,6 +70,7 @@ WebPreferences::WebPreferences()
       webaudio_enabled(false),
       experimental_webgl_enabled(false),
       gl_multisampling_enabled(true),
+      privileged_webgl_extensions_enabled(false),
       show_composited_layer_borders(false),
       show_composited_layer_tree(false),
       show_fps_counter(false),
@@ -78,6 +80,7 @@ WebPreferences::WebPreferences()
       force_compositing_mode(false),
       allow_webui_compositing(false),
       composite_to_texture_enabled(false),
+      fixed_position_compositing_enabled(false),
       accelerated_layers_enabled(false),
       accelerated_video_enabled(false),
       accelerated_2d_canvas_enabled(false),
@@ -90,7 +93,8 @@ WebPreferences::WebPreferences()
       allow_running_insecure_content(false),
       should_print_backgrounds(false),
       enable_scroll_animator(false),
-      hixie76_websocket_protocol_enabled(false) {
+      hixie76_websocket_protocol_enabled(false),
+      visual_word_movement_enabled(false) {
 }
 
 WebPreferences::~WebPreferences() {
@@ -236,6 +240,11 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Disable GL multisampling if requested on command line.
   settings->setOpenGLMultisamplingEnabled(gl_multisampling_enabled);
 
+  // Enable privileged WebGL extensions for Chrome extensions or if requested
+  // on command line.
+  settings->setPrivilegedWebGLExtensionsEnabled(
+      privileged_webgl_extensions_enabled);
+
   // Display colored borders around composited render layers if requested
   // on command line.
   settings->setShowDebugBorders(show_composited_layer_borders);
@@ -250,13 +259,20 @@ void WebPreferences::Apply(WebView* web_view) const {
   // Enable gpu-accelerated compositing if requested on the command line.
   settings->setAcceleratedCompositingEnabled(accelerated_compositing_enabled);
 
+#ifndef WEBCOMPOSITOR_HAS_INITIALIZE
   settings->setUseThreadedCompositor(threaded_compositing_enabled);
+#endif
 
   // Always enter compositing if requested on the command line.
   settings->setForceCompositingMode(force_compositing_mode);
 
   // Enable composite to offscreen texture if requested on the command line.
   settings->setCompositeToTextureEnabled(composite_to_texture_enabled);
+
+  // Enable compositing for fixed position elements if requested
+  // on the command line.
+  settings->setAcceleratedCompositingForFixedPositionEnabled(
+      fixed_position_compositing_enabled);
 
   // Enable gpu-accelerated 2d canvas if requested on the command line.
   settings->setAccelerated2dCanvasEnabled(accelerated_2d_canvas_enabled);
@@ -306,6 +322,7 @@ void WebPreferences::Apply(WebView* web_view) const {
   settings->setEnableScrollAnimator(enable_scroll_animator);
   settings->setHixie76WebSocketProtocolEnabled(
       hixie76_websocket_protocol_enabled);
+  settings->setVisualWordMovementEnabled(visual_word_movement_enabled);
 
   WebNetworkStateNotifier::setOnLine(is_online);
 }

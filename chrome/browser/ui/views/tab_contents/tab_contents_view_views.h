@@ -6,17 +6,17 @@
 #define CHROME_BROWSER_UI_VIEWS_TAB_CONTENTS_TAB_CONTENTS_VIEW_VIEWS_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
 #include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 class ConstrainedWindowGtk;
 class NativeTabContentsView;
 class RenderViewContextMenuViews;
-class SadTabView;
 class SkBitmap;
 struct WebDropData;
 namespace gfx {
@@ -28,8 +28,6 @@ class Widget;
 }
 
 // Views-specific implementation of the TabContentsView.
-// TODO(beng): Remove last remnants of Windows-specificity, and make this
-//             subclass Widget.
 class TabContentsViewViews : public views::Widget,
                              public TabContentsView,
                              public internal::NativeTabContentsViewDelegate {
@@ -72,9 +70,11 @@ class TabContentsViewViews : public views::Widget,
   virtual void RestoreFocus() OVERRIDE;
   virtual bool IsDoingDrag() const OVERRIDE;
   virtual void CancelDragAndCloseTab() OVERRIDE;
-  virtual bool IsEventTracking() const;
-  virtual void CloseTabAfterEventTracking();
+  virtual bool IsEventTracking() const OVERRIDE;
+  virtual void CloseTabAfterEventTracking() OVERRIDE;
   virtual void GetViewBounds(gfx::Rect* out) const OVERRIDE;
+  virtual void InstallOverlayView(gfx::NativeView view) OVERRIDE;
+  virtual void RemoveOverlayView() OVERRIDE;
 
   // Implementation of RenderViewHostDelegate::View.
   virtual void CreateNewWindow(
@@ -116,12 +116,14 @@ class TabContentsViewViews : public views::Widget,
   virtual void OnNativeTabContentsViewMouseDown() OVERRIDE;
   virtual void OnNativeTabContentsViewMouseMove(bool motion) OVERRIDE;
   virtual void OnNativeTabContentsViewDraggingEnded() OVERRIDE;
-  virtual views::internal::NativeWidgetDelegate* AsNativeWidgetDelegate()
-      OVERRIDE;
+  virtual views::internal::NativeWidgetDelegate*
+      AsNativeWidgetDelegate() OVERRIDE;
 
   // Overridden from views::Widget:
   virtual views::FocusManager* GetFocusManager() OVERRIDE;
+  virtual const views::FocusManager* GetFocusManager() const OVERRIDE;
   virtual void OnNativeWidgetVisibilityChanged(bool visible) OVERRIDE;
+  virtual void OnNativeWidgetSizeChanged(const gfx::Size& new_size) OVERRIDE;
 
   // A helper method for closing the tab.
   void CloseTab();
@@ -150,10 +152,6 @@ class TabContentsViewViews : public views::Widget,
 
   NativeTabContentsView* native_tab_contents_view_;
 
-  // Used to render the sad tab. This will be non-NULL only when the sad tab is
-  // visible.
-  SadTabView* sad_tab_;
-
   // The id used in the ViewStorage to store the last focused view.
   int last_focused_view_storage_id_;
 
@@ -169,7 +167,11 @@ class TabContentsViewViews : public views::Widget,
 
   // The FocusManager associated with this tab.  Stored as it is not directly
   // accessible when un-parented.
-  views::FocusManager* focus_manager_;
+  mutable const views::FocusManager* focus_manager_;
+
+  // The overlaid view. Owned by the caller of |InstallOverlayView|; this is a
+  // weak reference.
+  views::Widget* overlaid_view_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsViewViews);
 };

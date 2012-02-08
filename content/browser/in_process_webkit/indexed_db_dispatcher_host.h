@@ -14,7 +14,6 @@
 
 class IndexedDBKey;
 class NullableString16;
-class SerializedScriptValue;
 struct IndexedDBHostMsg_DatabaseCreateObjectStore_Params;
 struct IndexedDBHostMsg_FactoryGetDatabaseNames_Params;
 struct IndexedDBHostMsg_FactoryDeleteDatabase_Params;
@@ -33,6 +32,10 @@ class WebIDBObjectStore;
 class WebIDBTransaction;
 }
 
+namespace content {
+class SerializedScriptValue;
+}
+
 // Handles all IndexedDB related messages from a particular renderer process.
 class IndexedDBDispatcherHost : public BrowserMessageFilter {
  public:
@@ -40,11 +43,12 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
   IndexedDBDispatcherHost(int process_id, WebKitContext* webkit_context);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing();
-  virtual void OverrideThreadForMessage(const IPC::Message& message,
-                                        BrowserThread::ID* thread);
+  virtual void OnChannelClosing() OVERRIDE;
+  virtual void OverrideThreadForMessage(
+      const IPC::Message& message,
+      content::BrowserThread::ID* thread) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   void TransactionComplete(int32 transaction_id);
 
@@ -61,6 +65,8 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
   int32 Add(WebKit::WebIDBObjectStore* idb_object_store);
   int32 Add(WebKit::WebIDBTransaction* idb_transaction, const GURL& origin_url);
   int32 Add(WebKit::WebDOMStringList* domStringList);
+
+  WebKit::WebIDBCursor* GetCursorFromId(int32 cursor_id);
 
  private:
   virtual ~IndexedDBDispatcherHost();
@@ -223,15 +229,21 @@ class IndexedDBDispatcherHost : public BrowserMessageFilter {
     void OnKey(int32 idb_object_store_id, IndexedDBKey* key);
     void OnPrimaryKey(int32 idb_object_store_id, IndexedDBKey* primary_key);
     void OnValue(int32 idb_object_store_id,
-                 SerializedScriptValue* script_value);
+                 content::SerializedScriptValue* script_value);
     void OnUpdate(int32 idb_object_store_id,
                   int32 response_id,
-                  const SerializedScriptValue& value,
+                  const content::SerializedScriptValue& value,
                   WebKit::WebExceptionCode* ec);
     void OnContinue(int32 idb_object_store_id,
                     int32 response_id,
                     const IndexedDBKey& key,
                     WebKit::WebExceptionCode* ec);
+    void OnPrefetch(int32 idb_cursor_id,
+                    int32 response_id,
+                    int n,
+                    WebKit::WebExceptionCode* ec);
+    void OnPrefetchReset(int32 idb_cursor_id, int used_prefetches,
+                         int unused_prefetches);
     void OnDelete(int32 idb_object_store_id,
                   int32 response_id,
                   WebKit::WebExceptionCode* ec);

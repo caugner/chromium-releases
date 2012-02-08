@@ -10,13 +10,13 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "chrome/browser/tabs/tab_strip_model_observer.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "ui/gfx/rect.h"
 
 class NativePanel;
 class PanelManager;
-class RenderViewHost;
 
 // A platform independent implementation of BrowserWindow for Panels.  This
 // class would get the first crack at all the BrowserWindow calls for Panels and
@@ -28,7 +28,9 @@ class RenderViewHost;
 //   Panel size is restricted to certain limits.
 // - Invoke an appropriate PanelManager function to do stuff that might affect
 //   other Panels.  For example deleting a panel would rearrange other panels.
-class Panel : public BrowserWindow, public NotificationObserver {
+class Panel : public BrowserWindow,
+              public TabStripModelObserver,
+              public content::NotificationObserver {
  public:
   enum ExpansionState {
    // The panel is fully expanded with both title-bar and the client-area.
@@ -36,11 +38,14 @@ class Panel : public BrowserWindow, public NotificationObserver {
    // The panel is shown with the title-bar only.
    TITLE_ONLY,
    // The panel is shown with 3-pixel line.
-   MINIMIZED
+   MINIMIZED,
+   // The panel is put into the overflow area due to no space available in the
+   // normal display area.
+   IN_OVERFLOW
   };
 
-  // The panel can be minimized to 3-pixel lines.
-  static const int kMinimizedPanelHeight = 3;
+  // The panel can be minimized to 4-pixel lines.
+  static const int kMinimizedPanelHeight = 4;
 
   virtual ~Panel();
 
@@ -57,10 +62,24 @@ class Panel : public BrowserWindow, public NotificationObserver {
 
   bool IsDrawingAttention() const;
 
-  // Gets or sets the restored height, which is the full height of the panel
-  // when it is expanded.
-  int GetRestoredHeight() const;
-  void SetRestoredHeight(int height);
+  // This function will only get called by PanelManager when full screen mode
+  // changes i.e it gets called when an app goes into full screen mode or when
+  // an app exits full screen mode. Panel should respond by making sure
+  // a) it does not go on top when some app enters full screen mode.
+  // b) it remains on top when an app exits full screen mode.
+  void FullScreenModeChanged(bool is_full_screen);
+
+  void MoveOutOfOverflow();
+
+  // Ensures that the panel is fully visible, that is, not obscured by other
+  // top-most windows.
+  void EnsureFullyVisible();
+
+  int TitleOnlyHeight() const;
+
+  // Returns the size of the panel when it is iconified, as shown on the
+  // overflow area.
+  gfx::Size IconOnlySize() const;
 
   // BrowserWindow overrides.
   virtual void Show() OVERRIDE;
@@ -85,6 +104,9 @@ class Panel : public BrowserWindow, public NotificationObserver {
   virtual gfx::Rect GetBounds() const OVERRIDE;
   virtual bool IsMaximized() const OVERRIDE;
   virtual bool IsMinimized() const OVERRIDE;
+  virtual void Maximize() OVERRIDE;
+  virtual void Minimize() OVERRIDE;
+  virtual void Restore() OVERRIDE;
   virtual void EnterFullscreen(
       const GURL& url, FullscreenExitBubbleType type) OVERRIDE;
   virtual void ExitFullscreen() OVERRIDE;
@@ -124,7 +146,6 @@ class Panel : public BrowserWindow, public NotificationObserver {
   virtual DownloadShelf* GetDownloadShelf() OVERRIDE;
   virtual void ShowRepostFormWarningDialog(TabContents* tab_contents) OVERRIDE;
   virtual void ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) OVERRIDE;
-  virtual void ShowThemeInstallBubble() OVERRIDE;
   virtual void ConfirmBrowserCloseWithPendingDownloads() OVERRIDE;
   virtual void UserChangedTheme() OVERRIDE;
   virtual int GetExtraRenderViewHeight() const OVERRIDE;
@@ -161,17 +182,24 @@ class Panel : public BrowserWindow, public NotificationObserver {
       const gfx::Rect& bounds) OVERRIDE;
   virtual FindBar* CreateFindBar() OVERRIDE;
 #if defined(OS_CHROMEOS)
+  virtual void ShowMobileSetup() OVERRIDE;
   virtual void ShowKeyboardOverlay(gfx::NativeWindow owning_window) OVERRIDE;
 #endif
   virtual void UpdatePreferredSize(TabContents* tab_contents,
                                    const gfx::Size& pref_size) OVERRIDE;
   virtual void ShowAvatarBubble(TabContents* tab_contents,
                                 const gfx::Rect& rect) OVERRIDE;
+  virtual void ShowAvatarBubbleFromAvatarButton() OVERRIDE;
 
-  // NotificationObserver overrides.
+  // TabStripModelObserver overrides.
+  virtual void TabInsertedAt(TabContentsWrapper* contents,
+                             int index,
+                             bool foreground) OVERRIDE;
+
+  // content::NotificationObserver overrides.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Construct a native panel BrowserWindow implementation for the specified
   // |browser|.
@@ -187,11 +215,38 @@ class Panel : public BrowserWindow, public NotificationObserver {
   // until the window has been created. (e.g. GTK)
   void OnWindowSizeAvailable();
 
+  // Asynchronous completion of panel close request.
+  void OnNativePanelClosed();
+
   NativePanel* native_panel() { return native_panel_; }
-  Browser* browser() const;
+  Browser* browser() const { return browser_; }
   ExpansionState expansion_state() const { return expansion_state_; }
   const gfx::Size& min_size() const { return min_size_; }
   const gfx::Size& max_size() const { return max_size_; }
+  bool auto_resizable() const { return auto_resizable_; }
+  // The restored size is the size of the panel when it is expanded.
+  gfx::Size restored_size() const { return restored_size_; }
+  void set_restored_size(const gfx::Size& size) { restored_size_ = size; }
+
+  // Panel must be initialized to be "fully created" and ready for use.
+  // Only called by PanelManager.
+  bool initialized() const { return initialized_; }
+  void Initialize(const gfx::Rect& bounds);
+
+  // This is different from BrowserWindow::SetBounds():
+  // * SetPanelBounds() is only called by PanelManager to manage its position.
+  // * SetBounds() is called by the API to try to change the bounds, which is
+  //   not allowed for Panel.
+  void SetPanelBounds(const gfx::Rect& bounds);
+
+  // Updates the panel bounds instantly without any animation.
+  void SetPanelBoundsInstantly(const gfx::Rect& bounds);
+
+  // Sets whether the panel will auto resize according to its content.
+  void SetAutoResizable(bool resizable);
+
+  // Sets minimum and maximum size for the panel.
+  void SetSizeRange(const gfx::Size& min_size, const gfx::Size& max_size);
 
  protected:
   virtual void DestroyBrowser() OVERRIDE;
@@ -202,24 +257,24 @@ class Panel : public BrowserWindow, public NotificationObserver {
   FRIEND_TEST_ALL_PREFIXES(PanelBrowserTest, RestoredBounds);
 
   // Panel can only be created using PanelManager::CreatePanel().
-  Panel(Browser* browser, const gfx::Rect& bounds);
+  // |requested_size| is the desired size for the panel, but actual
+  // size may differ after panel layout.
+  Panel(Browser* browser, const gfx::Size& requested_size);
 
-  // This is different from BrowserWindow::SetBounds():
-  // * SetPanelBounds() is only called by PanelManager to manage its position.
-  // * SetBounds() is called by the API to try to change the bounds, which is
-  //   not allowed for Panel.
-  void SetPanelBounds(const gfx::Rect& bounds);
+  // Configures the tab contents for auto resize, including configurations
+  // on the renderer and detecting renderer changes.
+  void EnableTabContentsAutoResize(TabContents* tab_contents);
 
-  // Updates the maximum size.
-  void SetMaxSize(const gfx::Size& max_size);
+  // Configures the renderer for auto resize (if auto resize is enabled).
+  void ConfigureAutoResize(TabContents* tab_contents);
 
-  // NULL might be returned if the tab has not been added.
-  RenderViewHost* GetRenderViewHost() const;
+  Browser* browser_;  // Weak, owned by native panel.
 
-  // Requests RenderViewHost not to show the scrollbars till |max_size_| since
-  // the panel can grow to |max_size_|.
-  void RequestRenderViewHostToDisableScrollbars(
-      RenderViewHost* render_view_host);
+  bool initialized_;
+
+  // Stores the full size of the panel so we can restore it after it's
+  // been minimized.
+  gfx::Size restored_size_;
 
   // This is the minimum size that the panel can shrink to.
   gfx::Size min_size_;
@@ -228,17 +283,16 @@ class Panel : public BrowserWindow, public NotificationObserver {
   // the growing content and WebKit would add the scrollbars in such case.
   gfx::Size max_size_;
 
+  // True if this panel auto resizes based on content.
+  bool auto_resizable_;
+
   // Platform specifc implementation for panels.  It'd be one of
   // PanelBrowserWindowGtk/PanelBrowserView/PanelBrowserWindowCocoa.
   NativePanel* native_panel_;  // Weak, owns us.
 
   ExpansionState expansion_state_;
 
-  // Stores the full height of the panel so we can restore it after it's
-  // been minimized.
-  int restored_height_;
-
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(Panel);
 };

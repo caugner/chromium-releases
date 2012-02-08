@@ -7,15 +7,10 @@ importScripts('function_parallel.js');
 importScripts('util.js');
 
 function Id3Parser(parent) {
-  MetadataParser.apply(this, [parent]);
-  this.verbose = true;
+  MetadataParser.call(this, parent, 'id3', /\.(mp3)$/i);
 }
 
-Id3Parser.parserType = 'id3';
-
 Id3Parser.prototype = {__proto__: MetadataParser.prototype};
-
-Id3Parser.prototype.urlFilter = /\.(mp3)$/i;
 
 /**
  * Reads synchsafe integer.
@@ -212,9 +207,7 @@ Id3Parser.prototype.readFrame_ = function(reader, majorVersion) {
   return frame;
 };
 
-Id3Parser.prototype.parse = function (file, callback, onError) {
-  var metadata = {};
-
+Id3Parser.prototype.parse = function (file, metadata, callback, onError) {
   var self = this;
 
   this.log('Starting id3 parser for ' + file.name);

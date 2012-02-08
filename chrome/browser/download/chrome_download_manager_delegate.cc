@@ -11,13 +11,13 @@
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/stringprintf.h"
+#include "base/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_file_picker.h"
 #include "chrome/browser/download/download_history.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/download/download_safe_browsing_client.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/download/save_package_file_picker.h"
 #include "chrome/browser/extensions/crx_installer.h"
@@ -36,9 +36,12 @@
 #include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_status_updater.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::BrowserThread;
+using safe_browsing::DownloadProtectionService;
 
 ChromeDownloadManagerDelegate::ChromeDownloadManagerDelegate(Profile* profile)
     : profile_(profile),
@@ -50,11 +53,11 @@ ChromeDownloadManagerDelegate::~ChromeDownloadManagerDelegate() {
 
 bool ChromeDownloadManagerDelegate::IsExtensionDownload(
     const DownloadItem* item) {
-  if (item->prompt_user_for_save_location())
+  if (item->PromptUserForSaveLocation())
     return false;
 
-  return (item->mime_type() == Extension::kMimeType) ||
-      UserScript::IsURLUserScript(item->GetURL(), item->mime_type());
+  return (item->GetMimeType() == Extension::kMimeType) ||
+      UserScript::IsURLUserScript(item->GetURL(), item->GetMimeType());
 }
 
 void ChromeDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
@@ -62,9 +65,6 @@ void ChromeDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
   download_history_.reset(new DownloadHistory(profile_));
   download_history_->Load(
       base::Bind(&DownloadManager::OnPersistentStoreQueryComplete,
-                 base::Unretained(dm)));
-  download_history_->GetNextId(
-      base::Bind(&DownloadManager::OnPersistentStoreGetNextId,
                  base::Unretained(dm)));
 }
 
@@ -87,17 +87,20 @@ bool ChromeDownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
     return false;
 
 #if defined(ENABLE_SAFE_BROWSING)
-  // Create a client to verify download URL with safebrowsing.
-  // It deletes itself after the callback.
-  scoped_refptr<DownloadSBClient> sb_client = new DownloadSBClient(
-      download_id, download->url_chain(), download->referrer_url(),
-          profile_->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled));
-  sb_client->CheckDownloadUrl(
-      base::Bind(&ChromeDownloadManagerDelegate::CheckDownloadUrlDone,
-                 base::Unretained(this)));
-#else
-  CheckDownloadUrlDone(download_id, false);
+  DownloadProtectionService* service = GetDownloadProtectionService();
+  if (service) {
+    VLOG(2) << __FUNCTION__ << "() Start SB URL check for download = "
+            << download->DebugString(false);
+    service->CheckDownloadUrl(
+        DownloadProtectionService::DownloadInfo::FromDownloadItem(*download),
+        base::Bind(
+            &ChromeDownloadManagerDelegate::CheckDownloadUrlDone,
+            this,
+            download->GetId()));
+    return false;
+  }
 #endif
+  CheckDownloadUrlDone(download_id, DownloadProtectionService::SAFE);
   return false;
 }
 
@@ -113,16 +116,16 @@ void ChromeDownloadManagerDelegate::ChooseDownloadPath(
 bool ChromeDownloadManagerDelegate::OverrideIntermediatePath(
     DownloadItem* item,
     FilePath* intermediate_path) {
-  if (item->IsDangerous()) {
-    // The download is not safe.  It's name is already set to an intermediate
-    // name, so no need to override.
+  if (item->GetDangerType() != DownloadStateInfo::NOT_DANGEROUS) {
+    // The download might not be safe.  It's name is already set to an
+    // intermediate name, so no need to override.
     return false;
   }
 
   // The download is a safe download.  We need to rename it to its intermediate
   // '.crdownload' path.  The final name after user confirmation will be set
   // from DownloadItem::OnDownloadCompleting.
-  *intermediate_path = download_util::GetCrDownloadPath(item->full_path());
+  *intermediate_path = download_util::GetCrDownloadPath(item->GetFullPath());
   return true;
 }
 
@@ -147,29 +150,54 @@ bool ChromeDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
   return download_prefs_->IsAutoOpenEnabledForExtension(extension);
 }
 
-bool ChromeDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
-  if (!IsExtensionDownload(item))
-    return true;
-
-  download_crx_util::OpenChromeExtension(profile_, *item);
-  return false;
+bool ChromeDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
+#if defined(ENABLE_SAFE_BROWSING)
+  // See if there is already a pending SafeBrowsing check for that download.
+  SafeBrowsingStateMap::iterator it = safe_browsing_state_.find(item->GetId());
+  if (it != safe_browsing_state_.end()) {
+    SafeBrowsingState state = it->second;
+    if (!state.pending) {
+      safe_browsing_state_.erase(it);
+    }
+    return !state.pending;
+  }
+  // Begin the safe browsing download protection check.
+  DownloadProtectionService* service = GetDownloadProtectionService();
+  if (service) {
+    VLOG(2) << __FUNCTION__ << "() Start SB download check for download = "
+            << item->DebugString(false);
+    service->CheckClientDownload(
+        DownloadProtectionService::DownloadInfo::FromDownloadItem(*item),
+        base::Bind(
+            &ChromeDownloadManagerDelegate::CheckClientDownloadDone,
+            this,
+            item->GetId()));
+    SafeBrowsingState state;
+    state.pending = true;
+    state.verdict = DownloadProtectionService::SAFE;
+    safe_browsing_state_[item->GetId()] = state;
+    return false;
+  }
+#endif
+  return true;
 }
 
-bool ChromeDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
-  if (!IsExtensionDownload(item))
+bool ChromeDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
+  if (!IsExtensionDownload(item)) {
     return true;
+  }
 
   scoped_refptr<CrxInstaller> crx_installer =
       download_crx_util::OpenChromeExtension(profile_, *item);
 
   // CRX_INSTALLER_DONE will fire when the install completes.  Observe()
-  // will call CompleteDelayedDownload() on this item.  If this DownloadItem is
+  // will call DelayedDownloadOpened() on this item.  If this DownloadItem is
   // not around when CRX_INSTALLER_DONE fires, Complete() will not be called.
   registrar_.Add(this,
                  chrome::NOTIFICATION_CRX_INSTALLER_DONE,
-                 Source<CrxInstaller>(crx_installer.get()));
+                 content::Source<CrxInstaller>(crx_installer.get()));
 
-  crx_installers_[crx_installer.get()] = item->id();
+  crx_installers_[crx_installer.get()] = item->GetId();
   // The status text and percent complete indicator will change now
   // that we are installing a CRX.  Update observers so that they pick
   // up the change.
@@ -186,27 +214,8 @@ bool ChromeDownloadManagerDelegate::GenerateFileHash() {
 #endif
 }
 
-void ChromeDownloadManagerDelegate::OnResponseCompleted(
-    DownloadItem* item,
-    const std::string& hash) {
-#if defined(ENABLE_SAFE_BROWSING)
-  // When hash is not available, it means either it is not calculated
-  // or there is error while it is calculated. We will skip the download hash
-  // check in that case.
-  if (hash.empty())
-    return;
-
-  scoped_refptr<DownloadSBClient> sb_client =
-      new DownloadSBClient(item->id(),
-                           item->url_chain(),
-                           item->referrer_url(),
-                           profile_->GetPrefs()->GetBoolean(
-                               prefs::kSafeBrowsingEnabled));
-  sb_client->CheckDownloadHash(
-      hash,
-      base::Bind(&ChromeDownloadManagerDelegate::CheckDownloadHashDone,
-                 base::Unretained(this)));
-#endif
+void ChromeDownloadManagerDelegate::OnResponseCompleted(DownloadItem* item) {
+  // TODO(noelutz): remove this method from the delegate API.
 }
 
 void ChromeDownloadManagerDelegate::AddItemToPersistentStore(
@@ -286,43 +295,82 @@ void ChromeDownloadManagerDelegate::DownloadProgressUpdated() {
       download_count, progress_known, progress);
 }
 
+#if defined(ENABLE_SAFE_BROWSING)
+DownloadProtectionService*
+    ChromeDownloadManagerDelegate::GetDownloadProtectionService() {
+  SafeBrowsingService* sb_service = g_browser_process->safe_browsing_service();
+  if (sb_service && sb_service->download_protection_service() &&
+      profile_->GetPrefs()->GetBoolean(prefs::kSafeBrowsingEnabled)) {
+    return sb_service->download_protection_service();
+  }
+  return NULL;
+}
+#endif
+
 void ChromeDownloadManagerDelegate::CheckDownloadUrlDone(
     int32 download_id,
-    bool is_dangerous_url) {
+    DownloadProtectionService::DownloadCheckResult result) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
   DownloadItem* download =
       download_manager_->GetActiveDownloadItem(download_id);
   if (!download)
     return;
 
-  if (is_dangerous_url)
+  VLOG(2) << __FUNCTION__ << "() download = " << download->DebugString(false)
+          << " verdict = " << result;
+  if (result == DownloadProtectionService::DANGEROUS)
     download->MarkUrlDangerous();
 
   download_history_->CheckVisitedReferrerBefore(
-      download_id, download->referrer_url(),
+      download_id, download->GetReferrerUrl(),
       base::Bind(&ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone,
                  base::Unretained(this)));
 }
 
-// NotificationObserver implementation.
+void ChromeDownloadManagerDelegate::CheckClientDownloadDone(
+    int32 download_id,
+    DownloadProtectionService::DownloadCheckResult result) {
+  DownloadItem* item = download_manager_->GetActiveDownloadItem(download_id);
+  if (!item) {
+    safe_browsing_state_.erase(download_id);  // Just in case.
+    return;
+  }
+
+  VLOG(2) << __FUNCTION__ << "() download = " << item->DebugString(false)
+          << " verdict = " << result;
+  // We only mark the content as being dangerous if the download's safety state
+  // has not been set to DANGEROUS yet.  We don't want to show two warnings.
+  if (result == DownloadProtectionService::DANGEROUS &&
+      item->GetSafetyState() == DownloadItem::SAFE)
+    item->MarkContentDangerous();
+
+  SafeBrowsingStateMap::iterator it = safe_browsing_state_.find(item->GetId());
+  DCHECK(it != safe_browsing_state_.end() && it->second.pending);
+  if (it != safe_browsing_state_.end()) {
+    it->second.pending = false;
+    it->second.verdict = result;
+  }
+  download_manager_->MaybeCompleteDownload(item);
+}
+
+// content::NotificationObserver implementation.
 void ChromeDownloadManagerDelegate::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_CRX_INSTALLER_DONE);
 
   registrar_.Remove(this,
                     chrome::NOTIFICATION_CRX_INSTALLER_DONE,
                     source);
 
-  CrxInstaller* installer = Source<CrxInstaller>(source).ptr();
+  CrxInstaller* installer = content::Source<CrxInstaller>(source).ptr();
   int download_id = crx_installers_[installer];
   crx_installers_.erase(installer);
 
   DownloadItem* item = download_manager_->GetActiveDownloadItem(download_id);
   if (item)
-    item->CompleteDelayedDownload();
+    item->DelayedDownloadOpened();
 }
 
 void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
@@ -337,7 +385,7 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
 
   // Check whether this download is for an extension install or not.
   // Allow extensions to be explicitly saved.
-  DownloadStateInfo state = download->state_info();
+  DownloadStateInfo state = download->GetStateInfo();
 
   if (state.force_file_name.empty()) {
     FilePath generated_name;
@@ -366,8 +414,8 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
     // 1) using the default download directory.
     // 2) prompting the user.
     if (state.prompt_user_for_save_location &&
-        !download_manager_->last_download_path().empty()) {
-      state.suggested_path = download_manager_->last_download_path();
+        !download_manager_->LastDownloadPath().empty()) {
+      state.suggested_path = download_manager_->LastDownloadPath();
     } else {
       state.suggested_path = download_prefs_->download_path();
     }
@@ -376,10 +424,24 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
     state.suggested_path = state.force_file_name;
   }
 
-  if (!state.prompt_user_for_save_location && state.force_file_name.empty()) {
-    state.is_dangerous_file =
-        IsDangerousFile(*download, state, visited_referrer_before);
+  if (!state.prompt_user_for_save_location &&
+      state.force_file_name.empty() &&
+      IsDangerousFile(*download, state, visited_referrer_before)) {
+    state.danger = DownloadStateInfo::DANGEROUS_FILE;
   }
+
+#if defined(ENABLE_SAFE_BROWSING)
+  DownloadProtectionService* service = GetDownloadProtectionService();
+  // Return false if this type of files is handled by the enhanced SafeBrowsing
+  // download protection.
+  if (service && service->enabled() &&
+      service->IsSupportedFileType(state.suggested_path.BaseName())) {
+    // TODO(noelutz): if the user changes the extension name in the UI to
+    // something like .exe SafeBrowsing will currently *not* check if the
+    // download is malicious.
+    state.danger = DownloadStateInfo::MAYBE_DANGEROUS_CONTENT;
+  }
+#endif
 
   // We need to move over to the download thread because we don't want to stat
   // the suggested path on the UI thread.
@@ -388,7 +450,7 @@ void ChromeDownloadManagerDelegate::CheckVisitedReferrerBeforeDone(
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists,
-                 this, download->id(), state,
+                 this, download->GetId(), state,
                  download_prefs_->download_path()));
 }
 
@@ -414,8 +476,8 @@ void ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists(
     state.suggested_path = state.suggested_path.Append(filename);
   }
 
-  // If the download is deemed dangerous, we'll use a temporary name for it.
-  if (state.IsDangerous()) {
+  // If the download is possibly dangerous, we'll use a temporary name for it.
+  if (state.danger != DownloadStateInfo::NOT_DANGEROUS) {
     state.target_name = FilePath(state.suggested_path).BaseName();
     // Create a temporary file to hold the file until the user approves its
     // download.
@@ -467,7 +529,7 @@ void ChromeDownloadManagerDelegate::CheckIfSuggestedPathExists(
   // See: http://code.google.com/p/chromium/issues/detail?id=3662
   if (!state.prompt_user_for_save_location &&
       state.force_file_name.empty()) {
-    if (state.IsDangerous())
+    if (state.danger != DownloadStateInfo::NOT_DANGEROUS)
       file_util::WriteFile(state.suggested_path, "", 0);
     else
       file_util::WriteFile(download_util::GetCrDownloadPath(
@@ -506,7 +568,7 @@ bool ChromeDownloadManagerDelegate::IsDangerousFile(
   if (IsExtensionDownload(&download)) {
     ExtensionService* service = profile_->GetExtensionService();
     if (!service || !service->IsDownloadFromGallery(download.GetURL(),
-                                                    download.referrer_url()))
+                                                    download.GetReferrerUrl()))
       return true;
   }
 
@@ -535,15 +597,4 @@ void ChromeDownloadManagerDelegate::OnItemAddedToPersistentStore(
   if (db_handle == DownloadItem::kUninitializedHandle)
     db_handle = download_history_->GetNextFakeDbHandle();
   download_manager_->OnItemAddedToPersistentStore(download_id, db_handle);
-}
-
-// TODO(noelutz): This function currently works as a callback place holder.
-// Once we decide the hash check is reliable, we could move the
-// MaybeCompleteDownload in OnAllDataSaved to this function.
-void ChromeDownloadManagerDelegate::CheckDownloadHashDone(
-    int32 download_id,
-    bool is_dangerous_hash) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DVLOG(1) << "CheckDownloadHashDone, download_id: " << download_id
-           << " is dangerous_hash: " << is_dangerous_hash;
 }

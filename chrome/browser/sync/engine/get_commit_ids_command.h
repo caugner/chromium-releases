@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/sync/engine/syncer_command.h"
 #include "chrome/browser/sync/engine/syncer_util.h"
 #include "chrome/browser/sync/sessions/ordered_commit_set.h"
@@ -27,19 +28,13 @@ class GetCommitIdsCommand : public SyncerCommand {
   virtual ~GetCommitIdsCommand();
 
   // SyncerCommand implementation.
-  virtual void ExecuteImpl(sessions::SyncSession* session);
-
-  // Filter |unsynced_handles| to exclude all handles to entries that require
-  // encryption but are in plaintext.
-  static void FilterEntriesNeedingEncryption(
-      const syncable::ModelTypeSet& encrypted_types,
-      syncable::BaseTransaction* trans,
-      syncable::Directory::UnsyncedMetaHandles* unsynced_handles);
+  virtual void ExecuteImpl(sessions::SyncSession* session) OVERRIDE;
 
   // Builds a vector of IDs that should be committed.
   void BuildCommitIds(const vector<int64>& unsynced_handles,
                       syncable::WriteTransaction* write_transaction,
-                      const ModelSafeRoutingInfo& routes);
+                      const ModelSafeRoutingInfo& routes,
+                      const syncable::ModelTypeSet& throttled_types);
 
   // TODO(chron): Remove writes from this iterator. As a warning, this
   // iterator causes writes to entries and so isn't a pure iterator.
@@ -114,20 +109,36 @@ class GetCommitIdsCommand : public SyncerCommand {
   };
 
  private:
+  // Removes all entries not ready for commit from |unsynced_handles|.
+  // An entry is considered unready for commit if:
+  // 1. It's in conflict or requires (re)encryption. Any datatype requiring
+  //     encryption while the cryptographer is missing a passphrase is
+  //     considered unready for commit.
+  // 2. Its type is currently throttled.
+  void FilterUnreadyEntries(
+      syncable::BaseTransaction* trans,
+      const syncable::ModelTypeSet& throttled_types,
+      syncable::Directory::UnsyncedMetaHandles* unsynced_handles);
+
   void AddUncommittedParentsAndTheirPredecessors(
       syncable::BaseTransaction* trans,
       syncable::Id parent_id,
-      const ModelSafeRoutingInfo& routes);
+      const ModelSafeRoutingInfo& routes,
+      const syncable::ModelTypeSet& throttled_types);
 
   // OrderedCommitSet helpers for adding predecessors in order.
   // TODO(ncarter): Refactor these so that the |result| parameter goes away,
   // and AddItem doesn't need to consider two OrderedCommitSets.
-  bool AddItem(syncable::Entry* item, sessions::OrderedCommitSet* result);
+  bool AddItem(syncable::Entry* item,
+               const syncable::ModelTypeSet& throttled_types,
+               sessions::OrderedCommitSet* result);
   bool AddItemThenPredecessors(syncable::BaseTransaction* trans,
+                               const syncable::ModelTypeSet& throttled_types,
                                syncable::Entry* item,
                                syncable::IndexedBitField inclusion_filter,
                                sessions::OrderedCommitSet* result);
   void AddPredecessorsThenItem(syncable::BaseTransaction* trans,
+                               const syncable::ModelTypeSet& throttled_types,
                                syncable::Entry* item,
                                syncable::IndexedBitField inclusion_filter,
                                const ModelSafeRoutingInfo& routes);
@@ -136,7 +147,8 @@ class GetCommitIdsCommand : public SyncerCommand {
 
   void AddCreatesAndMoves(const vector<int64>& unsynced_handles,
                           syncable::WriteTransaction* write_transaction,
-                          const ModelSafeRoutingInfo& routes);
+                          const ModelSafeRoutingInfo& routes,
+                          const syncable::ModelTypeSet& throttled_types);
 
   void AddDeletes(const vector<int64>& unsynced_handles,
                   syncable::WriteTransaction* write_transaction);
@@ -144,6 +156,8 @@ class GetCommitIdsCommand : public SyncerCommand {
   scoped_ptr<sessions::OrderedCommitSet> ordered_commit_set_;
 
   int requested_commit_batch_size_;
+  bool passphrase_missing_;
+  syncable::ModelTypeSet encrypted_types_;
 
   DISALLOW_COPY_AND_ASSIGN(GetCommitIdsCommand);
 };

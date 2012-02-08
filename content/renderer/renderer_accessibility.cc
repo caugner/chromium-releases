@@ -10,6 +10,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityObject.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebInputElement.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/webaccessibility.h"
 
@@ -18,6 +20,7 @@ using WebKit::WebAccessibilityObject;
 using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebNode;
+using WebKit::WebSize;
 using WebKit::WebView;
 using webkit_glue::WebAccessibility;
 
@@ -81,6 +84,7 @@ RendererAccessibility::RendererAccessibility(RenderViewImpl* render_view)
     : content::RenderViewObserver(render_view),
       ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
       browser_root_(NULL),
+      last_scroll_offset_(gfx::Size()),
       ack_pending_(false),
       logging_(false),
       sent_load_complete_(false) {
@@ -103,6 +107,10 @@ bool RendererAccessibility::OnMessageReceived(const IPC::Message& message) {
                         OnAccessibilityDoDefaultAction)
     IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityNotifications_ACK,
                         OnAccessibilityNotificationsAck)
+    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityChangeScrollPosition,
+                        OnChangeScrollPosition)
+    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilitySetTextSelection,
+                        OnSetTextSelection)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -164,6 +172,19 @@ void RendererAccessibility::PostAccessibilityNotification(
         WebKit::WebAccessibilityNotificationLoadComplete);
   }
 
+  gfx::Size scroll_offset = document.frame()->scrollOffset();
+  if (scroll_offset != last_scroll_offset_) {
+    // Make sure the browser is always aware of the scroll position of
+    // the root document element by posting a generic notification that
+    // will update it.
+    // TODO(dmazzoni): remove this as soon as
+    // https://bugs.webkit.org/show_bug.cgi?id=73460 is fixed.
+    last_scroll_offset_ = scroll_offset;
+    PostAccessibilityNotification(
+        document.accessibilityObject(),
+        WebKit::WebAccessibilityNotificationLayoutComplete);
+  }
+
   if (notification == WebKit::WebAccessibilityNotificationLoadComplete)
     sent_load_complete_ = true;
 
@@ -213,14 +234,6 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
     WebAccessibilityObject obj = document.accessibilityObjectFromID(
         notification.id);
 
-    if (!obj.isValid()) {
-#ifndef NDEBUG
-      if (logging_)
-        LOG(WARNING) << "Got notification on invalid object id " << obj.axID();
-#endif
-      continue;
-    }
-
     // The browser may not have this object yet, for example if we get a
     // notification on an object that was recently added, or if we get a
     // notification on a node before the page has loaded. Work our way
@@ -228,6 +241,7 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
     // we reach the root.
     int root_id = document.accessibilityObject().axID();
     while (browser_id_map_.find(obj.axID()) == browser_id_map_.end() &&
+           obj.isValid() &&
            obj.axID() != root_id) {
       obj = obj.parentObject();
       includes_children = true;
@@ -237,6 +251,15 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
       }
     }
 
+    if (!obj.isValid()) {
+#ifndef NDEBUG
+      if (logging_)
+        LOG(WARNING) << "Got notification on object that is invalid or has"
+                     << " invalid ancestor. Id: " << obj.axID();
+#endif
+      continue;
+    }
+
     // Another potential problem is that this notification may be on an
     // object that is detached from the tree. Determine if this node is not a
     // child of its parent, and if so move the notification to the parent.
@@ -244,10 +267,15 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
     // https://bugs.webkit.org/show_bug.cgi?id=68466 is fixed.
     if (obj.axID() != root_id) {
       WebAccessibilityObject parent = obj.parentObject();
-      while (!parent.isNull() && parent.accessibilityIsIgnored())
+      while (!parent.isNull() &&
+             parent.isValid() &&
+             parent.accessibilityIsIgnored()) {
         parent = parent.parentObject();
-      if (parent.isNull()) {
+      }
+
+      if (parent.isNull() || !parent.isValid()) {
         NOTREACHED();
+        continue;
       }
       bool is_child_of_parent = false;
       for (unsigned int i = 0; i < parent.childCount(); ++i) {
@@ -283,7 +311,7 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
       LOG(INFO) << "Accessibility update: "
                 << param.acc_tree.DebugString(true,
                                               routing_id(),
-                                              param.notification_type);
+                                              notification.type);
     }
 #endif
   }
@@ -352,6 +380,75 @@ void RendererAccessibility::OnAccessibilityDoDefaultAction(int acc_obj_id) {
   obj.performDefaultAction();
 }
 
+void RendererAccessibility::OnChangeScrollPosition(
+    int acc_obj_id, int scroll_x, int scroll_y) {
+  if (!WebAccessibilityObject::accessibilityEnabled())
+    return;
+
+  const WebDocument& document = GetMainDocument();
+  if (document.isNull())
+    return;
+
+  WebAccessibilityObject root = document.accessibilityObject();
+
+  // TODO(dmazzoni): Support scrolling of any scrollable container,
+  // not just the main document frame.
+  if (acc_obj_id != root.axID())
+    return;
+
+  WebFrame* frame = document.frame();
+  if (!frame)
+    return;
+
+  WebSize min_offset = frame->minimumScrollOffset();
+  WebSize max_offset = frame->maximumScrollOffset();
+  scroll_x = std::max(min_offset.width, scroll_x);
+  scroll_x = std::min(max_offset.width, scroll_x);
+  scroll_y = std::max(min_offset.height, scroll_y);
+  scroll_y = std::min(max_offset.height, scroll_y);
+
+  frame->setScrollOffset(WebSize(scroll_x, scroll_y));
+  if (frame->view())
+    frame->view()->layout();
+
+  // Make sure the browser gets a notification when the scroll
+  // position actually changes.
+  // TODO(dmazzoni): remove this once this bug is fixed:
+  // https://bugs.webkit.org/show_bug.cgi?id=73460
+  PostAccessibilityNotification(
+      root,
+      WebKit::WebAccessibilityNotificationLayoutComplete);
+}
+
+void RendererAccessibility::OnSetTextSelection(
+    int acc_obj_id, int start_offset, int end_offset) {
+  if (!WebAccessibilityObject::accessibilityEnabled())
+    return;
+
+  const WebDocument& document = GetMainDocument();
+  if (document.isNull())
+    return;
+
+  WebAccessibilityObject obj = document.accessibilityObjectFromID(acc_obj_id);
+  if (!obj.isValid()) {
+#ifndef NDEBUG
+    if (logging_)
+      LOG(WARNING) << "SetTextSelection on invalid object id " << acc_obj_id;
+#endif
+    return;
+  }
+
+  // TODO(dmazzoni): support elements other than <input>.
+  WebKit::WebNode node = obj.node();
+  if (!node.isNull() && node.isElementNode()) {
+    WebKit::WebElement element = node.to<WebKit::WebElement>();
+    WebKit::WebInputElement* input_element =
+        WebKit::toWebInputElement(&element);
+    if (input_element && input_element->isTextField())
+      input_element->setSelectionRange(start_offset, end_offset);
+  }
+}
+
 void RendererAccessibility::OnAccessibilityNotificationsAck() {
   DCHECK(ack_pending_);
   ack_pending_ = false;
@@ -417,7 +514,8 @@ bool RendererAccessibility::ShouldIncludeChildren(
   WebKit::WebAccessibilityNotification type = notification.type;
   if (type == WebKit::WebAccessibilityNotificationChildrenChanged ||
       type == WebKit::WebAccessibilityNotificationLoadComplete ||
-      type == WebKit::WebAccessibilityNotificationLiveRegionChanged) {
+      type == WebKit::WebAccessibilityNotificationLiveRegionChanged ||
+      type == WebKit::WebAccessibilityNotificationSelectedChildrenChanged) {
     return true;
   }
   return false;

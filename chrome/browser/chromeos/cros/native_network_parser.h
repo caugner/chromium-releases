@@ -61,6 +61,10 @@ class NativeNetworkParser : public NetworkParser {
   NativeNetworkParser();
   virtual ~NativeNetworkParser();
   static const EnumMapper<PropertyIndex>* property_mapper();
+  static const EnumMapper<ConnectionType>* network_type_mapper();
+  static const EnumMapper<ConnectionSecurity>* network_security_mapper();
+  static const EnumMapper<EAPMethod>* network_eap_method_mapper();
+  static const EnumMapper<EAPPhase2Auth>* network_eap_auth_mapper();
   static const ConnectionType ParseConnectionType(const std::string& type);
  protected:
   virtual Network* CreateNewNetwork(ConnectionType type,
@@ -144,6 +148,7 @@ class NativeVirtualNetworkParser : public NativeNetworkParser {
                           Network* network) OVERRIDE;
   virtual bool UpdateNetworkFromInfo(const base::DictionaryValue& info,
                                      Network* network) OVERRIDE;
+  static const EnumMapper<ProviderType>* provider_type_mapper();
  protected:
   bool ParseProviderValue(PropertyIndex index,
                           const base::Value& value,

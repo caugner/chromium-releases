@@ -89,19 +89,16 @@ class UI_EXPORT Clipboard {
   enum Buffer {
     BUFFER_STANDARD,
     BUFFER_SELECTION,
-    BUFFER_DRAG,
   };
 
   static bool IsValidBuffer(int32 buffer) {
     switch (buffer) {
       case BUFFER_STANDARD:
         return true;
-#if defined(USE_X11)
+#if defined(USE_X11) && !defined(USE_AURA)
       case BUFFER_SELECTION:
         return true;
 #endif
-      case BUFFER_DRAG:
-        return true;
     }
     return false;
   }
@@ -119,19 +116,18 @@ class UI_EXPORT Clipboard {
   // kept until the system clipboard is set again.
   void WriteObjects(const ObjectMap& objects);
 
-  // Behaves as above. If there is some shared memory handle passed as one of
-  // the objects, it came from the process designated by |process|. This will
-  // assist in turning it into a shared memory region that the current process
-  // can use.
-  void WriteObjects(const ObjectMap& objects, base::ProcessHandle process);
-
   // On Linux/BSD, we need to know when the clipboard is set to a URL.  Most
   // platforms don't care.
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(USE_AURA)
   void DidWriteURL(const std::string& utf8_text) {}
 #else  // !defined(OS_WIN) && !defined(OS_MACOSX)
   void DidWriteURL(const std::string& utf8_text);
 #endif
+
+  // Returns a sequence number which uniquely identifies clipboard state.
+  // This can be used to version the data on the clipboard and determine
+  // whether it has changed.
+  uint64 GetSequenceNumber(Buffer buffer);
 
   // Tests whether the clipboard contains a certain format
   bool IsFormatAvailable(const FormatType& format, Buffer buffer) const;
@@ -160,6 +156,10 @@ class UI_EXPORT Clipboard {
   // Reads an image from the clipboard, if available.
   SkBitmap ReadImage(Buffer buffer) const;
 
+  void ReadCustomData(Buffer buffer,
+                      const string16& type,
+                      string16* result) const;
+
   // Reads a bookmark from the clipboard, if available.
   void ReadBookmark(string16* title, std::string* url) const;
 
@@ -172,12 +172,7 @@ class UI_EXPORT Clipboard {
   // as a byte vector.
   // TODO(dcheng): Due to platform limitations on Windows, we should make sure
   // format is never controlled by the user.
-  void ReadData(const std::string& format, std::string* result);
-
-  // Returns a sequence number which uniquely identifies clipboard state.
-  // This can be used to version the data on the clipboard and determine
-  // whether it has changed.
-  uint64 GetSequenceNumber();
+  void ReadData(const std::string& format, std::string* result) const;
 
   // Get format Identifiers for various types.
   static FormatType GetUrlFormatType();
@@ -191,6 +186,7 @@ class UI_EXPORT Clipboard {
   // Win: MS HTML Format, Other: Generic HTML format
   static FormatType GetHtmlFormatType();
   static FormatType GetBitmapFormatType();
+  static FormatType GetWebCustomDataFormatType();
 
   // Embeds a pointer to a SharedMemory object pointed to by |bitmap_handle|
   // belonging to |process| into a shared bitmap [CBF_SMBITMAP] slot in
@@ -230,12 +226,9 @@ class UI_EXPORT Clipboard {
 
   void WriteBitmap(const char* pixel_data, const char* size_data);
 
-#if !defined(OS_MACOSX)
   // |format_name| is an ASCII string and should be NULL-terminated.
-  // TODO(estade): port to mac.
   void WriteData(const char* format_name, size_t format_len,
                  const char* data_data, size_t data_len);
-#endif
 #if defined(OS_WIN)
   void WriteBitmapFromHandle(HBITMAP source_hbitmap,
                              const gfx::Size& size);

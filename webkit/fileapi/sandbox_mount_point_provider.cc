@@ -4,6 +4,7 @@
 
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/scoped_callback_factory.h"
@@ -306,7 +307,7 @@ class SandboxMountPointProvider::GetFileSystemRootPathTask
       FileSystemType type,
       ObfuscatedFileUtil* file_util,
       const FilePath& old_base_path,
-      FileSystemPathManager::GetRootPathCallback* callback)
+      const FileSystemPathManager::GetRootPathCallback& callback)
       : file_message_loop_(file_message_loop),
         origin_message_loop_proxy_(
             base::MessageLoopProxy::current()),
@@ -325,8 +326,11 @@ class SandboxMountPointProvider::GetFileSystemRootPathTask
   }
 
   void Start(bool create) {
-    file_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(this,
-        &GetFileSystemRootPathTask::GetFileSystemRootPathOnFileThread, create));
+    file_message_loop_->PostTask(
+        FROM_HERE,
+        base::Bind(
+            &GetFileSystemRootPathTask::GetFileSystemRootPathOnFileThread, this,
+            create));
   }
 
  private:
@@ -339,9 +343,10 @@ class SandboxMountPointProvider::GetFileSystemRootPathTask
   }
 
   void DispatchCallbackOnCallerThread(const FilePath& root_path) {
-    origin_message_loop_proxy_->PostTask(FROM_HERE,
-        NewRunnableMethod(this, &GetFileSystemRootPathTask::DispatchCallback,
-                          root_path));
+    origin_message_loop_proxy_->PostTask(
+        FROM_HERE,
+        base::Bind(&GetFileSystemRootPathTask::DispatchCallback, this,
+                   root_path));
   }
 
   void DispatchCallback(const FilePath& root_path) {
@@ -350,8 +355,8 @@ class SandboxMountPointProvider::GetFileSystemRootPathTask
         FileSystemPathManager::GetFileSystemTypeString(type_);
     DCHECK(!type_string.empty());
     std::string name = origin_identifier + ":" + type_string;
-    callback_->Run(!root_path.empty(), root_path, name);
-    callback_.reset();
+    callback_.Run(!root_path.empty(), root_path, name);
+    callback_.Reset();
   }
 
   scoped_refptr<base::MessageLoopProxy> file_message_loop_;
@@ -360,7 +365,7 @@ class SandboxMountPointProvider::GetFileSystemRootPathTask
   FileSystemType type_;
   scoped_refptr<ObfuscatedFileUtil> file_util_;
   FilePath old_base_path_;
-  scoped_ptr<FileSystemPathManager::GetRootPathCallback> callback_;
+  FileSystemPathManager::GetRootPathCallback callback_;
 };
 
 FilePath SandboxMountPointProvider::old_base_path() const {
@@ -413,29 +418,25 @@ SandboxMountPointProvider::CreateOriginEnumerator() const {
 }
 
 void SandboxMountPointProvider::ValidateFileSystemRootAndGetURL(
-    const GURL& origin_url, fileapi::FileSystemType type,
-    bool create, FileSystemPathManager::GetRootPathCallback* callback_ptr) {
-  scoped_ptr<FileSystemPathManager::GetRootPathCallback> callback(callback_ptr);
+    const GURL& origin_url, fileapi::FileSystemType type, bool create,
+    const FileSystemPathManager::GetRootPathCallback& callback) {
   FilePath origin_base_path;
 
   if (path_manager_->is_incognito()) {
     // TODO(kinuko): return an isolated temporary directory.
-    callback->Run(false, FilePath(), std::string());
+    callback.Run(false, FilePath(), std::string());
     return;
   }
 
   if (!path_manager_->IsAllowedScheme(origin_url)) {
-    callback->Run(false, FilePath(), std::string());
+    callback.Run(false, FilePath(), std::string());
     return;
   }
 
   scoped_refptr<GetFileSystemRootPathTask> task(
-      new GetFileSystemRootPathTask(file_message_loop_,
-                                    origin_url,
-                                    type,
-                                    sandbox_file_util_.get(),
-                                    old_base_path(),
-                                    callback.release()));
+      new GetFileSystemRootPathTask(
+          file_message_loop_, origin_url, type, sandbox_file_util_.get(),
+          old_base_path(), callback));
   task->Start(create);
 };
 

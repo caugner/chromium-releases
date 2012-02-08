@@ -27,18 +27,14 @@
 #include "webkit/plugins/ppapi/dir_contents.h"
 #include "webkit/quota/quota_types.h"
 
-class AudioMessageFilter;
 class GURL;
+struct PP_NetAddress_Private;
 class SkBitmap;
-class Task;
+class TransportDIB;
 
 namespace base {
 class MessageLoopProxy;
 class Time;
-}
-
-namespace content {
-class P2PSocketDispatcher;
 }
 
 namespace fileapi {
@@ -47,7 +43,6 @@ class FileSystemCallbackDispatcher;
 
 namespace gfx {
 class Point;
-class Rect;
 }
 
 namespace gpu {
@@ -72,10 +67,6 @@ namespace webkit_glue {
 class P2PTransport;
 }  // namespace webkit_glue
 
-struct PP_Flash_NetAddress;
-
-class TransportDIB;
-
 namespace webkit {
 namespace ppapi {
 
@@ -87,6 +78,8 @@ class PluginModule;
 class PPB_Broker_Impl;
 class PPB_Flash_Menu_Impl;
 class PPB_Flash_NetConnector_Impl;
+class PPB_TCPSocket_Private_Impl;
+class PPB_UDPSocket_Private_Impl;
 
 // Virtual interface that the browser implements to implement features for
 // PPAPI plugins.
@@ -189,19 +182,21 @@ class PluginDelegate {
     virtual bool Echo(const base::Callback<void()>& callback) = 0;
   };
 
+  // The (interface for the) client used by |PlatformAudio| and
+  // |PlatformAudioInput|.
+  class PlatformAudioCommonClient {
+   protected:
+    virtual ~PlatformAudioCommonClient() {}
+
+   public:
+    // Called when the stream is created.
+    virtual void StreamCreated(base::SharedMemoryHandle shared_memory_handle,
+                               size_t shared_memory_size,
+                               base::SyncSocket::Handle socket) = 0;
+  };
+
   class PlatformAudio {
    public:
-    class Client {
-     protected:
-      virtual ~Client() {}
-
-     public:
-      // Called when the stream is created.
-      virtual void StreamCreated(base::SharedMemoryHandle shared_memory_handle,
-                                 size_t shared_memory_size,
-                                 base::SyncSocket::Handle socket) = 0;
-    };
-
     // Starts the playback. Returns false on error or if called before the
     // stream is created or after the stream is closed.
     virtual bool StartPlayback() = 0;
@@ -216,6 +211,24 @@ class PluginDelegate {
 
    protected:
     virtual ~PlatformAudio() {}
+  };
+
+  class PlatformAudioInput {
+   public:
+    // Starts the playback. Returns false on error or if called before the
+    // stream is created or after the stream is closed.
+    virtual bool StartCapture() = 0;
+
+    // Stops the capture. Returns false on error or if called before the stream
+    // is created or after the stream is closed.
+    virtual bool StopCapture() = 0;
+
+    // Closes the stream. Make sure to call this before the object is
+    // destructed.
+    virtual void ShutDown() = 0;
+
+   protected:
+    virtual ~PlatformAudioInput() {}
   };
 
   // Interface for PlatformVideoDecoder is directly inherited from general media
@@ -250,6 +263,9 @@ class PluginDelegate {
                                   bool focused) = 0;
   // Notification that the text input status of the given plugin is changed.
   virtual void PluginTextInputTypeChanged(
+      webkit::ppapi::PluginInstance* instance) = 0;
+  // Notification that the caret position in the given plugin is changed.
+  virtual void PluginCaretPositionChanged(
       webkit::ppapi::PluginInstance* instance) = 0;
   // Notification that the plugin requested to cancel the current composition.
   virtual void PluginRequestedCancelComposition(
@@ -291,7 +307,13 @@ class PluginDelegate {
   // to clean up the corresponding resources allocated during this call.
   virtual PlatformAudio* CreateAudio(uint32_t sample_rate,
                                      uint32_t sample_count,
-                                     PlatformAudio::Client* client) = 0;
+                                     PlatformAudioCommonClient* client) = 0;
+
+  // The caller is responsible for calling Shutdown() on the returned pointer
+  // to clean up the corresponding resources allocated during this call.
+  virtual PlatformAudioInput* CreateAudioInput(uint32_t sample_rate,
+      uint32_t sample_count,
+      PlatformAudioCommonClient* client) = 0;
 
   // A pointer is returned immediately, but it is not ready to be used until
   // BrokerConnected has been called.
@@ -348,12 +370,6 @@ class PluginDelegate {
       const GURL& directory_path,
       fileapi::FileSystemCallbackDispatcher* dispatcher) = 0;
 
-  // Takes a UTF-8 string representing the enterprise policy, and pushes it to
-  // every plugin instance that has called SubscribeToPolicyUpdates().
-  //
-  // This should be called when the enterprise policy is updated.
-  virtual void PublishPolicy(const std::string& policy_json) = 0;
-
   // For quota handlings for FileIO API.
   typedef base::Callback<void (int64)> AvailableSpaceCallback;
   virtual void QueryAvailableSpace(const GURL& origin,
@@ -390,7 +406,35 @@ class PluginDelegate {
       uint16_t port) = 0;
   virtual int32_t ConnectTcpAddress(
       webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-      const struct PP_Flash_NetAddress* addr) = 0;
+      const PP_NetAddress_Private* addr) = 0;
+
+  // For PPB_TCPSocket_Private.
+  virtual uint32 TCPSocketCreate() = 0;
+  virtual void TCPSocketConnect(PPB_TCPSocket_Private_Impl* socket,
+                                uint32 socket_id,
+                                const std::string& host,
+                                uint16_t port) = 0;
+  virtual void TCPSocketConnectWithNetAddress(
+      PPB_TCPSocket_Private_Impl* socket,
+      uint32 socket_id,
+      const PP_NetAddress_Private& addr) = 0;
+  virtual void TCPSocketSSLHandshake(uint32 socket_id,
+                                     const std::string& server_name,
+                                     uint16_t server_port) = 0;
+  virtual void TCPSocketRead(uint32 socket_id, int32_t bytes_to_read) = 0;
+  virtual void TCPSocketWrite(uint32 socket_id, const std::string& buffer) = 0;
+  virtual void TCPSocketDisconnect(uint32 socket_id) = 0;
+
+  // For PPB_UDPSocket_Private.
+  virtual uint32 UDPSocketCreate() = 0;
+  virtual void UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
+                             uint32 socket_id,
+                             const PP_NetAddress_Private& addr) = 0;
+  virtual void UDPSocketRecvFrom(uint32 socket_id, int32_t num_bytes) = 0;
+  virtual void UDPSocketSendTo(uint32 socket_id,
+                               const std::string& buffer,
+                               const PP_NetAddress_Private& addr) = 0;
+  virtual void UDPSocketClose(uint32 socket_id) = 0;
 
   // Show the given context menu at the given position (in the plugin's
   // coordinates).
@@ -414,10 +458,6 @@ class PluginDelegate {
   // Sets the minimum and maximum zoom factors.
   virtual void ZoomLimitsChanged(double minimum_factor,
                                  double maximum_factor) = 0;
-
-  // Subscribes the instances to notifications that the policy has been
-  // updated.
-  virtual void SubscribeToPolicyUpdates(PluginInstance* instance) = 0;
 
   // Retrieves the proxy information for the given URL in PAC format. On error,
   // this will return an empty string.

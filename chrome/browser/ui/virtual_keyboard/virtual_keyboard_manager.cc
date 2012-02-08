@@ -21,15 +21,15 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/interpolated_transform.h"
 #include "ui/gfx/screen.h"
-#include "views/ime/text_input_type_tracker.h"
-#include "views/widget/widget.h"
+#include "ui/views/ime/text_input_type_tracker.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
@@ -48,17 +48,12 @@ namespace {
 const int kDefaultKeyboardHeight = 300;
 const int kKeyboardSlideDuration = 300;  // In milliseconds
 const char kOnTextInputTypeChanged[] =
-    "experimental.input.onTextInputTypeChanged";
+    "experimental.input.virtualKeyboard.onTextInputTypeChanged";
 
 // The default position of the keyboard widget should be at the bottom,
 // spanning the entire width of the desktop.
 gfx::Rect GetKeyboardPosition(int height) {
-  views::View* desktop = views::desktop::DesktopWindowView::desktop_window_view;
-  gfx::Rect area;
-  if (desktop)
-    area = desktop->bounds();
-  else
-    area = gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point());
+  gfx::Rect area = gfx::Screen::GetMonitorAreaNearestPoint(gfx::Point());
   return gfx::Rect(area.x(), area.y() + area.height() - height,
                    area.width(), height);
 }
@@ -78,7 +73,7 @@ class KeyboardWidget
 #if defined(USE_AURA)
       public aura::DesktopObserver,
 #endif
-      public NotificationObserver,
+      public content::NotificationObserver,
       public views::Widget::Observer,
       public views::TextInputTypeObserver {
  public:
@@ -115,6 +110,7 @@ class KeyboardWidget
 
   // Overridden from TabContentsObserver.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
+  virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
   void OnRequest(const ExtensionHostMsg_Request_Params& params);
 
   // Overridden from TextInputTypeObserver.
@@ -141,8 +137,8 @@ class KeyboardWidget
 
   // Overridden from NotificationObserver.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Overridden from views::Widget::Observer.
   virtual void OnWidgetClosing(Widget* widget) OVERRIDE;
@@ -155,6 +151,8 @@ class KeyboardWidget
   // Interpolated transform used during animation.
   scoped_ptr<ui::InterpolatedTransform> transform_;
 
+  GURL keyboard_url_;
+
   // The DOM view to host the keyboard.
   DOMView* dom_view_;
 
@@ -166,13 +164,14 @@ class KeyboardWidget
   // Height of the keyboard.
   int keyboard_height_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(KeyboardWidget);
 };
 
 KeyboardWidget::KeyboardWidget()
     : views::Widget::Widget(),
+      keyboard_url_(chrome::kChromeUIKeyboardURL),
       dom_view_(new DOMView),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_dispatcher_(ProfileManager::GetDefaultProfile(), this)),
@@ -184,18 +183,18 @@ KeyboardWidget::KeyboardWidget()
   params.keep_on_top = true;
   params.transparent = true;
   params.bounds = GetKeyboardPosition(keyboard_height_);
-#if defined(USE_AURA)
-  params.parent = aura_shell::Shell::GetInstance()->GetContainer(
-      aura_shell::internal::kShellWindowId_MenusAndTooltipsContainer);
-#endif
   Init(params);
+#if defined(USE_AURA)
+  aura_shell::Shell::GetInstance()->GetContainer(
+      aura_shell::internal::kShellWindowId_MenusAndTooltipsContainer)->
+      AddChild(GetNativeView());
+#endif
 
   // Setup the DOM view to host the keyboard.
   Profile* profile = ProfileManager::GetDefaultProfile();
-  GURL keyboard_url(chrome::kChromeUIKeyboardURL);
   dom_view_->Init(profile,
-      SiteInstance::CreateSiteInstanceForURL(profile, keyboard_url));
-  dom_view_->LoadURL(keyboard_url);
+      SiteInstance::CreateSiteInstanceForURL(profile, keyboard_url_));
+  dom_view_->LoadURL(keyboard_url_);
   dom_view_->SetVisible(true);
   SetContentsView(dom_view_);
 
@@ -210,16 +209,16 @@ KeyboardWidget::KeyboardWidget()
   views::TextInputTypeTracker::GetInstance()->AddTextInputTypeObserver(this);
   registrar_.Add(this,
                  chrome::NOTIFICATION_FOCUSED_EDITABLE_NODE_TOUCHED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_HIDE_KEYBOARD_INVOKED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this,
                  chrome::NOTIFICATION_SET_KEYBOARD_HEIGHT_INVOKED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this,
                  content::NOTIFICATION_APP_TERMINATING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 
 #if defined(OS_CHROMEOS)
   chromeos::input_method::InputMethodManager* manager =
@@ -262,10 +261,10 @@ void KeyboardWidget::ShowKeyboardForWidget(views::Widget* widget) {
   Show();
 
   bool visible = true;
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_KEYBOARD_VISIBILITY_CHANGED,
-      Source<KeyboardWidget>(this),
-      Details<bool>(&visible));
+      content::Source<KeyboardWidget>(this),
+      content::Details<bool>(&visible));
 }
 
 void KeyboardWidget::ResetBounds() {
@@ -276,10 +275,10 @@ void KeyboardWidget::Hide() {
   animation_->Hide();
 
   bool visible = false;
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_KEYBOARD_VISIBILITY_CHANGED,
-      Source<KeyboardWidget>(this),
-      Details<bool>(&visible));
+      content::Source<KeyboardWidget>(this),
+      content::Details<bool>(&visible));
 }
 
 void KeyboardWidget::SetTarget(views::Widget* target) {
@@ -328,10 +327,10 @@ void KeyboardWidget::AnimationEnded(const ui::Animation* animation) {
   else
     keyboard_rect = GetWindowScreenBounds();
 
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_KEYBOARD_VISIBLE_BOUNDS_CHANGED,
-      Source<KeyboardWidget>(this),
-      Details<gfx::Rect>(&keyboard_rect));
+      content::Source<KeyboardWidget>(this),
+      content::Details<gfx::Rect>(&keyboard_rect));
 }
 
 bool KeyboardWidget::OnMessageReceived(const IPC::Message& message) {
@@ -341,6 +340,14 @@ bool KeyboardWidget::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
+}
+
+void KeyboardWidget::RenderViewGone(base::TerminationStatus status) {
+  if (status != base::TERMINATION_STATUS_NORMAL_TERMINATION) {
+    // Reload the keyboard if it crashes.
+    dom_view_->LoadURL(keyboard_url_);
+    dom_view_->SchedulePaint();
+  }
 }
 
 void KeyboardWidget::OnRequest(const ExtensionHostMsg_Request_Params& request) {
@@ -441,8 +448,8 @@ void KeyboardWidget::OnDesktopResized(const gfx::Size& new_size) {
 #endif
 
 void KeyboardWidget::Observe(int type,
-                             const NotificationSource& source,
-                             const NotificationDetails& details) {
+                             const content::NotificationSource& source,
+                             const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_FOCUSED_EDITABLE_NODE_TOUCHED: {
       // In case the keyboard hid itself and the focus is still in an editable
@@ -464,7 +471,7 @@ void KeyboardWidget::Observe(int type,
 
       // TODO(penghuang) Allow extension conrtol the virtual keyboard directly
       // instead of using Notification.
-      int height = *Details<int>(details).ptr();
+      int height = *content::Details<int>(details).ptr();
       if (height != keyboard_height_) {
         DCHECK_GE(height, 0) << "Keyboard height should not be negative.";
 
@@ -509,30 +516,10 @@ void KeyboardWidget::OnWidgetActivationChanged(Widget* widget, bool active) {
 VirtualKeyboardManager::VirtualKeyboardManager()
     : keyboard_(new KeyboardWidget()) {
   keyboard_->AddObserver(this);
-
-  views::desktop::DesktopWindowView* desktop =
-      views::desktop::DesktopWindowView::desktop_window_view;
-
-  // We are either not in views desktop mode, or we are and we are not yet
-  // observing the desktop.
-  DCHECK(!desktop || !desktop->HasObserver(this));
-
-  if (desktop)
-    desktop->AddObserver(this);
 }
 
 VirtualKeyboardManager::~VirtualKeyboardManager() {
   DCHECK(!keyboard_);
-
-  views::desktop::DesktopWindowView* desktop =
-      views::desktop::DesktopWindowView::desktop_window_view;
-
-  // We are either not in views desktop mode, or we are and we have been
-  // observing the desktop
-  DCHECK(!desktop || desktop->HasObserver(this));
-
-  if (desktop)
-    desktop->RemoveObserver(this);
 }
 
 void VirtualKeyboardManager::ShowKeyboardForWidget(views::Widget* widget) {
@@ -550,11 +537,6 @@ views::Widget* VirtualKeyboardManager::keyboard() {
 void VirtualKeyboardManager::OnWidgetClosing(views::Widget* widget) {
   DCHECK_EQ(keyboard_, widget);
   keyboard_ = NULL;
-}
-
-void VirtualKeyboardManager::OnDesktopBoundsChanged(
-    const gfx::Rect& prev_bounds) {
-  keyboard_->ResetBounds();
 }
 
 // static

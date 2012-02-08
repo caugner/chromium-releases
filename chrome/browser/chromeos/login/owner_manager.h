@@ -6,16 +6,19 @@
 #define CHROME_BROWSER_CHROMEOS_LOGIN_OWNER_MANAGER_H_
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "crypto/rsa_private_key.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/owner_key_utils.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "crypto/rsa_private_key.h"
 
-class FilePath;
+namespace content {
 class NotificationDetails;
+}
 
 namespace chromeos {
 
@@ -51,7 +54,7 @@ class OwnerManager : public base::RefCountedThreadSafe<OwnerManager> {
   virtual ~OwnerManager();
 
   // Sets a new owner key from a provided memory buffer.
-  void UpdateOwnerKey(const BrowserThread::ID thread_id,
+  void UpdateOwnerKey(const content::BrowserThread::ID thread_id,
                       const std::vector<uint8>& key,
                       KeyUpdateDelegate* d);
 
@@ -70,7 +73,7 @@ class OwnerManager : public base::RefCountedThreadSafe<OwnerManager> {
   // successful return code, passing the signaure blob in |payload|.
   // On failure, calls d->OnKeyOpComplete() on |thread_id| with an appropriate
   // error and passes an empty string for |payload|.
-  void Sign(const BrowserThread::ID thread_id,
+  void Sign(const content::BrowserThread::ID thread_id,
             const std::string& data,
             Delegate* d);
 
@@ -82,7 +85,7 @@ class OwnerManager : public base::RefCountedThreadSafe<OwnerManager> {
   // successful return code, passing an empty string for |payload|.
   // On failure, calls d->OnKeyOpComplete() on |thread_id| with an appropriate
   // error code, passing an empty string for |payload|.
-  void Verify(const BrowserThread::ID thread_id,
+  void Verify(const content::BrowserThread::ID thread_id,
               const std::string& data,
               const std::vector<uint8>& signature,
               Delegate* d);
@@ -90,7 +93,7 @@ class OwnerManager : public base::RefCountedThreadSafe<OwnerManager> {
  private:
   // A helper method to send a notification on another thread.
   void SendNotification(int type,
-                        const NotificationDetails& details);
+                        const content::NotificationDetails& details);
 
   // Calls back a key update delegate on a given thread.
   void CallKeyUpdateDelegate(KeyUpdateDelegate* d) {

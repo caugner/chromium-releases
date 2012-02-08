@@ -14,10 +14,12 @@
 #include "base/memory/linked_ptr.h"
 #include "base/time.h"
 #include "googleurl/src/gurl.h"
+#include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/navigation_types.h"
+#include "content/public/browser/navigation_type.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/referrer.h"
 
 class NavigationEntry;
 class SessionStorageNamespace;
@@ -28,6 +30,7 @@ struct ViewHostMsg_FrameNavigate_Params;
 namespace content {
 class BrowserContext;
 struct LoadCommittedDetails;
+struct Referrer;
 }
 
 // A NavigationController maintains the back-forward list for a single tab and
@@ -176,16 +179,30 @@ class CONTENT_EXPORT NavigationController {
   // Loads the specified URL, specifying extra http headers to add to the
   // request.  Extra headers are separated by \n.
   void LoadURL(const GURL& url,
-               const GURL& referrer,
+               const content::Referrer& referrer,
                content::PageTransition type,
                const std::string& extra_headers);
 
   // Same as LoadURL, but for renderer-initiated navigations.  This state is
   // important for tracking whether to display pending URLs.
   void LoadURLFromRenderer(const GURL& url,
-                           const GURL& referrer,
+                           const content::Referrer& referrer,
                            content::PageTransition type,
                            const std::string& extra_headers);
+
+  // Behaves like LoadURL() and LoadURLFromRenderer() but marks the new
+  // navigation as being transferred from one RVH to another. In this case the
+  // browser can recycle the old request once the new renderer wants to
+  // navigate.
+  // |transferred_global_request_id| identifies the request ID of the old
+  // request.
+  void TransferURL(
+      const GURL& url,
+      const content::Referrer& referrer,
+      content::PageTransition transition,
+      const std::string& extra_headers,
+      const GlobalRequestID& transferred_global_request_id,
+      bool is_renderer_initiated);
 
   // Loads the current page if this NavigationController was restored from
   // history and the current page has not loaded yet.
@@ -336,7 +353,7 @@ class CONTENT_EXPORT NavigationController {
   // separated by \n.
   static NavigationEntry* CreateNavigationEntry(
       const GURL& url,
-      const GURL& referrer,
+      const content::Referrer& referrer,
       content::PageTransition transition,
       bool is_renderer_initiated,
       const std::string& extra_headers,

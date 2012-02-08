@@ -7,19 +7,26 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/net/chrome_cookie_notification_details.h"
 #include "chrome/browser/net/gaia/gaia_oauth_consumer.h"
-#include "content/common/net/url_fetcher.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 
 struct ChromeCookieDetails;
 
 class Browser;
 class Profile;
+
+namespace net {
+class URLRequestContextGetter;
+class URLRequestStatus;
+typedef std::vector<std::string> ResponseCookies;
+}
 
 // Authenticate a user using Gaia's OAuth1 and OAuth2 support.
 //
@@ -38,8 +45,8 @@ class Profile;
 //
 // This class can handle one request at a time, and all calls through an
 // instance should be serialized.
-class GaiaOAuthFetcher : public URLFetcher::Delegate,
-                         public NotificationObserver {
+class GaiaOAuthFetcher : public content::URLFetcherDelegate,
+                         public content::NotificationObserver {
  public:
   // Defines steps of OAuth process performed by this class.
   typedef enum {
@@ -115,10 +122,10 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   // StartOAuthWrapBridge).
   virtual void StartOAuthRevokeWrapToken(const std::string& token);
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Called when a cookie, e. g. oauth_token, changes
   virtual void OnCookieChanged(Profile* profile,
@@ -128,17 +135,12 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   virtual void OnBrowserClosing(Browser* profile,
                                 bool detail);
 
-  // Implementation of URLFetcher::Delegate
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data) OVERRIDE;
+  // Implementation of content::URLFetcherDelegate
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // StartGetOAuthToken (or other Start* routine) been called, but results
   // are not back yet.
-  virtual bool HasPendingFetch();
+  virtual bool HasPendingFetch() const;
 
   // Stop any URL fetches in progress.
   virtual void CancelRequest();
@@ -204,7 +206,8 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   // From a URLFetcher result, generate an appropriate error.
   static GoogleServiceAuthError GenerateAuthError(
       const std::string& data,
-      const net::URLRequestStatus& status);
+      const net::URLRequestStatus& status,
+      int response_code);
 
   // Given parameters, create a OAuth v1 request URL.
   static GURL MakeGetOAuthTokenUrl(const std::string& oauth1_login_scope,
@@ -229,12 +232,13 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
       const std::string& oauth2_service_scope);
 
   // Create a fetcher useable for making any Gaia OAuth request.
-  static URLFetcher* CreateGaiaFetcher(net::URLRequestContextGetter* getter,
-                                       const GURL& gaia_gurl_,
-                                       const std::string& body,
-                                       const std::string& headers,
-                                       bool send_cookies,
-                                       URLFetcher::Delegate* delegate);
+  static content::URLFetcher* CreateGaiaFetcher(
+      net::URLRequestContextGetter* getter,
+      const GURL& gaia_gurl_,
+      const std::string& body,
+      const std::string& headers,
+      bool send_cookies,
+      content::URLFetcherDelegate* delegate);
 
   bool ShouldAutoFetch(AutoFetchLimit fetch_step);
 
@@ -243,10 +247,10 @@ class GaiaOAuthFetcher : public URLFetcher::Delegate,
   net::URLRequestContextGetter* const getter_;
   Profile* profile_;
   Browser* popup_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // While a fetch is going on:
-  scoped_ptr<URLFetcher> fetcher_;
+  scoped_ptr<content::URLFetcher> fetcher_;
   std::string request_body_;
   std::string request_headers_;
   std::string service_scope_;

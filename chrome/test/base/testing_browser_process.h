@@ -16,7 +16,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "content/common/notification_service.h"
+#include "content/browser/notification_service_impl.h"
 
 class BackgroundModeManager;
 class CRLSetFetcher;
@@ -26,10 +26,6 @@ class MHTMLGenerationManager;
 class NotificationUIManager;
 class PrefService;
 class WatchDogThread;
-
-namespace base {
-class WaitableEvent;
-}
 
 namespace policy {
 class BrowserPolicyConnector;
@@ -55,7 +51,6 @@ class TestingBrowserProcess : public BrowserProcess {
 
   virtual base::Thread* file_thread() OVERRIDE;
   virtual base::Thread* db_thread() OVERRIDE;
-  virtual base::Thread* cache_thread() OVERRIDE;
   virtual WatchDogThread* watchdog_thread() OVERRIDE;
 
 #if defined(OS_CHROMEOS)
@@ -67,7 +62,6 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual policy::BrowserPolicyConnector* browser_policy_connector() OVERRIDE;
   virtual IconManager* icon_manager() OVERRIDE;
   virtual ThumbnailGenerator* GetThumbnailGenerator() OVERRIDE;
-  virtual DevToolsManager* devtools_manager() OVERRIDE;
   virtual SidebarManager* sidebar_manager() OVERRIDE;
   virtual TabCloseableStateWatcher* tab_closeable_state_watcher() OVERRIDE;
   virtual BackgroundModeManager* background_mode_manager() OVERRIDE;
@@ -78,8 +72,6 @@ class TestingBrowserProcess : public BrowserProcess {
   virtual net::URLRequestContextGetter* system_request_context() OVERRIDE;
 
 #if defined(OS_CHROMEOS)
-  virtual chromeos::ProxyConfigServiceImpl*
-      chromeos_proxy_config_service_impl() OVERRIDE;
   virtual browser::OomPriorityManager* oom_priority_manager() OVERRIDE;
 #endif  // defined(OS_CHROMEOS)
 
@@ -95,7 +87,6 @@ class TestingBrowserProcess : public BrowserProcess {
       const std::string& ip,
       int port,
       const std::string& frontend_url) OVERRIDE;
-  virtual void InitDevToolsLegacyProtocolHandler(int port) OVERRIDE;
   virtual unsigned int AddRefModule() OVERRIDE;
   virtual unsigned int ReleaseModule() OVERRIDE;
   virtual bool IsShuttingDown() OVERRIDE;
@@ -116,12 +107,7 @@ class TestingBrowserProcess : public BrowserProcess {
 
   virtual ChromeNetLog* net_log() OVERRIDE;
   virtual prerender::PrerenderTracker* prerender_tracker() OVERRIDE;
-
-#if defined(IPC_MESSAGE_LOG_ENABLED)
-  virtual void SetIPCLoggingEnabled(bool enable) OVERRIDE {}
-#endif
   virtual MHTMLGenerationManager* mhtml_generation_manager() OVERRIDE;
-  virtual GpuBlacklistUpdater* gpu_blacklist_updater() OVERRIDE;
   virtual ComponentUpdateService* component_updater() OVERRIDE;
   virtual CRLSetFetcher* crl_set_fetcher() OVERRIDE;
 
@@ -131,10 +117,10 @@ class TestingBrowserProcess : public BrowserProcess {
   void SetGoogleURLTracker(GoogleURLTracker* google_url_tracker);
   void SetProfileManager(ProfileManager* profile_manager);
   void SetIOThread(IOThread* io_thread);
-  void SetDevToolsManager(DevToolsManager*);
+  void SetBrowserPolicyConnector(policy::BrowserPolicyConnector* connector);
 
  private:
-  NotificationService notification_service_;
+  NotificationServiceImpl notification_service_;
   unsigned int module_ref_count_;
   scoped_ptr<ui::Clipboard> clipboard_;
   std::string app_locale_;
@@ -146,9 +132,10 @@ class TestingBrowserProcess : public BrowserProcess {
   scoped_ptr<ProfileManager> profile_manager_;
   scoped_ptr<NotificationUIManager> notification_ui_manager_;
   scoped_ptr<printing::BackgroundPrintingManager> background_printing_manager_;
+  scoped_refptr<printing::PrintPreviewTabController>
+      print_preview_tab_controller_;
   scoped_ptr<prerender::PrerenderTracker> prerender_tracker_;
   IOThread* io_thread_;
-  scoped_ptr<DevToolsManager> devtools_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(TestingBrowserProcess);
 };

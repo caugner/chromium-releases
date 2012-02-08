@@ -5,7 +5,8 @@
 #include "ui/aura_shell/desktop_layout_manager.h"
 
 #include "ui/aura/window.h"
-#include "views/widget/widget.h"
+#include "ui/aura_shell/shelf_layout_controller.h"
+#include "ui/views/widget/widget.h"
 
 namespace aura_shell {
 namespace internal {
@@ -16,8 +17,7 @@ namespace internal {
 DesktopLayoutManager::DesktopLayoutManager(aura::Window* owner)
     : owner_(owner),
       background_widget_(NULL),
-      launcher_widget_(NULL),
-      status_area_widget_(NULL) {
+      shelf_(NULL) {
 }
 
 DesktopLayoutManager::~DesktopLayoutManager() {
@@ -36,19 +36,25 @@ void DesktopLayoutManager::OnWindowResized() {
 
   background_widget_->SetBounds(fullscreen_bounds);
 
-  gfx::Rect launcher_bounds = launcher_widget_->GetWindowScreenBounds();
-  launcher_widget_->SetBounds(
-      gfx::Rect(0, owner_->bounds().bottom() - launcher_bounds.height(),
-                launcher_bounds.width(),
-                launcher_bounds.height()));
-
-  gfx::Rect status_area_bounds = status_area_widget_->GetWindowScreenBounds();
-  status_area_widget_->SetBounds(
-      gfx::Rect(owner_->bounds().right() - status_area_bounds.width(),
-                0,
-                status_area_bounds.width(),
-                status_area_bounds.height()));
+  if (shelf_)
+    shelf_->LayoutShelf();
 }
+
+void DesktopLayoutManager::OnWindowAddedToLayout(aura::Window* child) {
+}
+
+void DesktopLayoutManager::OnWillRemoveWindowFromLayout(aura::Window* child) {
+}
+
+void DesktopLayoutManager::OnChildWindowVisibilityChanged(aura::Window* child,
+                                                          bool visible) {
+}
+
+void DesktopLayoutManager::SetChildBounds(aura::Window* child,
+                                          const gfx::Rect& requested_bounds) {
+  SetChildBoundsDirect(child, requested_bounds);
+}
+
 
 }  // namespace internal
 }  // namespace aura_shell

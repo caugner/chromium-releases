@@ -22,9 +22,9 @@
 #include "grit/ui_resources.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/widget/widget.h"
 
 using views::MenuItemView;
 
@@ -40,7 +40,7 @@ BookmarkMenuController::BookmarkMenuController(Profile* profile,
       for_drop_(false),
       bookmark_bar_(NULL) {
   menu_delegate_->Init(this, NULL, node, start_child_index,
-                       BookmarkMenuDelegate::HIDE_OTHER_FOLDER,
+                       BookmarkMenuDelegate::HIDE_PERMANENT_FOLDERS,
                        bookmark_utils::LAUNCH_BAR_SUBFOLDER);
   menu_runner_.reset(new views::MenuRunner(menu_delegate_->menu()));
 }
@@ -83,7 +83,8 @@ void BookmarkMenuController::SetPageNavigator(PageNavigator* navigator) {
   menu_delegate_->SetPageNavigator(navigator);
 }
 
-string16 BookmarkMenuController::GetTooltipText(int id, const gfx::Point& p) {
+string16 BookmarkMenuController::GetTooltipText(int id,
+                                                const gfx::Point& p) const {
   return menu_delegate_->GetTooltipText(id, p);
 }
 

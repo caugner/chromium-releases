@@ -47,10 +47,11 @@
 #include "chrome/common/net/gaia/gaia_auth_consumer.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class Profile;
+class TokenServiceTest;
 
 namespace net {
 class URLRequestContextGetter;
@@ -61,7 +62,7 @@ class URLRequestContextGetter;
 class TokenService : public GaiaAuthConsumer,
                      public GaiaOAuthConsumer,
                      public WebDataServiceConsumer,
-                     public NotificationObserver {
+                     public content::NotificationObserver {
  public:
    TokenService();
    virtual ~TokenService();
@@ -135,7 +136,7 @@ class TokenService : public GaiaAuthConsumer,
   bool HasLsid() const;
   const std::string& GetLsid() const;
   // Did we get a proper LSID?
-  bool AreCredentialsValid() const;
+  virtual bool AreCredentialsValid() const;
 
   // For services with their own auth routines, they can read the OAuth token
   // and secret directly. Deprecated (in the sense of discouraged).
@@ -148,8 +149,16 @@ class TokenService : public GaiaAuthConsumer,
   // are issued.
   void StartFetchingTokens();
   void StartFetchingOAuthTokens();
-  bool HasTokenForService(const char* const service) const;
+  virtual bool HasTokenForService(const char* service) const;
   const std::string& GetTokenForService(const char* const service) const;
+
+  // OAuth login token is an all-powerful token that allows creating OAuth2
+  // tokens for any other scope (i.e. down-scoping).
+  // Typical use is to create an OAuth2 token for appropriate scope and then
+  // use that token to call a Google API.
+  virtual bool HasOAuthLoginToken() const;
+  const std::string& GetOAuth2LoginRefreshToken() const;
+  const std::string& GetOAuth2LoginAccessToken() const;
 
   // For tests only. Doesn't save to the WebDB.
   void IssueAuthTokenForTest(const std::string& service,
@@ -158,8 +167,13 @@ class TokenService : public GaiaAuthConsumer,
   // GaiaAuthConsumer implementation.
   virtual void OnIssueAuthTokenSuccess(const std::string& service,
                                        const std::string& auth_token) OVERRIDE;
-  virtual void OnIssueAuthTokenFailure(const std::string& service,
-                                       const GoogleServiceAuthError& error)
+  virtual void OnIssueAuthTokenFailure(
+      const std::string& service,
+      const GoogleServiceAuthError& error) OVERRIDE;
+  virtual void OnOAuthLoginTokenSuccess(const std::string& refresh_token,
+                                        const std::string& access_token,
+                                        int expires_in_secs) OVERRIDE;
+  virtual void OnOAuthLoginTokenFailure(const GoogleServiceAuthError& error)
       OVERRIDE;
 
   // GaiaOAuthConsumer implementation.
@@ -171,18 +185,19 @@ class TokenService : public GaiaAuthConsumer,
   virtual void OnOAuthWrapBridgeSuccess(const std::string& service_scope,
                                         const std::string& token,
                                         const std::string& expires_in) OVERRIDE;
-  virtual void OnOAuthWrapBridgeFailure(const std::string& service_name,
-                                        const GoogleServiceAuthError& error)
-      OVERRIDE;
+  virtual void OnOAuthWrapBridgeFailure(
+      const std::string& service_name,
+      const GoogleServiceAuthError& error) OVERRIDE;
 
   // WebDataServiceConsumer implementation.
-  virtual void OnWebDataServiceRequestDone(WebDataService::Handle h,
-                                           const WDTypedResult* result);
+  virtual void OnWebDataServiceRequestDone(
+      WebDataService::Handle h,
+      const WDTypedResult* result) OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
 
@@ -192,11 +207,19 @@ class TokenService : public GaiaAuthConsumer,
   void FireTokenRequestFailedNotification(const std::string& service,
                                           const GoogleServiceAuthError& error);
 
-  void LoadTokensIntoMemory(const std::map<std::string, std::string>& in_toks,
-                            std::map<std::string, std::string>* out_toks);
+  void LoadTokensIntoMemory(
+      const std::map<std::string, std::string>& db_tokens,
+      std::map<std::string, std::string>* in_memory_tokens);
+  void LoadSingleTokenIntoMemory(
+      const std::map<std::string, std::string>& db_tokens,
+      std::map<std::string, std::string>* in_memory_tokens,
+      const std::string& service);
 
   void SaveAuthTokenToDB(const std::string& service,
                          const std::string& auth_token);
+
+  // Returns the index of the given service.
+  static int GetServiceIndex(const std::string& service);
 
   // The profile with which this instance was initialized, or NULL.
   Profile* profile_;
@@ -245,10 +268,12 @@ class TokenService : public GaiaAuthConsumer,
   // Map from service to token.
   std::map<std::string, std::string> token_map_;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
+  friend class TokenServiceTest;
   FRIEND_TEST_ALL_PREFIXES(TokenServiceTest, LoadTokensIntoMemoryBasic);
   FRIEND_TEST_ALL_PREFIXES(TokenServiceTest, LoadTokensIntoMemoryAdvanced);
+  FRIEND_TEST_ALL_PREFIXES(TokenServiceTest, FullIntegrationNewServicesAdded);
 
   DISALLOW_COPY_AND_ASSIGN(TokenService);
 };

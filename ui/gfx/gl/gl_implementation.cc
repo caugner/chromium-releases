@@ -41,6 +41,21 @@ void CleanupNativeLibraries(void* unused) {
     g_libraries = NULL;
   }
 }
+
+bool ExportsCoreFunctionsFromGetProcAddress(GLImplementation implementation) {
+  switch (GetGLImplementation()) {
+    case kGLImplementationDesktopGL:
+    case kGLImplementationOSMesaGL:
+    case kGLImplementationMockGL:
+      return true;
+    case kGLImplementationEGLGLES2:
+      return false;
+    default:
+      NOTREACHED();
+      return true;
+  }
+}
+
 }
 
 GLImplementation GetNamedGLImplementation(const std::string& name) {
@@ -59,53 +74,6 @@ const char* GetGLImplementationName(GLImplementation implementation) {
   }
 
   return "unknown";
-}
-
-bool InitializeRequestedGLBindings(
-    const GLImplementation* allowed_implementations_begin,
-    const GLImplementation* allowed_implementations_end,
-    GLImplementation default_implementation) {
-  bool fallback_to_osmesa = false;
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUseGL)) {
-    std::string requested_implementation_name =
-        CommandLine::ForCurrentProcess()->GetSwitchValueASCII(switches::kUseGL);
-    GLImplementation requested_implementation;
-    if (requested_implementation_name == "any") {
-      requested_implementation = default_implementation;
-      fallback_to_osmesa = true;
-    } else {
-      requested_implementation =
-        GetNamedGLImplementation(requested_implementation_name);
-    }
-    if (std::find(allowed_implementations_begin,
-                  allowed_implementations_end,
-                  requested_implementation) == allowed_implementations_end) {
-      LOG(ERROR) << "Requested GL implementation is not available.";
-      return false;
-    }
-
-    InitializeGLBindings(requested_implementation);
-  } else {
-    InitializeGLBindings(default_implementation);
-  }
-
-  if (GetGLImplementation() == kGLImplementationNone && fallback_to_osmesa)
-    InitializeGLBindings(kGLImplementationOSMesaGL);
-
-  if (CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kEnableGPUServiceLogging)) {
-    InitializeDebugGLBindings();
-  }
-
-  if (GetGLImplementation() == kGLImplementationNone) {
-    LOG(ERROR) << "Could not initialize GL.";
-    return false;
-  } else {
-    LOG(INFO) << "Using "
-              << GetGLImplementationName(GetGLImplementation())
-              << " GL implementation.";
-    return true;
-  }
 }
 
 void SetGLImplementation(GLImplementation implementation) {
@@ -132,12 +100,16 @@ void AddGLNativeLibrary(base::NativeLibrary library) {
   g_libraries->push_back(library);
 }
 
+void UnloadGLNativeLibraries() {
+  CleanupNativeLibraries(NULL);
+}
+
 void SetGLGetProcAddressProc(GLGetProcAddressProc proc) {
   DCHECK(proc);
   g_get_proc_address = proc;
 }
 
-void* GetGLProcAddress(const char* name) {
+void* GetGLCoreProcAddress(const char* name) {
   DCHECK(g_gl_implementation != kGLImplementationNone);
 
   if (g_libraries) {
@@ -148,14 +120,27 @@ void* GetGLProcAddress(const char* name) {
         return proc;
     }
   }
-
-  if (g_get_proc_address) {
+  if (ExportsCoreFunctionsFromGetProcAddress(g_gl_implementation) &&
+      g_get_proc_address) {
     void* proc = g_get_proc_address(name);
     if (proc)
       return proc;
   }
 
   return NULL;
+}
+
+void* GetGLProcAddress(const char* name) {
+  DCHECK(g_gl_implementation != kGLImplementationNone);
+
+  void* proc = GetGLCoreProcAddress(name);
+  if (!proc && g_get_proc_address) {
+    proc = g_get_proc_address(name);
+    if (proc)
+      return proc;
+  }
+
+  return proc;
 }
 
 }  // namespace gfx

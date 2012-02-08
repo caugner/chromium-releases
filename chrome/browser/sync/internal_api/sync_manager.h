@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/configure_reason.h"
@@ -19,10 +19,6 @@
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 
 class FilePath;
-
-namespace base {
-class DictionaryValue;
-}  // namespace base
 
 namespace browser_sync {
 class JsBackend;
@@ -165,6 +161,9 @@ class SyncManager {
     syncable::ModelTypeSet encrypted_types;
     bool cryptographer_ready;
     bool crypto_has_pending_keys;
+
+    // The unique identifer for this client.
+    std::string unique_id;
   };
 
   // An interface the embedding application implements to be notified
@@ -376,9 +375,29 @@ class SyncManager {
     virtual void OnClearServerDataSucceeded() = 0;
     virtual void OnClearServerDataFailed() = 0;
 
-    // Called after we finish encrypting all appropriate datatypes.
-    virtual void OnEncryptionComplete(
-        const syncable::ModelTypeSet& encrypted_types) = 0;
+    // Called when the set of encrypted types or the encrypt
+    // everything flag has been changed.  Note that encryption isn't
+    // complete until the OnEncryptionComplete() notification has been
+    // sent (see below).
+    //
+    // |encrypted_types| will always be a superset of
+    // Cryptographer::SensitiveTypes().  If |encrypt_everything| is
+    // true, |encrypted_types| will be the set of all known types.
+    //
+    // Until this function is called, observers can assume that the
+    // set of encrypted types is Cryptographer::SensitiveTypes() and
+    // that the encrypt everything flag is false.
+    //
+    // Called from within a transaction.
+    virtual void OnEncryptedTypesChanged(
+        const syncable::ModelTypeSet& encrypted_types,
+        bool encrypt_everything) = 0;
+
+    // Called after we finish encrypting the current set of encrypted
+    // types.
+    //
+    // Called from within a transaction.
+    virtual void OnEncryptionComplete() = 0;
 
     virtual void OnActionableError(
         const browser_sync::SyncProtocolError& sync_protocol_error) = 0;
@@ -423,11 +442,6 @@ class SyncManager {
 
   // Checks if the sync server is reachable.
   void CheckServerReachable();
-
-  // Returns the username last used for a successful authentication.
-  // Returns empty if there is no such username.  May be called on any
-  // thread.
-  const std::string& GetAuthenticatedUsername();
 
   // Check if the database has been populated with a full "initial" download of
   // sync items for each data type currently present in the routing info.
@@ -477,10 +491,6 @@ class SyncManager {
   // Request a clearing of all data on the server
   void RequestClearServerData();
 
-  // Add/remove change observers.
-  void AddChangeObserver(ChangeObserver* observer);
-  void RemoveChangeObserver(ChangeObserver* observer);
-
   // Adds a listener to be notified of sync events.
   // NOTE: It is OK (in fact, it's probably a good idea) to call this before
   // having received OnInitializationCompleted.
@@ -522,24 +532,34 @@ class SyncManager {
   // May be called from any thread.
   UserShare* GetUserShare() const;
 
-  // Inform the cryptographer of the most recent passphrase and set of encrypted
-  // types (from nigori node), then ensure all data that needs encryption is
-  // encrypted with the appropriate passphrase.
-  // Note: opens a transaction and can trigger ON_PASSPHRASE_REQUIRED, so must
-  // only be called after syncapi has been initialized.
+  // Inform the cryptographer of the most recent passphrase and set of
+  // encrypted types (from nigori node), then ensure all data that
+  // needs encryption is encrypted with the appropriate passphrase.
+  //
+  // May trigger OnPassphraseRequired().  Otherwise, it will trigger
+  // OnEncryptedTypesChanged() if necessary (see comments for
+  // OnEncryptedTypesChanged()), and then OnEncryptionComplete().
+  //
+  // Note: opens a transaction, so must only be called after syncapi
+  // has been initialized.
   void RefreshEncryption();
 
-  // Enable encryption of all sync data. Once enabled, it can never be disabled
-  // without clearing the server data.
+  // Enable encryption of all sync data. Once enabled, it can never be
+  // disabled without clearing the server data.
+  //
+  // This will trigger OnEncryptedTypesChanged() if necessary (see
+  // comments for OnEncryptedTypesChanged()).  It then may trigger
+  // OnPassphraseRequired(), but otherwise it will trigger
+  // OnEncryptionComplete().
   void EnableEncryptEverything();
 
   // Returns true if we are currently encrypting all sync data.  May
   // be called on any thread.
-  bool EncryptEverythingEnabled() const;
+  bool EncryptEverythingEnabledForTest() const;
 
   // Gets the set of encrypted types from the cryptographer
   // Note: opens a transaction.  May be called from any thread.
-  syncable::ModelTypeSet GetEncryptedDataTypes() const;
+  syncable::ModelTypeSet GetEncryptedDataTypesForTest() const;
 
   // Reads the nigori node to determine if any experimental types should be
   // enabled.
@@ -569,9 +589,13 @@ class SyncManager {
 
 bool InitialSyncEndedForTypes(syncable::ModelTypeSet types, UserShare* share);
 
+syncable::ModelTypeSet GetTypesWithEmptyProgressMarkerToken(
+    const syncable::ModelTypeSet types,
+    sync_api::UserShare* share);
+
 // Returns the string representation of a PassphraseRequiredReason value.
 std::string PassphraseRequiredReasonToString(PassphraseRequiredReason reason);
 
-} // namespace sync_api
+}  // namespace sync_api
 
 #endif  // CHROME_BROWSER_SYNC_INTERNAL_API_SYNC_MANAGER_H_

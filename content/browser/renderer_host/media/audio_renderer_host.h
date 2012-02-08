@@ -61,8 +61,8 @@
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "content/browser/browser_message_filter.h"
-#include "content/browser/browser_thread.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_thread.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_output_controller.h"
 #include "media/audio/simple_sources.h"
@@ -108,23 +108,23 @@ class CONTENT_EXPORT AudioRendererHost
   AudioRendererHost(const content::ResourceContext* resource_context);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing();
-  virtual void OnDestruct() const;
+  virtual void OnChannelClosing() OVERRIDE;
+  virtual void OnDestruct() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   // AudioOutputController::EventHandler implementations.
-  virtual void OnCreated(media::AudioOutputController* controller);
-  virtual void OnPlaying(media::AudioOutputController* controller);
-  virtual void OnPaused(media::AudioOutputController* controller);
+  virtual void OnCreated(media::AudioOutputController* controller) OVERRIDE;
+  virtual void OnPlaying(media::AudioOutputController* controller) OVERRIDE;
+  virtual void OnPaused(media::AudioOutputController* controller) OVERRIDE;
   virtual void OnError(media::AudioOutputController* controller,
-                       int error_code);
+                       int error_code) OVERRIDE;
   virtual void OnMoreData(media::AudioOutputController* controller,
-                          AudioBuffersState buffers_state);
+                          AudioBuffersState buffers_state) OVERRIDE;
 
  private:
   friend class AudioRendererHostTest;
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<AudioRendererHost>;
   friend class MockAudioRendererHost;
   FRIEND_TEST_ALL_PREFIXES(AudioRendererHostTest, CreateMockStream);

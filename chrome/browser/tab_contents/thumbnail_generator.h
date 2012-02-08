@@ -16,8 +16,8 @@
 #include "base/timer.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class GURL;
 class Profile;
@@ -29,7 +29,7 @@ namespace history {
 class TopSites;
 }
 
-class ThumbnailGenerator : public NotificationObserver,
+class ThumbnailGenerator : public content::NotificationObserver,
                            public TabContentsObserver {
  public:
   typedef base::Callback<void(const SkBitmap&)> ThumbnailReadyCallback;
@@ -124,8 +124,8 @@ class ThumbnailGenerator : public NotificationObserver,
                                     const GURL& url);
 
   // TabContentsObserver overrides.
-  virtual void DidStartLoading();
-  virtual void StopNavigation();
+  virtual void DidStartLoading() OVERRIDE;
+  virtual void StopNavigation() OVERRIDE;
 
  private:
   virtual void WidgetDidReceivePaintAtSizeAck(
@@ -133,10 +133,10 @@ class ThumbnailGenerator : public NotificationObserver,
       int tag,
       const gfx::Size& size);
 
-  // NotificationObserver interface.
+  // content::NotificationObserver interface.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Indicates that the given widget has changed is visibility.
   void WidgetHidden(RenderWidgetHost* widget);
@@ -145,7 +145,7 @@ class ThumbnailGenerator : public NotificationObserver,
   // through being closed, or because the renderer is no longer there).
   void TabContentsDisconnected(TabContents* contents);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Map of callback objects by sequence number.
   struct AsyncRequestInfo;

@@ -10,7 +10,6 @@
 #include "base/string16.h"
 #include "chrome/browser/autocomplete/autocomplete_controller_delegate.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
-#include "chrome/browser/autocomplete/network_action_predictor.h"
 #include "chrome/common/instant_types.h"
 #include "content/public/common/page_transition_types.h"
 #include "googleurl/src/gurl.h"
@@ -23,7 +22,6 @@ class AutocompleteEditModel;
 class AutocompletePopupModel;
 class AutocompleteResult;
 class InstantController;
-class NetworkActionPredictor;
 class OmniboxView;
 class Profile;
 class SkBitmap;
@@ -293,6 +291,9 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
   // Called when the user pastes in text.
   void on_paste() { paste_state_ = PASTING; }
 
+  // Returns true if pasting is in progress.
+  bool is_pasting() const { return paste_state_ == PASTING; }
+
   // Called when the user presses up or down.  |count| is a repeat count,
   // negative for moving up, positive for moving down.
   void OnUpOrDownKeyPressed(int count);
@@ -365,7 +366,7 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
   };
 
   // AutocompleteControllerDelegate:
-  virtual void OnResultChanged(bool default_match_changed);
+  virtual void OnResultChanged(bool default_match_changed) OVERRIDE;
 
   // Returns true if a query to an autocomplete provider is currently
   // in progress.  This logic should in the future live in
@@ -554,9 +555,6 @@ class AutocompleteEditModel : public AutocompleteControllerDelegate {
 
   // Last value of InstantCompleteBehavior supplied to |SetSuggestedText|.
   InstantCompleteBehavior instant_complete_behavior_;
-
-  // Used to determine what network actions to take in different circumstances.
-  NetworkActionPredictor network_action_predictor_;
 
   DISALLOW_COPY_AND_ASSIGN(AutocompleteEditModel);
 };

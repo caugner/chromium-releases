@@ -5,7 +5,7 @@
       {
         "id": "Resource",
         "type": "object",
-        "description": "A resource within the inspected page, such as a document, a script or an image.",
+        "description": "A resource within the inspected page, such as a document, a script, or an image.",
         "properties": {
           "url": {
             "type": "string",
@@ -21,7 +21,7 @@
               {
                 "name": "callback",
                 "type": "function",
-                "description": "A function that is called upon request completion.",
+                "description": "A function that receives resource content when the request completes.",
                 "parameters": [
                   {
                     "name": "content",
@@ -50,18 +50,19 @@
               {
                 "name": "commit",
                 "type": "boolean",
-                "description": "True if the user has finished editing the resource and the new content of the resource should be persisted, false if this is a minor change sent in progress of the user editing the resource."
+                "description": "True if the user has finished editing the resource, and the new content of the resource should be persisted; false if this is a minor change sent in progress of the user editing the resource."
               },
               {
                 "name": "callback",
                 "type": "function",
                 "description": "A function called upon request completion.",
+                "optional": true,
                 "parameters": [
                   {
                     "name": "error",
                     "type": "object",
                     "optional": true,
-                    "description": "Set to undefined if the operation completed successfully, describes error otherwise."
+                    "description": "Set to undefined if the resource content was set successfully; describes error otherwise."
                   }
                 ]
               }
@@ -91,6 +92,7 @@
             "name": "callback",
             "type": "function",
             "description": "A function called when evaluation completes.",
+            "optional": true,
             "parameters": [
               {
                 "name": "result",
@@ -100,7 +102,7 @@
               {
                 "name": "isException",
                 "type": "boolean",
-                "description": "Set if an exception was caught while evaluating the expression"
+                "description": "Set if an exception was caught while evaluating the expression."
               }
             ]
           }
@@ -109,13 +111,29 @@
       {
         "name": "reload",
         "type": "function",
-        "description": "Reloads the inspected page, optionally setting override for the user agent string.",
+        "description": "Reloads the inspected page.",
         "parameters": [
           {
-            "name": "userAgent",
-            "type": "string",
+            "type": "object",
+            "name": "reloadOptions",
             "optional": true,
-            "description": "A user agent override string."
+            "properties": {
+              "ignoreCache": {
+                "type": "boolean",
+                "optional": true,
+                "description": "When true, the loader will ignore the cache for all inspected page resources loaded before the <code>load</code> event is fired. The effect is similar to pressing Ctrl+Shift+R in the inspected window or within the Developer Tools window."
+              },
+              "userAgent": {
+                "type": "string",
+                "optional": true,
+                "description": "If specified, the string will override the value of the <code>User-Agent</code> HTTP header that's sent while loading the resources of the inspected page. The string will also override the value of the <code>navigator.userAgent</code> property that's returned to any scripts that are running within the inspected page."
+              },
+              "injectedScript": {
+                "type": "string",
+                "optional": true,
+                "description": "If specified, the script will be injected into every frame of the inspected page immediately upon load, before any of the frame's scripts. The script will not be injected after subsequent reloads&mdash;for example, if the user presses Ctrl+R."
+              }
+            }
           }
         ]
       },
@@ -127,7 +145,7 @@
           {
             "name": "callback",
             "type": "function",
-            "description": "A function that is called upon request completion.",
+            "description": "A function that receives the list of resources when the request completes.",
             "parameters": [
               {
                 "name": "resources",
@@ -167,10 +185,15 @@
     "namespace": "experimental.devtools.panels",
     "types": [
       {
-        "id": "PanelWithSidebars",
+        "id": "ElementsPanel",
         "type": "object",
-        "isInstanceOf": "Panel",
-        "description": "A panel within Web Inspector UI that has sidebars.",
+        "description": "Represents the Elements panel.",
+        "events": [
+          {
+            "name": "onSelectionChanged",
+            "description": "Fired when an object is selected in the panel."
+          }
+        ],
         "functions": [
           {
             "name": "createSidebarPane",
@@ -180,12 +203,13 @@
               {
                 "name": "title",
                 "type": "string",
-                "description": "A text that is displayed in sidebar caption."
+                "description": "Text that is displayed in sidebar caption."
               },
               {
                 "name": "callback",
                 "type": "function",
-                "description": "A callback invoked when sidebar is created.",
+                "description": "A callback invoked when the sidebar is created.",
+                "optional": true,
                 "parameters": [
                   {
                     "name": "result",
@@ -199,26 +223,37 @@
         ]
       },
       {
-        "id": "ElementsPanel",
-        "type": "object",
-        "isInstanceOf": "PanelWithSidebars",
-        "description": "Represents Elements panel",
-        "events": [
-          {
-            "name": "onSelectionChanged",
-            "description": "Fired when an object is selected in the panel."
-          }
-        ]
-      },
-      {
         "id": "ExtensionPanel",
         "type": "object",
-        "isInstanceOf": "Panel",
         "description": "Represents a panel created by extension.",
+        "functions": [
+          {
+            "name": "createStatusBarButton",
+            "description": "Appends a button to the status bar of the panel.",
+            "parameters": [
+              {
+                "name": "iconPath",
+                "type": "string",
+                "description": "Path to the icon of the button. The file should contain a 64x24-pixel image composed of two 32x24 icons. The left icon is used when the button is inactive; the right icon is displayed when the button is pressed."
+              },
+              {
+                "name": "tooltipText",
+                "type": "string",
+                "description": "Text shown as a tooltip when user hovers the mouse over the button."
+              },
+              {
+                "name": "disabled",
+                "type": "boolean",
+                "description": "Whether the button is disabled."
+              }
+            ],
+            "returns": { "$ref": "Button" }
+          }
+        ],
         "events": [
           {
             "name": "onSearch",
-            "description": "Fired upon a search action (start of a new search, search result navigation or search being canceled).",
+            "description": "Fired upon a search action (start of a new search, search result navigation, or search being canceled).",
             "parameters": [
               {
                 "name": "action",
@@ -232,6 +267,23 @@
                 "description": "Query string (only for 'performSearch')."
               }
             ]
+          },
+          {
+            "name": "onShown",
+            "type": "function",
+            "description": "Fired when the user switches to the panel.",
+            "parameters": [
+              { 
+                "name": "window",
+                "type": "DOMWindow",
+                "description": "The <code>window</code> object of panel's page."
+              }
+            ]
+          },
+          {
+            "name": "onHidden",
+            "type": "function",
+            "description": "Fired when the user switches away from the panel."
           }
         ]
       },
@@ -248,7 +300,7 @@
               {
                 "name": "height",
                 "type": "string",
-                "description": "A CSS-like size specification, e.g. '10px' or '12pt'."
+                "description": "A CSS-like size specification, such as <code>'100px'</code> or <code>'12ex'</code>."
               }
             ]
           },
@@ -267,6 +319,12 @@
                 "type": "string",
                 "optional": true,
                 "description": "An optional title for the root of the expression tree."
+              },
+              {
+                "name": "callback",
+                "type": "function",
+                "optional": true,
+                "description": "A callback invoked after the sidebar pane is updated with the expression evaluation results."
               }
             ]
           },
@@ -285,6 +343,12 @@
                 "type": "string",
                 "optional": true,
                 "description": "An optional title for the root of the expression tree."
+              },
+              {
+                "name": "callback",
+                "type": "function",
+                "optional": true,
+                "description": "A callback invoked after the sidebar is updated with the object."
               }
             ]
           },
@@ -294,11 +358,69 @@
             "description": "Sets an HTML page to be displayed in the sidebar pane.",
             "parameters": [
               {
-                "name": "url",
+                "name": "path",
                 "type": "string",
-                "description": "A URL of an extension page to display within the sidebar."
+                "description": "Relative path of an extension page to display within the sidebar."
               }
             ]
+          }
+        ],
+        "events": [
+          {
+            "name": "onShown",
+            "type": "function",
+            "description": "Fired when the sidebar pane becomes visible as a result of user switching to the panel that hosts it.",
+            "parameters": [
+              { 
+                "name": "window",
+                "type": "DOMWindow",
+                "optional": true,
+                "description": "The <code>window</code> object of the sidebar page, if one was set with the <code>setPage()</code> method."
+              }
+            ]
+          },
+          {
+            "name": "onHidden",
+            "type": "function",
+            "description": "Fired when the sidebar pane becomes hidden as a result of the user switching away from the panel that hosts the sidebar pane."
+          }
+        ]
+      },
+      {
+        "id": "Button",
+        "type": "object",
+        "description": "A button created by the extension.",
+        "functions": [
+          {
+            "name": "update",
+            "description": "Updates the attributes of the button. If some of the arguments are omitted or <code>null</code>, the corresponding attributes are not updated.",
+            "parameters": [
+              {
+                "name": "iconPath",
+                "type": "string",
+                "optional": true,
+                "description": "Path to the new icon of the button."
+              },
+              {
+                "name": "tooltipText",
+                "type": "string",
+                "optional": true,
+                "description": "Text shown as a tooltip when user hovers the mouse over the button."
+              },
+              {
+                "name": "disabled",
+                "type": "boolean",
+                "optional": true,
+                "description": "Whether the button is disabled."
+              }
+            ]
+          }
+        ],
+        "events": [
+          {
+            "name": "onClicked",
+            "type": "function",
+            "description": "Fired when the button is clicked."
           }
         ]
       }
@@ -318,22 +440,23 @@
           {
             "name": "title",
             "type": "string",
-            "description": "Title that is displayed under the extension icon in the toolbar."
+            "description": "Title that is displayed next to the extension icon in the Developer Tools toolbar."
           },
           {
-            "name": "iconURL",
+            "name": "iconPath",
             "type": "string",
-            "description": "A URL of the toolbar icon."
+            "description": "Path of the panel's icon relative to the extension directory."
           },
           {
-            "name": "pageURL",
+            "name": "pagePath",
             "type": "string",
-            "description": "A URL of the page that represents this panel."
+            "description": "Path of the panel's HTML page relative to the extension directory."
           },
           {
             "name": "callback",
             "type": "function",
-            "description": "A function that is called upon request completion.",
+            "optional": true,
+            "description": "A function that is called when the panel is created.",
             "parameters": [
               {
                 "name": "panel",
@@ -372,7 +495,7 @@
       {
         "id": "Request",
         "type": "object",
-        "description": "Represents a network request for a document resource (script, image etc). See HAR Specification for reference.",
+        "description": "Represents a network request for a document resource (script, image and so on). See HAR Specification for reference.",
         "functions": [
           {
             "name": "getContent",
@@ -382,7 +505,7 @@
               {
                 "name": "callback",
                 "type": "function",
-                "description": "A function that is called upon request completion.",
+                "description": "A function that receives the response body when the request completes.",
                 "parameters": [
                   {
                     "name": "content",
@@ -405,17 +528,17 @@
       {
         "name": "getHAR",
         "type": "function",
-        "description": "Returns HAR archive that contains all known network requests.",
+        "description": "Returns HAR log that contains all known network requests.",
         "parameters": [
           {
             "name": "callback",
             "type": "function",
-            "description": "A function that is called upon request completion.",
+            "description": "A function that receives the HAR log when the request completes.",
             "parameters": [
               {
-                "name": "har",
+                "name": "harLog",
                 "type": "object",
-                "description": "A HAR archive. See HAR specification for details."
+                "description": "A HAR log. See HAR specification for details."
               }
             ]
           }
@@ -465,7 +588,7 @@
           {
             "name": "callback",
             "type": "function",
-            "description": "A function that is called upon request completion.",
+            "description": "A function that receives console messages when the request completes.",
             "parameters": [
               {
                 "name": "messages",
@@ -557,12 +680,12 @@
       {
         "id": "AuditCategory",
         "type": "object",
-        "description": "A set of audit rules",
+        "description": "A group of logically related audit checks.",
         "events": [
           {
             "name": "onAuditStarted",
             "type": "function",
-            "description": "Fired when the audit is started, if the category is enabled -- the extension is expected to begin executing audit rules.",
+            "description": "If the category is enabled, this event is fired when the audit is started. The event handler is expected to initiate execution of the audit logic that will populate the <code>results</code> collection.",
             "parameters": [
               { "name": "results", "$ref": "AuditResults" }
             ]
@@ -572,21 +695,22 @@
       {
         "id": "FormattedValue",
         "type": "object",
-        "description": "A value returned from one of the formatters (a URL, code snippet etc), to be passed to createResult or addChild."
+        "description": "A value returned from one of the formatters (a URL, code snippet etc), to be passed to <code>createResult()</code> or <code>addChild()</code>. See <a href=\"#method-AuditResults-createSnippet\"><code>createSnippet()</code></a> and <a href=\"#method-AuditResults-createURL\"><code>createURL()</code></a>."
       },
       {
         "id": "AuditResults",
         "type": "object",
-        "description": "A collection of audit results for current run of the audit category.",
+        "description": "A collection of audit results for the current run of the audit category.",
         "functions": [
           {
             "name": "addResult",
             "type": "function",
+            "description": "Adds an audit result. The results are rendered as bulleted items under the audit category assoicated with the <code>AuditResults</code> object.",
             "parameters": [
               {
                 "name": "displayName",
                 "type": "string",
-                "description": "A concise, high-level description of audit rule result."
+                "description": "A concise, high-level description of the result."
               },
               {
                 "name": "description",
@@ -595,20 +719,20 @@
               },
               {
                 "name": "severity",
-                "$ref": "AuditResultSeverety"
+                "$ref": "AuditResultSeverity"
               },
               {
                 "name": "details",
                 "$ref": "AuditResultNode",
                 "optional": true,
-                "description": "A subtree that appears under added result that may provide additional details on the violations found."
+                "description": "A subtree that appears under the added result that may provide additional details on the violations found."
               }
             ]
           },
           {
             "name": "createResult",
             "type": "function",
-            "description": "Creates a result node that may be user as details parameters to addResult.",
+            "description": "Creates a result node that may be used as the <code>details</code> parameters to the <code>addResult()</code> method.",
             "parameters": [
               {
                 "name": "content ...",
@@ -616,7 +740,7 @@
                   { "type": "string" },
                   { "$ref": "FormattedValue" }
                 ],
-                "description": "Either string or formatted values returned by one of the AuditResult formatters (URL, snippet etc). If multiple arguments are passed, these will be concatenated into a single node."
+                "description": "Either string or formatted values returned by one of the AuditResult formatters (a URL, a snippet etc). If multiple arguments are passed, these will be concatenated into a single node."
               }
             ],
             "returns": {
@@ -626,15 +750,15 @@
           {
             "name": "done",
             "type": "function",
-            "description": "Signals the WebInspector Audits panel that the run of this category is over. Normally the run completes automatically when a number of added top-level results is equal to that declared when AuditCategory was created."
+            "description": "Signals the DevTools Audits panel that the run of this category is over. The audit run also completes automatically when the number of added top-level results is equal to that declared when AuditCategory was created."
           },
           {
             "name": "createURL",
             "type": "function",
-            "description": "Render passed value as a URL in the Audits panel",
+            "description": "Render passed value as a URL in the Audits panel.",
             "parameters": [
-              { "name": "href", "type": "string", "description": "A URL that will appear as the href value on the resulting link." },
-              { "name": "displayText", "type": "string", "description": "A text that will appear to the user.", "optional": true }
+              { "name": "href", "type": "string", "description": "A URL that appears as the href value on the resulting link." },
+              { "name": "displayText", "type": "string", "description": "Text that appears to the user.", "optional": true }
             ],
             "returns": { "$ref": "FormattedValue" }
           },
@@ -651,7 +775,7 @@
         "properties": {
           "Severity": {
             "$ref": "AuditResultSeverity",
-            "description": "A class that contains possible values for audit result severities."
+            "description": "A class that contains possible values for the audit result severities."
           },
           "text": {
             "type": "string",
@@ -673,11 +797,11 @@
       {
         "id": "AuditResultNode",
         "type": "object",
-        "description": "A node in the audit result tree. Displays some content and optionally has children node.",
+        "description": "A node in the audit result tree. Displays content and may optionally have children nodes.",
         "functions": [
           {
             "name": "addChild",
-            "description": "Adds another child node to this node.",
+            "description": "Adds a child node to this node.",
             "parameters": [
               {
                 "name": "content ...",
@@ -703,6 +827,7 @@
       {
         "id": "AuditResultSeverity",
         "type": "object",
+        "description": "This type contains possible values for a result severity. The results of different severities are distinguished by colored bullets near the result's display name.",
         "properties": {
           "Info": {
             "type": "string"

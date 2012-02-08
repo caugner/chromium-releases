@@ -4,8 +4,8 @@
 
 #include "chrome/browser/policy/cloud_policy_controller.h"
 
-#include "base/message_loop.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
 #include "chrome/browser/policy/cloud_policy_data_store.h"
 #include "chrome/browser/policy/device_token_fetcher.h"
@@ -14,7 +14,7 @@
 #include "chrome/browser/policy/mock_device_management_service.h"
 #include "chrome/browser/policy/policy_notifier.h"
 #include "chrome/browser/policy/user_policy_cache.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "policy/policy_constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -24,6 +24,7 @@ namespace policy {
 using ::testing::AnyNumber;
 using ::testing::InSequence;
 using ::testing::_;
+using content::BrowserThread;
 
 class MockDeviceTokenFetcher : public DeviceTokenFetcher {
  public:
@@ -50,7 +51,8 @@ class CloudPolicyControllerTest : public testing::Test {
   virtual void SetUp() {
     ASSERT_TRUE(temp_user_data_dir_.CreateUniqueTempDir());
     cache_.reset(new UserPolicyCache(
-        temp_user_data_dir_.path().AppendASCII("CloudPolicyControllerTest")));
+        temp_user_data_dir_.path().AppendASCII("CloudPolicyControllerTest"),
+        false  /* wait_for_policy_fetch */));
     token_fetcher_.reset(new MockDeviceTokenFetcher(cache_.get()));
     EXPECT_CALL(service_, CreateBackend())
         .Times(AnyNumber())
@@ -67,6 +69,18 @@ class CloudPolicyControllerTest : public testing::Test {
     controller_.reset(new CloudPolicyController(
         &service_, cache_.get(), token_fetcher_.get(), data_store_.get(),
         &notifier_, new DummyWorkScheduler));
+  }
+
+  void CreateNewWaitingCache() {
+    cache_.reset(new UserPolicyCache(
+        temp_user_data_dir_.path().AppendASCII("CloudPolicyControllerTest"),
+        true  /* wait_for_policy_fetch */));
+    // Make this cache's disk cache ready, but have it still waiting for a
+    // policy fetch.
+    cache_->Load();
+    loop_.RunAllPending();
+    ASSERT_TRUE(cache_->last_policy_refresh_time().is_null());
+    ASSERT_FALSE(cache_->IsReady());
   }
 
   void ExpectHasSpdyPolicy() {
@@ -92,8 +106,8 @@ class CloudPolicyControllerTest : public testing::Test {
   MessageLoop loop_;
 
  private:
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   DISALLOW_COPY_AND_ASSIGN(CloudPolicyControllerTest);
 };
@@ -236,6 +250,63 @@ TEST_F(CloudPolicyControllerTest, InvalidSerialNumber) {
   EXPECT_CALL(*token_fetcher_.get(), SetSerialNumberInvalidState()).Times(1);
   CreateNewController();
   loop_.RunAllPending();
+}
+
+TEST_F(CloudPolicyControllerTest, DontSetFetchingDoneWithoutTokens) {
+  CreateNewWaitingCache();
+  CreateNewController();
+  // Initialized without an oauth token, goes into TOKEN_UNAVAILABLE state.
+  // This means the controller is still waiting for an oauth token fetch.
+  EXPECT_FALSE(cache_->IsReady());
+}
+
+TEST_F(CloudPolicyControllerTest, DontSetFetchingDoneWithoutFetching) {
+  CreateNewWaitingCache();
+  data_store_->SetupForTesting("device_token", "device_id",
+                               "who@what.com", "auth", true);
+  CreateNewController();
+  // Initialized with an oauth token, goes into TOKEN_VALID state.
+  // This means the controller has an oauth token and should fetch the next
+  // token, which is the dm server register token.
+  EXPECT_FALSE(cache_->IsReady());
+}
+
+TEST_F(CloudPolicyControllerTest, SetFetchingDoneForUnmanagedUsers) {
+  CreateNewWaitingCache();
+  data_store_->SetupForTesting("", "device_id",
+                               "user@gmail.com", "auth", true);
+  CreateNewController();
+  loop_.RunAllPending();
+  // User is in an unmanaged domain.
+  EXPECT_TRUE(cache_->IsReady());
+  EXPECT_TRUE(cache_->last_policy_refresh_time().is_null());
+}
+
+TEST_F(CloudPolicyControllerTest, SetFetchingDoneAfterPolicyFetch) {
+  CreateNewWaitingCache();
+  data_store_->SetupForTesting("device_token", "device_id",
+                               "user@enterprise.com", "auth", true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(DoAll(
+      InvokeWithoutArgs(this, &CloudPolicyControllerTest::StopMessageLoop),
+      MockDeviceManagementBackendSucceedSpdyCloudPolicy()));
+  CreateNewController();
+  loop_.RunAllPending();
+  EXPECT_TRUE(cache_->IsReady());
+  EXPECT_FALSE(cache_->last_policy_refresh_time().is_null());
+}
+
+TEST_F(CloudPolicyControllerTest, SetFetchingDoneAfterPolicyFetchFails) {
+  CreateNewWaitingCache();
+  data_store_->SetupForTesting("device_token", "device_id",
+                               "user@enterprise.com", "auth", true);
+  EXPECT_CALL(backend_, ProcessPolicyRequest(_, _, _, _, _)).WillOnce(DoAll(
+      InvokeWithoutArgs(this, &CloudPolicyControllerTest::StopMessageLoop),
+      MockDeviceManagementBackendFailPolicy(
+          DeviceManagementBackend::kErrorRequestFailed)));
+  CreateNewController();
+  loop_.RunAllPending();
+  EXPECT_TRUE(cache_->IsReady());
+  EXPECT_TRUE(cache_->last_policy_refresh_time().is_null());
 }
 
 }  // namespace policy

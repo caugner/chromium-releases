@@ -54,12 +54,6 @@ class Time;
 
 // Temporary layering violation to allow existing users of a deprecated
 // interface.
-namespace chrome_browser_net {
-class ConnectInterceptor;
-}
-
-// Temporary layering violation to allow existing users of a deprecated
-// interface.
 namespace fileapi {
 class FileSystemDirURLRequestJobTest;
 class FileSystemOperationWriteTest;
@@ -604,7 +598,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
   // OnAuthRequired() callback (and only then).
   // SetAuth will reissue the request with the given credentials.
   // CancelAuth will give up and display the error page.
-  void SetAuth(const string16& username, const string16& password);
+  void SetAuth(const AuthCredentials& credentials);
   void CancelAuth();
 
   // This method can be called after the user selects a client certificate to
@@ -806,7 +800,7 @@ class NET_EXPORT URLRequest : NON_EXPORTED_BASE(public base::NonThreadSafe) {
 
   // Callback passed to the network delegate to notify us when a blocked request
   // is ready to be resumed or canceled.
-  OldCompletionCallbackImpl<URLRequest> before_request_callback_;
+  CompletionCallback before_request_callback_;
 
   // Safe-guard to ensure that we do not send multiple "I am completed"
   // messages to network delegate.

@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback_old.h"
+#include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/task.h"
 #include "base/time.h"
@@ -49,6 +49,9 @@ struct BrowseInfo {
   std::vector<GURL> host_redirects;
   std::vector<GURL> url_redirects;
 
+  // The HTTP status code from this navigation.
+  int http_status_code;
+
   BrowseInfo();
   ~BrowseInfo();
 };
@@ -61,7 +64,7 @@ class BrowserFeatureExtractor {
   // true iff feature extraction succeeded.  The second argument is the
   // phishing request which was modified by the feature extractor.  The
   // DoneCallback takes ownership of the request object.
-  typedef Callback2<bool, ClientPhishingRequest*>::Type DoneCallback;
+  typedef base::Callback<void(bool, ClientPhishingRequest*)> DoneCallback;
 
   // The caller keeps ownership of the tab and service objects and is
   // responsible for ensuring that they stay valid for the entire
@@ -80,11 +83,11 @@ class BrowserFeatureExtractor {
   // ExtractFeatures returns.  This method must run on the UI thread.
   virtual void ExtractFeatures(const BrowseInfo* info,
                                ClientPhishingRequest* request,
-                               DoneCallback* callback);
+                               const DoneCallback& callback);
 
  private:
   friend class DeleteTask<BrowserFeatureExtractor>;
-  typedef std::pair<ClientPhishingRequest*, DoneCallback*> ExtractionData;
+  typedef std::pair<ClientPhishingRequest*, DoneCallback> ExtractionData;
   typedef std::map<CancelableRequestProvider::Handle,
                    ExtractionData> PendingQueriesMap;
 
@@ -94,7 +97,7 @@ class BrowserFeatureExtractor {
 
   // Actually starts feature extraction (does the real work).
   void StartExtractFeatures(ClientPhishingRequest* request,
-                            DoneCallback* callback);
+                            const DoneCallback& callback);
 
   // HistoryService callback which is called when we're done querying URL visits
   // in the history.
@@ -130,14 +133,14 @@ class BrowserFeatureExtractor {
   // query is being processed.
   void StorePendingQuery(CancelableRequestProvider::Handle handle,
                          ClientPhishingRequest* request,
-                         DoneCallback* callback);
+                         const DoneCallback& callback);
 
   // Helper function which is the counterpart of StorePendingQuery.  If there
   // is a pending query for the given handle it will return false and set both
   // the request and cb pointers.  Otherwise, it will return false.
   bool GetPendingQuery(CancelableRequestProvider::Handle handle,
                        ClientPhishingRequest** request,
-                       DoneCallback** callback);
+                       DoneCallback* callback);
 
   // Helper function which gets the history server if possible.  If the pointer
   // is set it will return true and false otherwise.
@@ -146,11 +149,11 @@ class BrowserFeatureExtractor {
   TabContents* tab_;
   ClientSideDetectionService* service_;
   CancelableRequestConsumer request_consumer_;
-  ScopedRunnableMethodFactory<BrowserFeatureExtractor> method_factory_;
+  base::WeakPtrFactory<BrowserFeatureExtractor> weak_factory_;
 
   // Set of pending extractions (i.e. extractions for which ExtractFeatures was
   // called but not StartExtractFeatures).
-  std::set<ExtractionData> pending_extractions_;
+  std::map<ClientPhishingRequest*, DoneCallback> pending_extractions_;
 
   // Set of pending queries (i.e., where history->Query...() was called but
   // the history callback hasn't been invoked yet).
@@ -158,5 +161,6 @@ class BrowserFeatureExtractor {
 
   DISALLOW_COPY_AND_ASSIGN(BrowserFeatureExtractor);
 };
+
 }  // namespace safe_browsing
 #endif  // CHROME_BROWSER_SAFE_BROWSING_BROWSER_FEATURE_EXTRACTOR_H_

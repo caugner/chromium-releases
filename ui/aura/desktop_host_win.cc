@@ -6,9 +6,14 @@
 
 #include <windows.h>
 
+#include <algorithm>
+
 #include "base/message_loop.h"
 #include "ui/aura/desktop.h"
 #include "ui/aura/event.h"
+
+using std::max;
+using std::min;
 
 namespace aura {
 
@@ -101,8 +106,19 @@ DesktopHost* DesktopHost::Create(const gfx::Rect& bounds) {
   return new DesktopHostWin(bounds);
 }
 
-DesktopHostWin::DesktopHostWin(const gfx::Rect& bounds) : desktop_(NULL) {
+// static
+gfx::Size DesktopHost::GetNativeScreenSize() {
+  return gfx::Size(GetSystemMetrics(SM_CXSCREEN),
+                   GetSystemMetrics(SM_CYSCREEN));
+}
+
+DesktopHostWin::DesktopHostWin(const gfx::Rect& bounds)
+    : desktop_(NULL),
+      fullscreen_(false),
+      saved_window_style_(0),
+      saved_window_ex_style_(0) {
   Init(NULL, bounds);
+  SetWindowText(hwnd(), L"aura::Desktop!");
 }
 
 DesktopHostWin::~DesktopHostWin() {
@@ -127,6 +143,38 @@ void DesktopHostWin::Show() {
   ShowWindow(hwnd(), SW_SHOWNORMAL);
 }
 
+void DesktopHostWin::ToggleFullScreen() {
+  gfx::Rect target_rect;
+  if (!fullscreen_) {
+    fullscreen_ = true;
+    saved_window_style_ = GetWindowLong(hwnd(), GWL_STYLE);
+    saved_window_ex_style_ = GetWindowLong(hwnd(), GWL_EXSTYLE);
+    GetWindowRect(hwnd(), &saved_window_rect_);
+    SetWindowLong(hwnd(), GWL_STYLE,
+                  saved_window_style_ & ~(WS_CAPTION | WS_THICKFRAME));
+    SetWindowLong(hwnd(), GWL_EXSTYLE,
+                  saved_window_ex_style_ & ~(WS_EX_DLGMODALFRAME |
+                      WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE));
+
+    MONITORINFO mi;
+    mi.cbSize = sizeof(mi);
+    GetMonitorInfo(MonitorFromWindow(hwnd(), MONITOR_DEFAULTTONEAREST), &mi);
+    target_rect = mi.rcMonitor;
+  } else {
+    fullscreen_ = false;
+    SetWindowLong(hwnd(), GWL_STYLE, saved_window_style_);
+    SetWindowLong(hwnd(), GWL_EXSTYLE, saved_window_ex_style_);
+    target_rect = saved_window_rect_;
+  }
+  SetWindowPos(hwnd(),
+               NULL,
+               target_rect.x(),
+               target_rect.y(),
+               target_rect.width(),
+               target_rect.height(),
+               SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
 gfx::Size DesktopHostWin::GetSize() const {
   RECT r;
   GetClientRect(hwnd(), &r);
@@ -134,15 +182,36 @@ gfx::Size DesktopHostWin::GetSize() const {
 }
 
 void DesktopHostWin::SetSize(const gfx::Size& size) {
+  if (fullscreen_) {
+    saved_window_rect_.right = saved_window_rect_.left + size.width();
+    saved_window_rect_.bottom = saved_window_rect_.top + size.height();
+    return;
+  }
+  RECT window_rect;
+  window_rect.left = 0;
+  window_rect.top = 0;
+  window_rect.right = size.width();
+  window_rect.bottom = size.height();
+  AdjustWindowRectEx(&window_rect,
+                     GetWindowLong(hwnd(), GWL_STYLE),
+                     FALSE,
+                     GetWindowLong(hwnd(), GWL_EXSTYLE));
   SetWindowPos(
       hwnd(),
       NULL,
       0,
       0,
-      size.width(),
-      size.height(),
+      window_rect.right - window_rect.left,
+      window_rect.bottom - window_rect.top,
       SWP_NOMOVE | SWP_NOOWNERZORDER | SWP_NOREDRAW | SWP_NOREPOSITION);
 }
+
+gfx::Point DesktopHostWin::GetLocationOnNativeScreen() const {
+  RECT r;
+  GetClientRect(hwnd(), &r);
+  return gfx::Point(r.left, r.top);
+}
+
 
 void DesktopHostWin::SetCursor(gfx::NativeCursor native_cursor) {
   // Custom web cursors are handled directly.
@@ -158,7 +227,14 @@ gfx::Point DesktopHostWin::QueryMouseLocation() {
   POINT pt;
   GetCursorPos(&pt);
   ScreenToClient(hwnd(), &pt);
-  return gfx::Point(pt);
+  const gfx::Size size = GetSize();
+  return gfx::Point(max(0, min(size.width(), static_cast<int>(pt.x))),
+                    max(0, min(size.height(), static_cast<int>(pt.y))));
+}
+
+void DesktopHostWin::PostNativeEvent(const base::NativeEvent& native_event) {
+  ::PostMessage(
+      hwnd(), native_event.message, native_event.wParam, native_event.lParam);
 }
 
 void DesktopHostWin::OnClose() {
@@ -170,7 +246,8 @@ LRESULT DesktopHostWin::OnKeyEvent(UINT message,
                                    WPARAM w_param,
                                    LPARAM l_param) {
   MSG msg = { hwnd(), message, w_param, l_param };
-  SetMsgHandled(desktop_->OnKeyEvent(KeyEvent(msg)));
+  KeyEvent keyev(msg, message == WM_CHAR);
+  SetMsgHandled(desktop_->DispatchKeyEvent(&keyev));
   return 0;
 }
 
@@ -182,7 +259,7 @@ LRESULT DesktopHostWin::OnMouseRange(UINT message,
   MouseEvent event(msg);
   bool handled = false;
   if (!(event.flags() & ui::EF_IS_NON_CLIENT))
-    handled = desktop_->OnMouseEvent(event);
+    handled = desktop_->DispatchMouseEvent(&event);
   SetMsgHandled(handled);
   return 0;
 }
@@ -193,7 +270,10 @@ void DesktopHostWin::OnPaint(HDC dc) {
 }
 
 void DesktopHostWin::OnSize(UINT param, const CSize& size) {
-  desktop_->OnHostResized(gfx::Size(size.cx, size.cy));
+  // Minimizing resizes the window to 0x0 which causes our layout to go all
+  // screwy, so we just ignore it.
+  if (param != SIZE_MINIMIZED)
+    desktop_->OnHostResized(gfx::Size(size.cx, size.cy));
 }
 
 }  // namespace aura

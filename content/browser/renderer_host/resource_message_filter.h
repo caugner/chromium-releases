@@ -8,7 +8,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "content/browser/browser_message_filter.h"
 #include "content/common/content_export.h"
-#include "content/common/child_process_info.h"
+#include "content/public/common/process_type.h"
 #include "webkit/glue/resource_type.h"
 
 class ResourceDispatcherHost;
@@ -42,15 +42,15 @@ class CONTENT_EXPORT ResourceMessageFilter : public BrowserMessageFilter {
   };
 
   ResourceMessageFilter(int child_id,
-                        ChildProcessInfo::ProcessType process_type,
+                        content::ProcessType process_type,
                         const content::ResourceContext* resource_context,
                         URLRequestContextSelector* url_request_context_selector,
                         ResourceDispatcherHost* resource_dispatcher_host);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing();
+  virtual void OnChannelClosing() OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   const content::ResourceContext& resource_context() const {
     return *resource_context_;
@@ -61,7 +61,7 @@ class CONTENT_EXPORT ResourceMessageFilter : public BrowserMessageFilter {
       ResourceType::Type request_type);
 
   int child_id() const { return child_id_; }
-  ChildProcessInfo::ProcessType process_type() const { return process_type_; }
+  content::ProcessType process_type() const { return process_type_; }
 
  protected:
   // Protected destructor so that we can be overriden in tests.
@@ -71,7 +71,7 @@ class CONTENT_EXPORT ResourceMessageFilter : public BrowserMessageFilter {
   // The ID of the child process.
   int child_id_;
 
-  ChildProcessInfo::ProcessType process_type_;
+  content::ProcessType process_type_;
 
   // Owned by ProfileIOData* which is guaranteed to outlive us.
   const content::ResourceContext* const resource_context_;

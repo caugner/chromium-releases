@@ -20,10 +20,10 @@
 // OnCloseStream -> AudioInputController::Close
 //
 // For the OnStartDevice() request, AudioInputRendererHost starts the device
-// referenced by the session id, and a OnDeviceStarted() callback with the
-// index of the opened device will be received later. Then it will send a IPC
-// message to notify the renderer that the device is ready, so that renderer
-// can continue with the OnCreateStream() request.
+// referenced by the session id, and an OnDeviceStarted() callback with the
+// id of the opened device will be received later. Then it will send a
+// IPC message to notify the renderer that the device is ready, so that
+// renderer can continue with the OnCreateStream() request.
 //
 // OnDeviceStopped() is called when the user closes the device through
 // AudioInputDeviceManager without calling Stop() before. What
@@ -57,14 +57,15 @@
 
 #include <map>
 
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "content/browser/browser_message_filter.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager_event_handler.h"
+#include "content/public/browser/browser_thread.h"
 #include "media/audio/audio_input_controller.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/simple_sources.h"
@@ -76,7 +77,7 @@ class ResourceContext;
 class AudioManager;
 struct AudioParameters;
 
-class AudioInputRendererHost
+class CONTENT_EXPORT AudioInputRendererHost
     : public BrowserMessageFilter,
       public media::AudioInputController::EventHandler,
       public media_stream::AudioInputDeviceManagerEventHandler {
@@ -107,27 +108,28 @@ class AudioInputRendererHost
       const content::ResourceContext* resource_context);
 
   // BrowserMessageFilter implementation.
-  virtual void OnChannelClosing();
-  virtual void OnDestruct() const;
+  virtual void OnChannelClosing() OVERRIDE;
+  virtual void OnDestruct() const OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message,
-                                 bool* message_was_ok);
+                                 bool* message_was_ok) OVERRIDE;
 
   // AudioInputController::EventHandler implementation.
-  virtual void OnCreated(media::AudioInputController* controller);
-  virtual void OnRecording(media::AudioInputController* controller);
+  virtual void OnCreated(media::AudioInputController* controller) OVERRIDE;
+  virtual void OnRecording(media::AudioInputController* controller) OVERRIDE;
   virtual void OnError(media::AudioInputController* controller,
-                       int error_code);
+                       int error_code) OVERRIDE;
   virtual void OnData(media::AudioInputController* controller,
                       const uint8* data,
-                      uint32 size);
+                      uint32 size) OVERRIDE;
 
   // media_stream::AudioInputDeviceManagerEventHandler implementation.
-  virtual void OnDeviceStarted(int session_id, int index);
-  virtual void OnDeviceStopped(int session_id);
+  virtual void OnDeviceStarted(int session_id,
+                               const std::string& device_id) OVERRIDE;
+  virtual void OnDeviceStopped(int session_id) OVERRIDE;
 
  private:
   // TODO(henrika): extend test suite (compare AudioRenderHost)
-  friend class BrowserThread;
+  friend class content::BrowserThread;
   friend class DeleteTask<AudioInputRendererHost>;
 
   virtual ~AudioInputRendererHost();
@@ -144,7 +146,8 @@ class AudioInputRendererHost
   // required properties.
   void OnCreateStream(int stream_id,
                       const AudioParameters& params,
-                      bool low_latency);
+                      bool low_latency,
+                      const std::string& device_id);
 
   // Record the audio input stream referenced by |stream_id|.
   void OnRecordStream(int stream_id);

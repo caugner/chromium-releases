@@ -18,7 +18,6 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/native_widget_types.h"
 
-class Browser;
 class CloudPrintServiceProcessHelper;
 class CloudPrintSetupMessageHandler;
 class GaiaAuthFetcher;
@@ -85,9 +84,9 @@ class CloudPrintSetupFlow : public HtmlDialogUIDelegate,
 
   // GaiaAuthConsumer implementation.
   virtual void OnClientLoginSuccess(
-      const GaiaAuthConsumer::ClientLoginResult& credentials);
+      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
   virtual void OnClientLoginFailure(
-      const GoogleServiceAuthError& error);
+      const GoogleServiceAuthError& error) OVERRIDE;
 
  private:
   friend class CloudPrintServiceProcessHelper;

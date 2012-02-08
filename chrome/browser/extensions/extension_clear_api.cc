@@ -14,13 +14,15 @@
 #include "base/values.h"
 #include "chrome/browser/browsing_data_remover.h"
 #include "chrome/browser/extensions/extension_clear_api_constants.h"
-#include "chrome/browser/plugin_data_remover.h"
+#include "chrome/browser/plugin_data_remover_helper.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_error_utils.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace keys = extension_clear_api_constants;
 
@@ -122,7 +124,7 @@ bool BrowsingDataExtensionFunction::RunImpl() {
 
 void BrowsingDataExtensionFunction::CheckRemovingLSODataSupported(
     scoped_refptr<PluginPrefs> plugin_prefs) {
-  if (!PluginDataRemover::IsSupported(plugin_prefs))
+  if (!PluginDataRemoverHelper::IsSupported(plugin_prefs))
     removal_mask_ &= ~BrowsingDataRemover::REMOVE_LSO_DATA;
 
   BrowserThread::PostTask(

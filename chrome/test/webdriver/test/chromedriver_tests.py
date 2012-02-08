@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -12,12 +11,14 @@ it to the appropriate place in the WebDriver tree instead.
 import binascii
 from distutils import archive_util
 import hashlib
+import httplib
 import os
 import platform
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import urllib
@@ -27,10 +28,8 @@ import urlparse
 from chromedriver_factory import ChromeDriverFactory
 from chromedriver_launcher import ChromeDriverLauncher
 from chromedriver_test import ChromeDriverTest
-from gtest_text_test_runner import GTestTextTestRunner
-import test_environment
-from test_environment import GetTestDataUrl
 import test_paths
+import util
 
 try:
   import simplejson as json
@@ -42,42 +41,6 @@ from selenium.webdriver.remote.command import Command
 from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
-
-
-def GetFileURLForPath(path):
-  """Get file:// url for the given path.
-  Also quotes the url using urllib.quote().
-  """
-  abs_path = os.path.abspath(path)
-  if sys.platform == 'win32':
-    # Don't quote the ':' in drive letter ( say, C: ) on win.
-    # Also, replace '\' with '/' as expected in a file:/// url.
-    drive, rest = os.path.splitdrive(abs_path)
-    quoted_path = drive.upper() + urllib.quote((rest.replace('\\', '/')))
-    return 'file:///' + quoted_path
-  else:
-    quoted_path = urllib.quote(abs_path)
-    return 'file://' + quoted_path
-
-
-def IsWindows():
-  return sys.platform == 'cygwin' or sys.platform.startswith('win')
-
-
-def IsLinux():
-  return sys.platform.startswith('linux')
-
-
-def IsMac():
-  return sys.platform.startswith('darwin')
-
-
-def Kill(pid):
-  """Terminate the given pid."""
-  if IsWindows():
-    subprocess.call(['taskkill.exe', '/T', '/F', '/PID', str(pid)])
-  else:
-    os.kill(pid, signal.SIGTERM)
 
 
 class Request(urllib2.Request):
@@ -227,7 +190,7 @@ class NativeInputTest(ChromeDriverTest):
   # Flaky on windows. See crbug.com/80295.
   def DISABLED_testSendKeysNative(self):
     driver = self.GetNewDriver(NativeInputTest._CAPABILITIES)
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     # Find the text input.
     q = driver.find_element_by_name('key_input_test')
     # Send some keys.
@@ -237,7 +200,7 @@ class NativeInputTest(ChromeDriverTest):
   # Needs to run on a machine with an IME installed.
   def DISABLED_testSendKeysNativeProcessedByIME(self):
     driver = self.GetNewDriver(NativeInputTest._CAPABILITIES)
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     q = driver.find_element_by_name('key_input_test')
     # Send key combination to turn IME on.
     q.send_keys(Keys.F7)
@@ -263,23 +226,7 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     driver.quit()
 
   def testBinary(self):
-    binary_path = test_paths.CHROMEDRIVER_EXE
-    self.assertNotEquals(None, binary_path)
-    if IsWindows():
-      chrome_name = 'chrome.exe'
-    elif IsMac():
-      chrome_name = 'Google Chrome.app/Contents/MacOS/Google Chrome'
-      if not os.path.exists(os.path.join(binary_path, chrome_name)):
-        chrome_name = 'Chromium.app/Contents/MacOS/Chromium'
-    elif IsLinux():
-      chrome_name = 'chrome'
-    else:
-      self.fail('Unrecognized platform: ' + sys.platform)
-    binary_path = os.path.join(os.path.dirname(binary_path), chrome_name)
-    self.assertTrue(os.path.exists(binary_path),
-                    'Binary not found: ' + binary_path)
-    capabilities = {'chrome.binary': binary_path}
-    self.GetNewDriver(capabilities)
+    self.GetNewDriver({'chrome.binary': self.GetChromePath()})
 
   def testUserProfile(self):
     """Test starting WebDriver session with custom profile."""
@@ -288,7 +235,7 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     profile_dir = tempfile.mkdtemp()
     capabilities = {'chrome.switches': ['--user-data-dir=' + profile_dir]}
     driver = self.GetNewDriver(capabilities)
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     # Create a cookie.
     cookie_dict = {}
     cookie_dict['name'] = 'test_user_profile'
@@ -310,7 +257,7 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     # Start new session with the saved user profile.
     capabilities = {'chrome.profile': base64_user_profile}
     driver = self.GetNewDriver(capabilities)
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     cookie_dict = driver.get_cookie('test_user_profile')
     self.assertNotEqual(cookie_dict, None)
     self.assertEqual(cookie_dict['value'], 'chrome profile')
@@ -321,7 +268,7 @@ class DesiredCapabilitiesTest(ChromeDriverTest):
     extensions = ['ext_test_1.crx', 'ext_test_2.crx']
     base64_extensions = []
     for ext in extensions:
-      f = open(os.path.join(test_paths.TestDir(), ext), 'rb')
+      f = open(test_paths.GetTestDataPath(ext), 'rb')
       base64_ext = (binascii.b2a_base64(f.read()).strip())
       base64_extensions.append(base64_ext)
       f.close()
@@ -354,7 +301,7 @@ class DetachProcessTest(unittest.TestCase):
     pid = int(driver.find_elements_by_xpath('//*[@jscontent="pid"]')[0].text)
     self._server.Kill()
     try:
-      Kill(pid)
+      util.Kill(pid)
     except OSError:
       self.fail('Chrome quit after detached chromedriver server was killed')
 
@@ -364,7 +311,7 @@ class CookieTest(ChromeDriverTest):
 
   def testAddCookie(self):
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     cookie_dict = None
     cookie_dict = driver.get_cookie("chromedriver_cookie_test")
     cookie_dict = {}
@@ -389,14 +336,8 @@ class ScreenshotTest(ChromeDriverTest):
   REDBOX = "automation_proxy_snapshot/set_size.html"
 
   def testScreenCaptureAgainstReference(self):
-    # This has regressed on linux because of tighter sandbox restrictions.
-    # See crbug.com/89777.
-    if IsLinux():
-      return
-
     # Create a red square of 2000x2000 pixels.
-    url = GetFileURLForPath(os.path.join(test_paths.DataDir(),
-                                         self.REDBOX))
+    url = util.GetFileURLForPath(test_paths.GetChromeTestDataPath(self.REDBOX))
     url += '?2000,2000'
     driver = self.GetNewDriver()
     driver.get(url)
@@ -408,11 +349,11 @@ class ScreenshotTest(ChromeDriverTest):
   # This test requires Flash and must be run on a VM or via remote desktop.
   # See crbug.com/96317.
   def testSnapshotWithWindowlessFlashAndTransparentOverlay(self):
-    if not IsWindows():
+    if not util.IsWin():
       return
 
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/plugin_transparency_test.html')
+    driver.get(self.GetTestDataUrl() + '/plugin_transparency_test.html')
     snapshot = driver.get_screenshot_as_base64()
     self.assertEquals(hashlib.md5(snapshot).hexdigest(),
                       '72e5b8525e48758bae59997472f27f14')
@@ -452,13 +393,14 @@ class SessionTest(ChromeDriverTest):
   def testSessionCreationDeletion(self):
     self.GetNewDriver().quit()
 
-  def testMultipleSessionCreationDeletion(self):
+  # crbug.com/103396
+  def DISABLED_testMultipleSessionCreationDeletion(self):
     for i in range(10):
       self.GetNewDriver().quit()
 
   def testSessionCommandsAfterSessionDeletionReturn404(self):
     driver = self.GetNewDriver()
-    url = test_environment.GetServer().GetUrl()
+    url = self.GetTestDataUrl()
     url += '/session/' + driver.session_id
     driver.quit()
     try:
@@ -475,6 +417,43 @@ class SessionTest(ChromeDriverTest):
       driver.quit()
 
 
+class ShutdownTest(ChromeDriverTest):
+
+  def setUp(self):
+    super(ShutdownTest, self).setUp()
+    self._custom_server = ChromeDriverLauncher(self.GetDriverPath()).Launch()
+    self._custom_factory = ChromeDriverFactory(self._custom_server,
+                                               self.GetChromePath())
+
+  def tearDown(self):
+    self._custom_server.Kill()
+    super(ShutdownTest, self).tearDown()
+
+  def testShutdownWithSession(self):
+    driver = self._custom_factory.GetNewDriver()
+    driver.get(self._custom_server.GetUrl() + '/status')
+    driver.find_element_by_tag_name('body')
+    self._custom_server.Kill()
+
+  def testShutdownWithBusySession(self):
+    def _Hang(driver):
+      """Waits for the process to quit and then notifies."""
+      try:
+        driver.get(self._custom_server.GetUrl() + '/hang')
+      except httplib.BadStatusLine:
+        pass
+
+    driver = self._custom_factory.GetNewDriver()
+    wait_thread = threading.Thread(target=_Hang, args=(driver,))
+    wait_thread.start()
+    wait_thread.join(5)
+    self.assertTrue(wait_thread.isAlive())
+
+    self._custom_server.Kill()
+    wait_thread.join(10)
+    self.assertFalse(wait_thread.isAlive())
+
+
 class MouseTest(ChromeDriverTest):
   """Mouse command tests for the json webdriver protocol"""
 
@@ -483,41 +462,41 @@ class MouseTest(ChromeDriverTest):
     self._driver = self.GetNewDriver()
 
   def testCanClickTransparentElement(self):
-    self._driver.get(GetTestDataUrl() + '/transparent.html')
+    self._driver.get(self.GetTestDataUrl() + '/transparent.html')
     self._driver.find_element_by_tag_name('a').click()
     self.assertTrue(self._driver.execute_script('return window.success'))
 
   def testClickElementThatNeedsContainerScrolling(self):
-    self._driver.get(GetTestDataUrl() + '/test_page.html')
+    self._driver.get(self.GetTestDataUrl() + '/test_page.html')
     self._driver.find_element_by_name('hidden_scroll').click()
     self.assertTrue(self._driver.execute_script('return window.success'))
 
   def testClickElementThatNeedsIframeScrolling(self):
-    self._driver.get(GetTestDataUrl() + '/test_page.html')
+    self._driver.get(self.GetTestDataUrl() + '/test_page.html')
     self._driver.switch_to_frame('iframe')
     self._driver.find_element_by_name('hidden_scroll').click()
     self.assertTrue(self._driver.execute_script('return window.success'))
 
   def testClickElementThatNeedsPageScrolling(self):
-    self._driver.get(GetTestDataUrl() + '/test_page.html')
+    self._driver.get(self.GetTestDataUrl() + '/test_page.html')
     self._driver.find_element_by_name('far_away').click()
     self.assertTrue(self._driver.execute_script('return window.success'))
 
   # TODO(kkania): Move this test to the webdriver repo.
   def testClickDoesSelectOption(self):
-    self._driver.get(GetTestDataUrl() + '/test_page.html')
+    self._driver.get(self.GetTestDataUrl() + '/test_page.html')
     option = self._driver.find_element_by_name('option')
     self.assertFalse(option.is_selected())
     option.click()
     self.assertTrue(option.is_selected())
 
   def testClickDoesUseFirstClientRect(self):
-    self._driver.get(GetTestDataUrl() + '/test_page.html')
+    self._driver.get(self.GetTestDataUrl() + '/test_page.html')
     self._driver.find_element_by_name('wrapped').click()
     self.assertTrue(self._driver.execute_script('return window.success'))
 
   def testThrowErrorIfNotClickable(self):
-    self._driver.get(GetTestDataUrl() + '/not_clickable.html')
+    self._driver.get(self.GetTestDataUrl() + '/not_clickable.html')
     elem = self._driver.find_element_by_name('click')
     self.assertRaises(WebDriverException, elem.click)
 
@@ -529,7 +508,7 @@ class TypingTest(ChromeDriverTest):
     self._driver = self.GetNewDriver()
 
   def testSendKeysToEditingHostDiv(self):
-    self._driver.get(GetTestDataUrl() + '/content_editable.html')
+    self._driver.get(self.GetTestDataUrl() + '/content_editable.html')
     div = self._driver.find_element_by_name('editable')
     # Break into two to ensure element doesn't lose focus.
     div.send_keys('hi')
@@ -537,26 +516,26 @@ class TypingTest(ChromeDriverTest):
     self.assertEquals('hi there', div.text)
 
   def testSendKeysToNonFocusableChildOfEditingHost(self):
-    self._driver.get(GetTestDataUrl() + '/content_editable.html')
+    self._driver.get(self.GetTestDataUrl() + '/content_editable.html')
     child = self._driver.find_element_by_name('editable_child')
     self.assertRaises(WebDriverException, child.send_keys, 'hi')
 
   def testSendKeysToFocusableChildOfEditingHost(self):
-    self._driver.get(GetTestDataUrl() + '/content_editable.html')
+    self._driver.get(self.GetTestDataUrl() + '/content_editable.html')
     child = self._driver.find_element_by_tag_name('input')
     child.send_keys('hi')
     child.send_keys(' there')
     self.assertEquals('hi there', child.get_attribute('value'))
 
   def testSendKeysToDesignModePage(self):
-    self._driver.get(GetTestDataUrl() + '/design_mode_doc.html')
+    self._driver.get(self.GetTestDataUrl() + '/design_mode_doc.html')
     body = self._driver.find_element_by_tag_name('body')
     body.send_keys('hi')
     body.send_keys(' there')
     self.assertEquals('hi there', body.text)
 
   def testSendKeysToDesignModeIframe(self):
-    self._driver.get(GetTestDataUrl() + '/content_editable.html')
+    self._driver.get(self.GetTestDataUrl() + '/content_editable.html')
     self._driver.switch_to_frame(0)
     body = self._driver.find_element_by_tag_name('body')
     body.send_keys('hi')
@@ -564,21 +543,21 @@ class TypingTest(ChromeDriverTest):
     self.assertEquals('hi there', body.text)
 
   def testSendKeysToTransparentElement(self):
-    self._driver.get(GetTestDataUrl() + '/transparent.html')
+    self._driver.get(self.GetTestDataUrl() + '/transparent.html')
     text_box = self._driver.find_element_by_tag_name('input')
     text_box.send_keys('hi')
     self.assertEquals('hi', text_box.get_attribute('value'))
 
   def testSendKeysDesignModePageAfterNavigate(self):
-    self._driver.get(GetTestDataUrl() + '/test_page.html')
-    self._driver.get(GetTestDataUrl() + '/design_mode_doc.html')
+    self._driver.get(self.GetTestDataUrl() + '/test_page.html')
+    self._driver.get(self.GetTestDataUrl() + '/design_mode_doc.html')
     body = self._driver.find_element_by_tag_name('body')
     body.send_keys('hi')
     body.send_keys(' there')
     self.assertEquals('hi there', body.text)
 
   def testAppendsToTextInput(self):
-    self._driver.get(GetTestDataUrl() + '/keyboard.html')
+    self._driver.get(self.GetTestDataUrl() + '/keyboard.html')
     text_elem = self._driver.find_element_by_name('input')
     text_elem.send_keys(' text')
     self.assertEquals('more text', text_elem.get_attribute('value'))
@@ -587,7 +566,7 @@ class TypingTest(ChromeDriverTest):
     self.assertEquals('more text', area_elem.get_attribute('value'))
 
   def testTextAreaKeepsCursorPosition(self):
-    self._driver.get(GetTestDataUrl() + '/keyboard.html')
+    self._driver.get(self.GetTestDataUrl() + '/keyboard.html')
     area_elem = self._driver.find_element_by_name('area')
     area_elem.send_keys(' text')
     area_elem.send_keys(Keys.LEFT * 9)
@@ -637,7 +616,7 @@ class ElementEqualityTest(ChromeDriverTest):
     self._driver.quit()
 
   def testElementEquality(self):
-    self._driver.get(GetTestDataUrl() + '/test_page.html')
+    self._driver.get(self.GetTestDataUrl() + '/test_page.html')
     body1 = self._driver.find_element_by_tag_name('body')
     body2 = self._driver.execute_script('return document.body')
 
@@ -686,7 +665,7 @@ class FileUploadControlTest(ChromeDriverTest):
 
   def testSetFilePathToFileUploadControl(self):
     """Verify a file path is set to the file upload control."""
-    self._driver.get(GetTestDataUrl() + '/upload.html')
+    self._driver.get(self.GetTestDataUrl() + '/upload.html')
 
     file = tempfile.NamedTemporaryFile()
 
@@ -700,7 +679,7 @@ class FileUploadControlTest(ChromeDriverTest):
   def testSetMultipleFilePathsToFileuploadControlWithoutMultipleWillFail(self):
     """Verify setting file paths to the file upload control without 'multiple'
     attribute will fail."""
-    self._driver.get(GetTestDataUrl() + '/upload.html')
+    self._driver.get(self.GetTestDataUrl() + '/upload.html')
 
     files = []
     filepaths = []
@@ -720,7 +699,7 @@ class FileUploadControlTest(ChromeDriverTest):
 
   def testSetMultipleFilePathsToFileUploadControl(self):
     """Verify multiple file paths are set to the file upload control."""
-    self._driver.get(GetTestDataUrl() + '/upload.html')
+    self._driver.get(self.GetTestDataUrl() + '/upload.html')
 
     files = []
     filepaths = []
@@ -749,7 +728,7 @@ class FrameSwitchingTest(ChromeDriverTest):
 
   def testGetWindowHandles(self):
     driver = self.GetNewDriver({'chrome.switches': ['disable-popup-blocking']})
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     driver.execute_script('window.popup = window.open("about:blank")')
     self.assertEquals(2, len(driver.window_handles))
     driver.execute_script('window.popup.close()')
@@ -757,20 +736,20 @@ class FrameSwitchingTest(ChromeDriverTest):
 
   def testSwitchToSameWindow(self):
     driver = self.GetNewDriver({'chrome.switches': ['disable-popup-blocking']})
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     driver.switch_to_window(driver.window_handles[0])
     self.assertEquals('test_page.html', driver.current_url.split('/')[-1])
 
   def testClosedWindowThrows(self):
     driver = self.GetNewDriver({'chrome.switches': ['disable-popup-blocking']})
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     driver.execute_script('window.open("about:blank")')
     driver.close()
     self.assertRaises(WebDriverException, driver.close)
 
   def testSwitchFromClosedWindow(self):
     driver = self.GetNewDriver({'chrome.switches': ['disable-popup-blocking']})
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     driver.execute_script('window.open("about:blank")')
     driver.close()
     driver.switch_to_window(driver.window_handles[0])
@@ -778,7 +757,7 @@ class FrameSwitchingTest(ChromeDriverTest):
 
   def testSwitchToWindowWhileInSubframe(self):
     driver = self.GetNewDriver({'chrome.switches': ['disable-popup-blocking']})
-    driver.get(GetTestDataUrl() + '/test_page.html')
+    driver.get(self.GetTestDataUrl() + '/test_page.html')
     driver.execute_script('window.open("about:blank")')
     driver.switch_to_frame(0)
     driver.switch_to_window(driver.window_handles[1])
@@ -789,7 +768,7 @@ class FrameSwitchingTest(ChromeDriverTest):
   # See crbug.com/88685.
   def testSwitchToFrameByIndex(self):
     driver = self.GetNewDriver({'chrome.switches': ['disable-popup-blocking']})
-    driver.get(GetTestDataUrl() + '/switch_to_frame_by_index.html')
+    driver.get(self.GetTestDataUrl() + '/switch_to_frame_by_index.html')
     for i in range(3):
       driver.switch_to_frame(i)
       self.assertEquals(str(i), driver.current_url.split('?')[-1])
@@ -799,29 +778,29 @@ class AlertTest(ChromeDriverTest):
 
   def testAlertOnLoadDoesNotHang(self):
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/alert_on_load.html')
+    driver.get(self.GetTestDataUrl() + '/alert_on_load.html')
     driver.switch_to_alert().accept()
 
   def testAlertWhenTypingThrows(self):
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/alerts.html')
+    driver.get(self.GetTestDataUrl() + '/alerts.html')
     input_box = driver.find_element_by_name('onkeypress')
     self.assertRaises(WebDriverException, input_box.send_keys, 'a')
 
   def testAlertJustAfterTypingDoesNotThrow(self):
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/alerts.html')
+    driver.get(self.GetTestDataUrl() + '/alerts.html')
     driver.find_element_by_name('onkeyup').send_keys('a')
     driver.switch_to_alert().accept()
 
   def testAlertOnScriptDoesNotHang(self):
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/alerts.html')
+    driver.get(self.GetTestDataUrl() + '/alerts.html')
     self.assertRaises(WebDriverException, driver.execute_script, 'alert("ok")')
 
   def testMustHandleAlertFirst(self):
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/alerts.html')
+    driver.get(self.GetTestDataUrl() + '/alerts.html')
     input_box = driver.find_element_by_name('normal')
     driver.execute_async_script('arguments[0](); window.alert("ok")')
 
@@ -830,7 +809,7 @@ class AlertTest(ChromeDriverTest):
     self.assertRaises(WebDriverException, input_box.send_keys, 'abc')
 
     self.assertRaises(WebDriverException, driver.get,
-                      GetTestDataUrl() + '/test_page.html')
+                      self.GetTestDataUrl() + '/test_page.html')
 
     self.assertRaises(WebDriverException, driver.refresh)
     self.assertRaises(WebDriverException, driver.back)
@@ -839,7 +818,7 @@ class AlertTest(ChromeDriverTest):
 
   def testCanHandleAlertInSubframe(self):
     driver = self.GetNewDriver()
-    driver.get(GetTestDataUrl() + '/alerts.html')
+    driver.get(self.GetTestDataUrl() + '/alerts.html')
     driver.switch_to_frame('subframe')
     driver.execute_async_script('arguments[0](); window.alert("ok")')
     driver.switch_to_alert().accept()

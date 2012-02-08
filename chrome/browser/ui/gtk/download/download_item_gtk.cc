@@ -24,7 +24,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/download_manager.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -250,7 +250,7 @@ DownloadItemGtk::DownloadItemGtk(DownloadShelfGtk* parent_shelf,
   }
 
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
   theme_service_->InitThemesFor(this);
 
   // Set the initial width of the widget to be animated.
@@ -293,7 +293,7 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
   DCHECK_EQ(download, get_download());
 
   if (dangerous_prompt_ != NULL &&
-      download->safety_state() == DownloadItem::DANGEROUS_BUT_VALIDATED) {
+      download->GetSafetyState() == DownloadItem::DANGEROUS_BUT_VALIDATED) {
     // We have been approved.
     gtk_widget_set_no_show_all(body_.get(), FALSE);
     gtk_widget_set_no_show_all(menu_button_, FALSE);
@@ -315,7 +315,7 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
     UpdateTooltip();
   }
 
-  switch (download->state()) {
+  switch (download->GetState()) {
     case DownloadItem::REMOVING:
       parent_shelf_->RemoveDownloadItem(this);  // This will delete us!
       return;
@@ -329,9 +329,9 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
       complete_animation_.Show();
       break;
     case DownloadItem::COMPLETE:
-      // auto_opened() may change after the download's initial transition to
+      // GetAutoOpened() may change after the download's initial transition to
       // COMPLETE, so we check it before the idemopotency shield below.
-      if (download->auto_opened()) {
+      if (download->GetAutoOpened()) {
         parent_shelf_->RemoveDownloadItem(this);  // This will delete us!
         return;
       }
@@ -350,7 +350,7 @@ void DownloadItemGtk::OnDownloadUpdated(DownloadItem* download) {
       download_complete_ = true;
       break;
     case DownloadItem::IN_PROGRESS:
-      get_download()->is_paused() ?
+      get_download()->IsPaused() ?
           StopDownloadProgress() : StartDownloadProgress();
       break;
     default:
@@ -381,8 +381,8 @@ void DownloadItemGtk::AnimationProgressed(const ui::Animation* animation) {
 }
 
 void DownloadItemGtk::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_BROWSER_THEME_CHANGED) {
     // Our GtkArrow is only visible in gtk mode. Otherwise, we let the custom
     // rendering code do whatever it wants.
@@ -417,7 +417,7 @@ DownloadItem* DownloadItemGtk::get_download() {
 }
 
 bool DownloadItemGtk::IsDangerous() {
-  return get_download()->safety_state() == DownloadItem::DANGEROUS;
+  return get_download()->GetSafetyState() == DownloadItem::DANGEROUS;
 }
 
 // Download progress animation functions.
@@ -560,20 +560,21 @@ void DownloadItemGtk::UpdateDangerWarning() {
     string16 dangerous_warning;
 
     // The dangerous download label text is different for different cases.
-    if (get_download()->GetDangerType() == DownloadItem::DANGEROUS_URL) {
+    if (get_download()->GetDangerType() == DownloadStateInfo::DANGEROUS_URL) {
+      // TODO(noelutz): handle malicious content warning.
       // Safebrowsing shows the download URL leads to malicious file.
       dangerous_warning =
-          l10n_util::GetStringUTF16(IDS_PROMPT_UNSAFE_DOWNLOAD_URL);
+          l10n_util::GetStringUTF16(IDS_PROMPT_MALICIOUS_DOWNLOAD_URL);
     } else {
       // It's a dangerous file type (e.g.: an executable).
       DCHECK(get_download()->GetDangerType() ==
-             DownloadItem::DANGEROUS_FILE);
+             DownloadStateInfo::DANGEROUS_FILE);
       if (ChromeDownloadManagerDelegate::IsExtensionDownload(get_download())) {
         dangerous_warning =
             l10n_util::GetStringUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD_EXTENSION);
       } else {
         string16 elided_filename = ui::ElideFilename(
-            get_download()->target_name(), gfx::Font(), kTextWidth);
+            get_download()->GetTargetName(), gfx::Font(), kTextWidth);
         dangerous_warning =
             l10n_util::GetStringFUTF16(IDS_PROMPT_DANGEROUS_DOWNLOAD,
                                        elided_filename);
@@ -617,7 +618,7 @@ void DownloadItemGtk::UpdateDangerWarning() {
 void DownloadItemGtk::UpdateDangerIcon() {
   if (theme_service_->UsingNativeTheme()) {
     const char* stock =
-        get_download()->GetDangerType() == DownloadItem::DANGEROUS_URL ?
+        get_download()->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ?
         GTK_STOCK_DIALOG_ERROR : GTK_STOCK_DIALOG_WARNING;
     gtk_image_set_from_stock(
         GTK_IMAGE(dangerous_image_), stock, GTK_ICON_SIZE_SMALL_TOOLBAR);
@@ -625,7 +626,7 @@ void DownloadItemGtk::UpdateDangerIcon() {
     // Set the warning icon.
     ResourceBundle& rb = ResourceBundle::GetSharedInstance();
     int pixbuf_id =
-        get_download()->GetDangerType() == DownloadItem::DANGEROUS_URL ?
+        get_download()->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ?
         IDR_SAFEBROWSING_WARNING : IDR_WARNING;
     GdkPixbuf* download_pixbuf = rb.GetNativeImageNamed(pixbuf_id);
     gtk_image_set_from_pixbuf(GTK_IMAGE(dangerous_image_), download_pixbuf);

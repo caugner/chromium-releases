@@ -25,6 +25,9 @@ void MockPluginDelegate::PluginFocusChanged(PluginInstance* instance,
 void MockPluginDelegate::PluginTextInputTypeChanged(PluginInstance* instance) {
 }
 
+void MockPluginDelegate::PluginCaretPositionChanged(PluginInstance* instance) {
+}
+
 void MockPluginDelegate::PluginRequestedCancelComposition(
     PluginInstance* instance) {
 }
@@ -68,7 +71,14 @@ MockPluginDelegate::CreateVideoCapture(
 MockPluginDelegate::PlatformAudio* MockPluginDelegate::CreateAudio(
     uint32_t sample_rate,
     uint32_t sample_count,
-    PlatformAudio::Client* client) {
+    PlatformAudioCommonClient* client) {
+  return NULL;
+}
+
+MockPluginDelegate::PlatformAudioInput* MockPluginDelegate::CreateAudioInput(
+    uint32_t sample_rate,
+    uint32_t sample_count,
+    PlatformAudioCommonClient* client) {
   return NULL;
 }
 
@@ -204,9 +214,6 @@ void MockPluginDelegate::SyncGetFileSystemPlatformPath(
   *platform_path = FilePath();
 }
 
-void MockPluginDelegate::PublishPolicy(const std::string& policy_json) {
-}
-
 scoped_refptr<base::MessageLoopProxy>
 MockPluginDelegate::GetFileThreadMessageLoopProxy() {
   return scoped_refptr<base::MessageLoopProxy>();
@@ -221,8 +228,61 @@ int32_t MockPluginDelegate::ConnectTcp(
 
 int32_t MockPluginDelegate::ConnectTcpAddress(
     webkit::ppapi::PPB_Flash_NetConnector_Impl* connector,
-    const struct PP_Flash_NetAddress* addr) {
+    const PP_NetAddress_Private* addr) {
   return PP_ERROR_FAILED;
+}
+
+uint32 MockPluginDelegate::TCPSocketCreate() {
+  return 0;
+}
+
+void MockPluginDelegate::TCPSocketConnect(PPB_TCPSocket_Private_Impl* socket,
+                                          uint32 socket_id,
+                                          const std::string& host,
+                                          uint16_t port) {
+}
+
+void MockPluginDelegate::TCPSocketConnectWithNetAddress(
+    PPB_TCPSocket_Private_Impl* socket,
+    uint32 socket_id,
+    const PP_NetAddress_Private& addr) {
+}
+
+void MockPluginDelegate::TCPSocketSSLHandshake(uint32 socket_id,
+                                               const std::string& server_name,
+                                               uint16_t server_port) {
+}
+
+void MockPluginDelegate::TCPSocketRead(uint32 socket_id,
+                                       int32_t bytes_to_read) {
+}
+
+void MockPluginDelegate::TCPSocketWrite(uint32 socket_id,
+                                        const std::string& buffer) {
+}
+
+void MockPluginDelegate::TCPSocketDisconnect(uint32 socket_id) {
+}
+
+uint32 MockPluginDelegate::UDPSocketCreate() {
+  return 0;
+}
+
+void MockPluginDelegate::UDPSocketBind(PPB_UDPSocket_Private_Impl* socket,
+                                       uint32 socket_id,
+                                       const PP_NetAddress_Private& addr) {
+}
+
+void MockPluginDelegate::UDPSocketRecvFrom(uint32 socket_id,
+                                           int32_t num_bytes) {
+}
+
+void MockPluginDelegate::UDPSocketSendTo(uint32 socket_id,
+                                         const std::string& buffer,
+                                         const PP_NetAddress_Private& addr) {
+}
+
+void MockPluginDelegate::UDPSocketClose(uint32 socket_id) {
 }
 
 int32_t MockPluginDelegate::ShowContextMenu(
@@ -247,9 +307,6 @@ std::string MockPluginDelegate::GetDefaultEncoding() {
 
 void MockPluginDelegate::ZoomLimitsChanged(double minimum_factor,
                                            double maximum_factor) {
-}
-
-void MockPluginDelegate::SubscribeToPolicyUpdates(PluginInstance* instance) {
 }
 
 std::string MockPluginDelegate::ResolveProxy(const GURL& url) {

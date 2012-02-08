@@ -19,7 +19,7 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/content_constants.h"
+#include "content/public/common/content_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/cert_status_flags.h"
@@ -58,7 +58,7 @@ string16 ToolbarModel::GetText() const {
   // the space.
   return AutocompleteInput::FormattedStringWithEquivalentMeaning(
       url, net::FormatUrl(url, languages, net::kFormatUrlOmitAll,
-                          UnescapeRule::NORMAL, NULL, NULL, NULL));
+                          net::UnescapeRule::NORMAL, NULL, NULL, NULL));
 }
 
 bool ToolbarModel::ShouldDisplayURL() const {
@@ -72,8 +72,10 @@ bool ToolbarModel::ShouldDisplayURL() const {
   NavigationController* controller = GetNavigationController();
   NavigationEntry* entry = controller ? controller->GetVisibleEntry() : NULL;
   if (entry) {
-    if (entry->IsViewSourceMode() || entry->page_type() == INTERSTITIAL_PAGE)
+    if (entry->IsViewSourceMode() ||
+        entry->page_type() == content::PAGE_TYPE_INTERSTITIAL) {
       return true;
+    }
   }
 
   TabContents* tab_contents = browser_->GetSelectedTabContents();
@@ -100,14 +102,14 @@ ToolbarModel::SecurityLevel ToolbarModel::GetSecurityLevel() const {
 
   const NavigationEntry::SSLStatus& ssl = entry->ssl();
   switch (ssl.security_style()) {
-    case SECURITY_STYLE_UNKNOWN:
-    case SECURITY_STYLE_UNAUTHENTICATED:
+    case content::SECURITY_STYLE_UNKNOWN:
+    case content::SECURITY_STYLE_UNAUTHENTICATED:
       return NONE;
 
-    case SECURITY_STYLE_AUTHENTICATION_BROKEN:
+    case content::SECURITY_STYLE_AUTHENTICATION_BROKEN:
       return SECURITY_ERROR;
 
-    case SECURITY_STYLE_AUTHENTICATED:
+    case content::SECURITY_STYLE_AUTHENTICATED:
       if (ssl.displayed_insecure_content())
         return SECURITY_WARNING;
       if (net::IsCertStatusError(ssl.cert_status())) {

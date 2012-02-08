@@ -12,22 +12,27 @@
 #include "base/stringprintf.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/render_messages.h"
-#include "content/common/pepper_plugin_registry.h"
+#include "chrome/default_plugin/plugin_main.h"
+#include "content/public/common/pepper_plugin_info.h"
+#include "grit/common_resources.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/glue/user_agent.h"
+#include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/plugin_constants.h"
 
 #if defined(OS_WIN)
-#include "content/common/sandbox_policy.h"
 #include "sandbox/src/sandbox.h"
+#elif defined(OS_MACOSX)
+#include "chrome/common/chrome_sandbox_type_mac.h"
 #endif
 
 namespace {
@@ -63,7 +68,7 @@ const char kRemotingViewerPluginOldMimeType[] =
 // and some are extra shared libraries distributed with the browser (these are
 // not marked internal, aside from being automatically registered, they're just
 // regular plugins).
-void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
+void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
   // PDF.
   //
   // Once we're sandboxed, we can't know if the PDF plugin is available or not;
@@ -74,7 +79,7 @@ void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
   FilePath path;
   if (PathService::Get(chrome::FILE_PDF_PLUGIN, &path)) {
     if (skip_pdf_file_check || file_util::PathExists(path)) {
-      PepperPluginInfo pdf;
+      content::PepperPluginInfo pdf;
       pdf.path = path;
       pdf.name = kPDFPluginName;
       webkit::WebPluginMimeType pdf_mime_type(kPDFPluginMimeType,
@@ -99,7 +104,7 @@ void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
   static bool skip_nacl_file_check = false;
   if (PathService::Get(chrome::FILE_NACL_PLUGIN, &path)) {
     if (skip_nacl_file_check || file_util::PathExists(path)) {
-      PepperPluginInfo nacl;
+      content::PepperPluginInfo nacl;
       nacl.path = path;
       nacl.name = kNaClPluginName;
       webkit::WebPluginMimeType nacl_mime_type(kNaClPluginMimeType,
@@ -114,7 +119,7 @@ void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
 
   // The Remoting Viewer plugin is built-in.
 #if defined(ENABLE_REMOTING)
-  PepperPluginInfo info;
+  content::PepperPluginInfo info;
   info.is_internal = true;
   info.name = kRemotingViewerPluginName;
   info.path = FilePath(kRemotingViewerPluginPath);
@@ -137,7 +142,7 @@ void ComputeBuiltInPlugins(std::vector<PepperPluginInfo>* plugins) {
 #endif
 }
 
-void AddOutOfProcessFlash(std::vector<PepperPluginInfo>* plugins) {
+void AddOutOfProcessFlash(std::vector<content::PepperPluginInfo>* plugins) {
   // Flash being out of process is handled separately than general plugins
   // for testing purposes.
   bool flash_out_of_process = !CommandLine::ForCurrentProcess()->HasSwitch(
@@ -150,7 +155,7 @@ void AddOutOfProcessFlash(std::vector<PepperPluginInfo>* plugins) {
   if (flash_path.empty())
     return;
 
-  PepperPluginInfo plugin;
+  content::PepperPluginInfo plugin;
   plugin.is_out_of_process = flash_out_of_process;
   plugin.path = FilePath(flash_path);
   plugin.name = kFlashPluginName;
@@ -227,11 +232,7 @@ bool LoadFlashBroker(const FilePath& plugin_path, CommandLine* cmd_line) {
   // terminates the job object is destroyed (by the OS) and the flash broker
   // is terminated.
   HANDLE job = ::CreateJobObjectW(NULL, NULL);
-  JOBOBJECT_EXTENDED_LIMIT_INFORMATION job_limits = {0};
-  job_limits.BasicLimitInformation.LimitFlags =
-      JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-  if (::SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-                                &job_limits, sizeof(job_limits))) {
+  if (base::SetJobObjectAsKillOnJobClose(job)) {
     ::AssignProcessToJobObject(job, process);
     // Yes, we are leaking the object here. Read comment above.
   } else {
@@ -242,13 +243,6 @@ bool LoadFlashBroker(const FilePath& plugin_path, CommandLine* cmd_line) {
   ::CloseHandle(process);
   return true;
 }
-
-// Must be dynamically loaded to avoid startup failures on Win XP.
-typedef BOOL (WINAPI *ChangeWindowMessageFilterFunction)(
-    UINT message,
-    DWORD flag);
-ChangeWindowMessageFilterFunction g_ChangeWindowMessageFilter;
-
 #endif  // OS_WIN
 
 }  // namespace
@@ -264,14 +258,45 @@ void ChromeContentClient::SetActiveURL(const GURL& url) {
   child_process_logging::SetActiveURL(url);
 }
 
-void ChromeContentClient::SetGpuInfo(const GPUInfo& gpu_info) {
+void ChromeContentClient::SetGpuInfo(const content::GPUInfo& gpu_info) {
   child_process_logging::SetGpuInfo(gpu_info);
 }
 
 void ChromeContentClient::AddPepperPlugins(
-    std::vector<PepperPluginInfo>* plugins) {
+    std::vector<content::PepperPluginInfo>* plugins) {
   ComputeBuiltInPlugins(plugins);
   AddOutOfProcessFlash(plugins);
+}
+
+void ChromeContentClient::AddNPAPIPlugins(
+    webkit::npapi::PluginList* plugin_list) {
+#if defined(OS_WIN) && !defined(USE_AURA)
+  // TODO(bauerb): On Windows the default plug-in can download and install
+  // missing plug-ins, which we don't support in the browser yet, so keep
+  // using the default plug-in on Windows until we do.
+  // Aura isn't going to support NPAPI plugins.
+  const webkit::npapi::PluginEntryPoints entry_points = {
+    default_plugin::NP_GetEntryPoints,
+    default_plugin::NP_Initialize,
+    default_plugin::NP_Shutdown
+  };
+
+  webkit::WebPluginInfo info;
+  info.path = FilePath(webkit::npapi::kDefaultPluginLibraryName);
+  info.name = ASCIIToUTF16("Default Plug-in");
+  info.version = ASCIIToUTF16("1");
+  info.desc = ASCIIToUTF16("Provides functionality for installing third-party "
+                           "plug-ins");
+
+  webkit::WebPluginMimeType mimeType;
+  mimeType.mime_type = "*";
+  info.mime_types.push_back(mimeType);
+
+  webkit::npapi::PluginList::Singleton()->RegisterInternalPlugin(
+      info,
+      entry_points,
+      false);
+#endif
 }
 
 bool ChromeContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
@@ -359,16 +384,10 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
                           sandbox::USER_INTERACTIVE);
     // Allow the Flash plugin to forward some messages back to Chrome.
     if (base::win::GetVersion() == base::win::VERSION_VISTA) {
-      if (!g_ChangeWindowMessageFilter) {
-        g_ChangeWindowMessageFilter =
-            reinterpret_cast<ChangeWindowMessageFilterFunction>(
-                ::GetProcAddress(::GetModuleHandle(L"user32.dll"),
-                                 "ChangeWindowMessageFilter"));
-      }
       // Per-window message filters required on Win7 or later must be added to:
       // render_widget_host_view_win.cc RenderWidgetHostViewWin::ReparentWindow
-      g_ChangeWindowMessageFilter(WM_MOUSEWHEEL, MSGFLT_ADD);
-      g_ChangeWindowMessageFilter(WM_APPCOMMAND, MSGFLT_ADD);
+      ::ChangeWindowMessageFilter(WM_MOUSEWHEEL, MSGFLT_ADD);
+      ::ChangeWindowMessageFilter(WM_APPCOMMAND, MSGFLT_ADD);
     }
     policy->SetIntegrityLevel(sandbox::INTEGRITY_LEVEL_LOW);
   } else {
@@ -380,6 +399,19 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
   }
 
   return true;
+}
+#endif
+
+#if defined(OS_MACOSX)
+bool ChromeContentClient::GetSandboxProfileForSandboxType(
+    int sandbox_type,
+    int* sandbox_profile_resource_id) const {
+  DCHECK(sandbox_profile_resource_id);
+  if (sandbox_type == CHROME_SANDBOX_TYPE_NACL_LOADER) {
+    *sandbox_profile_resource_id = IDR_NACL_SANDBOX_PROFILE;
+    return true;
+  }
+  return false;
 }
 #endif
 

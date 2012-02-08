@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/net_log.h"
 #include "net/base/ssl_config_service.h"
 #include "net/http/http_network_session.h"
@@ -16,6 +16,8 @@
 #include "net/http/http_transaction_factory.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
+
+using content::BrowserThread;
 
 namespace chrome_browser_net {
 
@@ -94,8 +96,8 @@ void PreconnectOnIOThread(
   // Setup the SSL Configuration.
   net::SSLConfig ssl_config;
   session->ssl_config_service()->GetSSLConfig(&ssl_config);
-  if (session->http_stream_factory()->next_protos())
-    ssl_config.next_protos = *session->http_stream_factory()->next_protos();
+  if (session->http_stream_factory()->has_next_protos())
+    ssl_config.next_protos = session->http_stream_factory()->next_protos();
 
   // All preconnects should perform EV certificate verification.
   ssl_config.verify_ev_cert = true;

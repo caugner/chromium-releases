@@ -14,7 +14,7 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 namespace chromeos {
 
@@ -72,7 +72,7 @@ TabCloseableStateWatcher::TabCloseableStateWatcher()
       waiting_for_browser_(false) {
   BrowserList::AddObserver(this);
   notification_registrar_.Add(this, content::NOTIFICATION_APP_EXITING,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
 }
 
 TabCloseableStateWatcher::~TabCloseableStateWatcher() {
@@ -186,10 +186,11 @@ void TabCloseableStateWatcher::OnBrowserRemoved(const Browser* browser) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// TabCloseableStateWatcher, NotificationObserver implementation:
+// TabCloseableStateWatcher, content::NotificationObserver implementation:
 
 void TabCloseableStateWatcher::Observe(int type,
-    const NotificationSource& source, const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type != content::NOTIFICATION_APP_EXITING)
     NOTREACHED();
   if (!signing_off_) {
@@ -260,10 +261,10 @@ void TabCloseableStateWatcher::SetCloseableState(bool closeable) {
   can_close_tab_ = closeable;
 
   // Notify of change in tab closeable state.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_TAB_CLOSEABLE_STATE_CHANGED,
-      NotificationService::AllSources(),
-      Details<bool>(&can_close_tab_));
+      content::NotificationService::AllSources(),
+      content::Details<bool>(&can_close_tab_));
 }
 
 bool TabCloseableStateWatcher::CanCloseBrowserImpl(

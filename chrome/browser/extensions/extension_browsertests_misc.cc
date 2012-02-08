@@ -26,8 +26,10 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_service.h"
 #include "net/base/net_util.h"
 #include "net/test/test_server.h"
+#include "webkit/glue/webpreferences.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -120,7 +122,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, WebKitPrefsBackgroundPage) {
   ExtensionProcessManager* manager =
         browser()->profile()->GetExtensionProcessManager();
   ExtensionHost* host = FindHostWithPath(manager, "/backgroundpage.html", 1);
-  WebPreferences prefs = host->GetWebkitPrefs();
+  WebPreferences prefs =
+      static_cast<RenderViewHostDelegate*>(host->host_contents())->
+          GetWebkitPrefs();
   ASSERT_FALSE(prefs.experimental_webgl_enabled);
   ASSERT_FALSE(prefs.accelerated_compositing_enabled);
   ASSERT_FALSE(prefs.accelerated_2d_canvas_enabled);
@@ -614,7 +618,7 @@ static void WindowOpenHelper(Browser* browser, const GURL& start_url,
 
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScript(
       browser->GetSelectedTabContents()->render_view_host(), L"",
       L"window.open('" + UTF8ToWide(newtab_url) + L"');"));
@@ -728,7 +732,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
-        Source<NavigationController>(
+        content::Source<NavigationController>(
             &browser()->GetSelectedTabContentsWrapper()->controller()));
     browser()->Reload(CURRENT_TAB);
     observer.Wait();
@@ -754,7 +758,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
-        Source<NavigationController>(
+        content::Source<NavigationController>(
             &browser()->GetSelectedTabContentsWrapper()->controller()));
     browser()->Reload(CURRENT_TAB);
     observer.Wait();
@@ -764,10 +768,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionBrowserTest, MAYBE_PluginLoadUnload) {
   EXPECT_TRUE(result);
 }
 
-#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if !defined(USE_AURA) && (defined(OS_WIN) || defined(OS_LINUX) || defined(OS_CHROMEOS))
 #define MAYBE_PluginPrivate PluginPrivate
 #else
 // TODO(mpcomplete): http://crbug.com/29900 need cross platform plugin support.
+// crbug.com/105627 for AURA.
 #define MAYBE_PluginPrivate DISABLED_PluginPrivate
 #endif
 

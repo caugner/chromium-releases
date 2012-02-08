@@ -15,12 +15,15 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/scoped_native_library.h"
+#include "base/string_number_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/windows_version.h"
 #include "base/win/wrapped_window_proc.h"
 #include "chrome/browser/browser_util_win.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/metrics/metrics_service.h"
+#include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_shortcut_manager_win.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/uninstall_view.h"
 #include "chrome/common/chrome_constants.h"
@@ -31,13 +34,16 @@
 #include "chrome/installer/util/helper.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
-#include "content/common/main_function_params.h"
+#include "content/public/common/main_function_params.h"
+#include "grit/app_locale_settings.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/message_box_win.h"
-#include "views/focus/accelerator_handler.h"
-#include "views/widget/widget.h"
+#include "ui/gfx/platform_font_win.h"
+#include "ui/views/focus/accelerator_handler.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 
@@ -55,6 +61,19 @@ void InitializeWindowProcExceptions() {
   exception_filter = base::win::SetWinProcExceptionFilter(exception_filter);
   DCHECK(!exception_filter);
 }
+
+// gfx::Font callbacks
+void AdjustUIFont(LOGFONT* logfont) {
+  l10n_util::AdjustUIFont(logfont);
+}
+
+int GetMinimumFontSize() {
+  int min_font_size;
+  base::StringToInt(l10n_util::GetStringUTF16(IDS_MINIMUM_UI_FONT_SIZE),
+                    &min_font_size);
+  return min_font_size;
+}
+
 }  // namespace
 
 void RecordBreakpadStatusUMA(MetricsService* metrics) {
@@ -74,14 +93,6 @@ void WarnAboutMinimumSystemRequirements() {
   }
 }
 
-#if !defined(USE_AURA)
-void ShowMissingLocaleMessageBox() {
-  ui::MessageBox(NULL, ASCIIToUTF16(chrome_browser::kMissingLocaleDataMessage),
-                 ASCIIToUTF16(chrome_browser::kMissingLocaleDataTitle),
-                 MB_OK | MB_ICONERROR | MB_TOPMOST);
-}
-#endif
-
 void RecordBrowserStartupTime() {
   // Calculate the time that has elapsed from our own process creation.
   FILETIME creation_time = {};
@@ -97,7 +108,7 @@ int AskForUninstallConfirmation() {
   int ret = content::RESULT_CODE_NORMAL_EXIT;
   views::Widget::CreateWindow(new UninstallView(&ret))->Show();
   views::AcceleratorHandler accelerator_handler;
-  MessageLoopForUI::current()->Run(&accelerator_handler);
+  MessageLoopForUI::current()->RunWithDispatcher(&accelerator_handler);
   return ret;
 }
 
@@ -132,20 +143,46 @@ int DoUninstallTasks(bool chrome_still_running) {
     // created by us and not by the installer so |alternate| is false.
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
     if (!ShellUtil::RemoveChromeDesktopShortcut(dist, ShellUtil::CURRENT_USER,
-                                                false))
+                                                false)) {
       VLOG(1) << "Failed to delete desktop shortcut.";
+    }
+    if (!ShellUtil::RemoveChromeDesktopShortcutsWithAppendedNames(
+        ProfileShortcutManagerWin::GenerateShortcutsFromProfiles(
+            ProfileInfoCache::GetProfileNames()))) {
+      VLOG(1) << "Failed to delete desktop profiles shortcuts.";
+    }
     if (!ShellUtil::RemoveChromeQuickLaunchShortcut(dist,
-                                                    ShellUtil::CURRENT_USER))
+                                                    ShellUtil::CURRENT_USER)) {
       VLOG(1) << "Failed to delete quick launch shortcut.";
+    }
   }
   return ret;
 }
 
-// Prepares the localized strings that are going to be displayed to
-// the user if the browser process dies. These strings are stored in the
-// environment block so they are accessible in the early stages of the
-// chrome executable's lifetime.
-void PrepareRestartOnCrashEnviroment(const CommandLine& parsed_command_line) {
+// ChromeBrowserMainPartsWin ---------------------------------------------------
+
+ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
+    const content::MainFunctionParams& parameters)
+    : ChromeBrowserMainParts(parameters) {
+}
+
+void ChromeBrowserMainPartsWin::ToolkitInitialized() {
+  ChromeBrowserMainParts::ToolkitInitialized();
+  gfx::PlatformFontWin::adjust_font_callback = &AdjustUIFont;
+  gfx::PlatformFontWin::get_minimum_font_size_callback = &GetMinimumFontSize;
+}
+
+void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
+  ChromeBrowserMainParts::PreMainMessageLoopStart();
+  if (!parameters().ui_task) {
+    // Make sure that we know how to handle exceptions from the message loop.
+    InitializeWindowProcExceptions();
+  }
+}
+
+// static
+void ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment(
+    const CommandLine& parsed_command_line) {
   // Clear this var so child processes don't show the dialog by default.
   scoped_ptr<base::Environment> env(base::Environment::Create());
   env->UnSetVar(env_vars::kShowRestart);
@@ -177,7 +214,9 @@ void PrepareRestartOnCrashEnviroment(const CommandLine& parsed_command_line) {
   env->SetVar(env_vars::kRestartInfo, UTF16ToUTF8(dlg_strings));
 }
 
-void RegisterApplicationRestart(const CommandLine& parsed_command_line) {
+// static
+void ChromeBrowserMainPartsWin::RegisterApplicationRestart(
+    const CommandLine& parsed_command_line) {
   DCHECK(base::win::GetVersion() >= base::win::VERSION_VISTA);
   base::ScopedNativeLibrary library(FilePath(L"kernel32.dll"));
   // Get the function pointer for RegisterApplicationRestart.
@@ -207,11 +246,15 @@ void RegisterApplicationRestart(const CommandLine& parsed_command_line) {
   DCHECK(SUCCEEDED(hr)) << "RegisterApplicationRestart failed.";
 }
 
-// This method handles the --hide-icons and --show-icons command line options
-// for chrome that get triggered by Windows from registry entries
-// HideIconsCommand & ShowIconsCommand. Chrome doesn't support hide icons
-// functionality so we just ask the users if they want to uninstall Chrome.
-int HandleIconsCommands(const CommandLine& parsed_command_line) {
+void ChromeBrowserMainPartsWin::ShowMissingLocaleMessageBox() {
+  ui::MessageBox(NULL, ASCIIToUTF16(chrome_browser::kMissingLocaleDataMessage),
+                 ASCIIToUTF16(chrome_browser::kMissingLocaleDataTitle),
+                 MB_OK | MB_ICONERROR | MB_TOPMOST);
+}
+
+// static
+int ChromeBrowserMainPartsWin::HandleIconsCommands(
+    const CommandLine& parsed_command_line) {
   if (parsed_command_line.HasSwitch(switches::kHideIcons)) {
     string16 cp_applet;
     base::win::Version version = base::win::GetVersion();
@@ -237,11 +280,8 @@ int HandleIconsCommands(const CommandLine& parsed_command_line) {
   return chrome::RESULT_CODE_UNSUPPORTED_PARAM;
 }
 
-// Check if there is any machine level Chrome installed on the current
-// machine. If yes and the current Chrome process is user level, we do not
-// allow the user level Chrome to run. So we notify the user and uninstall
-// user level Chrome.
-bool CheckMachineLevelInstall() {
+// static
+bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
   // TODO(tommi): Check if using the default distribution is always the right
   // thing to do.
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
@@ -269,18 +309,4 @@ bool CheckMachineLevelInstall() {
     }
   }
   return false;
-}
-
-// ChromeBrowserMainPartsWin ---------------------------------------------------
-
-ChromeBrowserMainPartsWin::ChromeBrowserMainPartsWin(
-    const MainFunctionParams& parameters)
-    : ChromeBrowserMainParts(parameters) {
-}
-
-void ChromeBrowserMainPartsWin::PreMainMessageLoopStart() {
-  if (!parameters().ui_task) {
-    // Make sure that we know how to handle exceptions from the message loop.
-    InitializeWindowProcExceptions();
-  }
 }

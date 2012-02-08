@@ -7,15 +7,21 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_function.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "googleurl/src/gurl.h"
 
 class BackingStore;
 class SkBitmap;
+
+namespace base {
+class DictionaryValue;
+}  // namespace base
 
 // Windows
 class GetWindowFunction : public SyncExtensionFunction {
@@ -41,6 +47,15 @@ class GetAllWindowsFunction : public SyncExtensionFunction {
 class CreateWindowFunction : public SyncExtensionFunction {
   virtual ~CreateWindowFunction() {}
   virtual bool RunImpl() OVERRIDE;
+  // Returns whether the window should be created in incognito mode.
+  // |urls| is the list of urls to open. If we are creating an incognito window,
+  // the function will remove these urls which may not be opened in incognito
+  // mode.  If window creation leads the browser into an erroneous state,
+  // |is_error| is set to true (also, error_ member variable is assigned
+  // the proper error message).
+  bool ShouldOpenIncognitoWindow(const base::DictionaryValue* args,
+                                 std::vector<GURL>* urls,
+                                 bool* is_error);
   DECLARE_EXTENSION_FUNCTION_NAME("windows.create")
 };
 class UpdateWindowFunction : public SyncExtensionFunction {
@@ -97,7 +112,7 @@ class UpdateTabFunction : public AsyncExtensionFunction,
  private:
   virtual ~UpdateTabFunction() {}
   virtual bool RunImpl() OVERRIDE;
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   void OnExecuteCodeFinished(int request_id,
                              bool success,
                              const std::string& error);
@@ -110,7 +125,7 @@ class MoveTabsFunction : public SyncExtensionFunction {
 };
 class ReloadTabFunction : public SyncExtensionFunction {
   virtual ~ReloadTabFunction() {}
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.reload")
 };
 class RemoveTabsFunction : public SyncExtensionFunction {
@@ -119,20 +134,20 @@ class RemoveTabsFunction : public SyncExtensionFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.remove")
 };
 class DetectTabLanguageFunction : public AsyncExtensionFunction,
-                                  public NotificationObserver {
+                                  public content::NotificationObserver {
  private:
   virtual ~DetectTabLanguageFunction() {}
   virtual bool RunImpl() OVERRIDE;
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
   void GotLanguage(const std::string& language);
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.detectLanguage")
 };
 class CaptureVisibleTabFunction : public AsyncExtensionFunction,
-                                  public NotificationObserver {
+                                  public content::NotificationObserver {
  private:
   enum ImageFormat {
     FORMAT_JPEG,
@@ -146,11 +161,11 @@ class CaptureVisibleTabFunction : public AsyncExtensionFunction,
   virtual bool RunImpl() OVERRIDE;
   virtual bool CaptureSnapshotFromBackingStore(BackingStore* backing_store);
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
   virtual void SendResultFromBitmap(const SkBitmap& screen_capture);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // The format (JPEG vs PNG) of the resulting image.  Set in RunImpl().
   ImageFormat image_format_;

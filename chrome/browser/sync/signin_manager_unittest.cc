@@ -4,14 +4,18 @@
 
 #include "chrome/browser/sync/signin_manager.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/compiler_specific.h"
 #include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/gaia/token_service_unittest.h"
 #include "chrome/browser/password_manager/encryptor.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/sync/util/oauth.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
-#include "chrome/test/base/signaling_task.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "net/url_request/url_request.h"
@@ -26,9 +30,9 @@ class SigninManagerTest : public TokenServiceTestHarness {
     manager_.reset(new SigninManager());
     google_login_success_.ListenFor(
         chrome::NOTIFICATION_GOOGLE_SIGNIN_SUCCESSFUL,
-        Source<Profile>(profile_.get()));
+        content::Source<Profile>(profile_.get()));
     google_login_failure_.ListenFor(chrome::NOTIFICATION_GOOGLE_SIGNIN_FAILED,
-                                    Source<Profile>(profile_.get()));
+                                    content::Source<Profile>(profile_.get()));
     originally_using_oauth_ = browser_sync::IsUsingOAuth();
   }
 
@@ -43,20 +47,23 @@ class SigninManagerTest : public TokenServiceTestHarness {
     TestURLFetcher* fetcher = factory_.GetFetcherByID(0);
     DCHECK(fetcher);
     DCHECK(fetcher->delegate());
-    fetcher->delegate()->OnURLFetchComplete(
-        fetcher, GURL(GaiaUrls::GetInstance()->client_login_url()),
-        net::URLRequestStatus(), 200, net::ResponseCookies(),
-        "SID=sid\nLSID=lsid\nAuth=auth");
+
+    fetcher->set_url(GURL(GaiaUrls::GetInstance()->client_login_url()));
+    fetcher->set_status(net::URLRequestStatus());
+    fetcher->set_response_code(200);
+    fetcher->SetResponseString("SID=sid\nLSID=lsid\nAuth=auth");
+    fetcher->delegate()->OnURLFetchComplete(fetcher);
 
     // Then simulate the correct GetUserInfo response for the canonical email.
     // A new URL fetcher is used for each call.
     fetcher = factory_.GetFetcherByID(0);
     DCHECK(fetcher);
     DCHECK(fetcher->delegate());
-    fetcher->delegate()->OnURLFetchComplete(
-        fetcher, GURL(GaiaUrls::GetInstance()->get_user_info_url()),
-        net::URLRequestStatus(), 200, net::ResponseCookies(),
-        "email=user@gmail.com");
+    fetcher->set_url(GURL(GaiaUrls::GetInstance()->get_user_info_url()));
+    fetcher->set_status(net::URLRequestStatus());
+    fetcher->set_response_code(200);
+    fetcher->SetResponseString("email=user@gmail.com");
+    fetcher->delegate()->OnURLFetchComplete(fetcher);
   }
 
   void SimulateSigninStartOAuth() {
@@ -108,6 +115,39 @@ TEST_F(SigninManagerTest, SignInClientLogin) {
   manager_->Initialize(profile_.get());
   EXPECT_EQ("user@gmail.com", manager_->GetUsername());
 }
+
+TEST_F(SigninManagerTest, ClearInMemoryData) {
+  browser_sync::SetIsUsingOAuthForTest(false);
+  manager_->Initialize(profile_.get());
+  EXPECT_TRUE(manager_->GetUsername().empty());
+
+  manager_->StartSignIn("username", "password", "", "");
+  EXPECT_FALSE(manager_->GetUsername().empty());
+
+  SimulateValidResponseClientLogin();
+
+  // Should go into token service and stop.
+  EXPECT_EQ(1U, google_login_success_.size());
+  EXPECT_EQ(0U, google_login_failure_.size());
+
+  EXPECT_EQ("user@gmail.com", manager_->GetUsername());
+
+  // Now clear the in memory data.
+  manager_->ClearInMemoryData();
+  EXPECT_TRUE(manager_->GetUsername().empty());
+
+  // Ensure preferences are not modified.
+  EXPECT_FALSE(
+     profile_->GetPrefs()->GetString(prefs::kGoogleServicesUsername).empty());
+
+  // On reset it should be regenerated.
+  manager_.reset(new SigninManager());
+  manager_->Initialize(profile_.get());
+
+  // Now make sure we have the right user name.
+  EXPECT_EQ("user@gmail.com", manager_->GetUsername());
+}
+
 
 // NOTE: OAuth's "StartOAuthSignIn" is called before collecting credentials
 //       from the user.  See also SigninManagerTest::SignInClientLogin.

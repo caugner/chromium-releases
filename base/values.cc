@@ -143,6 +143,14 @@ bool Value::GetAsList(const ListValue** out_value) const {
   return false;
 }
 
+bool Value::GetAsDictionary(DictionaryValue** out_value) {
+  return false;
+}
+
+bool Value::GetAsDictionary(const DictionaryValue** out_value) const {
+  return false;
+}
+
 Value* Value::DeepCopy() const {
   // This method should only be getting called for null Values--all subclasses
   // need to provide their own implementation;.
@@ -345,6 +353,18 @@ DictionaryValue::~DictionaryValue() {
   Clear();
 }
 
+bool DictionaryValue::GetAsDictionary(DictionaryValue** out_value) {
+  if (out_value)
+    *out_value = this;
+  return true;
+}
+
+bool DictionaryValue::GetAsDictionary(const DictionaryValue** out_value) const {
+  if (out_value)
+    *out_value = this;
+  return true;
+}
+
 bool DictionaryValue::HasKey(const std::string& key) const {
   DCHECK(IsStringUTF8(key));
   ValueMap::const_iterator current_entry = dictionary_.find(key);
@@ -412,12 +432,13 @@ void DictionaryValue::SetWithoutPathExpansion(const std::string& key,
                                               Value* in_value) {
   // If there's an existing value here, we need to delete it, because
   // we own all our children.
-  if (HasKey(key)) {
-    DCHECK(dictionary_[key] != in_value);  // This would be bogus
-    delete dictionary_[key];
+  std::pair<ValueMap::iterator, bool> ins_res =
+      dictionary_.insert(std::make_pair(key, in_value));
+  if (!ins_res.second) {
+    DCHECK_NE(ins_res.first->second, in_value);  // This would be bogus
+    delete ins_res.first->second;
+    ins_res.first->second = in_value;
   }
-
-  dictionary_[key] = in_value;
 }
 
 bool DictionaryValue::Get(const std::string& path, Value** out_value) const {

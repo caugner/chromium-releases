@@ -9,8 +9,8 @@
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
-#include "views/controls/message_box_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/message_box_view.h"
+#include "ui/views/widget/widget.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // RestartMessageBox, public:
@@ -22,12 +22,12 @@ void RestartMessageBox::ShowMessageBox(gfx::NativeWindow parent_window) {
 }
 
 int RestartMessageBox::GetDialogButtons() const {
-  return ui::MessageBoxFlags::DIALOGBUTTON_OK;
+  return ui::DIALOG_BUTTON_OK;
 }
 
 string16 RestartMessageBox::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  DCHECK(button == ui::MessageBoxFlags::DIALOGBUTTON_OK);
+    ui::DialogButton button) const {
+  DCHECK_EQ(button, ui::DIALOG_BUTTON_OK);
   return l10n_util::GetStringUTF16(IDS_OK);
 }
 

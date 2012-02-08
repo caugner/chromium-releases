@@ -39,17 +39,33 @@
         'compositor_export.h',
         'compositor_gl.cc',
         'compositor_gl.h',
+        'compositor_cc.cc',
+        'compositor_cc.h',
         'compositor_observer.h',
         'compositor_stub.cc',
+        'compositor_switches.cc',
+        'compositor_switches.h',
         'compositor_win.cc',
+        'debug_utils.cc',
+        'debug_utils.h',
         'layer.cc',
         'layer.h',
+        'layer_animation_delegate.h',
+        'layer_animation_element.cc',
+        'layer_animation_element.h',
+        'layer_animation_observer.h',
+        'layer_animation_sequence.cc',
+        'layer_animation_sequence.h',
         'layer_animator.cc',
         'layer_animator.h',
-        'layer_animator_delegate.h',
+        'screen_rotation.cc',
+        'screen_rotation.h',
+        # UI tests need TestWebGraphicsContext3D, so we always build it.
+        'test_web_graphics_context_3d.cc',
+        'test_web_graphics_context_3d.h',
       ],
       'conditions': [
-        ['os_posix == 1 and OS != "mac"', {
+        ['os_posix == 1', {
           'sources!': [
             'compositor_stub.cc',
           ],
@@ -77,6 +93,53 @@
             ['exclude', '^compositor_win.cc'],
           ],
         }],
+        ['use_webkit_compositor == 1', {
+            'sources/': [
+              ['exclude', '^compositor_(gl|mac|win|stub).(h|cc|mm)$'],
+            ],
+            'dependencies': [
+              '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+              '<(DEPTH)/webkit/support/webkit_support.gyp:fileapi',
+              '<(DEPTH)/webkit/support/webkit_support.gyp:glue',
+              '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_gpu',
+            ],
+          }, {
+            'sources!': [
+              'compositor_cc.cc',
+              'compositor_cc.h',
+              'test_web_graphics_context_3d.cc',
+              'test_web_graphics_context_3d.h',
+            ],
+          }
+        ],
+      ],
+    },
+    {
+      'target_name': 'compositor_test_support',
+      'type': 'static_library',
+      'dependencies': [
+        '<(DEPTH)/base/base.gyp:base',
+      ],
+      'sources': [
+        'test/compositor_test_support.cc',
+        'test/compositor_test_support.h',
+      ],
+      'conditions': [
+        ['use_webkit_compositor == 1', {
+          'dependencies': [
+            '<(DEPTH)/webkit/support/webkit_support.gyp:webkit_support',
+            '<(DEPTH)/third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+          ],
+        }],
+        ['os_posix == 1 and OS != "mac"', {
+          'conditions': [
+            ['linux_use_tcmalloc==1', {
+              'dependencies': [
+                '<(DEPTH)/base/allocator/allocator.gyp:allocator',
+              ],
+            }],
+          ],
+        }],
       ],
     },
     {
@@ -85,6 +148,7 @@
       'dependencies': [
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:test_support_base',
+        '<(DEPTH)/chrome/chrome_resources.gyp:packed_resources',
         '<(DEPTH)/skia/skia.gyp:skia',
         '<(DEPTH)/testing/gtest.gyp:gtest',
         '<(DEPTH)/ui/gfx/gl/gl.gyp:gl',
@@ -92,19 +156,27 @@
         '<(DEPTH)/ui/ui.gyp:ui',
         '<(DEPTH)/ui/ui.gyp:ui_resources',
         'compositor',
+        'compositor_test_support',
+        'test_compositor',
       ],
       'sources': [
+        'layer_animation_element_unittest.cc',
+        'layer_animation_sequence_unittest.cc',
+        'layer_animator_unittest.cc',
         'layer_unittest.cc',
         'run_all_unittests.cc',
-        'test_compositor.cc',
-        'test_compositor.h',
-        'test_compositor_host.h',
-        'test_compositor_host_linux.cc',
-        'test_compositor_host_win.cc',
-        'test_suite.cc',
-        'test_suite.h',
-        'test_texture.cc',
-        'test_texture.h',
+        'test/test_compositor_host.h',
+        'test/test_compositor_host_linux.cc',
+        'test/test_compositor_host_mac.mm',
+        'test/test_compositor_host_win.cc',
+        'test/test_layer_animation_delegate.cc',
+        'test/test_layer_animation_delegate.h',
+        'test/test_layer_animation_observer.cc',
+        'test/test_layer_animation_observer.h',
+        'test/test_suite.cc',
+        'test/test_suite.h',
+        'test/test_utils.cc',
+        'test/test_utils.h',
         '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
         '<(SHARED_INTERMEDIATE_DIR)/ui/ui_resources/ui_resources.rc',
       ],
@@ -115,10 +187,32 @@
             '<(DEPTH)/third_party/mesa/mesa.gyp:osmesa',
           ],
         }],
-        ['OS!="mac"', {
+      ],
+    },
+    {
+      'target_name': 'test_compositor',
+      'type': 'static_library',
+      'dependencies': [
+        '<(DEPTH)/base/base.gyp:base',
+      ],
+      'sources': [
+        '../test/gfx_test_utils.cc',
+        '../test/gfx_test_utils.h',
+      ],
+      'conditions': [
+        # We allow on platforms without a compositor (such as OS_WIN).
+        # They will use compositor_stub.cc.
+        ['toolkit_views == 1', {
           'dependencies': [
-            '<(DEPTH)/chrome/chrome.gyp:packed_resources',
-           ],
+            '<(DEPTH)/skia/skia.gyp:skia',
+            'compositor',
+          ],
+          'sources': [
+            'test/test_compositor.cc',
+            'test/test_compositor.h',
+            'test/test_texture.cc',
+            'test/test_texture.h',
+          ],
         }],
       ],
     },

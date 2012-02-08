@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -14,14 +15,16 @@
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/navigation_details.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/quota/quota_types.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -39,7 +42,7 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
       const GURL& origin_url,
       int64 requested_quota,
       const std::string& display_languages,
-      PermissionCallback* callback)
+      const PermissionCallback& callback)
       : ConfirmInfoBarDelegate(infobar_helper),
         context_(context),
         origin_url_(origin_url),
@@ -49,9 +52,9 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   virtual ~RequestQuotaInfoBarDelegate() {
-    if (callback_.get())
+    if (!callback_.is_null())
       context_->DispatchCallbackOnIOThread(
-          callback_.release(), QuotaPermissionContext::kResponseCancelled);
+          callback_, QuotaPermissionContext::kResponseCancelled);
   }
 
   virtual bool ShouldExpire(
@@ -59,6 +62,7 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
       const OVERRIDE {
     return false;
   }
+
   virtual string16 GetMessageText() const OVERRIDE;
   virtual void InfoBarDismissed() OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -68,13 +72,13 @@ class RequestQuotaInfoBarDelegate : public ConfirmInfoBarDelegate {
   GURL origin_url_;
   std::string display_languages_;
   int64 requested_quota_;
-  scoped_ptr<PermissionCallback> callback_;
+  PermissionCallback callback_;
   DISALLOW_COPY_AND_ASSIGN(RequestQuotaInfoBarDelegate);
 };
 
 void RequestQuotaInfoBarDelegate::InfoBarDismissed() {
   context_->DispatchCallbackOnIOThread(
-      callback_.release(), QuotaPermissionContext::kResponseCancelled);
+      callback_, QuotaPermissionContext::kResponseCancelled);
 }
 
 string16 RequestQuotaInfoBarDelegate::GetMessageText() const {
@@ -87,13 +91,13 @@ string16 RequestQuotaInfoBarDelegate::GetMessageText() const {
 
 bool RequestQuotaInfoBarDelegate::Accept() {
   context_->DispatchCallbackOnIOThread(
-      callback_.release(), QuotaPermissionContext::kResponseAllow);
+      callback_, QuotaPermissionContext::kResponseAllow);
   return true;
 }
 
 bool RequestQuotaInfoBarDelegate::Cancel() {
   context_->DispatchCallbackOnIOThread(
-      callback_.release(), QuotaPermissionContext::kResponseCancelled);
+      callback_, QuotaPermissionContext::kResponseCancelled);
   return true;
 }
 
@@ -111,23 +115,20 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
     int64 requested_quota,
     int render_process_id,
     int render_view_id,
-    PermissionCallback* callback_ptr) {
-  scoped_ptr<PermissionCallback> callback(callback_ptr);
+    const PermissionCallback& callback) {
   if (type != quota::kStorageTypePersistent) {
     // For now we only support requesting quota with this interface
     // for Persistent storage type.
-    callback->Run(kResponseDisallow);
+    callback.Run(kResponseDisallow);
     return;
   }
 
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(
-            this,
-            &ChromeQuotaPermissionContext::RequestQuotaPermission,
-            origin_url, type, requested_quota,
-            render_process_id, render_view_id, callback.release()));
+        base::Bind(&ChromeQuotaPermissionContext::RequestQuotaPermission, this,
+                   origin_url, type, requested_quota, render_process_id,
+                   render_view_id, callback));
     return;
   }
 
@@ -137,7 +138,7 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
     // The tab may have gone away or the request may not be from a tab.
     LOG(WARNING) << "Attempt to request quota tabless renderer: "
                  << render_process_id << "," << render_view_id;
-    DispatchCallbackOnIOThread(callback.release(), kResponseCancelled);
+    DispatchCallbackOnIOThread(callback, kResponseCancelled);
     return;
   }
 
@@ -145,26 +146,23 @@ void ChromeQuotaPermissionContext::RequestQuotaPermission(
       TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
   InfoBarTabHelper* infobar_helper = wrapper->infobar_tab_helper();
   infobar_helper->AddInfoBar(new RequestQuotaInfoBarDelegate(
-      infobar_helper,
-      this,
-      origin_url,
-      requested_quota,
+      infobar_helper, this, origin_url, requested_quota,
       wrapper->profile()->GetPrefs()->GetString(prefs::kAcceptLanguages),
-      callback.release()));
+      callback));
 }
 
 void ChromeQuotaPermissionContext::DispatchCallbackOnIOThread(
-    PermissionCallback* callback_ptr,
+    const PermissionCallback& callback,
     Response response) {
-  DCHECK(callback_ptr);
-  scoped_ptr<PermissionCallback> callback(callback_ptr);
+  DCHECK_EQ(false, callback.is_null());
+
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(
-            this, &ChromeQuotaPermissionContext::DispatchCallbackOnIOThread,
-            callback.release(), response));
+        base::Bind(&ChromeQuotaPermissionContext::DispatchCallbackOnIOThread,
+                   this, callback, response));
     return;
   }
-  callback->Run(response);
+
+  callback.Run(response);
 }

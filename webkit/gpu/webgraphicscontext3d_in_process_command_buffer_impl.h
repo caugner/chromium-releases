@@ -11,12 +11,12 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebGraphicsContext3D.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if !defined(OS_MACOSX)
+#if defined(USE_SKIA)
 #define FLIP_FRAMEBUFFER_VERTICALLY
 #endif
 
@@ -69,12 +69,15 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
 
   virtual void reshape(int width, int height);
 
+  virtual void setVisibility(bool visible);
+
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size);
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size,
                                    WebGLId framebuffer, int width, int height);
 
   virtual WebGLId getPlatformTextureId();
   virtual void prepareTexture();
+  virtual void postSubBufferCHROMIUM(int x, int y, int width, int height);
 
   virtual void activeTexture(WGC3Denum texture);
   virtual void attachShader(WebGLId program, WebGLId shader);
@@ -110,6 +113,23 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
                          WGC3Dboolean blue, WGC3Dboolean alpha);
   virtual void compileShader(WebGLId shader);
 
+  virtual void compressedTexImage2D(WGC3Denum target,
+                                    WGC3Dint level,
+                                    WGC3Denum internalformat,
+                                    WGC3Dsizei width,
+                                    WGC3Dsizei height,
+                                    WGC3Dint border,
+                                    WGC3Dsizei imageSize,
+                                    const void* data);
+  virtual void compressedTexSubImage2D(WGC3Denum target,
+                                       WGC3Dint level,
+                                       WGC3Dint xoffset,
+                                       WGC3Dint yoffset,
+                                       WGC3Dsizei width,
+                                       WGC3Dsizei height,
+                                       WGC3Denum format,
+                                       WGC3Dsizei imageSize,
+                                       const void* data);
   virtual void copyTexImage2D(WGC3Denum target,
                               WGC3Dint level,
                               WGC3Denum internalformat,
@@ -405,6 +425,8 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
       WGC3Denum access);
   virtual void unmapTexSubImage2DCHROMIUM(const void*);
 
+  virtual void setVisibilityCHROMIUM(bool visible);
+
   virtual void copyTextureToParentTextureCHROMIUM(
       WebGLId texture, WebGLId parentTexture);
 
@@ -431,6 +453,10 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
   virtual void setContextLostCallback(
       WebGraphicsContext3D::WebGraphicsContextLostCallback* callback);
   virtual WGC3Denum getGraphicsResetStatusARB();
+
+  virtual void texImageIOSurface2DCHROMIUM(
+      WGC3Denum target, WGC3Dint width, WGC3Dint height,
+      WGC3Duint ioSurfaceId, WGC3Duint plane);
 
  protected:
 #if WEBKIT_USING_SKIA
@@ -482,5 +508,3 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
 
 #endif  // defined(ENABLE_GPU)
 #endif  // WEBKIT_GPU_WEBGRAPHICSCONTEXT3D_IN_PROCESS_COMMAND_BUFFER_IMPL_H_
-
-

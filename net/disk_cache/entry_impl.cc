@@ -544,11 +544,6 @@ bool EntryImpl::Update() {
 
 void EntryImpl::SetDirtyFlag(int32 current_id) {
   DCHECK(node_.HasData());
-  // We are checking if the entry is valid or not. If there is a pointer here,
-  // we should not be checking the entry.
-  if (node_.Data()->dummy)
-    dirty_ = true;
-
   if (node_.Data()->dirty && current_id != node_.Data()->dirty)
     dirty_ = true;
 
@@ -558,7 +553,6 @@ void EntryImpl::SetDirtyFlag(int32 current_id) {
 
 void EntryImpl::SetPointerForInvalidEntry(int32 new_id) {
   node_.Data()->dirty = new_id;
-  node_.Data()->dummy = 0;
   node_.Store();
 }
 
@@ -571,6 +565,9 @@ bool EntryImpl::LeaveRankingsBehind() {
 // Basically, even if there is something wrong with this entry, we want to see
 // if it is possible to load the rankings node and delete them together.
 bool EntryImpl::SanityCheck() {
+  if (!entry_.VerifyHash())
+    return false;
+
   EntryStore* stored = entry_.Data();
   if (!stored->rankings_node || stored->key_len <= 0)
     return false;
@@ -585,8 +582,11 @@ bool EntryImpl::SanityCheck() {
 
   Addr next_addr(stored->next);
   if (next_addr.is_initialized() &&
-      (next_addr.is_separate_file() || next_addr.file_type() != BLOCK_256))
+      (next_addr.is_separate_file() || next_addr.file_type() != BLOCK_256)) {
+    STRESS_NOTREACHED();
     return false;
+  }
+  STRESS_DCHECK(next_addr.value() != entry_.address().value());
 
   if (!rankings_addr.SanityCheck() || !next_addr.SanityCheck())
     return false;
@@ -603,8 +603,8 @@ bool EntryImpl::SanityCheck() {
     return false;
 
   if (key_addr.is_initialized() &&
-      ((stored->key_len <= kMaxBlockSize && key_addr.is_separate_file()) ||
-       (stored->key_len > kMaxBlockSize && key_addr.is_block_file())))
+      ((stored->key_len < kMaxBlockSize && key_addr.is_separate_file()) ||
+       (stored->key_len >= kMaxBlockSize && key_addr.is_block_file())))
     return false;
 
   int num_blocks = NumBlocksForEntry(stored->key_len);
@@ -658,6 +658,7 @@ void EntryImpl::FixForDelete() {
       if ((data_size <= kMaxBlockSize && data_addr.is_separate_file()) ||
           (data_size > kMaxBlockSize && data_addr.is_block_file()) ||
           !data_addr.SanityCheck()) {
+        STRESS_NOTREACHED();
         // The address is weird so don't attempt to delete it.
         stored->data_addr[i] = 0;
         // In general, trust the stored size as it should be in sync with the
@@ -701,6 +702,12 @@ void EntryImpl::ReportIOTime(Operation op, const base::TimeTicks& start) {
       break;
     case kAsyncIO:
       CACHE_UMA(AGE_MS, "AsyncIOTime", group, start);
+      break;
+    case kReadAsync1:
+      CACHE_UMA(AGE_MS, "AsyncReadDispatchTime", group, start);
+      break;
+    case kWriteAsync1:
+      CACHE_UMA(AGE_MS, "AsyncWriteDispatchTime", group, start);
       break;
     default:
       NOTREACHED();
@@ -763,11 +770,11 @@ std::string EntryImpl::GetKey() const {
   File* key_file = const_cast<EntryImpl*>(this)->GetBackingFile(address,
                                                                 kKeyFileIndex);
 
-  if (!offset && key_file->GetLength() != static_cast<size_t>(key_len + 1))
+  ++key_len;  // We store a trailing \0 on disk that we read back below.
+  if (!offset && key_file->GetLength() != static_cast<size_t>(key_len))
     return std::string();
 
-  if (!key_file ||
-      !key_file->Read(WriteInto(&key_, key_len + 1), key_len + 1, offset))
+  if (!key_file || !key_file->Read(WriteInto(&key_, key_len), key_len, offset))
     key_.clear();
   return key_;
 }
@@ -896,6 +903,9 @@ EntryImpl::~EntryImpl() {
   if (doomed_) {
     DeleteEntryData(true);
   } else {
+#if defined(NET_BUILD_STRESS_CACHE)
+    SanityCheck();
+#endif
     net_log_.AddEvent(net::NetLog::TYPE_ENTRY_CLOSE, NULL);
     bool ret = true;
     for (int index = 0; index < kNumStreams; index++) {
@@ -984,6 +994,8 @@ int EntryImpl::InternalReadData(int index, int offset, net::IOBuffer* buf,
                                    net::NetLog::TYPE_ENTRY_READ_DATA);
   }
 
+  TimeTicks start_async = TimeTicks::Now();
+
   bool completed;
   if (!file->Read(buf->data(), buf_len, file_offset, io_callback, &completed)) {
     if (io_callback)
@@ -993,6 +1005,9 @@ int EntryImpl::InternalReadData(int index, int offset, net::IOBuffer* buf,
 
   if (io_callback && completed)
     io_callback->Discard();
+
+  if (io_callback)
+    ReportIOTime(kReadAsync1, start_async);
 
   ReportIOTime(kRead, start);
   return (completed || !callback) ? buf_len : net::ERR_IO_PENDING;
@@ -1078,6 +1093,8 @@ int EntryImpl::InternalWriteData(int index, int offset, net::IOBuffer* buf,
                                    net::NetLog::TYPE_ENTRY_WRITE_DATA);
   }
 
+  TimeTicks start_async = TimeTicks::Now();
+
   bool completed;
   if (!file->Write(buf->data(), buf_len, file_offset, io_callback,
                    &completed)) {
@@ -1088,6 +1105,9 @@ int EntryImpl::InternalWriteData(int index, int offset, net::IOBuffer* buf,
 
   if (io_callback && completed)
     io_callback->Discard();
+
+  if (io_callback)
+    ReportIOTime(kWriteAsync1, start_async);
 
   ReportIOTime(kWrite, start);
   return (completed || !callback) ? buf_len : net::ERR_IO_PENDING;

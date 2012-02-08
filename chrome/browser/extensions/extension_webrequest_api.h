@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_EXTENSIONS_EXTENSION_WEBREQUEST_API_H_
 #pragma once
 
+#include <list>
 #include <map>
 #include <set>
 #include <string>
@@ -14,6 +15,7 @@
 #include "base/memory/singleton.h"
 #include "base/time.h"
 #include "chrome/browser/extensions/extension_function.h"
+#include "chrome/browser/extensions/extension_webrequest_api_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "ipc/ipc_message.h"
@@ -32,10 +34,13 @@ class ListValue;
 class StringValue;
 }
 
+namespace content {
+class RenderProcessHost;
+}
+
 namespace net {
 class AuthCredentials;
 class AuthChallengeInfo;
-class HostPortPair;
 class HttpRequestHeaders;
 class HttpResponseHeaders;
 class URLRequest;
@@ -46,6 +51,8 @@ class URLRequest;
 // thread unless otherwise specified.
 class ExtensionWebRequestEventRouter {
  public:
+  struct BlockedRequest;
+
   enum EventTypes {
     kInvalidEvent = 0,
     kOnBeforeRequest = 1 << 0,
@@ -84,6 +91,7 @@ class ExtensionWebRequestEventRouter {
       REQUEST_HEADERS = 1<<0,
       RESPONSE_HEADERS = 1<<1,
       BLOCKING = 1<<2,
+      ASYNC_BLOCKING = 1<<3,
     };
 
     static bool InitFromValue(const base::ListValue& value,
@@ -104,8 +112,9 @@ class ExtensionWebRequestEventRouter {
     bool cancel;
     GURL new_url;
     scoped_ptr<net::HttpRequestHeaders> request_headers;
-    // Contains all header lines after the status line, lines are \n separated.
-    std::string response_headers_string;
+    scoped_ptr<extension_webrequest_api_helpers::ResponseHeaders>
+        response_headers;
+
     scoped_ptr<net::AuthCredentials> auth_credentials;
 
     EventResponse(const std::string& extension_id,
@@ -115,41 +124,6 @@ class ExtensionWebRequestEventRouter {
     DISALLOW_COPY_AND_ASSIGN(EventResponse);
   };
 
-  // Contains the modification an extension wants to perform on an event.
-  struct EventResponseDelta {
-    // ID of the extension that sent this response.
-    std::string extension_id;
-
-    // The time that the extension was installed. Used for deciding order of
-    // precedence in case multiple extensions respond with conflicting
-    // decisions.
-    base::Time extension_install_time;
-
-    // Response values. These are mutually exclusive.
-    bool cancel;
-    GURL new_url;
-
-    // Newly introduced or overridden request headers.
-    net::HttpRequestHeaders modified_request_headers;
-
-    // Keys of request headers to be deleted.
-    std::vector<std::string> deleted_request_headers;
-
-    // Complete set of response headers that will replace the original ones.
-    scoped_refptr<net::HttpResponseHeaders> new_response_headers;
-
-    // Authentication Credentials to use.
-    scoped_ptr<net::AuthCredentials> auth_credentials;
-
-    EventResponseDelta(const std::string& extension_id,
-                       const base::Time& extension_install_time);
-    ~EventResponseDelta();
-
-    DISALLOW_COPY_AND_ASSIGN(EventResponseDelta);
-  };
-
-  typedef std::list<linked_ptr<EventResponseDelta> > EventResponseDeltas;
-
   static ExtensionWebRequestEventRouter* GetInstance();
 
   // Dispatches the OnBeforeRequest event to any extensions whose filters match
@@ -158,7 +132,7 @@ class ExtensionWebRequestEventRouter {
   int OnBeforeRequest(void* profile,
                       ExtensionInfoMap* extension_info_map,
                       net::URLRequest* request,
-                      net::OldCompletionCallback* callback,
+                      const net::CompletionCallback& callback,
                       GURL* new_url);
 
   // Dispatches the onBeforeSendHeaders event. This is fired for HTTP(s)
@@ -168,7 +142,7 @@ class ExtensionWebRequestEventRouter {
   int OnBeforeSendHeaders(void* profile,
                           ExtensionInfoMap* extension_info_map,
                           net::URLRequest* request,
-                          net::OldCompletionCallback* callback,
+                          const net::CompletionCallback& callback,
                           net::HttpRequestHeaders* headers);
 
   // Dispatches the onSendHeaders event. This is fired for HTTP(s) requests
@@ -191,7 +165,7 @@ class ExtensionWebRequestEventRouter {
       void* profile,
       ExtensionInfoMap* extension_info_map,
       net::URLRequest* request,
-      net::OldCompletionCallback* callback,
+      const net::CompletionCallback& callback,
       net::HttpResponseHeaders* original_response_headers,
       scoped_refptr<net::HttpResponseHeaders>* override_response_headers);
 
@@ -269,16 +243,20 @@ class ExtensionWebRequestEventRouter {
   void OnOTRProfileDestroyed(void* original_profile,
                              void* otr_profile);
 
+  // Registers a |callback| that is executed when the next page load happens.
+  // The callback is then deleted.
+  void AddCallbackForPageLoad(const base::Closure& callback);
+
  private:
   friend struct DefaultSingletonTraits<ExtensionWebRequestEventRouter>;
   struct EventListener;
-  struct BlockedRequest;
   typedef std::map<std::string, std::set<EventListener> > ListenerMapForProfile;
   typedef std::map<void*, ListenerMapForProfile> ListenerMap;
   typedef std::map<uint64, BlockedRequest> BlockedRequestMap;
   // Map of request_id -> bit vector of EventTypes already signaled
   typedef std::map<uint64, int> SignaledRequestMap;
   typedef std::map<void*, void*> CrossProfileMap;
+  typedef std::list<base::Closure> CallbacksForPageLoad;
 
   ExtensionWebRequestEventRouter();
   ~ExtensionWebRequestEventRouter();
@@ -311,6 +289,7 @@ class ExtensionWebRequestEventRouter {
       int tab_id,
       int window_id,
       ResourceType::Type resource_type,
+      bool is_request_from_extension,
       int* extra_info_spec,
       std::vector<const ExtensionWebRequestEventRouter::EventListener*>*
           matching_listeners);
@@ -334,38 +313,11 @@ class ExtensionWebRequestEventRouter {
   // Clears the flag that |event_type| has been signaled for |request_id|.
   void ClearSignaled(uint64 request_id, EventTypes event_type);
 
-  // Returns the difference between the original request properties stored
-  // in |blocked_request| and the EventResponse in |response|.
-  linked_ptr<EventResponseDelta> CalculateDelta(
-      BlockedRequest* blocked_request,
-      EventResponse* response) const;
+  // Returns whether |request| represents a top level window navigation.
+  bool IsPageLoad(net::URLRequest* request) const;
 
-  // These functions merge the responses of blocked request handlers,
-  // assuming that |request| contains valid |respone_deltas| representing the
-  // changes done by the respective handlers. The |response_deltas| need to be
-  // sorted in decreasing order of precedence of extensions.
-  // The functions update the target url or the headers in |request|
-  // and reports extension IDs of extensions whose wishes could not be honored
-  // in |conflicting_extensions|.
-  void MergeOnBeforeRequestResponses(
-      BlockedRequest* request,
-      std::list<std::string>* conflicting_extensions) const;
-  void MergeOnBeforeSendHeadersResponses(
-      BlockedRequest* request,
-      std::list<std::string>* conflicting_extensions) const;
-  void MergeOnHeadersReceivedResponses(
-      BlockedRequest* request,
-      std::list<std::string>* conflicting_extensions) const;
-
-  // Merge the responses of blocked onAuthRequired handlers. The first
-  // registered listener that supplies authentication credentials in a response,
-  // if any, will have its authentication credentials used. |request| must be
-  // non-NULL, and contain |deltas| that are sorted in decreasing order of
-  // precedence.
-  // Returns whether authentication credentials are set.
-  bool MergeOnAuthRequiredResponses(
-      BlockedRequest* request,
-      std::list<std::string>* conflicting_extensions) const;
+  // Called on a page load to process all registered callbacks.
+  void NotifyPageLoad();
 
   // A map for each profile that maps an event name to a set of extensions that
   // are listening to that event.
@@ -387,26 +339,40 @@ class ExtensionWebRequestEventRouter {
   // webRequest API.
   scoped_ptr<ExtensionWebRequestTimeTracker> request_time_tracker_;
 
+  CallbacksForPageLoad callbacks_for_page_load_;
+
   DISALLOW_COPY_AND_ASSIGN(ExtensionWebRequestEventRouter);
 };
 
 class WebRequestAddEventListener : public SyncIOThreadExtensionFunction {
  public:
-  virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.webRequest.addEventListener");
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION_NAME("webRequest.addEventListener");
 };
 
 class WebRequestEventHandled : public SyncIOThreadExtensionFunction {
  public:
-  virtual bool RunImpl();
-  DECLARE_EXTENSION_FUNCTION_NAME("experimental.webRequest.eventHandled");
+  virtual bool RunImpl() OVERRIDE;
+  DECLARE_EXTENSION_FUNCTION_NAME("webRequest.eventHandled");
 };
 
-class WebRequestHandlerBehaviorChanged : public AsyncExtensionFunction {
+class WebRequestHandlerBehaviorChanged : public SyncIOThreadExtensionFunction {
  public:
-  virtual bool RunImpl();
+  virtual bool RunImpl() OVERRIDE;
   DECLARE_EXTENSION_FUNCTION_NAME(
-      "experimental.webRequest.handlerBehaviorChanged");
+      "webRequest.handlerBehaviorChanged");
+
+ private:
+  virtual void GetQuotaLimitHeuristics(
+      QuotaLimitHeuristics* heuristics) const OVERRIDE;
+  // Handle quota exceeded gracefully: Only warn the user but still execute the
+  // function.
+  virtual void OnQuotaExceeded() OVERRIDE;
 };
+
+// Send updates to |host| with information about what webRequest-related
+// extensions are installed.
+// TODO(mpcomplete): remove. http://crbug.com/100411
+void SendExtensionWebRequestStatusToHost(content::RenderProcessHost* host);
 
 #endif  // CHROME_BROWSER_EXTENSIONS_EXTENSION_WEBREQUEST_API_H_

@@ -18,13 +18,9 @@
 
 class FilePath;
 class IndexedDBKey;
+
+namespace content {
 class SerializedScriptValue;
-
-namespace webkit {
-struct WebPluginInfo;
-}
-
-namespace webkit_glue {
 class WebKitPlatformSupportImpl;
 }
 
@@ -36,8 +32,11 @@ class UtilityThreadImpl : public content::UtilityThread,
   virtual ~UtilityThreadImpl();
 
   virtual bool Send(IPC::Message* msg) OVERRIDE;
-
   virtual void ReleaseProcessIfNeeded() OVERRIDE;
+#if defined(OS_WIN)
+  virtual void PreCacheFont(const LOGFONT& log_font) OVERRIDE;
+  virtual void ReleaseCachedFonts() OVERRIDE;
+#endif
 
  private:
   // ChildThread implementation.
@@ -46,25 +45,23 @@ class UtilityThreadImpl : public content::UtilityThread,
   // IPC message handlers.
   void OnIDBKeysFromValuesAndKeyPath(
       int id,
-      const std::vector<SerializedScriptValue>& serialized_script_values,
+      const std::vector<content::SerializedScriptValue>&
+          serialized_script_values,
       const string16& idb_key_path);
   void OnInjectIDBKey(const IndexedDBKey& key,
-                      const SerializedScriptValue& value,
+                      const content::SerializedScriptValue& value,
                       const string16& key_path);
   void OnBatchModeStarted();
   void OnBatchModeFinished();
 
 #if defined(OS_POSIX)
-  void OnLoadPlugins(
-      const std::vector<FilePath>& extra_plugin_paths,
-      const std::vector<FilePath>& extra_plugin_dirs,
-      const std::vector<webkit::WebPluginInfo>& internal_plugins);
+  void OnLoadPlugins(const std::vector<FilePath>& plugin_paths);
 #endif  // OS_POSIX
 
   // True when we're running in batch mode.
   bool batch_mode_;
 
-  scoped_ptr<webkit_glue::WebKitPlatformSupportImpl> webkit_platform_support_;
+  scoped_ptr<content::WebKitPlatformSupportImpl> webkit_platform_support_;
 
   DISALLOW_COPY_AND_ASSIGN(UtilityThreadImpl);
 };

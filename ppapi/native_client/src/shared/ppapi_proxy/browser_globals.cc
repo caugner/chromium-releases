@@ -17,11 +17,8 @@
 #include "native_client/src/shared/ppapi_proxy/utility.h"
 #include "native_client/src/shared/srpc/nacl_srpc.h"
 #include "native_client/src/trusted/plugin/plugin.h"
-#include "ppapi/c/dev/ppb_context_3d_dev.h"
-#include "ppapi/c/dev/ppb_context_3d_trusted_dev.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
 #include "ppapi/c/dev/ppb_layer_compositor_dev.h"
-#include "ppapi/c/dev/ppb_surface_3d_dev.h"
 #include "ppapi/c/ppb_graphics_3d.h"
 #include "ppapi/c/ppb_opengles2.h"
 #include "ppapi/c/trusted/ppb_graphics_3d_trusted.h"
@@ -189,11 +186,8 @@ const void* GetBrowserInterface(const char* interface_name) {
     static const char* disabled_interface_names[] = {
       PPB_GRAPHICS_3D_INTERFACE,
       PPB_GRAPHICS_3D_TRUSTED_INTERFACE,
-      PPB_CONTEXT_3D_DEV_INTERFACE,
-      PPB_CONTEXT_3D_TRUSTED_DEV_INTERFACE,
       PPB_GLES_CHROMIUM_TEXTURE_MAPPING_DEV_INTERFACE,
       PPB_OPENGLES2_INTERFACE,
-      PPB_SURFACE_3D_DEV_INTERFACE,
       PPB_LAYER_COMPOSITOR_DEV_INTERFACE
     };
     for (size_t i = 0; i < NACL_ARRAY_SIZE(disabled_interface_names); i++) {
@@ -413,6 +407,20 @@ const PPB_PDF* PPBPDFInterface() {
   static const PPB_PDF* ppb =
       static_cast<const PPB_PDF*>(
           GetBrowserInterfaceSafe(PPB_PDF_INTERFACE));
+  return ppb;
+}
+
+const PPB_TCPSocket_Private* PPBTCPSocketPrivateInterface() {
+  static const PPB_TCPSocket_Private* ppb =
+      static_cast<const PPB_TCPSocket_Private*>(
+          GetBrowserInterfaceSafe(PPB_TCPSOCKET_PRIVATE_INTERFACE));
+  return ppb;
+}
+
+const PPB_UDPSocket_Private* PPBUDPSocketPrivateInterface() {
+  static const PPB_UDPSocket_Private* ppb =
+      static_cast<const PPB_UDPSocket_Private*>(
+          GetBrowserInterfaceSafe(PPB_UDPSOCKET_PRIVATE_INTERFACE));
   return ppb;
 }
 

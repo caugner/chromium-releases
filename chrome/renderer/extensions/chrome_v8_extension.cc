@@ -10,6 +10,7 @@
 #include "base/string_util.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_set.h"
+#include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/renderer/extensions/chrome_v8_context.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
 #include "content/public/renderer/render_view.h"
@@ -18,37 +19,22 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
 
+using extensions::ExtensionAPI;
+using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebView;
 
 namespace {
 
-const char kChromeHidden[] = "chromeHidden";
-
-#ifndef NDEBUG
-const char kValidateCallbacks[] = "validateCallbacks";
-#endif
-
-typedef std::map<int, std::string> StringMap;
-static base::LazyInstance<StringMap> g_string_map(base::LINKER_INITIALIZED);
-
-static base::LazyInstance<ChromeV8Extension::InstanceSet> g_instances(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<ChromeV8Extension::InstanceSet> g_instances =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
 
 // static
-const char* ChromeV8Extension::GetStringResource(int resource_id) {
-  StringMap* strings = g_string_map.Pointer();
-  StringMap::iterator it = strings->find(resource_id);
-  if (it == strings->end()) {
-    it = strings->insert(std::make_pair(
-        resource_id,
-        ResourceBundle::GetSharedInstance().GetRawDataResource(
-            resource_id).as_string())).first;
-  }
-  return it->second.c_str();
+base::StringPiece ChromeV8Extension::GetStringResource(int resource_id) {
+  return ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
 }
 
 // static
@@ -70,9 +56,10 @@ content::RenderView* ChromeV8Extension::GetCurrentRenderView() {
 ChromeV8Extension::ChromeV8Extension(const char* name, int resource_id,
                                      ExtensionDispatcher* extension_dispatcher)
     : v8::Extension(name,
-                    GetStringResource(resource_id),
-                    0,  // num dependencies
-                    NULL),  // dependencies array
+                    GetStringResource(resource_id).data(),
+                    0,     // num dependencies
+                    NULL,  // dependencies array
+                    GetStringResource(resource_id).size()),  // source length
       extension_dispatcher_(extension_dispatcher) {
   g_instances.Get().insert(this);
 }
@@ -82,9 +69,10 @@ ChromeV8Extension::ChromeV8Extension(const char* name, int resource_id,
                                      const char** dependencies,
                                      ExtensionDispatcher* extension_dispatcher)
     : v8::Extension(name,
-                    GetStringResource(resource_id),
+                    GetStringResource(resource_id).data(),
                     dependency_count,
-                    dependencies),
+                    dependencies,
+                    GetStringResource(resource_id).size()),
       extension_dispatcher_(extension_dispatcher) {
   g_instances.Get().insert(this);
 }
@@ -116,29 +104,53 @@ const Extension* ChromeV8Extension::GetExtensionForCurrentRenderView() const {
   if (!renderview)
     return NULL;  // this can happen as a tab is closing.
 
-  GURL url = renderview->GetWebView()->mainFrame()->document().url();
+  WebDocument document = renderview->GetWebView()->mainFrame()->document();
+  GURL url = document.url();
   const ExtensionSet* extensions = extension_dispatcher_->extensions();
-  if (!extensions->ExtensionBindingsAllowed(url))
+  if (!extensions->ExtensionBindingsAllowed(
+      ExtensionURLInfo(document.securityOrigin(), url)))
     return NULL;
 
-  return extensions->GetByURL(url);
+  return extensions->GetByURL(
+      ExtensionURLInfo(document.securityOrigin(), url));
 }
 
-bool ChromeV8Extension::CheckPermissionForCurrentRenderView(
+bool ChromeV8Extension::CheckCurrentContextAccessToExtensionAPI(
     const std::string& function_name) const {
-  const ::Extension* extension = GetExtensionForCurrentRenderView();
-  if (extension &&
-      extension_dispatcher_->IsExtensionActive(extension->id()) &&
-      extension->HasAPIPermission(function_name))
-    return true;
+  ChromeV8Context* context =
+      extension_dispatcher_->v8_context_set().GetCurrent();
+  if (!context) {
+    DLOG(ERROR) << "Not in a v8::Context";
+    return false;
+  }
 
-  static const char kMessage[] =
-      "You do not have permission to use '%s'. Be sure to declare"
-      " in your manifest what permissions you need.";
-  std::string error_msg = base::StringPrintf(kMessage, function_name.c_str());
+  const ::Extension* extension = NULL;
+  if (!context->extension_id().empty()) {
+    extension =
+        extension_dispatcher_->extensions()->GetByID(context->extension_id());
+  }
 
-  v8::ThrowException(v8::Exception::Error(v8::String::New(error_msg.c_str())));
-  return false;
+  if (!extension || !extension->HasAPIPermission(function_name)) {
+    static const char kMessage[] =
+        "You do not have permission to use '%s'. Be sure to declare"
+        " in your manifest what permissions you need.";
+    std::string error_msg = base::StringPrintf(kMessage, function_name.c_str());
+    v8::ThrowException(
+        v8::Exception::Error(v8::String::New(error_msg.c_str())));
+    return false;
+  }
+
+  if (!extension_dispatcher_->IsExtensionActive(extension->id()) &&
+      ExtensionAPI::GetInstance()->IsPrivileged(function_name)) {
+    static const char kMessage[] =
+        "%s can only be used in an extension process.";
+    std::string error_msg = base::StringPrintf(kMessage, function_name.c_str());
+    v8::ThrowException(
+        v8::Exception::Error(v8::String::New(error_msg.c_str())));
+    return false;
+  }
+
+  return true;
 }
 
 v8::Handle<v8::FunctionTemplate>
@@ -184,29 +196,7 @@ ChromeV8ExtensionHandler* ChromeV8Extension::CreateHandler(
 
 v8::Handle<v8::Value> ChromeV8Extension::GetChromeHidden(
     const v8::Arguments& args) {
-  return GetChromeHidden(v8::Context::GetCurrent());
-}
-
-v8::Handle<v8::Value> ChromeV8Extension::GetChromeHidden(
-    const v8::Handle<v8::Context>& context) {
-  v8::Local<v8::Object> global = context->Global();
-  v8::Local<v8::Value> hidden = global->GetHiddenValue(
-      v8::String::New(kChromeHidden));
-
-  if (hidden.IsEmpty() || hidden->IsUndefined()) {
-    hidden = v8::Object::New();
-    global->SetHiddenValue(v8::String::New(kChromeHidden), hidden);
-
-#ifndef NDEBUG
-    // Tell extension_process_bindings.js to validate callbacks and events
-    // against their schema definitions in api/extension_api.json.
-    v8::Local<v8::Object>::Cast(hidden)
-        ->Set(v8::String::New(kValidateCallbacks), v8::True());
-#endif
-  }
-
-  DCHECK(hidden->IsObject());
-  return v8::Local<v8::Object>::Cast(hidden);
+  return ChromeV8Context::GetOrCreateChromeHidden(v8::Context::GetCurrent());
 }
 
 v8::Handle<v8::Value> ChromeV8Extension::Print(const v8::Arguments& args) {

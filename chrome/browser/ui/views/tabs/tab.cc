@@ -24,10 +24,10 @@
 #include "ui/gfx/font.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/skbitmap_operations.h"
-#include "views/controls/button/image_button.h"
-#include "views/widget/tooltip_manager.h"
-#include "views/widget/widget.h"
-#include "views/window/non_client_view.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/widget/tooltip_manager.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/non_client_view.h"
 
 static const int kLeftPadding = 16;
 static const int kTopPadding = 6;
@@ -39,13 +39,8 @@ static const int kFaviconTitleSpacing = 4;
 static const int kTitleCloseButtonSpacing = 3;
 static const int kStandardTitleWidth = 175;
 static const int kCloseButtonVertFuzz = 0;
-#if defined(TOUCH_UI)
-static const int kTabIconSize = 32;
-static const int kCloseButtonHorzFuzz = -10;
-#else
 static const int kTabIconSize = gfx::kFaviconSize;
 static const int kCloseButtonHorzFuzz = 5;
-#endif
 
 // Vertical adjustment to the favicon when the tab has a large icon.
 static const int kAppTapFaviconVerticalAdjustment = 2;
@@ -330,7 +325,7 @@ void Tab::GetHitTestMask(gfx::Path* path) const {
   TabResources::GetHitTestMask(width(), height(), path);
 }
 
-bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) {
+bool Tab::GetTooltipTextOrigin(const gfx::Point& p, gfx::Point* origin) const {
   origin->set_x(title_bounds_.x() + 10);
   origin->set_y(-views::TooltipManager::GetTooltipHeight() - 4);
   return true;

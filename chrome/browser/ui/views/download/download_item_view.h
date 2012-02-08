@@ -31,9 +31,9 @@
 #include "content/browser/download/download_manager.h"
 #include "ui/base/animation/animation_delegate.h"
 #include "ui/gfx/font.h"
-#include "views/controls/button/button.h"
-#include "views/events/event.h"
-#include "views/view.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/events/event.h"
+#include "ui/views/view.h"
 
 class BaseDownloadItemModel;
 class DownloadShelfView;
@@ -88,7 +88,8 @@ class DownloadItemView : public views::ButtonListener,
   virtual void OnMouseMoved(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
   virtual bool OnKeyPressed(const views::KeyEvent& event) OVERRIDE;
-  virtual bool GetTooltipText(const gfx::Point& p, string16* tooltip) OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p,
+                              string16* tooltip) const OVERRIDE;
   virtual void ShowContextMenu(const gfx::Point& p,
                                bool is_mouse_gesture) OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -108,8 +109,13 @@ class DownloadItemView : public views::ButtonListener,
   enum State {
     NORMAL = 0,
     HOT,
-    PUSHED,
-    DANGEROUS
+    PUSHED
+  };
+
+  enum Mode {
+    NORMAL_MODE = 0,        // Showing download item.
+    DANGEROUS_MODE,         // Displaying the dangerous download warning.
+    MALICIOUS_MODE          // Displaying the malicious download warning.
   };
 
   // The image set associated with the part containing the icon and text.
@@ -152,10 +158,16 @@ class DownloadItemView : public views::ButtonListener,
   void SetState(State body_state, State drop_down_state);
 
   // Whether we are in the dangerous mode.
-  bool IsDangerousMode() { return body_state_ == DANGEROUS; }
+  bool IsShowingWarningDialog() {
+    return mode_ == DANGEROUS_MODE || mode_ == MALICIOUS_MODE;
+  }
 
   // Reverts from dangerous mode to normal download mode.
-  void ClearDangerousMode();
+  void ClearWarningDialog();
+
+  // Start displaying the dangerous download warning or the malicious download
+  // warning.
+  void ShowWarningDialog();
 
   // Sets |size| with the size of the Save and Discard buttons (they have the
   // same size).
@@ -170,6 +182,9 @@ class DownloadItemView : public views::ButtonListener,
   // open the downloaded file.
   void Reenable();
 
+  // Releases drop down button after showing a context menu.
+  void ReleaseDropDown();
+
   // Given |x|, returns whether |x| is within the x coordinate range of
   // the drop-down button or not.
   bool InDropDownButtonXCoordinateRange(int x);
@@ -179,11 +194,15 @@ class DownloadItemView : public views::ButtonListener,
   // dangerous download warning message (if any).
   void UpdateAccessibleName();
 
+  // Update the location of the drop down button.
+  void UpdateDropDownButtonPosition();
+
   // The different images used for the background.
   BodyImageSet normal_body_image_set_;
   BodyImageSet hot_body_image_set_;
   BodyImageSet pushed_body_image_set_;
   BodyImageSet dangerous_mode_body_image_set_;
+  BodyImageSet malicious_mode_body_image_set_;
   DropDownImageSet normal_drop_down_image_set_;
   DropDownImageSet hot_drop_down_image_set_;
   DropDownImageSet pushed_drop_down_image_set_;
@@ -209,6 +228,9 @@ class DownloadItemView : public views::ButtonListener,
   // The current state (normal, hot or pushed) of the body and drop-down.
   State body_state_;
   State drop_down_state_;
+
+  // Mode of the download item view.
+  Mode mode_;
 
   // In degrees, for downloads with no known total size.
   int progress_angle_;
@@ -274,7 +296,7 @@ class DownloadItemView : public views::ButtonListener,
 
   // Method factory used to delay reenabling of the item when opening the
   // downloaded file.
-  base::WeakPtrFactory<DownloadItemView> reenable_method_factory_;
+  base::WeakPtrFactory<DownloadItemView> weak_ptr_factory_;
 
   // The currently running download context menu.
   scoped_ptr<DownloadShelfContextMenuView> context_menu_;

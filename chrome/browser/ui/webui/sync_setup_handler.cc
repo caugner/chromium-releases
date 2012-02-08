@@ -8,19 +8,26 @@
 #include "base/bind_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
+#include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/protocol/service_constants.h"
 #include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
 #include "chrome/browser/sync/util/oauth.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/webui/sync_promo_trial.h"
 #include "chrome/browser/ui/webui/sync_promo_ui.h"
+#include "chrome/browser/ui/webui/user_selectable_sync_type.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "grit/chromium_strings.h"
@@ -32,21 +39,6 @@ using l10n_util::GetStringFUTF16;
 using l10n_util::GetStringUTF16;
 
 namespace {
-
-// TODO(jhawkins): Move these to url_constants.h.
-const char* kInvalidPasswordHelpUrl =
-    "http://www.google.com/support/accounts/bin/answer.py?ctx=ch&answer=27444";
-const char* kCanNotAccessAccountUrl =
-    "http://www.google.com/support/accounts/bin/answer.py?answer=48598";
-#if defined(OS_CHROMEOS)
-const char* kEncryptionHelpUrl =
-    "http://www.google.com/support/chromeos/bin/answer.py?answer=1181035";
-#else
-const char* kEncryptionHelpUrl =
-    "http://www.google.com/support/chrome/bin/answer.py?answer=1181035";
-#endif
-const char* kCreateNewAccountUrl =
-    "https://www.google.com/accounts/NewAccount?service=chromiumsync";
 
 bool GetAuthData(const std::string& json,
                  std::string* username,
@@ -111,20 +103,16 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
   bool sync_extensions;
   if (!result->GetBoolean("syncExtensions", &sync_extensions))
     return false;
-  if (sync_extensions)
+  if (sync_extensions) {
     config->data_types.insert(syncable::EXTENSIONS);
+    config->data_types.insert(syncable::EXTENSION_SETTINGS);
+  }
 
   bool sync_typed_urls;
   if (!result->GetBoolean("syncTypedUrls", &sync_typed_urls))
     return false;
   if (sync_typed_urls)
     config->data_types.insert(syncable::TYPED_URLS);
-
-  bool sync_search_engines;
-  if (!result->GetBoolean("syncSearchEngines", &sync_search_engines))
-    return false;
-  if (sync_search_engines)
-    config->data_types.insert(syncable::SEARCH_ENGINES);
 
   bool sync_sessions;
   if (!result->GetBoolean("syncSessions", &sync_sessions))
@@ -135,8 +123,10 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
   bool sync_apps;
   if (!result->GetBoolean("syncApps", &sync_apps))
     return false;
-  if (sync_apps)
+  if (sync_apps) {
     config->data_types.insert(syncable::APPS);
+    config->data_types.insert(syncable::APP_SETTINGS);
+  }
 
   // Encryption settings.
   if (!result->GetBoolean("encryptAllData", &config->encrypt_all))
@@ -167,6 +157,60 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
   return true;
 }
 
+bool HasConfigurationChanged(const SyncConfiguration& config,
+                             Profile* profile) {
+  CHECK(profile);
+
+  // This function must be updated every time a new sync datatype is added to
+  // the sync preferences page.
+  COMPILE_ASSERT(17 == syncable::MODEL_TYPE_COUNT,
+                 UpdateCustomConfigHistogram);
+
+  // If service is null or if this is a first time configuration, return true.
+  ProfileSyncService* service = profile->GetProfileSyncService();
+  if (!service || !service->HasSyncSetupCompleted())
+    return true;
+
+  if ((config.set_secondary_passphrase || config.set_gaia_passphrase) &&
+      !service->IsUsingSecondaryPassphrase())
+    return true;
+
+  if (config.encrypt_all != service->EncryptEverythingEnabled())
+    return true;
+
+  PrefService* pref_service = profile->GetPrefs();
+  CHECK(pref_service);
+
+  if (config.sync_everything !=
+      pref_service->GetBoolean(prefs::kSyncKeepEverythingSynced))
+    return true;
+
+  // Only check the data types that are explicitly listed on the sync
+  // preferences page.
+  const syncable::ModelTypeSet& types = config.data_types;
+  if (((types.find(syncable::BOOKMARKS) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncBookmarks)) ||
+      ((types.find(syncable::PREFERENCES) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncPreferences)) ||
+      ((types.find(syncable::THEMES) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncThemes)) ||
+      ((types.find(syncable::PASSWORDS) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncPasswords)) ||
+      ((types.find(syncable::AUTOFILL) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncAutofill)) ||
+      ((types.find(syncable::EXTENSIONS) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncExtensions)) ||
+      ((types.find(syncable::TYPED_URLS) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncTypedUrls)) ||
+      ((types.find(syncable::SESSIONS) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncSessions)) ||
+      ((types.find(syncable::APPS) != types.end()) !=
+       pref_service->GetBoolean(prefs::kSyncApps)))
+    return true;
+
+  return false;
+}
+
 bool GetPassphrase(const std::string& json, std::string* passphrase) {
   scoped_ptr<Value> parsed_value(base::JSONReader::Read(json, false));
   if (!parsed_value.get() || !parsed_value->IsType(Value::TYPE_DICTIONARY))
@@ -174,6 +218,16 @@ bool GetPassphrase(const std::string& json, std::string* passphrase) {
 
   DictionaryValue* result = static_cast<DictionaryValue*>(parsed_value.get());
   return result->GetString("passphrase", passphrase);
+}
+
+string16 NormalizeUserName(const string16& user) {
+  if (user.find_first_of(ASCIIToUTF16("@")) != string16::npos)
+    return user;
+  return user + ASCIIToUTF16("@") + ASCIIToUTF16(DEFAULT_SIGNIN_DOMAIN);
+}
+
+bool AreUserNamesEqual(const string16& user1, const string16& user2) {
+  return NormalizeUserName(user1) == NormalizeUserName(user2);
 }
 
 }  // namespace
@@ -190,19 +244,22 @@ SyncSetupHandler::~SyncSetupHandler() {
 }
 
 void SyncSetupHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
-  GetStaticLocalizedValues(localized_strings);
+  GetStaticLocalizedValues(localized_strings, web_ui_);
 }
 
 void SyncSetupHandler::GetStaticLocalizedValues(
-    DictionaryValue* localized_strings) {
+    DictionaryValue* localized_strings,
+    WebUI* web_ui) {
   DCHECK(localized_strings);
 
   localized_strings->SetString(
       "invalidPasswordHelpURL",
-      google_util::StringAppendGoogleLocaleParam(kInvalidPasswordHelpUrl));
+      google_util::StringAppendGoogleLocaleParam(
+          chrome::kInvalidPasswordHelpURL));
   localized_strings->SetString(
       "cannotAccessAccountURL",
-      google_util::StringAppendGoogleLocaleParam(kCanNotAccessAccountUrl));
+      google_util::StringAppendGoogleLocaleParam(
+          chrome::kCanNotAccessAccountURL));
   localized_strings->SetString(
       "introduction",
       GetStringFUTF16(IDS_SYNC_LOGIN_INTRODUCTION,
@@ -217,7 +274,8 @@ void SyncSetupHandler::GetStaticLocalizedValues(
                       GetStringUTF16(IDS_PRODUCT_NAME)));
   localized_strings->SetString(
       "encryptionHelpURL",
-      google_util::StringAppendGoogleLocaleParam(kEncryptionHelpUrl));
+      google_util::StringAppendGoogleLocaleParam(
+          chrome::kSyncEncryptionHelpURL));
   localized_strings->SetString(
       "passphraseEncryptionMessage",
       GetStringFUTF16(IDS_SYNC_PASSPHRASE_ENCRYPTION_MESSAGE,
@@ -235,9 +293,24 @@ void SyncSetupHandler::GetStaticLocalizedValues(
       "promoMessageTitle",
       GetStringFUTF16(IDS_SYNC_PROMO_MESSAGE_TITLE,
                       GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
+  localized_strings->SetString(
+      "syncEverythingHelpURL",
+      google_util::StringAppendGoogleLocaleParam(
+          chrome::kSyncEverythingLearnMoreURL));
 
-  std::string create_account_url =
-      google_util::StringAppendGoogleLocaleParam(kCreateNewAccountUrl);
+  // The experimental body string only appears if we are on the launch page
+  // version of the Sync Promo.
+  int message_body_resource_id = IDS_SYNC_PROMO_MESSAGE_BODY_A;
+  if (web_ui && SyncPromoUI::GetIsLaunchPageForSyncPromoURL(
+      web_ui->tab_contents()->GetURL())) {
+    message_body_resource_id = sync_promo_trial::GetMessageBodyResID();
+  }
+  localized_strings->SetString(
+      "promoMessageBody",
+      GetStringUTF16(message_body_resource_id));
+
+  std::string create_account_url = google_util::StringAppendGoogleLocaleParam(
+      chrome::kSyncCreateNewAccountURL);
   string16 create_account = GetStringUTF16(IDS_SYNC_CREATE_ACCOUNT);
   create_account= UTF8ToUTF16("<a id='create-account-link' target='_blank' "
       "class='account-link' href='" + create_account_url + "'>") +
@@ -277,7 +350,6 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "extensions", IDS_SYNC_DATATYPE_EXTENSIONS },
     { "typedURLs", IDS_SYNC_DATATYPE_TYPED_URLS },
     { "apps", IDS_SYNC_DATATYPE_APPS },
-    { "searchEngines", IDS_SYNC_DATATYPE_SEARCH_ENGINES },
     { "openTabs", IDS_SYNC_DATATYPE_TABS },
     { "syncZeroDataTypesError", IDS_SYNC_ZERO_DATA_TYPES_ERROR },
     { "serviceUnavailableError", IDS_SYNC_SETUP_ABORTED_BY_PENDING_CLEAR },
@@ -316,8 +388,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
     { "aspWarningText", IDS_SYNC_ASP_PASSWORD_WARNING_TEXT },
-    { "promoPageTitle", IDS_NEW_TAB_TITLE},
-    { "promoMessageBody", IDS_SYNC_PROMO_MESSAGE_BODY},
+    { "promoPageTitle", IDS_SYNC_PROMO_TAB_TITLE},
     { "promoSkipButton", IDS_SYNC_PROMO_SKIP_BUTTON},
     { "promoAdvanced", IDS_SYNC_PROMO_ADVANCED},
     { "promoLearnMoreShow", IDS_SYNC_PROMO_LEARN_MORE_SHOW},
@@ -416,7 +487,7 @@ void SyncSetupHandler::ShowSettingUp() {
       "SyncSetupOverlay.showSyncSetupPage", page);
 }
 
-void SyncSetupHandler::ShowSetupDone(const std::wstring& user) {
+void SyncSetupHandler::ShowSetupDone(const string16& user) {
   StringValue page("done");
   web_ui_->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page);
@@ -424,6 +495,13 @@ void SyncSetupHandler::ShowSetupDone(const std::wstring& user) {
   // Suppress the sync promo once the user signs into sync. This way the user
   // doesn't see the sync promo even if they sign out of sync later on.
   SyncPromoUI::SetUserSkippedSyncPromo(Profile::FromWebUI(web_ui_));
+
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  ProfileSyncService* service = profile->GetProfileSyncService();
+  if (!service->HasSyncSetupCompleted()) {
+    FilePath profile_file_path = profile->GetPath();
+    ProfileMetrics::LogProfileSyncSignIn(profile_file_path);
+  }
 }
 
 void SyncSetupHandler::SetFlow(SyncSetupFlow* flow) {
@@ -485,8 +563,68 @@ void SyncSetupHandler::HandleConfigure(const ListValue* args) {
     return;
   }
 
+  // We do not do UMA logging during unit tests.
+  if (web_ui_) {
+    Profile* profile = Profile::FromWebUI(web_ui_);
+    if (HasConfigurationChanged(configuration, profile)) {
+      UMA_HISTOGRAM_BOOLEAN("Sync.SyncEverything",
+                            configuration.sync_everything);
+      if (!configuration.sync_everything) {
+        // Only log the data types that are explicitly listed on the sync
+        // preferences page.
+        const syncable::ModelTypeSet& types = configuration.data_types;
+        if (types.find(syncable::BOOKMARKS) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", BOOKMARKS, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::PREFERENCES) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", PREFERENCES, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::PASSWORDS) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", PASSWORDS, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::AUTOFILL) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", AUTOFILL, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::THEMES) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", THEMES, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::TYPED_URLS) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", TYPED_URLS, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::EXTENSIONS) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", EXTENSIONS, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::SESSIONS) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", SESSIONS, SELECTABLE_DATATYPE_COUNT + 1);
+        if (types.find(syncable::APPS) != types.end())
+          UMA_HISTOGRAM_ENUMERATION(
+              "Sync.CustomSync", APPS, SELECTABLE_DATATYPE_COUNT + 1);
+        COMPILE_ASSERT(17 == syncable::MODEL_TYPE_COUNT,
+                       UpdateCustomConfigHistogram);
+        COMPILE_ASSERT(9 == SELECTABLE_DATATYPE_COUNT,
+                       UpdateCustomConfigHistogram);
+      }
+      UMA_HISTOGRAM_BOOLEAN("Sync.EncryptAllData", configuration.encrypt_all);
+      UMA_HISTOGRAM_BOOLEAN("Sync.CustomPassphrase",
+                            configuration.set_gaia_passphrase ||
+                            configuration.set_secondary_passphrase);
+    }
+  }
+
   DCHECK(flow_);
   flow_->OnUserConfigured(configuration);
+
+  ProfileMetrics::LogProfileSyncInfo(ProfileMetrics::SYNC_CUSTOMIZE);
+  if (configuration.encrypt_all) {
+    ProfileMetrics::LogProfileSyncInfo(ProfileMetrics::SYNC_ENCRYPT);
+  }
+  if (configuration.set_secondary_passphrase) {
+    ProfileMetrics::LogProfileSyncInfo(ProfileMetrics::SYNC_PASSPHRASE);
+  }
+  if (!configuration.sync_everything) {
+    ProfileMetrics::LogProfileSyncInfo(ProfileMetrics::SYNC_CHOOSE);
+  }
 }
 
 void SyncSetupHandler::HandlePassphraseEntry(const ListValue* args) {
@@ -526,19 +664,17 @@ void SyncSetupHandler::HandleShowErrorUI(const ListValue* args) {
   ProfileSyncService* service = profile->GetProfileSyncService();
   DCHECK(service);
 
-  service->get_wizard().Step(SyncSetupWizard::NONFATAL_ERROR);
-
-  // Show the Sync Setup page.
-  if (service->get_wizard().IsVisible()) {
-    service->get_wizard().Focus();
-  } else {
-    StringValue page("syncSetup");
-    web_ui_->CallJavascriptFunction("OptionsPage.navigateToPage", page);
-  }
+  service->ShowErrorUI();
 }
 
 void SyncSetupHandler::HandleShowSetupUI(const ListValue* args) {
   DCHECK(!flow_);
+  if (FocusExistingWizard()) {
+    CloseOverlay();
+    return;
+  }
+
+  StepWizardForShowSetupUI();
   ShowSetupUI();
 }
 
@@ -559,21 +695,49 @@ void SyncSetupHandler::OpenSyncSetup() {
     // If there's no sync service, the user tried to manually invoke a syncSetup
     // URL, but sync features are disabled.  We need to close the overlay for
     // this (rare) case.
-    web_ui_->CallJavascriptFunction("OptionsPage.closeOverlay");
+    CloseOverlay();
     return;
   }
 
-  // If the wizard is not visible, step into the appropriate UI state.
-  if (!service->get_wizard().IsVisible())
-    ShowSetupUI();
-
-  // The SyncSetupFlow will set itself as the |flow_|.
-  if (!service->get_wizard().AttachSyncSetupHandler(this)) {
-    // If attach fails, a wizard is already activated and attached to a flow
-    // handler.
-    web_ui_->CallJavascriptFunction("OptionsPage.closeOverlay");
-    service->get_wizard().Focus();
+  // If the wizard is already visible, it must be attached to another flow
+  // handler.
+  if (FocusExistingWizard()) {
+    CloseOverlay();
+    return;
   }
+
+  // The wizard must be stepped before attaching. Allow subclasses to step the
+  // wizard to appropriate state.
+  StepWizardForShowSetupUI();
+
+  // Attach this as the sync setup handler, before calling ShowSetupUI().
+  if (!service->get_wizard().AttachSyncSetupHandler(this)) {
+    LOG(ERROR) << "SyncSetupHandler attach failed!";
+    CloseOverlay();
+    return;
+  }
+
+  ShowSetupUI();
+}
+
+// Private member functions.
+
+bool SyncSetupHandler::FocusExistingWizard() {
+  Profile* profile = Profile::FromWebUI(web_ui_);
+  ProfileSyncService* service = profile->GetProfileSyncService();
+  if (!service)
+    return false;
+
+  // If the wizard is already visible, focus it.
+  if (service->get_wizard().IsVisible()) {
+    service->get_wizard().Focus();
+    return true;
+  }
+  return false;
+}
+
+void SyncSetupHandler::CloseOverlay() {
+  web_ui_->CallJavascriptFunction("OptionsPage.closeOverlay");
 }
 
 bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,
@@ -592,10 +756,10 @@ bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,
   string16 username_utf16 = UTF8ToUTF16(username);
 
   for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
-    if (i != current_profile_index &&
-        cache.GetUserNameOfProfileAtIndex(i) == username_utf16) {
-        *error_message = l10n_util::GetStringUTF16(
-            IDS_SYNC_USER_NAME_IN_USE_ERROR);
+    if (i != current_profile_index && AreUserNamesEqual(
+        cache.GetUserNameOfProfileAtIndex(i), username_utf16)) {
+      *error_message = l10n_util::GetStringUTF16(
+          IDS_SYNC_USER_NAME_IN_USE_ERROR);
       return false;
     }
   }

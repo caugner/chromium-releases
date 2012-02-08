@@ -4,18 +4,21 @@
 
 #include "chrome/browser/browsing_data_indexed_db_helper.h"
 
-#include "base/callback_old.h"
+#include "base/bind.h"
+#include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "webkit/database/database_util.h"
 #include "webkit/glue/webkit_glue.h"
 
+using content::BrowserThread;
 using webkit_database::DatabaseUtil;
 
 namespace {
@@ -25,9 +28,10 @@ class BrowsingDataIndexedDBHelperImpl : public BrowsingDataIndexedDBHelper {
   explicit BrowsingDataIndexedDBHelperImpl(Profile* profile);
 
   virtual void StartFetching(
-      Callback1<const std::list<IndexedDBInfo>& >::Type* callback);
-  virtual void CancelNotification();
-  virtual void DeleteIndexedDB(const GURL& origin);
+      const base::Callback<void(const std::list<IndexedDBInfo>&)>&
+          callback) OVERRIDE;
+  virtual void CancelNotification() OVERRIDE;
+  virtual void DeleteIndexedDB(const GURL& origin) OVERRIDE;
 
  private:
   virtual ~BrowsingDataIndexedDBHelperImpl();
@@ -45,8 +49,8 @@ class BrowsingDataIndexedDBHelperImpl : public BrowsingDataIndexedDBHelper {
   std::list<IndexedDBInfo> indexed_db_info_;
 
   // This only mutates on the UI thread.
-  scoped_ptr<Callback1<const std::list<IndexedDBInfo>& >::Type >
-      completion_callback_;
+  base::Callback<void(const std::list<IndexedDBInfo>&)> completion_callback_;
+
   // Indicates whether or not we're currently fetching information:
   // it's true when StartFetching() is called in the UI thread, and it's reset
   // after we notified the callback in the UI thread.
@@ -59,7 +63,6 @@ class BrowsingDataIndexedDBHelperImpl : public BrowsingDataIndexedDBHelper {
 BrowsingDataIndexedDBHelperImpl::BrowsingDataIndexedDBHelperImpl(
     Profile* profile)
     : indexed_db_context_(profile->GetWebKitContext()->indexed_db_context()),
-      completion_callback_(NULL),
       is_fetching_(false) {
   DCHECK(indexed_db_context_.get());
 }
@@ -68,22 +71,23 @@ BrowsingDataIndexedDBHelperImpl::~BrowsingDataIndexedDBHelperImpl() {
 }
 
 void BrowsingDataIndexedDBHelperImpl::StartFetching(
-    Callback1<const std::list<IndexedDBInfo>& >::Type* callback) {
+    const base::Callback<void(const std::list<IndexedDBInfo>&)>& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!is_fetching_);
-  DCHECK(callback);
+  DCHECK_EQ(false, callback.is_null());
+
   is_fetching_ = true;
-  completion_callback_.reset(callback);
+  completion_callback_ = callback;
   BrowserThread::PostTask(
       BrowserThread::WEBKIT, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &BrowsingDataIndexedDBHelperImpl::FetchIndexedDBInfoInWebKitThread));
+      base::Bind(
+          &BrowsingDataIndexedDBHelperImpl::FetchIndexedDBInfoInWebKitThread,
+          this));
 }
 
 void BrowsingDataIndexedDBHelperImpl::CancelNotification() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  completion_callback_.reset();
+  completion_callback_.Reset();
 }
 
 void BrowsingDataIndexedDBHelperImpl::DeleteIndexedDB(
@@ -91,11 +95,9 @@ void BrowsingDataIndexedDBHelperImpl::DeleteIndexedDB(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   BrowserThread::PostTask(
       BrowserThread::WEBKIT, FROM_HERE,
-       NewRunnableMethod(
-           this,
-           &BrowsingDataIndexedDBHelperImpl::
-              DeleteIndexedDBInWebKitThread,
-           origin));
+      base::Bind(
+          &BrowsingDataIndexedDBHelperImpl::DeleteIndexedDBInWebKitThread, this,
+          origin));
 }
 
 void BrowsingDataIndexedDBHelperImpl::FetchIndexedDBInfoInWebKitThread() {
@@ -115,8 +117,7 @@ void BrowsingDataIndexedDBHelperImpl::FetchIndexedDBInfoInWebKitThread() {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &BrowsingDataIndexedDBHelperImpl::NotifyInUIThread));
+      base::Bind(&BrowsingDataIndexedDBHelperImpl::NotifyInUIThread, this));
 }
 
 void BrowsingDataIndexedDBHelperImpl::NotifyInUIThread() {
@@ -124,9 +125,9 @@ void BrowsingDataIndexedDBHelperImpl::NotifyInUIThread() {
   DCHECK(is_fetching_);
   // Note: completion_callback_ mutates only in the UI thread, so it's safe to
   // test it here.
-  if (completion_callback_ != NULL) {
-    completion_callback_->Run(indexed_db_info_);
-    completion_callback_.reset();
+  if (!completion_callback_.is_null()) {
+    completion_callback_.Run(indexed_db_info_);
+    completion_callback_.Reset();
   }
   is_fetching_ = false;
 }
@@ -172,8 +173,7 @@ PendingIndexedDBInfo::~PendingIndexedDBInfo() {
 }
 
 CannedBrowsingDataIndexedDBHelper::CannedBrowsingDataIndexedDBHelper()
-    : completion_callback_(NULL),
-      is_fetching_(false) {
+    : is_fetching_(false) {
 }
 
 CannedBrowsingDataIndexedDBHelper* CannedBrowsingDataIndexedDBHelper::Clone() {
@@ -205,15 +205,18 @@ bool CannedBrowsingDataIndexedDBHelper::empty() const {
 }
 
 void CannedBrowsingDataIndexedDBHelper::StartFetching(
-    Callback1<const std::list<IndexedDBInfo>& >::Type* callback) {
+    const base::Callback<void(const std::list<IndexedDBInfo>&)>& callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(!is_fetching_);
-  DCHECK(callback);
+  DCHECK_EQ(false, callback.is_null());
+
   is_fetching_ = true;
-  completion_callback_.reset(callback);
-  BrowserThread::PostTask(BrowserThread::WEBKIT, FROM_HERE, NewRunnableMethod(
-      this,
-      &CannedBrowsingDataIndexedDBHelper::ConvertPendingInfoInWebKitThread));
+  completion_callback_ = callback;
+  BrowserThread::PostTask(
+      BrowserThread::WEBKIT, FROM_HERE,
+      base::Bind(
+          &CannedBrowsingDataIndexedDBHelper::ConvertPendingInfoInWebKitThread,
+          this));
 }
 
 CannedBrowsingDataIndexedDBHelper::~CannedBrowsingDataIndexedDBHelper() {}
@@ -244,23 +247,23 @@ void CannedBrowsingDataIndexedDBHelper::ConvertPendingInfoInWebKitThread() {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &CannedBrowsingDataIndexedDBHelper::NotifyInUIThread));
+      base::Bind(&CannedBrowsingDataIndexedDBHelper::NotifyInUIThread, this));
 }
 
 void CannedBrowsingDataIndexedDBHelper::NotifyInUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK(is_fetching_);
-  // Note: completion_callback_ mutates only in the UI thread, so it's safe to
-  // test it here.
-  if (completion_callback_ != NULL) {
-    completion_callback_->Run(indexed_db_info_);
-    completion_callback_.reset();
+
+  // Completion_callback_ mutates only in the UI thread, so it's safe to test it
+  // here.
+  if (!completion_callback_.is_null()) {
+    completion_callback_.Run(indexed_db_info_);
+    completion_callback_.Reset();
   }
   is_fetching_ = false;
 }
 
 void CannedBrowsingDataIndexedDBHelper::CancelNotification() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  completion_callback_.reset();
+  completion_callback_.Reset();
 }

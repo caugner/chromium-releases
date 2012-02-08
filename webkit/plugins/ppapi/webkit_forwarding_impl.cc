@@ -17,12 +17,12 @@
 #include "ppapi/shared_impl/ppapi_preferences.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFont.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFontDescription.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFloatPoint.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFloatRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFloatPoint.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFloatRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextRun.h"
 #include "webkit/glue/webkit_glue.h"
 
@@ -192,6 +192,8 @@ void FontImpl::Describe(base::WaitableEvent* event,
     description->weight = static_cast<PP_FontWeight_Dev>(web_desc.weight);
     description->italic = web_desc.italic ? PP_TRUE : PP_FALSE;
     description->small_caps = web_desc.smallCaps ? PP_TRUE : PP_FALSE;
+    description->letter_spacing = static_cast<int32_t>(web_desc.letterSpacing);
+    description->word_spacing = static_cast<int32_t>(web_desc.wordSpacing);
 
     *face = UTF16ToUTF8(web_desc.family);
 

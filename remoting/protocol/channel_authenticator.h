@@ -8,91 +8,33 @@
 #include <string>
 
 #include "base/callback.h"
-#include "base/memory/ref_counted.h"
-#include "base/threading/non_thread_safe.h"
-#include "net/base/completion_callback.h"
+#include "net/base/net_errors.h"
 
 namespace net {
-class DrainableIOBuffer;
-class GrowableIOBuffer;
-class SSLClientSocket;
-class SSLServerSocket;
+class StreamSocket;
 }  // namespace net
 
 namespace remoting {
 namespace protocol {
 
-class ChannelAuthenticator : public base::NonThreadSafe {
+// Interface for channel authentications that perform channel-level
+// authentication. Depending on implementation channel authenticators
+// may also establish SSL connection. Each instance of this interface
+// should be used only once for one channel.
+class ChannelAuthenticator {
  public:
-  enum Result {
-    SUCCESS,
-    FAILURE,
-  };
+  typedef base::Callback<void(net::Error error, net::StreamSocket*)>
+      DoneCallback;
 
-  typedef base::Callback<void(Result)> DoneCallback;
+  virtual ~ChannelAuthenticator() {}
 
-  ChannelAuthenticator() { }
-  virtual ~ChannelAuthenticator() { }
-
-  // Starts authentication of the |socket|. |done_callback| is called
-  // when authentication is finished. Caller retains ownership of
-  // |socket|. |shared_secret| is a shared secret that we use to
-  // authenticate the channel.
-  virtual void Authenticate(const std::string& shared_secret,
-                            const DoneCallback& done_callback) = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChannelAuthenticator);
-};
-
-class HostChannelAuthenticator : public ChannelAuthenticator {
- public:
-  HostChannelAuthenticator(net::SSLServerSocket* socket);
-  virtual ~HostChannelAuthenticator();
-
-  // ChannelAuthenticator overrides.
-  virtual void Authenticate(const std::string& shared_secret,
-                            const DoneCallback& done_callback) OVERRIDE;
-
- private:
-  void DoAuthRead();
-  void OnAuthBytesRead(int result);
-  bool HandleAuthBytesRead(int result);
-  bool VerifyAuthBytes(const std::string& received_auth_bytes);
-
-  std::string auth_bytes_;
-  net::SSLServerSocket* socket_;
-  DoneCallback done_callback_;
-
-  scoped_refptr<net::GrowableIOBuffer> auth_read_buf_;
-
-  net::OldCompletionCallbackImpl<HostChannelAuthenticator> auth_read_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(HostChannelAuthenticator);
-};
-
-class ClientChannelAuthenticator : public ChannelAuthenticator {
- public:
-  ClientChannelAuthenticator(net::SSLClientSocket* socket);
-  virtual ~ClientChannelAuthenticator();
-
-  // ChannelAuthenticator overrides.
-  virtual void Authenticate(const std::string& shared_secret,
-                            const DoneCallback& done_callback);
-
- private:
-  void DoAuthWrite();
-  void OnAuthBytesWritten(int result);
-  bool HandleAuthBytesWritten(int result);
-
-  net::SSLClientSocket* socket_;
-  DoneCallback done_callback_;
-
-  scoped_refptr<net::DrainableIOBuffer> auth_write_buf_;
-
-  net::OldCompletionCallbackImpl<ClientChannelAuthenticator> auth_write_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(ClientChannelAuthenticator);
+  // Start authentication of the given |socket|. Takes ownership of
+  // |socket|, and caller must not use |socket| after calling this
+  // method. |done_callback| is called when authentication is
+  // finished. Callback may be invoked before this method
+  // returns. Callback handler must take ownership of the result.
+  virtual void SecureAndAuthenticate(
+      net::StreamSocket* socket, const DoneCallback& done_callback) = 0;
 };
 
 }  // namespace protocol

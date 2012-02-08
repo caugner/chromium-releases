@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/i18n/rtl.h"
+#include "base/lazy_instance.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
@@ -120,7 +121,9 @@ static const char* kTimeZones[] = {
     "Pacific/Tongatapu",
 };
 
-static base::Lock timezone_bundle_lock;
+static base::LazyInstance<base::Lock,
+                          base::LeakyLazyInstanceTraits<base::Lock> >
+    g_timezone_bundle_lock = LAZY_INSTANCE_INITIALIZER;
 
 struct UResClose {
   inline void operator() (UResourceBundle* b) const {
@@ -138,7 +141,7 @@ string16 GetExemplarCity(const icu::TimeZone& zone) {
 
   UErrorCode status = U_ZERO_ERROR;
   {
-    base::AutoLock lock(timezone_bundle_lock);
+    base::AutoLock lock(g_timezone_bundle_lock.Get());
     if (zone_bundle == NULL)
       zone_bundle = ures_open(zone_bundle_name, uloc_getDefault(), &status);
 
@@ -186,7 +189,8 @@ SystemSettingsProvider::SystemSettingsProvider() {
         icu::UnicodeString(kTimeZones[i], -1, US_INV)));
   }
   system::TimezoneSettings::GetInstance()->AddObserver(this);
-
+  timezone_value_.reset(base::Value::CreateStringValue(GetKnownTimezoneID(
+      system::TimezoneSettings::GetInstance()->GetTimezone())));
 }
 
 SystemSettingsProvider::~SystemSettingsProvider() {
@@ -194,39 +198,50 @@ SystemSettingsProvider::~SystemSettingsProvider() {
   STLDeleteElements(&timezones_);
 }
 
-void SystemSettingsProvider::DoSet(const std::string& path, Value* in_value) {
+void SystemSettingsProvider::DoSet(const std::string& path,
+                                   const base::Value& in_value) {
   // Non-guest users can change the time zone.
   if (UserManager::Get()->IsLoggedInAsGuest())
     return;
 
   if (path == kSystemTimezone) {
     string16 value;
-    if (!in_value || !in_value->IsType(Value::TYPE_STRING) ||
-        !in_value->GetAsString(&value))
+    if (!in_value.IsType(Value::TYPE_STRING) || !in_value.GetAsString(&value))
       return;
     const icu::TimeZone* timezone = GetTimezone(value);
     if (!timezone)
       return;
     system::TimezoneSettings::GetInstance()->SetTimezone(*timezone);
+    timezone_value_.reset(
+        base::Value::CreateStringValue(GetKnownTimezoneID(*timezone)));
   }
 }
 
-bool SystemSettingsProvider::Get(const std::string& path,
-                                 Value** out_value) const {
-  if (path == kSystemTimezone) {
-    *out_value = Value::CreateStringValue(GetKnownTimezoneID(
-        system::TimezoneSettings::GetInstance()->GetTimezone()));
-    return true;
-  }
-  return false;
+const base::Value* SystemSettingsProvider::Get(const std::string& path) const {
+  if (path == kSystemTimezone)
+    return timezone_value_.get();
+  return NULL;
+}
+
+// The timezone is always trusted.
+bool SystemSettingsProvider::GetTrusted(const std::string& path,
+                                        const base::Closure& callback) {
+  return true;
 }
 
 bool SystemSettingsProvider::HandlesSetting(const std::string& path) const {
   return path == kSystemTimezone;
 }
 
+void SystemSettingsProvider::Reload() {
+  // TODO(pastarmovj): We can actually cache the timezone here to make returning
+  // it faster.
+}
+
 void SystemSettingsProvider::TimezoneChanged(const icu::TimeZone& timezone) {
   // Fires system setting change notification.
+  timezone_value_.reset(
+      base::Value::CreateStringValue(GetKnownTimezoneID(timezone)));
   CrosSettings::Get()->FireObservers(kSystemTimezone);
 }
 

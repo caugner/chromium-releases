@@ -4,89 +4,48 @@
 
 #import "chrome/browser/ui/cocoa/fullscreen_exit_bubble_view.h"
 
-#import "chrome/browser/ui/cocoa/nsview_additions.h"
-#import "chrome/browser/ui/cocoa/themed_window.h"
-#import "chrome/browser/ui/cocoa/url_drop_target.h"
-#import "chrome/browser/ui/cocoa/view_id_util.h"
+#include "base/memory/scoped_nsobject.h"
 #include "ui/gfx/scoped_ns_graphics_context_save_gstate_mac.h"
 
-CGFloat kCurveSize = 8;
+namespace {
+
+const CGFloat kShadowTop = 20;
+const CGFloat kShadowBottom = 50;
+const CGFloat kShadowLeft = 50;
+const CGFloat kShadowRight = 50;
+const CGFloat kShadowBlurRadius = 290;
+const CGFloat kShadowAlpha = 0.5;
+const CGFloat kBubbleCornerRadius = 8.0;
+
+}
 
 @implementation FullscreenExitBubbleView
 
 - (void)drawRect:(NSRect)rect {
-  const CGFloat lineWidth = [self cr_lineWidth];
+  // Make room for the border to be seen.
+  NSRect bounds = [self bounds];
+  bounds.size.width -= kShadowLeft + kShadowRight;
+  bounds.size.height -= kShadowTop + kShadowBottom;
+  bounds.origin.x += kShadowLeft;
+  bounds.origin.y += kShadowBottom;
+  NSBezierPath* bezier = [NSBezierPath bezierPath];
 
-  rect = NSOffsetRect([self bounds], 0, lineWidth*2);
+  CGFloat radius = kBubbleCornerRadius;
+  // Start with a rounded rectangle.
+  [bezier appendBezierPathWithRoundedRect:bounds
+                                  xRadius:radius
+                                  yRadius:radius];
 
-  NSPoint topLeft = NSMakePoint(NSMinX(rect), NSMaxY(rect));
-  NSPoint topRight = NSMakePoint(NSMaxX(rect), NSMaxY(rect));
-  NSPoint midLeft =
-      NSMakePoint(NSMinX(rect), NSMinY(rect) + kCurveSize);
-  NSPoint midRight =
-      NSMakePoint(NSMaxX(rect), NSMinY(rect) + kCurveSize);
-  NSPoint bottomLeft =
-      NSMakePoint(NSMinX(rect) + kCurveSize, NSMinY(rect));
-  NSPoint bottomRight =
-      NSMakePoint(NSMaxX(rect) - kCurveSize, NSMinY(rect));
+  [bezier closePath];
+  [[NSColor whiteColor] set];
+  gfx::ScopedNSGraphicsContextSaveGState scoped_g_state;
+  scoped_nsobject<NSShadow> shadow([[NSShadow alloc] init]);
+  [shadow setShadowBlurRadius:kShadowBlurRadius];
+  [shadow setShadowColor:[[NSColor blackColor]
+    colorWithAlphaComponent:kShadowAlpha]];
+  [shadow set];
 
-  NSBezierPath* path = [NSBezierPath bezierPath];
-  [path moveToPoint:topLeft];
-  [path appendBezierPathWithArcWithCenter:NSMakePoint(bottomLeft.x, midLeft.y)
-      radius:kCurveSize startAngle:180 endAngle:270];
-
-  [path lineToPoint:bottomRight];
-  [path appendBezierPathWithArcWithCenter:NSMakePoint(bottomRight.x, midRight.y)
-      radius:kCurveSize startAngle:270 endAngle:360];
-  [path lineToPoint:topRight];
-
-  {
-    gfx::ScopedNSGraphicsContextSaveGState scopedGState;
-    [path addClip];
-
-    const NSRect bounds = [self bounds];
-
-    [[NSColor colorWithDeviceWhite:0 alpha:0.7] set];
-    NSRectFillUsingOperation(bounds, NSCompositeSourceOver);
-  }
-
-}
-
-// Eat all mouse events, to prevent clicks from falling through to views below.
-- (void)mouseDown:(NSEvent *)theEvent {
-}
-
-- (void)rightMouseDown:(NSEvent *)theEvent {
-}
-
-- (void)otherMouseDown:(NSEvent *)theEvent {
-}
-
-- (void)mouseUp:(NSEvent *)theEvent {
-}
-
-- (void)rightMouseUp:(NSEvent *)theEvent {
-}
-
-- (void)otherMouseUp:(NSEvent *)theEvent {
-}
-
-- (void)mouseMoved:(NSEvent *)theEvent {
-}
-
-- (void)mouseDragged:(NSEvent *)theEvent {
-}
-
-- (void)rightMouseDragged:(NSEvent *)theEvent {
-}
-
-- (void)otherMouseDragged:(NSEvent *)theEvent {
-}
-
-// Specifies that mouse events over this view should be ignored by the
-// render host.
-- (BOOL)nonWebContentView {
-  return YES;
+  [bezier fill];
 }
 
 @end

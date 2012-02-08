@@ -5,9 +5,11 @@
 #include "content/browser/speech/speech_input_dispatcher_host.h"
 
 #include "base/lazy_instance.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/speech/speech_input_preferences.h"
 #include "content/common/speech_input_messages.h"
+#include "content/public/browser/content_browser_client.h"
+
+using content::BrowserThread;
 
 namespace speech_input {
 
@@ -47,7 +49,7 @@ class SpeechInputDispatcherHost::SpeechInputCallers {
 };
 
 static base::LazyInstance<SpeechInputDispatcherHost::SpeechInputCallers>
-    g_speech_input_callers(base::LINKER_INITIALIZED);
+    g_speech_input_callers = LAZY_INSTANCE_INITIALIZER;
 
 SpeechInputDispatcherHost::SpeechInputCallers::SpeechInputCallers()
     : next_id_(1) {
@@ -190,7 +192,7 @@ void SpeechInputDispatcherHost::OnStopRecording(int render_view_id,
 }
 
 void SpeechInputDispatcherHost::SetRecognitionResult(
-    int caller_id, const SpeechInputResult& result) {
+    int caller_id, const content::SpeechInputResult& result) {
   VLOG(1) << "SpeechInputDispatcherHost::SetRecognitionResult enter";
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   int caller_render_view_id =

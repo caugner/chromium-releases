@@ -21,15 +21,16 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/net/gaia/gaia_auth_fetcher.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_messages.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/chromium_strings.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_font_util.h"
@@ -37,16 +38,12 @@
 
 namespace {
 
-string16& SetupIframeXPath() {
-  static string16 kSetupIframeXPath =
-      ASCIIToUTF16("//iframe[@id='cloudprintsetup']");
-  return kSetupIframeXPath;
+string16 SetupIframeXPath() {
+  return ASCIIToUTF16("//iframe[@id='cloudprintsetup']");
 }
 
-string16& DoneIframeXPath() {
-  static string16 kDoneIframeXPath =
-      ASCIIToUTF16("//iframe[@id='setupdone']");
-  return kDoneIframeXPath;
+string16 DoneIframeXPath() {
+  return ASCIIToUTF16("//iframe[@id='setupdone']");
 }
 
 }  // end namespace
@@ -86,7 +83,7 @@ CloudPrintSetupFlow* CloudPrintSetupFlow::OpenDialog(
     if (browser && browser->window())
       parent_window = browser->window()->GetNativeHandle();
   }
-  browser::ShowHtmlDialog(parent_window, profile, flow);
+  browser::ShowHtmlDialog(parent_window, profile, flow, STYLE_GENERIC);
   return flow;
 }
 
@@ -133,7 +130,7 @@ void CloudPrintSetupFlow::GetWebUIMessageHandlers(
 void CloudPrintSetupFlow::GetDialogSize(gfx::Size* size) const {
   PrefService* prefs = profile_->GetPrefs();
   gfx::Font approximate_web_font(
-      UTF8ToUTF16(prefs->GetString(prefs::kWebKitSansSerifFontFamily)),
+      prefs->GetString(prefs::kWebKitSansSerifFontFamily),
       prefs->GetInteger(prefs::kWebKitDefaultFontSize));
 
   if (setup_done_) {
@@ -312,7 +309,7 @@ void CloudPrintSetupFlow::ShowSetupDone() {
   if (web_ui_) {
     PrefService* prefs = profile_->GetPrefs();
     gfx::Font approximate_web_font(
-        UTF8ToUTF16(prefs->GetString(prefs::kWebKitSansSerifFontFamily)),
+        prefs->GetString(prefs::kWebKitSansSerifFontFamily),
         prefs->GetInteger(prefs::kWebKitDefaultFontSize));
     gfx::Size done_size = ui::GetLocalizedContentsSizeForFont(
         IDS_CLOUD_PRINT_SETUP_WIZARD_DONE_WIDTH_CHARS,

@@ -29,8 +29,17 @@ cr.define('login', function() {
   GaiaSigninScreen.prototype = {
     __proto__: HTMLDivElement.prototype,
 
+    // Frame loading error code (0 - no error).
+    error_: 0,
+
     // Authentication extension's start page URL.
-    extension_url_: null,
+    extensionUrl_: null,
+
+    // Whether extension should be loaded silently.
+    silentLoad_: false,
+
+    // Whether there is focused element.
+    hasFocused_: false,
 
     // Number of times that we reload extension frame.
     retryCount_: 0,
@@ -40,20 +49,12 @@ cr.define('login', function() {
 
     /** @inheritDoc */
     decorate: function() {
-      $('createAccount').innerHTML = localStrings.getStringF(
-          'createAccount',
-          '<a id="createAccountLink" class="signin-link" href="#">',
-          '</a>');
-      $('guestSignin').innerHTML = localStrings.getStringF(
-          'guestSignin',
-          '<a id="guestSigninLink" class="signin-link" href="#">',
-          '</a>');
-      $('createAccountLink').onclick = function() {
-        chrome.send('createAccount');
-      };
-      $('guestSigninLink').onclick = function() {
-        chrome.send('launchIncognito');
-      };
+      this.frame_ = $('signin-frame');
+
+      this.updateLocalizedContent();
+
+      document.addEventListener(
+          'focusin', this.selfBind_(this.onFocusIn_.bind(this)));
     },
 
     /**
@@ -71,7 +72,7 @@ cr.define('login', function() {
      */
     showLoadingUI_: function(show) {
       $('gaia-loading').hidden = !show;
-      $('signin-frame').hidden = show;
+      this.frame_.hidden = show;
 
       // Sign-in right panel is hidden if all its items are hidden.
       $('signin-right').hidden = show ||
@@ -98,8 +99,53 @@ cr.define('login', function() {
      *        page.
      */
     onBeforeShow: function(data) {
-      console.log('Opening extension: ' + data.startUrl +
-                  ', opt_email=' + data.email);
+      // Announce the name of the screen, if accessibility is on.
+      $('gaia-signin-aria-label').setAttribute(
+          'aria-label', localStrings.getString('signinScreenTitle'));
+
+      // Button header is always visible when sign in is presented.
+      // Header is hidden once GAIA reports on successful sign in.
+      Oobe.getInstance().headerHidden = false;
+    },
+
+    /**
+     * Returns function which gets an event and passes it and self to listener.
+     * @param {!Object} listener Listener to be wrapped.
+     */
+    selfBind_: function(listener) {
+      var selfBound = function(e) {
+        listener(e, selfBound);
+      };
+      return selfBound;
+    },
+
+    /**
+     * Tracks first focus in event.
+     * @param {!Object} e Focus in event.
+     * @param {!Object} listener Listener which shold be removed from event
+     *   listeners list.
+     */
+    onFocusIn_: function(e, listener) {
+      this.hasFocused_ = true;
+      document.removeEventListener('focusin', listener);
+    },
+
+    /**
+     * Restore focus back to the focused element.
+     * @param {!Object} e Focus out event.
+     * @param {!Object} listener Listener which shold be removed from event
+     *   listeners list.
+     */
+    onFocusOut_: function(e, listener) {
+      window.setTimeout(e.target.focus.bind(e.target), 0);
+      document.removeEventListener('focusout', listener);
+    },
+
+    loadAuthExtension_: function(data) {
+      this.silentLoad_ = data.silentLoad;
+
+      $('createAccount').hidden = !data.createAccount;
+      $('guestSignin').hidden = !data.guestSignin;
 
       var params = [];
       if (data.gaiaOrigin)
@@ -117,22 +163,30 @@ cr.define('login', function() {
       if (params.length)
         url += '?' + params.join('&');
 
-      $('signin-frame').src = url;
-      this.extension_url_ = url;
+      if (data.forceReload || this.extensionUrl_ != url) {
+        console.log('Opening extension: ' + data.startUrl +
+                    ', opt_email=' + data.email);
 
-      $('createAccount').hidden = !data.createAccount;
-      $('guestSignin').hidden = !data.guestSignin;
+        this.error_ = 0;
+        this.frame_.src = url;
+        this.extensionUrl_ = url;
 
-      // Announce the name of the screen, if accessibility is on.
-      $('gaia-signin-aria-label').setAttribute(
-          'aria-label', localStrings.getString('signinScreenTitle'));
-
-      // Button header is always visible when sign in is presented.
-      // Header is hidden once GAIA reports on successful sign in.
-      Oobe.getInstance().headerHidden = false;
-
-      this.loading = true;
-      this.clearRetry_();
+        this.loading = true;
+        this.clearRetry_();
+      } else if (this.loading) {
+        if (this.error_) {
+          // An error has occurred, so trying to reload.
+          this.doReload();
+        } else {
+          console.log('Gaia is still loading.');
+          // Nothing to do here. Just wait until the extension loads.
+        }
+      } else {
+        // TODO(altimofeev): GAIA extension is reloaded to make focus be set
+        // correctly. When fix on the GAIA side is ready, this reloading should
+        // be deleted.
+        this.doReload();
+      }
     },
 
     /**
@@ -141,9 +195,9 @@ cr.define('login', function() {
      * @type {bool}
      */
     isAuthExtMessage_: function(e) {
-      return this.extension_url_ != null &&
-          this.extension_url_.indexOf(e.origin) == 0 &&
-          e.source == $('signin-frame').contentWindow;
+      return this.extensionUrl_ != null &&
+          this.extensionUrl_.indexOf(e.origin) == 0 &&
+          e.source == this.frame_.contentWindow;
     },
 
     /**
@@ -158,6 +212,13 @@ cr.define('login', function() {
         // Now that we're in logged in state header should be hidden.
         Oobe.getInstance().headerHidden = true;
       } else if (msg.method == 'loginUILoaded' && this.isAuthExtMessage_(e)) {
+        // TODO(altimofeev): there is no guarantee that next 'focusout' event
+        // will be caused by the extension, so better approach is direct asking
+        // the extension (and gaia consequently) to not grab the focus.
+        if (this.silentLoad_ && this.hasFocused_) {
+          document.addEventListener(
+              'focusout', this.selfBind_(this.onFocusOut_.bind(this)));
+        }
         $('error-message').update();
         this.loading = false;
         this.clearRetry_();
@@ -192,8 +253,10 @@ cr.define('login', function() {
      */
     doReload: function() {
       console.log('Reload auth extension frame.');
-      $('signin-frame').src = this.extension_url_;
+      this.error_ = 0;
+      this.frame_.src = this.extensionUrl_;
       this.retryTimer_ = undefined;
+      this.loading = true;
     },
 
     /**
@@ -212,7 +275,39 @@ cr.define('login', function() {
       ++this.retryCount_;
       this.retryTimer_ = window.setTimeout(this.doReload.bind(this), delay);
       console.log('GaiaSigninScreen scheduleRetry in ' + delay + 'ms.');
+    },
+
+    /**
+     * This method is called when a frame loading error appears.
+     * @param {int} error Error code.
+     */
+    onFrameError: function(error) {
+      this.error_ = error;
+    },
+
+    /**
+     * Updates localized content of the screen that is not updated via template.
+     */
+    updateLocalizedContent: function() {
+      $('createAccount').innerHTML = localStrings.getStringF(
+        'createAccount',
+        '<a id="createAccountLink" class="signin-link" href="#">',
+        '</a>');
+      $('guestSignin').innerHTML = localStrings.getStringF(
+          'guestSignin',
+          '<a id="guestSigninLink" class="signin-link" href="#">',
+          '</a>');
+      $('createAccountLink').onclick = function() {
+        chrome.send('createAccount');
+      };
+      $('guestSigninLink').onclick = function() {
+        chrome.send('launchIncognito');
+      };
     }
+  };
+
+  GaiaSigninScreen.loadAuthExtension = function(data) {
+    $('gaia-signin').loadAuthExtension_(data);
   };
 
   return {

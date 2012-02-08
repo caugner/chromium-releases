@@ -4,27 +4,30 @@
 
 #include "chrome/browser/search_engines/search_provider_install_state_message_filter.h"
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
 #include "googleurl/src/gurl.h"
+
+using content::BrowserThread;
 
 SearchProviderInstallStateMessageFilter::
 SearchProviderInstallStateMessageFilter(
     int render_process_id,
     Profile* profile)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(
-        reply_with_provider_install_state_factory_(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       provider_data_(profile->GetWebDataService(Profile::EXPLICIT_ACCESS),
                      content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                     Source<RenderProcessHost>(
-                         RenderProcessHost::FromID(render_process_id))),
+                     content::Source<content::RenderProcessHost>(
+                         content::RenderProcessHost::FromID(
+                            render_process_id))),
       is_off_the_record_(profile->IsOffTheRecord()) {
-  // This is initialized by BrowserRenderProcessHost. Do not add any non-trivial
+  // This is initialized by RenderProcessHostImpl. Do not add any non-trivial
   // initialization here. Instead do it lazily when required.
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 }
@@ -86,9 +89,10 @@ SearchProviderInstallStateMessageFilter::OnMsgGetSearchProviderInstallState(
     const GURL& requested_host,
     IPC::Message* reply_msg) {
   provider_data_.CallWhenLoaded(
-      reply_with_provider_install_state_factory_.NewRunnableMethod(
+      base::Bind(
           &SearchProviderInstallStateMessageFilter::
           ReplyWithProviderInstallState,
+          weak_factory_.GetWeakPtr(),
           page_location,
           requested_host,
           reply_msg));

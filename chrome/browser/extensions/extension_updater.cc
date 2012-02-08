@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <set>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -36,8 +37,9 @@
 #include "chrome/common/extensions/extension_file_util.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/utility_process_host.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "content/public/common/url_fetcher.h"
 #include "crypto/sha2.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
@@ -54,6 +56,7 @@ using base::RandDouble;
 using base::RandInt;
 using base::Time;
 using base::TimeDelta;
+using content::BrowserThread;
 using prefs::kExtensionBlacklistUpdateVersion;
 using prefs::kLastExtensionsUpdateCheck;
 using prefs::kNextExtensionsUpdateCheck;
@@ -105,7 +108,7 @@ void RecordCRXWriteHistogram(bool success, const FilePath& crx_path) {
     // can not be read. Try reading.
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableFunction(CheckThatCRXIsReadable, crx_path));
+        base::Bind(&CheckThatCRXIsReadable, crx_path));
   }
 }
 
@@ -125,7 +128,7 @@ void CheckThatCRXIsReadable(const FilePath& crx_path) {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableFunction(RecordFileUpdateHistogram, file_write_result));
+      base::Bind(&RecordFileUpdateHistogram, file_write_result));
 }
 
 void RecordFileUpdateHistogram(FileWriteResult file_write_result) {
@@ -477,7 +480,6 @@ ExtensionUpdater::ExtensionUpdater(ExtensionServiceInterface* service,
     : alive_(false),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       service_(service), frequency_seconds_(frequency_seconds),
-      method_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       will_check_soon_(false), extension_prefs_(extension_prefs),
       prefs_(prefs), profile_(profile), blacklist_checks_enabled_(true),
       crx_install_is_running_(false) {
@@ -583,7 +585,6 @@ void ExtensionUpdater::Stop() {
   profile_ = NULL;
   timer_.Stop();
   will_check_soon_ = false;
-  method_factory_.RevokeAll();
   manifest_fetcher_.reset();
   extension_fetcher_.reset();
   STLDeleteElements(&manifests_pending_);
@@ -591,23 +592,23 @@ void ExtensionUpdater::Stop() {
   extensions_pending_.clear();
 }
 
-void ExtensionUpdater::OnURLFetchComplete(const URLFetcher* source) {
+void ExtensionUpdater::OnURLFetchComplete(const content::URLFetcher* source) {
   // Stop() destroys all our URLFetchers, which means we shouldn't be
   // called after Stop() is called.
   DCHECK(alive_);
 
   if (source == manifest_fetcher_.get()) {
     std::string data;
-    CHECK(source->GetResponseAsString(&data));
-    OnManifestFetchComplete(source->url(),
-                            source->status(),
-                            source->response_code(),
+    source->GetResponseAsString(&data);
+    OnManifestFetchComplete(source->GetURL(),
+                            source->GetStatus(),
+                            source->GetResponseCode(),
                             data);
   } else if (source == extension_fetcher_.get()) {
     OnCRXFetchComplete(source,
-                       source->url(),
-                       source->status(),
-                       source->response_code());
+                       source->GetURL(),
+                       source->GetStatus(),
+                       source->GetResponseCode());
   } else {
     NOTREACHED();
   }
@@ -631,8 +632,8 @@ class SafeManifestParser : public UtilityProcessHost::Client {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     if (!BrowserThread::PostTask(
             BrowserThread::IO, FROM_HERE,
-            NewRunnableMethod(
-                this, &SafeManifestParser::ParseInSandbox,
+            base::Bind(
+                &SafeManifestParser::ParseInSandbox, this,
                 g_browser_process->resource_dispatcher_host()))) {
       NOTREACHED();
     }
@@ -655,16 +656,16 @@ class SafeManifestParser : public UtilityProcessHost::Client {
       if (manifest.Parse(xml_)) {
         if (!BrowserThread::PostTask(
                 BrowserThread::UI, FROM_HERE,
-                NewRunnableMethod(
-                    this, &SafeManifestParser::OnParseUpdateManifestSucceeded,
+                base::Bind(
+                    &SafeManifestParser::OnParseUpdateManifestSucceeded, this,
                     manifest.results()))) {
           NOTREACHED();
         }
       } else {
         if (!BrowserThread::PostTask(
                 BrowserThread::UI, FROM_HERE,
-                NewRunnableMethod(
-                    this, &SafeManifestParser::OnParseUpdateManifestFailed,
+                base::Bind(
+                    &SafeManifestParser::OnParseUpdateManifestFailed, this,
                     manifest.errors()))) {
           NOTREACHED();
         }
@@ -826,7 +827,7 @@ void ExtensionUpdater::ProcessBlacklist(const std::string& data) {
 }
 
 void ExtensionUpdater::OnCRXFetchComplete(
-    const URLFetcher* source,
+    const content::URLFetcher* source,
     const GURL& url,
     const net::URLRequestStatus& status,
     int response_code) {
@@ -844,7 +845,7 @@ void ExtensionUpdater::OnCRXFetchComplete(
       (response_code == 200 || url.SchemeIsFile())) {
     if (current_extension_fetch_.id == kBlacklistAppID) {
       std::string data;
-      CHECK(source->GetResponseAsString(&data));
+      source->GetResponseAsString(&data);
       ProcessBlacklist(data);
       in_progress_ids_.erase(current_extension_fetch_.id);
     } else {
@@ -903,7 +904,7 @@ bool ExtensionUpdater::MaybeInstallCRXFile() {
       // the installer we started.
       registrar_.Add(this,
                      chrome::NOTIFICATION_CRX_INSTALLER_DONE,
-                     Source<CrxInstaller>(installer));
+                     content::Source<CrxInstaller>(installer));
     }
     in_progress_ids_.erase(crx_file.id);
     fetched_crx_files_.pop();
@@ -914,8 +915,8 @@ bool ExtensionUpdater::MaybeInstallCRXFile() {
 }
 
 void ExtensionUpdater::Observe(int type,
-                               const NotificationSource& source,
-                               const NotificationDetails& details) {
+                               const content::NotificationSource& source,
+                               const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_CRX_INSTALLER_DONE);
 
   // No need to listen for CRX_INSTALLER_DONE anymore.
@@ -984,8 +985,8 @@ void ExtensionUpdater::CheckSoon() {
   }
   if (BrowserThread::PostTask(
           BrowserThread::UI, FROM_HERE,
-          method_factory_.NewRunnableMethod(
-              &ExtensionUpdater::DoCheckSoon))) {
+          base::Bind(&ExtensionUpdater::DoCheckSoon,
+                     weak_ptr_factory_.GetWeakPtr()))) {
     will_check_soon_ = true;
   } else {
     NOTREACHED();
@@ -1160,7 +1161,7 @@ void ExtensionUpdater::StartUpdateCheck(ManifestFetchData* fetch_data) {
   }
 
   if (manifest_fetcher_.get() != NULL) {
-    if (manifest_fetcher_->url() != fetch_data->full_url()) {
+    if (manifest_fetcher_->GetURL() != fetch_data->full_url()) {
       manifests_pending_.push_back(scoped_fetch_data.release());
     }
   } else {
@@ -1168,14 +1169,13 @@ void ExtensionUpdater::StartUpdateCheck(ManifestFetchData* fetch_data) {
         fetch_data->full_url().possibly_invalid_spec().length());
 
     current_manifest_fetch_.swap(scoped_fetch_data);
-    manifest_fetcher_.reset(
-        URLFetcher::Create(kManifestFetcherId, fetch_data->full_url(),
-                           URLFetcher::GET, this));
-    manifest_fetcher_->set_request_context(
-        profile_->GetRequestContext());
-    manifest_fetcher_->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES |
-                                      net::LOAD_DO_NOT_SAVE_COOKIES |
-                                      net::LOAD_DISABLE_CACHE);
+    manifest_fetcher_.reset(content::URLFetcher::Create(
+        kManifestFetcherId, fetch_data->full_url(), content::URLFetcher::GET,
+        this));
+    manifest_fetcher_->SetRequestContext(profile_->GetRequestContext());
+    manifest_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                                    net::LOAD_DO_NOT_SAVE_COOKIES |
+                                    net::LOAD_DISABLE_CACHE);
     manifest_fetcher_->Start();
   }
 }
@@ -1193,17 +1193,17 @@ void ExtensionUpdater::FetchUpdatedExtension(const std::string& id,
   }
 
   if (extension_fetcher_.get() != NULL) {
-    if (extension_fetcher_->url() != url) {
+    if (extension_fetcher_->GetURL() != url) {
       extensions_pending_.push_back(ExtensionFetch(id, url, hash, version));
     }
   } else {
-    extension_fetcher_.reset(
-        URLFetcher::Create(kExtensionFetcherId, url, URLFetcher::GET, this));
-    extension_fetcher_->set_request_context(
+    extension_fetcher_.reset(content::URLFetcher::Create(
+        kExtensionFetcherId, url, content::URLFetcher::GET, this));
+    extension_fetcher_->SetRequestContext(
         profile_->GetRequestContext());
-    extension_fetcher_->set_load_flags(net::LOAD_DO_NOT_SEND_COOKIES |
-                                       net::LOAD_DO_NOT_SAVE_COOKIES |
-                                       net::LOAD_DISABLE_CACHE);
+    extension_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
+                                     net::LOAD_DO_NOT_SAVE_COOKIES |
+                                     net::LOAD_DISABLE_CACHE);
     // Download CRX files to a temp file. The blacklist is small and will be
     // processed in memory, so it is fetched into a string.
     if (id != ExtensionUpdater::kBlacklistAppID) {
@@ -1217,25 +1217,25 @@ void ExtensionUpdater::FetchUpdatedExtension(const std::string& id,
 }
 
 void ExtensionUpdater::NotifyStarted() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_UPDATING_STARTED,
-      Source<Profile>(profile_),
-      NotificationService::NoDetails());
+      content::Source<Profile>(profile_),
+      content::NotificationService::NoDetails());
 }
 
 void ExtensionUpdater::NotifyUpdateFound(const std::string& extension_id) {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_UPDATE_FOUND,
-      Source<Profile>(profile_),
-      Details<const std::string>(&extension_id));
+      content::Source<Profile>(profile_),
+      content::Details<const std::string>(&extension_id));
 }
 
 void ExtensionUpdater::NotifyIfFinished() {
   if (in_progress_ids_.empty()) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_UPDATING_FINISHED,
-        Source<Profile>(profile_),
-        NotificationService::NoDetails());
+        content::Source<Profile>(profile_),
+        content::NotificationService::NoDetails());
     VLOG(1) << "Sending EXTENSION_UPDATING_FINISHED";
   }
 }

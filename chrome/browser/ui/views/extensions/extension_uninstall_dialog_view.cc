@@ -10,18 +10,19 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/extensions/extension.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/compositor/layer.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/layout/layout_constants.h"
-#include "views/view.h"
-#include "views/widget/widget.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/view.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace {
 
@@ -66,13 +67,10 @@ class ExtensionUninstallDialogDelegateView : public views::DialogDelegateView {
 
  private:
   // views::DialogDelegate:
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
-
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual int GetDefaultDialogButton() const OVERRIDE {
-    return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+    return ui::DIALOG_BUTTON_CANCEL;
   }
-
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
 
@@ -120,7 +118,9 @@ void ExtensionUninstallDialogViews::Show() {
   }
 
   view_ = new ExtensionUninstallDialogDelegateView(this, extension_, &icon_);
-  browser::CreateViewsWindow(window->GetNativeHandle(), view_)->Show();
+  browser::CreateViewsWindow(window->GetNativeHandle(),
+                             view_,
+                             STYLE_GENERIC)->Show();
 }
 
 void ExtensionUninstallDialogViews::ExtensionUninstallAccepted() {
@@ -160,11 +160,11 @@ ExtensionUninstallDialogDelegateView::~ExtensionUninstallDialogDelegateView() {
 }
 
 string16 ExtensionUninstallDialogDelegateView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
+    ui::DialogButton button) const {
   switch (button) {
-    case ui::MessageBoxFlags::DIALOGBUTTON_OK:
+    case ui::DIALOG_BUTTON_OK:
       return l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_UNINSTALL_BUTTON);
-    case ui::MessageBoxFlags::DIALOGBUTTON_CANCEL:
+    case ui::DIALOG_BUTTON_CANCEL:
       return l10n_util::GetStringUTF16(IDS_CANCEL);
     default:
       NOTREACHED();

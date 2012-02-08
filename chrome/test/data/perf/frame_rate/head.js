@@ -34,32 +34,40 @@
  *      ],
  */
 
+var __initialized = true;
 var __running = false;
 var __running_all = false;
 var __old_title = "";
 var __raf_is_live = false;
 var __raf;
 
+var __t_start;
 var __t_last;
 var __t_est;
-var __t_est_total;
-var __t_est_squared_total;
-var __t_count;
-var __t_start;
+var __t_frame_intervals;
 
 var __queued_gesture_functions;
 var __results;
 
 var __recording = [];
 var __advance_gesture;
-var __gestures = {
-  none: [
+
+// This flag indicates whether the test page contains an animation loop
+// For more on testing animated pages, see head_animation.js
+var __animation = false;
+
+var __gesture_library = {
+  init: [
+    {"time_ms":1, "y":0},
+    {"time_ms":5, "y":10}
+  ],
+  stationary: [
     {"time_ms":1, "y":0},
     {"time_ms":5000, "y":0}
   ],
   steady: [
     {"time_ms":1, "y":0},
-    {"time_ms":5, "y":10}
+    {"time_ms":500, "y":400}
   ],
   reading: [
     {"time_ms":1, "y":0},
@@ -161,35 +169,92 @@ var __gestures = {
   ],
 };
 
+// Stretch the duration of a gesture by a given factor
+function __gesture_stretch(gesture, stretch_factor) {
+  // clone the gesture
+  var new_gesture = JSON.parse(JSON.stringify(gesture));
+  for (var i = 0; i < new_gesture.length; ++i) {
+    new_gesture[i].time_ms *= stretch_factor;
+  }
+  return new_gesture;
+}
+
+// Gesture set to use for testing, initialized with default gesture set.
+// Redefine in test file to use a different set of gestures.
+var __gestures = {
+  steady: __gesture_library["steady"],
+};
+
 function __init_stats() {
   __t_last = undefined;
   __t_est = undefined;
-  __t_est_total = 0;
-  __t_est_squared_total = 0;
-  __t_count = 0;
+  __t_frame_intervals = [];
 }
 __init_stats();
 
+var __cur_chrome_interval;
+function __init_time() {
+  if (chrome.Interval) {
+    __cur_chrome_interval = new chrome.Interval();
+    __cur_chrome_interval.start();
+  }
+}
+__init_time();
+
+function __get_time() {
+  if (__cur_chrome_interval)
+    return __cur_chrome_interval.microseconds() / 1000;
+  return new Date().getTime();
+}
+
+function __init_raf() {
+  if ("requestAnimationFrame" in window)
+    __raf = requestAnimationFrame;
+  else if ("webkitRequestAnimationFrame" in window)
+    __raf = webkitRequestAnimationFrame;
+  else if ("mozRequestAnimationFrame" in window)
+    __raf = mozRequestAnimationFrame;
+  else if ("oRequestAnimationFrame" in window)
+    __raf = oRequestAnimationFrame;
+  else if ("msRequestAnimationFrame" in window)
+    __raf = msRequestAnimationFrame;
+  else
+    // No raf implementation available, fake it with 16ms timeouts
+    __raf = function(callback, element) {
+      setTimeout(callback, 16);
+    };
+}
+__init_raf();
+
 function __calc_results() {
-  var M = __t_est_total / __t_count;
-  var X = __t_est_squared_total / __t_count;
-  var V = X - M * M;
-  var S = Math.sqrt(V);
+  var M = 0.0;
+  var N = __t_frame_intervals.length;
+
+  for (var i = 0; i < N; i++)
+    M += __t_frame_intervals[i];
+  M = M / N;
+
+  var V = 0.0;
+  for (var i = 0; i < N; i++) {
+    var v = __t_frame_intervals[i] - M;
+    V += v * v;
+  }
+
+  var S = Math.sqrt(V / (N - 1));
 
   var R = new Object();
-  R.mean = 1000.0 / M;
-  R.sigma = R.mean - 1000.0 / (M + S);
+  R.mean = M;
+  R.sigma = S;
   return R;
 }
 
 function __calc_results_total() {
   if (!__results) {
-    return;
+    return {};
   }
   var size = __results.gestures.length;
   var mean = 0;
   var variance = 0;
-  var sigma;
 
   // Remove any intial caching test(s).
   while (__results.means.length != size) {
@@ -202,7 +267,7 @@ function __calc_results_total() {
   }
   mean /= size;
   variance /= size;
-  sigma = Math.sqrt(variance);
+  var sigma = Math.sqrt(variance);
 
   var results = new Object();
   // GTest expects a comma-separated string for lists.
@@ -214,8 +279,8 @@ function __calc_results_total() {
   return results;
 }
 
-function __update_fps() {
-  var t_now = new Date().getTime();
+function __record_frame_time() {
+  var t_now = __get_time();
   if (window.__t_last) {
     var t_delta = t_now - __t_last;
     if (window.__t_est) {
@@ -223,12 +288,11 @@ function __update_fps() {
     } else {
       __t_est = t_delta;
     }
-    var fps = 1000.0 / __t_est;
-    document.title = "FPS: " + (fps | 0);
 
-    __t_est_total += t_delta;
-    __t_est_squared_total += t_delta * t_delta;
-    __t_count++;
+    __t_frame_intervals.push(t_delta);
+
+    var fps = 1000.0 / __t_est;
+    document.title = "FPS: " + fps;
   }
   __t_last = t_now;
 }
@@ -238,7 +302,7 @@ function __advance_gesture_recording() {
   var y = document.body.scrollTop;
   // Only add a gesture if the scroll position changes.
   if (__recording.length == 0 || y != __recording[__recording.length - 1].y) {
-    var time_ms = new Date().getTime() - __t_start;
+    var time_ms = __get_time() - __t_start;
     __recording.push({ time_ms: time_ms, y: y });
     return true;
   }
@@ -274,7 +338,7 @@ function __create_gesture_function(gestures) {
       __stop();
       return false;
     }
-    var time_cur = new Date().getTime() - __t_start;
+    var time_cur = __get_time() - __t_start;
     if (time_cur <= gestures[i0].time_ms)
       return false;
 
@@ -328,23 +392,20 @@ function __create_repeating_gesture_function(gestures) {
 }
 
 function __sched_update() {
-  if (!__raf) {
-    if ("webkitRequestAnimationFrame" in window)
-      __raf = webkitRequestAnimationFrame;
-    else if ("mozRequestAnimationFrame" in window)
-      __raf = mozRequestAnimationFrame;
-  }
   __raf(function() {
     __raf_is_live = true;
+    // In case __raf falls back to using setTimeout, we must schedule the next
+    // update before rendering the current update to help maintain the
+    // regularity of update frame_intervals.
+    __sched_update();
     if (__running) {
       // Only update the FPS if a gesture movement occurs. Otherwise, the frame
       // rate average becomes inaccurate after any pause.
       if (__advance_gesture())
-        __update_fps();
+        __record_frame_time();
       else
-        __t_last = new Date().getTime();
+        __t_last = __get_time();
     }
-    __sched_update();
   }, document.body);
 }
 
@@ -361,8 +422,13 @@ function __start(gesture_function) {
     return;
   // Attempt to create a gesture function from a string name.
   if (typeof gesture_function == "string") {
-    if (!__gestures[gesture_function])
-      throw new Error("Unrecognized gesture name");
+    if (!__gestures[gesture_function]) {
+      if (!__gesture_library[gesture_function])
+        throw new Error("Unrecognized gesture name");
+      else
+        gesture_function = __create_repeating_gesture_function(
+                            __gesture_library[gesture_function]);
+    }
     else
       gesture_function = __create_repeating_gesture_function(
                             __gestures[gesture_function]);
@@ -372,9 +438,9 @@ function __start(gesture_function) {
 
   __old_title = document.title;
   __advance_gesture = gesture_function;
-  __t_start = new Date().getTime();
+  __t_start = __get_time();
   __running = true;
-  if (!__raf_is_live) {
+  if (!__raf_is_live && !__animation) {
     __sched_update();
   }
 }
@@ -392,8 +458,8 @@ function __start_all() {
     __queued_gesture_functions.push(gesture);
   }
   __running_all = true;
-  // Run steady gesture once to cache the webpage layout for subsequent tests.
-  __start("steady");
+  // Run init gesture once to cache the webpage layout for subsequent tests.
+  __start("init");
 }
 
 function __stop() {

@@ -14,10 +14,13 @@
 
 namespace net {
 
+// WARNING: If you modify or add any static flags, you must keep them in sync
+// with |ResetStaticSettingsToInit|. This is critical for unit test isolation.
+
 // static
 const HostMappingRules* HttpStreamFactory::host_mapping_rules_ = NULL;
 // static
-const std::string* HttpStreamFactory::next_protos_ = NULL;
+std::vector<std::string>* HttpStreamFactory::next_protos_ = NULL;
 // static
 bool HttpStreamFactory::spdy_enabled_ = true;
 // static
@@ -30,8 +33,26 @@ bool HttpStreamFactory::force_spdy_always_ = false;
 std::list<HostPortPair>* HttpStreamFactory::forced_spdy_exclusions_ = NULL;
 // static
 bool HttpStreamFactory::ignore_certificate_errors_ = false;
+// static
+bool HttpStreamFactory::http_pipelining_enabled_ = false;
 
 HttpStreamFactory::~HttpStreamFactory() {}
+
+// static
+void HttpStreamFactory::ResetStaticSettingsToInit() {
+  // WARNING: These must match the initializers above.
+  delete host_mapping_rules_;
+  delete next_protos_;
+  delete forced_spdy_exclusions_;
+  host_mapping_rules_ = NULL;
+  next_protos_ = NULL;
+  spdy_enabled_ = true;
+  use_alternate_protocols_ = false;
+  force_spdy_over_ssl_ = true;
+  force_spdy_always_ = false;
+  forced_spdy_exclusions_ = NULL;
+  ignore_certificate_errors_ = false;
+}
 
 void HttpStreamFactory::ProcessAlternateProtocol(
     HttpServerProperties* http_server_properties,

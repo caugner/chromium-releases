@@ -17,8 +17,8 @@
 #include "chrome/common/pref_names.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/gfx/rect.h"
-#include "views/widget/native_widget.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/native_widget.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/app_icon_win.h"
@@ -44,18 +44,11 @@ PrefService* GetPrefsForWindow(const views::Widget* window) {
 
 }  // namespace
 
-// static
-views::View* ChromeViewsDelegate::default_parent_view = NULL;
-
 ///////////////////////////////////////////////////////////////////////////////
 // ChromeViewsDelegate, views::ViewsDelegate implementation:
 
 ui::Clipboard* ChromeViewsDelegate::GetClipboard() const {
   return g_browser_process->clipboard();
-}
-
-views::View* ChromeViewsDelegate::GetDefaultParentView() {
-  return default_parent_view;
 }
 
 void ChromeViewsDelegate::SaveWindowPlacement(const views::Widget* window,

@@ -4,8 +4,8 @@
 
 // chrome_tab.cc : Implementation of DLL Exports.
 
-// Include without path to make GYP build see it.
-#include "chrome_tab.h"  // NOLINT
+// Need to include this before the ATL headers below.
+#include "chrome_frame/chrome_tab.h"
 
 #include <atlsecurity.h>
 #include <objbase.h>
@@ -375,7 +375,7 @@ HRESULT SetChromeFrameUA(bool is_system, const wchar_t* value) {
     wchar_t value_data[MAX_PATH + 1] = {};
 
     DWORD value_index = 0;
-    while (value_index < ua_key.ValueCount()) {
+    while (value_index < ua_key.GetValueCount()) {
       DWORD name_size = arraysize(value_name);
       DWORD value_size = arraysize(value_data);
       DWORD type = 0;
@@ -467,8 +467,9 @@ class SecurityDescBackup {
     DWORD reg_type = REG_NONE;
     if (backup_key.ReadValue(NULL, NULL, &len, &reg_type) != ERROR_SUCCESS)
       return false;
+    DCHECK_EQ(0u, len % sizeof(wchar_t));
 
-    if (reg_type != REG_SZ)
+    if ((len == 0) || (reg_type != REG_SZ))
       return false;
 
     size_t wchar_count = 1 + len / sizeof(wchar_t);
@@ -612,7 +613,9 @@ HRESULT RegisterElevationPolicy(bool reg, bool is_system) {
     // be able launch Chrome when running in low-integrity IE.
     hr = _AtlModule.UpdateRegistryFromResourceS(IDR_CHROMEFRAME_ELEVATION, reg);
     if (SUCCEEDED(hr)) {
-      hr = RefreshElevationPolicy();
+      // Ignore failures since old versions of IE 7 (e.g., 7.0.6000.16386, which
+      // shipped with Vista RTM) do not export IERefreshElevationPolicy.
+      RefreshElevationPolicy();
     }
   }
   return hr;

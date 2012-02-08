@@ -12,8 +12,8 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
-#include "base/task.h"
 #include "chrome/browser/instant/instant_commit_type.h"
 #include "chrome/browser/instant/instant_loader_delegate.h"
 #include "chrome/browser/search_engines/template_url_id.h"
@@ -101,14 +101,14 @@ class InstantController : public InstantLoaderDelegate {
   // false a commit does not result in committing the last url passed to update.
   // A return value of false happens if we're in the process of determining if
   // the page supports instant.
-  bool IsCurrent();
+  bool IsCurrent() const;
 
   // Returns true if the caller should proceed with committing the preview. A
   // return value of false means that there is no valid preview to commit. This
   // is used by Browser, when the user presses <Enter>, to decide whether to
   // load the omnibox contents through Instant or otherwise. This is needed
   // because calls to |Update| don't necessarily result in a preview being
-  // shown, such as in the HIDDEN field trial.
+  // shown, such as in the HIDDEN and SILENT field trials.
   bool PrepareForCommit();
 
   // Invoked when the user does some gesture that should trigger making the
@@ -149,7 +149,7 @@ class InstantController : public InstantLoaderDelegate {
   TabContentsWrapper* tab_contents() const { return tab_contents_; }
 
   // The preview TabContents; may be null.
-  TabContentsWrapper* GetPreviewContents();
+  TabContentsWrapper* GetPreviewContents() const;
 
   // Returns true if the preview TabContents is ready to be displayed. In some
   // situations this may return false yet GetPreviewContents() returns non-NULL.
@@ -248,7 +248,7 @@ class InstantController : public InstantLoaderDelegate {
   std::set<TemplateURLID> blacklisted_ids_;
 
   // Used by ScheduleForDestroy; see it for details.
-  ScopedRunnableMethodFactory<InstantController> destroy_factory_;
+  base::WeakPtrFactory<InstantController> weak_factory_;
 
   // List of InstantLoaders to destroy. See ScheduleForDestroy for details.
   ScopedVector<InstantLoader> loaders_to_destroy_;

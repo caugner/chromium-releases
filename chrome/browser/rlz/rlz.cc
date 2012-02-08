@@ -8,17 +8,18 @@
 
 #include "chrome/browser/rlz/rlz.h"
 
-#include <process.h>
 #include <windows.h>
+#include <process.h>
 
 #include <algorithm>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_path.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/utf_string_conversions.h"
@@ -31,11 +32,17 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/installer/util/google_update_settings.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/navigation_entry.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+
+using content::BrowserThread;
 
 namespace {
+
+bool IsBrandOrganic(const std::string& brand) {
+  return brand.empty() || google_util::IsOrganic(brand);
+}
 
 void RecordProductEvents(bool first_run, bool google_default_search,
                          bool google_default_homepage, bool already_ran,
@@ -103,21 +110,6 @@ bool SendFinancialPing(const std::string& brand,
                                    rlz_lib::NO_ACCESS_POINT};
   std::string lang_ascii(WideToASCII(lang));
   std::string referral_ascii(WideToASCII(referral));
-
-  // If chrome has been reactivated, send a ping for this brand as well.
-  // We ignore the return value of SendFinancialPing() since we'll try again
-  // later anyway. Callers of this function are only interested in whether
-  // the ping for the main brand succeeded or not.
-  std::string reactivation_brand;
-  if (google_util::GetReactivationBrand(&reactivation_brand)) {
-    string16 reactivation_brand16 = UTF8ToUTF16(reactivation_brand);
-    rlz_lib::SupplementaryBranding branding(reactivation_brand16.c_str());
-    rlz_lib::SendFinancialPing(rlz_lib::CHROME, points, "chrome",
-                               reactivation_brand.c_str(),
-                               referral_ascii.c_str(), lang_ascii.c_str(),
-                               false, NULL, true);
-  }
-
   return rlz_lib::SendFinancialPing(rlz_lib::CHROME, points, "chrome",
                                     brand.c_str(), referral_ascii.c_str(),
                                     lang_ascii.c_str(), false, NULL, true);
@@ -179,16 +171,16 @@ bool RLZTracker::Init(bool first_run, int delay, bool google_default_search,
   // Register for notifications from the omnibox so that we can record when
   // the user performs a first search.
   registrar_.Add(this, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   // If instant is enabled we'll start searching as soon as the user starts
   // typing in the omnibox (which triggers INSTANT_CONTROLLER_UPDATED).
   registrar_.Add(this, chrome::NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 
   // Register for notifications from navigations, to see if the user has used
   // the home page.
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 
   ScheduleDelayedInit(delay);
 
@@ -196,42 +188,50 @@ bool RLZTracker::Init(bool first_run, int delay, bool google_default_search,
 }
 
 void RLZTracker::ScheduleDelayedInit(int delay) {
+  // The RLZTracker is a singleton object that outlives any runnable tasks
+  // that will be queued up.
   BrowserThread::PostDelayedTask(
       BrowserThread::FILE,
       FROM_HERE,
-      NewRunnableMethod(this, &RLZTracker::DelayedInit),
+      base::Bind(&RLZTracker::DelayedInit, base::Unretained(this)),
       delay);
 }
 
 void RLZTracker::DelayedInit() {
+  bool schedule_ping = false;
+
   // For organic brandcodes do not use rlz at all. Empty brandcode usually
   // means a chromium install. This is ok.
   std::string brand;
-  if (!google_util::GetBrand(&brand) || brand.empty() ||
-      google_util::IsOrganic(brand))
-    return;
-
-  RecordProductEvents(first_run_, google_default_search_,
-                      google_default_homepage_, already_ran_,
-                      omnibox_used_, homepage_used_);
+  if (google_util::GetBrand(&brand) && !IsBrandOrganic(brand)) {
+    RecordProductEvents(first_run_, google_default_search_,
+                        google_default_homepage_, already_ran_,
+                        omnibox_used_, homepage_used_);
+    schedule_ping = true;
+  }
 
   // If chrome has been reactivated, record the events for this brand
   // as well.
   std::string reactivation_brand;
-  if (google_util::GetReactivationBrand(&reactivation_brand)) {
+  if (google_util::GetReactivationBrand(&reactivation_brand) &&
+      !IsBrandOrganic(reactivation_brand)) {
     string16 reactivation_brand16 = UTF8ToUTF16(reactivation_brand);
     rlz_lib::SupplementaryBranding branding(reactivation_brand16.c_str());
     RecordProductEvents(first_run_, google_default_search_,
                         google_default_homepage_, already_ran_,
                         omnibox_used_, homepage_used_);
+    schedule_ping = true;
   }
 
   already_ran_ = true;
 
-  ScheduleFinancialPing();
+  if (schedule_ping)
+    ScheduleFinancialPing();
 }
 
 void RLZTracker::ScheduleFinancialPing() {
+  // Investigate why _beginthread() is used here, and not chrome's threading
+  // API.  Tracked in bug http://crbug.com/106213
   _beginthread(PingNow, 0, this);
 }
 
@@ -249,11 +249,12 @@ void RLZTracker::PingNowImpl() {
   GoogleUpdateSettings::GetLanguage(&lang);
   if (lang.empty())
     lang = L"en";
-  std::string brand;
-  google_util::GetBrand(&brand);
   string16 referral;
   GoogleUpdateSettings::GetReferral(&referral);
-  if (SendFinancialPing(brand, lang, referral)) {
+
+  std::string brand;
+  if (google_util::GetBrand(&brand) && !IsBrandOrganic(brand) &&
+      SendFinancialPing(brand, lang, referral)) {
     GoogleUpdateSettings::ClearReferral();
 
     {
@@ -265,6 +266,14 @@ void RLZTracker::PingNowImpl() {
     GetAccessPointRlz(rlz_lib::CHROME_OMNIBOX, NULL);
     GetAccessPointRlz(rlz_lib::CHROME_HOME_PAGE, NULL);
   }
+
+  std::string reactivation_brand;
+  if (google_util::GetReactivationBrand(&reactivation_brand) &&
+      !IsBrandOrganic(reactivation_brand)) {
+    string16 reactivation_brand16 = UTF8ToUTF16(reactivation_brand);
+    rlz_lib::SupplementaryBranding branding(reactivation_brand16.c_str());
+    SendFinancialPing(reactivation_brand, lang, referral);
+  }
 }
 
 bool RLZTracker::SendFinancialPing(const std::string& brand,
@@ -274,8 +283,8 @@ bool RLZTracker::SendFinancialPing(const std::string& brand,
 }
 
 void RLZTracker::Observe(int type,
-                         const NotificationSource& source,
-                         const NotificationDetails& details) {
+                         const content::NotificationSource& source,
+                         const content::NotificationDetails& details) {
   // Needs to be evaluated. See http://crbug.com/62328.
   base::ThreadRestrictions::ScopedAllowIO allow_io;
 
@@ -291,12 +300,13 @@ void RLZTracker::Observe(int type,
       call_record = true;
 
       registrar_.Remove(this, chrome::NOTIFICATION_OMNIBOX_OPENED_URL,
-                        NotificationService::AllSources());
+                        content::NotificationService::AllSources());
       registrar_.Remove(this, chrome::NOTIFICATION_INSTANT_CONTROLLER_UPDATED,
-                        NotificationService::AllSources());
+                        content::NotificationService::AllSources());
       break;
     case content::NOTIFICATION_NAV_ENTRY_PENDING: {
-      const NavigationEntry* entry = Details<NavigationEntry>(details).ptr();
+      const NavigationEntry* entry =
+          content::Details<NavigationEntry>(details).ptr();
       if (entry != NULL &&
           ((entry->transition_type() &
             content::PAGE_TRANSITION_HOME_PAGE) != 0)) {
@@ -305,7 +315,7 @@ void RLZTracker::Observe(int type,
         call_record = true;
 
         registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-                          NotificationService::AllSources());
+                          content::NotificationService::AllSources());
       }
       break;
     }
@@ -388,7 +398,8 @@ bool RLZTracker::ScheduleGetAccessPointRlz(rlz_lib::AccessPoint point) {
   string16* not_used = NULL;
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      NewRunnableFunction(&RLZTracker::GetAccessPointRlz, point, not_used));
+      base::IgnoreReturn<bool>(
+          base::Bind(&RLZTracker::GetAccessPointRlz, point, not_used)));
   return true;
 }
 

@@ -25,6 +25,7 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
+#include "chrome/common/extensions/csp_validator.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
@@ -33,6 +34,7 @@
 #include "chrome/common/extensions/extension_sidebar_defaults.h"
 #include "chrome/common/extensions/extension_sidebar_utils.h"
 #include "chrome/common/extensions/file_browser_handler.h"
+#include "chrome/common/extensions/manifest.h"
 #include "chrome/common/extensions/user_script.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/url_util.h"
@@ -50,8 +52,12 @@ namespace keys = extension_manifest_keys;
 namespace values = extension_manifest_values;
 namespace errors = extension_manifest_errors;
 
+using extensions::csp_validator::ContentSecurityPolicyIsLegal;
+using extensions::csp_validator::ContentSecurityPolicyIsSecure;
+
 namespace {
 
+const int kModernManifestVersion = 1;
 const int kPEMOutputColumns = 65;
 
 // KEY MARKERS
@@ -62,6 +68,9 @@ const char kPublic[] = "PUBLIC";
 const char kPrivate[] = "PRIVATE";
 
 const int kRSAKeySize = 1024;
+
+const char kDefaultContentSecurityPolicy[] =
+    "script-src 'self'; object-src 'self'";
 
 // Converts a normal hexadecimal string into the alphabet used by extensions.
 // We use the characters 'a'-'p' instead of '0'-'f' to avoid ever having a
@@ -77,28 +86,6 @@ static void ConvertHexadecimalToIDAlphabet(std::string* id) {
   }
 }
 
-// These keys are allowed by all crx files (apps, extensions, themes, etc).
-static const char* kBaseCrxKeys[] = {
-  keys::kCurrentLocale,
-  keys::kDefaultLocale,
-  keys::kDescription,
-  keys::kIcons,
-  keys::kName,
-  keys::kPublicKey,
-  keys::kSignature,
-  keys::kVersion,
-  keys::kUpdateURL
-};
-
-bool IsBaseCrxKey(const std::string& key) {
-  for (size_t i = 0; i < arraysize(kBaseCrxKeys); ++i) {
-    if (key == kBaseCrxKeys[i])
-      return true;
-  }
-
-  return false;
-}
-
 // A singleton object containing global data needed by the extension objects.
 class ExtensionConfig {
  public:
@@ -111,7 +98,14 @@ class ExtensionConfig {
  private:
   friend struct DefaultSingletonTraits<ExtensionConfig>;
 
-  ExtensionConfig() { }
+  ExtensionConfig() {
+    // Whitelist ChromeVox, an accessibility extension from Google that needs
+    // the ability to script webui pages. This is temporary and is not
+    // meant to be a general solution.
+    // TODO(dmazzoni): remove this once we have an extension API that
+    // allows any extension to request read-only access to webui pages.
+    scripting_whitelist_.push_back("kgejglhpjiefppelpmljglcjbhoiplfn");
+  }
   ~ExtensionConfig() { }
 
   // A whitelist of extensions that can script anywhere. Do not add to this
@@ -237,7 +231,8 @@ scoped_refptr<Extension> Extension::Create(const FilePath& path,
   DCHECK(error);
   scoped_refptr<Extension> extension = new Extension(path, location);
 
-  if (!extension->InitFromValue(value, flags, error))
+  if (!extension->InitFromValue(new extensions::Manifest(value.DeepCopy()),
+                                flags, error))
     return NULL;
   return extension;
 }
@@ -275,11 +270,11 @@ Extension::Location Extension::GetHigherPriorityLocation(
 void Extension::OverrideLaunchUrl(const GURL& override_url) {
   GURL new_url(override_url);
   if (!new_url.is_valid()) {
-    LOG(WARNING) << "Invalid override url given for " << name();
+    DLOG(WARNING) << "Invalid override url given for " << name();
   } else {
     if (new_url.has_port()) {
-      LOG(WARNING) << "Override URL passed for " << name()
-                   << " should not contain a port.  Removing it.";
+      DLOG(WARNING) << "Override URL passed for " << name()
+                    << " should not contain a port.  Removing it.";
 
       GURL::Replacements remove_port;
       remove_port.ClearPort();
@@ -353,6 +348,8 @@ Extension::Type Extension::GetType() const {
     return TYPE_THEME;
   if (converted_from_user_script())
     return TYPE_USER_SCRIPT;
+  if (is_platform_app())
+    return TYPE_PLATFORM_APP;
   if (is_hosted_app())
     return TYPE_HOSTED_APP;
   if (is_packaged_app())
@@ -373,7 +370,7 @@ GURL Extension::GetResourceURL(const GURL& extension_url,
 }
 
 bool Extension::GenerateId(const std::string& input, std::string* output) {
-  CHECK(output);
+  DCHECK(output);
   uint8 hash[Extension::kIdSize];
   crypto::SHA256HashString(input, hash, sizeof(hash));
   *output = StringToLowerASCII(base::HexEncode(hash, sizeof(hash)));
@@ -882,24 +879,7 @@ ExtensionSidebarDefaults* Extension::LoadExtensionSidebarDefaults(
   return result.release();
 }
 
-bool Extension::ContainsNonThemeKeys(const DictionaryValue& source) const {
-  for (DictionaryValue::key_iterator key = source.begin_keys();
-       key != source.end_keys(); ++key) {
-    if (!IsBaseCrxKey(*key) && *key != keys::kTheme)
-      return true;
-  }
-  return false;
-}
-
-bool Extension::LoadIsApp(const DictionaryValue* manifest,
-                          std::string* error) {
-  if (manifest->HasKey(keys::kApp))
-    is_app_ = true;
-
-  return true;
-}
-
-bool Extension::LoadExtent(const DictionaryValue* manifest,
+bool Extension::LoadExtent(const extensions::Manifest* manifest,
                            const char* key,
                            URLPatternSet* extent,
                            const char* list_error,
@@ -976,7 +956,7 @@ bool Extension::LoadExtent(const DictionaryValue* manifest,
   return true;
 }
 
-bool Extension::LoadLaunchURL(const DictionaryValue* manifest,
+bool Extension::LoadLaunchURL(const extensions::Manifest* manifest,
                               std::string* error) {
   Value* temp = NULL;
 
@@ -1074,7 +1054,7 @@ bool Extension::LoadLaunchURL(const DictionaryValue* manifest,
   return true;
 }
 
-bool Extension::LoadLaunchContainer(const DictionaryValue* manifest,
+bool Extension::LoadLaunchContainer(const extensions::Manifest* manifest,
                                     std::string* error) {
   Value* temp = NULL;
   if (!manifest->Get(keys::kLaunchContainer, &temp))
@@ -1086,7 +1066,9 @@ bool Extension::LoadLaunchContainer(const DictionaryValue* manifest,
     return false;
   }
 
-  if (launch_container_string == values::kLaunchContainerPanel) {
+  if (launch_container_string == values::kLaunchContainerShell) {
+    launch_container_ = extension_misc::LAUNCH_SHELL;
+  } else if (launch_container_string == values::kLaunchContainerPanel) {
     launch_container_ = extension_misc::LAUNCH_PANEL;
   } else if (launch_container_string == values::kLaunchContainerTab) {
     launch_container_ = extension_misc::LAUNCH_TAB;
@@ -1127,7 +1109,7 @@ bool Extension::LoadLaunchContainer(const DictionaryValue* manifest,
   return true;
 }
 
-bool Extension::LoadAppIsolation(const DictionaryValue* manifest,
+bool Extension::LoadAppIsolation(const extensions::Manifest* manifest,
                                  std::string* error) {
   Value* temp = NULL;
   if (!manifest->Get(keys::kIsolation, &temp))
@@ -1152,103 +1134,80 @@ bool Extension::LoadAppIsolation(const DictionaryValue* manifest,
     if (isolation_string == values::kIsolatedStorage) {
       is_storage_isolated_ = true;
     } else {
-      LOG(WARNING) << "Did not recognize isolation type: "
-                   << isolation_string;
+      DLOG(WARNING) << "Did not recognize isolation type: "
+                    << isolation_string;
     }
   }
   return true;
 }
 
-bool Extension::LoadWebIntents(const base::DictionaryValue& manifest,
-                               std::string* error) {
+bool Extension::LoadWebIntentServices(const extensions::Manifest* manifest,
+                                      std::string* error) {
   DCHECK(error);
 
   if (!CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableWebIntents))
     return true;
 
-  if (!manifest.HasKey(keys::kIntents))
+  if (!manifest->HasKey(keys::kIntents))
     return true;
 
-  DictionaryValue* all_intents = NULL;
-  if (!manifest.GetDictionary(keys::kIntents, &all_intents)) {
+  DictionaryValue* all_services = NULL;
+  if (!manifest->GetDictionary(keys::kIntents, &all_services)) {
     *error = errors::kInvalidIntents;
     return false;
   }
 
   std::string value;
-  for (DictionaryValue::key_iterator iter(all_intents->begin_keys());
-       iter != all_intents->end_keys(); ++iter) {
-    WebIntentServiceData intent;
+  for (DictionaryValue::key_iterator iter(all_services->begin_keys());
+       iter != all_services->end_keys(); ++iter) {
+    webkit_glue::WebIntentServiceData service;
 
-    DictionaryValue* one_intent = NULL;
-    if (!all_intents->GetDictionaryWithoutPathExpansion(*iter, &one_intent)) {
+    DictionaryValue* one_service = NULL;
+    if (!all_services->GetDictionaryWithoutPathExpansion(*iter, &one_service)) {
       *error = errors::kInvalidIntent;
       return false;
     }
-    intent.action = UTF8ToUTF16(*iter);
+    service.action = UTF8ToUTF16(*iter);
 
     // TODO(groby): Support an array of types.
-    if (one_intent->HasKey(keys::kIntentType) &&
-        !one_intent->GetString(keys::kIntentType, &intent.type)) {
+    if (one_service->HasKey(keys::kIntentType) &&
+        !one_service->GetString(keys::kIntentType, &service.type)) {
       *error = errors::kInvalidIntentType;
       return false;
     }
 
-    if (one_intent->HasKey(keys::kIntentPath)) {
-      if (!one_intent->GetString(keys::kIntentPath, &value)) {
+    if (one_service->HasKey(keys::kIntentPath)) {
+      if (!one_service->GetString(keys::kIntentPath, &value)) {
         *error = errors::kInvalidIntentPath;
         return false;
       }
-      intent.service_url = GetResourceURL(value);
+      service.service_url = GetResourceURL(value);
     }
 
-    if (one_intent->HasKey(keys::kIntentTitle) &&
-        !one_intent->GetString(keys::kIntentTitle, &intent.title)) {
+    if (one_service->HasKey(keys::kIntentTitle) &&
+        !one_service->GetString(keys::kIntentTitle, &service.title)) {
       *error = errors::kInvalidIntentTitle;
       return false;
     }
 
-    if (one_intent->HasKey(keys::kIntentDisposition)) {
-      if (!one_intent->GetString(keys::kIntentDisposition, &value) ||
+    if (one_service->HasKey(keys::kIntentDisposition)) {
+      if (!one_service->GetString(keys::kIntentDisposition, &value) ||
           (value != values::kIntentDispositionWindow &&
            value != values::kIntentDispositionInline)) {
         *error = errors::kInvalidIntentDisposition;
         return false;
       }
-      if (value == values::kIntentDispositionInline)
-        intent.disposition = WebIntentServiceData::DISPOSITION_INLINE;
-      else
-        intent.disposition = WebIntentServiceData::DISPOSITION_WINDOW;
+      if (value == values::kIntentDispositionInline) {
+        service.disposition =
+            webkit_glue::WebIntentServiceData::DISPOSITION_INLINE;
+      } else {
+        service.disposition =
+            webkit_glue::WebIntentServiceData::DISPOSITION_WINDOW;
+      }
     }
 
-    intents_.push_back(intent);
+    intents_services_.push_back(service);
   }
-  return true;
-}
-
-
-bool Extension::EnsureNotHybridApp(const DictionaryValue* manifest,
-                                   std::string* error) {
-  if (web_extent().is_empty())
-    return true;
-
-  for (DictionaryValue::key_iterator key = manifest->begin_keys();
-       key != manifest->end_keys(); ++key) {
-    if (!IsBaseCrxKey(*key) &&
-        *key != keys::kApp &&
-        *key != keys::kPermissions &&
-        *key != keys::kOptionalPermissions &&
-        *key != keys::kOptionsPage &&
-        *key != keys::kBackground &&
-        *key != keys::kOfflineEnabled &&
-        *key != keys::kMinimumChromeVersion &&
-        *key != keys::kRequirements) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(
-          errors::kHostedAppsCannotIncludeExtensionFeatures, *key);
-      return false;
-    }
-  }
-
   return true;
 }
 
@@ -1259,12 +1218,11 @@ bool Extension::IsTrustedId(const std::string& id) {
 }
 
 Extension::Extension(const FilePath& path, Location location)
-    : incognito_split_mode_(false),
+    : manifest_version_(0),
+      incognito_split_mode_(false),
       offline_enabled_(false),
       location_(location),
       converted_from_user_script_(false),
-      is_theme_(false),
-      is_app_(false),
       is_storage_isolated_(false),
       launch_container_(extension_misc::LAUNCH_TAB),
       launch_width_(0),
@@ -1327,7 +1285,7 @@ bool Extension::ParsePEMKeyBytes(const std::string& input,
 }
 
 bool Extension::ProducePEM(const std::string& input, std::string* output) {
-  CHECK(output);
+  DCHECK(output);
   if (input.length() == 0)
     return false;
 
@@ -1337,7 +1295,7 @@ bool Extension::ProducePEM(const std::string& input, std::string* output) {
 bool Extension::FormatPEMForFileOutput(const std::string& input,
                                        std::string* output,
                                        bool is_public) {
-  CHECK(output);
+  DCHECK(output);
   if (input.length() == 0)
     return false;
   *output = "";
@@ -1381,7 +1339,7 @@ void Extension::DecodeIconFromPath(const FilePath& icon_path,
 
   std::string file_contents;
   if (!file_util::ReadFileToString(icon_path, &file_contents)) {
-    LOG(ERROR) << "Could not read icon file: " << icon_path.LossyDisplayName();
+    DLOG(ERROR) << "Could not read icon file: " << icon_path.LossyDisplayName();
     return;
   }
 
@@ -1392,15 +1350,15 @@ void Extension::DecodeIconFromPath(const FilePath& icon_path,
   scoped_ptr<SkBitmap> decoded(new SkBitmap());
   *decoded = decoder.Decode(data, file_contents.length());
   if (decoded->empty()) {
-    LOG(ERROR) << "Could not decode icon file: "
-               << icon_path.LossyDisplayName();
+    DLOG(ERROR) << "Could not decode icon file: "
+                << icon_path.LossyDisplayName();
     return;
   }
 
   if (decoded->width() != icon_size || decoded->height() != icon_size) {
-    LOG(ERROR) << "Icon file has unexpected size: "
-               << base::IntToString(decoded->width()) << "x"
-               << base::IntToString(decoded->height());
+    DLOG(ERROR) << "Icon file has unexpected size: "
+                << base::IntToString(decoded->width()) << "x"
+                << base::IntToString(decoded->height());
     return;
   }
 
@@ -1423,10 +1381,15 @@ GURL Extension::GetBaseURLFromExtensionId(const std::string& extension_id) {
               chrome::kStandardSchemeSeparator + extension_id + "/");
 }
 
-bool Extension::InitFromValue(const DictionaryValue& source, int flags,
+bool Extension::InitFromValue(extensions::Manifest* manifest, int flags,
                               std::string* error) {
   DCHECK(error);
   base::AutoLock auto_lock(runtime_data_lock_);
+  manifest_.reset(manifest);
+
+  if (!manifest->ValidateManifest(error))
+    return false;
+
   // When strict error checks are enabled, make URL pattern parsing strict.
   URLPattern::ParseOption parse_strictness =
       (flags & STRICT_ERROR_CHECKS ? URLPattern::ERROR_ON_PORTS
@@ -1437,10 +1400,31 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   optional_permission_set_ = new ExtensionPermissionSet();
   required_permission_set_ = new ExtensionPermissionSet();
 
-  if (source.HasKey(keys::kPublicKey)) {
+  if (manifest->HasKey(keys::kManifestVersion)) {
+    int manifest_version = 0;
+    if (!manifest->GetInteger(keys::kManifestVersion, &manifest_version) ||
+        manifest_version < 1) {
+      *error = errors::kInvalidManifestVersion;
+      return false;
+    }
+    manifest_version_ = manifest_version;
+  } else {
+    // Version 1 was the original version, which lacked a version indicator.
+    manifest_version_ = 1;
+  }
+
+  if (flags & REQUIRE_MODERN_MANIFEST_VERSION &&
+      manifest_version() < kModernManifestVersion &&
+      !CommandLine::ForCurrentProcess()->HasSwitch(
+                switches::kAllowLegacyExtensionManifests)) {
+    *error = errors::kInvalidManifestVersion;
+    return false;
+  }
+
+  if (manifest->HasKey(keys::kPublicKey)) {
     std::string public_key_bytes;
-    if (!source.GetString(keys::kPublicKey,
-                          &public_key_) ||
+    if (!manifest->GetString(keys::kPublicKey,
+                         &public_key_) ||
         !ParsePEMKeyBytes(public_key_,
                           &public_key_bytes) ||
         !GenerateId(public_key_bytes, &id_)) {
@@ -1463,15 +1447,12 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
 
   creation_flags_ = flags;
 
-  // Make a copy of the manifest so we can store it in prefs.
-  manifest_value_.reset(source.DeepCopy());
-
   // Initialize the URL.
   extension_url_ = Extension::GetBaseURLFromExtensionId(id());
 
   // Initialize version.
   std::string version_str;
-  if (!source.GetString(keys::kVersion, &version_str)) {
+  if (!manifest->GetString(keys::kVersion, &version_str)) {
     *error = errors::kInvalidVersion;
     return false;
   }
@@ -1484,7 +1465,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
 
   // Initialize name.
   string16 localized_name;
-  if (!source.GetString(keys::kName, &localized_name)) {
+  if (!manifest->GetString(keys::kName, &localized_name)) {
     *error = errors::kInvalidName;
     return false;
   }
@@ -1494,21 +1475,30 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   // Load App settings. LoadExtent at least has to be done before
   // ParsePermissions(), because the valid permissions depend on what type of
   // package this is.
-  if (!LoadIsApp(manifest_value_.get(), error) ||
-      !LoadExtent(manifest_value_.get(), keys::kWebURLs,
-                  &extent_,
-                  errors::kInvalidWebURLs, errors::kInvalidWebURL,
-                  parse_strictness, error) ||
-      !EnsureNotHybridApp(manifest_value_.get(), error) ||
-      !LoadLaunchURL(manifest_value_.get(), error) ||
-      !LoadLaunchContainer(manifest_value_.get(), error)) {
+  if (is_app() &&
+      (!LoadExtent(manifest_.get(), keys::kWebURLs,
+                   &extent_,
+                   errors::kInvalidWebURLs, errors::kInvalidWebURL,
+                   parse_strictness, error) ||
+       !LoadLaunchURL(manifest_.get(), error) ||
+       !LoadLaunchContainer(manifest_.get(), error))) {
+    return false;
+  }
+
+  if (is_platform_app()) {
+    if (launch_container() != extension_misc::LAUNCH_SHELL) {
+      *error = errors::kInvalidLaunchContainerForPlatform;
+      return false;
+    }
+  } else if (launch_container() == extension_misc::LAUNCH_SHELL) {
+    *error = errors::kInvalidLaunchContainerForNonPlatform;
     return false;
   }
 
   // Initialize the permissions (optional).
   ExtensionAPIPermissionSet api_permissions;
   URLPatternSet host_permissions;
-  if (!ParsePermissions(&source,
+  if (!ParsePermissions(manifest_.get(),
                         keys::kPermissions,
                         flags,
                         error,
@@ -1520,7 +1510,7 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   // Initialize the optional permissions (optional).
   ExtensionAPIPermissionSet optional_api_permissions;
   URLPatternSet optional_host_permissions;
-  if (!ParsePermissions(&source,
+  if (!ParsePermissions(manifest_.get(),
                         keys::kOptionalPermissions,
                         flags,
                         error,
@@ -1530,8 +1520,8 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize description (if present).
-  if (source.HasKey(keys::kDescription)) {
-    if (!source.GetString(keys::kDescription,
+  if (manifest->HasKey(keys::kDescription)) {
+    if (!manifest->GetString(keys::kDescription,
                           &description_)) {
       *error = errors::kInvalidDescription;
       return false;
@@ -1539,9 +1529,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize homepage url (if present).
-  if (source.HasKey(keys::kHomepageURL)) {
+  if (manifest->HasKey(keys::kHomepageURL)) {
     std::string tmp;
-    if (!source.GetString(keys::kHomepageURL, &tmp)) {
+    if (!manifest->GetString(keys::kHomepageURL, &tmp)) {
       *error = ExtensionErrorUtils::FormatErrorMessage(
           errors::kInvalidHomepageURL, "");
       return false;
@@ -1557,9 +1547,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize update url (if present).
-  if (source.HasKey(keys::kUpdateURL)) {
+  if (manifest->HasKey(keys::kUpdateURL)) {
     std::string tmp;
-    if (!source.GetString(keys::kUpdateURL, &tmp)) {
+    if (!manifest->GetString(keys::kUpdateURL, &tmp)) {
       *error = ExtensionErrorUtils::FormatErrorMessage(
           errors::kInvalidUpdateURL, "");
       return false;
@@ -1575,9 +1565,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
 
   // Validate minimum Chrome version (if present). We don't need to store this,
   // since the extension is not valid if it is incorrect.
-  if (source.HasKey(keys::kMinimumChromeVersion)) {
+  if (manifest->HasKey(keys::kMinimumChromeVersion)) {
     std::string minimum_version_string;
-    if (!source.GetString(keys::kMinimumChromeVersion,
+    if (!manifest->GetString(keys::kMinimumChromeVersion,
                           &minimum_version_string)) {
       *error = errors::kInvalidMinimumChromeVersion;
       return false;
@@ -1613,13 +1603,14 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize converted_from_user_script (if present)
-  source.GetBoolean(keys::kConvertedFromUserScript,
-                    &converted_from_user_script_);
+  if (manifest->HasKey(keys::kConvertedFromUserScript))
+    manifest->GetBoolean(keys::kConvertedFromUserScript,
+                        &converted_from_user_script_);
 
   // Initialize icons (if present).
-  if (source.HasKey(keys::kIcons)) {
+  if (manifest->HasKey(keys::kIcons)) {
     DictionaryValue* icons_value = NULL;
-    if (!source.GetDictionary(keys::kIcons, &icons_value)) {
+    if (!manifest->GetDictionary(keys::kIcons, &icons_value)) {
       *error = errors::kInvalidIcons;
       return false;
     }
@@ -1649,20 +1640,12 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize themes (if present).
-  is_theme_ = false;
-  if (source.HasKey(keys::kTheme)) {
-    // Themes cannot contain extension keys.
-    if (ContainsNonThemeKeys(source)) {
-      *error = errors::kThemesCannotContainExtensions;
-      return false;
-    }
-
+  if (manifest->HasKey(keys::kTheme)) {
     DictionaryValue* theme_value = NULL;
-    if (!source.GetDictionary(keys::kTheme, &theme_value)) {
+    if (!manifest->GetDictionary(keys::kTheme, &theme_value)) {
       *error = errors::kInvalidTheme;
       return false;
     }
-    is_theme_ = true;
 
     DictionaryValue* images_value = NULL;
     if (theme_value->GetDictionary(keys::kThemeImages, &images_value)) {
@@ -1735,9 +1718,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize plugins (optional).
-  if (source.HasKey(keys::kPlugins)) {
+  if (manifest->HasKey(keys::kPlugins)) {
     ListValue* list_value = NULL;
-    if (!source.GetList(keys::kPlugins, &list_value)) {
+    if (!manifest->GetList(keys::kPlugins, &list_value)) {
       *error = errors::kInvalidPlugins;
       return false;
     }
@@ -1773,15 +1756,15 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
       // displayed across platforms.
 #if !defined(OS_CHROMEOS)
       plugins_.push_back(PluginInfo());
-      plugins_.back().path = path().AppendASCII(path_str);
+      plugins_.back().path = path().Append(FilePath::FromUTF8Unsafe(path_str));
       plugins_.back().is_public = is_public;
 #endif
     }
   }
 
-  if (source.HasKey(keys::kNaClModules)) {
+  if (manifest->HasKey(keys::kNaClModules)) {
     ListValue* list_value = NULL;
-    if (!source.GetList(keys::kNaClModules, &list_value)) {
+    if (!manifest->GetList(keys::kNaClModules, &list_value)) {
       *error = errors::kInvalidNaClModules;
       return false;
     }
@@ -1817,9 +1800,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize content scripts (optional).
-  if (source.HasKey(keys::kContentScripts)) {
+  if (manifest->HasKey(keys::kContentScripts)) {
     ListValue* list_value;
-    if (!source.GetList(keys::kContentScripts, &list_value)) {
+    if (!manifest->GetList(keys::kContentScripts, &list_value)) {
       *error = errors::kInvalidContentScriptsList;
       return false;
     }
@@ -1847,9 +1830,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   // Initialize page action (optional).
   DictionaryValue* page_action_value = NULL;
 
-  if (source.HasKey(keys::kPageActions)) {
+  if (manifest->HasKey(keys::kPageActions)) {
     ListValue* list_value = NULL;
-    if (!source.GetList(keys::kPageActions, &list_value)) {
+    if (!manifest->GetList(keys::kPageActions, &list_value)) {
       *error = errors::kInvalidPageActionsList;
       return false;
     }
@@ -1868,8 +1851,8 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
       *error = errors::kInvalidPageActionsListSize;
       return false;
     }
-  } else if (source.HasKey(keys::kPageAction)) {
-    if (!source.GetDictionary(keys::kPageAction, &page_action_value)) {
+  } else if (manifest->HasKey(keys::kPageAction)) {
+    if (!manifest->GetDictionary(keys::kPageAction, &page_action_value)) {
       *error = errors::kInvalidPageAction;
       return false;
     }
@@ -1884,9 +1867,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize browser action (optional).
-  if (source.HasKey(keys::kBrowserAction)) {
+  if (manifest->HasKey(keys::kBrowserAction)) {
     DictionaryValue* browser_action_value = NULL;
-    if (!source.GetDictionary(keys::kBrowserAction, &browser_action_value)) {
+    if (!manifest->GetDictionary(keys::kBrowserAction, &browser_action_value)) {
       *error = errors::kInvalidBrowserAction;
       return false;
     }
@@ -1898,9 +1881,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize file browser actions (optional).
-  if (source.HasKey(keys::kFileBrowserHandlers)) {
+  if (manifest->HasKey(keys::kFileBrowserHandlers)) {
     ListValue* file_browser_handlers_value = NULL;
-    if (!source.GetList(keys::kFileBrowserHandlers,
+    if (!manifest->GetList(keys::kFileBrowserHandlers,
                               &file_browser_handlers_value)) {
       *error = errors::kInvalidFileBrowserHandler;
       return false;
@@ -1914,15 +1897,14 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
 
   // App isolation.
   if (api_permissions.count(ExtensionAPIPermission::kExperimental)) {
-    if (!LoadAppIsolation(manifest_value_.get(), error))
+    if (is_app() && !LoadAppIsolation(manifest_.get(), error))
       return false;
   }
 
   // Initialize options page url (optional).
-  // Function LoadIsApp() set is_app_ above.
-  if (source.HasKey(keys::kOptionsPage)) {
+  if (manifest->HasKey(keys::kOptionsPage)) {
     std::string options_str;
-    if (!source.GetString(keys::kOptionsPage, &options_str)) {
+    if (!manifest->GetString(keys::kOptionsPage, &options_str)) {
       *error = errors::kInvalidOptionsPage;
       return false;
     }
@@ -1951,9 +1933,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize background url (optional).
-  if (source.HasKey(keys::kBackground)) {
+  if (manifest->HasKey(keys::kBackground)) {
     std::string background_str;
-    if (!source.GetString(keys::kBackground, &background_str)) {
+    if (!manifest->GetString(keys::kBackground, &background_str)) {
       *error = errors::kInvalidBackground;
       return false;
     }
@@ -1984,8 +1966,8 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
     }
   }
 
-  if (source.HasKey(keys::kDefaultLocale)) {
-    if (!source.GetString(keys::kDefaultLocale, &default_locale_) ||
+  if (manifest->HasKey(keys::kDefaultLocale)) {
+    if (!manifest->GetString(keys::kDefaultLocale, &default_locale_) ||
         !l10n_util::IsValidLocaleSyntax(default_locale_)) {
       *error = errors::kInvalidDefaultLocale;
       return false;
@@ -1993,9 +1975,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Chrome URL overrides (optional)
-  if (source.HasKey(keys::kChromeURLOverrides)) {
+  if (manifest->HasKey(keys::kChromeURLOverrides)) {
     DictionaryValue* overrides = NULL;
-    if (!source.GetDictionary(keys::kChromeURLOverrides, &overrides)) {
+    if (!manifest->GetDictionary(keys::kChromeURLOverrides, &overrides)) {
       *error = errors::kInvalidChromeURLOverrides;
       return false;
     }
@@ -2037,9 +2019,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   if (api_permissions.count(ExtensionAPIPermission::kExperimental) &&
-      source.HasKey(keys::kInputComponents)) {
+      manifest->HasKey(keys::kInputComponents)) {
     ListValue* list_value = NULL;
-    if (!source.GetList(keys::kInputComponents, &list_value)) {
+    if (!manifest->GetList(keys::kInputComponents, &list_value)) {
       *error = errors::kInvalidInputComponents;
       return false;
     }
@@ -2168,37 +2150,44 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
     }
   }
 
-  if (source.HasKey(keys::kOmnibox)) {
-    if (!source.GetString(keys::kOmniboxKeyword, &omnibox_keyword_) ||
+  if (manifest->HasKey(keys::kOmnibox)) {
+    if (!manifest->GetString(keys::kOmniboxKeyword, &omnibox_keyword_) ||
         omnibox_keyword_.empty()) {
       *error = errors::kInvalidOmniboxKeyword;
       return false;
     }
   }
 
-  if (source.HasKey(keys::kContentSecurityPolicy)) {
+  if (manifest->HasKey(keys::kContentSecurityPolicy)) {
     std::string content_security_policy;
-    if (!source.GetString(keys::kContentSecurityPolicy,
+    if (!manifest->GetString(keys::kContentSecurityPolicy,
                           &content_security_policy)) {
       *error = errors::kInvalidContentSecurityPolicy;
       return false;
     }
-    // We block these characters to prevent HTTP header injection when
-    // representing the content security policy as an HTTP header.
-    const char kBadCSPCharacters[] = {'\r', '\n', '\0'};
-    if (content_security_policy.find_first_of(kBadCSPCharacters, 0,
-                                              arraysize(kBadCSPCharacters)) !=
-        std::string::npos) {
+    if (!ContentSecurityPolicyIsLegal(content_security_policy)) {
       *error = errors::kInvalidContentSecurityPolicy;
       return false;
     }
+    if (manifest_version_ >= 2 &&
+        !ContentSecurityPolicyIsSecure(content_security_policy)) {
+      *error = errors::kInvalidContentSecurityPolicy;
+      return false;
+    }
+
     content_security_policy_ = content_security_policy;
+  } else if (manifest_version_ >= 2) {
+    // Manifest version 2 introduced a default Content-Security-Policy.
+    // TODO(abarth): Should we continue to let extensions override the
+    //               default Content-Security-Policy?
+    content_security_policy_ = kDefaultContentSecurityPolicy;
+    CHECK(ContentSecurityPolicyIsSecure(content_security_policy_));
   }
 
   // Initialize devtools page url (optional).
-  if (source.HasKey(keys::kDevToolsPage)) {
+  if (manifest->HasKey(keys::kDevToolsPage)) {
     std::string devtools_str;
-    if (!source.GetString(keys::kDevToolsPage, &devtools_str)) {
+    if (!manifest->GetString(keys::kDevToolsPage, &devtools_str)) {
       *error = errors::kInvalidDevToolsPage;
       return false;
     }
@@ -2210,9 +2199,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize sidebar action (optional).
-  if (source.HasKey(keys::kSidebar)) {
+  if (manifest->HasKey(keys::kSidebar)) {
     DictionaryValue* sidebar_value = NULL;
-    if (!source.GetDictionary(keys::kSidebar, &sidebar_value)) {
+    if (!manifest->GetDictionary(keys::kSidebar, &sidebar_value)) {
       *error = errors::kInvalidSidebar;
       return false;
     }
@@ -2226,9 +2215,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize text-to-speech voices (optional).
-  if (source.HasKey(keys::kTtsEngine)) {
+  if (manifest->HasKey(keys::kTtsEngine)) {
     DictionaryValue* tts_dict = NULL;
-    if (!source.GetDictionary(keys::kTtsEngine, &tts_dict)) {
+    if (!manifest->GetDictionary(keys::kTtsEngine, &tts_dict)) {
       *error = errors::kInvalidTts;
       return false;
     }
@@ -2309,15 +2298,15 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize web intents (optional).
-  if (!LoadWebIntents(source, error))
+  if (!LoadWebIntentServices(manifest, error))
     return false;
 
   // Initialize incognito behavior. Apps default to split mode, extensions
   // default to spanning.
   incognito_split_mode_ = is_app();
-  if (source.HasKey(keys::kIncognito)) {
+  if (manifest->HasKey(keys::kIncognito)) {
     std::string value;
-    if (!source.GetString(keys::kIncognito, &value)) {
+    if (!manifest->GetString(keys::kIncognito, &value)) {
       *error = errors::kInvalidIncognitoBehavior;
       return false;
     }
@@ -2332,8 +2321,8 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
   }
 
   // Initialize offline-enabled status. Defaults to false.
-  if (source.HasKey(keys::kOfflineEnabled)) {
-    if (!source.GetBoolean(keys::kOfflineEnabled, &offline_enabled_)) {
+  if (manifest->HasKey(keys::kOfflineEnabled)) {
+    if (!manifest->GetBoolean(keys::kOfflineEnabled, &offline_enabled_)) {
       *error = errors::kInvalidOfflineEnabled;
       return false;
     }
@@ -2341,9 +2330,9 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
 
   // Initialize requirements (optional). Not actually persisted (they're only
   // used by the store), but still validated.
-  if (source.HasKey(keys::kRequirements)) {
+  if (manifest->HasKey(keys::kRequirements)) {
     DictionaryValue* requirements_value = NULL;
-    if (!source.GetDictionary(keys::kRequirements, &requirements_value)) {
+    if (!manifest->GetDictionary(keys::kRequirements, &requirements_value)) {
       *error = errors::kInvalidRequirements;
       return false;
     }
@@ -2371,13 +2360,6 @@ bool Extension::InitFromValue(const DictionaryValue& source, int flags,
       this, api_permissions, host_permissions);
   optional_permission_set_ = new ExtensionPermissionSet(
       optional_api_permissions, optional_host_permissions, URLPatternSet());
-
-  // Although |source| is passed in as a const, it's still possible to modify
-  // it.  This is dangerous since the utility process re-uses |source| after
-  // it calls InitFromValue, passing it up to the browser process which calls
-  // InitFromValue again.  As a result, we need to make sure that nobody
-  // accidentally modifies it.
-  DCHECK(source.Equals(manifest_value_.get()));
 
   return true;
 }
@@ -2534,7 +2516,7 @@ GURL Extension::GetIconURL(int size,
     return GetResourceURL(path);
 }
 
-bool Extension::ParsePermissions(const DictionaryValue* source,
+bool Extension::ParsePermissions(const extensions::Manifest* source,
                                  const char* key,
                                  int flags,
                                  std::string* error,
@@ -2564,9 +2546,10 @@ bool Extension::ParsePermissions(const DictionaryValue* source,
           ExtensionPermissionsInfo::GetInstance()->GetByName(permission_str);
 
       if (permission != NULL) {
-        if (!CanSpecifyAPIPermission(permission, error))
+        if (CanSpecifyAPIPermission(permission, error))
+          api_permissions->insert(permission->id());
+        if (!error->empty())
           return false;
-        api_permissions->insert(permission->id());
         continue;
       }
 
@@ -2577,7 +2560,7 @@ bool Extension::ParsePermissions(const DictionaryValue* source,
       URLPattern::ParseResult parse_result = pattern.Parse(permission_str,
                                                            parse_strictness);
       if (parse_result == URLPattern::PARSE_SUCCESS) {
-        if (!CanSpecifyHostPermission(pattern)) {
+        if (!CanSpecifyHostPermission(pattern, *api_permissions)) {
           *error = ExtensionErrorUtils::FormatErrorMessage(
               errors::kInvalidPermissionScheme, base::IntToString(i));
           return false;
@@ -2616,13 +2599,25 @@ bool Extension::CanSilentlyIncreasePermissions() const {
   return location() != INTERNAL;
 }
 
-bool Extension::CanSpecifyHostPermission(const URLPattern& pattern) const {
+bool Extension::CanSpecifyHostPermission(const URLPattern& pattern,
+    const ExtensionAPIPermissionSet& permissions) const {
   if (!pattern.match_all_urls() &&
       pattern.MatchesScheme(chrome::kChromeUIScheme)) {
-    // Only allow access to chrome://favicon to regular extensions. Component
-    // extensions can have access to all of chrome://*.
-    return (pattern.host() == chrome::kChromeUIFaviconHost ||
-            CanExecuteScriptEverywhere());
+    // Regular extensions are only allowed access to chrome://favicon.
+    if (pattern.host() == chrome::kChromeUIFaviconHost)
+      return true;
+
+    // Experimental extensions are also allowed chrome://thumb.
+    if (pattern.host() == chrome::kChromeUIThumbnailHost) {
+      return permissions.find(ExtensionAPIPermission::kExperimental) !=
+          permissions.end();
+    }
+
+    // Component extensions can have access to all of chrome://*.
+    if (CanExecuteScriptEverywhere())
+      return true;
+
+    return false;
   }
 
   // Otherwise, the valid schemes were handled by URLPattern.
@@ -2648,11 +2643,14 @@ const URLPatternSet& Extension::GetEffectiveHostPermissions() const {
 }
 
 bool Extension::HasHostPermission(const GURL& url) const {
-  base::AutoLock auto_lock(runtime_data_lock_);
   if (url.SchemeIs(chrome::kChromeUIScheme) &&
       url.host() != chrome::kChromeUIFaviconHost &&
-      location() != Extension::COMPONENT)
+      url.host() != chrome::kChromeUIThumbnailHost &&
+      location() != Extension::COMPONENT) {
     return false;
+  }
+
+  base::AutoLock auto_lock(runtime_data_lock_);
   return runtime_data_.GetActivePermissions()->
       HasExplicitAccessToOrigin(url);
 }
@@ -2762,8 +2760,7 @@ bool Extension::ShowConfigureContextMenus() const {
 bool Extension::ImplicitlyDelaysNetworkStartup() const {
   // Network requests should be deferred until any extensions that might want
   // to observe or modify them are loaded.
-  return HasAPIPermission(ExtensionAPIPermission::kWebNavigation) ||
-      HasAPIPermission(ExtensionAPIPermission::kWebRequest);
+  return HasAPIPermission(ExtensionAPIPermission::kWebRequest);
 }
 
 bool Extension::CanSpecifyAPIPermission(
@@ -2784,12 +2781,43 @@ bool Extension::CanSpecifyAPIPermission(
     }
   }
 
-  if (is_hosted_app()) {
-    if (!CanSpecifyPermissionForHostedApp(permission)) {
+  if (location_ == Extension::COMPONENT)
+    return true;
+
+  bool supports_type = false;
+  switch (GetType()) {
+    case TYPE_USER_SCRIPT: // Pass through.
+    case TYPE_EXTENSION:
+      supports_type = permission->supports_extensions();
+      break;
+    case TYPE_HOSTED_APP:
+      supports_type = permission->supports_hosted_apps();
+      break;
+    case TYPE_PACKAGED_APP:
+      supports_type = permission->supports_packaged_apps();
+      break;
+    case TYPE_PLATFORM_APP:
+      supports_type = permission->supports_platform_apps();
+      break;
+    default:
+      supports_type = false;
+      break;
+  }
+
+  if (!supports_type) {
+    // We special case hosted apps because some old versions of Chrome did not
+    // return errors here and we ended up with extensions in the store
+    // containing bad data: crbug.com/101993.
+    //
+    // TODO(aa): Consider just being a lot looser when loading and installing
+    // extensions. We can be strict when packing and in development mode. Then
+    // we won't have to maintain all these tricky backward compat issues:
+    // crbug.com/102328.
+    if (!is_hosted_app() || creation_flags_ & STRICT_ERROR_CHECKS) {
       *error = ExtensionErrorUtils::FormatErrorMessage(
           errors::kPermissionNotAllowed, permission->name());
-      return false;
     }
+    return false;
   }
 
   return true;
@@ -2825,17 +2853,6 @@ bool Extension::CanSpecifyExperimentalPermission() const {
   // whitelist extensions to have access to experimental in just the store, and
   // not have to push a new version of the client.
   if (from_webstore())
-    return true;
-
-  return false;
-}
-
-bool Extension::CanSpecifyPermissionForHostedApp(
-    const ExtensionAPIPermission* permission) const {
-  if (location_ == Extension::COMPONENT)
-    return true;
-
-  if (permission->is_hosted_app())
     return true;
 
   return false;

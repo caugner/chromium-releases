@@ -69,6 +69,13 @@ enum DownloadCountTypes {
   // Counts interruptions that happened at the end of the download.
   INTERRUPTED_AT_END_COUNT,
 
+  // Counts errors due to writes to BaseFiles that have been detached already.
+  // This can happen when saving web pages as complete packages. It happens
+  // when we get messages to append data to files that have already finished and
+  // been detached, but haven't yet been removed from the list of files in
+  // progress.
+  APPEND_TO_DETACHED_FILE_COUNT,
+
   DOWNLOAD_COUNT_TYPES_LAST_ENTRY
 };
 
@@ -92,6 +99,14 @@ void RecordDownloadWriteSize(size_t data_len);
 // Record WRITE_LOOP_COUNT and number of loops.
 void RecordDownloadWriteLoopCount(int count);
 
+// Record the number of buffers piled up by the IO thread
+// before the file thread gets to draining them.
+void RecordFileThreadReceiveBuffers(size_t num_buffers);
+
+// Record the bandwidth seen in DownloadResourceHandler
+// |actual_bandwidth| and |potential_bandwidth| are in bytes/second.
+void RecordBandwidth(double actual_bandwidth, double potential_bandwidth);
+
 // Record the time of both the first open and all subsequent opens since the
 // download completed.
 void RecordOpen(const base::Time& end, bool first);
@@ -100,10 +115,13 @@ void RecordOpen(const base::Time& end, bool first);
 // new download is added to the history.
 void RecordHistorySize(int size);
 
+// Record whether or not the server accepts ranges, and the download size.
+void RecordAcceptsRanges(const std::string& accepts_ranges, int64 download_len);
+
 // Record the total number of items and the number of in-progress items showing
 // in the shelf when it closes.  Set |autoclose| to true when the shelf is
 // closing itself, false when the user explicitly closed it.
-void RecordShelfClose(int size, int in_progress, bool autoclose);
+CONTENT_EXPORT void RecordShelfClose(int size, int in_progress, bool autoclose);
 
 // Record the number of downloads removed by ClearAll.
 void RecordClearAllSize(int size);

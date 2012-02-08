@@ -193,15 +193,17 @@ Version* InstallUtil::GetChromeVersion(BrowserDistribution* dist,
   return ret;
 }
 
-Version* InstallUtil::GetCriticalUpdateVersion(BrowserDistribution* dist) {
+Version* InstallUtil::GetCriticalUpdateVersion(BrowserDistribution* dist,
+                                               bool system_install) {
   DCHECK(dist);
   RegKey key;
+  HKEY reg_root = (system_install) ? HKEY_LOCAL_MACHINE : HKEY_CURRENT_USER;
   LONG result =
-      key.Open(HKEY_CURRENT_USER, dist->GetVersionKey().c_str(), KEY_READ);
+      key.Open(reg_root, dist->GetVersionKey().c_str(), KEY_QUERY_VALUE);
 
   string16 version_str;
   if (result == ERROR_SUCCESS)
-    result = key.ReadValue(google_update::kRegCriticalUpdateField,
+    result = key.ReadValue(google_update::kRegCriticalVersionField,
                            &version_str);
 
   Version* ret = NULL;
@@ -375,7 +377,7 @@ bool InstallUtil::DeleteRegistryValue(HKEY reg_root,
                                       const std::wstring& value_name) {
   RegKey key(reg_root, key_path.c_str(), KEY_ALL_ACCESS);
   VLOG(1) << "Deleting registry value " << value_name;
-  if (key.ValueExists(value_name.c_str())) {
+  if (key.HasValue(value_name.c_str())) {
     LONG result = key.DeleteValue(value_name.c_str());
     if (result != ERROR_SUCCESS) {
       LOG(ERROR) << "Failed to delete registry value: " << value_name
@@ -387,7 +389,7 @@ bool InstallUtil::DeleteRegistryValue(HKEY reg_root,
 }
 
 // static
-bool InstallUtil::DeleteRegistryKeyIf(
+InstallUtil::ConditionalDeleteResult InstallUtil::DeleteRegistryKeyIf(
     HKEY root_key,
     const std::wstring& key_to_delete_path,
     const std::wstring& key_to_test_path,
@@ -395,6 +397,7 @@ bool InstallUtil::DeleteRegistryKeyIf(
     const RegistryValuePredicate& predicate) {
   DCHECK(root_key);
   DCHECK(value_name);
+  ConditionalDeleteResult delete_result = NOT_FOUND;
   RegKey key;
   std::wstring actual_value;
   if (key.Open(root_key, key_to_test_path.c_str(),
@@ -402,13 +405,14 @@ bool InstallUtil::DeleteRegistryKeyIf(
       key.ReadValue(value_name, &actual_value) == ERROR_SUCCESS &&
       predicate.Evaluate(actual_value)) {
     key.Close();
-    return DeleteRegistryKey(root_key, key_to_delete_path);
+    delete_result = DeleteRegistryKey(root_key, key_to_delete_path)
+        ? DELETED : DELETE_FAILED;
   }
-  return true;
+  return delete_result;
 }
 
 // static
-bool InstallUtil::DeleteRegistryValueIf(
+InstallUtil::ConditionalDeleteResult InstallUtil::DeleteRegistryValueIf(
     HKEY root_key,
     const wchar_t* key_path,
     const wchar_t* value_name,
@@ -416,6 +420,7 @@ bool InstallUtil::DeleteRegistryValueIf(
   DCHECK(root_key);
   DCHECK(key_path);
   DCHECK(value_name);
+  ConditionalDeleteResult delete_result = NOT_FOUND;
   RegKey key;
   std::wstring actual_value;
   if (key.Open(root_key, key_path,
@@ -426,10 +431,11 @@ bool InstallUtil::DeleteRegistryValueIf(
     if (result != ERROR_SUCCESS) {
       LOG(ERROR) << "Failed to delete registry value: " << value_name
                  << " error: " << result;
-      return false;
+      delete_result = DELETE_FAILED;
     }
+    delete_result = DELETED;
   }
-  return true;
+  return delete_result;
 }
 
 bool InstallUtil::ValueEquals::Evaluate(const std::wstring& value) const {

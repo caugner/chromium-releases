@@ -11,6 +11,7 @@ cr.define('print_preview', function() {
     box.setAttribute('type', 'text');
     box.className = MarginTextbox.CSS_CLASS_MARGIN_TEXTBOX;
     box.value = '0';
+    box.setAttribute('aria-label', localStrings.getString(groupName));
 
     // @type {string} Specifies which margin this line refers to.
     box.marginGroup = groupName;
@@ -20,8 +21,6 @@ cr.define('print_preview', function() {
     box.timerId_ = null;
     // @type {number} The last valid value in points.
     box.lastValidValueInPoints = 0;
-    // @type {print_preview.Rect} A rectangle describing the four margins.
-    box.marginsRectangle_ = null;
     // @type {number} The upper allowed limit for the corresponding margin.
     box.valueLimit = null;
 
@@ -30,77 +29,83 @@ cr.define('print_preview', function() {
   }
 
   MarginTextbox.CSS_CLASS_MARGIN_TEXTBOX = 'margin-box';
-  MarginTextbox.MARGIN_BOX_HEIGHT = 15;
-  MarginTextbox.MARGIN_BOX_VERTICAL_PADDING = 5;
-  MarginTextbox.MARGIN_BOX_WIDTH = 40;
-  MarginTextbox.MARGIN_BOX_HORIZONTAL_PADDING = 10;
-
   // Keycode for the "Escape" key.
   MarginTextbox.ESCAPE_KEYCODE = 27;
   // Keycode for the "Enter" key.
   MarginTextbox.ENTER_KEYCODE = 13;
 
-  MarginTextbox.convertPointsToInchesText = function(toConvert) {
-    var inInches = convertPointsToInches(toConvert);
-    return MarginTextbox.convertInchesToInchesText(inInches);
-  };
-
-  MarginTextbox.convertInchesToInchesText = function(toConvert) {
-    return toConvert.toFixed(2) + '"';
-  };
-
-  /**
-   * @return {number} The total height of a margin textbox (including padding).
-   */
-  MarginTextbox.totalHeight = function() {
-    return MarginTextbox.MARGIN_BOX_HEIGHT +
-        2 * MarginTextbox.MARGIN_BOX_VERTICAL_PADDING;
-  }
-
-  /**
-   * @return {number} The total width of a margin textbox (including padding).
-   */
-  MarginTextbox.totalWidth = function() {
-    return MarginTextbox.MARGIN_BOX_WIDTH +
-        2 * MarginTextbox.MARGIN_BOX_HORIZONTAL_PADDING;
-  }
-
   MarginTextbox.prototype = {
     __proto__: HTMLInputElement.prototype,
 
     /**
+     * @type {number} The margin value currently in the textbox.
+     */
+    get margin() {
+      return print_preview.extractMarginValue(this.value);
+    },
+
+    /**
+     * Sets the contents of the textbox.
+     * @param {number} newValueInPoints The value to be displayed in points.
+     * @private
+     */
+    setValue_: function(newValueInPoints) {
+      this.value =
+          print_preview.convertPointsToLocaleUnitsText(newValueInPoints);
+    },
+
+    /**
      * Updates the state of |this|.
-     * @param {print_preview.Rect} marginsRectangle A rectangle describing the
-     *     margins in percentages.
      * @param {number} value The margin value in points.
      * @param {number} valueLimit The upper allowed value for the margin.
      * @param {boolean} keepDisplayedValue True if the currently displayed value
      *     should not be updated.
      */
-    update: function(marginsRectangle, value, valueLimit, keepDisplayedValue) {
-      this.marginsRectangle_ = marginsRectangle;
+    update: function(value, valueLimit, keepDisplayedValue) {
       this.lastValidValueInPoints = value;
-      if (!keepDisplayedValue) {
-        this.value = MarginTextbox.convertPointsToInchesText(
-            this.lastValidValueInPoints);
-      }
+      if (!keepDisplayedValue)
+        this.setValue_(this.lastValidValueInPoints);
 
       this.valueLimit = valueLimit;
       this.validate();
     },
 
-    get margin() {
-      return print_preview.extractMarginValue(this.value);
+    /**
+     * Updates |this| while dragging is in progress.
+     * @param {number} dragDeltaInPoints The difference in points between the
+     *     margin value before dragging started and now.
+     */
+    updateWhileDragging: function(dragDeltaInPoints) {
+      var validity = this.validateDelta(dragDeltaInPoints);
+
+      if (validity == print_preview.marginValidationStates.WITHIN_RANGE)
+        this.setValue_(this.lastValidValueInPoints + dragDeltaInPoints);
+      else if (validity == print_preview.marginValidationStates.TOO_SMALL)
+        this.setValue_(0);
+      else if (validity == print_preview.marginValidationStates.TOO_BIG)
+        this.setValue_(this.valueLimit);
+
+      this.validate();
+      this.updateColor();
+    },
+
+    /**
+     * @param {number} dragDeltaInPoints The difference in points between the
+     *     margin value before dragging started and now.
+     * @return {number} An appropriate value from enum |marginValidationStates|.
+     */
+    validateDelta: function(dragDeltaInPoints) {
+      var newValue = this.lastValidValueInPoints + dragDeltaInPoints;
+      return print_preview.validateMarginValue(newValue, this.valueLimit);
     },
 
     /**
      * Updates |this.isValid|.
      */
     validate: function() {
-      this.isValid = print_preview.isMarginTextValid(this.value,
-                                                     this.valueLimit);
-      if (this.isValid)
-        this.value = MarginTextbox.convertInchesToInchesText(this.margin);
+      this.isValid =
+          print_preview.validateMarginText(this.value, this.valueLimit) ==
+              print_preview.marginValidationStates.WITHIN_RANGE;
     },
 
     /**
@@ -117,76 +122,7 @@ cr.define('print_preview', function() {
      * Draws this textbox.
      */
     draw: function() {
-      var topLeft = this.getCoordinates_();
-      var totalWidth = previewArea.pdfPlugin_.offsetWidth;
-      var totalHeight = previewArea.pdfPlugin_.offsetHeight;
-
-      this.style.left = Math.round(topLeft.x * totalWidth) + 'px';
-      this.style.top = Math.round(topLeft.y * totalHeight) + 'px';
       this.updateColor();
-    },
-
-    /**
-     * @return {boolean} True if |this| refers to the top margin.
-     * @private
-     */
-    isTop_: function() {
-      return this.marginGroup == print_preview.MarginSettings.TOP_GROUP;
-    },
-
-    /**
-     * @return {boolean} True if |this| refers to the bottom margin.
-     * @private
-     */
-    isBottom_: function() {
-      return this.marginGroup == print_preview.MarginSettings.BOTTOM_GROUP;
-    },
-
-    /**
-     * @return {boolean} True if |this| refers to the left margin.
-     * @private
-     */
-    isLeft_: function() {
-      return this.marginGroup == print_preview.MarginSettings.LEFT_GROUP;
-    },
-
-    /**
-     * @return {boolean} True if |this| refers to the bottom margin.
-     * @private
-     */
-    isRight_: function() {
-      return this.marginGroup == print_preview.MarginSettings.RIGHT_GROUP;
-    },
-
-    /**
-     * Calculates the coordinates where |this| should be displayed.
-     * @return {{x: number, y: number}} The coordinates (in percent) where
-     *     |this| should be drawn relative to the upper left corner of the
-     *     plugin.
-     * @private
-     */
-    getCoordinates_: function() {
-      var x = 0, y = 0;
-      var totalWidth = previewArea.pdfPlugin_.offsetWidth;
-      var totalHeight = previewArea.pdfPlugin_.offsetHeight;
-      var offsetY = (MarginTextbox.totalHeight() / 2) / totalHeight;
-      var offsetX = (MarginTextbox.totalWidth() / 2) / totalWidth;
-
-      if (this.isTop_()) {
-        x = this.marginsRectangle_.middleX - offsetX;
-        y = this.marginsRectangle_.y;
-      } else if (this.isBottom_()) {
-        x = this.marginsRectangle_.middleX - offsetX;
-        y = this.marginsRectangle_.bottom - 2 * offsetY;
-      } else if (this.isRight_()) {
-        x = this.marginsRectangle_.right - 2 * offsetX;
-        y = this.marginsRectangle_.middleY - offsetY;
-      } else if (this.isLeft_()) {
-        x = this.marginsRectangle_.x;
-        y = this.marginsRectangle_.middleY - offsetY;
-      }
-
-      return { x: x, y: y };
     },
 
     /**
@@ -198,6 +134,9 @@ cr.define('print_preview', function() {
       this.onblur = this.onBlur_.bind(this);
       this.onkeypress = this.onKeyPressed_.bind(this);
       this.onkeyup = this.onKeyUp_.bind(this);
+      this.onfocus = function() {
+        cr.dispatchSimpleEvent(document, customEvents.MARGIN_TEXTBOX_FOCUSED);
+      };
     },
 
     /**
@@ -208,15 +147,14 @@ cr.define('print_preview', function() {
       clearTimeout(this.timerId_);
       this.validate();
       if (!this.isValid) {
-        this.value = MarginTextbox.convertPointsToInchesText(
-            this.lastValidValueInPoints);
+        this.setValue_(this.lastValidValueInPoints);
         this.validate();
       }
 
       this.updateColor();
-      cr.dispatchSimpleEvent(document, 'updateSummary');
-      cr.dispatchSimpleEvent(document, 'updatePrintButton');
-      cr.dispatchSimpleEvent(this, 'MarginsMayHaveChanged');
+      cr.dispatchSimpleEvent(document, customEvents.UPDATE_SUMMARY);
+      cr.dispatchSimpleEvent(document, customEvents.UPDATE_PRINT_BUTTON);
+      cr.dispatchSimpleEvent(this, customEvents.MARGINS_MAY_HAVE_CHANGED);
     },
 
     /**
@@ -239,12 +177,11 @@ cr.define('print_preview', function() {
      */
     onKeyUp_: function(e) {
       if (e.keyCode == MarginTextbox.ESCAPE_KEYCODE) {
-        this.value = MarginTextbox.convertPointsToInchesText(
-            this.lastValidValueInPoints);
+        this.setValue_(this.lastValidValueInPoints);
         this.validate();
         this.updateColor();
-        cr.dispatchSimpleEvent(document, 'updateSummary');
-        cr.dispatchSimpleEvent(document, 'updatePrintButton');
+        cr.dispatchSimpleEvent(document, customEvents.UPDATE_SUMMARY);
+        cr.dispatchSimpleEvent(document, customEvents.UPDATE_PRINT_BUTTON);
       }
     },
 
@@ -256,22 +193,22 @@ cr.define('print_preview', function() {
     resetTimer_: function() {
       clearTimeout(this.timerId_);
       this.timerId_ = window.setTimeout(
-          this.onTextValueMayHaveChanged_.bind(this), 500);
+          this.onTextValueMayHaveChanged.bind(this), 1000);
     },
 
     /**
-     * Executes whenever the user stops typing.
-     * @private
+     * Executes whenever the user stops typing or when a drag session associated
+     * with |this| ends.
      */
-    onTextValueMayHaveChanged_: function() {
+    onTextValueMayHaveChanged: function() {
       this.validate();
       this.updateColor();
-      cr.dispatchSimpleEvent(document, 'updateSummary');
-      cr.dispatchSimpleEvent(document, 'updatePrintButton');
+      cr.dispatchSimpleEvent(document, customEvents.UPDATE_SUMMARY);
+      cr.dispatchSimpleEvent(document, customEvents.UPDATE_PRINT_BUTTON);
 
       if (!this.isValid)
         return;
-      cr.dispatchSimpleEvent(this, 'MarginsMayHaveChanged');
+      cr.dispatchSimpleEvent(this, customEvents.MARGINS_MAY_HAVE_CHANGED);
     }
 
   };

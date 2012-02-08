@@ -13,7 +13,6 @@
 
 #include "base/id_map.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "content/common/gpu/media/gpu_video_decode_accelerator.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/service/command_buffer_service.h"
@@ -58,13 +57,16 @@ class GpuCommandBufferStub
   virtual ~GpuCommandBufferStub();
 
   // IPC::Channel::Listener implementation:
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // IPC::Message::Sender implementation:
-  virtual bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // Whether this command buffer can currently handle IPC messages.
   bool IsScheduled();
+
+  // Set the swap interval according to the command line.
+  void SetSwapInterval();
 
   gpu::gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
   gpu::GpuScheduler* scheduler() const { return scheduler_.get(); }
@@ -78,8 +80,6 @@ class GpuCommandBufferStub
   // Identifies the various GpuCommandBufferStubs in the GPU process belonging
   // to the same renderer process.
   int32 route_id() const { return route_id_; }
-
-  void ViewResized();
 
   gfx::GpuPreference gpu_preference() { return gpu_preference_; }
 
@@ -118,21 +118,10 @@ class GpuCommandBufferStub
 
   void OnSetSurfaceVisible(bool visible);
 
-#if defined(OS_MACOSX)
-  void OnSwapBuffers();
-
-  // Returns the id of the current surface that is being rendered to
-  // (or 0 if no such surface has been created).
-  uint64 GetSurfaceId();
-#endif
-
   void OnCommandProcessed();
   void OnParseError();
 
-  void OnResize(gfx::Size size);
   void ReportState();
-
-  void SetSwapInterval();
 
   // The lifetime of objects of this class is managed by a GpuChannel. The
   // GpuChannels destroy all the GpuCommandBufferStubs that they own when they
@@ -173,8 +162,6 @@ class GpuCommandBufferStub
   // Zero or more video decoders owned by this stub, keyed by their
   // decoder_route_id.
   IDMap<GpuVideoDecodeAccelerator, IDMapOwnPointer> video_decoders_;
-
-  ScopedRunnableMethodFactory<GpuCommandBufferStub> task_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuCommandBufferStub);
 };

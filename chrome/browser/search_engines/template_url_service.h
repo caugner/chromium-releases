@@ -20,19 +20,18 @@
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
-class GURL;
 class Extension;
+class GURL;
 class PrefService;
-class Profile;
 class PrefSetObserver;
+class Profile;
 class SearchHostToURLsMap;
 class SearchTermsData;
 class SyncData;
 class TemplateURLServiceObserver;
-class TemplateURLRef;
 
 namespace history {
 struct URLVisitedDetails;
@@ -61,7 +60,7 @@ struct URLVisitedDetails;
 
 class TemplateURLService : public WebDataServiceConsumer,
                            public ProfileKeyedService,
-                           public NotificationObserver,
+                           public content::NotificationObserver,
                            public SyncableService {
  public:
   typedef std::map<std::string, std::string> QueryTerms;
@@ -202,6 +201,12 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Returns true if the default search is managed through group policy.
   bool is_default_search_managed() const { return is_default_search_managed_; }
 
+  // Returns the default search specified in the prepopulated data, if it
+  // exists.  If not, returns first URL in |template_urls_|, or NULL if that's
+  // empty. The returned object is owned by TemplateURLService and can be
+  // destroyed at any time so should be used right after the call.
+  const TemplateURL* FindNewDefaultSearchProvider();
+
   // Observers used to listen for changes to the model.
   // TemplateURLService does NOT delete the observers when deleted.
   void AddObserver(TemplateURLServiceObserver* observer);
@@ -223,8 +228,9 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Notification that the keywords have been loaded.
   // This is invoked from WebDataService, and should not be directly
   // invoked.
-  virtual void OnWebDataServiceRequestDone(WebDataService::Handle h,
-                                           const WDTypedResult* result);
+  virtual void OnWebDataServiceRequestDone(
+      WebDataService::Handle h,
+      const WDTypedResult* result) OVERRIDE;
 
   // Returns the locale-direction-adjusted short name for the given keyword.
   // Also sets the out param to indicate whether the keyword belongs to an
@@ -232,7 +238,7 @@ class TemplateURLService : public WebDataServiceConsumer,
   string16 GetKeywordShortName(const string16& keyword,
                                bool* is_extension_keyword);
 
-  // NotificationObserver method. TemplateURLService listens for three
+  // content::NotificationObserver method. TemplateURLService listens for three
   // notification types:
   // . NOTIFY_HISTORY_URL_VISITED: adds keyword search terms if the visit
   //   corresponds to a keyword.
@@ -240,8 +246,8 @@ class TemplateURLService : public WebDataServiceConsumer,
   //   a google base url replacement term.
   // . PREF_CHANGED: checks whether the default search engine has changed.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // SyncableService implementation.
 
@@ -330,8 +336,6 @@ class TemplateURLService : public WebDataServiceConsumer,
                            FindDuplicateOfSyncTemplateURL);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
                            MergeSyncAndLocalURLDuplicates);
-  FRIEND_TEST_ALL_PREFIXES(TemplateURLServiceSyncTest,
-                           CreateGUIDToSyncDataMap);
 
   friend class TemplateURLServiceTestUtil;
 
@@ -414,7 +418,7 @@ class TemplateURLService : public WebDataServiceConsumer,
   // does not occur multiple times.
   static bool BuildQueryTerms(
       const GURL& url,
-      std::map<std::string,std::string>* query_terms);
+      std::map<std::string, std::string>* query_terms);
 
   // Invoked when the Google base URL has changed. Updates the mapping for all
   // TemplateURLs that have a replacement term of {google:baseURL} or
@@ -424,11 +428,6 @@ class TemplateURLService : public WebDataServiceConsumer,
   // Update the default search.  Called at initialization or when a managed
   // preference has changed.
   void UpdateDefaultSearch();
-
-  // Returns the default search specified in the prepopulated data, if it
-  // exists.  If not, returns first URL in |template_urls_|, or NULL if that's
-  // empty.
-  const TemplateURL* FindNewDefaultSearchProvider();
 
   // Set the default search provider even if it is managed. |url| may be null.
   // Caller is responsible for notifying observers.
@@ -495,7 +494,20 @@ class TemplateURLService : public WebDataServiceConsumer,
                                       TemplateURL* local_url,
                                       SyncChangeList* change_list);
 
-  NotificationRegistrar registrar_;
+  // Checks a newly added TemplateURL from Sync by its sync_guid and sets it as
+  // the default search provider if we were waiting for it.
+  void SetDefaultSearchProviderIfNewlySynced(const std::string& guid);
+
+  // Retrieve the pending default search provider according to Sync. Returns
+  // NULL if there was no pending search provider from Sync.
+  const TemplateURL* GetPendingSyncedDefaultSearchProvider();
+
+  // Goes through a vector of TemplateURLs and ensure that both the in-memory
+  // and database copies have valid sync_guids. This is to fix crbug.com/102038,
+  // where old entries were being pushed to Sync without a sync_guid.
+  void PatchMissingSyncGUIDs(std::vector<TemplateURL*>* template_urls);
+
+  content::NotificationRegistrar registrar_;
 
   // Mapping from keyword to the TemplateURL.
   KeywordToTemplateMap keyword_to_template_map_;
@@ -572,6 +584,13 @@ class TemplateURLService : public WebDataServiceConsumer,
 
   // Sync's SyncChange handler. We push all our changes through this.
   SyncChangeProcessor* sync_processor_;
+
+  // Whether or not we are waiting on the default search provider to come in
+  // from Sync. This is to facilitate the fact that changes to the value of
+  // prefs::kSyncedDefaultSearchProviderGUID do not always come before the
+  // TemplateURL entry it refers to, and to handle the case when we want to use
+  // the Synced default when the default search provider becomes unmanaged.
+  bool pending_synced_default_search_;
 
   DISALLOW_COPY_AND_ASSIGN(TemplateURLService);
 };

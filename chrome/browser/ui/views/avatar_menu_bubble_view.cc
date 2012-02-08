@@ -8,10 +8,11 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
+#include "chrome/browser/profiles/profile_info_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/browser.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -20,15 +21,17 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
+#include "ui/views/controls/button/custom_button.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/separator.h"
 
 namespace {
 
 const int kItemHeight = 44;
 const int kItemMarginY = 4;
-const int kIconWidth = 38;
 const int kIconMarginX = 6;
 const int kSeparatorPaddingY = 5;
 
@@ -65,6 +68,7 @@ class HighlightDelegate {
  public:
   virtual ~HighlightDelegate() {}
   virtual void OnHighlightStateChanged() = 0;
+  virtual void OnFocusStateChanged(bool has_focus) = 0;
 };
 
 
@@ -80,6 +84,8 @@ class EditProfileLink : public views::Link {
 
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
 
   views::CustomButton::ButtonState state() { return state_; }
 
@@ -105,6 +111,17 @@ void EditProfileLink::OnMouseExited(const views::MouseEvent& event) {
   views::Link::OnMouseExited(event);
   state_ = views::CustomButton::BS_NORMAL;
   delegate_->OnHighlightStateChanged();
+}
+
+void EditProfileLink::OnFocus() {
+  views::Link::OnFocus();
+  delegate_->OnFocusStateChanged(true);
+}
+
+void EditProfileLink::OnBlur() {
+  views::Link::OnBlur();
+  state_ = views::CustomButton::BS_NORMAL;
+  delegate_->OnFocusStateChanged(false);
 }
 
 
@@ -136,8 +153,11 @@ class ProfileItemView : public views::CustomButton,
   virtual void Layout() OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
+  virtual void OnFocus() OVERRIDE;
+  virtual void OnBlur() OVERRIDE;
 
   virtual void OnHighlightStateChanged() OVERRIDE;
+  virtual void OnFocusStateChanged(bool has_focus) OVERRIDE;
 
   EditProfileLink* edit_link() { return edit_link_; }
   const AvatarMenuModel::Item& item() { return item_; }
@@ -145,7 +165,7 @@ class ProfileItemView : public views::CustomButton,
  private:
   static SkBitmap GetBadgedIcon(const SkBitmap& icon);
 
-  bool IsHighlighted() const;
+  bool IsHighlighted();
 
   EditProfileLink* edit_link_;
   views::ImageView* image_view_;
@@ -203,18 +223,27 @@ gfx::Size ProfileItemView::GetPreferredSize() {
   int width = std::max(name_label_->GetPreferredSize().width(),
                        sync_state_label_->GetPreferredSize().width());
   width = std::max(edit_link_->GetPreferredSize().width(), width);
-  return gfx::Size(kIconWidth + kIconMarginX + width, kItemHeight);
+  return gfx::Size(profiles::kAvatarIconWidth + kIconMarginX + width,
+                   kItemHeight);
 }
 
 void ProfileItemView::Layout() {
   // Profile icon.
-  const SkBitmap& icon = image_view_->GetImage();
-  gfx::Rect icon_rect = GetCenteredAndScaledRect(
-      icon.width(), icon.height(), 0, 0, kIconWidth, height());
+  gfx::Rect icon_rect;
+  if (item_.active) {
+    // If this is the active item then the icon is already scaled and so
+    // just use the preferred size.
+    icon_rect.set_size(image_view_->GetPreferredSize());
+    icon_rect.set_y((height() - icon_rect.height()) / 2);
+  } else {
+    const SkBitmap& icon = image_view_->GetImage();
+    icon_rect = GetCenteredAndScaledRect(icon.width(), icon.height(), 0, 0,
+        profiles::kAvatarIconWidth, height());
+  }
   image_view_->SetBoundsRect(icon_rect);
 
-  int label_x = icon_rect.right() + kIconMarginX;
-  int max_label_width = width() - label_x;
+  int label_x = profiles::kAvatarIconWidth + kIconMarginX;
+  int max_label_width = std::max(width() - label_x, 0);
   gfx::Size name_size = name_label_->GetPreferredSize();
   name_size.set_width(std::min(name_size.width(), max_label_width));
   gfx::Size state_size = sync_state_label_->GetPreferredSize();
@@ -246,11 +275,21 @@ void ProfileItemView::OnMouseExited(const views::MouseEvent& event) {
   OnHighlightStateChanged();
 }
 
+void ProfileItemView::OnFocus() {
+  views::CustomButton::OnFocus();
+  OnFocusStateChanged(true);
+}
+
+void ProfileItemView::OnBlur() {
+  views::CustomButton::OnBlur();
+  OnFocusStateChanged(false);
+}
+
 void ProfileItemView::OnHighlightStateChanged() {
   set_background(IsHighlighted() ? views::Background::CreateSolidBackground(
       SkColorSetRGB(0xe3, 0xed, 0xf6)) : NULL);
   SkColor background_color = background() ?
-      background()->get_color() : Bubble::kBackgroundColor;
+      background()->get_color() : views::BubbleDelegateView::kBackgroundColor;
   name_label_->SetBackgroundColor(background_color);
   sync_state_label_->SetBackgroundColor(background_color);
   edit_link_->SetBackgroundColor(background_color);
@@ -261,10 +300,16 @@ void ProfileItemView::OnHighlightStateChanged() {
   SchedulePaint();
 }
 
+void ProfileItemView::OnFocusStateChanged(bool has_focus) {
+  if (!has_focus && state() != views::CustomButton::BS_DISABLED)
+    SetState(views::CustomButton::BS_NORMAL);
+  OnHighlightStateChanged();
+}
+
 // static
 SkBitmap ProfileItemView::GetBadgedIcon(const SkBitmap& icon) {
-  gfx::Rect icon_rect = GetCenteredAndScaledRect(
-      icon.width(), icon.height(), 0, 0, kIconWidth, kItemHeight);
+  gfx::Rect icon_rect = GetCenteredAndScaledRect(icon.width(), icon.height(),
+      0, 0, profiles::kAvatarIconWidth, kItemHeight);
 
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SkBitmap badge = rb.GetImageNamed(IDR_PROFILE_SELECTED);
@@ -280,11 +325,13 @@ SkBitmap ProfileItemView::GetBadgedIcon(const SkBitmap& icon) {
   return canvas.ExtractBitmap();
 }
 
-bool ProfileItemView::IsHighlighted() const {
+bool ProfileItemView::IsHighlighted() {
   return state() == views::CustomButton::BS_PUSHED ||
          state() == views::CustomButton::BS_HOT ||
          edit_link_->state() == views::CustomButton::BS_PUSHED ||
-         edit_link_->state() == views::CustomButton::BS_HOT;
+         edit_link_->state() == views::CustomButton::BS_HOT ||
+         HasFocus() ||
+         edit_link_->HasFocus();
 }
 
 }  // namespace
@@ -292,20 +339,27 @@ bool ProfileItemView::IsHighlighted() const {
 
 // AvatarMenuBubbleView -------------------------------------------------------
 
-AvatarMenuBubbleView::AvatarMenuBubbleView(Browser* browser)
-    : add_profile_link_(NULL),
+AvatarMenuBubbleView::AvatarMenuBubbleView(
+    views::View* anchor_view,
+    views::BubbleBorder::ArrowLocation arrow_location,
+    const gfx::Rect& anchor_rect,
+    Browser* browser)
+    : BubbleDelegateView(anchor_view, arrow_location),
+      add_profile_link_(NULL),
+      anchor_rect_(anchor_rect),
       browser_(browser) {
   avatar_menu_model_.reset(new AvatarMenuModel(
       &g_browser_process->profile_manager()->GetProfileInfoCache(),
       this, browser_));
-  // Build the menu for the first time.
-  OnAvatarMenuModelChanged(avatar_menu_model_.get());
 }
 
 AvatarMenuBubbleView::~AvatarMenuBubbleView() {
 }
 
 gfx::Size AvatarMenuBubbleView::GetPreferredSize() {
+  if (!add_profile_link_)
+    return gfx::Size();
+
   int max_width = 0;
   int total_height = 0;
   for (size_t i = 0; i < item_views_.size(); ++i) {
@@ -319,7 +373,7 @@ gfx::Size AvatarMenuBubbleView::GetPreferredSize() {
 
   gfx::Size add_profile_size = add_profile_link_->GetPreferredSize();
   max_width = std::max(max_width,
-                       add_profile_size.width() +  kIconWidth + kIconMarginX);
+      add_profile_size.width() + profiles::kAvatarIconWidth + kIconMarginX);
   total_height += add_profile_link_->GetPreferredSize().height();
 
   const int kBubbleViewMaxWidth = 800;
@@ -344,8 +398,48 @@ void AvatarMenuBubbleView::Layout() {
   separator_->SetBounds(0, y, width(), separator_height);
   y += kSeparatorPaddingY + separator_height;
 
-  add_profile_link_->SetBounds(kIconWidth + kIconMarginX, y, width(),
-                               add_profile_link_->GetPreferredSize().height());
+  add_profile_link_->SetBounds(profiles::kAvatarIconWidth + kIconMarginX, y,
+      width(), add_profile_link_->GetPreferredSize().height());
+}
+
+bool AvatarMenuBubbleView::AcceleratorPressed(
+    const ui::Accelerator& accelerator) {
+  if (accelerator.key_code() != ui::VKEY_DOWN &&
+      accelerator.key_code() != ui::VKEY_UP) {
+    return false;
+  }
+
+  if (item_views_.empty())
+    return true;
+
+  // Find the currently focused item. Note that if there is no focused item, the
+  // code below correctly handles a |focus_index| of -1.
+  int focus_index = -1;
+  for (size_t i = 0; i < item_views_.size(); ++i) {
+    if (item_views_[i]->HasFocus()) {
+      focus_index = i;
+      break;
+    }
+  }
+
+  // Moved the focus up or down by 1.
+  if (accelerator.key_code() == ui::VKEY_DOWN)
+    focus_index = (focus_index + 1) % item_views_.size();
+  else
+    focus_index = ((focus_index > 0) ? focus_index : item_views_.size()) - 1;
+  item_views_[focus_index]->RequestFocus();
+
+  return true;
+}
+
+void AvatarMenuBubbleView::ViewHierarchyChanged(bool is_add,
+                                                views::View* parent,
+                                                views::View* child) {
+  // Build the menu for the first time.
+  if (!add_profile_link_ && is_add && child == this)
+    OnAvatarMenuModelChanged(avatar_menu_model_.get());
+
+  views::BubbleDelegateView::ViewHierarchyChanged(is_add, parent, child);
 }
 
 void AvatarMenuBubbleView::ButtonPressed(views::Button* sender,
@@ -376,16 +470,13 @@ void AvatarMenuBubbleView::LinkClicked(views::Link* source, int event_flags) {
   }
 }
 
-void AvatarMenuBubbleView::BubbleClosing(Bubble* bubble,
-                                         bool closed_by_escape) {
+gfx::Rect AvatarMenuBubbleView::GetAnchorRect() {
+  return anchor_rect_;
 }
 
-bool AvatarMenuBubbleView::CloseOnEscape() {
-  return true;
-}
-
-bool AvatarMenuBubbleView::FadeInOnShow() {
-  return false;
+void AvatarMenuBubbleView::Init() {
+  AddAccelerator(ui::Accelerator(ui::VKEY_DOWN, 0));
+  AddAccelerator(ui::Accelerator(ui::VKEY_UP, 0));
 }
 
 void AvatarMenuBubbleView::OnAvatarMenuModelChanged(
@@ -401,6 +492,7 @@ void AvatarMenuBubbleView::OnAvatarMenuModelChanged(
     ProfileItemView* item_view = new ProfileItemView(item, this, this);
     item_view->SetAccessibleName(l10n_util::GetStringFUTF16(
         IDS_PROFILES_SWITCH_TO_PROFILE_ACCESSIBLE_NAME, item.name));
+    item_view->set_focusable(true);
     AddChildView(item_view);
     item_views_.push_back(item_view);
   }
@@ -412,9 +504,11 @@ void AvatarMenuBubbleView::OnAvatarMenuModelChanged(
       l10n_util::GetStringUTF16(IDS_PROFILES_CREATE_NEW_PROFILE_LINK));
   add_profile_link_->set_listener(this);
   add_profile_link_->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
-  add_profile_link_->SetBackgroundColor(Bubble::kBackgroundColor);
+  add_profile_link_->SetBackgroundColor(color());
   add_profile_link_->SetEnabledColor(SkColorSetRGB(0xe3, 0xed, 0xf6));
   AddChildView(add_profile_link_);
 
-  PreferredSizeChanged();
+  // If the bubble has already been shown then resize and reposition the bubble.
+  Layout();
+  SizeToContents();
 }

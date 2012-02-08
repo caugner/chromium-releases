@@ -21,8 +21,8 @@
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/common/ref_counted_util.h"
 #include "content/browser/cancelable_request.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
 #include "sql/init_status.h"
 
@@ -32,26 +32,13 @@ class FilePath;
 class GURL;
 class HistoryURLProvider;
 struct HistoryURLProviderParams;
-class InMemoryURLDatabase;
-class MainPagesRequest;
 class PageUsageData;
 class PageUsageRequest;
 class Profile;
-class SkBitmap;
-struct ThumbnailScore;
 
 namespace base {
 class Thread;
 class Time;
-}
-
-namespace browser_sync {
-class HistoryModelWorker;
-class TypedUrlDataTypeController;
-}
-
-namespace gfx {
-class Image;
 }
 
 namespace history {
@@ -98,7 +85,7 @@ class HistoryDBTask : public base::RefCountedThreadSafe<HistoryDBTask> {
 // This service is thread safe. Each request callback is invoked in the
 // thread that made the request.
 class HistoryService : public CancelableRequestProvider,
-                       public NotificationObserver,
+                       public content::NotificationObserver,
                        public base::RefCountedThreadSafe<HistoryService> {
  public:
   // Miscellaneous commonly-used types.
@@ -605,10 +592,10 @@ class HistoryService : public CancelableRequestProvider,
   friend class RedirectRequest;
   friend class TestingProfile;
 
-  // Implementation of NotificationObserver.
+  // Implementation of content::NotificationObserver.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Low-level Init().  Same as the public version, but adds a |no_db| parameter
   // that is only set by unittests which causes the backend to not init its DB.
@@ -625,12 +612,10 @@ class HistoryService : public CancelableRequestProvider,
   // Broadcasts the given notification. This is called by the backend so that
   // the notification will be broadcast on the main thread.
   //
-  // The |details_deleted| pointer will be sent as the "details" for the
-  // notification. The function takes ownership of the pointer and deletes it
-  // when the notification is sent (it is coming from another thread, so must
-  // be allocated on the heap).
-  void BroadcastNotifications(int type,
-                              history::HistoryDetails* details_deleted);
+  // Compared to BroadcastNotifications(), this function does not take
+  // ownership of |details|.
+  void BroadcastNotificationsHelper(int type,
+                                    history::HistoryDetails* details);
 
   // Initializes the backend.
   void LoadBackendIfNecessary();
@@ -665,6 +650,10 @@ class HistoryService : public CancelableRequestProvider,
   // Used by the FaviconService to mark the favicon for the page as being out
   // of date.
   void SetFaviconOutOfDateForPage(const GURL& page_url);
+
+  // Used by the FaviconService to clone favicons from one page to another,
+  // provided that other page does not already have favicons.
+  void CloneFavicon(const GURL& old_page_url, const GURL& new_page_url);
 
   // Used by the FaviconService for importing many favicons for many pages at
   // once. The pages must exist, any favicon sets for unknown pages will be
@@ -831,7 +820,7 @@ class HistoryService : public CancelableRequestProvider,
                                       a, b, c, d));
   }
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Some void primitives require some internal processing in the main thread
   // when done. We use this internal consumer for this purpose.

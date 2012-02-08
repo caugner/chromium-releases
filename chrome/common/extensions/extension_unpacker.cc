@@ -20,7 +20,7 @@
 #include "chrome/common/extensions/extension_l10n_util.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/zip.h"
-#include "content/common/common_param_traits.h"
+#include "content/public/common/common_param_traits.h"
 #include "ipc/ipc_message_utils.h"
 #include "net/base/file_stream.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -84,8 +84,11 @@ bool PathContainsParentDirectory(const FilePath& path) {
 
 }  // namespace
 
-ExtensionUnpacker::ExtensionUnpacker(const FilePath& extension_path)
-    : extension_path_(extension_path) {
+ExtensionUnpacker::ExtensionUnpacker(const FilePath& extension_path,
+                                     Extension::Location location,
+                                     int creation_flags)
+    : extension_path_(extension_path), location_(location),
+      creation_flags_(creation_flags) {
 }
 
 ExtensionUnpacker::~ExtensionUnpacker() {
@@ -144,7 +147,7 @@ bool ExtensionUnpacker::ReadAllMessageCatalogs(
 }
 
 bool ExtensionUnpacker::Run() {
-  VLOG(1) << "Installing extension " << extension_path_.value();
+  DVLOG(1) << "Installing extension " << extension_path_.value();
 
   // <profile>/Extensions/INSTALL_TEMP/<version>
   temp_install_dir_ =
@@ -161,7 +164,7 @@ bool ExtensionUnpacker::Run() {
     return false;
   }
 
-  if (!Unzip(extension_path_, temp_install_dir_)) {
+  if (!zip::Unzip(extension_path_, temp_install_dir_)) {
     SetError(kCouldNotUnzipExtension);
     return false;
   }
@@ -178,9 +181,9 @@ bool ExtensionUnpacker::Run() {
   std::string error;
   scoped_refptr<Extension> extension(Extension::Create(
       temp_install_dir_,
-      Extension::INVALID,
+      location_,
       *parsed_manifest_,
-      Extension::NO_FLAGS,
+      creation_flags_,
       &error));
   if (!extension.get()) {
     SetError(error);

@@ -7,15 +7,16 @@
 #pragma once
 
 #include "base/basictypes.h"
+#include "ui/aura/aura_export.h"
 
 namespace aura {
 class Window;
 
 namespace internal {
 
-// An interface implemented by the RootWindow to expose the focused window and
+// An interface implemented by the Desktop to expose the focused window and
 // allow for it to be changed.
-class FocusManager {
+class AURA_EXPORT FocusManager {
  public:
   // Sets the currently focused window. Before the currently focused window is
   // changed, the previous focused window's delegate is sent a blur

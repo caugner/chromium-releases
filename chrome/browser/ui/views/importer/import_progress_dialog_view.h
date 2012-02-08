@@ -12,8 +12,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/importer/importer_progress_observer.h"
-#include "views/view.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/view.h"
+#include "ui/views/window/dialog_delegate.h"
 
 class ImporterHost;
 class ImporterObserver;
@@ -46,8 +46,7 @@ class ImportProgressDialogView : public views::DialogDelegateView,
 
   // views::DialogDelegate:
   virtual int GetDialogButtons() const OVERRIDE;
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual bool Cancel() OVERRIDE;

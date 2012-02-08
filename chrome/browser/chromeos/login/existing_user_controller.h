@@ -20,21 +20,21 @@
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/ownership_status_checker.h"
 #include "chrome/browser/chromeos/login/password_changed_view.h"
-#include "chrome/browser/chromeos/login/user_manager.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "chrome/browser/chromeos/login/user.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "ui/gfx/rect.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_message_listener.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_message_listener.h"
 #endif
 
 namespace chromeos {
 
 class LoginDisplayHost;
-class UserCrosSettingsProvider;
+class CrosSettings;
 
 // ExistingUserController is used to handle login when someone has
 // already logged into the machine.
@@ -44,7 +44,7 @@ class UserCrosSettingsProvider;
 // ExistingUserController maintains it's own life cycle and deletes itself when
 // the user logs in (or chooses to see other settings).
 class ExistingUserController : public LoginDisplay::Delegate,
-                               public NotificationObserver,
+                               public content::NotificationObserver,
                                public LoginPerformer::Delegate,
                                public LoginUtils::Delegate,
                                public CaptchaView::Delegate,
@@ -60,12 +60,13 @@ class ExistingUserController : public LoginDisplay::Delegate,
   }
 
   // Creates and shows login UI for known users.
-  void Init(const UserVector& users);
+  void Init(const UserList& users);
 
   // LoginDisplay::Delegate: implementation
   virtual void CreateAccount() OVERRIDE;
   virtual string16 GetConnectedNetworkName() OVERRIDE;
   virtual void FixCaptivePortal() OVERRIDE;
+  virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
   virtual void CompleteLogin(const std::string& username,
                              const std::string& password) OVERRIDE;
   virtual void Login(const std::string& username,
@@ -74,10 +75,10 @@ class ExistingUserController : public LoginDisplay::Delegate,
   virtual void OnUserSelected(const std::string& username) OVERRIDE;
   virtual void OnStartEnterpriseEnrollment() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Set a delegate that we will pass LoginStatusConsumer events to.
   // Used for testing.
@@ -85,14 +86,13 @@ class ExistingUserController : public LoginDisplay::Delegate,
     login_status_consumer_ = consumer;
   }
 
-  // Returns the LoginDisplay instance created and owned by this controller.
+  // Returns the LoginDisplay created and owned by this controller.
   // Used for testing.
   LoginDisplay* login_display() {
-    return login_display_;
+    return login_display_.get();
   }
 
   // Returns the LoginDisplayHost for this controller.
-  // Used for testing.
   LoginDisplayHost* login_display_host() {
     return host_;
   }
@@ -102,27 +102,27 @@ class ExistingUserController : public LoginDisplay::Delegate,
   friend class MockLoginPerformerDelegate;
 
   // LoginPerformer::Delegate implementation:
-  virtual void OnLoginFailure(const LoginFailure& error);
+  virtual void OnLoginFailure(const LoginFailure& error) OVERRIDE;
   virtual void OnLoginSuccess(
       const std::string& username,
       const std::string& password,
       const GaiaAuthConsumer::ClientLoginResult& credentials,
       bool pending_requests,
-      bool using_oauth);
-  virtual void OnOffTheRecordLoginSuccess();
+      bool using_oauth) OVERRIDE;
+  virtual void OnOffTheRecordLoginSuccess() OVERRIDE;
   virtual void OnPasswordChangeDetected(
-      const GaiaAuthConsumer::ClientLoginResult& credentials);
-  virtual void WhiteListCheckFailed(const std::string& email);
+      const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
+  virtual void WhiteListCheckFailed(const std::string& email) OVERRIDE;
 
   // LoginUtils::Delegate implementation:
-  virtual void OnProfilePrepared(Profile* profile);
+  virtual void OnProfilePrepared(Profile* profile) OVERRIDE;
 
   // CaptchaView::Delegate:
-  virtual void OnCaptchaEntered(const std::string& captcha);
+  virtual void OnCaptchaEntered(const std::string& captcha) OVERRIDE;
 
   // PasswordChangedView::Delegate:
-  virtual void RecoverEncryptedData(const std::string& old_password);
-  virtual void ResyncEncryptedData();
+  virtual void RecoverEncryptedData(const std::string& old_password) OVERRIDE;
+  virtual void ResyncEncryptedData() OVERRIDE;
 
   // Starts WizardController with the specified screen.
   void ActivateWizard(const std::string& screen_name);
@@ -154,9 +154,6 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // Used to execute login operations.
   scoped_ptr<LoginPerformer> login_performer_;
 
-  // Login UI implementation instance.
-  LoginDisplay* login_display_;
-
   // Delegate for login performer to be overridden by tests.
   // |this| is used if |login_performer_delegate_| is NULL.
   scoped_ptr<LoginPerformer::Delegate> login_performer_delegate_;
@@ -171,6 +168,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // OOBE/login display host.
   LoginDisplayHost* host_;
 
+  // Login UI implementation instance.
+  scoped_ptr<LoginDisplay> login_display_;
+
   // Number of login attempts. Used to show help link when > 1 unsuccessful
   // logins for the same user.
   size_t num_login_attempts_;
@@ -179,14 +179,14 @@ class ExistingUserController : public LoginDisplay::Delegate,
   // automation tests.
   static ExistingUserController* current_controller_;
 
-  // Triggers prefetching of user settings.
-  scoped_ptr<UserCrosSettingsProvider> user_settings_;
+  // Interface to the signed settings store.
+  CrosSettings* cros_settings_;
 
   // URL to append to start Guest mode with.
   GURL guest_mode_url_;
 
   // Used for user image changed notifications.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Factory of callbacks.
   base::WeakPtrFactory<ExistingUserController> weak_factory_;
@@ -202,6 +202,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
 
   // Whether it's first login to the device and this user will be owner.
   bool is_owner_login_;
+
+  // The displayed email for the next login attempt set by |SetDisplayEmail|.
+  std::string display_email_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, NewUserLogin);
 

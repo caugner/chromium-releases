@@ -9,7 +9,7 @@
 #include "base/stl_util.h"
 #include "chrome/browser/ui/global_error.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 
 GlobalErrorService::GlobalErrorService(Profile* profile) : profile_(profile) {
 }
@@ -60,8 +60,8 @@ GlobalError* GlobalErrorService::GetFirstGlobalErrorWithBubbleView() const {
 }
 
 void GlobalErrorService::NotifyErrorsChanged(GlobalError* error) {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_GLOBAL_ERRORS_CHANGED,
-      Source<Profile>(profile_),
-      Details<GlobalError>(error));
+      content::Source<Profile>(profile_),
+      content::Details<GlobalError>(error));
 }

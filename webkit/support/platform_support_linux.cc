@@ -12,6 +12,7 @@
 #include "base/string_piece.h"
 #include "grit/webkit_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "webkit/support/test_webkit_platform_support.h"
 
 namespace webkit_support {
 
@@ -40,19 +41,17 @@ void AfterShutdown() {
 
 }  // namespace webkit_support
 
-namespace webkit_glue {
-
-string16 GetLocalizedString(int message_id) {
+string16 TestWebKitPlatformSupport::GetLocalizedString(int message_id) {
   return ResourceBundle::GetSharedInstance().GetLocalizedString(message_id);
 }
 
-base::StringPiece GetDataResource(int resource_id) {
+base::StringPiece TestWebKitPlatformSupport::GetDataResource(int resource_id) {
   FilePath resources_path;
   PathService::Get(base::DIR_EXE, &resources_path);
   resources_path = resources_path.Append("DumpRenderTree_resources");
   switch (resource_id) {
     case IDR_BROKENIMAGE: {
-      static std::string broken_image_data;
+      CR_DEFINE_STATIC_LOCAL(std::string, broken_image_data, ());
       if (broken_image_data.empty()) {
         FilePath path = resources_path.Append("missingImage.gif");
         bool success = file_util::ReadFileToString(path, &broken_image_data);
@@ -62,7 +61,7 @@ base::StringPiece GetDataResource(int resource_id) {
       return broken_image_data;
     }
     case IDR_TEXTAREA_RESIZER: {
-      static std::string resize_corner_data;
+      CR_DEFINE_STATIC_LOCAL(std::string, resize_corner_data, ());
       if (resize_corner_data.empty()) {
         FilePath path = resources_path.Append("textAreaResizeCorner.png");
         bool success = file_util::ReadFileToString(path, &resize_corner_data);
@@ -75,5 +74,3 @@ base::StringPiece GetDataResource(int resource_id) {
 
   return ResourceBundle::GetSharedInstance().GetRawDataResource(resource_id);
 }
-
-}  // namespace webkit_glue

@@ -41,7 +41,7 @@ class NetworkMenuWebUI : public NetworkMenu {
 
 NetworkMenuWebUI::NetworkMenuWebUI(NetworkMenu::Delegate* delegate,
                                    WebUI* web_ui)
-    : NetworkMenu(delegate, false),
+    : NetworkMenu(delegate),
       web_ui_(web_ui) {
 }
 
@@ -92,9 +92,12 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
 
 // NetworkDropdown -------------------------------------------------------------
 
-NetworkDropdown::NetworkDropdown(WebUI* web_ui, gfx::NativeWindow parent_window)
+NetworkDropdown::NetworkDropdown(WebUI* web_ui,
+                                 gfx::NativeWindow parent_window,
+                                 bool oobe)
     : parent_window_(parent_window),
-      web_ui_(web_ui) {
+      web_ui_(web_ui),
+      oobe_(oobe) {
   network_menu_.reset(new NetworkMenuWebUI(this, web_ui));
   network_icon_.reset(
       new NetworkMenuIcon(this, NetworkMenuIcon::DROPDOWN_MODE));
@@ -104,6 +107,10 @@ NetworkDropdown::NetworkDropdown(WebUI* web_ui, gfx::NativeWindow parent_window)
 
 NetworkDropdown::~NetworkDropdown() {
   CrosLibrary::Get()->GetNetworkLibrary()->RemoveNetworkManagerObserver(this);
+}
+
+void NetworkDropdown::SetLastNetworkType(ConnectionType last_network_type) {
+  network_icon_->set_last_network_type(last_network_type);
 }
 
 void NetworkDropdown::OnItemChosen(int id) {
@@ -128,7 +135,7 @@ void NetworkDropdown::OpenButtonOptions() {
 }
 
 bool NetworkDropdown::ShouldOpenButtonOptions() const {
-  return true;
+  return !oobe_;
 }
 
 void NetworkDropdown::OnNetworkManagerChanged(NetworkLibrary* cros) {

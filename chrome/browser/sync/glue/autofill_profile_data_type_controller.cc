@@ -11,18 +11,20 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/api/syncable_service.h"
-#include "chrome/browser/sync/profile_sync_factory.h"
+#include "chrome/browser/sync/profile_sync_components_factory.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
 AutofillProfileDataTypeController::AutofillProfileDataTypeController(
-    ProfileSyncFactory* profile_sync_factory,
+    ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile)
     : NewNonFrontendDataTypeController(profile_sync_factory, profile),
       personal_data_(NULL) {
@@ -47,7 +49,7 @@ bool AutofillProfileDataTypeController::StartModels() {
     return true;
   } else {
     notification_registrar_.Add(this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
-                                NotificationService::AllSources());
+                                content::NotificationService::AllSources());
     return false;
   }
 }
@@ -61,14 +63,14 @@ void AutofillProfileDataTypeController::OnPersonalDataChanged() {
     DoStartAssociationAsync();
   } else {
     notification_registrar_.Add(this, chrome::NOTIFICATION_WEB_DATABASE_LOADED,
-                                NotificationService::AllSources());
+                                content::NotificationService::AllSources());
   }
 }
 
 void AutofillProfileDataTypeController::Observe(
     int notification_type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   notification_registrar_.RemoveAll();
   DoStartAssociationAsync();
 }

@@ -45,9 +45,6 @@ SearchProviderTest::SearchProviderTest()
   if (!test_server_started_)
     return;
 
-  // Enable the search provider additions.
-  launch_arguments_.AppendSwitch(switches::kEnableSearchProviderApiV2);
-
   // Map all hosts to our local server.
   std::string host_rule("MAP * " + test_server_.host_port_pair().ToString());
   launch_arguments_.AppendSwitchASCII(switches::kHostRules, host_rule);
@@ -120,8 +117,8 @@ void SearchProviderTest::FinishIsSearchProviderInstalledTest(
   // Unescapes and normalizes the actual result.
   std::string value = net::UnescapeURLComponent(
       escaped_value,
-      UnescapeRule::NORMAL | UnescapeRule::SPACES |
-      UnescapeRule::URL_SPECIAL_CHARS | UnescapeRule::CONTROL_CHARS);
+      net::UnescapeRule::NORMAL | net::UnescapeRule::SPACES |
+      net::UnescapeRule::URL_SPECIAL_CHARS | net::UnescapeRule::CONTROL_CHARS);
   value += "\n";
   ReplaceSubstringsAfterOffset(&value, 0, "\r", "");
   EXPECT_STREQ("1\n", value.c_str());

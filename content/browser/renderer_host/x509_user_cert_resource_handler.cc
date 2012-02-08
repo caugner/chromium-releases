@@ -5,11 +5,11 @@
 #include "content/browser/renderer_host/x509_user_cert_resource_handler.h"
 
 #include "base/string_util.h"
-#include "content/browser/content_browser_client.h"
 #include "content/browser/download/download_types.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/common/resource_response.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/common/resource_response.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/mime_util.h"
@@ -24,7 +24,6 @@ X509UserCertResourceHandler::X509UserCertResourceHandler(
     : host_(host),
       request_(request),
       content_length_(0),
-      buffer_(new DownloadBuffer),
       read_buffer_(NULL),
       resource_buffer_(NULL),
       render_process_host_id_(render_process_host_id),
@@ -37,17 +36,19 @@ bool X509UserCertResourceHandler::OnUploadProgress(int request_id,
   return true;
 }
 
-bool X509UserCertResourceHandler::OnRequestRedirected(int request_id,
-                                                      const GURL& url,
-                                                      ResourceResponse* resp,
-                                                      bool* defer) {
+bool X509UserCertResourceHandler::OnRequestRedirected(
+    int request_id,
+    const GURL& url,
+    content::ResourceResponse* resp,
+    bool* defer) {
   url_ = url;
   return true;
 }
 
-bool X509UserCertResourceHandler::OnResponseStarted(int request_id,
-                                                    ResourceResponse* resp) {
-  return (resp->response_head.mime_type == "application/x-x509-user-cert");
+bool X509UserCertResourceHandler::OnResponseStarted(
+    int request_id,
+    content::ResourceResponse* resp) {
+  return (resp->mime_type == "application/x-x509-user-cert");
 }
 
 bool X509UserCertResourceHandler::OnWillStart(int request_id,
@@ -85,7 +86,7 @@ bool X509UserCertResourceHandler::OnReadCompleted(int request_id,
   net::IOBuffer* buffer = NULL;
   read_buffer_.swap(&buffer);
   // TODO(gauravsh): Should this be handled by a separate thread?
-  buffer_->contents.push_back(std::make_pair(buffer, *bytes_read));
+  buffer_.push_back(std::make_pair(buffer, *bytes_read));
 
   return true;
 }
@@ -115,14 +116,7 @@ X509UserCertResourceHandler::~X509UserCertResourceHandler() {
 }
 
 void X509UserCertResourceHandler::AssembleResource() {
-  size_t bytes_copied = 0;
-  resource_buffer_ = new net::IOBuffer(content_length_);
-
-  for (size_t i = 0; i < buffer_->contents.size(); ++i) {
-    net::IOBuffer* data = buffer_->contents[i].first;
-    const int data_len = buffer_->contents[i].second;
-    DCHECK(bytes_copied + data_len <= content_length_);
-    memcpy(resource_buffer_->data() + bytes_copied, data->data(), data_len);
-    bytes_copied += data_len;
-  }
+  size_t assembled_bytes = 0;
+  resource_buffer_ = content::AssembleData(buffer_, &assembled_bytes);
+  DCHECK_EQ(content_length_, assembled_bytes);
 }

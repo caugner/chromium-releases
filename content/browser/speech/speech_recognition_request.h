@@ -12,11 +12,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
-#include "content/common/net/url_fetcher.h"
-#include "content/common/speech_input_result.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 
 class URLFetcher;
+
+namespace content {
+struct SpeechInputResult;
+}
 
 namespace net {
 class URLRequestContextGetter;
@@ -26,7 +29,7 @@ namespace speech_input {
 
 // Provides a simple interface for sending recorded speech data to the server
 // and get back recognition results.
-class SpeechRecognitionRequest : public URLFetcher::Delegate {
+class SpeechRecognitionRequest : public content::URLFetcherDelegate {
  public:
   // ID passed to URLFetcher::Create(). Used for testing.
   CONTENT_EXPORT static int url_fetcher_id_for_tests;
@@ -34,7 +37,8 @@ class SpeechRecognitionRequest : public URLFetcher::Delegate {
   // Interface for receiving callbacks from this object.
   class CONTENT_EXPORT Delegate {
    public:
-    virtual void SetRecognitionResult(const SpeechInputResult& result) = 0;
+    virtual void SetRecognitionResult(
+        const content::SpeechInputResult& result) = 0;
 
    protected:
     virtual ~Delegate() {}
@@ -62,13 +66,13 @@ class SpeechRecognitionRequest : public URLFetcher::Delegate {
 
   CONTENT_EXPORT bool HasPendingRequest() { return url_fetcher_ != NULL; }
 
-  // URLFetcher::Delegate methods.
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  // content::URLFetcherDelegate methods.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
  private:
   scoped_refptr<net::URLRequestContextGetter> url_context_;
   Delegate* delegate_;
-  scoped_ptr<URLFetcher> url_fetcher_;
+  scoped_ptr<content::URLFetcher> url_fetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(SpeechRecognitionRequest);
 };

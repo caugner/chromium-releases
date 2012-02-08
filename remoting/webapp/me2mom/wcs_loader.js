@@ -14,7 +14,9 @@
 /** @suppress {duplicate} */
 var remoting = remoting || {};
 
-(function() {
+/** @type {remoting.WcsLoader} */
+remoting.wcsLoader = null;
+
 /**
  * @constructor
  */
@@ -28,17 +30,18 @@ remoting.WcsLoader = function() {
 
   /**
    * A callback that gets an updated access token asynchronously.
-   * @type {function(function(string): void): void}
+   * @param {function(string): void} setToken The function to call when the
+   *     token is available.
    * @private
    */
-  this.refreshToken_ = function(setToken) {};
+  this.tokenRefresh_ = function(setToken) {};
 
   /**
-   * The function called when WCS is ready.
-   * @type {function(): void}
+   * The function called when WCS is ready, or on error.
+   * @param {boolean} success Whether or not the load succeeded.
    * @private
    */
-  this.onReady_ = function() {};
+  this.onReady_ = function(success) {};
 
   /**
    * @enum {string}
@@ -59,7 +62,7 @@ remoting.WcsLoader = function() {
 
   /**
    * The WCS client that will be downloaded.
-   * @type {Object}
+   * @type {remoting.WcsIqClient}
    */
   this.wcsIqClient = null;
 };
@@ -73,6 +76,28 @@ remoting.WcsLoader.prototype.TALK_GADGET_URL_ =
     'https://talkgadget.google.com/talkgadget/';
 
 /**
+ * Starts loading the WCS IQ client aynchronously. If an OAuth2 token is
+ * already available, this is equivalent to the start method; if not, then
+ * the client will be loaded after an OAuth token exchange has occurred.
+ *
+ * @param {function(function(string): void): void} tokenRefresh
+ *     Gets a (possibly updated) access token asynchronously.
+ * @param {function(boolean): void} onReady If the WCS connection is not yet
+ *     ready, then |onReady| will be called with a true parameter when it is
+ *     ready, or with a false parameter on error.
+ * @return {void} Nothing.
+ */
+remoting.WcsLoader.prototype.startAsync = function(tokenRefresh, onReady) {
+  /** @type {remoting.WcsLoader} */
+  var that = this;
+  /** @param {string} token The OAuth2 access token. */
+  var start = function(token) {
+    that.start(token, tokenRefresh, onReady);
+  };
+  remoting.oauth2.callWithToken(start);
+};
+
+/**
  * Starts loading the WCS IQ client.
  *
  * When it's loaded, construct remoting.wcs as a wrapper for it.
@@ -82,18 +107,19 @@ remoting.WcsLoader.prototype.TALK_GADGET_URL_ =
  * than once.
  *
  * @param {string} token An OAuth2 access token.
- * @param {function(function(string): void): void} refreshToken
+ * @param {function(function(string): void): void} tokenRefresh
  *     Gets a (possibly updated) access token asynchronously.
- * @param {function(): void} onReady If the WCS connection is not yet
- *     ready, then |onReady| will be called when it is ready.
+ * @param {function(boolean): void} onReady If the WCS connection is not yet
+ *     ready, then |onReady| will be called with a true parameter when it is
+ *     ready, or with a false parameter on error.
  * @return {void} Nothing.
  */
-remoting.WcsLoader.prototype.start = function(token, refreshToken, onReady) {
+remoting.WcsLoader.prototype.start = function(token, tokenRefresh, onReady) {
   this.token_ = token;
-  this.refreshToken_ = refreshToken;
+  this.tokenRefresh_ = tokenRefresh;
   this.onReady_ = onReady;
   if (this.loadState_ == this.LoadState_.READY) {
-    this.onReady_();
+    this.onReady_(true);
     return;
   }
   if (this.loadState_ == this.LoadState_.STARTED) {
@@ -103,8 +129,10 @@ remoting.WcsLoader.prototype.start = function(token, refreshToken, onReady) {
   var node = document.createElement('script');
   node.src = this.TALK_GADGET_URL_ + 'iq?access_token=' + this.token_;
   node.type = 'text/javascript';
+  /** @type {remoting.WcsLoader} */
   var that = this;
   node.onload = function() { that.constructWcs_(); };
+  node.onerror = function() { that.onReady_(false); };
   document.body.insertBefore(node, document.body.firstChild);
   return;
 };
@@ -116,12 +144,16 @@ remoting.WcsLoader.prototype.start = function(token, refreshToken, onReady) {
  * @private
  */
 remoting.WcsLoader.prototype.constructWcs_ = function() {
+  /** @type {remoting.WcsLoader} */
   var that = this;
+  /** @param {function(string): void} setToken The function to call when the
+      token is available. */
+  var tokenRefresh = function(setToken) { that.tokenRefresh_(setToken); };
   remoting.wcs = new remoting.Wcs(
       remoting.wcsLoader.wcsIqClient,
       this.token_,
       function() { that.onWcsReady_(); },
-      function(setToken) { that.refreshToken_(setToken); });
+      tokenRefresh);
 };
 
 /**
@@ -132,8 +164,6 @@ remoting.WcsLoader.prototype.constructWcs_ = function() {
  */
 remoting.WcsLoader.prototype.onWcsReady_ = function() {
   this.loadState_ = this.LoadState_.READY;
-  this.onReady_();
-  this.onReady_ = function() {};
+  this.onReady_(true);
+  this.onReady_ = function(success) {};
 };
-
-}());

@@ -46,17 +46,15 @@ class ResourceCreationProxy : public InterfaceProxy,
                                         PP_AudioSampleRate sample_rate,
                                         uint32_t sample_frame_count) OVERRIDE;
   virtual PP_Resource CreateAudioTrusted(PP_Instance instance) OVERRIDE;
+  virtual PP_Resource CreateAudioInput(
+      PP_Instance instance,
+      PP_Resource config_id,
+      PPB_AudioInput_Callback audio_input_callback,
+      void* user_data) OVERRIDE;
+  virtual PP_Resource CreateAudioInputTrusted(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateBroker(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateBuffer(PP_Instance instance,
                                    uint32_t size) OVERRIDE;
-  virtual PP_Resource CreateContext3D(PP_Instance instance,
-                                      PP_Config3D_Dev config,
-                                      PP_Resource share_context,
-                                      const int32_t* attrib_list) OVERRIDE;
-  virtual PP_Resource CreateContext3DRaw(PP_Instance instance,
-                                         PP_Config3D_Dev config,
-                                         PP_Resource share_context,
-                                         const int32_t* attrib_list) OVERRIDE;
   virtual PP_Resource CreateDirectoryReader(PP_Resource directory_ref) OVERRIDE;
   virtual PP_Resource CreateFileChooser(
       PP_Instance instance,
@@ -70,8 +68,6 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual PP_Resource CreateFlashMenu(PP_Instance instance,
                                       const PP_Flash_Menu* menu_data) OVERRIDE;
   virtual PP_Resource CreateFlashNetConnector(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateFlashTCPSocket(PP_Instance instance) OVERRIDE;
-  virtual PP_Resource CreateFlashUDPSocket(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateFontObject(
       PP_Instance instance,
       const PP_FontDescription_Dev* description) OVERRIDE;
@@ -106,12 +102,11 @@ class ResourceCreationProxy : public InterfaceProxy,
       const PP_Point* mouse_movement) OVERRIDE;
   virtual PP_Resource CreateScrollbar(PP_Instance instance,
                                       PP_Bool vertical) OVERRIDE;
-  virtual PP_Resource CreateSurface3D(PP_Instance instance,
-                                      PP_Config3D_Dev config,
-                                      const int32_t* attrib_list) OVERRIDE;
+  virtual PP_Resource CreateTCPSocketPrivate(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateTransport(PP_Instance instance,
                                       const char* name,
                                       PP_TransportType type) OVERRIDE;
+  virtual PP_Resource CreateUDPSocketPrivate(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateURLLoader(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateURLRequestInfo(
       PP_Instance instance,
@@ -123,6 +118,7 @@ class ResourceCreationProxy : public InterfaceProxy,
       PP_VideoDecoder_Profile profile) OVERRIDE;
   virtual PP_Resource CreateVideoLayer(PP_Instance instance,
                                        PP_VideoLayerMode_Dev mode) OVERRIDE;
+  virtual PP_Resource CreateWebSocket(PP_Instance instance) OVERRIDE;
   virtual PP_Resource CreateWheelInputEvent(
       PP_Instance instance,
       PP_TimeTicks time_stamp,
@@ -135,23 +131,6 @@ class ResourceCreationProxy : public InterfaceProxy,
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
  private:
-  // IPC message handlers (called in browser).
-  void OnMsgCreateAudio(PP_Instance instance,
-                        int32_t sample_rate,
-                        uint32_t sample_frame_count,
-                        HostResource* result);
-  void OnMsgCreateGraphics2D(PP_Instance instance,
-                             const PP_Size& size,
-                             PP_Bool is_always_opaque,
-                             HostResource* result);
-  void OnMsgCreateImageData(PP_Instance instance,
-                            int32_t format,
-                            const PP_Size& size,
-                            PP_Bool init_to_zero,
-                            HostResource* result,
-                            std::string* image_data_desc,
-                            ImageHandle* result_image_handle);
-
   DISALLOW_COPY_AND_ASSIGN(ResourceCreationProxy);
 };
 

@@ -5,6 +5,7 @@
 #include "ppapi/proxy/ppp_video_decoder_proxy.h"
 
 #include "ppapi/proxy/host_dispatcher.h"
+#include "ppapi/proxy/plugin_globals.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
@@ -27,7 +28,7 @@ void ProvidePictureBuffers(PP_Instance instance, PP_Resource decoder,
 
   HostDispatcher::GetForInstance(instance)->Send(
       new PpapiMsg_PPPVideoDecoder_ProvidePictureBuffers(
-          INTERFACE_ID_PPP_VIDEO_DECODER_DEV,
+          API_ID_PPP_VIDEO_DECODER_DEV,
           decoder_resource, req_num_of_bufs, *dimensions));
 }
 
@@ -38,7 +39,7 @@ void DismissPictureBuffer(PP_Instance instance, PP_Resource decoder,
 
   HostDispatcher::GetForInstance(instance)->Send(
       new PpapiMsg_PPPVideoDecoder_DismissPictureBuffer(
-          INTERFACE_ID_PPP_VIDEO_DECODER_DEV,
+          API_ID_PPP_VIDEO_DECODER_DEV,
           decoder_resource, picture_buffer_id));
 }
 
@@ -49,7 +50,7 @@ void PictureReady(PP_Instance instance, PP_Resource decoder,
 
   HostDispatcher::GetForInstance(instance)->Send(
       new PpapiMsg_PPPVideoDecoder_PictureReady(
-          INTERFACE_ID_PPP_VIDEO_DECODER_DEV, decoder_resource, *picture));
+          API_ID_PPP_VIDEO_DECODER_DEV, decoder_resource, *picture));
 }
 
 void EndOfStream(PP_Instance instance, PP_Resource decoder) {
@@ -58,7 +59,7 @@ void EndOfStream(PP_Instance instance, PP_Resource decoder) {
 
   HostDispatcher::GetForInstance(instance)->Send(
       new PpapiMsg_PPPVideoDecoder_NotifyEndOfStream(
-          INTERFACE_ID_PPP_VIDEO_DECODER_DEV, decoder_resource));
+          API_ID_PPP_VIDEO_DECODER_DEV, decoder_resource));
 }
 
 void NotifyError(PP_Instance instance, PP_Resource decoder,
@@ -68,7 +69,7 @@ void NotifyError(PP_Instance instance, PP_Resource decoder,
 
   HostDispatcher::GetForInstance(instance)->Send(
       new PpapiMsg_PPPVideoDecoder_NotifyError(
-          INTERFACE_ID_PPP_VIDEO_DECODER_DEV, decoder_resource, error));
+          API_ID_PPP_VIDEO_DECODER_DEV, decoder_resource, error));
 }
 
 static const PPP_VideoDecoder_Dev video_decoder_interface = {
@@ -102,7 +103,7 @@ const InterfaceProxy::Info* PPP_VideoDecoder_Proxy::GetInfo() {
   static const Info info = {
     &video_decoder_interface,
     PPP_VIDEODECODER_DEV_INTERFACE,
-    INTERFACE_ID_PPP_VIDEO_DECODER_DEV,
+    API_ID_PPP_VIDEO_DECODER_DEV,
     false,
     &CreateVideoDecoderPPPProxy,
   };
@@ -131,7 +132,7 @@ bool PPP_VideoDecoder_Proxy::OnMessageReceived(const IPC::Message& msg) {
 void PPP_VideoDecoder_Proxy::OnMsgProvidePictureBuffers(
     const HostResource& decoder, uint32_t req_num_of_bufs,
     const PP_Size& dimensions) {
-  PP_Resource plugin_decoder = PluginResourceTracker::GetInstance()->
+  PP_Resource plugin_decoder = PluginGlobals::Get()->plugin_resource_tracker()->
       PluginResourceForHostResource(decoder);
   ppp_video_decoder_impl_->ProvidePictureBuffers(
       decoder.instance(), plugin_decoder, req_num_of_bufs, &dimensions);
@@ -139,7 +140,7 @@ void PPP_VideoDecoder_Proxy::OnMsgProvidePictureBuffers(
 
 void PPP_VideoDecoder_Proxy::OnMsgDismissPictureBuffer(
     const HostResource& decoder, int32_t picture_id) {
-  PP_Resource plugin_decoder = PluginResourceTracker::GetInstance()->
+  PP_Resource plugin_decoder = PluginGlobals::Get()->plugin_resource_tracker()->
       PluginResourceForHostResource(decoder);
   ppp_video_decoder_impl_->DismissPictureBuffer(
       decoder.instance(), plugin_decoder, picture_id);
@@ -147,7 +148,7 @@ void PPP_VideoDecoder_Proxy::OnMsgDismissPictureBuffer(
 
 void PPP_VideoDecoder_Proxy::OnMsgPictureReady(
     const HostResource& decoder, const PP_Picture_Dev& picture) {
-  PP_Resource plugin_decoder = PluginResourceTracker::GetInstance()->
+  PP_Resource plugin_decoder = PluginGlobals::Get()->plugin_resource_tracker()->
       PluginResourceForHostResource(decoder);
   ppp_video_decoder_impl_->PictureReady(
       decoder.instance(), plugin_decoder, &picture);
@@ -155,7 +156,7 @@ void PPP_VideoDecoder_Proxy::OnMsgPictureReady(
 
 void PPP_VideoDecoder_Proxy::OnMsgNotifyEndOfStream(
     const HostResource& decoder) {
-  PP_Resource plugin_decoder = PluginResourceTracker::GetInstance()->
+  PP_Resource plugin_decoder = PluginGlobals::Get()->plugin_resource_tracker()->
       PluginResourceForHostResource(decoder);
   ppp_video_decoder_impl_->EndOfStream(decoder.instance(),
                                           plugin_decoder);
@@ -163,7 +164,7 @@ void PPP_VideoDecoder_Proxy::OnMsgNotifyEndOfStream(
 
 void PPP_VideoDecoder_Proxy::OnMsgNotifyError(
     const HostResource& decoder, PP_VideoDecodeError_Dev error) {
-  PP_Resource plugin_decoder = PluginResourceTracker::GetInstance()->
+  PP_Resource plugin_decoder = PluginGlobals::Get()->plugin_resource_tracker()->
       PluginResourceForHostResource(decoder);
   ppp_video_decoder_impl_->NotifyError(
       decoder.instance(), plugin_decoder, error);

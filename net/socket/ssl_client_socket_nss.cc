@@ -65,6 +65,7 @@
 #include <map>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -74,6 +75,7 @@
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/values.h"
+#include "crypto/ec_private_key.h"
 #include "crypto/rsa_private_key.h"
 #include "crypto/scoped_nss_types.h"
 #include "net/base/address_list.h"
@@ -92,6 +94,7 @@
 #include "net/base/ssl_connection_status_flags.h"
 #include "net/base/ssl_info.h"
 #include "net/base/sys_addrinfo.h"
+#include "net/base/x509_certificate_net_log_param.h"
 #include "net/ocsp/nss_ocsp.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/dns_cert_provenance_checker.h"
@@ -438,7 +441,8 @@ SSLClientSocketNSS::SSLClientSocketNSS(ClientSocketHandle* transport_socket,
       transport_recv_busy_(false),
       corked_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(handshake_io_callback_(
-          this, &SSLClientSocketNSS::OnHandshakeIOComplete)),
+          base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
+                     base::Unretained(this)))),
       transport_(transport_socket),
       host_and_port_(host_and_port),
       ssl_config_(ssl_config),
@@ -466,6 +470,7 @@ SSLClientSocketNSS::SSLClientSocketNSS(ClientSocketHandle* transport_socket,
       net_log_(transport_socket->socket()->NetLog()),
       ssl_host_info_(ssl_host_info),
       dns_cert_checker_(context.dns_cert_checker),
+      next_proto_status_(kNextProtoUnsupported),
       valid_thread_id_(base::kInvalidThreadId) {
   EnterFunction("");
 }
@@ -478,6 +483,11 @@ SSLClientSocketNSS::~SSLClientSocketNSS() {
 
 // static
 void SSLClientSocketNSS::ClearSessionCache() {
+  // SSL_ClearSessionCache can't be called before NSS is initialized.  Don't
+  // bother initializing NSS just to clear an empty SSL session cache.
+  if (!NSS_IsInitialized())
+    return;
+
   SSL_ClearSessionCache();
 }
 
@@ -498,6 +508,8 @@ void SSLClientSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
   }
   ssl_info->is_issued_by_known_root =
       server_cert_verify_result_->is_issued_by_known_root;
+  ssl_info->client_cert_sent =
+      ssl_config_.send_client_cert && ssl_config_.client_cert;
 
   PRUint16 cipher_suite =
       SSLConnectionStatusToCipherSuite(ssl_connection_status_);
@@ -552,39 +564,11 @@ int SSLClientSocketNSS::ExportKeyingMaterial(const base::StringPiece& label,
 }
 
 SSLClientSocket::NextProtoStatus
-SSLClientSocketNSS::GetNextProto(std::string* proto) {
-#if defined(SSL_NEXT_PROTO_NEGOTIATED)
-  unsigned char buf[255];
-  int state;
-  unsigned len;
-  SECStatus rv = SSL_GetNextProto(nss_fd_, &state, buf, &len, sizeof(buf));
-  if (rv != SECSuccess) {
-    NOTREACHED() << "Error return from SSL_GetNextProto: " << rv;
-    proto->clear();
-    return kNextProtoUnsupported;
-  }
-  // We don't check for truncation because sizeof(buf) is large enough to hold
-  // the maximum protocol size.
-  switch (state) {
-    case SSL_NEXT_PROTO_NO_SUPPORT:
-      proto->clear();
-      return kNextProtoUnsupported;
-    case SSL_NEXT_PROTO_NEGOTIATED:
-      *proto = std::string(reinterpret_cast<char*>(buf), len);
-      return kNextProtoNegotiated;
-    case SSL_NEXT_PROTO_NO_OVERLAP:
-      *proto = std::string(reinterpret_cast<char*>(buf), len);
-      return kNextProtoNoOverlap;
-    default:
-      NOTREACHED() << "Unknown status from SSL_GetNextProto: " << state;
-      proto->clear();
-      return kNextProtoUnsupported;
-  }
-#else
-  // No NPN support in the libssl that we are building with.
-  proto->clear();
-  return kNextProtoUnsupported;
-#endif
+SSLClientSocketNSS::GetNextProto(std::string* proto,
+                                 std::string* server_protos) {
+  *proto = next_proto_;
+  *server_protos = server_protos_;
+  return next_proto_status_;
 }
 
 int SSLClientSocketNSS::Connect(OldCompletionCallback* callback) {
@@ -966,12 +950,10 @@ int SSLClientSocketNSS::InitializeSSLOptions() {
 
 #ifdef SSL_NEXT_PROTO_NEGOTIATED
   if (!ssl_config_.next_protos.empty()) {
-    rv = SSL_SetNextProtoNego(
-       nss_fd_,
-       reinterpret_cast<const unsigned char *>(ssl_config_.next_protos.data()),
-       ssl_config_.next_protos.size());
+    rv = SSL_SetNextProtoCallback(
+        nss_fd_, SSLClientSocketNSS::NextProtoCallback, this);
     if (rv != SECSuccess)
-      LogFailedNSSFunction(net_log_, "SSL_SetNextProtoNego", "");
+      LogFailedNSSFunction(net_log_, "SSL_SetNextProtoCallback", "");
   }
 #endif
 
@@ -997,6 +979,15 @@ int SSLClientSocketNSS::InitializeSSLOptions() {
                      ssl_config_.origin_bound_certs_enabled);
   if (rv != SECSuccess)
     LogFailedNSSFunction(net_log_, "SSL_OptionSet", "SSL_ENABLE_OB_CERTS");
+#endif
+
+#ifdef SSL_ENCRYPT_CLIENT_CERTS
+  // For now, enable the encrypted client certificates extension only if
+  // origin-bound certificates are enabled.
+  rv = SSL_OptionSet(nss_fd_, SSL_ENCRYPT_CLIENT_CERTS,
+                     ssl_config_.origin_bound_certs_enabled);
+  if (rv != SECSuccess)
+    LogFailedNSSFunction(net_log_, "SSL_OptionSet", "SSL_ENCRYPT_CLIENT_CERTS");
 #endif
 
   rv = SSL_OptionSet(nss_fd_, SSL_HANDSHAKE_AS_CLIENT, PR_TRUE);
@@ -1084,6 +1075,11 @@ void SSLClientSocketNSS::UpdateServerCert() {
       // case CreateFromDERCertChain() returns NULL.
       server_cert_ = X509Certificate::CreateFromDERCertChain(
           certs.AsStringPieceVector());
+      if (server_cert_ && net_log_.IsLoggingBytes()) {
+        net_log_.AddEvent(
+            NetLog::TYPE_SSL_CERTIFICATES_RECEIVED,
+            make_scoped_refptr(new X509CertificateNetLogParam(server_cert_)));
+      }
     }
   }
 }
@@ -1400,7 +1396,7 @@ bool SSLClientSocketNSS::LoadSSLHostInfo() {
 
 int SSLClientSocketNSS::DoLoadSSLHostInfo() {
   EnterFunction("");
-  int rv = ssl_host_info_->WaitForDataReady(&handshake_io_callback_);
+  int rv = ssl_host_info_->WaitForDataReady(handshake_io_callback_);
   GotoState(STATE_HANDSHAKE);
 
   if (rv == OK) {
@@ -1559,20 +1555,48 @@ int SSLClientSocketNSS::ImportOBCertAndKey(CERTCertificate** cert,
     return MapNSSError(PORT_GetError());
 
   // Set the private key.
-  SECItem der_private_key_info;
-  der_private_key_info.data = (unsigned char*)ob_private_key_.data();
-  der_private_key_info.len = ob_private_key_.size();
-  const unsigned int key_usage = KU_DIGITAL_SIGNATURE;
-  crypto::ScopedPK11Slot slot(PK11_GetInternalSlot());
-  SECStatus rv = PK11_ImportDERPrivateKeyInfoAndReturnKey(
-      slot.get(), &der_private_key_info, NULL, NULL, PR_FALSE, PR_FALSE,
-      key_usage, key, NULL);
+  switch (ob_cert_type_) {
+    case CLIENT_CERT_RSA_SIGN: {
+      SECItem der_private_key_info;
+      der_private_key_info.data = (unsigned char*)ob_private_key_.data();
+      der_private_key_info.len = ob_private_key_.size();
+      const unsigned int key_usage = KU_DIGITAL_SIGNATURE;
+      crypto::ScopedPK11Slot slot(PK11_GetInternalSlot());
+      SECStatus rv = PK11_ImportDERPrivateKeyInfoAndReturnKey(
+          slot.get(), &der_private_key_info, NULL, NULL, PR_FALSE, PR_FALSE,
+          key_usage, key, NULL);
 
-  if (rv != SECSuccess) {
-    int error = MapNSSError(PORT_GetError());
-    CERT_DestroyCertificate(*cert);
-    *cert = NULL;
-    return error;
+      if (rv != SECSuccess) {
+        int error = MapNSSError(PORT_GetError());
+        CERT_DestroyCertificate(*cert);
+        *cert = NULL;
+        return error;
+      }
+      break;
+    }
+
+    case CLIENT_CERT_ECDSA_SIGN: {
+      SECKEYPublicKey* public_key = NULL;
+      if (!crypto::ECPrivateKey::ImportFromEncryptedPrivateKeyInfo(
+          OriginBoundCertService::kEPKIPassword,
+          reinterpret_cast<const unsigned char*>(ob_private_key_.data()),
+          ob_private_key_.size(),
+          &(*cert)->subjectPublicKeyInfo,
+          false,
+          false,
+          key,
+          &public_key)) {
+        CERT_DestroyCertificate(*cert);
+        *cert = NULL;
+        return MapNSSError(PORT_GetError());
+      }
+      SECKEY_DestroyPublicKey(public_key);
+      break;
+    }
+
+    default:
+      NOTREACHED();
+      return ERR_INVALID_ARGUMENT;
   }
 
   return OK;
@@ -1681,7 +1705,7 @@ int SSLClientSocketNSS::DoVerifyCert(int result) {
     UMA_HISTOGRAM_TIMES("Net.SSLVerificationMergedMsSaved",
                         end_time - ssl_host_info_->verification_start_time());
     server_cert_verify_result_ = &ssl_host_info_->cert_verify_result();
-    return ssl_host_info_->WaitForCertVerification(&handshake_io_callback_);
+    return ssl_host_info_->WaitForCertVerification(handshake_io_callback_);
   } else {
     UMA_HISTOGRAM_ENUMERATION("Net.SSLVerificationMerged", 0 /* false */, 2);
   }
@@ -1695,9 +1719,11 @@ int SSLClientSocketNSS::DoVerifyCert(int result) {
   server_cert_verify_result_ = &local_server_cert_verify_result_;
   return verifier_->Verify(
       server_cert_, host_and_port_.host(), flags,
+      ssl_config_.crl_set,
       &local_server_cert_verify_result_,
       base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
-                 base::Unretained(this)));
+                 base::Unretained(this)),
+      net_log_);
 }
 
 // Derived from AuthCertificateCallback() in
@@ -1887,7 +1913,7 @@ void SSLClientSocketNSS::SaveSSLHostInfo() {
 
   // If the SSLHostInfo hasn't managed to load from disk yet then we can't save
   // anything.
-  if (ssl_host_info_->WaitForDataReady(NULL) != OK)
+  if (ssl_host_info_->WaitForDataReady(net::CompletionCallback()) != OK)
     return;
 
   SSLHostInfo::State* state = ssl_host_info_->mutable_state();
@@ -2125,15 +2151,20 @@ bool SSLClientSocketNSS::OriginBoundCertNegotiated(PRFileDesc* socket) {
 }
 
 SECStatus SSLClientSocketNSS::OriginBoundClientAuthHandler(
+    const SECItem* cert_types,
     CERTCertificate** result_certificate,
     SECKEYPrivateKey** result_private_key) {
   ob_cert_xtn_negotiated_ = true;
 
   // We have negotiated the origin-bound certificate extension.
   std::string origin = "https://" + host_and_port_.ToString();
+  std::vector<uint8> requested_cert_types(cert_types->data,
+                                          cert_types->data + cert_types->len);
   net_log_.BeginEvent(NetLog::TYPE_SSL_GET_ORIGIN_BOUND_CERT, NULL);
   int error = origin_bound_cert_service_->GetOriginBoundCert(
       origin,
+      requested_cert_types,
+      &ob_cert_type_,
       &ob_private_key_,
       &ob_cert_,
       base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
@@ -2181,10 +2212,12 @@ SECStatus SSLClientSocketNSS::PlatformClientAuthHandler(
 
   that->net_log_.AddEvent(NetLog::TYPE_SSL_CLIENT_CERT_REQUESTED, NULL);
 
+  const SECItem* cert_types = SSL_GetRequestedClientCertificateTypes(socket);
+
   // Check if an origin-bound certificate is requested.
   if (OriginBoundCertNegotiated(socket)) {
     return that->OriginBoundClientAuthHandler(
-        result_nss_certificate, result_nss_private_key);
+        cert_types, result_nss_certificate, result_nss_private_key);
   }
 
   that->client_auth_cert_needed_ = !that->ssl_config_.send_client_cert;
@@ -2299,12 +2332,14 @@ SECStatus SSLClientSocketNSS::PlatformClientAuthHandler(
   find_by_issuer_para.pfnFindCallback = ClientCertFindCallback;
 
   PCCERT_CHAIN_CONTEXT chain_context = NULL;
+  DWORD find_flags = CERT_CHAIN_FIND_BY_ISSUER_CACHE_ONLY_FLAG |
+                     CERT_CHAIN_FIND_BY_ISSUER_CACHE_ONLY_URL_FLAG;
 
   for (;;) {
     // Find a certificate chain.
     chain_context = CertFindChainInStore(my_cert_store,
                                          X509_ASN_ENCODING,
-                                         0,
+                                         find_flags,
                                          CERT_CHAIN_FIND_BY_ISSUER,
                                          &find_by_issuer_para,
                                          chain_context);
@@ -2413,8 +2448,11 @@ SECStatus SSLClientSocketNSS::PlatformClientAuthHandler(
         }
       }
       if (os_error == noErr) {
-        int cert_count = CFArrayGetCount(chain);
-        CFRelease(chain);
+        int cert_count = 0;
+        if (chain) {
+          cert_count = CFArrayGetCount(chain);
+          CFRelease(chain);
+        }
         that->net_log_.AddEvent(NetLog::TYPE_SSL_CLIENT_CERT_PROVIDED,
             make_scoped_refptr(new NetLogIntegerParameter("cert_count",
                                                           cert_count)));
@@ -2481,10 +2519,12 @@ SECStatus SSLClientSocketNSS::ClientAuthHandler(
 
   that->net_log_.AddEvent(NetLog::TYPE_SSL_CLIENT_CERT_REQUESTED, NULL);
 
+  const SECItem* cert_types = SSL_GetRequestedClientCertificateTypes(socket);
+
   // Check if an origin-bound certificate is requested.
   if (OriginBoundCertNegotiated(socket)) {
     return that->OriginBoundClientAuthHandler(
-        result_certificate, result_private_key);
+        cert_types, result_certificate, result_private_key);
   }
 
   // Regular client certificate requested.
@@ -2562,6 +2602,61 @@ void SSLClientSocketNSS::HandshakeCallback(PRFileDesc* socket,
 
   that->UpdateServerCert();
   that->UpdateConnectionStatus();
+}
+
+// NextProtoCallback is called by NSS during the handshake, if the server
+// supports NPN, to select a protocol from the list that the server offered.
+// See the comment in net/third_party/nss/ssl/ssl.h for the meanings of the
+// arguments.
+// static
+SECStatus
+SSLClientSocketNSS::NextProtoCallback(void* arg,
+                                      PRFileDesc* nss_fd,
+                                      const unsigned char* protos,
+                                      unsigned int protos_len,
+                                      unsigned char* proto_out,
+                                      unsigned int* proto_out_len) {
+  SSLClientSocketNSS* that = reinterpret_cast<SSLClientSocketNSS*>(arg);
+
+  // For each protocol in server preference, see if we support it.
+  for (unsigned int i = 0; i < protos_len; ) {
+    const size_t len = protos[i];
+    for (std::vector<std::string>::const_iterator
+         j = that->ssl_config_.next_protos.begin();
+         j != that->ssl_config_.next_protos.end(); j++) {
+      // Having very long elements in the |next_protos| vector isn't a disaster
+      // because they'll never be selected, but it does indicate an error
+      // somewhere.
+      DCHECK_LT(j->size(), 256u);
+
+      if (j->size() == len &&
+          memcmp(&protos[i + 1], j->data(), len) == 0) {
+        that->next_proto_status_ = kNextProtoNegotiated;
+        that->next_proto_ = *j;
+        break;
+      }
+    }
+
+    if (that->next_proto_status_ == kNextProtoNegotiated)
+      break;
+
+    // NSS checks that the data in |protos| is well formed, so we know that
+    // this doesn't cause us to jump off the end of the buffer.
+    i += len + 1;
+  }
+
+  that->server_protos_.assign(
+      reinterpret_cast<const char*>(protos), protos_len);
+
+  // If we didn't find a protocol, we select the first one from our list.
+  if (that->next_proto_status_ != kNextProtoNegotiated) {
+    that->next_proto_status_ = kNextProtoNoOverlap;
+    that->next_proto_ = that->ssl_config_.next_protos[0];
+  }
+
+  memcpy(proto_out, that->next_proto_.data(), that->next_proto_.size());
+  *proto_out_len = that->next_proto_.size();
+  return SECSuccess;
 }
 
 void SSLClientSocketNSS::EnsureThreadIdAssigned() const {

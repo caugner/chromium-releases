@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/string_util.h"
+#include "base/logging.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/sync/glue/synced_session_tracker.h"
 
 namespace browser_sync {
@@ -93,8 +94,8 @@ SyncedSession* SyncedSessionTracker::GetSession(
     synced_session = synced_session_map_[session_tag];
   } else {
     synced_session = new SyncedSession;
-    VLOG(1) << "Creating new session with tag " << session_tag << " at "
-            << synced_session;
+    DVLOG(1) << "Creating new session with tag " << session_tag << " at "
+             << synced_session;
     synced_session->session_tag = session_tag;
     synced_session_map_[session_tag] = synced_session;
   }
@@ -151,8 +152,8 @@ bool SyncedSessionTracker::DeleteOldSessionWindowIfNecessary(
    // Clear the tabs first, since we don't want the destructor to destroy
    // them. Their deletion will be handled by DeleteOldSessionTab below.
   if (!window_wrapper.owned) {
-    VLOG(1) << "Deleting closed window "
-            << window_wrapper.window_ptr->window_id.id();
+    DVLOG(1) << "Deleting closed window "
+             << window_wrapper.window_ptr->window_id.id();
     window_wrapper.window_ptr->tabs.clear();
     delete window_wrapper.window_ptr;
     return true;
@@ -165,13 +166,13 @@ bool SyncedSessionTracker::DeleteOldSessionTabIfNecessary(
   if (!tab_wrapper.owned) {
     if (VLOG_IS_ON(1)) {
       SessionTab* tab_ptr = tab_wrapper.tab_ptr;
-      std::string title = "";
+      std::string title;
       if (tab_ptr->navigations.size() > 0) {
-        title = " (" + UTF16ToASCII(
+        title = " (" + UTF16ToUTF8(
             tab_ptr->navigations[tab_ptr->navigations.size()-1].title()) + ")";
       }
-      VLOG(1) << "Deleting closed tab " << tab_ptr->tab_id.id() << title
-              << " from window " << tab_ptr->window_id.id();
+      DVLOG(1) << "Deleting closed tab " << tab_ptr->tab_id.id() << title
+               << " from window " << tab_ptr->window_id.id();
     }
     unmapped_tabs_.erase(tab_wrapper.tab_ptr);
     delete tab_wrapper.tab_ptr;
@@ -215,18 +216,18 @@ void SyncedSessionTracker::PutWindowInSession(const std::string& session_tag,
   if (iter != synced_window_map_[session_tag].end()) {
     iter->second.owned = true;
     window_ptr = iter->second.window_ptr;
-    VLOG(1) << "Putting seen window " << window_id  << " at " << window_ptr
-            << "in " << (session_tag == local_session_tag_ ?
-                             "local session" : session_tag);
+    DVLOG(1) << "Putting seen window " << window_id  << " at " << window_ptr
+             << "in " << (session_tag == local_session_tag_ ?
+                          "local session" : session_tag);
   } else {
     // Create the window.
     window_ptr = new SessionWindow();
     window_ptr->window_id.set_id(window_id);
     synced_window_map_[session_tag][window_id] =
         SessionWindowWrapper(window_ptr, true);
-    VLOG(1) << "Putting new window " << window_id  << " at " << window_ptr
-            << "in " << (session_tag == local_session_tag_ ?
-                             "local session" : session_tag);
+    DVLOG(1) << "Putting new window " << window_id  << " at " << window_ptr
+             << "in " << (session_tag == local_session_tag_ ?
+                          "local session" : session_tag);
   }
   DCHECK(window_ptr);
   DCHECK_EQ(window_ptr->window_id.id(), window_id);
@@ -242,7 +243,7 @@ void SyncedSessionTracker::PutTabInWindow(const std::string& session_tag,
   unmapped_tabs_.erase(tab_ptr);
   synced_tab_map_[session_tag][tab_id].owned = true;
   tab_ptr->window_id.set_id(window_id);
-  VLOG(1) << "  - tab " << tab_id << " added to window "<< window_id;
+  DVLOG(1) << "  - tab " << tab_id << " added to window "<< window_id;
   DCHECK(GetSession(session_tag)->windows.find(window_id) !=
          GetSession(session_tag)->windows.end());
   std::vector<SessionTab*>& window_tabs =
@@ -262,24 +263,26 @@ SessionTab* SyncedSessionTracker::GetTab(
       synced_tab_map_[session_tag].find(tab_id);
   if (iter != synced_tab_map_[session_tag].end()) {
     tab_ptr = iter->second.tab_ptr;
-    std::string title = "";
-    if (tab_ptr->navigations.size() > 0) {
-      title = " (" + UTF16ToASCII(
-          tab_ptr->navigations[tab_ptr->navigations.size()-1].title()) + ")";
+    if (VLOG_IS_ON(1)) {
+      std::string title;
+      if (tab_ptr->navigations.size() > 0) {
+        title = " (" + UTF16ToUTF8(
+            tab_ptr->navigations[tab_ptr->navigations.size()-1].title()) + ")";
+      }
+      DVLOG(1) << "Getting "
+               << (session_tag == local_session_tag_ ?
+                   "local session" : session_tag)
+               << "'s seen tab " << tab_id  << " at " << tab_ptr << title;
     }
-    VLOG(1) << "Getting "
-            << (session_tag == local_session_tag_ ?
-                "local session" : session_tag)
-            << "'s seen tab " << tab_id  << " at " << tab_ptr << title;
   } else {
     tab_ptr = new SessionTab();
     tab_ptr->tab_id.set_id(tab_id);
     synced_tab_map_[session_tag][tab_id] = SessionTabWrapper(tab_ptr, false);
     unmapped_tabs_.insert(tab_ptr);
-    VLOG(1) << "Getting "
-            << (session_tag == local_session_tag_ ?
-                "local session" : session_tag)
-            << "'s new tab " << tab_id  << " at " << tab_ptr;
+    DVLOG(1) << "Getting "
+             << (session_tag == local_session_tag_ ?
+                 "local session" : session_tag)
+             << "'s new tab " << tab_id  << " at " << tab_ptr;
   }
   DCHECK(tab_ptr);
   DCHECK_EQ(tab_ptr->tab_id.id(), tab_id);

@@ -4,6 +4,7 @@
 
 #include "content/browser/in_process_webkit/indexed_db_context.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -11,20 +12,21 @@
 #include "base/string_util.h"
 #include "base/task.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/in_process_webkit/indexed_db_quota_client.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBDatabase.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/database/database_util.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/quota/quota_manager.h"
 #include "webkit/quota/special_storage_policy.h"
 
+using content::BrowserThread;
 using webkit_database::DatabaseUtil;
 using WebKit::WebIDBDatabase;
 using WebKit::WebIDBFactory;
@@ -87,41 +89,6 @@ const FilePath::CharType IndexedDBContext::kIndexedDBDirectory[] =
 const FilePath::CharType IndexedDBContext::kIndexedDBExtension[] =
     FILE_PATH_LITERAL(".leveldb");
 
-class IndexedDBContext::IndexedDBGetUsageAndQuotaCallback :
-    public quota::QuotaManager::GetUsageAndQuotaCallback {
- public:
-  IndexedDBGetUsageAndQuotaCallback(IndexedDBContext* context,
-                                    const GURL& origin_url)
-      : context_(context),
-        origin_url_(origin_url) {
-  }
-
-  void Run(quota::QuotaStatusCode status, int64 usage, int64 quota) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-    DCHECK(status == quota::kQuotaStatusOk || status == quota::kQuotaErrorAbort)
-        << "status was " << status;
-    if (status == quota::kQuotaErrorAbort) {
-      // We seem to no longer care to wait around for the answer.
-      return;
-    }
-    BrowserThread::PostTask(BrowserThread::WEBKIT, FROM_HERE,
-        NewRunnableMethod(context_.get(),
-                          &IndexedDBContext::GotUpdatedQuota,
-                          origin_url_,
-                          usage,
-                          quota));
-  }
-
-  virtual void RunWithParams(
-        const Tuple3<quota::QuotaStatusCode, int64, int64>& params) {
-    Run(params.a, params.b, params.c);
-  }
-
- private:
-  scoped_refptr<IndexedDBContext> context_;
-  const GURL origin_url_;
-};
-
 IndexedDBContext::IndexedDBContext(
     WebKitContext* webkit_context,
     quota::SpecialStoragePolicy* special_storage_policy,
@@ -158,11 +125,10 @@ IndexedDBContext::~IndexedDBContext() {
 
   // No WEBKIT thread here means we are running in a unit test where no clean
   // up is needed.
-  BrowserThread::PostTask(BrowserThread::WEBKIT, FROM_HERE,
-                          NewRunnableFunction(&ClearLocalState,
-                                              data_path_,
-                                              clear_local_state_on_exit_,
-                                              special_storage_policy_));
+  BrowserThread::PostTask(
+      BrowserThread::WEBKIT, FROM_HERE,
+      base::Bind(&ClearLocalState, data_path_, clear_local_state_on_exit_,
+                 special_storage_policy_));
 }
 
 WebIDBFactory* IndexedDBContext::GetIDBFactory() {
@@ -316,6 +282,22 @@ void IndexedDBContext::QueryDiskAndUpdateQuotaUsage(const GURL& origin_url) {
   }
 }
 
+void IndexedDBContext::GotUsageAndQuota(const GURL& origin_url,
+                                        quota::QuotaStatusCode status,
+                                        int64 usage, int64 quota) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK(status == quota::kQuotaStatusOk || status == quota::kQuotaErrorAbort)
+      << "status was " << status;
+  if (status == quota::kQuotaErrorAbort) {
+    // We seem to no longer care to wait around for the answer.
+    return;
+  }
+  BrowserThread::PostTask(
+      BrowserThread::WEBKIT, FROM_HERE,
+      base::Bind(&IndexedDBContext::GotUpdatedQuota, this, origin_url, usage,
+                 quota));
+}
+
 void IndexedDBContext::GotUpdatedQuota(const GURL& origin_url, int64 usage,
                                        int64 quota) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
@@ -326,20 +308,19 @@ void IndexedDBContext::QueryAvailableQuota(const GURL& origin_url) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::WEBKIT));
     if (quota_manager_proxy())
-      BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-          NewRunnableMethod(this, &IndexedDBContext::QueryAvailableQuota,
-                            origin_url));
+      BrowserThread::PostTask(
+          BrowserThread::IO, FROM_HERE,
+          base::Bind(&IndexedDBContext::QueryAvailableQuota, this, origin_url));
     return;
   }
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!quota_manager_proxy()->quota_manager())
     return;
-  IndexedDBGetUsageAndQuotaCallback* callback =
-      new IndexedDBGetUsageAndQuotaCallback(this, origin_url);
   quota_manager_proxy()->quota_manager()->GetUsageAndQuota(
       origin_url,
       quota::kStorageTypeTemporary,
-      callback);
+      base::Bind(&IndexedDBContext::GotUsageAndQuota,
+                 this, origin_url));
 }
 
 std::set<GURL>* IndexedDBContext::GetOriginSet() {

@@ -24,15 +24,15 @@
 #include "printing/print_job_constants.h"
 #include "printing/units.h"
 #include "third_party/skia/include/core/SkRect.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "webkit/glue/webpreferences.h"
@@ -100,7 +100,7 @@ int GetDPI(const PrintMsg_Print_Params* print_params) {
 
 bool PrintMsg_Print_Params_IsEmpty(const PrintMsg_Print_Params& params) {
   return !params.document_cookie && !params.desired_dpi && !params.max_shrink &&
-         !params.min_shrink && !params.dpi && params.printable_size.IsEmpty() &&
+         !params.min_shrink && !params.dpi && params.content_size.IsEmpty() &&
          !params.selection_only && params.page_size.IsEmpty() &&
          !params.margin_top && !params.margin_left &&
          !params.supports_alpha_blend;
@@ -108,7 +108,7 @@ bool PrintMsg_Print_Params_IsEmpty(const PrintMsg_Print_Params& params) {
 
 bool PageLayoutIsEqual(const PrintMsg_PrintPages_Params& oldParams,
                        const PrintMsg_PrintPages_Params& newParams) {
-  return oldParams.params.printable_size == newParams.params.printable_size &&
+  return oldParams.params.content_size == newParams.params.content_size &&
          oldParams.params.page_size == newParams.params.page_size &&
          oldParams.params.margin_top == newParams.params.margin_top &&
          oldParams.params.margin_left == newParams.params.margin_left &&
@@ -138,10 +138,10 @@ bool PrintMsg_Print_Params_IsEqual(
 void CalculatePrintCanvasSize(const PrintMsg_Print_Params& print_params,
                               gfx::Size* result) {
   int dpi = GetDPI(&print_params);
-  result->set_width(ConvertUnit(print_params.printable_size.width(), dpi,
+  result->set_width(ConvertUnit(print_params.content_size.width(), dpi,
                                 print_params.desired_dpi));
 
-  result->set_height(ConvertUnit(print_params.printable_size.height(), dpi,
+  result->set_height(ConvertUnit(print_params.content_size.height(), dpi,
                                  print_params.desired_dpi));
 }
 
@@ -462,7 +462,13 @@ void PrintWebViewHelper::PrintPage(WebKit::WebFrame* frame) {
 
   if (is_preview_enabled_) {
     print_preview_context_.InitWithFrame(frame);
-    RequestPrintPreview();
+
+    old_print_pages_params_.reset();  // Same as in RequestPrintPreview().
+    IPC::SyncMessage* msg = new PrintHostMsg_ScriptedPrintPreview(
+        routing_id(),
+        print_preview_context_.IsModifiable());
+    msg->EnableMessagePumping();
+    Send(msg);
   } else {
     Print(frame, WebNode());
   }
@@ -517,14 +523,8 @@ void PrintWebViewHelper::OnPrintForPrintPreview(
     return;
   }
 
-  scoped_ptr<PrepareFrameAndViewForPrint> prepare;
-  prepare.reset(new PrepareFrameAndViewForPrint(print_pages_params_->params,
-                                                pdf_frame, pdf_element));
-  UpdatePrintableSizeInPrintParameters(pdf_frame, pdf_element, prepare.get(),
-                                       &print_pages_params_->params);
-
   // Render Pages for printing.
-  if (!RenderPagesForPrint(pdf_frame, pdf_element, prepare.get())) {
+  if (!RenderPagesForPrint(pdf_frame, pdf_element)) {
     LOG(ERROR) << "RenderPagesForPrint failed";
     DidFinishPrinting(FAIL_PRINT);
   }
@@ -766,7 +766,7 @@ void PrintWebViewHelper::Print(WebKit::WebFrame* frame,
   }
 
   // Render Pages for printing.
-  if (!RenderPagesForPrint(frame, node, NULL)) {
+  if (!RenderPagesForPrint(frame, node)) {
     LOG(ERROR) << "RenderPagesForPrint failed";
     DidFinishPrinting(FAIL_PRINT);
   }
@@ -838,25 +838,20 @@ bool PrintWebViewHelper::CopyAndPrint(WebKit::WebFrame* web_frame) {
 #if defined(OS_MACOSX) || defined(OS_WIN)
 bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
                                     WebFrame* frame,
-                                    const WebNode& node,
-                                    PrepareFrameAndViewForPrint* prepare) {
+                                    const WebNode& node) {
   PrintMsg_Print_Params print_params = params.params;
-  scoped_ptr<PrepareFrameAndViewForPrint> prep_frame_view;
-  if (!prepare) {
-    prep_frame_view.reset(new PrepareFrameAndViewForPrint(print_params, frame,
-                                                          node));
-    prepare = prep_frame_view.get();
-  }
-  UpdatePrintableSizeInPrintParameters(frame, node, prepare, &print_params);
+  PrepareFrameAndViewForPrint prep_frame_view(print_params, frame, node);
+  UpdatePrintableSizeInPrintParameters(frame, node, &prep_frame_view,
+                                       &print_params);
 
-  int page_count = prepare->GetExpectedPageCount();
+  int page_count = prep_frame_view.GetExpectedPageCount();
   if (!page_count)
     return false;
   Send(new PrintHostMsg_DidGetPrintedPagesCount(routing_id(),
                                                 print_params.document_cookie,
                                                 page_count));
 
-  const gfx::Size& canvas_size = prepare->GetPrintCanvasSize();
+  const gfx::Size& canvas_size = prep_frame_view.GetPrintCanvasSize();
   PrintMsg_PrintPage_Params page_params;
   page_params.params = print_params;
   if (params.pages.empty()) {
@@ -879,7 +874,7 @@ bool PrintWebViewHelper::PrintPages(const PrintMsg_PrintPages_Params& params,
 void PrintWebViewHelper::didStopLoading() {
   PrintMsg_PrintPages_Params* params = print_pages_params_.get();
   DCHECK(params != NULL);
-  PrintPages(*params, print_web_view_->mainFrame(), WebNode(), NULL);
+  PrintPages(*params, print_web_view_->mainFrame(), WebNode());
 }
 
 // static - Not anonymous so that platform implementations can use it.
@@ -900,11 +895,11 @@ void PrintWebViewHelper::GetPageSizeAndMarginsInPoints(
       dpi, printing::kPixelsPerInch);
   int margin_right_in_pixels = ConvertUnit(
       default_params.page_size.width() -
-      default_params.printable_size.width() - default_params.margin_left,
+      default_params.content_size.width() - default_params.margin_left,
       dpi, printing::kPixelsPerInch);
   int margin_bottom_in_pixels = ConvertUnit(
       default_params.page_size.height() -
-      default_params.printable_size.height() - default_params.margin_top,
+      default_params.content_size.height() - default_params.margin_top,
       dpi, printing::kPixelsPerInch);
   int margin_left_in_pixels = ConvertUnit(
       default_params.margin_left,
@@ -959,7 +954,7 @@ void PrintWebViewHelper::UpdatePrintableSizeInPrintParameters(
   PrintWebViewHelper::GetPageSizeAndMarginsInPoints(frame, 0, *params,
                                                     &page_layout_in_points);
   int dpi = GetDPI(params);
-  params->printable_size = gfx::Size(
+  params->content_size = gfx::Size(
       static_cast<int>(ConvertUnitDouble(
           page_layout_in_points.content_width,
           printing::kPointsPerInch, dpi)),
@@ -1167,10 +1162,6 @@ bool PrintWebViewHelper::GetPrintSettingsFromUser(WebKit::WebFrame* frame,
   PrintHostMsg_ScriptedPrint_Params params;
   PrintMsg_PrintPages_Params print_settings;
 
-  // The routing id is sent across as it is needed to look up the
-  // corresponding RenderViewHost instance to signal and reset the
-  // pump messages event.
-  params.routing_id = render_view()->GetRoutingId();
   // host_window_ may be NULL at this point if the current window is a
   // popup and the print() command has been issued from the parent. The
   // receiver of this message has to deal with this.
@@ -1196,14 +1187,13 @@ bool PrintWebViewHelper::GetPrintSettingsFromUser(WebKit::WebFrame* frame,
 
 bool PrintWebViewHelper::RenderPagesForPrint(
     WebKit::WebFrame* frame,
-    const WebKit::WebNode& node,
-    PrepareFrameAndViewForPrint* prepare) {
+    const WebKit::WebNode& node) {
   PrintMsg_PrintPages_Params print_settings = *print_pages_params_;
   if (print_settings.params.selection_only) {
     return CopyAndPrint(frame);
   } else {
     // TODO: Always copy before printing.
-    return PrintPages(print_settings, frame, node, prepare);
+    return PrintPages(print_settings, frame, node);
   }
 }
 
@@ -1286,7 +1276,8 @@ void PrintWebViewHelper::DisplayPrintJobError() {
 
 void PrintWebViewHelper::RequestPrintPreview() {
   old_print_pages_params_.reset();
-  Send(new PrintHostMsg_RequestPrintPreview(routing_id()));
+  Send(new PrintHostMsg_RequestPrintPreview(
+      routing_id(), print_preview_context_.IsModifiable()));
 }
 
 bool PrintWebViewHelper::CheckForCancel() {
@@ -1386,8 +1377,6 @@ bool PrintWebViewHelper::PrintPreviewContext::CreatePreviewDocument(
   DCHECK_EQ(INITIALIZED, state_);
   state_ = RENDERING;
 
-  print_params_.reset(new PrintMsg_Print_Params(*print_params));
-
   metafile_.reset(new printing::PreviewMetafile);
   if (!metafile_->Init()) {
     set_error(PREVIEW_ERROR_METAFILE_INIT_FAILED);
@@ -1400,6 +1389,8 @@ bool PrintWebViewHelper::PrintPreviewContext::CreatePreviewDocument(
                                                          node()));
   UpdatePrintableSizeInPrintParameters(frame_, node_,
                                        prep_frame_view_.get(), print_params);
+
+  print_params_.reset(new PrintMsg_Print_Params(*print_params));
 
   total_page_count_ = prep_frame_view_->GetExpectedPageCount();
   if (total_page_count_ == 0) {
@@ -1537,7 +1528,7 @@ const WebKit::WebNode& PrintWebViewHelper::PrintPreviewContext::node() const {
 }
 
 int PrintWebViewHelper::PrintPreviewContext::total_page_count() const {
-  DCHECK(IsRendering());
+  DCHECK(state_ != UNINITIALIZED);
   return total_page_count_;
 }
 

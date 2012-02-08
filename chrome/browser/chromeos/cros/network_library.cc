@@ -18,29 +18,33 @@
 #include "base/i18n/icu_encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
+#include "base/json/json_writer.h"  // for debug output only.
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_tokenizer.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "base/utf_string_conversions.h"
 #include "base/utf_string_conversion_utils.h"
+#include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
+#include "chrome/browser/chromeos/cros/network_ui_data.h"
 #include "chrome/browser/chromeos/cros/onc_network_parser.h"
-#include "chrome/browser/chromeos/login/user_manager.h"
+#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/network_login_observer.h"
-#include "chrome/browser/chromeos/user_cros_settings_provider.h"
 #include "chrome/common/time_format.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "crypto/nss_util.h"  // crypto::GetTPMTokenInfo() for 802.1X and VPN.
 #include "grit/generated_resources.h"
+#include "net/base/x509_certificate.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/text/bytes_formatting.h"
+
+using content::BrowserThread;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Implementation notes.
@@ -314,6 +318,24 @@ GValue* ConvertValueToGValue(const Value* value) {
   return new GValue();
 }
 
+GHashTable* ConvertDictionaryValueToGValueMap(const DictionaryValue* dict) {
+  GHashTable* ghash =
+      g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+  for (DictionaryValue::key_iterator it = dict->begin_keys();
+       it != dict->end_keys(); ++it) {
+    std::string key = *it;
+    Value* val = NULL;
+    if (dict->GetWithoutPathExpansion(key, &val)) {
+      g_hash_table_insert(ghash,
+                          g_strdup(const_cast<char*>(key.c_str())),
+                          ConvertValueToGValue(val));
+    } else {
+      VLOG(2) << "Could not insert key " << key << " into hash";
+    }
+  }
+  return ghash;
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -379,10 +401,38 @@ Network::Network(const std::string& service_path,
       type_(type) {
 }
 
-Network::~Network() {}
+Network::~Network() {
+  for (PropertyMap::const_iterator props = property_map_.begin();
+       props != property_map_.end(); ++props) {
+     delete props->second;
+  }
+}
 
 void Network::SetNetworkParser(NetworkParser* parser) {
   network_parser_.reset(parser);
+}
+
+void Network::UpdatePropertyMap(PropertyIndex index, const base::Value& value) {
+  // Add the property to property_map_.  Delete previous value if necessary.
+  Value*& entry = property_map_[index];
+  delete entry;
+  entry = value.DeepCopy();
+  if (VLOG_IS_ON(2)) {
+    std::string value_json;
+    base::JSONWriter::Write(&value, true, &value_json);
+    VLOG(2) << "Updated property map on network: "
+            << unique_id() << "[" << index << "] = " << value_json;
+  }
+}
+
+bool Network::GetProperty(PropertyIndex index,
+                          const base::Value** value) const {
+  PropertyMap::const_iterator i = property_map_.find(index);
+  if (i == property_map_.end())
+    return false;
+  if (value != NULL)
+    *value = i->second;
+  return true;
 }
 
 void Network::SetState(ConnectionState new_state) {
@@ -770,6 +820,7 @@ void VirtualNetwork::SetOpenVPNCredentials(
     const std::string& username,
     const std::string& user_passphrase,
     const std::string& otp) {
+  // TODO(kmixter): Are we missing setting the CaCert property?
   SetStringProperty(flimflam::kOpenVPNClientCertIdProperty,
                     client_cert_id, &client_cert_id_);
   SetStringProperty(flimflam::kOpenVPNUserProperty, username, &username_);
@@ -1462,6 +1513,10 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
       const std::string& service_name,
       const std::string& server_hostname,
       ProviderType provider_type) = 0;
+  // Call to configure a wifi service. The identifier is either a service_path
+  // or a GUID. |info| is a dictionary of property values.
+  virtual void CallConfigureService(const std::string& identifier,
+                                    const DictionaryValue* info) = 0;
   // Called from NetworkConnectStart.
   // Calls NetworkConnectCompleted when the connection attept completes.
   virtual void CallConnectToNetwork(Network* network) = 0;
@@ -1689,7 +1744,8 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // virtual GetIPConfigs implemented in derived classes.
   // virtual SetIPConfig implemented in derived classes.
   virtual void SwitchToPreferredNetwork() OVERRIDE;
-  virtual bool LoadOncNetworks(const std::string& onc_blob) OVERRIDE;
+  virtual bool LoadOncNetworks(const std::string& onc_blob,
+                               const std::string& passcode) OVERRIDE;
   virtual bool SetActiveNetwork(ConnectionType type,
                                 const std::string& service_path) OVERRIDE;
 
@@ -2171,7 +2227,7 @@ const std::string& NetworkLibraryImplBase::IPAddress() const {
     result = ethernet_;  // Use non active ethernet addr if no active network.
   if (result)
     return result->ip_address();
-  static std::string null_address("0.0.0.0");
+  CR_DEFINE_STATIC_LOCAL(std::string, null_address, ("0.0.0.0"));
   return null_address;
 }
 
@@ -2777,20 +2833,43 @@ void NetworkLibraryImplBase::SwitchToPreferredNetwork() {
   }
 }
 
-bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob) {
+bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
+                                             const std::string& passcode) {
+  // TODO(gspencer): Add support for decrypting onc files. crbug.com/19397
   OncNetworkParser parser(onc_blob);
+
+  for (int i = 0; i < parser.GetCertificatesSize(); i++) {
+    // Insert each of the available certs into the certificate DB.
+    if (parser.ParseCertificate(i).get() == NULL) {
+      DLOG(WARNING) << "Cannot parse certificate in ONC file";
+      return false;
+    }
+  }
 
   for (int i = 0; i < parser.GetNetworkConfigsSize(); i++) {
     // Parse Open Network Configuration blob into a temporary Network object.
-    Network* network = parser.ParseNetwork(i);
-    if (!network) {
-      DLOG(WARNING) << "Cannot parse networks in ONC file";
+    scoped_ptr<Network> network(parser.ParseNetwork(i));
+    if (!network.get()) {
+      DLOG(WARNING) << "Cannot parse network in ONC file";
       return false;
     }
 
-    // TODO(chocobo): Pass parsed network values to flimflam update network.
+    DictionaryValue dict;
+    for (Network::PropertyMap::const_iterator props =
+             network->property_map_.begin();
+         props != network->property_map_.end(); ++props) {
+      std::string key =
+          NativeNetworkParser::property_mapper()->GetKey(props->first);
+      if (!key.empty())
+        dict.SetWithoutPathExpansion(key, props->second->DeepCopy());
+      else
+        VLOG(2) << "Property " << props->first << " will not be sent";
+    }
+
+    CallConfigureService(network->unique_id(), &dict);
   }
-  return true;
+  return (parser.GetNetworkConfigsSize() != 0 ||
+          parser.GetCertificatesSize() != 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -3287,6 +3366,8 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
   virtual void MonitorNetworkDeviceStop(
       const std::string& device_path) OVERRIDE;
 
+  virtual void CallConfigureService(const std::string& identifier,
+                                    const DictionaryValue* info) OVERRIDE;
   virtual void CallConnectToNetwork(Network* network) OVERRIDE;
   virtual void CallRequestWifiNetworkAndConnect(
       const std::string& ssid, ConnectionSecurity security) OVERRIDE;
@@ -3347,6 +3428,11 @@ class NetworkLibraryImplCros : public NetworkLibraryImplBase  {
 
   static void CellularRegisterCallback(void* object,
                                        const char* path,
+                                       NetworkMethodErrorType error,
+                                       const char* error_message);
+
+  static void ConfigureServiceCallback(void* object,
+                                       const char* service_path,
                                        NetworkMethodErrorType error,
                                        const char* error_message);
 
@@ -3580,9 +3666,10 @@ void NetworkLibraryImplCros::UpdateNetworkDeviceStatus(
         if (!device->data_roaming_allowed() && IsCellularAlwaysInRoaming()) {
           SetCellularDataRoamingAllowed(true);
         } else {
-          bool settings_value =
-              UserCrosSettingsProvider::cached_data_roaming_enabled();
-          if (device->data_roaming_allowed() != settings_value) {
+          bool settings_value;
+          if (CrosSettings::Get()->GetBoolean(
+                  kSignedDataRoamingEnabled, &settings_value) &&
+              device->data_roaming_allowed() != settings_value) {
             // Switch back to signed settings value.
             SetCellularDataRoamingAllowed(settings_value);
             return;
@@ -3605,6 +3692,32 @@ void NetworkLibraryImplCros::UpdateNetworkDeviceStatus(
 
 /////////////////////////////////////////////////////////////////////////////
 // NetworkLibraryImplBase connect implementation.
+
+// static callback
+void NetworkLibraryImplCros::ConfigureServiceCallback(
+    void* object,
+    const char* service_path,
+    NetworkMethodErrorType error,
+    const char* error_message) {
+  if (error != NETWORK_METHOD_ERROR_NONE) {
+    LOG(WARNING) << "Error from ConfigureService callback for: "
+                 << service_path
+                 << " Error: " << error << " Message: " << error_message;
+  }
+}
+
+void NetworkLibraryImplCros::CallConfigureService(const std::string& identifier,
+                                                  const DictionaryValue* info) {
+  GHashTable* ghash = ConvertDictionaryValueToGValueMap(info);
+  if (VLOG_IS_ON(2)) {
+    scoped_ptr<DictionaryValue> dict(ConvertGHashTable(ghash));
+    std::string dict_json;
+    base::JSONWriter::Write(static_cast<Value*>(dict.get()), true, &dict_json);
+    VLOG(2) << "ConfigureService will be called on:" << dict_json;
+  }
+  chromeos::ConfigureService(identifier.c_str(), ghash,
+                             ConfigureServiceCallback, this);
+}
 
 // static callback
 void NetworkLibraryImplCros::NetworkConnectCallback(
@@ -4661,9 +4774,10 @@ void NetworkLibraryImplCros::ParseNetworkDevice(const std::string& device_path,
     if (!device->data_roaming_allowed() && IsCellularAlwaysInRoaming()) {
       SetCellularDataRoamingAllowed(true);
     } else {
-      bool settings_value =
-          UserCrosSettingsProvider::cached_data_roaming_enabled();
-      if (device->data_roaming_allowed() != settings_value) {
+      bool settings_value;
+      if (CrosSettings::Get()->GetBoolean(
+              kSignedDataRoamingEnabled, &settings_value) &&
+          device->data_roaming_allowed() != settings_value) {
         // Switch back to signed settings value.
         SetCellularDataRoamingAllowed(settings_value);
       }
@@ -4692,6 +4806,8 @@ class NetworkLibraryImplStub : public NetworkLibraryImplBase {
   virtual void MonitorNetworkDeviceStop(
       const std::string& device_path) OVERRIDE {}
 
+  virtual void CallConfigureService(const std::string& identifier,
+                                    const DictionaryValue* info) OVERRIDE {}
   virtual void CallConnectToNetwork(Network* network) OVERRIDE;
   virtual void CallRequestWifiNetworkAndConnect(
       const std::string& ssid, ConnectionSecurity security) OVERRIDE;
@@ -4787,6 +4903,26 @@ void NetworkLibraryImplStub::Init() {
   cellular->imsi_ = "123456789012345";
   device_map_["cellular"] = cellular;
 
+  CellularApn apn;
+  apn.apn = "apn";
+  apn.network_id = "network_id";
+  apn.username = "username";
+  apn.password = "password";
+  apn.name = "name";
+  apn.localized_name = "localized_name";
+  apn.language = "language";
+
+  CellularApnList apn_list;
+  apn_list.push_back(apn);
+
+  NetworkDevice* cellular_gsm = new NetworkDevice("cellular_gsm");
+  cellular_gsm->type_ = TYPE_CELLULAR;
+  cellular_gsm->set_technology_family(TECHNOLOGY_FAMILY_GSM);
+  cellular_gsm->imsi_ = "123456789012345";
+  cellular_gsm->set_sim_pin_required(SIM_PIN_REQUIRED);
+  cellular_gsm->set_provider_apn_list(apn_list);
+  device_map_["cellular_gsm"] = cellular_gsm;
+
   // Profiles
   AddProfile("default", PROFILE_SHARED);
   AddProfile("user", PROFILE_USER);
@@ -4802,14 +4938,14 @@ void NetworkLibraryImplStub::Init() {
   ethernet->set_name("Fake Ethernet");
   ethernet->set_is_active(true);
   ethernet->set_connected(true);
-  AddStubNetwork(ethernet, PROFILE_NONE);
+  AddStubNetwork(ethernet, PROFILE_SHARED);
 
   WifiNetwork* wifi1 = new WifiNetwork("wifi1");
   wifi1->set_name("Fake WiFi1");
   wifi1->set_strength(100);
   wifi1->set_connected(true);
   wifi1->set_encryption(SECURITY_NONE);
-  AddStubNetwork(wifi1, PROFILE_NONE);
+  AddStubNetwork(wifi1, PROFILE_SHARED);
 
   WifiNetwork* wifi2 = new WifiNetwork("wifi2");
   wifi2->set_name("Fake WiFi2");
@@ -4846,8 +4982,22 @@ void NetworkLibraryImplStub::Init() {
   wifi6->set_strength(20);
   AddStubNetwork(wifi6, PROFILE_NONE);
 
+  WifiNetwork* wifi7 = new WifiNetwork("wifi7");
+  wifi7->set_name("Fake Wifi7 (policy-managed)");
+  wifi7->set_strength(100);
+  wifi7->set_connectable(false);
+  wifi7->set_passphrase_required(true);
+  wifi7->set_encryption(SECURITY_8021X);
+  wifi7->SetEAPMethod(EAP_METHOD_PEAP);
+  wifi7->SetEAPIdentity("enterprise@example.com");
+  wifi7->SetEAPPassphrase("password");
+  NetworkUIData wifi7_ui_data;
+  wifi7_ui_data.set_onc_source(NetworkUIData::ONC_SOURCE_DEVICE_POLICY);
+  wifi7_ui_data.FillDictionary(wifi7->ui_data());
+  AddStubNetwork(wifi7, PROFILE_USER);
+
   CellularNetwork* cellular1 = new CellularNetwork("cellular1");
-  cellular1->set_name("Fake Cellular1");
+  cellular1->set_name("Fake Cellular 1");
   cellular1->set_strength(100);
   cellular1->set_connected(true);
   cellular1->set_activation_state(ACTIVATION_STATE_ACTIVATED);
@@ -4857,12 +5007,32 @@ void NetworkLibraryImplStub::Init() {
   AddStubNetwork(cellular1, PROFILE_NONE);
 
   CellularNetwork* cellular2 = new CellularNetwork("cellular2");
-  cellular2->set_name("Fake Cellular2");
+  cellular2->set_name("Fake Cellular 2");
   cellular2->set_strength(50);
   cellular2->set_activation_state(ACTIVATION_STATE_NOT_ACTIVATED);
   cellular2->set_network_technology(NETWORK_TECHNOLOGY_UMTS);
   cellular2->set_roaming_state(ROAMING_STATE_ROAMING);
   AddStubNetwork(cellular2, PROFILE_NONE);
+
+  CellularNetwork* cellular3 = new CellularNetwork("cellular3");
+  cellular3->set_name("Fake Cellular 3 (policy-managed)");
+  cellular3->set_device_path(cellular->device_path());
+  cellular3->set_activation_state(ACTIVATION_STATE_ACTIVATED);
+  cellular3->set_network_technology(NETWORK_TECHNOLOGY_EVDO);
+  NetworkUIData cellular3_ui_data;
+  cellular3_ui_data.set_onc_source(NetworkUIData::ONC_SOURCE_USER_POLICY);
+  cellular3_ui_data.FillDictionary(cellular3->ui_data());
+  AddStubNetwork(cellular3, PROFILE_NONE);
+
+  CellularNetwork* cellular4 = new CellularNetwork("cellular4");
+  cellular4->set_name("Fake Cellular 4 (policy-managed)");
+  cellular4->set_device_path(cellular_gsm->device_path());
+  cellular4->set_activation_state(ACTIVATION_STATE_ACTIVATED);
+  cellular4->set_network_technology(NETWORK_TECHNOLOGY_GSM);
+  NetworkUIData cellular4_ui_data;
+  cellular4_ui_data.set_onc_source(NetworkUIData::ONC_SOURCE_USER_POLICY);
+  cellular4_ui_data.FillDictionary(cellular4->ui_data());
+  AddStubNetwork(cellular4, PROFILE_NONE);
 
   CellularDataPlan* base_plan = new CellularDataPlan();
   base_plan->plan_name = "Base plan";
@@ -4901,6 +5071,15 @@ void NetworkLibraryImplStub::Init() {
   vpn3->set_provider_type(PROVIDER_TYPE_OPEN_VPN);
   AddStubNetwork(vpn3, PROFILE_USER);
 
+  VirtualNetwork* vpn4 = new VirtualNetwork("vpn4");
+  vpn4->set_name("Fake VPN4 (policy-managed)");
+  vpn4->set_server_hostname("vpn4server.fake.com");
+  vpn4->set_provider_type(PROVIDER_TYPE_OPEN_VPN);
+  NetworkUIData vpn4_ui_data;
+  vpn4_ui_data.set_onc_source(NetworkUIData::ONC_SOURCE_DEVICE_POLICY);
+  vpn4_ui_data.FillDictionary(vpn4->ui_data());
+  AddStubNetwork(vpn4, PROFILE_USER);
+
   wifi_scanning_ = false;
   offline_mode_ = false;
 
@@ -4908,6 +5087,22 @@ void NetworkLibraryImplStub::Init() {
   // autotest browser_tests sometimes conclude the device is offline.
   CHECK(active_network()->connected());
   CHECK(connected_network()->is_active());
+
+  std::string test_blob(
+        "{"
+        "  \"NetworkConfigurations\": ["
+        "    {"
+        "      \"GUID\": \"guid\","
+        "      \"Type\": \"WiFi\","
+        "      \"WiFi\": {"
+        "        \"Security\": \"WEP\","
+        "        \"SSID\": \"MySSID\","
+        "      }"
+        "    }"
+        "  ],"
+        "  \"Certificates\": []"
+        "}");
+  LoadOncNetworks(test_blob, "");
 }
 
 ////////////////////////////////////////////////////////////////////////////

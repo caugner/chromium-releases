@@ -14,6 +14,7 @@ namespace gfx {
 class Canvas;
 class Point;
 class Rect;
+class Size;
 }
 
 namespace aura {
@@ -26,6 +27,9 @@ class TouchEvent;
 // Delegate interface for aura::Window.
 class AURA_EXPORT WindowDelegate {
  public:
+  // Returns the window's minimum size, or size 0,0 if there is no limit.
+  virtual gfx::Size GetMinimumSize() const = 0;
+
   // Called when the Window's position and/or size changes.
   virtual void OnBoundsChanged(const gfx::Rect& old_bounds,
                                const gfx::Rect& new_bounds) = 0;
@@ -47,6 +51,9 @@ class AURA_EXPORT WindowDelegate {
   virtual bool OnMouseEvent(MouseEvent* event) = 0;
 
   virtual ui::TouchStatus OnTouchEvent(TouchEvent* event) = 0;
+
+  // Returns true of the window can be focused.
+  virtual bool CanFocus() = 0;
 
   // Returns true if the window should be activated. |event| is either the mouse
   // event supplied if the activation is the result of a mouse, or the touch

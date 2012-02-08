@@ -6,8 +6,9 @@
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_INFOBAR_BACKGROUND_H_
 #pragma once
 
+#include "base/compiler_specific.h"
 #include "chrome/browser/infobars/infobar_delegate.h"
-#include "views/background.h"
+#include "ui/views/background.h"
 
 class InfoBarBackground : public views::Background {
  public:
@@ -18,7 +19,7 @@ class InfoBarBackground : public views::Background {
 
  private:
   // views::Background:
-  virtual void Paint(gfx::Canvas* canvas, views::View* view) const;
+  virtual void Paint(gfx::Canvas* canvas, views::View* view) const OVERRIDE;
 
   SkColor separator_color_;
   SkColor top_color_;

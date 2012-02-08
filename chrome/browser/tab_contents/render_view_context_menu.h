@@ -23,10 +23,12 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class ExtensionMenuItem;
+class PrintPreviewContextMenuObserver;
 class Profile;
 class RenderViewHost;
 class TabContents;
 class SpellingMenuObserver;
+class SpellCheckerSubMenuObserver;
 
 namespace gfx {
 class Point;
@@ -46,7 +48,7 @@ struct WebMediaPlayerAction;
 // The following snippet describes the simple usage that updates a context-menu
 // item with this interface.
 //
-//   class MyTask : public URLFetcher::Delegate {
+//   class MyTask : public content::URLFetcherDelegate {
 //    public:
 //     MyTask(RenderViewContextMenuProxy* proxy, int id)
 //         : proxy_(proxy),
@@ -54,7 +56,7 @@ struct WebMediaPlayerAction;
 //     }
 //     virtual ~MyTask() {
 //     }
-//     virtual void OnURLFetchComplete(const URLFetcher* source,
+//     virtual void OnURLFetchComplete(const content::URLFetcher* source,
 //                                     const GURL& url,
 //                                     const net::URLRequestStatus& status,
 //                                     int response,
@@ -66,7 +68,7 @@ struct WebMediaPlayerAction;
 //     }
 //     void Start(const GURL* url, net::URLRequestContextGetter* context) {
 //       fetcher_.reset(new URLFetcher(url, URLFetcher::GET, this));
-//       fetcher_->set_request_context(context);
+//       fetcher_->SetRequestContext(context);
 //       fetcher_->Start();
 //     }
 //
@@ -90,10 +92,17 @@ class RenderViewContextMenuProxy {
  public:
   // Add a menu item to a context menu.
   virtual void AddMenuItem(int command_id, const string16& title) = 0;
+  virtual void AddSeparator() = 0;
+
+  // Add a submenu item to a context menu.
+  virtual void AddSubMenu(int command_id,
+                          const string16& label,
+                          ui::MenuModel* model) = 0;
 
   // Update the status and text of the specified context-menu item.
   virtual void UpdateMenuItem(int command_id,
                               bool enabled,
+                              bool hidden,
                               const string16& title) = 0;
 
   // Retrieve the RenderViewHost (or Profile) instance associated with a context
@@ -129,11 +138,16 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
 
   // RenderViewContextMenuDelegate implementation.
   virtual void AddMenuItem(int command_id, const string16& title) OVERRIDE;
+  virtual void AddSeparator() OVERRIDE;
+  virtual void AddSubMenu(int command_id,
+                          const string16& label,
+                          ui::MenuModel* model) OVERRIDE;
   virtual void UpdateMenuItem(int command_id,
                               bool enabled,
+                              bool hidden,
                               const string16& title) OVERRIDE;
-  virtual RenderViewHost* GetRenderViewHost() const;
-  virtual Profile* GetProfile() const;
+  virtual RenderViewHost* GetRenderViewHost() const OVERRIDE;
+  virtual Profile* GetProfile() const OVERRIDE;
 
  protected:
   void InitMenu();
@@ -243,15 +257,20 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   // a text selection.
   GURL selection_navigation_url_;
 
-  ui::SimpleMenuModel spellcheck_submenu_model_;
   ui::SimpleMenuModel speech_input_submenu_model_;
   ui::SimpleMenuModel bidi_submenu_model_;
   ui::SimpleMenuModel protocol_handler_submenu_model_;
   ScopedVector<ui::SimpleMenuModel> extension_menu_models_;
   scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
 
-  // An observer that handles a spelling-menu items.
+  // An observer that handles spelling-menu items.
   scoped_ptr<SpellingMenuObserver> spelling_menu_observer_;
+
+  // An observer that handles a 'spell-checker options' submenu.
+  scoped_ptr<SpellCheckerSubMenuObserver> spellchecker_submenu_observer_;
+
+  // An observer that disables menu items when print preview is active.
+  scoped_ptr<PrintPreviewContextMenuObserver> print_preview_menu_observer_;
 
   // Our observers.
   mutable ObserverList<RenderViewContextMenuObserver> observers_;

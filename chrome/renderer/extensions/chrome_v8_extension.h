@@ -25,12 +25,6 @@ class RenderView;
 
 // This is a base class for chrome extension bindings.  Common features that
 // are shared by different modules go here.
-//
-// TODO(aa): Remove the extension-system specific bits of this and move to
-// renderer/, or even to renderer/bindings and use DEPS to enforce separation
-// from extension system.
-//
-// TODO(aa): Add unit testing for this class.
 class ChromeV8Extension : public v8::Extension {
  public:
   typedef std::set<ChromeV8Extension*> InstanceSet;
@@ -48,18 +42,13 @@ class ChromeV8Extension : public v8::Extension {
 
   ExtensionDispatcher* extension_dispatcher() { return extension_dispatcher_; }
 
-  // Returns a hidden variable for use by the bindings in the specified context
-  // that is unreachable by the page for the current context.
-  static v8::Handle<v8::Value> GetChromeHidden(
-      const v8::Handle<v8::Context>& context);
-
   void ContextWillBeReleased(ChromeV8Context* context);
 
   // Derived classes should call this at the end of their implementation in
   // order to expose common native functions, like GetChromeHidden, to the
   // v8 extension.
   virtual v8::Handle<v8::FunctionTemplate>
-      GetNativeFunction(v8::Handle<v8::String> name);
+      GetNativeFunction(v8::Handle<v8::String> name) OVERRIDE;
 
  protected:
   template<class T>
@@ -80,7 +69,7 @@ class ChromeV8Extension : public v8::Extension {
   // Checks that the current context contains an extension that has permission
   // to execute the specified function. If it does not, a v8 exception is thrown
   // and the method returns false. Otherwise returns true.
-  bool CheckPermissionForCurrentRenderView(
+  bool CheckCurrentContextAccessToExtensionAPI(
       const std::string& function_name) const;
 
   // Create a handler for |context|. If a subclass of ChromeV8Extension wishes
@@ -93,7 +82,7 @@ class ChromeV8Extension : public v8::Extension {
   ExtensionDispatcher* extension_dispatcher_;
 
  private:
-  static const char* GetStringResource(int resource_id);
+  static base::StringPiece GetStringResource(int resource_id);
 
   // Helper to print from bindings javascript.
   static v8::Handle<v8::Value> Print(const v8::Arguments& args);

@@ -18,6 +18,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
+#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/customization_document.h"
 #include "chrome/browser/chromeos/language_preferences.h"
@@ -31,7 +32,6 @@
 #include "chrome/browser/chromeos/login/network_screen.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
 #include "chrome/browser/chromeos/login/registration_screen.h"
-#include "chrome/browser/chromeos/login/signed_settings_temp_storage.h"
 #include "chrome/browser/chromeos/login/update_screen.h"
 #include "chrome/browser/chromeos/login/user_image_screen.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -40,14 +40,15 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/options/options_util.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/accelerator.h"
 
 #if defined(USE_LINUX_BREAKPAD)
 #include "chrome/app/breakpad_linux.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -364,17 +365,6 @@ void WizardController::OnNetworkOffline() {
   ShowLoginScreen();
 }
 
-void WizardController::OnAccountCreateBack() {
-  ShowLoginScreen();
-}
-
-void WizardController::OnAccountCreated() {
-  ShowLoginScreen();
-  // TODO(dpolukhin): clear password memory for real. Now it is not
-  // a problem because we can't extract password from the form.
-  password_.clear();
-}
-
 void WizardController::OnConnectionFailed() {
   // TODO(dpolukhin): show error message after login screen is displayed.
   ShowLoginScreen();
@@ -386,22 +376,9 @@ void WizardController::OnUpdateCompleted() {
 
 void WizardController::OnEulaAccepted() {
   MarkEulaAccepted();
-  // TODO(pastarmovj): Make this code cache the value for the pref in a better
-  // way until we can store it in the policy blob. See explanation below:
-  // At this point we can not write this in the signed settings pref blob.
-  // But we can at least create the consent file and Chrome would port that
-  // if the device is owned by a local user. In case of enterprise enrolled
-  // device the setting will be respected only until the policy is not set.
-  SignedSettingsTempStorage::Store(
-      kStatsReportingPref,
-      (usage_statistics_reporting_ ? "true" : "false"),
-      g_browser_process->local_state());
   bool enabled =
       OptionsUtil::ResolveMetricsReportingEnabled(usage_statistics_reporting_);
-  // Make sure the local state cached value is updated too because the real
-  // policy will only get written when the owner is created and the cache won't
-  // be updated until the policy is reread.
-  g_browser_process->local_state()->SetBoolean(kStatsReportingPref, enabled);
+  CrosSettings::Get()->SetBoolean(kStatsReportingPref, enabled);
   if (enabled) {
 #if defined(USE_LINUX_BREAKPAD)
     // The crash reporter initialization needs IO to complete.
@@ -650,12 +627,6 @@ void WizardController::OnExit(ExitCodes exit_code) {
       break;
     case NETWORK_OFFLINE:
       OnNetworkOffline();
-      break;
-    case ACCOUNT_CREATE_BACK:
-      OnAccountCreateBack();
-      break;
-    case ACCOUNT_CREATED:
-      OnAccountCreated();
       break;
     case CONNECTION_FAILED:
       OnConnectionFailed();

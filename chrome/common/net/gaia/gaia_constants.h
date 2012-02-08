@@ -23,6 +23,9 @@ extern const char kRemotingService[];
 extern const char kCloudPrintService[];
 extern const char kDeviceManagementService[];
 extern const char kDeviceManagementServiceOAuth[];
+extern const char kCWSService[];
+extern const char kCWSNotificationScope[];
+extern const char kLSOService[];
 
 // Used with uber auth tokens when needed.
 extern const char kGaiaSid[];
@@ -30,6 +33,8 @@ extern const char kGaiaLsid[];
 extern const char kGaiaOAuthToken[];
 extern const char kGaiaOAuthSecret[];
 extern const char kGaiaOAuthDuration[];
+extern const char kGaiaOAuth2LoginRefreshToken[];
+extern const char kGaiaOAuth2LoginAccessToken[];
 
 }  // namespace GaiaConstants
 

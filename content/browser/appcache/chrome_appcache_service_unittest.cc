@@ -6,8 +6,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/appcache/appcache_database.h"
 #include "webkit/appcache/appcache_storage_impl.h"
@@ -15,6 +15,9 @@
 #include "webkit/quota/mock_special_storage_policy.h"
 
 #include <set>
+
+using content::BrowserThread;
+using content::BrowserThreadImpl;
 
 namespace {
 const FilePath::CharType kTestingAppCacheDirname[] =
@@ -37,8 +40,9 @@ class ChromeAppCacheServiceTest : public testing::Test {
         kProtectedManifestURL(kProtectedManifest),
         kNormalManifestURL(kNormalManifest),
         kSessionOnlyManifestURL(kSessionOnlyManifest),
-        db_thread_(BrowserThread::DB, &message_loop_),
         file_thread_(BrowserThread::FILE, &message_loop_),
+        file_user_blocking_thread_(
+            BrowserThread::FILE_USER_BLOCKING, &message_loop_),
         cache_thread_(BrowserThread::CACHE, &message_loop_),
         io_thread_(BrowserThread::IO, &message_loop_) {
   }
@@ -56,10 +60,10 @@ class ChromeAppCacheServiceTest : public testing::Test {
   const GURL kSessionOnlyManifestURL;
 
  private:
-  BrowserThread db_thread_;
-  BrowserThread file_thread_;
-  BrowserThread cache_thread_;
-  BrowserThread io_thread_;
+  BrowserThreadImpl file_thread_;
+  BrowserThreadImpl file_user_blocking_thread_;
+  BrowserThreadImpl cache_thread_;
+  BrowserThreadImpl io_thread_;
 };
 
 scoped_refptr<ChromeAppCacheService>

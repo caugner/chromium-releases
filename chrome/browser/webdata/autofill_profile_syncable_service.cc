@@ -12,12 +12,15 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/webdata/autofill_table.h"
-#include "chrome/browser/webdata/web_database.h"
 #include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/browser/webdata/web_database.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/guid.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -48,9 +51,10 @@ AutofillProfileSyncableService::AutofillProfileSyncableService(
     : web_data_service_(web_data_service) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
   DCHECK(web_data_service_);
-  notification_registrar_.Add(this,
-                              chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
-                              Source<WebDataService>(web_data_service_));
+  notification_registrar_.Add(
+      this,
+      chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED,
+      content::Source<WebDataService>(web_data_service_));
 }
 
 AutofillProfileSyncableService::~AutofillProfileSyncableService() {
@@ -193,10 +197,10 @@ SyncError AutofillProfileSyncableService::ProcessSyncChanges(
 }
 
 void AutofillProfileSyncableService::Observe(int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK_EQ(type, chrome::NOTIFICATION_AUTOFILL_PROFILE_CHANGED);
-  DCHECK_EQ(web_data_service_, Source<WebDataService>(source).ptr());
+  DCHECK_EQ(web_data_service_, content::Source<WebDataService>(source).ptr());
   // Check if sync is on. If we receive notification prior to the sync being set
   // up we are going to process all when MergeData..() is called. If we receive
   // notification after the sync exited, it will be sinced next time Chrome
@@ -204,7 +208,8 @@ void AutofillProfileSyncableService::Observe(int type,
   if (!sync_processor_.get())
     return;
 
-  AutofillProfileChange* change = Details<AutofillProfileChange>(details).ptr();
+  AutofillProfileChange* change =
+      content::Details<AutofillProfileChange>(details).ptr();
   ActOnChange(*change);
 }
 

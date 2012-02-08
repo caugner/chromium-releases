@@ -8,13 +8,10 @@
 #include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
-#include "chrome/browser/chromeos/login/network_selection_view.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
-#include "chrome/browser/chromeos/login/views_network_screen_actor.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -74,10 +71,8 @@ void NetworkScreen::OnNetworkManagerChanged(NetworkLibrary* network_lib) {
 // NetworkScreen, public:
 
 void NetworkScreen::Refresh() {
-  if (CrosLibrary::Get()->EnsureLoaded()) {
-    SubscribeNetworkNotification();
-    OnNetworkManagerChanged(chromeos::CrosLibrary::Get()->GetNetworkLibrary());
-  }
+  SubscribeNetworkNotification();
+  OnNetworkManagerChanged(chromeos::CrosLibrary::Get()->GetNetworkLibrary());
 }
 
 ///////////////////////////////////////////////////////////////////////////////

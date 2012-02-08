@@ -8,16 +8,16 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
 #include "ipc/ipc_channel_handle.h"
 
-class Task;
 class CommandLine;
 
 namespace base {
-  class MessageLoopProxy;
+class MessageLoopProxy;
 }
 
 // Return the IPC channel to connect to the service process.
@@ -72,7 +72,8 @@ class ServiceProcessState {
   // |message_loop_proxy| must be of type IO and is the loop that POSIX uses
   // to monitor the service process.
   bool SignalReady(
-      base::MessageLoopProxy* message_loop_proxy, Task* terminate_task);
+      base::MessageLoopProxy* message_loop_proxy,
+      const base::Closure& terminate_task);
 
   // Signal that the service process is stopped.
   void SignalStopped();
@@ -87,7 +88,6 @@ class ServiceProcessState {
   IPC::ChannelHandle GetServiceProcessChannel();
 
  private:
-
 #if !defined(OS_MACOSX)
   // Create the shared memory data for the service process.
   bool CreateSharedData();

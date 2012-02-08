@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
@@ -14,27 +16,28 @@
 #include "base/string_number_conversions.h"
 #include "base/string_split.h"
 #include "base/string_util.h"
+#include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
 #include "chrome/browser/media/media_internals.h"
-#include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_net_log.h"
+#include "chrome/browser/net/chrome_network_delegate.h"
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/connect_interceptor.h"
 #include "chrome/browser/net/passive_log_collector.h"
-#include "chrome/browser/net/pref_proxy_config_service.h"
+#include "chrome/browser/net/pref_proxy_config_tracker.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/in_process_webkit/indexed_db_key_utility_client.h"
-#include "content/common/content_client.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_client.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/base/cert_verifier.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/default_origin_bound_cert_store.h"
@@ -61,6 +64,15 @@
 #if defined(USE_NSS)
 #include "net/ocsp/nss_ocsp.h"
 #endif  // defined(USE_NSS)
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/proxy_config_service_impl.h"
+#endif  // defined(OS_CHROMEOS)
+
+using content::BrowserThread;
+
+// The IOThread object must outlive any tasks posted to the IO thread before the
+// Quit task, so base::Bind() calls are not refcounted.
 
 namespace {
 
@@ -189,12 +201,7 @@ net::HostResolver* CreateGlobalHostResolver(net::NetLog* net_log) {
     if (command_line.HasSwitch(switches::kDisableIPv6)) {
       global_host_resolver->SetDefaultAddressFamily(net::ADDRESS_FAMILY_IPV4);
     } else {
-      net::HostResolverImpl* host_resolver_impl =
-          global_host_resolver->GetAsHostResolverImpl();
-      if (host_resolver_impl != NULL) {
-        // Use probe to decide if support is warranted.
-        host_resolver_impl->ProbeIPv6Support();
-      }
+      global_host_resolver->ProbeIPv6Support();
     }
   }
 
@@ -310,7 +317,8 @@ class SystemURLRequestContextGetter : public net::URLRequestContextGetter {
 SystemURLRequestContextGetter::SystemURLRequestContextGetter(
     IOThread* io_thread)
     : io_thread_(io_thread),
-      io_message_loop_proxy_(io_thread->message_loop_proxy()) {
+      io_message_loop_proxy_(
+          BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)) {
 }
 
 SystemURLRequestContextGetter::~SystemURLRequestContextGetter() {}
@@ -327,10 +335,6 @@ SystemURLRequestContextGetter::GetIOMessageLoopProxy() const {
   return io_message_loop_proxy_;
 }
 
-// The IOThread object must outlive any tasks posted to the IO thread before the
-// Quit task.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(IOThread);
-
 IOThread::Globals::Globals() {}
 
 IOThread::Globals::~Globals() {}
@@ -345,12 +349,11 @@ IOThread::IOThread(
     PrefService* local_state,
     ChromeNetLog* net_log,
     ExtensionEventRouterForwarder* extension_event_router_forwarder)
-    : BrowserProcessSubThread(BrowserThread::IO),
-      net_log_(net_log),
+    : net_log_(net_log),
       extension_event_router_forwarder_(extension_event_router_forwarder),
       globals_(NULL),
       sdch_manager_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   // We call RegisterPrefs() here (instead of inside browser_prefs.cc) to make
   // sure that everything is initialized in the right order.
   RegisterPrefs(local_state);
@@ -363,22 +366,23 @@ IOThread::IOThread(
   auth_delegate_whitelist_ = local_state->GetString(
       prefs::kAuthNegotiateDelegateWhitelist);
   gssapi_library_name_ = local_state->GetString(prefs::kGSSAPILibraryName);
-  pref_proxy_config_tracker_ = new PrefProxyConfigTracker(local_state);
+  pref_proxy_config_tracker_.reset(
+      ProxyServiceFactory::CreatePrefProxyConfigTracker(local_state));
   ChromeNetworkDelegate::InitializeReferrersEnabled(&system_enable_referrers_,
                                                     local_state);
   ssl_config_service_manager_.reset(
       SSLConfigServiceManager::CreateDefaultManager(local_state));
-  MessageLoop::current()->PostTask(FROM_HERE,
-                                   method_factory_.NewRunnableMethod(
-                                       &IOThread::InitSystemRequestContext));
+
+  BrowserThread::SetDelegate(BrowserThread::IO, this);
 }
 
 IOThread::~IOThread() {
-  if (pref_proxy_config_tracker_)
+  // This isn't needed for production code, but in tests, IOThread may
+  // be multiply constructed.
+  BrowserThread::SetDelegate(BrowserThread::IO, NULL);
+
+  if (pref_proxy_config_tracker_.get())
     pref_proxy_config_tracker_->DetachFromPrefService();
-  // We cannot rely on our base class to stop the thread since we want our
-  // CleanUp function to run.
-  Stop();
   DCHECK(!globals_);
 }
 
@@ -404,9 +408,7 @@ void IOThread::Init() {
   // messages around; it shouldn't be allowed to perform any blocking disk I/O.
   base::ThreadRestrictions::SetIOAllowed(false);
 
-  BrowserProcessSubThread::Init();
-
-  DCHECK_EQ(MessageLoop::TYPE_IO, message_loop()->type());
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
 
 #if defined(USE_NSS)
   net::SetMessageLoopForOCSP();
@@ -477,6 +479,26 @@ void IOThread::Init() {
 
   sdch_manager_ = new net::SdchManager();
   sdch_manager_->set_sdch_fetcher(new SdchDictionaryFetcher);
+
+  // InitSystemRequestContext turns right around and posts a task back
+  // to the IO thread, so we can't let it run until we know the IO
+  // thread has started.
+  //
+  // Note that since we are at BrowserThread::Init time, the UI thread
+  // is blocked waiting for the thread to start.  Therefore, posting
+  // this task to the main thread's message loop here is guaranteed to
+  // get it onto the message loop while the IOThread object still
+  // exists.  However, the message might not be processed on the UI
+  // thread until after IOThread is gone, so use a weak pointer.
+  BrowserThread::PostTask(BrowserThread::UI,
+                          FROM_HERE,
+                          base::Bind(&IOThread::InitSystemRequestContext,
+                                     weak_factory_.GetWeakPtr()));
+
+  // We constructed the weak pointer on the IO thread but it will be
+  // used on the UI thread.  Call this to avoid a thread checker
+  // error.
+  weak_factory_.DetachFromThread();
 }
 
 void IOThread::CleanUp() {
@@ -491,7 +513,7 @@ void IOThread::CleanUp() {
 #endif  // defined(USE_NSS)
 
   // Destroy all URLRequests started by URLFetchers.
-  URLFetcher::CancelAll();
+  content::URLFetcher::CancelAll();
 
   IndexedDBKeyUtilityClient::Shutdown();
 
@@ -517,10 +539,6 @@ void IOThread::CleanUp() {
   base::debug::LeakTracker<net::URLRequest>::CheckForLeaks();
 
   base::debug::LeakTracker<SystemURLRequestContextGetter>::CheckForLeaks();
-
-  // This will delete the |notification_service_|.  Make sure it's done after
-  // anything else can reference it.
-  BrowserProcessSubThread::CleanUp();
 }
 
 // static
@@ -533,7 +551,6 @@ void IOThread::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterStringPref(prefs::kAuthServerWhitelist, "");
   local_state->RegisterStringPref(prefs::kAuthNegotiateDelegateWhitelist, "");
   local_state->RegisterStringPref(prefs::kGSSAPILibraryName, "");
-  local_state->RegisterBooleanPref(prefs::kAllowCrossOriginAuthPrompt, false);
   local_state->RegisterBooleanPref(prefs::kEnableReferrers, true);
 }
 
@@ -580,18 +597,24 @@ void IOThread::InitSystemRequestContext() {
   if (system_url_request_context_getter_)
     return;
   // If we're in unit_tests, IOThread may not be run.
-  if (!message_loop())
+  if (!BrowserThread::IsMessageLoopValid(BrowserThread::IO))
     return;
-  system_proxy_config_service_.reset(
-      ProxyServiceFactory::CreateProxyConfigService(
-          pref_proxy_config_tracker_));
+  ChromeProxyConfigService* proxy_config_service =
+      ProxyServiceFactory::CreateProxyConfigService();
+  system_proxy_config_service_.reset(proxy_config_service);
+  if (pref_proxy_config_tracker_.get()) {
+    pref_proxy_config_tracker_->SetChromeProxyConfigService(
+        proxy_config_service);
+  }
   system_url_request_context_getter_ =
       new SystemURLRequestContextGetter(this);
-  message_loop()->PostTask(
+  // Safe to post an unretained this pointer, since IOThread is
+  // guaranteed to outlive the IO BrowserThread.
+  BrowserThread::PostTask(
+      BrowserThread::IO,
       FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &IOThread::InitSystemRequestContextOnIOThread));
+      base::Bind(&IOThread::InitSystemRequestContextOnIOThread,
+                 base::Unretained(this)));
 }
 
 void IOThread::InitSystemRequestContextOnIOThread() {

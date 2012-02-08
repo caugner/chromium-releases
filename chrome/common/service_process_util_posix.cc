@@ -5,6 +5,7 @@
 #include "chrome/common/service_process_util_posix.h"
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/eintr_wrapper.h"
 #include "base/message_loop_proxy.h"
 #include "base/synchronization/waitable_event.h"
@@ -14,7 +15,7 @@ int g_signal_socket = -1;
 }
 
 ServiceProcessTerminateMonitor::ServiceProcessTerminateMonitor(
-    Task* terminate_task)
+    const base::Closure& terminate_task)
     : terminate_task_(terminate_task) {
 }
 
@@ -22,18 +23,18 @@ ServiceProcessTerminateMonitor::~ServiceProcessTerminateMonitor() {
 }
 
 void ServiceProcessTerminateMonitor::OnFileCanReadWithoutBlocking(int fd) {
-  if (terminate_task_.get()) {
+  if (!terminate_task_.is_null()) {
     int buffer;
     int length = read(fd, &buffer, sizeof(buffer));
     if ((length == sizeof(buffer)) && (buffer == kTerminateMessage)) {
-      terminate_task_->Run();
-      terminate_task_.reset();
+      terminate_task_.Run();
+      terminate_task_.Reset();
     } else if (length > 0) {
-      LOG(ERROR) << "Unexpected read: " << buffer;
+      DLOG(ERROR) << "Unexpected read: " << buffer;
     } else if (length == 0) {
-      LOG(ERROR) << "Unexpected fd close";
+      DLOG(ERROR) << "Unexpected fd close";
     } else if (length < 0) {
-      PLOG(ERROR) << "read";
+      DPLOG(ERROR) << "read";
     }
   }
 }
@@ -50,7 +51,7 @@ static void SigTermHandler(int sig, siginfo_t* info, void* uap) {
   //                 down by an appropriate process.
   int message = ServiceProcessTerminateMonitor::kTerminateMessage;
   if (write(g_signal_socket, &message, sizeof(message)) < 0) {
-    PLOG(ERROR) << "write";
+    DPLOG(ERROR) << "write";
   }
 }
 
@@ -61,13 +62,13 @@ ServiceProcessState::StateData::StateData() : set_action_(false) {
 
 void ServiceProcessState::StateData::SignalReady(base::WaitableEvent* signal,
                                                  bool* success) {
-  CHECK_EQ(g_signal_socket, -1);
-  CHECK(!signal->IsSignaled());
+  DCHECK_EQ(g_signal_socket, -1);
+  DCHECK(!signal->IsSignaled());
    *success = MessageLoopForIO::current()->WatchFileDescriptor(
       sockets_[0], true, MessageLoopForIO::WATCH_READ,
       &watcher_, terminate_monitor_.get());
   if (!*success) {
-    LOG(ERROR) << "WatchFileDescriptor";
+    DLOG(ERROR) << "WatchFileDescriptor";
     signal->Signal();
     return;
   }
@@ -81,7 +82,7 @@ void ServiceProcessState::StateData::SignalReady(base::WaitableEvent* signal,
   action.sa_flags = SA_SIGINFO;
   *success = sigaction(SIGTERM, &action, &old_action_) == 0;
   if (!*success) {
-    PLOG(ERROR) << "sigaction";
+    DPLOG(ERROR) << "sigaction";
     signal->Signal();
     return;
   }
@@ -95,7 +96,7 @@ void ServiceProcessState::StateData::SignalReady(base::WaitableEvent* signal,
 #if defined(OS_MACOSX)
   *success = WatchExecutable();
   if (!*success) {
-    LOG(ERROR) << "WatchExecutable";
+    DLOG(ERROR) << "WatchExecutable";
     signal->Signal();
     return;
   }
@@ -108,24 +109,24 @@ void ServiceProcessState::StateData::SignalReady(base::WaitableEvent* signal,
 ServiceProcessState::StateData::~StateData() {
   if (sockets_[0] != -1) {
     if (HANDLE_EINTR(close(sockets_[0]))) {
-      PLOG(ERROR) << "close";
+      DPLOG(ERROR) << "close";
     }
   }
   if (sockets_[1] != -1) {
     if (HANDLE_EINTR(close(sockets_[1]))) {
-      PLOG(ERROR) << "close";
+      DPLOG(ERROR) << "close";
     }
   }
   if (set_action_) {
     if (sigaction(SIGTERM, &old_action_, NULL) < 0) {
-      PLOG(ERROR) << "sigaction";
+      DPLOG(ERROR) << "sigaction";
     }
   }
   g_signal_socket = -1;
 }
 
 void ServiceProcessState::CreateState() {
-  CHECK(!state_);
+  DCHECK(!state_);
   state_ = new StateData;
 
   // Explicitly adding a reference here (and removing it in TearDownState)
@@ -136,10 +137,10 @@ void ServiceProcessState::CreateState() {
 }
 
 bool ServiceProcessState::SignalReady(
-    base::MessageLoopProxy* message_loop_proxy, Task* terminate_task) {
-  CHECK(state_);
+    base::MessageLoopProxy* message_loop_proxy,
+    const base::Closure& terminate_task) {
+  DCHECK(state_);
 
-  scoped_ptr<Task> scoped_terminate_task(terminate_task);
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   state_->running_lock_.reset(TakeServiceRunningLock(true));
   if (state_->running_lock_.get() == NULL) {
@@ -147,18 +148,19 @@ bool ServiceProcessState::SignalReady(
   }
 #endif
   state_->terminate_monitor_.reset(
-      new ServiceProcessTerminateMonitor(scoped_terminate_task.release()));
+      new ServiceProcessTerminateMonitor(terminate_task));
   if (pipe(state_->sockets_) < 0) {
-    PLOG(ERROR) << "pipe";
+    DPLOG(ERROR) << "pipe";
     return false;
   }
   base::WaitableEvent signal_ready(true, false);
   bool success = false;
 
   message_loop_proxy->PostTask(FROM_HERE,
-      NewRunnableMethod(state_, &ServiceProcessState::StateData::SignalReady,
-                        &signal_ready,
-                        &success));
+      base::Bind(&ServiceProcessState::StateData::SignalReady,
+                 state_,
+                 &signal_ready,
+                 &success));
   signal_ready.Wait();
   return success;
 }

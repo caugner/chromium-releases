@@ -6,10 +6,11 @@
 #define CHROME_BROWSER_CHROMEOS_STATUS_POWER_MENU_BUTTON_H_
 #pragma once
 
-#include "chrome/browser/chromeos/cros/power_library.h"
+#include "base/compiler_specific.h"
+#include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
-#include "views/controls/menu/menu_delegate.h"
-#include "views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 namespace base {
 class TimeDelta;
@@ -19,41 +20,36 @@ namespace views {
 class MenuRunner;
 }
 
-class SkBitmap;
-
 namespace chromeos {
+
+class StatusAreaBubbleContentView;
 
 // The power menu button in the status area.
 // This class will handle getting the power status and populating the menu.
 class PowerMenuButton : public StatusAreaButton,
                         public views::MenuDelegate,
                         public views::ViewMenuDelegate,
-                        public PowerLibrary::Observer {
+                        public PowerManagerClient::Observer {
  public:
-  explicit PowerMenuButton(StatusAreaHost* host);
+  explicit PowerMenuButton(StatusAreaButton::Delegate* delegate);
   virtual ~PowerMenuButton();
 
   // views::MenuDelegate implementation.
-  virtual string16 GetLabel(int id) const;
-  virtual bool IsCommandEnabled(int id) const;
+  virtual string16 GetLabel(int id) const OVERRIDE;
 
-  // PowerLibrary::Observer implementation.
-  virtual void PowerChanged(PowerLibrary* obj);
-  virtual void SystemResumed() {}
-
-  int battery_index() const { return battery_index_; }
+  // PowerManagerClient::Observer implementation.
+  virtual void PowerChanged(const PowerSupplyStatus& power_status) OVERRIDE;
+  virtual void SystemResumed() OVERRIDE {}
 
  protected:
-  virtual int icon_width();
+  virtual int icon_width() OVERRIDE;
 
  private:
-  class StatusView;
-
   // views::View
   virtual void OnLocaleChanged() OVERRIDE;
 
   // views::ViewMenuDelegate implementation.
-  virtual void RunMenu(views::View* source, const gfx::Point& pt);
+  virtual void RunMenu(views::View* source, const gfx::Point& pt) OVERRIDE;
 
   // Format strings with power status
   string16 GetBatteryIsChargedText() const;
@@ -61,21 +57,26 @@ class PowerMenuButton : public StatusAreaButton,
   // Update the power icon and menu label info depending on the power status.
   void UpdateIconAndLabelInfo();
 
+  // Update status view
+  void UpdateStatusView();
+
   // Update Battery time. Try to make it monotonically decreasing unless
   // there's a large delta.
   void UpdateBatteryTime(base::TimeDelta* previous,
                          const base::TimeDelta& current);
 
-  // Stored data gathered from CrosLibrary::PowerLibrary.
+  // Stored data gathered from PowerManagerClient.
   bool battery_is_present_;
   bool line_power_on_;
   double battery_percentage_;
   int battery_index_;
+  PowerSupplyStatus power_status_;
+
   base::TimeDelta battery_time_to_full_;
   base::TimeDelta battery_time_to_empty_;
 
   // The currently showing status view. NULL if menu is not being displayed.
-  StatusView* status_;
+  StatusAreaBubbleContentView* status_;
 
   // If non-null the menu is showing.
   scoped_ptr<views::MenuRunner> menu_runner_;

@@ -15,14 +15,13 @@
 #include "chrome/browser/chromeos/login/web_page_screen.h"
 #include "chrome/browser/chromeos/login/web_page_view.h"
 
+class GURL;
+class Profile;
+
 namespace net {
 class URLRequest;
 class URLRequestJob;
 }  // namespace net
-
-class GURL;
-class Profile;
-class SiteContents;
 
 namespace chromeos {
 
@@ -36,7 +35,7 @@ class RegistrationDomView : public WebPageDomView {
  protected:
   // Overriden from DOMView:
   virtual TabContents* CreateTabContents(Profile* profile,
-                                         SiteInstance* instance);
+                                         SiteInstance* instance) OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(RegistrationDomView);
 };
@@ -47,7 +46,7 @@ class RegistrationView : public WebPageView {
   RegistrationView() : dom_view_(new RegistrationDomView()) {}
 
  protected:
-  virtual WebPageDomView* dom_view();
+  virtual WebPageDomView* dom_view() OVERRIDE;
 
  private:
   // View that renders page.
@@ -68,11 +67,8 @@ class RegistrationScreen : public ViewScreen<RegistrationView>,
   explicit RegistrationScreen(ViewScreenDelegate* delegate);
 
   // WebPageDelegate implementation:
-  virtual void OnPageLoaded();
-  virtual void OnPageLoadFailed(const std::string& url);
-
-  // Sets the url for registration host page. Used in tests.
-  static void set_registration_host_page_url(const GURL& url);
+  virtual void OnPageLoaded() OVERRIDE;
+  virtual void OnPageLoadFailed(const std::string& url) OVERRIDE;
 
   // Handler factory for net::URLRequestFilter::AddHostnameHandler.
   static net::URLRequestJob* Factory(net::URLRequest* request,
@@ -80,29 +76,19 @@ class RegistrationScreen : public ViewScreen<RegistrationView>,
 
  private:
   // ViewScreen implementation:
-  virtual void CreateView();
-  virtual void Refresh();
-  virtual RegistrationView* AllocateView();
+  virtual void CreateView() OVERRIDE;
+  virtual void Refresh() OVERRIDE;
+  virtual RegistrationView* AllocateView() OVERRIDE;
 
   // TabContentsDelegate implementation:
-  // Deprecated. Please use two-argument variant.
-  // TODO(adriansc): Remove this method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(
-      TabContents* source,
-      const GURL& url,
-      const GURL& referrer,
-      WindowOpenDisposition disposition,
-      content::PageTransition transition) OVERRIDE;
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params) OVERRIDE;
 
-  virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
+  virtual void HandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) OVERRIDE;
 
   // WebPageScreen implementation:
-  virtual void CloseScreen(ScreenObserver::ExitCodes code);
-
-  // Url of account creation page. Overriden by tests.
-  static scoped_ptr<GURL> host_page_url_;
+  virtual void CloseScreen(ScreenObserver::ExitCodes code) OVERRIDE;
 
   DISALLOW_COPY_AND_ASSIGN(RegistrationScreen);
 };

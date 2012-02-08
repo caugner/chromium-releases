@@ -8,9 +8,9 @@
 
 #include "chrome/browser/chromeos/status/status_area_button.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
-#include "views/controls/menu/view_menu_delegate.h"
-#include "views/controls/menu/menu_delegate.h"
+#include "content/public/browser/notification_observer.h"
+#include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 namespace views {
 class MenuRunner;
@@ -18,16 +18,16 @@ class MenuRunner;
 
 namespace chromeos {
 
-class StatusAreaHost;
+class StatusAreaBubbleController;
 
 // A class for the button in the status area which alerts the user when
 // accessibility features are enabled.
 class AccessibilityMenuButton : public StatusAreaButton,
                                 public views::ViewMenuDelegate,
                                 public views::MenuDelegate,
-                                public NotificationObserver {
+                                public content::NotificationObserver {
  public:
-  explicit AccessibilityMenuButton(StatusAreaHost* host);
+  explicit AccessibilityMenuButton(StatusAreaButton::Delegate* delegate);
   virtual ~AccessibilityMenuButton();
 
   // views::ViewMenuDelegate implementation
@@ -36,10 +36,10 @@ class AccessibilityMenuButton : public StatusAreaButton,
   // views::MenuDelegate implementation
   virtual void ExecuteCommand(int id) OVERRIDE;
 
-  // NotificationObserver implementation
+  // content::NotificationObserver implementation
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Updates the state along with the preferences.
@@ -53,6 +53,8 @@ class AccessibilityMenuButton : public StatusAreaButton,
   BooleanPrefMember accessibility_enabled_;
   // An object to show menu.
   scoped_ptr<views::MenuRunner> menu_runner_;
+  // The currently showing bubble controller.
+  scoped_ptr<StatusAreaBubbleController> bubble_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(AccessibilityMenuButton);
 };

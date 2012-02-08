@@ -492,7 +492,7 @@ class Predictor {
   // A time after which we need to do more trimming of referrers.
   base::TimeTicks next_trim_time_;
 
-  scoped_ptr<ScopedRunnableMethodFactory<Predictor> > trim_task_factory_;
+  scoped_ptr<base::WeakPtrFactory<Predictor> > weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(Predictor);
 };
@@ -505,8 +505,8 @@ class SimplePredictor : public Predictor {
   virtual ~SimplePredictor() {}
   virtual void InitNetworkPredictor(PrefService* user_prefs,
                                     PrefService* local_state,
-                                    IOThread* io_thread);
-  virtual void ShutdownOnUIThread(PrefService* user_prefs);
+                                    IOThread* io_thread) OVERRIDE;
+  virtual void ShutdownOnUIThread(PrefService* user_prefs) OVERRIDE;
 };
 
 }  // namespace chrome_browser_net

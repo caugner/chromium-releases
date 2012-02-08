@@ -12,15 +12,16 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebViewClient.h"
 #include "webkit/glue/webcursor.h"
@@ -39,12 +40,11 @@
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdkcursor.h>
+#include <gdk/gdk.h>
 #endif
 
 struct WebPreferences;
 class GURL;
-class TestGeolocationService;
 class TestShell;
 class WebWidgetHost;
 
@@ -164,8 +164,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   // WebKit::WebFrameClient
   virtual WebKit::WebPlugin* createPlugin(
       WebKit::WebFrame*, const WebKit::WebPluginParams&);
-  virtual WebKit::WebWorker* createWorker(
-      WebKit::WebFrame*, WebKit::WebWorkerClient*);
   virtual WebKit::WebMediaPlayer* createMediaPlayer(
       WebKit::WebFrame*, WebKit::WebMediaPlayerClient*);
   virtual WebKit::WebApplicationCacheHost* createApplicationCacheHost(
@@ -241,18 +239,18 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   // webkit::npapi::WebPluginPageDelegate
   virtual webkit::npapi::WebPluginDelegate* CreatePluginDelegate(
       const FilePath& url,
-      const std::string& mime_type);
+      const std::string& mime_type) OVERRIDE;
   virtual void CreatedPluginWindow(
-      gfx::PluginWindowHandle handle);
+      gfx::PluginWindowHandle handle) OVERRIDE;
   virtual void WillDestroyPluginWindow(
-      gfx::PluginWindowHandle handle);
+      gfx::PluginWindowHandle handle) OVERRIDE;
   virtual void DidMovePlugin(
-      const webkit::npapi::WebPluginGeometry& move);
-  virtual void DidStartLoadingForPlugin() {}
-  virtual void DidStopLoadingForPlugin() {}
-  virtual WebKit::WebCookieJar* GetCookieJar();
+      const webkit::npapi::WebPluginGeometry& move) OVERRIDE;
+  virtual void DidStartLoadingForPlugin() OVERRIDE {}
+  virtual void DidStopLoadingForPlugin() OVERRIDE {}
+  virtual WebKit::WebCookieJar* GetCookieJar() OVERRIDE;
 
-  TestWebViewDelegate(TestShell* shell);
+  explicit TestWebViewDelegate(TestShell* shell);
   virtual ~TestWebViewDelegate();
   void Reset();
 
@@ -331,7 +329,6 @@ class TestWebViewDelegate : public WebKit::WebViewClient,
   }
 
  private:
-
   // Called the title of the page changes.
   // Can be used to update the title of the window.
   void SetPageTitle(const string16& title);

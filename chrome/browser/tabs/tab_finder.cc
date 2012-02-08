@@ -18,10 +18,10 @@
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/common/frame_navigate_params.h"
 #include "content/public/common/page_transition_types.h"
 
 class TabFinder::TabContentsObserverImpl : public TabContentsObserver {
@@ -32,9 +32,9 @@ class TabFinder::TabContentsObserverImpl : public TabContentsObserver {
   TabContents* tab_contents() { return TabContentsObserver::tab_contents(); }
 
   // TabContentsObserver overrides:
-  virtual void DidNavigateAnyFramePostCommit(
+  virtual void DidNavigateAnyFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+      const content::FrameNavigateParams& params) OVERRIDE;
   virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
 
  private:
@@ -53,10 +53,10 @@ TabFinder::TabContentsObserverImpl::TabContentsObserverImpl(
 TabFinder::TabContentsObserverImpl::~TabContentsObserverImpl() {
 }
 
-void TabFinder::TabContentsObserverImpl::DidNavigateAnyFramePostCommit(
+void TabFinder::TabContentsObserverImpl::DidNavigateAnyFrame(
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
-  finder_->DidNavigateAnyFramePostCommit(tab_contents(), details, params);
+    const content::FrameNavigateParams& params) {
+  finder_->DidNavigateAnyFrame(tab_contents(), details, params);
 }
 
 void TabFinder::TabContentsObserverImpl::TabContentsDestroyed(
@@ -112,28 +112,28 @@ TabContents* TabFinder::FindTab(Browser* browser,
 }
 
 void TabFinder::Observe(int type,
-                        const NotificationSource& source,
-                        const NotificationDetails& details) {
+                        const content::NotificationSource& source,
+                        const content::NotificationDetails& details) {
   DCHECK_EQ(type, content::NOTIFICATION_TAB_PARENTED);
 
   // The tab was added to a browser. Query for its state now.
-  TabContentsWrapper* tab = Source<TabContentsWrapper>(source).ptr();
+  TabContentsWrapper* tab = content::Source<TabContentsWrapper>(source).ptr();
   TrackTab(tab->tab_contents());
 }
 
 TabFinder::TabFinder() {
   registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 TabFinder::~TabFinder() {
   STLDeleteElements(&tab_contents_observers_);
 }
 
-void TabFinder::DidNavigateAnyFramePostCommit(
+void TabFinder::DidNavigateAnyFrame(
     TabContents* source,
     const content::LoadCommittedDetails& details,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   CancelRequestsFor(source);
 
   if (content::PageTransitionIsRedirect(params.transition)) {

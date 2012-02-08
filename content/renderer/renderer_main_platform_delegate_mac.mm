@@ -14,10 +14,11 @@
 #import "content/common/chrome_application_mac.h"
 #include "content/common/sandbox_mac.h"
 #include "content/public/common/content_switches.h"
+#include "content/common/sandbox_init_mac.h"
 #include "third_party/WebKit/Source/WebKit/mac/WebCoreSupport/WebSystemInterface.h"
 
 RendererMainPlatformDelegate::RendererMainPlatformDelegate(
-    const MainFunctionParams& parameters)
+    const content::MainFunctionParams& parameters)
         : parameters_(parameters) {
 }
 
@@ -54,7 +55,7 @@ static void LogTestMessage(std::string message, bool is_error) {
 }
 
 bool RendererMainPlatformDelegate::InitSandboxTests(bool no_sandbox) {
-  const CommandLine& command_line = parameters_.command_line_;
+  const CommandLine& command_line = parameters_.command_line;
 
   if (command_line.HasSwitch(switches::kTestSandbox)) {
     std::string bundle_path =
@@ -76,10 +77,7 @@ bool RendererMainPlatformDelegate::InitSandboxTests(bool no_sandbox) {
 }
 
 bool RendererMainPlatformDelegate::EnableSandbox() {
-  CommandLine* parsed_command_line = CommandLine::ForCurrentProcess();
-  SandboxInitWrapper sandbox_wrapper;
-  return sandbox_wrapper.InitializeSandbox(*parsed_command_line,
-                                           switches::kRendererProcess);
+  return content::InitializeSandbox();
 }
 
 void RendererMainPlatformDelegate::RunSandboxTests() {

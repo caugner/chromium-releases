@@ -33,11 +33,20 @@ enum LoadState {
   // the first completes.  This may be done to optimize for cache reuse.
   LOAD_STATE_WAITING_FOR_CACHE,
 
+  // This state corresponds to a resource load that is blocked waiting for
+  // access to a resource in the AppCache.
+  // Note: This is a layering violation, but being the only one it's not that
+  // bad. TODO(rvargas): Reconsider what to do if we need to add more.
+  LOAD_STATE_WAITING_FOR_APPCACHE,
+
   // This state corresponds to a resource load that is blocked waiting for a
-  // proxy autoconfig script to return a proxy server to use.  This state may
-  // take a while if the proxy script needs to resolve the IP address of the
-  // host before deciding what proxy to use.
+  // proxy autoconfig script to return a proxy server to use.
   LOAD_STATE_RESOLVING_PROXY_FOR_URL,
+
+  // This state corresponds to a resource load that is blocked waiting for a
+  // proxy autoconfig script to return a proxy server to use, but that proxy
+  // script is busy resolving the IP address of a host.
+  LOAD_STATE_RESOLVING_HOST_IN_PROXY_SCRIPT,
 
   // This state indicates that we're in the process of establishing a tunnel
   // through the proxy server.

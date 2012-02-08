@@ -13,12 +13,16 @@
 #include "base/timer.h"
 #include "content/browser/download/download_file.h"
 #include "content/browser/download/download_id.h"
+#include "content/browser/download/download_types.h"
 #include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/resource_handler.h"
 
 class DownloadFileManager;
 class ResourceDispatcherHost;
-struct DownloadBuffer;
+
+namespace content {
+class DownloadBuffer;
+}
 
 namespace net {
 class URLRequest;
@@ -29,6 +33,8 @@ class DownloadResourceHandler : public ResourceHandler {
  public:
   typedef base::Callback<void(DownloadId, net::Error)>
     OnStartedCallback;
+
+  static const size_t kLoadsToWrite = 100;  // number of data buffers queued
 
   // started_cb will be called exactly once.
   DownloadResourceHandler(ResourceDispatcherHost* rdh,
@@ -43,29 +49,38 @@ class DownloadResourceHandler : public ResourceHandler {
                           const OnStartedCallback& started_cb,
                           const DownloadSaveInfo& save_info);
 
-  virtual bool OnUploadProgress(int request_id, uint64 position, uint64 size);
+  virtual bool OnUploadProgress(int request_id,
+                                uint64 position,
+                                uint64 size) OVERRIDE;
 
   // Not needed, as this event handler ought to be the final resource.
-  virtual bool OnRequestRedirected(int request_id, const GURL& url,
-                                   ResourceResponse* response, bool* defer);
+  virtual bool OnRequestRedirected(int request_id,
+                                   const GURL& url,
+                                   content::ResourceResponse* response,
+                                   bool* defer) OVERRIDE;
 
   // Send the download creation information to the download thread.
-  virtual bool OnResponseStarted(int request_id, ResourceResponse* response);
+  virtual bool OnResponseStarted(int request_id,
+                                 content::ResourceResponse* response) OVERRIDE;
 
   // Pass-through implementation.
-  virtual bool OnWillStart(int request_id, const GURL& url, bool* defer);
+  virtual bool OnWillStart(int request_id,
+                           const GURL& url,
+                           bool* defer) OVERRIDE;
 
   // Create a new buffer, which will be handed to the download thread for file
   // writing and deletion.
-  virtual bool OnWillRead(int request_id, net::IOBuffer** buf, int* buf_size,
-                          int min_size);
+  virtual bool OnWillRead(int request_id,
+                          net::IOBuffer** buf,
+                          int* buf_size,
+                          int min_size) OVERRIDE;
 
-  virtual bool OnReadCompleted(int request_id, int* bytes_read);
+  virtual bool OnReadCompleted(int request_id, int* bytes_read) OVERRIDE;
 
   virtual bool OnResponseCompleted(int request_id,
                                    const net::URLRequestStatus& status,
-                                   const std::string& security_info);
-  virtual void OnRequestClosed();
+                                   const std::string& security_info) OVERRIDE;
+  virtual void OnRequestClosed() OVERRIDE;
 
   // If the content-length header is not present (or contains something other
   // than numbers), the incoming content_length is -1 (unknown size).
@@ -95,13 +110,19 @@ class DownloadResourceHandler : public ResourceHandler {
   bool save_as_;  // Request was initiated via "Save As" by the user.
   OnStartedCallback started_cb_;
   DownloadSaveInfo save_info_;
-  scoped_ptr<DownloadBuffer> buffer_;
+  scoped_refptr<content::DownloadBuffer> buffer_;
   ResourceDispatcherHost* rdh_;
   bool is_paused_;
   base::OneShotTimer<DownloadResourceHandler> pause_timer_;
-  base::TimeTicks download_start_time_;  // used to collect stats.
+
+  // The following are used to collect stats.
+  base::TimeTicks download_start_time_;
+  base::TimeTicks last_read_time_;
+  size_t last_buffer_size_;
+  int64 bytes_read_;
+  std::string accept_ranges_;
+
   static const int kReadBufSize = 32768;  // bytes
-  static const size_t kLoadsToWrite = 100;  // number of data buffers queued
   static const int kThrottleTimeMs = 200;  // milliseconds
 
   DISALLOW_COPY_AND_ASSIGN(DownloadResourceHandler);

@@ -111,10 +111,6 @@ class NET_EXPORT HostResolverImpl
   // be called.
   virtual ~HostResolverImpl();
 
-  // Continuously observe whether IPv6 is supported, and set the allowable
-  // address family to IPv4 iff IPv6 is not supported.
-  void ProbeIPv6Support();
-
   // Applies a set of constraints for requests that belong to the specified
   // pool. NOTE: Don't call this after requests have been already been started.
   //
@@ -133,21 +129,16 @@ class NET_EXPORT HostResolverImpl
   // HostResolver methods:
   virtual int Resolve(const RequestInfo& info,
                       AddressList* addresses,
-                      OldCompletionCallback* callback,
+                      const CompletionCallback& callback,
                       RequestHandle* out_req,
                       const BoundNetLog& source_net_log) OVERRIDE;
   virtual int ResolveFromCache(const RequestInfo& info,
                                AddressList* addresses,
                                const BoundNetLog& source_net_log) OVERRIDE;
   virtual void CancelRequest(RequestHandle req) OVERRIDE;
-  virtual void AddObserver(HostResolver::Observer* observer) OVERRIDE;
-  virtual void RemoveObserver(HostResolver::Observer* observer) OVERRIDE;
-
-  // Set address family, and disable IPv6 probe support.
   virtual void SetDefaultAddressFamily(AddressFamily address_family) OVERRIDE;
   virtual AddressFamily GetDefaultAddressFamily() const OVERRIDE;
-
-  virtual HostResolverImpl* GetAsHostResolverImpl() OVERRIDE;
+  virtual void ProbeIPv6Support() OVERRIDE;
   virtual HostCache* GetHostCache() OVERRIDE;
 
  private:
@@ -164,14 +155,12 @@ class NET_EXPORT HostResolverImpl
   typedef std::vector<Request*> RequestsList;
   typedef HostCache::Key Key;
   typedef std::map<Key, scoped_refptr<Job> > JobMap;
-  typedef std::vector<HostResolver::Observer*> ObserversList;
 
   // Helper used by |Resolve()| and |ResolveFromCache()|.  Performs IP
   // literal and cache lookup, returns OK if successful,
   // ERR_NAME_NOT_RESOLVED if either hostname is invalid or IP literal is
   // incompatible, ERR_DNS_CACHE_MISS if entry was not found in cache.
-  int ResolveHelper(int request_id,
-                    const Key& key,
+  int ResolveHelper(const Key& key,
                     const RequestInfo& info,
                     AddressList* addresses,
                     const BoundNetLog& request_net_log);
@@ -222,13 +211,11 @@ class NET_EXPORT HostResolverImpl
   // Called when a request has just been started.
   void OnStartRequest(const BoundNetLog& source_net_log,
                       const BoundNetLog& request_net_log,
-                      int request_id,
                       const RequestInfo& info);
 
   // Called when a request has just completed (before its callback is run).
   void OnFinishRequest(const BoundNetLog& source_net_log,
                        const BoundNetLog& request_net_log,
-                       int request_id,
                        const RequestInfo& info,
                        int net_error,
                        int os_error);
@@ -236,7 +223,6 @@ class NET_EXPORT HostResolverImpl
   // Called when a request has been cancelled.
   void OnCancelRequest(const BoundNetLog& source_net_log,
                        const BoundNetLog& request_net_log,
-                       int request_id,
                        const RequestInfo& info);
 
   // Notify IPv6ProbeJob not to call back, and discard reference to the job.
@@ -278,7 +264,7 @@ class NET_EXPORT HostResolverImpl
   void AbortAllInProgressJobs();
 
   // NetworkChangeNotifier::IPAddressObserver methods:
-  virtual void OnIPAddressChanged();
+  virtual void OnIPAddressChanged() OVERRIDE;
 
   // Helper methods to get and set max_retry_attempts_.
   size_t max_retry_attempts() const {
@@ -303,7 +289,7 @@ class NET_EXPORT HostResolverImpl
   }
 
   // NetworkChangeNotifier::OnDNSChanged methods:
-  virtual void OnDNSChanged();
+  virtual void OnDNSChanged() OVERRIDE;
 
   // Cache of host resolution results.
   scoped_ptr<HostCache> cache_;
@@ -334,13 +320,6 @@ class NET_EXPORT HostResolverImpl
   // The job that OnJobComplete() is currently processing (needed in case
   // HostResolver gets deleted from within the callback).
   scoped_refptr<Job> cur_completing_job_;
-
-  // The observers to notify when a request starts/ends.
-  ObserversList observers_;
-
-  // Monotonically increasing ID number to assign to the next request.
-  // Observers are the only consumers of this ID number.
-  int next_request_id_;
 
   // Monotonically increasing ID number to assign to the next job.
   // The only consumer of this ID is the requests tracing code.

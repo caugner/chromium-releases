@@ -37,7 +37,7 @@ bool VideoCaptureMessageFilter::OnMessageReceived(const IPC::Message& message) {
 }
 
 void VideoCaptureMessageFilter::OnFilterAdded(IPC::Channel* channel) {
-  VLOG(1) << "VideoCaptureMessageFilter::OnFilterAdded()";
+  DVLOG(1) << "VideoCaptureMessageFilter::OnFilterAdded()";
   // Captures the message loop proxy for IPC.
   message_loop_proxy_ = base::MessageLoopProxy::current();
   channel_ = channel;
@@ -104,7 +104,7 @@ void VideoCaptureMessageFilter::OnBufferReceived(
 
 void VideoCaptureMessageFilter::OnDeviceStateChanged(
     int device_id,
-    const media::VideoCapture::State& state) {
+    video_capture::State state) {
   Delegate* delegate = NULL;
   if (delegates_.find(device_id) != delegates_.end())
     delegate = delegates_.find(device_id)->second;

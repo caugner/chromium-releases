@@ -12,14 +12,28 @@
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "ui/base/animation/animation_delegate.h"
+#include "ui/base/animation/slide_animation.h"
 
 class Browser;
 class Panel;
 class NativePanelTestingWin;
 class PanelBrowserFrameView;
-namespace ui {
-class SlideAnimation;
-}
+
+class PanelSlideAnimation : public ui::SlideAnimation {
+ public:
+  PanelSlideAnimation(ui::AnimationDelegate* target,
+                       bool for_minimize,
+                       double animation_stop_to_show_titlebar)
+    : ui::SlideAnimation(target),
+      for_minimize_(for_minimize),
+      animation_stop_to_show_titlebar_(animation_stop_to_show_titlebar) { }
+  virtual ~PanelSlideAnimation() { }
+  virtual double GetCurrentValue() const OVERRIDE;
+
+ private:
+  bool for_minimize_;
+  double animation_stop_to_show_titlebar_;
+};
 
 // A browser view that implements Panel specific behavior.
 class PanelBrowserView : public BrowserView,
@@ -63,8 +77,7 @@ class PanelBrowserView : public BrowserView,
   virtual bool GetSavedWindowPlacement(
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const OVERRIDE;
-  virtual bool AcceleratorPressed(const views::Accelerator& accelerator)
-      OVERRIDE;
+  virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual void OnDisplayChanged() OVERRIDE;
@@ -80,6 +93,7 @@ class PanelBrowserView : public BrowserView,
   virtual void ShowPanelInactive() OVERRIDE;
   virtual gfx::Rect GetPanelBounds() const OVERRIDE;
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual void SetPanelBoundsInstantly(const gfx::Rect& bounds) OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
   virtual void DeactivatePanel() OVERRIDE;
@@ -99,6 +113,7 @@ class PanelBrowserView : public BrowserView,
   virtual bool PreHandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event,
       bool* is_keyboard_shortcut) OVERRIDE;
+  virtual void FullScreenModeChanged(bool is_full_screen) OVERRIDE;
   virtual void HandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE;
   virtual gfx::Size WindowSizeFromContentSize(
@@ -108,6 +123,8 @@ class PanelBrowserView : public BrowserView,
   virtual int TitleOnlyHeight() const OVERRIDE;
   virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
+  virtual gfx::Size IconOnlySize() const OVERRIDE;
+  virtual void EnsurePanelFullyVisible() OVERRIDE;
 
   // Overridden from AnimationDelegate:
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
@@ -116,6 +133,10 @@ class PanelBrowserView : public BrowserView,
   bool EndDragging(bool cancelled);
 
   void StopDrawingAttention();
+
+  void SetBoundsInternal(const gfx::Rect& bounds, bool animate);
+
+  void ShowOrHidePanelAppIcon(bool show);
 
   scoped_ptr<Panel> panel_;
   gfx::Rect bounds_;
@@ -129,8 +150,9 @@ class PanelBrowserView : public BrowserView,
   // Is the mouse button currently down?
   bool mouse_pressed_;
 
-  // Location the mouse was pressed at. Used to detect drag and drop.
-  gfx::Point mouse_pressed_point_;
+  // Location the mouse was pressed at or dragged to. Used in drag-and-drop.
+  // This point is represented in the screen coordinate system.
+  gfx::Point mouse_location_;
 
   // Timestamp when the mouse was pressed. Used to detect long click.
   base::TimeTicks mouse_pressed_time_;
@@ -140,7 +162,7 @@ class PanelBrowserView : public BrowserView,
   MouseDraggingState mouse_dragging_state_;
 
   // Used to animate the bounds change.
-  scoped_ptr<ui::SlideAnimation> bounds_animator_;
+  scoped_ptr<PanelSlideAnimation> bounds_animator_;
   gfx::Rect animation_start_bounds_;
 
   // Is the panel in highlighted state to draw people's attention?

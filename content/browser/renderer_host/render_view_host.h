@@ -14,9 +14,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/process_util.h"
+#include "base/values.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/common/content_export.h"
-#include "content/common/window_container_type.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/common/stop_find_action.h"
+#include "content/public/common/window_container_type.h"
 #include "net/base/load_states.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDragOperation.h"
@@ -26,11 +29,10 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class ChildProcessSecurityPolicy;
-struct DesktopNotificationHostMsg_Show_Params;
 class FilePath;
 class GURL;
+class PowerSaveBlocker;
 class RenderViewHostDelegate;
-class RenderViewHostObserver;
 class SessionStorageNamespace;
 class SiteInstance;
 class SkBitmap;
@@ -41,13 +43,19 @@ struct ViewHostMsg_AccessibilityNotification_Params;
 struct ViewHostMsg_CreateWindow_Params;
 struct ViewHostMsg_ShowPopup_Params;
 struct ViewMsg_Navigate_Params;
-struct WebDropData;
-struct UserMetricsAction;
-struct ViewHostMsg_RunFileChooser_Params;
 struct ViewMsg_StopFinding_Params;
+struct WebDropData;
+struct WebPreferences;
 
 namespace base {
 class ListValue;
+}
+
+namespace content {
+struct FileChooserParams;
+struct Referrer;
+class RenderViewHostObserver;
+struct ShowDesktopNotificationHostMsgParams;
 }
 
 namespace gfx {
@@ -68,9 +76,26 @@ struct WebMediaPlayerAction;
 struct WebFindOptions;
 }  // namespace WebKit
 
-namespace net {
-class URLRequestContextGetter;
-}
+// NotificationObserver used to listen for EXECUTE_JAVASCRIPT_RESULT
+// notifications.
+class ExecuteNotificationObserver : public content::NotificationObserver {
+ public:
+  explicit ExecuteNotificationObserver(int id);
+  virtual ~ExecuteNotificationObserver();
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  int id() const { return id_; }
+
+  Value* value() const { return value_.get(); }
+
+ private:
+  int id_;
+  scoped_ptr<Value> value_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExecuteNotificationObserver);
+};
 
 //
 // RenderViewHost
@@ -258,6 +283,10 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   int ExecuteJavascriptInWebFrameNotifyResult(const string16& frame_xpath,
                                               const string16& jscript);
 
+  Value* ExecuteJavascriptAndGetValue(const string16& frame_xpath,
+                                      const string16& jscript);
+
+
   // Notifies the RenderView that the JavaScript message that was shown was
   // closed by the user.
   void JavaScriptDialogClosed(IPC::Message* reply_msg,
@@ -394,7 +423,7 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   void SetZoomLevel(double level);
 
   // Changes the zoom level for the current main frame.
-  void Zoom(PageZoom::Function zoom_function);
+  void Zoom(content::PageZoom zoom);
 
   // Reloads the current focused frame.
   void ReloadFrame();
@@ -412,7 +441,11 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   void DisableScrollbarsForThreshold(const gfx::Size& size);
 
   // Instructs the RenderView to send back updates to the preferred size.
-  void EnablePreferredSizeMode(int flags);
+  void EnablePreferredSizeMode();
+
+  // Instructs the RenderView to automatically resize and send back updates
+  // for the new size.
+  void EnableAutoResize(const gfx::Size& min_size, const gfx::Size& max_size);
 
   // Executes custom context menu action that was provided from WebKit.
   void ExecuteCustomContextMenuCommand(
@@ -442,18 +475,22 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
 
   // Notifies the renderer that the user has closed the FindInPage window
   // (and what action to take regarding the selection).
-  void StopFinding(const ViewMsg_StopFinding_Params& params);
+  void StopFinding(content::StopFindAction action);
+
+  SessionStorageNamespace* session_storage_namespace() {
+    return session_storage_namespace_.get();
+  }
 
   // NOTE: Do not add functions that just send an IPC message that are called in
   // one or two places.  Have the caller send the IPC message directly.
 
  protected:
-  friend class RenderViewHostObserver;
+  friend class content::RenderViewHostObserver;
 
   // Add and remove observers for filtering IPC messages.  Clients must be sure
   // to remove the observer before they go away.
-  void AddObserver(RenderViewHostObserver* observer);
-  void RemoveObserver(RenderViewHostObserver* observer);
+  void AddObserver(content::RenderViewHostObserver* observer);
+  void RemoveObserver(content::RenderViewHostObserver* observer);
 
   // RenderWidgetHost protected overrides.
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -463,6 +500,7 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   virtual void OnUserGesture() OVERRIDE;
   virtual void NotifyRendererUnresponsive() OVERRIDE;
   virtual void NotifyRendererResponsive() OVERRIDE;
+  virtual void OnRenderAutoResized(const gfx::Size& size) OVERRIDE;
   virtual void RequestToLockMouse() OVERRIDE;
   virtual bool IsFullscreen() const OVERRIDE;
   virtual void OnMsgFocus() OVERRIDE;
@@ -496,7 +534,7 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   void OnMsgContextMenu(const ContextMenuParams& params);
   void OnMsgToggleFullscreen(bool enter_fullscreen);
   void OnMsgOpenURL(const GURL& url,
-                    const GURL& referrer,
+                    const content::Referrer& referrer,
                     WindowOpenDisposition disposition,
                     int64 source_frame_id);
   void OnMsgDidContentsPreferredSizeChange(const gfx::Size& new_size);
@@ -526,6 +564,7 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   void OnUpdateDragCursor(WebKit::WebDragOperation drag_operation);
   void OnTargetDropACK();
   void OnTakeFocus(bool reverse);
+  void OnFocusedNodeChanged(bool is_editable_node);
   void OnAddMessageToConsole(int32 level,
                              const string16& message,
                              int32 line_no,
@@ -538,12 +577,16 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
       const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params);
   void OnScriptEvalResponse(int id, const base::ListValue& result);
   void OnDidZoomURL(double zoom_level, bool remember, const GURL& url);
+  void OnMediaNotification(int64 player_cookie,
+                           bool has_video,
+                           bool has_audio,
+                           bool is_playing);
   void OnRequestDesktopNotificationPermission(const GURL& origin,
                                               int callback_id);
   void OnShowDesktopNotification(
-      const DesktopNotificationHostMsg_Show_Params& params);
+      const content::ShowDesktopNotificationHostMsgParams& params);
   void OnCancelDesktopNotification(int notification_id);
-  void OnRunFileChooser(const ViewHostMsg_RunFileChooser_Params& params);
+  void OnRunFileChooser(const content::FileChooserParams& params);
 
   void OnWebUISend(const GURL& source_url, const std::string& name,
                    const base::ListValue& args);
@@ -554,6 +597,8 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
 
  private:
   friend class TestRenderViewHost;
+
+  void ClearPowerSaveBlockers();
 
   // The SiteInstance associated with this RenderViewHost.  All pages drawn
   // in this RenderViewHost are part of this SiteInstance.  Should not change
@@ -632,8 +677,13 @@ class CONTENT_EXPORT RenderViewHost : public RenderWidgetHost {
   // The termination status of the last render view that terminated.
   base::TerminationStatus render_view_termination_status_;
 
+  // Holds PowerSaveBlockers for the media players in use. Key is the
+  // player_cookie passed to OnMediaNotification, value is the PowerSaveBlocker.
+  typedef std::map<int64, PowerSaveBlocker*> PowerSaveBlockerMap;
+  PowerSaveBlockerMap power_save_blockers_;
+
   // A list of observers that filter messages.  Weak references.
-  ObserverList<RenderViewHostObserver> observers_;
+  ObserverList<content::RenderViewHostObserver> observers_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHost);
 };

@@ -9,9 +9,9 @@
 #include <string>
 
 #include "base/shared_memory.h"
-#include "content/common/common_param_traits.h"
-#include "content/common/gpu/gpu_info.h"
 #include "content/common/gpu/gpu_process_launch_causes.h"
+#include "content/public/common/common_param_traits.h"
+#include "content/public/common/gpu_info.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/ipc/gpu_command_buffer_traits.h"
@@ -33,43 +33,17 @@ IPC_STRUCT_BEGIN(GPUCreateCommandBufferConfig)
   IPC_STRUCT_MEMBER(gfx::GpuPreference, gpu_preference)
 IPC_STRUCT_END()
 
+IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceNew_Params)
+  IPC_STRUCT_MEMBER(int32, renderer_id)
+  IPC_STRUCT_MEMBER(int32, render_view_id)
+  IPC_STRUCT_MEMBER(int32, width)
+  IPC_STRUCT_MEMBER(int32, height)
+  IPC_STRUCT_MEMBER(uint64, surface_id)
+  IPC_STRUCT_MEMBER(int32, route_id)
 #if defined(OS_MACOSX)
-IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceNew_Params)
-  IPC_STRUCT_MEMBER(int32, renderer_id)
-  IPC_STRUCT_MEMBER(int32, render_view_id)
   IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
-  IPC_STRUCT_MEMBER(int32, width)
-  IPC_STRUCT_MEMBER(int32, height)
-  IPC_STRUCT_MEMBER(uint64, surface_id)
   IPC_STRUCT_MEMBER(bool, create_transport_dib)
-  IPC_STRUCT_MEMBER(int32, route_id)
-IPC_STRUCT_END()
-
-IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
-  IPC_STRUCT_MEMBER(int32, renderer_id)
-  IPC_STRUCT_MEMBER(int32, render_view_id)
-  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
-  IPC_STRUCT_MEMBER(uint64, surface_id)
-  IPC_STRUCT_MEMBER(int32, route_id)
-IPC_STRUCT_END()
-
-IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceRelease_Params)
-  IPC_STRUCT_MEMBER(int32, renderer_id)
-  IPC_STRUCT_MEMBER(int32, render_view_id)
-  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
-  IPC_STRUCT_MEMBER(uint64, identifier)
-  IPC_STRUCT_MEMBER(int32, route_id)
-IPC_STRUCT_END()
 #endif
-
-#if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
-IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceNew_Params)
-  IPC_STRUCT_MEMBER(int32, renderer_id)
-  IPC_STRUCT_MEMBER(int32, render_view_id)
-  IPC_STRUCT_MEMBER(int32, width)
-  IPC_STRUCT_MEMBER(int32, height)
-  IPC_STRUCT_MEMBER(uint64, surface_id)
-  IPC_STRUCT_MEMBER(int32, route_id)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
@@ -77,6 +51,25 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
   IPC_STRUCT_MEMBER(int32, render_view_id)
   IPC_STRUCT_MEMBER(uint64, surface_id)
   IPC_STRUCT_MEMBER(int32, route_id)
+#if defined(OS_WIN)
+  IPC_STRUCT_MEMBER(gfx::Size, size)
+#elif defined(OS_MACOSX)
+  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
+#endif
+IPC_STRUCT_END()
+
+IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params)
+  IPC_STRUCT_MEMBER(int32, renderer_id)
+  IPC_STRUCT_MEMBER(int32, render_view_id)
+  IPC_STRUCT_MEMBER(uint64, surface_id)
+  IPC_STRUCT_MEMBER(int32, route_id)
+  IPC_STRUCT_MEMBER(int, x)
+  IPC_STRUCT_MEMBER(int, y)
+  IPC_STRUCT_MEMBER(int, width)
+  IPC_STRUCT_MEMBER(int, height)
+#if defined(OS_MACOSX)
+  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
+#endif
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceRelease_Params)
@@ -84,15 +77,17 @@ IPC_STRUCT_BEGIN(GpuHostMsg_AcceleratedSurfaceRelease_Params)
   IPC_STRUCT_MEMBER(int32, render_view_id)
   IPC_STRUCT_MEMBER(uint64, identifier)
   IPC_STRUCT_MEMBER(int32, route_id)
-IPC_STRUCT_END()
+#if defined(OS_MACOSX)
+  IPC_STRUCT_MEMBER(gfx::PluginWindowHandle, window)
 #endif
+IPC_STRUCT_END()
 
-IPC_STRUCT_TRAITS_BEGIN(DxDiagNode)
+IPC_STRUCT_TRAITS_BEGIN(content::DxDiagNode)
   IPC_STRUCT_TRAITS_MEMBER(values)
   IPC_STRUCT_TRAITS_MEMBER(children)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(GPUInfo)
+IPC_STRUCT_TRAITS_BEGIN(content::GPUInfo)
   IPC_STRUCT_TRAITS_MEMBER(finalized)
   IPC_STRUCT_TRAITS_MEMBER(initialization_time)
   IPC_STRUCT_TRAITS_MEMBER(vendor_id)
@@ -160,25 +155,22 @@ IPC_MESSAGE_CONTROL4(GpuMsg_CreateViewCommandBuffer,
 // information.
 IPC_MESSAGE_CONTROL0(GpuMsg_CollectGraphicsInfo)
 
-#if defined(TOOLKIT_USES_GTK) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT) || \
-    defined(OS_WIN)
 // Tells the GPU process that the browser process has finished resizing the
 // view.
-IPC_MESSAGE_CONTROL2(GpuMsg_ResizeViewACK,
-                     int32 /* renderer_id */,
-                     int32 /* command_buffer_id */)
-#endif
+IPC_MESSAGE_ROUTED0(AcceleratedSurfaceMsg_ResizeViewACK)
 
-#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
 // Tells the GPU process that it's safe to start rendering to the surface.
 IPC_MESSAGE_ROUTED2(AcceleratedSurfaceMsg_NewACK,
                     uint64 /* surface_id */,
                     TransportDIB::Handle /* shared memory buffer */)
 
 // Tells the GPU process that the browser process handled the swap
-// buffers request with the given number.
+// buffers request.
 IPC_MESSAGE_ROUTED0(AcceleratedSurfaceMsg_BuffersSwappedACK)
-#endif
+
+// Tells the GPU process that the browser process handled the
+// PostSubBuffer command.
+IPC_MESSAGE_ROUTED0(AcceleratedSurfaceMsg_PostSubBufferACK)
 
 // Tells the GPU process to remove all contexts.
 IPC_MESSAGE_CONTROL0(GpuMsg_Clean)
@@ -200,7 +192,7 @@ IPC_SYNC_MESSAGE_CONTROL1_3(GpuHostMsg_EstablishGpuChannel,
                             content::CauseForGpuLaunch,
                             IPC::ChannelHandle /* handle to channel */,
                             base::ProcessHandle /* renderer_process_for_gpu */,
-                            GPUInfo /* stats about GPU process*/)
+                            content::GPUInfo /* stats about GPU process*/)
 
 // A renderer sends this to the browser process when it wants to
 // create a GL context associated with the given view_id.
@@ -226,7 +218,7 @@ IPC_MESSAGE_CONTROL3(GpuHostMsg_DestroyCommandBuffer,
 
 // Response from GPU to a GpuMsg_CollectGraphicsInfo.
 IPC_MESSAGE_CONTROL1(GpuHostMsg_GraphicsInfoCollected,
-                     GPUInfo /* GPU logging stats */)
+                     content::GPUInfo /* GPU logging stats */)
 
 // Message from GPU to add a GPU log message to the about:gpu page.
 IPC_MESSAGE_CONTROL3(GpuHostMsg_OnLogMessage,
@@ -234,18 +226,14 @@ IPC_MESSAGE_CONTROL3(GpuHostMsg_OnLogMessage,
                      std::string /* header */,
                      std::string /* message */)
 
-#if defined(TOOLKIT_USES_GTK) && !defined(UI_COMPOSITOR_IMAGE_TRANSPORT) || \
-    defined(OS_WIN)
 // Resize the window that is being drawn into. It's important that this
 // resize be synchronized with the swapping of the front and back buffers.
 IPC_MESSAGE_CONTROL4(GpuHostMsg_ResizeView,
                      int32 /* renderer_id */,
                      int32 /* render_view_id */,
-                     int32 /* command_buffer_route_id */,
+                     int32 /* route_id */,
                      gfx::Size /* size */)
-#endif
 
-#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
 // This message is sent from the GPU process to the browser to notify about a
 // new or resized surface in the GPU.  The browser allocates any resources
 // needed for it on its end and replies with an ACK containing any shared
@@ -253,18 +241,21 @@ IPC_MESSAGE_CONTROL4(GpuHostMsg_ResizeView,
 IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceNew,
                      GpuHostMsg_AcceleratedSurfaceNew_Params)
 
-// This message notifies the browser process that the renderer
-// swapped the buffers associated with the given "window", which
-// should cause the browser to redraw the compositor's contents.
+// Same as above with a rect of the part of the surface that changed.
 IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceBuffersSwapped,
                      GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params)
+
+// This message notifies the browser process that the renderer
+// swapped a portion of the buffers associated with the given "window", which
+// should cause the browser to redraw the compositor's contents.
+IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfacePostSubBuffer,
+                     GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params)
 
 // Tells the browser to release whatever resources are associated with
 // the given surface. The browser must send an ACK once this operation
 // is complete.
 IPC_MESSAGE_CONTROL1(GpuHostMsg_AcceleratedSurfaceRelease,
                      GpuHostMsg_AcceleratedSurfaceRelease_Params)
-#endif
 
 //------------------------------------------------------------------------------
 // GPU Channel Messages

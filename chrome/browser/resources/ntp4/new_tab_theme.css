@@ -37,9 +37,9 @@ body {
 }
 
 /* Only change the background to a gradient when a promo is showing. */
-.showing-sync-promo #page-switcher-end:hover,
-.showing-sync-promo #page-switcher-end:focus,
-.showing-sync-promo #page-switcher-end.drag-target {
+.showing-login-area #page-switcher-end:hover,
+.showing-login-area #page-switcher-end:focus,
+.showing-login-area #page-switcher-end.drag-target {
   background:
       -webkit-linear-gradient(top, rgba($23, 0) 0,
                                    rgba($23, .01) 60px,
@@ -76,17 +76,6 @@ body {
 
 .dot input:focus {
   background-color: $2;  /* COLOR_NTP_BACKGROUND */
-}
-
-/* Bookmarks ******************************************************************/
-
-.bookmark,
-.bookmark > .title {
-  color: $8;  /* COLOR_NTP_TEXT */
-}
-
-#bookmarks-title-wrapper {
-  border-bottom-color: rgba($22, 0.3);  /* COLOR_NTP_SECTION_BORDER */
 }
 
 /* Most Visited ***************************************************************/

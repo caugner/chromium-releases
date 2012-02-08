@@ -9,8 +9,8 @@
 
 #include "base/memory/ref_counted.h"
 #include "content/renderer/media/audio_device.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebAudioDevice.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebAudioDevice.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
 class RendererWebAudioDeviceImpl : public WebKit::WebAudioDevice,
                                    public AudioDevice::RenderCallback {
@@ -29,7 +29,7 @@ class RendererWebAudioDeviceImpl : public WebKit::WebAudioDevice,
   // AudioDevice::RenderCallback implementation.
   virtual void Render(const std::vector<float*>& audio_data,
                       size_t number_of_frames,
-                      size_t audio_delay_milliseconds);
+                      size_t audio_delay_milliseconds) OVERRIDE;
 
  private:
   scoped_refptr<AudioDevice> audio_device_;

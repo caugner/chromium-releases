@@ -14,20 +14,21 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/language_preferences.h"
+#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/controls/menu/submenu_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/widget/widget.h"
 
 // The language menu consists of 3 parts (in this order):
 //
@@ -132,7 +133,6 @@ using input_method::InputMethodManager;
 // InputMethodMenu
 
 InputMethodMenu::InputMethodMenu(PrefService* pref_service,
-                                 StatusAreaHost::ScreenMode screen_mode,
                                  bool for_out_of_box_experience_dialog)
     : input_method_descriptors_(InputMethodManager::GetInstance()->
                                 GetActiveInputMethods()),
@@ -145,28 +145,32 @@ InputMethodMenu::InputMethodMenu(PrefService* pref_service,
       minimum_input_method_menu_width_(0),
       menu_alignment_(views::MenuItemView::TOPRIGHT),
       pref_service_(pref_service),
-      screen_mode_(screen_mode),
       for_out_of_box_experience_dialog_(for_out_of_box_experience_dialog) {
   DCHECK(input_method_descriptors_.get() &&
          !input_method_descriptors_->empty());
 
   // Sync current and previous input methods on Chrome prefs with ibus-daemon.
-  if (pref_service_ && (screen_mode_ == StatusAreaHost::kBrowserMode)) {
-    previous_input_method_pref_.Init(
-        prefs::kLanguagePreviousInputMethod, pref_service, this);
-    current_input_method_pref_.Init(
-        prefs::kLanguageCurrentInputMethod, pref_service, this);
+  if (pref_service_ && StatusAreaViewChromeos::IsBrowserMode()) {
+    InitializePrefMembers();
   }
 
   InputMethodManager* manager = InputMethodManager::GetInstance();
-  if (screen_mode_ == StatusAreaHost::kViewsLoginMode ||
-      screen_mode_ == StatusAreaHost::kWebUILoginMode) {
+  if (StatusAreaViewChromeos::IsLoginMode()) {
     // This button is for the login screen.
     manager->AddPreLoginPreferenceObserver(this);
     registrar_.Add(this,
                    chrome::NOTIFICATION_LOGIN_USER_CHANGED,
-                   NotificationService::AllSources());
-  } else if (screen_mode_ == StatusAreaHost::kBrowserMode) {
+                   content::NotificationService::AllSources());
+#if defined(USE_AURA)
+    // On Aura status area is not recreated on sign in.
+    // In case of Chrome crash, Chrome will be reloaded but IsLoginMode() will
+    // return false at this point so NOTIFICATION_PROFILE_CREATED will be
+    // ignored and all initialization will happen in ctor.
+    registrar_.Add(this,
+                   chrome::NOTIFICATION_PROFILE_CREATED,
+                   content::NotificationService::AllSources());
+#endif
+  } else if (StatusAreaViewChromeos::IsBrowserMode()) {
     manager->AddPostLoginPreferenceObserver(this);
   }
 
@@ -421,19 +425,18 @@ void InputMethodMenu::PreferenceUpdateNeeded(
     InputMethodManager* manager,
     const input_method::InputMethodDescriptor& previous_input_method,
     const input_method::InputMethodDescriptor& current_input_method) {
-  if (screen_mode_ == StatusAreaHost::kBrowserMode) {
+  if (StatusAreaViewChromeos::IsBrowserMode()) {
     if (pref_service_) {  // make sure we're not in unit tests.
       // Sometimes (e.g. initial boot) |previous_input_method.id()| is empty.
       previous_input_method_pref_.SetValue(previous_input_method.id());
       current_input_method_pref_.SetValue(current_input_method.id());
       pref_service_->ScheduleSavePersistentPrefs();
     }
-  } else if (screen_mode_ == StatusAreaHost::kViewsLoginMode ||
-      screen_mode_ == StatusAreaHost::kWebUILoginMode) {
+  } else if (StatusAreaViewChromeos::IsLoginMode()) {
     if (g_browser_process && g_browser_process->local_state()) {
       g_browser_process->local_state()->SetString(
           language_prefs::kPreferredKeyboardLayout, current_input_method.id());
-      g_browser_process->local_state()->SavePersistentPrefs();
+      g_browser_process->local_state()->ScheduleSavePersistentPrefs();
     }
   }
 }
@@ -465,7 +468,7 @@ void InputMethodMenu::FirstObserverIsAdded(InputMethodManager* manager) {
   // NOTICE: Since this function might be called from the constructor of this
   // class, it's better to avoid calling virtual functions.
 
-  if (pref_service_ && (screen_mode_ == StatusAreaHost::kBrowserMode)) {
+  if (pref_service_ && (StatusAreaViewChromeos::IsBrowserMode())) {
     // Get the input method name in the Preferences file which was in use last
     // time, and switch to the method. We remember two input method names in the
     // preference so that the Control+space hot-key could work fine from the
@@ -659,6 +662,11 @@ string16 InputMethodMenu::GetTextForIndicator(
 
 string16 InputMethodMenu::GetTextForMenu(
     const input_method::InputMethodDescriptor& input_method) {
+  if (!input_method.name().empty()) {
+    // If the descriptor has a name, use it.
+    return UTF8ToUTF16(input_method.name());
+  }
+
   // We don't show language here.  Name of keyboard layout or input method
   // usually imply (or explicitly include) its language.
 
@@ -678,9 +686,9 @@ string16 InputMethodMenu::GetTextForMenu(
   string16 text =
       manager->GetInputMethodUtil()->TranslateString(input_method.id());
   if (text == standard_input_method_text ||
-      language_code == "de" ||
-      language_code == "fr" ||
-      language_code == "nl") {
+             language_code == "de" ||
+             language_code == "fr" ||
+             language_code == "nl") {
     text = GetLanguageName(language_code) + UTF8ToUTF16(" - ") + text;
   }
 
@@ -699,14 +707,24 @@ void InputMethodMenu::RegisterPrefs(PrefService* local_state) {
 }
 
 void InputMethodMenu::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_LOGIN_USER_CHANGED) {
     // When a user logs in, we should remove |this| object from the observer
     // list so that PreferenceUpdateNeeded() does not update the local state
     // anymore.
     RemoveObservers();
   }
+#if defined(USE_AURA)
+  if (type == chrome::NOTIFICATION_PROFILE_CREATED) {
+    // On Aura status area is not recreated on login for normal user sign in.
+    // NOTIFICATION_LOGIN_USER_CHANGED has been notified early in login process.
+    InitializePrefMembers();
+    InputMethodManager* manager = InputMethodManager::GetInstance();
+    manager->AddPostLoginPreferenceObserver(this);
+    manager->AddObserver(this);
+  }
+#endif
 }
 
 void InputMethodMenu::SetMinimumWidth(int width) {
@@ -716,13 +734,19 @@ void InputMethodMenu::SetMinimumWidth(int width) {
 
 void InputMethodMenu::RemoveObservers() {
   InputMethodManager* manager = InputMethodManager::GetInstance();
-  if (screen_mode_ == StatusAreaHost::kViewsLoginMode ||
-      screen_mode_ == StatusAreaHost::kWebUILoginMode) {
+  if (StatusAreaViewChromeos::IsLoginMode()) {
     manager->RemovePreLoginPreferenceObserver(this);
-  } else if (screen_mode_ == StatusAreaHost::kBrowserMode) {
+  } else if (StatusAreaViewChromeos::IsBrowserMode()) {
     manager->RemovePostLoginPreferenceObserver(this);
   }
   manager->RemoveObserver(this);
+}
+
+void InputMethodMenu::InitializePrefMembers() {
+  previous_input_method_pref_.Init(
+      prefs::kLanguagePreviousInputMethod, pref_service_, this);
+  current_input_method_pref_.Init(
+      prefs::kLanguageCurrentInputMethod, pref_service_, this);
 }
 
 }  // namespace chromeos

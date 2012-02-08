@@ -7,6 +7,7 @@
 #include "content/common/resource_dispatcher.h"
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/message_loop.h"
@@ -14,8 +15,8 @@
 #include "base/string_util.h"
 #include "content/common/request_extra_data.h"
 #include "content/common/resource_messages.h"
-#include "content/common/resource_response.h"
 #include "content/public/common/resource_dispatcher_delegate.h"
+#include "content/public/common/resource_response.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
 #include "net/base/upload_data.h"
@@ -72,6 +73,8 @@ class IPCResourceLoaderBridge : public ResourceLoaderBridge {
 
   // The routing id used when sending IPC messages.
   int routing_id_;
+
+  bool is_synchronous_request_;
 };
 
 IPCResourceLoaderBridge::IPCResourceLoaderBridge(
@@ -80,12 +83,14 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
     : peer_(NULL),
       dispatcher_(dispatcher),
       request_id_(-1),
-      routing_id_(request_info.routing_id) {
+      routing_id_(request_info.routing_id),
+      is_synchronous_request_(false) {
   DCHECK(dispatcher_) << "no resource dispatcher";
   request_.method = request_info.method;
   request_.url = request_info.url;
   request_.first_party_for_cookies = request_info.first_party_for_cookies;
   request_.referrer = request_info.referrer;
+  request_.referrer_policy = request_info.referrer_policy;
   request_.headers = request_info.headers;
   request_.load_flags = request_info.load_flags;
   request_.origin_pid = request_info.requestor_pid;
@@ -99,11 +104,21 @@ IPCResourceLoaderBridge::IPCResourceLoaderBridge(
         static_cast<RequestExtraData*>(request_info.extra_data);
     request_.is_main_frame = extra_data->is_main_frame();
     request_.frame_id = extra_data->frame_id();
+    request_.parent_is_main_frame = extra_data->parent_is_main_frame();
+    request_.parent_frame_id = extra_data->parent_frame_id();
     request_.transition_type = extra_data->transition_type();
+    request_.transferred_request_child_id =
+        extra_data->transferred_request_child_id();
+    request_.transferred_request_request_id =
+        extra_data->transferred_request_request_id();
   } else {
     request_.is_main_frame = false;
     request_.frame_id = -1;
+    request_.parent_is_main_frame = false;
+    request_.parent_frame_id = -1;
     request_.transition_type = content::PAGE_TRANSITION_LINK;
+    request_.transferred_request_child_id = -1;
+    request_.transferred_request_request_id = -1;
   }
 }
 
@@ -185,7 +200,8 @@ void IPCResourceLoaderBridge::Cancel() {
     return;
   }
 
-  dispatcher_->CancelPendingRequest(routing_id_, request_id_);
+  if (!is_synchronous_request_)
+    dispatcher_->CancelPendingRequest(routing_id_, request_id_);
 
   // We can't remove the request ID from the resource dispatcher because more
   // data might be pending. Sending the cancel message may cause more data
@@ -209,8 +225,9 @@ void IPCResourceLoaderBridge::SyncLoad(SyncLoadResponse* response) {
   }
 
   request_id_ = MakeRequestID();
+  is_synchronous_request_ = true;
 
-  SyncLoadResult result;
+  content::SyncLoadResult result;
   IPC::SyncMessage* msg = new ResourceHostMsg_SyncLoad(routing_id_, request_id_,
                                                        request_, &result);
   // NOTE: This may pump events (see RenderThread::Send).
@@ -253,7 +270,7 @@ void IPCResourceLoaderBridge::UpdateRoutingId(int new_routing_id) {
 
 ResourceDispatcher::ResourceDispatcher(IPC::Message::Sender* sender)
     : message_sender_(sender),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       delegate_(NULL) {
 }
 
@@ -327,7 +344,7 @@ void ResourceDispatcher::OnUploadProgress(
 }
 
 void ResourceDispatcher::OnReceivedResponse(
-    int request_id, const ResourceResponseHead& response_head) {
+    int request_id, const content::ResourceResponseHead& response_head) {
   PendingRequestInfo* request_info = GetPendingRequestInfo(request_id);
   if (!request_info)
     return;
@@ -508,8 +525,8 @@ void ResourceDispatcher::SetDefersLoading(int request_id, bool value) {
     FollowPendingRedirect(request_id, request_info);
 
     MessageLoop::current()->PostTask(FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &ResourceDispatcher::FlushDeferredMessages, request_id));
+        base::Bind(&ResourceDispatcher::FlushDeferredMessages,
+                   weak_factory_.GetWeakPtr(), request_id));
   }
 }
 

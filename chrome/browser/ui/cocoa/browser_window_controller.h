@@ -131,6 +131,10 @@ class TabContents;
   // exiting presentation mode.
   BOOL enteredPresentationModeFromFullscreen_;
 
+  // True between -windowWillEnterFullScreen and -windowDidEnterFullScreen.
+  // Only used on Lion.
+  BOOL enteringFullscreen_;
+
   // The size of the original (non-fullscreen) window.  This is saved just
   // before entering fullscreen mode and is only valid when |-isFullscreen|
   // returns YES.
@@ -198,6 +202,9 @@ class TabContents;
 
 // Access the Profile object that backs this Browser.
 - (Profile*)profile;
+
+// Access the avatar button controller.
+- (AvatarButtonController*)avatarButtonController;
 
 // Updates the toolbar (and transitively the location bar) with the states of
 // the specified |tab|.  If |shouldRestore| is true, we're switching
@@ -457,6 +464,9 @@ class TabContents;
 // |source| rect doesn't fit into |target|.
 - (NSSize)overflowFrom:(NSRect)source
                     to:(NSRect)target;
+
+// The fullscreen exit bubble controller, or nil if the bubble isn't showing.
+- (FullscreenExitBubbleController*)fullscreenExitBubbleController;
 @end  // @interface BrowserWindowController (TestingAPI)
 
 

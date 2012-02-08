@@ -13,10 +13,11 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace gfx {
 class Size;
@@ -69,10 +70,10 @@ class ViewEventTestBase : public views::WidgetDelegate,
   void Done();
 
   // Creates a window.
-  virtual void SetUp();
+  virtual void SetUp() OVERRIDE;
 
   // Destroys the window.
-  virtual void TearDown();
+  virtual void TearDown() OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual bool CanResize() const OVERRIDE;

@@ -8,13 +8,16 @@
 #include "base/file_util.h"
 #include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_paths.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace {
 // File name of the Pepper Flash plugin on different platforms.
@@ -37,7 +40,7 @@ const FilePath::CharType kDataPath[] =
 // TODO(viettrungluu): Separate out into two separate tests; use a test fixture.
 TEST(ComponentInstallerTest, PepperFlashCheck) {
   MessageLoop message_loop;
-  BrowserThread ui_thread(BrowserThread::UI, &message_loop);
+  content::TestBrowserThread ui_thread(BrowserThread::UI, &message_loop);
 
   // The test directory is chrome/test/data/components/flapper.
   FilePath manifest;

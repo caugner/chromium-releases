@@ -6,7 +6,7 @@
 
 #include "base/command_line.h"
 #include "base/task.h"
-#include "content/common/main_function_params.h"
+#include "content/public/common/main_function_params.h"
 #include "sandbox/src/dep.h"
 
 #if defined(OS_MACOSX)
@@ -14,7 +14,7 @@
 #include "base/system_monitor/system_monitor.h"
 #endif
 
-extern int BrowserMain(const MainFunctionParams&);
+extern int BrowserMain(const content::MainFunctionParams&);
 
 BrowserTestBase::BrowserTestBase() {
 #if defined(OS_MACOSX)
@@ -27,10 +27,7 @@ BrowserTestBase::~BrowserTestBase() {
 }
 
 void BrowserTestBase::SetUp() {
-  SandboxInitWrapper sandbox_wrapper;
-  MainFunctionParams params(*CommandLine::ForCurrentProcess(),
-                            sandbox_wrapper,
-                            NULL);
+  content::MainFunctionParams params(*CommandLine::ForCurrentProcess());
   params.ui_task =
       NewRunnableMethod(this, &BrowserTestBase::ProxyRunTestOnMainThreadLoop);
 

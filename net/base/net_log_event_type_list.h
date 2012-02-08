@@ -288,6 +288,19 @@ EVENT_TYPE(WAITING_FOR_PROXY_RESOLVER_THREAD)
 EVENT_TYPE(SUBMITTED_TO_RESOLVER_THREAD)
 
 // ------------------------------------------------------------------------
+// Socket (Shared by stream and datagram sockets)
+// ------------------------------------------------------------------------
+
+// Marks the begin/end of a socket (TCP/SOCKS/SSL/UDP).
+//
+// The BEGIN phase contains the following parameters:
+//
+//   {
+//     "source_dependency": <Source identifier for the controlling entity>,
+//   }
+EVENT_TYPE(SOCKET_ALIVE)
+
+// ------------------------------------------------------------------------
 // StreamSocket
 // ------------------------------------------------------------------------
 
@@ -300,10 +313,11 @@ EVENT_TYPE(SUBMITTED_TO_RESOLVER_THREAD)
 //     "address_list": <List of network address strings>,
 //   }
 //
-// And the END event will contain the following parameters on failure:
+// And the END event will contain the following parameters:
 //
 //   {
-//     "net_error": <Net integer error code>,
+//     "net_error": <Net integer error code, on error>,
+//     "source_address": <Local source address of the connection, on success>,
 //   }
 EVENT_TYPE(TCP_CONNECT)
 
@@ -334,9 +348,6 @@ EVENT_TYPE(TCP_CONNECT_ATTEMPT)
 //     "net_error": <Net integer error code>,
 //   }
 EVENT_TYPE(TCP_ACCEPT)
-
-// Marks the begin/end of a socket (TCP/SOCKS/SSL).
-EVENT_TYPE(SOCKET_ALIVE)
 
 // This event is logged to the socket stream whenever the socket is
 // acquired/released via a ClientSocketHandle.
@@ -474,6 +485,54 @@ EVENT_TYPE(SSL_SOCKET_BYTES_SENT)
 //   }
 EVENT_TYPE(SOCKET_BYTES_RECEIVED)
 EVENT_TYPE(SSL_SOCKET_BYTES_RECEIVED)
+
+// Certificates were received from the SSL server (during a handshake or
+// renegotiation). This event is only present when logging at LOG_ALL.
+// The following parameters are attached to the event:
+//  {
+//    "certificates": <A list of PEM encoded certificates in the order that
+//                     they were sent by the server>,
+//  }
+EVENT_TYPE(SSL_CERTIFICATES_RECEIVED)
+
+// ------------------------------------------------------------------------
+// DatagramSocket
+// ------------------------------------------------------------------------
+
+// The start/end of a UDP client connecting.
+//
+// The START event contains these parameters:
+//
+//   {
+//     "address": <Remote address being connected to>,
+//   }
+//
+// And the END event will contain the following parameter:
+//
+//   {
+//     "net_error": <Net integer error code, on failure>,
+//   }
+EVENT_TYPE(UDP_CONNECT)
+
+// The specified number of bytes were transferred on the socket.
+// The following parameters are attached:
+//   {
+//     "address": <Remote address of data transfer.  Not present when not
+//                 specified for UDP_BYTES_SENT events>,
+//     "byte_count": <Number of bytes that were just received>,
+//     "hex_encoded_bytes": <The exact bytes received, as a hexadecimal string.
+//                           Only present when byte logging is enabled>,
+//   }
+EVENT_TYPE(UDP_BYTES_RECEIVED)
+EVENT_TYPE(UDP_BYTES_SENT)
+
+// Logged when an error occurs while reading or writing to/from a UDP socket.
+// The following parameters are attached:
+//   {
+//     "net_error": <Net error code>,
+//   }
+EVENT_TYPE(UDP_RECEIVE_ERROR)
+EVENT_TYPE(UDP_SEND_ERROR)
 
 // ------------------------------------------------------------------------
 // ClientSocketPoolBase::ConnectJob
@@ -741,6 +800,14 @@ EVENT_TYPE(HTTP_STREAM_JOB)
 //   }
 EVENT_TYPE(HTTP_STREAM_REQUEST_BOUND_TO_JOB)
 
+// Logs the protocol negotiated with the server. The event parameters are:
+//   {
+//      "status": <The NPN status ("negotiated", "unsupported", "no-overlap")>,
+//      "proto": <The NPN protocol negotiated>,
+//      "server_protos": <The list of server advertised protocols>,
+//   }
+EVENT_TYPE(HTTP_STREAM_REQUEST_PROTO)
+
 // ------------------------------------------------------------------------
 // HttpNetworkTransaction
 // ------------------------------------------------------------------------
@@ -794,6 +861,13 @@ EVENT_TYPE(HTTP_TRANSACTION_READ_BODY)
 // Measures the time taken to read the response out of the socket before
 // restarting for authentication, on keep alive connections.
 EVENT_TYPE(HTTP_TRANSACTION_DRAIN_BODY_FOR_AUTH_RESTART)
+
+// This event is sent when we try to restart a transaction after an error.
+// The following parameters are attached:
+//   {
+//     "net_error": <The net error code integer for the failure>,
+//   }
+EVENT_TYPE(HTTP_TRANSACTION_RESTART_AFTER_ERROR)
 
 // ------------------------------------------------------------------------
 // SpdySession
@@ -1141,9 +1215,9 @@ EVENT_TYPE(THROTTLING_GOT_CUSTOM_RETRY_AFTER)
 // The END phase contains the following parameters:
 //
 // {
-//   "net_error": <The net error code for the failure>,
 //   "ip_address_list": <The result of the resolution process,
 //                       an IPAddressList>
+//   "net_error": <The net error code for the failure, if any>,
 // }
 EVENT_TYPE(DNS_TRANSACTION)
 
@@ -1254,3 +1328,28 @@ EVENT_TYPE(CHROME_EXTENSION_PROVIDE_AUTH_CREDENTIALS)
 
 // This event is created when a request is blocked by a policy.
 EVENT_TYPE(CHROME_POLICY_ABORTED_REQUEST)
+
+// ------------------------------------------------------------------------
+// CertVerifier
+// ------------------------------------------------------------------------
+
+// This event is created when we start a CertVerifier request.
+EVENT_TYPE(CERT_VERIFIER_REQUEST)
+
+// This event is created when we start a CertVerifier job.
+// The END phase event parameters are:
+//   {
+//     "certificates": <A list of PEM encoded certificates, the first one
+//                      being the certificate to verify and the remaining
+//                      being intermediate certificates to assist path
+//                      building. Only present when byte logging is enabled.>
+//   }
+EVENT_TYPE(CERT_VERIFIER_JOB)
+
+// This event is created when a CertVerifier request attaches to a job.
+//
+// The event parameters are:
+//   {
+//      "source_dependency": <Source identifer for the job we are bound to>,
+//   }
+EVENT_TYPE(CERT_VERIFIER_REQUEST_BOUND_TO_JOB)

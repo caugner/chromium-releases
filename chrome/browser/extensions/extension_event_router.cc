@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/extension_event_router.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_devtools_manager.h"
@@ -14,19 +15,24 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_webrequest_api.h"
+#include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/api/extension_api.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/renderer_host/render_process_host.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
+
+using content::BrowserThread;
+using extensions::ExtensionAPI;
 
 namespace {
 
 const char kDispatchEvent[] = "Event.dispatchJSON";
 
-static void NotifyEventListenerRemovedOnIOThread(
+void NotifyEventListenerRemovedOnIOThread(
     void* profile,
     const std::string& extension_id,
     const std::string& sub_event_name) {
@@ -37,10 +43,11 @@ static void NotifyEventListenerRemovedOnIOThread(
 }  // namespace
 
 struct ExtensionEventRouter::EventListener {
-  RenderProcessHost* process;
+  content::RenderProcessHost* process;
   std::string extension_id;
 
-  EventListener(RenderProcessHost* process, const std::string& extension_id)
+  EventListener(content::RenderProcessHost* process,
+                const std::string& extension_id)
       : process(process), extension_id(extension_id) {}
 
   bool operator<(const EventListener& that) const {
@@ -91,11 +98,11 @@ ExtensionEventRouter::ExtensionEventRouter(Profile* profile)
     : profile_(profile),
       extension_devtools_manager_(profile->GetExtensionDevToolsManager()) {
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_RENDERER_PROCESS_CLOSED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-                 Source<Profile>(profile_));
+                 content::Source<Profile>(profile_));
   // TODO(tessamac): also get notified for background page crash/failure.
 }
 
@@ -103,14 +110,15 @@ ExtensionEventRouter::~ExtensionEventRouter() {}
 
 void ExtensionEventRouter::AddEventListener(
     const std::string& event_name,
-    RenderProcessHost* process,
+    content::RenderProcessHost* process,
     const std::string& extension_id) {
   EventListener listener(process, extension_id);
   DCHECK_EQ(listeners_[event_name].count(listener), 0u) << event_name;
   listeners_[event_name].insert(listener);
 
   if (extension_devtools_manager_.get())
-    extension_devtools_manager_->AddEventListener(event_name, process->id());
+    extension_devtools_manager_->AddEventListener(event_name,
+                                                  process->GetID());
 
   // We lazily tell the TaskManager to start updating when listeners to the
   // processes.onUpdated event arrive.
@@ -120,18 +128,19 @@ void ExtensionEventRouter::AddEventListener(
 
 void ExtensionEventRouter::RemoveEventListener(
     const std::string& event_name,
-    RenderProcessHost* process,
+    content::RenderProcessHost* process,
     const std::string& extension_id) {
   EventListener listener(process, extension_id);
   DCHECK_EQ(listeners_[event_name].count(listener), 1u) <<
-      " PID=" << process->id() << " extension=" << extension_id <<
+      " PID=" << process->GetID() << " extension=" << extension_id <<
       " event=" << event_name;
   listeners_[event_name].erase(listener);
   // Note: extension_id may point to data in the now-deleted listeners_ object.
   // Do not use.
 
   if (extension_devtools_manager_.get())
-    extension_devtools_manager_->RemoveEventListener(event_name, process->id());
+    extension_devtools_manager_->RemoveEventListener(event_name,
+                                                     process->GetID());
 
   // If a processes.onUpdated event listener is removed (or a process with one
   // exits), then we let the TaskManager know that it has one fewer listener.
@@ -140,7 +149,7 @@ void ExtensionEventRouter::RemoveEventListener(
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(
+      base::Bind(
           &NotifyEventListenerRemovedOnIOThread,
           profile_, listener.extension_id, event_name));
 }
@@ -216,7 +225,7 @@ bool ExtensionEventRouter::CanDispatchEventNow(
       GetExtensionById(extension_id, false);  // exclude disabled extensions
   if (extension && extension->background_url().is_valid()) {
     ExtensionProcessManager* pm = profile_->GetExtensionProcessManager();
-    if (!pm->GetBackgroundHostForExtension(extension)) {
+    if (!pm->GetBackgroundHostForExtension(extension_id)) {
       pm->CreateBackgroundHost(extension, extension->background_url());
       return false;
     }
@@ -254,16 +263,6 @@ void ExtensionEventRouter::DispatchEventImpl(
   // Send the event only to renderers that are listening for it.
   for (std::set<EventListener>::iterator listener = listeners.begin();
        listener != listeners.end(); ++listener) {
-    Profile* listener_profile = Profile::FromBrowserContext(
-        listener->process->browser_context());
-    ExtensionProcessManager* extension_process_manager =
-        listener_profile->GetExtensionProcessManager();
-    if (!extension_process_manager->AreBindingsEnabledForProcess(
-        listener->process->id())) {
-      // Don't send browser-level events to unprivileged processes.
-      continue;
-    }
-
     if (!event->extension_id.empty() &&
         event->extension_id != listener->extension_id)
       continue;
@@ -276,6 +275,17 @@ void ExtensionEventRouter::DispatchEventImpl(
     if (!extension)
       continue;
 
+    Profile* listener_profile = Profile::FromBrowserContext(
+        listener->process->GetBrowserContext());
+    extensions::ProcessMap* process_map =
+        listener_profile->GetExtensionService()->process_map();
+    // If the event is privileged, only send to extension processes. Otherwise,
+    // it's OK to send to normal renderers (e.g., for content scripts).
+    if (ExtensionAPI::GetInstance()->IsPrivileged(event->event_name) &&
+        !process_map->Contains(extension->id(), listener->process->GetID())) {
+      continue;
+    }
+
     // Is this event from a different profile than the renderer (ie, an
     // incognito tab event sent to a normal process, or vice versa).
     bool cross_incognito = event->restrict_to_profile &&
@@ -287,13 +297,34 @@ void ExtensionEventRouter::DispatchEventImpl(
         DispatchEvent(listener->process, listener->extension_id,
                       event->event_name, event->cross_incognito_args,
                       event->event_url);
+        IncrementInFlightEvents(listener->extension_id);
       }
       continue;
     }
 
     DispatchEvent(listener->process, listener->extension_id,
                   event->event_name, event->event_args, event->event_url);
+    IncrementInFlightEvents(listener->extension_id);
   }
+}
+
+void ExtensionEventRouter::IncrementInFlightEvents(
+    const std::string& extension_id) {
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableLazyBackgroundPages))
+    in_flight_events_[extension_id]++;
+}
+
+void ExtensionEventRouter::OnExtensionEventAck(
+    const std::string& extension_id) {
+  CHECK(CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnableLazyBackgroundPages));
+  CHECK(in_flight_events_[extension_id] > 0);
+  in_flight_events_[extension_id]--;
+}
+
+bool ExtensionEventRouter::HasInFlightEvents(const std::string& extension_id) {
+  return in_flight_events_[extension_id] > 0;
 }
 
 void ExtensionEventRouter::AppendEvent(
@@ -330,13 +361,15 @@ void ExtensionEventRouter::DispatchPendingEvents(
   pending_events_.erase(extension_id);
 }
 
-void ExtensionEventRouter::Observe(int type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
+void ExtensionEventRouter::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED:
     case content::NOTIFICATION_RENDERER_PROCESS_CLOSED: {
-      RenderProcessHost* renderer = Source<RenderProcessHost>(source).ptr();
+      content::RenderProcessHost* renderer =
+          content::Source<content::RenderProcessHost>(source).ptr();
       // Remove all event listeners associated with this renderer
       for (ListenerMap::iterator it = listeners_.begin();
            it != listeners_.end(); ) {
@@ -355,7 +388,7 @@ void ExtensionEventRouter::Observe(int type,
     }
     case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING: {
       // TODO: dispatch events in queue.  ExtensionHost is in the details.
-      ExtensionHost* eh = Details<ExtensionHost>(details).ptr();
+      ExtensionHost* eh = content::Details<ExtensionHost>(details).ptr();
       DispatchPendingEvents(eh->extension_id());
       break;
     }

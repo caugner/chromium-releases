@@ -15,10 +15,10 @@
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/browser_context.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_state_info.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/net_util.h"
 
 namespace content {
@@ -42,18 +42,18 @@ void ShellDownloadManagerDelegate::Shutdown() {
 bool ShellDownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
   DownloadItem* download =
       download_manager_->GetActiveDownloadItem(download_id);
-  DownloadStateInfo state = download->state_info();
+  DownloadStateInfo state = download->GetStateInfo();
 
   if (!state.force_file_name.empty())
     return true;
 
   FilePath generated_name = net::GenerateFileName(
       download->GetURL(),
-      download->content_disposition(),
-      download->referrer_charset(),
-      download->suggested_filename(),
-      download->mime_type(),
-      string16(UTF8ToUTF16("download")));
+      download->GetContentDisposition(),
+      download->GetReferrerCharset(),
+      download->GetSuggestedFilename(),
+      download->GetMimeType(),
+      "download");
 
   // Since we have no download UI, show the user a dialog always.
   state.prompt_user_for_save_location = true;
@@ -72,7 +72,7 @@ void ShellDownloadManagerDelegate::GenerateFilename(
     DownloadStateInfo state,
     const FilePath& generated_name) {
   if (state.suggested_path.empty()) {
-    state.suggested_path = download_manager_->browser_context()->GetPath().
+    state.suggested_path = download_manager_->BrowserContext()->GetPath().
         Append(FILE_PATH_LITERAL("Downloads"));
     if (!file_util::PathExists(state.suggested_path))
       file_util::CreateDirectory(state.suggested_path);
@@ -152,11 +152,11 @@ bool ShellDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
   return false;
 }
 
-bool ShellDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
+bool ShellDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
   return true;
 }
 
-bool ShellDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
+bool ShellDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
   return true;
 }
 
@@ -164,9 +164,7 @@ bool ShellDownloadManagerDelegate::GenerateFileHash() {
   return false;
 }
 
-void ShellDownloadManagerDelegate::OnResponseCompleted(
-    DownloadItem* item,
-    const std::string& hash) {
+void ShellDownloadManagerDelegate::OnResponseCompleted(DownloadItem* item) {
 }
 
 void ShellDownloadManagerDelegate::AddItemToPersistentStore(

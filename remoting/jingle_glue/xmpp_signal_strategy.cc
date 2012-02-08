@@ -7,7 +7,6 @@
 #include "base/logging.h"
 #include "jingle/notifier/base/gaia_token_pre_xmpp_auth.h"
 #include "remoting/jingle_glue/jingle_thread.h"
-#include "remoting/jingle_glue/xmpp_iq_request.h"
 #include "remoting/jingle_glue/xmpp_socket_adapter.h"
 #include "third_party/libjingle/source/talk/base/asyncsocket.h"
 #include "third_party/libjingle/source/talk/xmpp/prexmppauth.h"
@@ -20,7 +19,6 @@ XmppSignalStrategy::XmppSignalStrategy(JingleThread* jingle_thread,
                                        const std::string& auth_token,
                                        const std::string& auth_token_service)
    : thread_(jingle_thread),
-     listener_(NULL),
      username_(username),
      auth_token_(auth_token),
      auth_token_service_(auth_token_service),
@@ -29,7 +27,7 @@ XmppSignalStrategy::XmppSignalStrategy(JingleThread* jingle_thread,
 }
 
 XmppSignalStrategy::~XmppSignalStrategy() {
-  DCHECK(listener_ == NULL);
+  DCHECK(listeners_.empty());
   Close();
 }
 
@@ -42,7 +40,7 @@ void XmppSignalStrategy::Init(StatusObserver* observer) {
   settings.set_user(login_jid.node());
   settings.set_host(login_jid.domain());
   settings.set_resource("chromoting");
-  settings.set_use_tls(true);
+  settings.set_use_tls(buzz::TLS_ENABLED);
   settings.set_token_service(auth_token_service_);
   settings.set_auth_cookie(auth_token_);
   settings.set_server(talk_base::SocketAddress("talk.google.com", 5222));
@@ -69,20 +67,29 @@ void XmppSignalStrategy::Close() {
   }
 }
 
-void XmppSignalStrategy::SetListener(Listener* listener) {
-  // Don't overwrite an listener without explicitly going
-  // through "NULL" first.
-  DCHECK(listener_ == NULL || listener == NULL);
-  listener_ = listener;
+void XmppSignalStrategy::AddListener(Listener* listener) {
+  DCHECK(std::find(listeners_.begin(), listeners_.end(), listener) ==
+         listeners_.end());
+  listeners_.push_back(listener);
 }
 
-void XmppSignalStrategy::SendStanza(buzz::XmlElement* stanza) {
+void XmppSignalStrategy::RemoveListener(Listener* listener) {
+  std::vector<Listener*>::iterator it =
+      std::find(listeners_.begin(), listeners_.end(), listener);
+  CHECK(it != listeners_.end());
+  listeners_.erase(it);
+}
+
+bool XmppSignalStrategy::SendStanza(buzz::XmlElement* stanza) {
   if (!xmpp_client_) {
     LOG(INFO) << "Dropping signalling message because XMPP "
         "connection has been terminated.";
-    return;
+    delete stanza;
+    return false;
   }
-  xmpp_client_->SendStanza(stanza);
+
+  buzz::XmppReturnStatus status = xmpp_client_->SendStanza(stanza);
+  return status == buzz::XMPP_RETURN_OK || status == buzz::XMPP_RETURN_PENDING;
 }
 
 std::string XmppSignalStrategy::GetNextId() {
@@ -94,15 +101,12 @@ std::string XmppSignalStrategy::GetNextId() {
   return xmpp_client_->NextId();
 }
 
-IqRequest* XmppSignalStrategy::CreateIqRequest() {
-  // TODO(sergeyu): Handle the case when |xmpp_client_| is NULL.
-  CHECK(xmpp_client_);
-  return new XmppIqRequest(thread_->message_loop(), xmpp_client_);
-}
-
 bool XmppSignalStrategy::HandleStanza(const buzz::XmlElement* stanza) {
-  if (listener_)
-    return listener_->OnIncomingStanza(stanza);
+  for (std::vector<Listener*>::iterator it = listeners_.begin();
+       it != listeners_.end(); ++it) {
+    if ((*it)->OnIncomingStanza(stanza))
+      return true;
+  }
   return false;
 }
 

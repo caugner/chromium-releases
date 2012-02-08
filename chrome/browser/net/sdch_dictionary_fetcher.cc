@@ -4,16 +4,21 @@
 
 #include "chrome/browser/net/sdch_dictionary_fetcher.h"
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/message_loop.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/common/url_fetcher.h"
 #include "net/url_request/url_request_status.h"
 
 SdchDictionaryFetcher::SdchDictionaryFetcher()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       task_is_pending_(false) {
+  DCHECK(CalledOnValidThread());
 }
 
 SdchDictionaryFetcher::~SdchDictionaryFetcher() {
+  DCHECK(CalledOnValidThread());
 }
 
 // static
@@ -22,6 +27,8 @@ void SdchDictionaryFetcher::Shutdown() {
 }
 
 void SdchDictionaryFetcher::Schedule(const GURL& dictionary_url) {
+  DCHECK(CalledOnValidThread());
+
   // Avoid pushing duplicate copy onto queue.  We may fetch this url again later
   // and get a different dictionary, but there is no reason to have it in the
   // queue twice at one time.
@@ -44,7 +51,8 @@ void SdchDictionaryFetcher::ScheduleDelayedRun() {
   if (fetch_queue_.empty() || current_fetch_.get() || task_is_pending_)
     return;
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      method_factory_.NewRunnableMethod(&SdchDictionaryFetcher::StartFetching),
+      base::Bind(&SdchDictionaryFetcher::StartFetching,
+      weak_factory_.GetWeakPtr()),
       kMsDelayFromRequestTillDownload);
   task_is_pending_ = true;
 }
@@ -63,19 +71,20 @@ void SdchDictionaryFetcher::StartFetching() {
     return;
   }
 
-  current_fetch_.reset(new URLFetcher(fetch_queue_.front(), URLFetcher::GET,
-                                      this));
+  current_fetch_.reset(content::URLFetcher::Create(
+      fetch_queue_.front(), content::URLFetcher::GET, this));
   fetch_queue_.pop();
-  current_fetch_->set_request_context(context);
+  current_fetch_->SetRequestContext(context);
   current_fetch_->Start();
 }
 
-void SdchDictionaryFetcher::OnURLFetchComplete(const URLFetcher* source) {
-  if ((200 == source->response_code()) &&
-      (source->status().status() == net::URLRequestStatus::SUCCESS)) {
-    net::SdchManager::Global()->AddSdchDictionary(
-        source->GetResponseStringRef(),
-        source->url());
+void SdchDictionaryFetcher::OnURLFetchComplete(
+    const content::URLFetcher* source) {
+  if ((200 == source->GetResponseCode()) &&
+      (source->GetStatus().status() == net::URLRequestStatus::SUCCESS)) {
+    std::string data;
+    source->GetResponseAsString(&data);
+    net::SdchManager::Global()->AddSdchDictionary(data, source->GetURL());
   }
   current_fetch_.reset(NULL);
   ScheduleDelayedRun();

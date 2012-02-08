@@ -10,8 +10,10 @@
 #include "base/message_loop.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "third_party/cros/chromeos_screen_lock.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -78,35 +80,23 @@ class ScreenLockLibraryImpl : public ScreenLockLibrary {
   }
 
   void LockScreen() {
-    // Make sure we run on UI thread.
-    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &ScreenLockLibraryImpl::LockScreen));
-      return;
-    }
+    // Called from ScreenLockedHandler, a libcros callback which should
+    // always run on UI thread.
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     FOR_EACH_OBSERVER(Observer, observers_, LockScreen(this));
   }
 
   void UnlockScreen() {
-    // Make sure we run on UI thread.
-    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &ScreenLockLibraryImpl::UnlockScreen));
-      return;
-    }
+    // Called from ScreenLockedHandler, a libcros callback which should
+    // always run on UI thread.
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     FOR_EACH_OBSERVER(Observer, observers_, UnlockScreen(this));
   }
 
   void UnlockScreenFailed() {
-    // Make sure we run on UI thread.
-    if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
-          NewRunnableMethod(this, &ScreenLockLibraryImpl::UnlockScreenFailed));
-      return;
-    }
+    // Called from ScreenLockedHandler, a libcros callback which should
+    // always run on UI thread.
+    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     FOR_EACH_OBSERVER(Observer, observers_, UnlockScreenFailed(this));
   }
 
@@ -142,7 +132,3 @@ ScreenLockLibrary* ScreenLockLibrary::GetImpl(bool stub) {
 }
 
 }  // namespace chromeos
-
-// Allows InvokeLater without adding refcounting. This class is a Singleton and
-// won't be deleted until it's last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::ScreenLockLibraryImpl);

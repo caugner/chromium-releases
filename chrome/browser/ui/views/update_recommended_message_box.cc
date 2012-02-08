@@ -7,17 +7,19 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/views/window.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/message_box_flags.h"
-#include "views/controls/message_box_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/message_box_view.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/power_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -32,7 +34,7 @@ void UpdateRecommendedMessageBox::ShowMessageBox(
 
 bool UpdateRecommendedMessageBox::Accept() {
 #if defined(OS_CHROMEOS)
-  chromeos::CrosLibrary::Get()->GetPowerLibrary()->RequestRestart();
+  chromeos::DBusThreadManager::Get()->GetPowerManagerClient()->RequestRestart();
   // If running the Chrome OS build, but we're not on the device, fall through
 #endif
   BrowserList::AttemptRestart();
@@ -40,15 +42,13 @@ bool UpdateRecommendedMessageBox::Accept() {
 }
 
 int UpdateRecommendedMessageBox::GetDialogButtons() const {
-  return ui::MessageBoxFlags::DIALOGBUTTON_OK |
-         ui::MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
 }
 
 string16 UpdateRecommendedMessageBox::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  DCHECK(button == ui::MessageBoxFlags::DIALOGBUTTON_OK ||
-         button == ui::MessageBoxFlags::DIALOGBUTTON_CANCEL);
-  return button == ui::MessageBoxFlags::DIALOGBUTTON_OK ?
+    ui::DialogButton button) const {
+  DCHECK(button == ui::DIALOG_BUTTON_OK || button == ui::DIALOG_BUTTON_CANCEL);
+  return button == ui::DIALOG_BUTTON_OK ?
       l10n_util::GetStringUTF16(IDS_RELAUNCH_AND_UPDATE) :
       l10n_util::GetStringUTF16(IDS_NOT_NOW);
 }
@@ -104,7 +104,7 @@ UpdateRecommendedMessageBox::UpdateRecommendedMessageBox(
       l10n_util::GetStringFUTF16(IDS_UPDATE_RECOMMENDED, product_name),
       string16(),
       kDialogWidth);
-  browser::CreateViewsWindow(parent_window, this)->Show();
+  browser::CreateViewsWindow(parent_window, this, STYLE_GENERIC)->Show();
 }
 
 UpdateRecommendedMessageBox::~UpdateRecommendedMessageBox() {

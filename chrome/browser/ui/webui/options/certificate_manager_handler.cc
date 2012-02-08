@@ -13,11 +13,11 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/certificate_viewer.h"
+#include "chrome/browser/ui/certificate_dialogs.h"
 #include "chrome/browser/ui/crypto_module_password_dialog.h"
-#include "chrome/browser/ui/gtk/certificate_dialogs.h"
-#include "content/browser/browser_thread.h"  // for FileAccessProvider
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/browser_thread.h"  // for FileAccessProvider
 #include "grit/generated_resources.h"
 #include "net/base/crypto_module.h"
 #include "net/base/x509_certificate.h"
@@ -29,6 +29,8 @@
 #include "chrome/browser/chromeos/cros/cryptohome_library.h"
 #endif
 
+using content::BrowserThread;
+
 namespace {
 
 static const char kKeyId[] = "id";
@@ -36,7 +38,6 @@ static const char kSubNodesId[] = "subnodes";
 static const char kNameId[] = "name";
 static const char kReadOnlyId[] = "readonly";
 static const char kUntrustedId[] = "untrusted";
-static const char kIconId[] = "icon";
 static const char kSecurityDeviceId[] = "device";
 static const char kErrorId[] = "error";
 
@@ -971,7 +972,6 @@ void CertificateManagerHandler::PopulateTree(const std::string& tab_name,
             kUntrustedId,
             certificate_manager_model_->cert_db().IsUntrusted(cert));
         // TODO(mattm): Other columns.
-        cert_dict->SetString(kIconId, "none");
         subnodes->Append(cert_dict);
       }
       std::sort(subnodes->begin(), subnodes->end(), comparator);

@@ -6,6 +6,8 @@
 
 #include "base/at_exit.h"
 #include "base/base64.h"
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/file_path.h"
@@ -36,7 +38,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFileSystemCallbacks.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginParams.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
 #if defined(TOOLKIT_USES_GTK)
 #include "ui/base/keycodes/keyboard_code_conversion_gtk.h"
 #endif
@@ -44,20 +46,20 @@
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
-#include "webkit/glue/media/video_renderer_impl.h"
-#include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/user_agent.h"
+#include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
-#include "webkit/glue/webmediaplayer_impl.h"
+#include "webkit/media/video_renderer_impl.h"
+#include "webkit/media/webmediaplayer_impl.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin_impl.h"
 #include "webkit/plugins/npapi/webplugin_page_delegate.h"
 #include "webkit/plugins/webplugininfo.h"
 #include "webkit/support/platform_support.h"
 #include "webkit/support/simple_database_system.h"
-#include "webkit/support/test_webplugin_page_delegate.h"
 #include "webkit/support/test_webkit_platform_support.h"
+#include "webkit/support/test_webplugin_page_delegate.h"
 #include "webkit/tools/test_shell/simple_file_system.h"
 #include "webkit/tools/test_shell/simple_resource_loader_bridge.h"
 
@@ -125,9 +127,11 @@ class TestEnvironment {
   typedef MessageLoopForUI MessageLoopType;
 #endif
 
-  explicit TestEnvironment(bool unit_test_mode) {
+  TestEnvironment(bool unit_test_mode,
+                  base::AtExitManager* existing_at_exit_manager) {
     if (!unit_test_mode) {
-      at_exit_manager_.reset(new base::AtExitManager);
+      // The existing_at_exit_manager must be not NULL.
+      at_exit_manager_.reset(existing_at_exit_manager);
       InitLogging(false);
     }
     main_message_loop_.reset(new MessageLoopType);
@@ -156,6 +160,8 @@ class TestEnvironment {
 #endif
 
  private:
+  // Data member at_exit_manager_ will take the ownership of the input
+  // AtExitManager and manage its lifecycle.
   scoped_ptr<base::AtExitManager> at_exit_manager_;
   scoped_ptr<MessageLoopType> main_message_loop_;
   scoped_ptr<TestWebKitPlatformSupport> webkit_platform_support_;
@@ -207,26 +213,6 @@ class WebKitClientMessageLoopImpl
   MessageLoop* message_loop_;
 };
 
-// An wrapper object for giving TaskAdaptor ref-countability,
-// which NewRunnableMethod() requires.
-class TaskAdaptorHolder : public CancelableTask {
- public:
-  explicit TaskAdaptorHolder(webkit_support::TaskAdaptor* adaptor)
-      : adaptor_(adaptor) {
-  }
-
-  virtual void Run() {
-    adaptor_->Run();
-  }
-
-  virtual void Cancel() {
-    adaptor_.reset();
-  }
-
- private:
-  scoped_ptr<webkit_support::TaskAdaptor> adaptor_;
-};
-
 webkit_support::GraphicsContext3DImplementation
     g_graphics_context_3d_implementation =
         webkit_support::IN_PROCESS_COMMAND_BUFFER;
@@ -255,8 +241,14 @@ static void SetUpTestEnvironmentImpl(bool unit_test_mode) {
   // Otherwise crash may happend when different threads try to create a GURL
   // at same time.
   url_util::Initialize();
+  base::AtExitManager* at_exit_manager = NULL;
+  // Some initialization code may use a AtExitManager before initializing
+  // TestEnvironment, so we create a AtExitManager early and pass its ownership
+  // to TestEnvironment.
+  if (!unit_test_mode)
+    at_exit_manager = new base::AtExitManager;
   BeforeInitialize(unit_test_mode);
-  test_environment = new TestEnvironment(unit_test_mode);
+  test_environment = new TestEnvironment(unit_test_mode, at_exit_manager);
   AfterInitialize(unit_test_mode);
   if (!unit_test_mode) {
     // Load ICU data tables.  This has to run after TestEnvironment is created
@@ -318,17 +310,15 @@ WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
 
-  scoped_refptr<webkit_glue::VideoRendererImpl> video_renderer(
-      new webkit_glue::VideoRendererImpl(false));
-  collection->AddVideoRenderer(video_renderer);
-
-  scoped_ptr<webkit_glue::WebMediaPlayerImpl> result(
-      new webkit_glue::WebMediaPlayerImpl(client,
-                                          collection.release(),
-                                          message_loop_factory.release(),
-                                          NULL,
-                                          new media::MediaLog()));
-  if (!result->Initialize(frame, false, video_renderer)) {
+  scoped_ptr<webkit_media::WebMediaPlayerImpl> result(
+      new webkit_media::WebMediaPlayerImpl(
+          client,
+          base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
+          collection.release(),
+          message_loop_factory.release(),
+          NULL,
+          new media::MediaLog()));
+  if (!result->Initialize(frame, false)) {
     return NULL;
   }
   return result.release();
@@ -430,12 +420,12 @@ WebDevToolsAgentClient::WebKitClientMessageLoop* CreateDevToolsMessageLoop() {
 
 void PostDelayedTask(void (*func)(void*), void* context, int64 delay_ms) {
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, NewRunnableFunction(func, context), delay_ms);
+      FROM_HERE, base::Bind(func, context), delay_ms);
 }
 
 void PostDelayedTask(TaskAdaptor* task, int64 delay_ms) {
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, new TaskAdaptorHolder(task), delay_ms);
+      FROM_HERE, base::Bind(&TaskAdaptor::Run, base::Owned(task)), delay_ms);
 }
 
 // Wrappers for FilePath and file_util
@@ -539,7 +529,7 @@ int64 GetCurrentTimeInMillisecond() {
 }
 
 std::string EscapePath(const std::string& path) {
-  return ::EscapePath(path);
+  return net::EscapePath(path);
 }
 
 std::string MakeURLErrorDescription(const WebKit::WebURLError& error) {
@@ -641,6 +631,15 @@ int NativeKeyCodeForWindowsKeyCode(int keycode, bool shift) {
 // Timers
 double GetForegroundTabTimerInterval() {
   return webkit_glue::kForegroundTabTimerInterval;
+}
+
+// Logging
+void EnableWebCoreLogChannels(const std::string& channels) {
+  webkit_glue::EnableWebCoreLogChannels(channels);
+}
+
+void SetGamepadData(const WebKit::WebGamepads& pads) {
+  test_environment->webkit_platform_support()->setGamepadData(pads);
 }
 
 }  // namespace webkit_support

@@ -8,11 +8,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
+#include <string>
+
+#include "base/bind.h"
 #include "base/basictypes.h"
 #include "base/eintr_wrapper.h"
 #include "base/metrics/histogram.h"
@@ -21,7 +24,9 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/metrics_service.h"
 #include "content/browser/user_metrics.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -65,7 +70,7 @@ void ExternalMetrics::RecordAction(const char* action) {
   std::string action_string(action);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &ExternalMetrics::RecordActionUI, action_string));
+      base::Bind(&ExternalMetrics::RecordActionUI, this, action_string));
 }
 
 void ExternalMetrics::RecordCrashUI(const std::string& crash_kind) {
@@ -77,7 +82,7 @@ void ExternalMetrics::RecordCrashUI(const std::string& crash_kind) {
 void ExternalMetrics::RecordCrash(const std::string& crash_kind) {
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(this, &ExternalMetrics::RecordCrashUI, crash_kind));
+      base::Bind(&ExternalMetrics::RecordCrashUI, this, crash_kind));
 }
 
 void ExternalMetrics::RecordHistogram(const char* histogram_data) {
@@ -232,8 +237,8 @@ void ExternalMetrics::CollectEventsAndReschedule() {
 void ExternalMetrics::ScheduleCollector() {
   bool result;
   result = BrowserThread::PostDelayedTask(
-    BrowserThread::FILE, FROM_HERE, NewRunnableMethod(
-        this, &chromeos::ExternalMetrics::CollectEventsAndReschedule),
+    BrowserThread::FILE, FROM_HERE,
+    base::Bind(&chromeos::ExternalMetrics::CollectEventsAndReschedule, this),
     kExternalMetricsCollectionIntervalMs);
   DCHECK(result);
 }

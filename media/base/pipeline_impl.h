@@ -23,6 +23,7 @@
 #include "media/base/clock.h"
 #include "media/base/composite_filter.h"
 #include "media/base/demuxer.h"
+#include "media/base/download_rate_monitor.h"
 #include "media/base/filter_host.h"
 #include "media/base/pipeline.h"
 #include "ui/gfx/size.h"
@@ -102,7 +103,7 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
   // Pipeline implementation.
   virtual void Init(const PipelineStatusCB& ended_callback,
                     const PipelineStatusCB& error_callback,
-                    const PipelineStatusCB& network_callback) OVERRIDE;
+                    const NetworkEventCB& network_callback) OVERRIDE;
   virtual bool Start(FilterCollection* filter_collection,
                      const std::string& uri,
                      const PipelineStatusCB& start_callback) OVERRIDE;
@@ -111,7 +112,6 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
                     const PipelineStatusCB& seek_callback) OVERRIDE;
   virtual bool IsRunning() const OVERRIDE;
   virtual bool IsInitialized() const OVERRIDE;
-  virtual bool IsNetworkActive() const OVERRIDE;
   virtual bool HasAudio() const OVERRIDE;
   virtual bool HasVideo() const OVERRIDE;
   virtual float GetPlaybackRate() const OVERRIDE;
@@ -126,7 +126,7 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
   virtual int64 GetTotalBytes() const OVERRIDE;
   virtual void GetNaturalVideoSize(gfx::Size* out_size) const OVERRIDE;
   virtual bool IsStreaming() const OVERRIDE;
-  virtual bool IsLoaded() const OVERRIDE;
+  virtual bool IsLocalSource() const OVERRIDE;
   virtual PipelineStatistics GetStatistics() const OVERRIDE;
 
   void SetClockForTesting(Clock* clock);
@@ -200,9 +200,7 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
   virtual void SetTotalBytes(int64 total_bytes) OVERRIDE;
   virtual void SetBufferedBytes(int64 buffered_bytes) OVERRIDE;
   virtual void SetNaturalVideoSize(const gfx::Size& size) OVERRIDE;
-  virtual void SetStreaming(bool streamed) OVERRIDE;
-  virtual void SetLoaded(bool loaded) OVERRIDE;
-  virtual void SetNetworkActivity(bool network_activity) OVERRIDE;
+  virtual void SetNetworkActivity(bool is_downloading_data) OVERRIDE;
   virtual void NotifyEnded() OVERRIDE;
   virtual void DisableAudioRenderer() OVERRIDE;
   virtual void SetCurrentReadPosition(int64 offset) OVERRIDE;
@@ -262,7 +260,7 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
   void NotifyEndedTask();
 
   // Carries out handling a notification of network event.
-  void NotifyNetworkEventTask();
+  void NotifyNetworkEventTask(NetworkEvent type);
 
   // Carries out disabling the audio renderer.
   void DisableAudioRendererTask();
@@ -333,6 +331,16 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
   void OnDemuxerSeekDone(base::TimeDelta seek_timestamp,
                          PipelineStatus status);
 
+  void OnAudioUnderflow();
+
+  // Called when |download_rate_monitor_| believes that the media can
+  // be played through without needing to pause to buffer.
+  void OnCanPlayThrough();
+
+  // Carries out the notification that the media can be played through without
+  // needing to pause to buffer.
+  void NotifyCanPlayThrough();
+
   // Message loop used to execute pipeline tasks.
   MessageLoop* message_loop_;
 
@@ -375,16 +383,13 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
   // Video's natural width and height.  Set by filters.
   gfx::Size natural_size_;
 
-  // Sets by the filters to indicate whether the data source is a streaming
+  // Set by the demuxer to indicate whether the data source is a streaming
   // source.
   bool streaming_;
 
-  // Sets by the filters to indicate whether the data source is a fully
-  // loaded source.
-  bool loaded_;
-
-  // Sets by the filters to indicate whether network is active.
-  bool network_activity_;
+  // Indicates whether the data source is local, such as a local media file
+  // from disk or a local webcam stream.
+  bool local_source_;
 
   // Current volume level (from 0.0f to 1.0f).  This value is set immediately
   // via SetVolume() and a task is dispatched on the message loop to notify the
@@ -457,7 +462,7 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
   PipelineStatusCB stop_callback_;
   PipelineStatusCB ended_callback_;
   PipelineStatusCB error_callback_;
-  PipelineStatusCB network_callback_;
+  NetworkEventCB network_callback_;
 
   // Reference to the filter(s) that constitute the pipeline.
   scoped_refptr<Filter> pipeline_filter_;
@@ -477,6 +482,15 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline, public FilterHost {
 
   // Statistics.
   PipelineStatistics statistics_;
+  // Time of pipeline creation; is non-zero only until the pipeline first
+  // reaches "kStarted", at which point it is used & zeroed out.
+  base::Time creation_time_;
+
+  // Approximates the rate at which the media is being downloaded.
+  DownloadRateMonitor download_rate_monitor_;
+
+  // True if the pipeline is actively downloading bytes, false otherwise.
+  bool is_downloading_data_;
 
   FRIEND_TEST_ALL_PREFIXES(PipelineImplTest, GetBufferedTime);
 

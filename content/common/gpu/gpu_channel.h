@@ -6,14 +6,13 @@
 #define CONTENT_COMMON_GPU_GPU_CHANNEL_H_
 #pragma once
 
-#include <queue>
-#include <set>
+#include <deque>
 #include <string>
-#include <vector>
 
 #include "base/id_map.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/process.h"
 #include "build/build_config.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
@@ -32,10 +31,6 @@ class TransportTexture;
 namespace base {
 class MessageLoopProxy;
 class WaitableEvent;
-}
-
-namespace gfx {
-class GLSurface;
 }
 
 // Encapsulates an IPC channel between the GPU process and one renderer
@@ -76,7 +71,7 @@ class GpuChannel : public IPC::Channel::Listener,
   virtual void OnChannelConnected(int32 peer_pid) OVERRIDE;
 
   // IPC::Message::Sender implementation:
-  virtual bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   // Whether this channel is able to handle IPC messages.
   bool IsScheduled();
@@ -92,8 +87,6 @@ class GpuChannel : public IPC::Channel::Listener,
       int32 render_view_id,
       const GPUCreateCommandBufferConfig& init_params,
       int32* route_id);
-
-  void ViewResized(int32 command_buffer_route_id);
 
   gfx::GLShareGroup* share_group() const { return share_group_.get(); }
 
@@ -188,9 +181,10 @@ class GpuChannel : public IPC::Channel::Listener,
   GpuWatchdog* watchdog_;
   bool software_;
   bool handle_messages_scheduled_;
+  bool processed_get_state_fast_;
   int32 num_contexts_preferring_discrete_gpu_;
 
-  ScopedRunnableMethodFactory<GpuChannel> task_factory_;
+  base::WeakPtrFactory<GpuChannel> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuChannel);
 };

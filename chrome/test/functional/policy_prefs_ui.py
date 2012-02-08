@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -21,10 +21,11 @@
 import logging
 
 import pyauto_functional  # must come before pyauto.
+import policy_base
 import pyauto
 
 
-class PolicyPrefsUITest(pyauto.PyUITest):
+class PolicyPrefsUITest(policy_base.PolicyTestBase):
   BROWSER         = 0
   PERSONAL        = 1
   ADVANCED        = 2
@@ -89,6 +90,7 @@ class PolicyPrefsUITest(pyauto.PyUITest):
     'PrintingEnabled': (False, []),
     # Note: supported_on is empty for this policy.
     'CloudPrintProxyEnabled': (True, [], []),
+    'CloudPrintSubmitEnabled': (False, [], ['win', 'mac', 'linux']),
     'SafeBrowsingEnabled': (False, [ ADVANCED ]),
     # TODO(joaodasilva): This is only in place on official builds, but the
     # SetUserCloudPolicy call is a nop on official builds. Should be ADVANCED.
@@ -105,6 +107,8 @@ class PolicyPrefsUITest(pyauto.PyUITest):
     'SyncDisabled': (True, []),
     'UserDataDir': ('${users}/${user_name}/chrome-test', [], [ 'win', 'mac' ]),
     'DiskCacheDir': ('${user_home}/test-cache', [], [ 'win', 'mac', 'linux' ]),
+    'DiskCacheSize': (100, [], [ 'win', 'mac', 'linux' ]),
+    'MediaCacheSize': (200, [], [ 'win', 'mac', 'linux' ]),
     'DownloadDirectory': ('${user_home}/test-downloads', [ ADVANCED ],
                           [ 'win', 'mac', 'linux' ]),
     'ClearSiteDataOnExit': (True, [ CONTENT ]),
@@ -116,6 +120,7 @@ class PolicyPrefsUITest(pyauto.PyUITest):
     'ProxyPacUrl': ('http://localhost:8080/proxy.pac', [],
                     [ 'win', 'mac', 'linux' ]),
     'ProxyBypassList': ('localhost', [], [ 'win', 'mac', 'linux' ]),
+    'EnableOriginBoundCerts': (False, []),
     'AuthSchemes': ('AuthSchemes', []),
     'DisableAuthNegotiateCnameLookup': (True, []),
     'EnableAuthNegotiatePort': (False, []),
@@ -172,16 +177,6 @@ class PolicyPrefsUITest(pyauto.PyUITest):
     'NotificationsAllowedForUrls': ([ '[*.]google.com' ], []),
     'NotificationsBlockedForUrls': ([ '[*.]google.com' ], []),
     'Disable3DAPIs': (True, []),
-    'PolicyRefreshRate': (300000, [], [ 'chromeos' ]),
-    # Only valid on chrome_frame.
-    'ChromeFrameRendererSettings': (0, [], []),
-    # Only valid on chrome_frame.
-    'RenderInChromeFrameList': ([ 'google.com' ], [], []),
-    # Only valid on chrome_frame.
-    'RenderInHostList': ([ 'google.com' ], [], []),
-    # Only valid on chrome_frame.
-    'ChromeFrameContentTypes': ([ 'text/xml' ], [], []),
-    'ChromeOsLockOnIdleSuspend': (True, [ PERSONAL ], [ 'chromeos' ]),
     'InstantEnabled': (False, [ BROWSER ]),
     'TranslateEnabled': (False, [ ADVANCED ]),
     'AllowOutdatedPlugins': (False, []),
@@ -190,12 +185,6 @@ class PolicyPrefsUITest(pyauto.PyUITest):
     'EditBookmarksEnabled': (False, []),
     'AllowFileSelectionDialogs': (False, [ ADVANCED ],
                                   [ 'win', 'mac', 'linux' ]),
-    # Only valid on chrome_frame.
-    'GCFUserDataDir': ('${user_name}/test-frame', [], []),
-    # device_only.
-    'DevicePolicyRefreshRate': (300000, [], []),
-    # device_only.
-    'ChromeOsReleaseChannel': ('stable-channel', [], []),
     'ImportBookmarks': (False, [], [ 'win', 'mac', 'linux' ]),
     'ImportHistory': (False, [], [ 'win', 'mac', 'linux' ]),
     'ImportHomepage': (False, [], [ 'win', 'mac', 'linux' ]),
@@ -205,6 +194,25 @@ class PolicyPrefsUITest(pyauto.PyUITest):
     'HideWebStorePromo': (True, []),
     'URLBlacklist': ([ 'google.com' ], []),
     'URLWhitelist': ([ 'google.com' ], []),
+    'EnterpriseWebStoreURL': ('', []),
+    'EnterpriseWebStoreName': ('', []),
+
+    # ChromeOS-only policies:
+    'ChromeOsLockOnIdleSuspend': (True, [ PERSONAL ], [ 'chromeos' ]),
+    'PolicyRefreshRate': (300000, [], [ 'chromeos' ]),
+    'OpenNetworkConfiguration': ('', [], [ 'chromeos' ]),
+
+    # ChromeOS Device policies:
+    'DevicePolicyRefreshRate': (300000, [], []),
+    'ChromeOsReleaseChannel': ('stable-channel', [], []),
+    'DeviceOpenNetworkConfiguration': ('', [], []),
+
+    # Chrome Frame policies:
+    'ChromeFrameRendererSettings': (0, [], []),
+    'RenderInChromeFrameList': ([ 'google.com' ], [], []),
+    'RenderInHostList': ([ 'google.com' ], [], []),
+    'ChromeFrameContentTypes': ([ 'text/xml' ], [], []),
+    'GCFUserDataDir': ('${user_name}/test-frame', [], []),
   }
 
   def GetPlatform(self):
@@ -243,9 +251,11 @@ class PolicyPrefsUITest(pyauto.PyUITest):
 
   def RunPoliciesShowBanner(self, include_expected, include_unexpected):
     """Tests all the policies on each settings page.
+
     If |include_expected|, pages where the banner is expected will be verified.
     If |include_unexpected|, pages where the banner should not appear will also
-    be verified. This can take some time."""
+    be verified. This can take some time.
+    """
 
     os = self.GetPlatform()
 
@@ -290,9 +300,12 @@ class PolicyPrefsUITest(pyauto.PyUITest):
     self.RunPoliciesShowBanner(False, True)
 
   def testFailOnPoliciesNotTested(self):
-    """Fails for all policies listed in GetPolicyDefinitionList() that aren't
+    """Verifies that all existing policies are covered.
+
+    Fails for all policies listed in GetPolicyDefinitionList() that aren't
     listed in |PolicyPrefsUITest.policies|, and thus are not tested by
-    |testPoliciesShowBanner|."""
+    |testPoliciesShowBanner|.
+    """
 
     all_policies = self.GetPolicyDefinitionList()
     for policy in all_policies:

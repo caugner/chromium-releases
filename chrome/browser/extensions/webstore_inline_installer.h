@@ -12,9 +12,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
+#include "chrome/browser/extensions/webstore_installer.h"
 #include "chrome/browser/extensions/webstore_install_helper.h"
 #include "content/browser/tab_contents/tab_contents_observer.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -31,7 +32,8 @@ class WebstoreInlineInstaller
     : public base::RefCountedThreadSafe<WebstoreInlineInstaller>,
       public ExtensionInstallUI::Delegate,
       public TabContentsObserver,
-      public URLFetcher::Delegate,
+      public content::URLFetcherDelegate,
+      public WebstoreInstaller::Delegate,
       public WebstoreInstallHelper::Delegate {
  public:
   class Delegate {
@@ -67,8 +69,8 @@ class WebstoreInlineInstaller
   // All flows (whether successful or not) end up in CompleteInstall, which
   // informs our delegate of success/failure.
 
-  // UrlFetcher::Delegate interface implementation.
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  // content::URLFetcherDelegate interface implementation.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Client callbacks for SafeWebstoreResponseParser when parsing is complete.
   void OnWebstoreResponseParseSuccess(DictionaryValue* webstore_data);
@@ -76,9 +78,11 @@ class WebstoreInlineInstaller
 
   // WebstoreInstallHelper::Delegate interface implementation.
   virtual void OnWebstoreParseSuccess(
+      const std::string& id,
       const SkBitmap& icon,
       base::DictionaryValue* parsed_manifest) OVERRIDE;
   virtual void OnWebstoreParseFailure(
+      const std::string& id,
       InstallHelperResultCode result_code,
       const std::string& error_message) OVERRIDE;
 
@@ -89,6 +93,11 @@ class WebstoreInlineInstaller
   // TabContentsObserver interface implementation.
   virtual void TabContentsDestroyed(TabContents* tab_contents) OVERRIDE;
 
+  // WebstoreInstaller::Delegate interface implementation.
+  virtual void OnExtensionInstallSuccess(const std::string& id) OVERRIDE;
+  virtual void OnExtensionInstallFailure(const std::string& id,
+                                         const std::string& error) OVERRIDE;
+
   void CompleteInstall(const std::string& error);
 
   int install_id_;
@@ -97,7 +106,7 @@ class WebstoreInlineInstaller
   Delegate* delegate_;
 
   // For fetching webstore JSON data.
-  scoped_ptr<URLFetcher> webstore_data_url_fetcher_;
+  scoped_ptr<content::URLFetcher> webstore_data_url_fetcher_;
 
   // Extracted from the webstore JSON data response.
   std::string localized_name_;

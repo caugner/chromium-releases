@@ -4,6 +4,7 @@
 
 #include "ipc/ipc_sync_channel.h"
 
+#include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
 #include "base/logging.h"
@@ -67,10 +68,9 @@ class SyncChannel::ReceivedSyncMsgQueue :
 
     dispatch_event_.Signal();
     if (!was_task_pending) {
-      listener_message_loop_->PostTask(FROM_HERE, NewRunnableMethod(
-          this,
-          &ReceivedSyncMsgQueue::DispatchMessagesTask,
-          scoped_refptr<SyncContext>(context)));
+      listener_message_loop_->PostTask(
+          FROM_HERE, base::Bind(&ReceivedSyncMsgQueue::DispatchMessagesTask,
+                                this, scoped_refptr<SyncContext>(context)));
     }
   }
 
@@ -206,7 +206,8 @@ class SyncChannel::ReceivedSyncMsgQueue :
 };
 
 base::LazyInstance<base::ThreadLocalPointer<SyncChannel::ReceivedSyncMsgQueue> >
-    SyncChannel::ReceivedSyncMsgQueue::lazy_tls_ptr_(base::LINKER_INITIALIZED);
+    SyncChannel::ReceivedSyncMsgQueue::lazy_tls_ptr_ =
+        LAZY_INSTANCE_INITIALIZER;
 
 SyncChannel::SyncContext::SyncContext(
     Channel::Listener* listener,
@@ -259,8 +260,9 @@ bool SyncChannel::SyncContext::Pop() {
   // blocking Send() call, whose reply we received after we made this last
   // Send() call.  So check if we have any queued replies available that
   // can now unblock the listener thread.
-  ipc_message_loop()->PostTask(FROM_HERE, NewRunnableMethod(
-      received_sync_msgs_.get(), &ReceivedSyncMsgQueue::DispatchReplies));
+  ipc_message_loop()->PostTask(
+      FROM_HERE, base::Bind(&ReceivedSyncMsgQueue::DispatchReplies,
+                            received_sync_msgs_.get()));
 
   return result;
 }
@@ -376,18 +378,19 @@ SyncChannel::SyncChannel(
     base::MessageLoopProxy* ipc_message_loop,
     bool create_pipe_now,
     WaitableEvent* shutdown_event)
-    : ChannelProxy(
-          channel_handle, mode, ipc_message_loop,
-          new SyncContext(listener, ipc_message_loop, shutdown_event),
-          create_pipe_now),
+    : ChannelProxy(new SyncContext(listener, ipc_message_loop, shutdown_event)),
       sync_messages_with_no_timeout_allowed_(true) {
-  // Ideally we only want to watch this object when running a nested message
-  // loop.  However, we don't know when it exits if there's another nested
-  // message loop running under it or not, so we wouldn't know whether to
-  // stop or keep watching.  So we always watch it, and create the event as
-  // manual reset since the object watcher might otherwise reset the event
-  // when we're doing a WaitMany.
-  dispatch_watcher_.StartWatching(sync_context()->GetDispatchEvent(), this);
+  ChannelProxy::Init(channel_handle, mode, create_pipe_now);
+  StartWatching();
+}
+
+SyncChannel::SyncChannel(
+    Channel::Listener* listener,
+    base::MessageLoopProxy* ipc_message_loop,
+    WaitableEvent* shutdown_event)
+    : ChannelProxy(new SyncContext(listener, ipc_message_loop, shutdown_event)),
+      sync_messages_with_no_timeout_allowed_(true) {
+  StartWatching();
 }
 
 SyncChannel::~SyncChannel() {
@@ -427,9 +430,10 @@ bool SyncChannel::SendWithTimeout(Message* message, int timeout_ms) {
     // We use the sync message id so that when a message times out, we don't
     // confuse it with another send that is either above/below this Send in
     // the call stack.
-    context->ipc_message_loop()->PostDelayedTask(FROM_HERE,
-        NewRunnableMethod(context.get(),
-            &SyncContext::OnSendTimeout, message_id), timeout_ms);
+    context->ipc_message_loop()->PostDelayedTask(
+        FROM_HERE,
+        base::Bind(&SyncContext::OnSendTimeout, context.get(), message_id),
+        timeout_ms);
   }
 
   // Wait for reply, or for any other incoming synchronous messages.
@@ -509,6 +513,16 @@ void SyncChannel::OnWaitableEventSignaled(WaitableEvent* event) {
   event->Reset();
   dispatch_watcher_.StartWatching(event, this);
   sync_context()->DispatchMessages();
+}
+
+void SyncChannel::StartWatching() {
+  // Ideally we only want to watch this object when running a nested message
+  // loop.  However, we don't know when it exits if there's another nested
+  // message loop running under it or not, so we wouldn't know whether to
+  // stop or keep watching.  So we always watch it, and create the event as
+  // manual reset since the object watcher might otherwise reset the event
+  // when we're doing a WaitMany.
+  dispatch_watcher_.StartWatching(sync_context()->GetDispatchEvent(), this);
 }
 
 }  // namespace IPC

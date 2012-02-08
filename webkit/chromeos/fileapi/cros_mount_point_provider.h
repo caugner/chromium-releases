@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/synchronization/lock.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
@@ -39,12 +40,13 @@ class CrosMountPointProvider
       const GURL& origin_url,
       fileapi::FileSystemType type,
       bool create,
-      fileapi::FileSystemPathManager::GetRootPathCallback* callback) OVERRIDE;
+      const fileapi::FileSystemPathManager::GetRootPathCallback& callback)
+          OVERRIDE;
   virtual FilePath ValidateFileSystemRootAndGetPathOnFileThread(
       const GURL& origin_url,
       fileapi::FileSystemType type,
       const FilePath& virtual_path,
-      bool create);
+      bool create) OVERRIDE;
   virtual bool IsRestrictedFileName(const FilePath& filename) const OVERRIDE;
   virtual std::vector<FilePath> GetRootDirectories() const OVERRIDE;
   virtual fileapi::FileSystemFileUtil* GetFileUtil() OVERRIDE;

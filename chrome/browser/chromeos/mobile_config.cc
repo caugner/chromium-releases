@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
@@ -14,7 +15,9 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -284,10 +287,10 @@ MobileConfig::~MobileConfig() {
 
 void MobileConfig::LoadConfig() {
   BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      NewRunnableMethod(this,
-          &MobileConfig::ReadConfigInBackground,
-          FilePath(kGlobalCarrierConfigPath),
-          FilePath(kLocalCarrierConfigPath)));
+      base::Bind(&MobileConfig::ReadConfigInBackground,
+                 base::Unretained(this),  // this class is a singleton.
+                 FilePath(kGlobalCarrierConfigPath),
+                 FilePath(kLocalCarrierConfigPath)));
 }
 
 void MobileConfig::ProcessConfig(const std::string& global_config,
@@ -330,11 +333,10 @@ void MobileConfig::ReadConfigInBackground(const FilePath& global_config_file,
             << local_config_file.value();
   }
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &MobileConfig::ProcessConfig,
-          global_config,
-          local_config));
+                          base::Bind(&MobileConfig::ProcessConfig,
+                                     base::Unretained(this),  // singleton.
+                                     global_config,
+                                     local_config));
 }
 
 }  // namespace chromeos

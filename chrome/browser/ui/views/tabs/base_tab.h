@@ -10,9 +10,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/views/tabs/tab_renderer_data.h"
 #include "ui/base/animation/animation_delegate.h"
-#include "views/context_menu_controller.h"
-#include "views/controls/button/button.h"
-#include "views/view.h"
+#include "ui/views/context_menu_controller.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/view.h"
 
 class BaseTab;
 class TabController;
@@ -91,7 +91,8 @@ class BaseTab : public ui::AnimationDelegate,
   virtual void OnMouseCaptureLost() OVERRIDE;
   virtual void OnMouseEntered(const views::MouseEvent& event) OVERRIDE;
   virtual void OnMouseExited(const views::MouseEvent& event) OVERRIDE;
-  virtual bool GetTooltipText(const gfx::Point& p, string16* tooltip) OVERRIDE;
+  virtual bool GetTooltipText(const gfx::Point& p,
+                              string16* tooltip) const OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
 
  protected:

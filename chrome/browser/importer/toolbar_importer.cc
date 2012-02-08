@@ -16,8 +16,11 @@
 #include "chrome/browser/importer/importer_data_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/libxml_utils.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/url_fetcher.h"
 #include "grit/generated_resources.h"
+
+using content::BrowserThread;
 
 // Toolbar5Importer
 const char Toolbar5Importer::kXmlApiReplyXmlTag[] = "xml_api_reply";
@@ -70,6 +73,8 @@ void Toolbar5Importer::StartImport(
 
   bridge_ = bridge;
   items_to_import_ = items;
+  DCHECK(source_profile.request_context_getter);
+  request_context_getter_ = source_profile.request_context_getter;
   state_ = INITIALIZED;
 
   bridge_->NotifyStarted();
@@ -96,25 +101,21 @@ void Toolbar5Importer::Cancel() {
   }
 }
 
-void Toolbar5Importer::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
+void Toolbar5Importer::OnURLFetchComplete(const content::URLFetcher* source) {
   if (cancelled()) {
     EndImport();
     return;
   }
 
-  if (200 != response_code) {  // HTTP/Ok
+  if (200 != source->GetResponseCode()) {  // HTTP/Ok
     // Cancelling here will update the UI and bypass the rest of bookmark
     // import.
     EndImportBookmarks();
     return;
   }
 
+  std::string data;
+  source->GetResponseAsString(&data);
   switch (state_) {
     case GET_AUTHORIZATION_TOKEN:
       GetBookmarkDataFromServer(data);
@@ -209,9 +210,9 @@ void Toolbar5Importer::GetAuthenticationFromServer() {
                      random_string);
   GURL url(url_string);
 
-  token_fetcher_ = new  URLFetcher(url, URLFetcher::GET, this);
-  token_fetcher_->set_request_context(
-      Profile::Deprecated::GetDefaultRequestContext());
+  token_fetcher_ = content::URLFetcher::Create(
+      url, content::URLFetcher::GET, this);
+  token_fetcher_->SetRequestContext(request_context_getter_.get());
   token_fetcher_->Start();
 }
 
@@ -243,9 +244,9 @@ void Toolbar5Importer::GetBookmarkDataFromServer(const std::string& response) {
                       token);
   GURL url(conn_string);
 
-  data_fetcher_ = new URLFetcher(url, URLFetcher::GET, this);
-  data_fetcher_->set_request_context(
-      Profile::Deprecated::GetDefaultRequestContext());
+  data_fetcher_ = content::URLFetcher::Create(
+      url, content::URLFetcher::GET, this);
+  data_fetcher_->SetRequestContext(request_context_getter_.get());
   data_fetcher_->Start();
 }
 

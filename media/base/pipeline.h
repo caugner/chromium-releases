@@ -34,10 +34,20 @@ struct PipelineStatistics {
   uint32 video_frames_dropped;
 };
 
+enum NetworkEvent {
+  DOWNLOAD_CONTINUED,
+  DOWNLOAD_PAUSED,
+  CAN_PLAY_THROUGH
+};
+
 class FilterCollection;
 
 class MEDIA_EXPORT Pipeline : public base::RefCountedThreadSafe<Pipeline> {
  public:
+  // Callback that executes when a network event occurrs.
+  // The parameter specifies the type of event that is being signaled.
+  typedef base::Callback<void(NetworkEvent)> NetworkEventCB;
+
   // Initializes pipeline. Pipeline takes ownership of all callbacks passed
   // into this method.
   // |ended_callback| will be executed when the media reaches the end.
@@ -45,7 +55,7 @@ class MEDIA_EXPORT Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // |network_callback_| will be executed when there's a network event.
   virtual void Init(const PipelineStatusCB& ended_callback,
                     const PipelineStatusCB& error_callback,
-                    const PipelineStatusCB& network_callback) = 0;
+                    const NetworkEventCB& network_callback) = 0;
 
   // Build a pipeline to render the given URL using the given filter collection
   // to construct a filter chain.  Returns true if successful, false otherwise
@@ -91,9 +101,6 @@ class MEDIA_EXPORT Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // point where playback controls will be respected.  Note that it is possible
   // for a pipeline to be started but not initialized (i.e., an error occurred).
   virtual bool IsInitialized() const = 0;
-
-  // Returns true if there has been network activity.
-  virtual bool IsNetworkActive() const = 0;
 
   // Returns true if the media has audio.
   virtual bool HasAudio() const = 0;
@@ -156,9 +163,9 @@ class MEDIA_EXPORT Pipeline : public base::RefCountedThreadSafe<Pipeline> {
   // data source. Seeking may not be possible.
   virtual bool IsStreaming() const = 0;
 
-  // If this method returns true, that means the data source has fully loaded
-  // the media and that the network is no longer needed.
-  virtual bool IsLoaded() const = 0;
+  // If this method returns true, that means the data source is local and
+  // the network is not needed.
+  virtual bool IsLocalSource() const = 0;
 
   // Gets the current pipeline statistics.
   virtual PipelineStatistics GetStatistics() const = 0;

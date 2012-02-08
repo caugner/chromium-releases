@@ -146,10 +146,6 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // Parses the string with the cookie time (very forgivingly).
   static base::Time ParseCookieTime(const std::string& time_string);
 
-  // Returns true if a domain string represents a host-only cookie,
-  // i.e. it doesn't begin with a leading '.' character.
-  static bool DomainIsHostOnly(const std::string& domain_string);
-
   // Helper function that adds all cookies from |list| into this instance.
   bool InitializeFrom(const CookieList& list);
 
@@ -279,6 +275,14 @@ class NET_EXPORT CookieMonster : public CookieStore {
 
   virtual CookieMonster* GetCookieMonster() OVERRIDE;
 
+  // Enables writing session cookies into the cookie database. If this this
+  // method is called, it must be called before first use of the instance
+  // (i.e. as part of the instance initialization process).
+  void SetPersistSessionCookies(bool persist_session_cookies);
+
+  // Protects session cookies from deletion on shutdown.
+  void SaveSessionCookies();
+
   // Debugging method to perform various validation checks on the map.
   // Currently just checking that there are no null CanonicalCookie pointers
   // in the map.
@@ -321,6 +325,9 @@ class NET_EXPORT CookieMonster : public CookieStore {
   FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, TestImport);
   FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, GetKey);
   FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, TestGetKey);
+
+  // For FindCookiesForKey.
+  FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, ShortLivedSessionCookies);
 
   // Internal reasons for deletion, used to populate informative histograms
   // and to provide a public cause for onCookieChange notifications.
@@ -459,7 +466,7 @@ class NET_EXPORT CookieMonster : public CookieStore {
 
   // Stores cookies loaded from the backing store and invokes any deferred
   // calls. |beginning_time| should be the moment PersistentCookieStore::Load
-  // was invoked and is used for reporting histogram_time_load_.
+  // was invoked and is used for reporting histogram_time_blocked_on_load_.
   // See PersistentCookieStore::Load for details on the contents of cookies.
   void OnLoaded(base::TimeTicks beginning_time,
                 const std::vector<CanonicalCookie*>& cookies);
@@ -610,7 +617,7 @@ class NET_EXPORT CookieMonster : public CookieStore {
   base::Histogram* histogram_cookie_deletion_cause_;
   base::Histogram* histogram_time_get_;
   base::Histogram* histogram_time_mac_;
-  base::Histogram* histogram_time_load_;
+  base::Histogram* histogram_time_blocked_on_load_;
 
   CookieMap cookies_;
 
@@ -674,6 +681,7 @@ class NET_EXPORT CookieMonster : public CookieStore {
   base::Time last_statistic_record_time_;
 
   bool keep_expired_cookies_;
+  bool persist_session_cookies_;
 
   static bool enable_file_scheme_;
 
@@ -700,7 +708,8 @@ class NET_EXPORT CookieMonster::CanonicalCookie {
                   const base::Time& last_access,
                   bool secure,
                   bool httponly,
-                  bool has_expires);
+                  bool has_expires,
+                  bool is_persistent);
 
   // This constructor does canonicalization but not validation.
   // The result of this constructor should not be relied on in contexts
@@ -730,7 +739,8 @@ class NET_EXPORT CookieMonster::CanonicalCookie {
                                  const base::Time& creation,
                                  const base::Time& expiration,
                                  bool secure,
-                                 bool http_only);
+                                 bool http_only,
+                                 bool is_persistent);
 
   const std::string& Source() const { return source_; }
   const std::string& Name() const { return name_; }
@@ -742,7 +752,7 @@ class NET_EXPORT CookieMonster::CanonicalCookie {
   const base::Time& CreationDate() const { return creation_date_; }
   const base::Time& LastAccessDate() const { return last_access_date_; }
   bool DoesExpire() const { return has_expires_; }
-  bool IsPersistent() const { return DoesExpire(); }
+  bool IsPersistent() const { return is_persistent_; }
   const base::Time& ExpiryDate() const { return expiry_date_; }
   bool IsSecure() const { return secure_; }
   bool IsHttpOnly() const { return httponly_; }
@@ -807,6 +817,7 @@ class NET_EXPORT CookieMonster::CanonicalCookie {
   bool secure_;
   bool httponly_;
   bool has_expires_;
+  bool is_persistent_;
 };
 
 class CookieMonster::Delegate

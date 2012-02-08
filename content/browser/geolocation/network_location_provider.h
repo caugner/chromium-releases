@@ -21,8 +21,6 @@
 #include "content/common/content_export.h"
 #include "content/common/geoposition.h"
 
-class URLFetcherProtectEntry;
-
 class NetworkLocationProvider
     : public LocationProviderBase,
       public RadioDataProvider::ListenerInterface,
@@ -73,11 +71,11 @@ class NetworkLocationProvider
   virtual ~NetworkLocationProvider();
 
   // LocationProviderBase implementation
-  virtual bool StartProvider(bool high_accuracy);
-  virtual void StopProvider();
-  virtual void GetPosition(Geoposition *position);
-  virtual void UpdatePosition();
-  virtual void OnPermissionGranted(const GURL& requesting_frame);
+  virtual bool StartProvider(bool high_accuracy) OVERRIDE;
+  virtual void StopProvider() OVERRIDE;
+  virtual void GetPosition(Geoposition *position) OVERRIDE;
+  virtual void UpdatePosition() OVERRIDE;
+  virtual void OnPermissionGranted(const GURL& requesting_frame) OVERRIDE;
 
  private:
   // Satisfies a position request from cache or network.
@@ -89,15 +87,15 @@ class NetworkLocationProvider
   bool IsStarted() const;
 
   // DeviceDataProvider::ListenerInterface implementation.
-  virtual void DeviceDataUpdateAvailable(RadioDataProvider* provider);
-  virtual void DeviceDataUpdateAvailable(WifiDataProvider* provider);
+  virtual void DeviceDataUpdateAvailable(RadioDataProvider* provider) OVERRIDE;
+  virtual void DeviceDataUpdateAvailable(WifiDataProvider* provider) OVERRIDE;
 
   // NetworkLocationRequest::ListenerInterface implementation.
   virtual void LocationResponseAvailable(const Geoposition& position,
                                          bool server_error,
                                          const string16& access_token,
                                          const RadioData& radio_data,
-                                         const WifiData& wifi_data);
+                                         const WifiData& wifi_data) OVERRIDE;
 
   scoped_refptr<AccessTokenStore> access_token_store_;
 

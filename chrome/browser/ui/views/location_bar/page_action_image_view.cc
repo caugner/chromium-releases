@@ -13,12 +13,17 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
+#include "content/browser/notification_service_impl.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "ui/base/accessibility/accessible_view_state.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
 
 PageActionImageView::PageActionImageView(LocationBarView* owner,
                                          ExtensionAction* page_action)
@@ -47,12 +52,17 @@ PageActionImageView::PageActionImageView(LocationBarView* owner,
                        ImageLoadingTracker::DONT_CACHE);
   }
 
+  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
+                 content::Source<Profile>(
+                     owner_->browser()->profile()->GetOriginalProfile()));
+
   set_accessibility_focusable(true);
 }
 
 PageActionImageView::~PageActionImageView() {
   if (popup_)
-    HidePopup();
+    popup_->GetWidget()->RemoveObserver(this);
+  HidePopup();
 }
 
 void PageActionImageView::ExecuteAction(int button,
@@ -72,21 +82,16 @@ void PageActionImageView::ExecuteAction(int button,
     if (popup_showing)
       return;
 
-    gfx::Rect screen_bounds(GetImageBounds());
-    gfx::Point origin(screen_bounds.origin());
-    View::ConvertPointToScreen(this, &origin);
-    screen_bounds.set_origin(origin);
-
     views::BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
         views::BubbleBorder::TOP_LEFT : views::BubbleBorder::TOP_RIGHT;
 
-    popup_ = ExtensionPopup::Show(
+    popup_ = ExtensionPopup::ShowPopup(
         page_action_->GetPopupUrl(current_tab_id_),
         owner_->browser(),
-        screen_bounds,
+        this,
         arrow_location,
-        inspect_with_devtools,
-        this);  // ExtensionPopup::Observer
+        inspect_with_devtools);
+    popup_->GetWidget()->AddObserver(this);
   } else {
     Profile* profile = owner_->browser()->profile();
     ExtensionService* service = profile->GetExtensionService();
@@ -225,17 +230,27 @@ void PageActionImageView::UpdateVisibility(TabContents* contents,
 }
 
 void PageActionImageView::InspectPopup(ExtensionAction* action) {
-  ExecuteAction(1,  // left-click
-                true);  // inspect_with_devtools
+  ExecuteAction(1,      // Left-click.
+                true);  // |inspect_with_devtools|.
 }
 
-void PageActionImageView::ExtensionPopupIsClosing(ExtensionPopup* popup) {
-  DCHECK_EQ(popup_, popup);
-  // ExtensionPopup is ref-counted, so we don't need to delete it.
+void PageActionImageView::OnWidgetClosing(views::Widget* widget) {
+  DCHECK_EQ(popup_->GetWidget(), widget);
+  popup_->GetWidget()->RemoveObserver(this);
   popup_ = NULL;
+}
+
+void PageActionImageView::Observe(int type,
+                                  const content::NotificationSource& source,
+                                  const content::NotificationDetails& details) {
+  DCHECK_EQ(chrome::NOTIFICATION_EXTENSION_UNLOADED, type);
+  const Extension* unloaded_extension =
+      content::Details<UnloadedExtensionInfo>(details)->extension;
+  if (page_action_ == unloaded_extension ->page_action())
+    owner_->UpdatePageActions();
 }
 
 void PageActionImageView::HidePopup() {
   if (popup_)
-    popup_->Close();
+    popup_->GetWidget()->Close();
 }

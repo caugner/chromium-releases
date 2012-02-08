@@ -32,13 +32,19 @@ enum MessageType {
                // attention, but not as an error.
 };
 
+enum StatusLabelStyle {
+  PLAIN_TEXT,  // Label will be plain-text only.
+  WITH_HTML    // Label may contain an HTML-formatted link.
+};
+
 // TODO(akalin): audit the use of ProfileSyncService* service below,
 // and use const ProfileSyncService& service where possible.
 
 // Create status and link labels for the current status labels and link text
 // by querying |service|.
-// |status_label| may contain an HTML-formatted link.
+// |style| sets the link properties, see |StatusLabelStyle|.
 MessageType GetStatusLabels(ProfileSyncService* service,
+                            StatusLabelStyle style,
                             string16* status_label,
                             string16* link_label);
 
@@ -57,9 +63,6 @@ void GetStatusLabelsForSyncGlobalError(ProfileSyncService* service,
                                        string16* bubble_accept_label);
 
 MessageType GetStatus(ProfileSyncService* service);
-
-// Determines whether or not the sync error button should be visible.
-bool ShouldShowSyncErrorButton(ProfileSyncService* service);
 
 // Returns a string with the synchronization status.
 string16 GetSyncMenuLabel(ProfileSyncService* service);
@@ -85,6 +88,13 @@ void AddIntSyncDetail(base::ListValue* details,
 
 void AddStringSyncDetails(ListValue* details, const std::string& stat_name,
                           const std::string& stat_value);
+
+// Returns a string describing the chrome version environment. Version format:
+// <Build Info> <OS> <Version number> (<Last change>)<channel or "-devel">
+// If version information is unavailable, returns "invalid."
+// TODO(zea): this approximately matches MakeUserAgentForSyncApi in
+// sync_backend_host.cc. Unify the two if possible.
+std::string GetVersionString();
 
 }  // namespace sync_ui_util
 #endif  // CHROME_BROWSER_SYNC_SYNC_UI_UTIL_H_

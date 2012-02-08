@@ -16,26 +16,38 @@
 /** @suppress {duplicate} */
 var remoting = remoting || {};
 
-(function() {
+/** @type {remoting.OAuth2} */
+remoting.oauth2 = null;
+
+
 /** @constructor */
 remoting.OAuth2 = function() {
-}
+};
 
 // Constants representing keys used for storing persistent state.
+/** @private */
 remoting.OAuth2.prototype.KEY_REFRESH_TOKEN_ = 'oauth2-refresh-token';
+/** @private */
 remoting.OAuth2.prototype.KEY_ACCESS_TOKEN_ = 'oauth2-access-token';
+/** @private */
+remoting.OAuth2.prototype.KEY_EMAIL_ = 'remoting-email';
 
 // Constants for parameters used in retrieving the OAuth2 credentials.
+/** @private */
 remoting.OAuth2.prototype.CLIENT_ID_ =
       '440925447803-2pi3v45bff6tp1rde2f7q6lgbor3o5uj.' +
       'apps.googleusercontent.com';
+/** @private */
 remoting.OAuth2.prototype.CLIENT_SECRET_ = 'W2ieEsG-R1gIA4MMurGrgMc_';
+/** @private */
 remoting.OAuth2.prototype.SCOPE_ =
       'https://www.googleapis.com/auth/chromoting ' +
       'https://www.googleapis.com/auth/googletalk ' +
       'https://www.googleapis.com/auth/userinfo#email';
+/** @private */
 remoting.OAuth2.prototype.REDIRECT_URI_ =
       'https://talkgadget.google.com/talkgadget/blank';
+/** @private */
 remoting.OAuth2.prototype.OAUTH2_TOKEN_ENDPOINT_ =
     'https://accounts.google.com/o/oauth2/token';
 
@@ -45,7 +57,7 @@ remoting.OAuth2.prototype.isAuthenticated = function() {
     return true;
   }
   return false;
-}
+};
 
 /**
  * Removes all storage, and effectively unauthenticates the user.
@@ -54,8 +66,9 @@ remoting.OAuth2.prototype.isAuthenticated = function() {
  */
 remoting.OAuth2.prototype.clear = function() {
   window.localStorage.removeItem(this.KEY_REFRESH_TOKEN_);
+  window.localStorage.removeItem(this.KEY_EMAIL_);
   this.clearAccessToken();
-}
+};
 
 /**
  * @param {string} token The new refresh token.
@@ -64,7 +77,7 @@ remoting.OAuth2.prototype.clear = function() {
 remoting.OAuth2.prototype.setRefreshToken = function(token) {
   window.localStorage.setItem(this.KEY_REFRESH_TOKEN_, escape(token));
   this.clearAccessToken();
-}
+};
 
 /** @return {?string} The refresh token, if authenticated, or NULL. */
 remoting.OAuth2.prototype.getRefreshToken = function() {
@@ -73,7 +86,7 @@ remoting.OAuth2.prototype.getRefreshToken = function() {
     return unescape(value);
   }
   return null;
-}
+};
 
 /**
  * @param {string} token The new access token.
@@ -84,12 +97,13 @@ remoting.OAuth2.prototype.setAccessToken = function(token, expiration) {
   var access_token = {'token': token, 'expiration': expiration};
   window.localStorage.setItem(this.KEY_ACCESS_TOKEN_,
                               JSON.stringify(access_token));
-}
+};
 
 /**
  * Returns the current access token, setting it to a invalid value if none
  * existed before.
  *
+ * @private
  * @return {{token: string, expiration: number}} The current access token, or
  * an invalid token if not authenticated.
  */
@@ -107,7 +121,7 @@ remoting.OAuth2.prototype.getAccessTokenInternal_ = function() {
   }
   console.log('Invalid access token stored.');
   return {'token': '', 'expiration': 0};
-}
+};
 
 /**
  * Returns true if the access token is expired, or otherwise invalid.
@@ -128,30 +142,31 @@ remoting.OAuth2.prototype.needsNewAccessToken = function() {
     return true;
   }
   return false;
-}
+};
 
 /**
  * Returns the current access token.
  *
  * Will throw if !isAuthenticated() or needsNewAccessToken().
  *
- * @return {{token: string, expiration: number}}
+ * @return {string} The access token.
  */
 remoting.OAuth2.prototype.getAccessToken = function() {
   if (this.needsNewAccessToken()) {
     throw 'Access Token expired.';
   }
   return this.getAccessTokenInternal_()['token'];
-}
+};
 
 /** @return {void} Nothing. */
 remoting.OAuth2.prototype.clearAccessToken = function() {
   window.localStorage.removeItem(this.KEY_ACCESS_TOKEN_);
-}
+};
 
 /**
  * Update state based on token response from the OAuth2 /token endpoint.
  *
+ * @private
  * @param {XMLHttpRequest} xhr The XHR object for this request.
  * @return {void} Nothing.
  */
@@ -175,7 +190,7 @@ remoting.OAuth2.prototype.processTokenResponse_ = function(xhr) {
     console.log('Failed to get tokens. Status: ' + xhr.status +
                 ' response: ' + xhr.responseText);
   }
-}
+};
 
 /**
  * Asynchronously retrieves a new access token from the server.
@@ -198,14 +213,17 @@ remoting.OAuth2.prototype.refreshAccessToken = function(onDone) {
     'grant_type': 'refresh_token'
   };
 
+  /** @type {remoting.OAuth2} */
   var that = this;
+  /** @param {XMLHttpRequest} xhr The XHR reply. */
+  var processTokenResponse = function(xhr) {
+    that.processTokenResponse_(xhr);
+    onDone(xhr);
+  };
   remoting.xhr.post(this.OAUTH2_TOKEN_ENDPOINT_,
-                    function(xhr) {
-                      that.processTokenResponse_(xhr);
-                      onDone(xhr);
-                    },
+                    processTokenResponse,
                     parameters);
-}
+};
 
 /**
  * Redirect page to get a new OAuth2 Refresh Token.
@@ -218,10 +236,12 @@ remoting.OAuth2.prototype.doAuthRedirect = function() {
           'client_id': this.CLIENT_ID_,
           'redirect_uri': this.REDIRECT_URI_,
           'scope': this.SCOPE_,
-          'response_type': 'code'
+          'response_type': 'code',
+          'access_type': 'offline',
+          'approval_prompt': 'force'
         });
   window.location.replace(GET_CODE_URL);
-}
+};
 
 /**
  * Asynchronously exchanges an authorization code for a refresh token.
@@ -240,14 +260,17 @@ remoting.OAuth2.prototype.exchangeCodeForToken = function(code, onDone) {
     'grant_type': 'authorization_code'
   };
 
+  /** @type {remoting.OAuth2} */
   var that = this;
+  /** @param {XMLHttpRequest} xhr The XHR reply. */
+  var processTokenResponse = function(xhr) {
+    that.processTokenResponse_(xhr);
+    onDone(xhr);
+  };
   remoting.xhr.post(this.OAUTH2_TOKEN_ENDPOINT_,
-                    function(xhr) {
-                      that.processTokenResponse_(xhr);
-                      onDone(xhr);
-                    },
+                    processTokenResponse,
                     parameters);
-}
+};
 
 /**
  * Call myfunc with an access token as the only parameter.
@@ -257,11 +280,12 @@ remoting.OAuth2.prototype.exchangeCodeForToken = function(code, onDone) {
  *
  * The access token will remain valid for at least 2 minutes.
  *
- * @param {function({token: string, expiration: number}):void} myfunc
+ * @param {function(string):void} myfunc
  *        Function to invoke with access token.
  * @return {void} Nothing.
  */
 remoting.OAuth2.prototype.callWithToken = function(myfunc) {
+  /** @type {remoting.OAuth2} */
   var that = this;
   if (remoting.oauth2.needsNewAccessToken()) {
     remoting.oauth2.refreshAccessToken(function() {
@@ -275,5 +299,50 @@ remoting.OAuth2.prototype.callWithToken = function(myfunc) {
   }
 
   myfunc(this.getAccessToken());
-}
-}());
+};
+
+/**
+ * Get the user's email address.
+ *
+ * @param {function(?string):void} setEmail Callback invoked when the email
+ *     address is available, or on error.
+ * @return {void} Nothing.
+ */
+remoting.OAuth2.prototype.getEmail = function(setEmail) {
+  /** @type {remoting.OAuth2} */
+  var that = this;
+  /** @param {XMLHttpRequest} xhr The XHR response. */
+  var onResponse = function(xhr) {
+    that.email = null;
+    if (xhr.status == 200) {
+      // TODO(ajwong): See if we can't find a JSON endpoint.
+      that.email = xhr.responseText.split('&')[0].split('=')[1];
+    }
+    window.localStorage.setItem(that.KEY_EMAIL_, that.email);
+    setEmail(that.email);
+  };
+
+  /** @param {string} token The access token. */
+  var getEmailFromToken = function(token) {
+    var headers = { 'Authorization': 'OAuth ' + token };
+    // TODO(ajwong): Update to new v2 API.
+    remoting.xhr.get('https://www.googleapis.com/userinfo/email',
+                     onResponse, '', headers);
+  };
+
+  this.callWithToken(getEmailFromToken);
+};
+
+/**
+ * If the user's email address is cached, return it, otherwise return null.
+ *
+ * @return {?string} The email address, if it has been cached by a previous call
+ *     to getEmail, otherwise null.
+ */
+remoting.OAuth2.prototype.getCachedEmail = function() {
+  var value = window.localStorage.getItem(this.KEY_EMAIL_);
+  if (typeof value == 'string') {
+    return value;
+  }
+  return null;
+};

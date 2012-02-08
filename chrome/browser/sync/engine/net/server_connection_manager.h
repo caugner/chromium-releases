@@ -20,7 +20,6 @@
 #include "chrome/common/net/http_return.h"
 
 namespace syncable {
-class WriteTransaction;
 class DirectoryManager;
 }
 
@@ -31,10 +30,6 @@ class ClientToServerMessage;
 namespace browser_sync {
 
 class ClientToServerMessage;
-
-// How many connection errors are accepted before network handles are closed
-// and reopened.
-static const int32 kMaxConnectionErrorsBeforeReset = 10;
 
 static const int32 kUnsetResponseCode = -1;
 static const int32 kUnsetContentLength = -1;
@@ -300,10 +295,6 @@ class ServerConnectionManager {
     return get_time_path_;
   }
 
-  // Called wherever a failure should be taken as an indication that we may
-  // be experiencing connection difficulties.
-  virtual bool IncrementErrorCount();
-
   // NOTE: Tests rely on this protected function being virtual.
   //
   // Internal PostBuffer base function.
@@ -345,8 +336,6 @@ class ServerConnectionManager {
 
   // The previous auth token that is invalid now.
   std::string previously_invalidated_token;
-
-  int error_count_;  // Tracks the number of connection errors.
 
   ObserverList<ServerConnectionEventListener> listeners_;
 

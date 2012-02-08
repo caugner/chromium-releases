@@ -12,11 +12,11 @@
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/controls/label.h"
-#include "views/controls/throbber.h"
-#include "views/layout/grid_layout.h"
-#include "views/layout/layout_constants.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/throbber.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/layout/layout_constants.h"
+#include "ui/views/widget/widget.h"
 
 ImportProgressDialogView::ImportProgressDialogView(
     HWND parent_window,
@@ -111,12 +111,12 @@ void ImportProgressDialogView::ViewHierarchyChanged(bool is_add,
 }
 
 int ImportProgressDialogView::GetDialogButtons() const {
-  return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  return ui::DIALOG_BUTTON_CANCEL;
 }
 
 string16 ImportProgressDialogView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  DCHECK(button == MessageBoxFlags::DIALOGBUTTON_CANCEL);
+    ui::DialogButton button) const {
+  DCHECK_EQ(button, ui::DIALOG_BUTTON_CANCEL);
   return l10n_util::GetStringUTF16(IDS_IMPORT_PROGRESS_STATUS_CANCEL);
 }
 

@@ -19,7 +19,7 @@
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "net/base/net_errors.h"
 
@@ -29,8 +29,8 @@ namespace {
 
 typedef std::map<TabContents*, ExtensionWebNavigationTabObserver*>
     TabObserverMap;
-static base::LazyInstance<TabObserverMap> g_tab_observer(
-    base::LINKER_INITIALIZED);
+static base::LazyInstance<TabObserverMap> g_tab_observer =
+    LAZY_INSTANCE_INITIALIZER;
 
 // URL schemes for which we'll send events.
 const char* kValidSchemes[] = {
@@ -364,31 +364,32 @@ void ExtensionWebNavigationEventRouter::Init() {
   if (registrar_.IsEmpty()) {
     registrar_.Add(this,
                    content::NOTIFICATION_RETARGETING,
-                   Source<content::BrowserContext>(profile_));
+                   content::Source<content::BrowserContext>(profile_));
     registrar_.Add(this,
                    content::NOTIFICATION_TAB_ADDED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
     registrar_.Add(this,
                    content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 }
 
 void ExtensionWebNavigationEventRouter::Observe(
     int type,
-    const NotificationSource& source,
-    const NotificationDetails& details) {
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RETARGETING:
-      Retargeting(Details<const content::RetargetingDetails>(details).ptr());
+      Retargeting(
+          content::Details<const content::RetargetingDetails>(details).ptr());
       break;
 
     case content::NOTIFICATION_TAB_ADDED:
-      TabAdded(Details<TabContents>(details).ptr());
+      TabAdded(content::Details<TabContents>(details).ptr());
       break;
 
     case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
-      TabDestroyed(Source<TabContents>(source).ptr());
+      TabDestroyed(content::Source<TabContents>(source).ptr());
       break;
 
     default:
@@ -403,7 +404,8 @@ void ExtensionWebNavigationEventRouter::Retargeting(
   ExtensionWebNavigationTabObserver* tab_observer =
       ExtensionWebNavigationTabObserver::Get(details->source_tab_contents);
   if (!tab_observer) {
-    NOTREACHED();
+    CHECK(details->source_tab_contents->GetRenderViewType() !=
+          content::VIEW_TYPE_TAB_CONTENTS);
     return;
   }
   const FrameNavigationState& frame_navigation_state =
@@ -569,20 +571,24 @@ void ExtensionWebNavigationTabObserver::DocumentLoadedInFrame(
 }
 
 void ExtensionWebNavigationTabObserver::DidFinishLoad(
-    int64 frame_id) {
+    int64 frame_id,
+    const GURL& validated_url,
+    bool is_main_frame) {
   if (!navigation_state_.CanSendEvents(frame_id))
     return;
   navigation_state_.SetNavigationCompleted(frame_id);
+  DCHECK_EQ(navigation_state_.GetUrl(frame_id), validated_url);
+  DCHECK_EQ(navigation_state_.IsMainFrame(frame_id), is_main_frame);
   DispatchOnCompleted(tab_contents(),
-                      navigation_state_.GetUrl(frame_id),
-                      navigation_state_.IsMainFrame(frame_id),
+                      validated_url,
+                      is_main_frame,
                       frame_id);
 }
 
 void ExtensionWebNavigationTabObserver::DidOpenRequestedURL(
     TabContents* new_contents,
     const GURL& url,
-    const GURL& referrer,
+    const content::Referrer& referrer,
     WindowOpenDisposition disposition,
     content::PageTransition transition,
     int64 source_frame_id) {

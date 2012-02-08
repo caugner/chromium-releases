@@ -10,7 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "content/browser/browser_thread.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/common/media/media_stream_options.h"
@@ -22,6 +22,9 @@ using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::InSequence;
 using ::testing::Return;
+using content::BrowserThread;
+
+using content::BrowserThreadImpl;
 
 namespace media_stream {
 
@@ -82,7 +85,8 @@ class VideoCaptureManagerTest : public testing::Test {
   virtual void SetUp() {
     listener_.reset(new media_stream::MockMediaStreamProviderListener());
     message_loop_.reset(new MessageLoop(MessageLoop::TYPE_IO));
-    io_thread_.reset(new BrowserThread(BrowserThread::IO, message_loop_.get()));
+    io_thread_.reset(new BrowserThreadImpl(BrowserThread::IO,
+                                           message_loop_.get()));
     vcm_.reset(new media_stream::VideoCaptureManager());
     vcm_->UseFakeDevice();
     vcm_->Register(listener_.get());
@@ -120,7 +124,7 @@ class VideoCaptureManagerTest : public testing::Test {
   scoped_ptr<media_stream::VideoCaptureManager> vcm_;
   scoped_ptr<media_stream::MockMediaStreamProviderListener> listener_;
   scoped_ptr<MessageLoop> message_loop_;
-  scoped_ptr<BrowserThread> io_thread_;
+  scoped_ptr<BrowserThreadImpl> io_thread_;
   scoped_ptr<MockFrameObserver> frame_observer_;
 
  private:
@@ -161,30 +165,29 @@ TEST_F(VideoCaptureManagerTest, CreateAndClose) {
   vcm_->Unregister();
 }
 
-// Open the same device twice, should fail.
+// Open the same device twice.
 TEST_F(VideoCaptureManagerTest, OpenTwice) {
   InSequence s;
   EXPECT_CALL(*listener_, DevicesEnumerated(_))
     .Times(1);
   EXPECT_CALL(*listener_, Opened(media_stream::kVideoCapture, _))
-    .Times(1);
-  EXPECT_CALL(*listener_, Error(media_stream::kVideoCapture, _,
-                                media_stream::kDeviceAlreadyInUse))
-    .Times(1);
+    .Times(2);
   EXPECT_CALL(*listener_, Closed(media_stream::kVideoCapture, _))
-    .Times(1);
+    .Times(2);
 
   vcm_->EnumerateDevices();
 
   // Wait to get device callback...
   SyncWithVideoCaptureManagerThread();
 
-  int video_session_id = vcm_->Open(listener_->devices_.front());
+  int video_session_id_first = vcm_->Open(listener_->devices_.front());
 
   // This should trigger an error callback with error code 'kDeviceAlreadyInUse'
-  vcm_->Open(listener_->devices_.front());
+  int video_session_id_second = vcm_->Open(listener_->devices_.front());
+  EXPECT_NE(video_session_id_first, video_session_id_second);
 
-  vcm_->Close(video_session_id);
+  vcm_->Close(video_session_id_first);
+  vcm_->Close(video_session_id_second);
 
   // Wait to check callbacks before removing the listener
   SyncWithVideoCaptureManagerThread();

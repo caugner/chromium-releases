@@ -13,11 +13,13 @@
 #include "net/base/net_log.h"
 #include "webkit/glue/resource_loader_bridge.h"
 
+namespace content {
+struct ResourceResponse;
+}
+
 namespace net {
 class URLRequest;
 }  // namespace net
-
-struct ResourceResponse;
 
 // LoadTimingObserver watches the NetLog event stream and collects the network
 // timing information.
@@ -69,10 +71,10 @@ class LoadTimingObserver : public ChromeNetLog::ThreadSafeObserverImpl {
                           const base::TimeTicks& time,
                           const net::NetLog::Source& source,
                           net::NetLog::EventPhase phase,
-                          net::NetLog::EventParameters* params);
+                          net::NetLog::EventParameters* params) OVERRIDE;
 
   static void PopulateTimingInfo(net::URLRequest* request,
-                                 ResourceResponse* response);
+                                 content::ResourceResponse* response);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(LoadTimingObserverTest,

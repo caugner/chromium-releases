@@ -33,9 +33,9 @@ class DebugSQLErrorHandler: public VanillaSQLErrorHandler {
  public:
   virtual int HandleError(int error, sqlite3* db) {
     error_ = error;
-    NOTREACHED() << "sqlite error " << error
-                 << " " << sqlite3_errmsg(db)
-                 << " db " << static_cast<void*>(db);
+    LOG(ERROR) << "sqlite error " << error
+               << " " << sqlite3_errmsg(db)
+               << " db " << static_cast<void*>(db);
     return error;
   }
 };
@@ -80,7 +80,7 @@ class DefaultSQLErrorHandlerFactory : public SQLErrorHandlerFactory {
 };
 
 static base::LazyInstance<DefaultSQLErrorHandlerFactory>
-    g_default_sql_error_handler_factory(base::LINKER_INITIALIZED);
+    g_default_sql_error_handler_factory = LAZY_INSTANCE_INITIALIZER;
 
 SQLErrorHandlerFactory* GetErrorHandlerFactory() {
   // TODO(cpu): Testing needs to override the error handler.

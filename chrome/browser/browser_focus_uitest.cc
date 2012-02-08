@@ -8,8 +8,8 @@
 #include "base/format_macros.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
-#include "base/stringprintf.h"
 #include "base/string_number_conversions.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
@@ -19,19 +19,19 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/notification_service.h"
 #include "net/test/test_server.h"
 
 #if defined(TOOLKIT_VIEWS) || defined(OS_WIN)
-#include "views/focus/focus_manager.h"
-#include "views/view.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/view.h"
 #endif
 
 #if defined(TOOLKIT_VIEWS)
@@ -63,9 +63,9 @@
 #define MAYBE_TabsRememberFocusFindInPage FAILS_TabsRememberFocusFindInPage
 #elif defined(OS_WIN)
 // Disabled, http://crbug.com/62543.
-#define MAYBE_FocusTraversal DISABLED_FocusTraversal
+#define MAYBE_FocusTraversal FocusTraversal
 // Disabled, http://crbug.com/62544.
-#define MAYBE_FocusTraversalOnInterstitial DISABLED_FocusTraversalOnInterstitial
+#define MAYBE_FocusTraversalOnInterstitial FocusTraversalOnInterstitial
 // Flaky, http://crbug.com/62537.
 #define MAYBE_TabsRememberFocusFindInPage FLAKY_TabsRememberFocusFindInPage
 #endif
@@ -89,7 +89,8 @@ bool ChromeInForeground() {
   std::wstring caption;
   std::wstring filename;
   int len = ::GetWindowTextLength(window) + 1;
-  ::GetWindowText(window, WriteInto(&caption, len), len);
+  if (len > 1)
+    ::GetWindowText(window, WriteInto(&caption, len), len);
   bool chrome_window_in_foreground =
       EndsWith(caption, L" - Google Chrome", true) ||
       EndsWith(caption, L" - Chromium", true);
@@ -101,8 +102,8 @@ bool ChromeInForeground() {
     if (base::OpenProcessHandleWithAccess(process_id,
                                           PROCESS_QUERY_LIMITED_INFORMATION,
                                           &process)) {
-      len = MAX_PATH;
-      if (!GetProcessImageFileName(process, WriteInto(&filename, len), len)) {
+      if (!GetProcessImageFileName(process, WriteInto(&filename, MAX_PATH),
+                                   MAX_PATH)) {
         int error = GetLastError();
         filename = std::wstring(L"Unable to read filename for process id '" +
                                 base::IntToString16(process_id) +
@@ -171,23 +172,6 @@ class TestInterstitialPage : public InterstitialPage {
     return render_view_host()->view()->HasFocus();
   }
 
- protected:
-  bool OnMessageReceived(const IPC::Message& message) {
-    bool handled = true;
-    IPC_BEGIN_MESSAGE_MAP(TestInterstitialPage, message)
-      IPC_MESSAGE_HANDLER(ViewHostMsg_FocusedNodeChanged, OnFocusedNodeChanged)
-      IPC_MESSAGE_UNHANDLED(handled = false)
-    IPC_END_MESSAGE_MAP()
-    return handled;
-  }
-
-  void OnFocusedNodeChanged(bool is_editable_node) {
-    NotificationService::current()->Notify(
-        content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
-        Source<TabContents>(tab()),
-        Details<const bool>(&is_editable_node));
-  }
-
  private:
   std::string html_contents_;
 };
@@ -227,14 +211,14 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FLAKY_BrowsersRememberFocus) {
   ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
   // Now hide the window, show it again, the focus should not have changed.
   ui_test_utils::HideNativeWindow(window);
-  ui_test_utils::ShowAndFocusNativeWindow(window);
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(window));
   ASSERT_TRUE(IsViewFocused(VIEW_ID_TAB_CONTAINER_FOCUS_VIEW));
 
   browser()->FocusLocationBar();
   ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
   // Hide the window, show it again, the focus should not have changed.
   ui_test_utils::HideNativeWindow(window);
-  ui_test_utils::ShowAndFocusNativeWindow(window);
+  ASSERT_TRUE(ui_test_utils::ShowAndFocusNativeWindow(window));
   ASSERT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
 
   // The rest of this test does not make sense on Linux because the behavior
@@ -251,9 +235,10 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FLAKY_BrowsersRememberFocus) {
   BrowserView* browser_view2 =
       BrowserView::GetBrowserViewForBrowser(browser2);
   ASSERT_TRUE(browser_view2);
-  views::Widget* widget2 = views::Widget::GetWidgetForNativeWindow(window2);
+  const views::Widget* widget2 =
+      views::Widget::GetWidgetForNativeWindow(window2);
   ASSERT_TRUE(widget2);
-  views::FocusManager* focus_manager2 = widget2->GetFocusManager();
+  const views::FocusManager* focus_manager2 = widget2->GetFocusManager();
   ASSERT_TRUE(focus_manager2);
   EXPECT_EQ(browser_view2->GetTabContentsContainerView(),
             focus_manager2->GetFocusedView());
@@ -503,20 +488,20 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
         // notified we have switched to an editable node.
         bool is_editable_node =
             (strcmp(kTextElementID, kExpElementIDs[j + 1]) == 0);
-        Details<bool> details(&is_editable_node);
+        content::Details<bool> details(&is_editable_node);
 
         ASSERT_TRUE(ui_test_utils::SendKeyPressAndWaitWithDetails(
             browser(), ui::VKEY_TAB, false, false, false, false,
             content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
-            NotificationSource(Source<TabContents>(
-                browser()->GetSelectedTabContents())),
+            content::NotificationSource(content::Source<RenderViewHost>(
+                browser()->GetSelectedTabContents()->render_view_host())),
             details));
       } else {
         // On the last tab key press, the focus returns to the browser.
         ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
             browser(), ui::VKEY_TAB, false, false, false, false,
             chrome::NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
-            NotificationSource(Source<Browser>(browser()))));
+            content::NotificationSource(content::Source<Browser>(browser()))));
       }
     }
 
@@ -546,20 +531,20 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversal) {
         // If the next element is the kTextElementID, we expect to be
         // notified we have switched to an editable node.
         bool is_editable_node = (strcmp(kTextElementID, next_element) == 0);
-        Details<bool> details(&is_editable_node);
+        content::Details<bool> details(&is_editable_node);
 
         ASSERT_TRUE(ui_test_utils::SendKeyPressAndWaitWithDetails(
             browser(), ui::VKEY_TAB, false, true, false, false,
             content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
-            NotificationSource(Source<TabContents>(
-                browser()->GetSelectedTabContents())),
+            content::NotificationSource(content::Source<RenderViewHost>(
+                browser()->GetSelectedTabContents()->render_view_host())),
             details));
       } else {
         // On the last tab key press, the focus returns to the browser.
         ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
             browser(), ui::VKEY_TAB, false, true, false, false,
             chrome::NOTIFICATION_FOCUS_RETURNED_TO_BROWSER,
-            NotificationSource(Source<Browser>(browser()))));
+            content::NotificationSource(content::Source<Browser>(browser()))));
       }
 
       // Let's make sure the focus is on the expected element in the page.
@@ -631,16 +616,16 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
       ASSERT_STREQ(kExpElementIDs[j], actual.c_str());
 
       int notification_type;
-      NotificationSource notification_source =
-          NotificationService::AllSources();
+      content::NotificationSource notification_source =
+          content::NotificationService::AllSources();
       if (j < arraysize(kExpElementIDs) - 1) {
         notification_type = content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE;
-        notification_source = Source<TabContents>(
-            interstitial_page->tab());
+        notification_source = content::Source<RenderViewHost>(
+            interstitial_page->render_view_host());
       } else {
         // On the last tab key press, the focus returns to the browser.
         notification_type = chrome::NOTIFICATION_FOCUS_RETURNED_TO_BROWSER;
-        notification_source = Source<Browser>(browser());
+        notification_source = content::Source<Browser>(browser());
       }
 
       ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
@@ -666,16 +651,16 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, MAYBE_FocusTraversalOnInterstitial) {
     // Now let's press shift-tab to move the focus in reverse.
     for (size_t j = 0; j < 7; ++j) {
       int notification_type;
-      NotificationSource notification_source =
-          NotificationService::AllSources();
+      content::NotificationSource notification_source =
+          content::NotificationService::AllSources();
       if (j < arraysize(kExpElementIDs) - 1) {
         notification_type = content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE;
-        notification_source = Source<TabContents>(
-            interstitial_page->tab());
+        notification_source = content::Source<RenderViewHost>(
+            interstitial_page->render_view_host());
       } else {
         // On the last tab key press, the focus returns to the browser.
         notification_type = chrome::NOTIFICATION_FOCUS_RETURNED_TO_BROWSER;
-        notification_source = Source<Browser>(browser());
+        notification_source = content::Source<Browser>(browser());
       }
 
       ASSERT_TRUE(ui_test_utils::SendKeyPressAndWait(
@@ -851,7 +836,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
-        NotificationService::AllSources());
+        content::NotificationService::AllSources());
     browser()->NewTab();
     observer.Wait();
   }
@@ -860,7 +845,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
-        Source<NavigationController>(
+        content::Source<NavigationController>(
             &browser()->GetSelectedTabContentsWrapper()->controller()));
     browser()->Reload(CURRENT_TAB);
     observer.Wait();
@@ -875,7 +860,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, FocusOnReload) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
-        Source<NavigationController>(
+        content::Source<NavigationController>(
             &browser()->GetSelectedTabContentsWrapper()->controller()));
     browser()->Reload(CURRENT_TAB);
     observer.Wait();
@@ -897,7 +882,7 @@ IN_PROC_BROWSER_TEST_F(BrowserFocusTest, DISABLED_FocusOnReloadCrashedTab) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
         content::NOTIFICATION_LOAD_STOP,
-        Source<NavigationController>(
+        content::Source<NavigationController>(
             &browser()->GetSelectedTabContentsWrapper()->controller()));
     browser()->Reload(CURRENT_TAB);
     observer.Wait();

@@ -7,8 +7,11 @@
     # TODO(dmaclach): can we pick this up some other way? Right now it's
     # duplicated from chrome.gyp
     'chromium_code': 1,
-    # Use a consistent MIME-type independent of branding.
+    # Use consistent strings across all platforms. Note that the plugin name
+    # is brand-dependent and is defined further down.
     'host_plugin_mime_type': 'application/vnd.chromium.remoting-host',
+    'host_plugin_description': 'Allow another user to access your computer securely over the Internet.',
+
     'conditions': [
       ['OS=="mac"', {
         'conditions': [
@@ -43,6 +46,7 @@
         'host_plugin_prefix': '',
       }],
       ['branding=="Chrome"', {
+        'host_plugin_name': 'Chrome Remote Desktop Host',
         'remoting_it2me_locale_files': [
           'webapp/me2mom/_locales.official/ar/messages.json',
           'webapp/me2mom/_locales.official/bg/messages.json',
@@ -88,22 +92,32 @@
           'webapp/me2mom/_locales.official/zh_TW/messages.json',
         ],
       }, {  # else: branding!="Chrome"
+        'host_plugin_name': 'Chromoting Host',
         'remoting_it2me_locale_files': [
           'webapp/me2mom/_locales/en/messages.json',
         ],
       }],
     ],
     'remoting_it2me_files': [
+      'resources/icon_cross.png',
+      'resources/icon_host.png',
+      'resources/icon_pencil.png',
       'resources/icon_warning.png',
       'webapp/me2mom/choice.css',
       'webapp/me2mom/choice.html',
+      'webapp/me2mom/client_screen.js',
       'webapp/me2mom/client_session.js',
       'webapp/me2mom/cs_oauth2_trampoline.js',
       'webapp/me2mom/debug_log.css',
       'webapp/me2mom/debug_log.js',
       'webapp/me2mom/dividerbottom.png',
       'webapp/me2mom/dividertop.png',
+      'webapp/me2mom/host_list.js',
+      'webapp/me2mom/host_screen.js',
+      'webapp/me2mom/host_session.js',
+      'webapp/me2mom/host_table_entry.js',
       'webapp/me2mom/l10n.js',
+      'webapp/me2mom/log_to_server.js',
       'webapp/me2mom/main.css',
       'webapp/me2mom/manifest.json',
       'webapp/me2mom/oauth2.js',
@@ -111,8 +125,12 @@
       'webapp/me2mom/plugin_settings.js',
       'webapp/me2mom/remoting.js',
       'webapp/me2mom/scale-to-fit.png',
+      'webapp/me2mom/server_log_entry.js',
       'webapp/me2mom/spinner.gif',
       'webapp/me2mom/toolbar.css',
+      'webapp/me2mom/toolbar.js',
+      'webapp/me2mom/ui_mode.js',
+      'webapp/me2mom/util.js',
       'webapp/me2mom/wcs.js',
       'webapp/me2mom/wcs_loader.js',
       'webapp/me2mom/xhr.js',
@@ -142,13 +160,76 @@
           ],
         }
       ],  # end of target 'remoting_client_test_webserver'
-    }],
+    }],  # 'os_posix == 1'
+    ['OS=="linux"', {
+      'targets': [
+        # Linux breakpad processing
+        {
+          'target_name': 'remoting_linux_symbols',
+          'type': 'none',
+          'conditions': [
+            ['linux_dump_symbols==1', {
+              'actions': [
+                {
+                  'action_name': 'dump_symbols',
+                  'variables': {
+                    'plugin_file': '<(host_plugin_prefix)remoting_host_plugin.<(host_plugin_extension)',
+                  },
+                  'inputs': [
+                    '<(DEPTH)/build/linux/dump_app_syms',
+                    '<(PRODUCT_DIR)/dump_syms',
+                    '<(PRODUCT_DIR)/<(plugin_file)',
+                  ],
+                  'outputs': [
+                    '<(PRODUCT_DIR)/<(plugin_file).breakpad.<(target_arch)',
+                  ],
+                  'action': ['<(DEPTH)/build/linux/dump_app_syms',
+                             '<(PRODUCT_DIR)/dump_syms',
+                             '<(linux_strip_binary)',
+                             '<(PRODUCT_DIR)/<(plugin_file)',
+                             '<@(_outputs)'],
+                  'message': 'Dumping breakpad symbols to <(_outputs)',
+                  'process_outputs_as_sources': 1,
+                },
+              ],
+              'dependencies': [
+                'remoting_host_plugin',
+                '../breakpad/breakpad.gyp:dump_syms',
+              ],
+            }],  # 'linux_dump_symbols==1'
+          ],  # end of 'conditions'
+        },  # end of target 'linux_symbols'
+
+        {
+          'target_name': 'remoting_me2me_host',
+          'type': 'executable',
+          'dependencies': [
+            'remoting_base',
+            'remoting_host',
+            'remoting_jingle_glue',
+            '../base/base.gyp:base',
+            '../base/base.gyp:base_i18n',
+            '../media/media.gyp:media',
+          ],
+          'sources': [
+            # TODO(lambroslambrou): Remove the dependencies on the Disconnect
+            # and Continue windows for the Me2Me case - crbug.com/104377.
+            'host/continue_window.h',
+            'host/continue_window_linux.cc',
+            'host/disconnect_window_linux.cc',
+            'host/remoting_me2me_host.cc',
+          ],
+        },  # end of target 'remoting_me2me_host'
+
+      ],  # end of 'targets'
+    }],  # 'OS=="linux"'
   ],  # end of 'conditions'
 
   'targets': [
     {
       'target_name': 'remoting_client_plugin',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'defines': [
         'HAVE_STDINT_H',  # Required by on2_integer.h
       ],
@@ -190,10 +271,13 @@
     {
       'target_name': 'remoting_host_plugin',
       'type': 'loadable_module',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'product_extension': '<(host_plugin_extension)',
       'product_prefix': '<(host_plugin_prefix)',
       'defines': [
-        'HOST_PLUGIN_MIME_TYPE=<(host_plugin_mime_type)',
+        'HOST_PLUGIN_MIME_TYPE="<(host_plugin_mime_type)"',
+        'HOST_PLUGIN_NAME="<(host_plugin_name)"',
+        'HOST_PLUGIN_DESCRIPTION="<(host_plugin_description)"',
       ],
       'dependencies': [
         'remoting_base',
@@ -202,6 +286,8 @@
         '../third_party/npapi/npapi.gyp:npapi',
       ],
       'sources': [
+        'host/it2me_host_user_interface.cc',
+        'host/it2me_host_user_interface.h',
         'host/plugin/host_log_handler.cc',
         'host/plugin/host_log_handler.h',
         'host/plugin/host_plugin.cc',
@@ -225,7 +311,7 @@
             'CHROMIUM_BUNDLE_ID': '<(mac_bundle_id)',
             'INFOPLIST_FILE': 'host/plugin/host_plugin-Info.plist',
             'INFOPLIST_PREPROCESS': 'YES',
-            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'HOST_PLUGIN_MIME_TYPE=<(host_plugin_mime_type)',
+            'INFOPLIST_PREPROCESSOR_DEFINITIONS': 'HOST_PLUGIN_MIME_TYPE="<(host_plugin_mime_type)" HOST_PLUGIN_NAME="<(host_plugin_name)" HOST_PLUGIN_DESCRIPTION="<(host_plugin_description)"',
           },
           # TODO(mark): Come up with a fancier way to do this.  It should
           # only be necessary to list host_plugin-Info.plist once, not the
@@ -282,6 +368,7 @@
             'webapp/verify-webapp.py',
             'webapp/me2mom/_locales/en/messages.json',
             'webapp/me2mom/choice.html',
+            'webapp/me2mom/host_table_entry.js',
             'webapp/me2mom/manifest.json',
             'webapp/me2mom/remoting.js',
             'host/plugin/host_script_object.cc',
@@ -295,6 +382,7 @@
             '<(PRODUCT_DIR)/remoting/it2me_verified.stamp',
             'webapp/me2mom/_locales/en/messages.json',
             'webapp/me2mom/choice.html',
+            'webapp/me2mom/host_table_entry.js',
             'webapp/me2mom/manifest.json',
             'webapp/me2mom/remoting.js',
             'host/plugin/host_script_object.cc',
@@ -332,6 +420,7 @@
     {
       'target_name': 'remoting_base',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         '../base/base.gyp:base',
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -401,6 +490,7 @@
     {
       'target_name': 'remoting_host',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         'remoting_base',
         'remoting_jingle_glue',
@@ -409,7 +499,6 @@
         '../crypto/crypto.gyp:crypto',
       ],
       'sources': [
-        'host/access_verifier.h',
         'host/capturer.h',
         'host/capturer_helper.cc',
         'host/capturer_helper.h',
@@ -418,6 +507,8 @@
         'host/capturer_linux.cc',
         'host/capturer_mac.cc',
         'host/capturer_win.cc',
+        'host/capture_scheduler.cc',
+        'host/capture_scheduler.h',
         'host/chromoting_host.cc',
         'host/chromoting_host.h',
         'host/chromoting_host_context.cc',
@@ -451,6 +542,8 @@
         'host/host_config.h',
         'host/host_key_pair.cc',
         'host/host_key_pair.h',
+        'host/host_secret.cc',
+        'host/host_secret.h',
         'host/host_status_observer.h',
         'host/in_memory_host_config.cc',
         'host/in_memory_host_config.h',
@@ -464,14 +557,14 @@
         'host/local_input_monitor_thread_win.cc',
         'host/local_input_monitor_thread_win.h',
         'host/local_input_monitor_win.cc',
+        'host/log_to_server.cc',
+        'host/log_to_server.h',
         'host/register_support_host_request.cc',
         'host/register_support_host_request.h',
-        'host/self_access_verifier.cc',
-        'host/self_access_verifier.h',
         'host/screen_recorder.cc',
         'host/screen_recorder.h',
-        'host/support_access_verifier.cc',
-        'host/support_access_verifier.h',
+        'host/server_log_entry.cc',
+        'host/server_log_entry.h',
         'host/ui_strings.cc',
         'host/ui_strings.h',
         'host/user_authenticator.h',
@@ -525,6 +618,7 @@
     {
       'target_name': 'remoting_client',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         'remoting_base',
         'remoting_jingle_glue',
@@ -552,6 +646,7 @@
     {
       'target_name': 'remoting_simple_host',
       'type': 'executable',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         'remoting_base',
         'remoting_host',
@@ -571,6 +666,8 @@
         'host/disconnect_window_mac.h',
         'host/disconnect_window_mac.mm',
         'host/disconnect_window_win.cc',
+        'host/it2me_host_user_interface.cc',
+        'host/it2me_host_user_interface.h',
         'host/simple_host_process.cc',
         '../base/test/mock_chrome_application_mac.mm',
         '../base/test/mock_chrome_application_mac.h',
@@ -594,6 +691,7 @@
     {
       'target_name': 'remoting_jingle_glue',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         '../base/base.gyp:base',
         '../jingle/jingle.gyp:jingle_glue',
@@ -606,10 +704,8 @@
         '../third_party/libjingle/libjingle.gyp:libjingle_p2p',
       ],
       'sources': [
-        'jingle_glue/iq_request.cc',
-        'jingle_glue/iq_request.h',
-        'jingle_glue/javascript_iq_request.cc',
-        'jingle_glue/javascript_iq_request.h',
+        'jingle_glue/iq_sender.cc',
+        'jingle_glue/iq_sender.h',
         'jingle_glue/javascript_signal_strategy.cc',
         'jingle_glue/javascript_signal_strategy.h',
         'jingle_glue/jingle_info_request.cc',
@@ -623,8 +719,6 @@
         'jingle_glue/ssl_adapter.cc',
         'jingle_glue/ssl_socket_adapter.cc',
         'jingle_glue/ssl_socket_adapter.h',
-        'jingle_glue/xmpp_iq_request.cc',
-        'jingle_glue/xmpp_iq_request.h',
         'jingle_glue/xmpp_proxy.h',
         'jingle_glue/xmpp_signal_strategy.cc',
         'jingle_glue/xmpp_signal_strategy.h',
@@ -636,6 +730,7 @@
     {
       'target_name': 'remoting_protocol',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         'remoting_base',
         'remoting_jingle_glue',
@@ -647,16 +742,18 @@
         'remoting_jingle_glue',
       ],
       'sources': [
-        'protocol/auth_token_utils.cc',
-        'protocol/auth_token_utils.h',
+        'protocol/auth_util.cc',
+        'protocol/auth_util.h',
+        'protocol/authenticator.h',
         'protocol/buffered_socket_writer.cc',
         'protocol/buffered_socket_writer.h',
-        'protocol/channel_authenticator.cc',
         'protocol/channel_authenticator.h',
-        'protocol/client_control_sender.cc',
-        'protocol/client_control_sender.h',
-        'protocol/client_message_dispatcher.cc',
-        'protocol/client_message_dispatcher.h',
+        'protocol/channel_dispatcher_base.cc',
+        'protocol/channel_dispatcher_base.h',
+        'protocol/client_control_dispatcher.cc',
+        'protocol/client_control_dispatcher.h',
+        'protocol/client_event_dispatcher.cc',
+        'protocol/client_event_dispatcher.h',
         'protocol/client_stub.h',
         'protocol/connection_to_client.cc',
         'protocol/connection_to_client.h',
@@ -664,13 +761,11 @@
         'protocol/connection_to_host.h',
         'protocol/content_description.cc',
         'protocol/content_description.h',
-        'protocol/host_control_sender.cc',
-        'protocol/host_control_sender.h',
-        'protocol/host_message_dispatcher.cc',
-        'protocol/host_message_dispatcher.h',
+        'protocol/host_control_dispatcher.cc',
+        'protocol/host_control_dispatcher.h',
+        'protocol/host_event_dispatcher.cc',
+        'protocol/host_event_dispatcher.h',
         'protocol/host_stub.h',
-        'protocol/input_sender.cc',
-        'protocol/input_sender.h',
         'protocol/input_stub.h',
         'protocol/jingle_channel_connector.h',
         'protocol/jingle_datagram_connector.cc',
@@ -712,8 +807,6 @@
         'protocol/rtp_video_writer.h',
         'protocol/rtp_writer.cc',
         'protocol/rtp_writer.h',
-        'protocol/secure_p2p_socket.cc',
-        'protocol/secure_p2p_socket.h',
         'protocol/session.h',
         'protocol/session_config.cc',
         'protocol/session_config.h',
@@ -724,6 +817,12 @@
         'protocol/transport_config.h',
         'protocol/util.cc',
         'protocol/util.h',
+        'protocol/v1_authenticator.cc',
+        'protocol/v1_authenticator.h',
+        'protocol/v1_client_channel_authenticator.cc',
+        'protocol/v1_client_channel_authenticator.h',
+        'protocol/v1_host_channel_authenticator.cc',
+        'protocol/v1_host_channel_authenticator.h',
         'protocol/video_reader.cc',
         'protocol/video_reader.h',
         'protocol/video_stub.h',
@@ -735,6 +834,7 @@
     {
       'target_name': 'differ_block',
       'type': 'static_library',
+      'variables': { 'enable_wexit_time_destructors': 1, },
       'dependencies': [
         '../media/media.gyp:cpu_features',
       ],
@@ -766,20 +866,6 @@
       ],
     }, # end of target differ_block_sse2
 
-    {
-      'target_name': 'chromotocol_test_client',
-      'type': 'executable',
-      'dependencies': [
-        'remoting_base',
-        'remoting_protocol',
-      ],
-      'sources': [
-        'protocol/protocol_test_client.cc',
-        '../base/test/mock_chrome_application_mac.mm',
-        '../base/test/mock_chrome_application_mac.h',
-      ],
-    },  # end of target 'chromotocol_test_client'
-
     # Remoting unit tests
     {
       'target_name': 'remoting_unittests',
@@ -794,9 +880,9 @@
         '../base/base.gyp:base_i18n',
         '../base/base.gyp:test_support_base',
         '../media/media.gyp:media',
-        '../ui/ui.gyp:ui',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        '../ui/ui.gyp:ui',
       ],
       'include_dirs': [
         '../testing/gmock/include',
@@ -827,14 +913,17 @@
         'host/host_key_pair_unittest.cc',
         'host/host_mock_objects.cc',
         'host/host_mock_objects.h',
+        'host/it2me_host_user_interface.cc',
+        'host/it2me_host_user_interface.h',
         'host/json_host_config_unittest.cc',
+        'host/log_to_server_unittest.cc',
         'host/register_support_host_request_unittest.cc',
-        'host/self_access_verifier_unittest.cc',
         'host/screen_recorder_unittest.cc',
+        'host/server_log_entry_unittest.cc',
         'host/test_key_pair.h',
         'jingle_glue/fake_signal_strategy.cc',
         'jingle_glue/fake_signal_strategy.h',
-        'jingle_glue/iq_request_unittest.cc',
+        'jingle_glue/iq_sender_unittest.cc',
         'jingle_glue/jingle_thread_unittest.cc',
         'jingle_glue/mock_objects.cc',
         'jingle_glue/mock_objects.h',
@@ -849,7 +938,7 @@
         'protocol/protocol_mock_objects.h',
         'protocol/rtp_video_reader_unittest.cc',
         'protocol/rtp_video_writer_unittest.cc',
-        'protocol/secure_p2p_socket_unittest.cc',
+        'protocol/v1_authenticator_unittest.cc',
         'run_all_unittests.cc',
       ],
       'conditions': [

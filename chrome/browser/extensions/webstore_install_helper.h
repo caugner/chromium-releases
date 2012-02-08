@@ -7,7 +7,7 @@
 #pragma once
 
 #include "content/browser/utility_process_host.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
@@ -19,12 +19,16 @@ class DictionaryValue;
 class ListValue;
 }
 
+namespace net {
+class URLRequestContextGetter;
+}
+
 // This is a class to help dealing with webstore-provided data. It manages
 // sending work to the utility process for parsing manifests and
 // fetching/decoding icon data. Clients must implement the
 // WebstoreInstallHelper::Delegate interface to receive the parsed data.
 class WebstoreInstallHelper : public UtilityProcessHost::Client,
-                              public URLFetcher::Delegate {
+                              public content::URLFetcherDelegate {
  public:
   class Delegate {
    public:
@@ -37,12 +41,14 @@ class WebstoreInstallHelper : public UtilityProcessHost::Client,
     // Called when we've successfully parsed the manifest and decoded the icon
     // in the utility process. Ownership of parsed_manifest is transferred.
     virtual void OnWebstoreParseSuccess(
+        const std::string& id,
         const SkBitmap& icon,
         base::DictionaryValue* parsed_manifest) = 0;
 
     // Called to indicate a parse failure. The |result_code| parameter should
     // indicate whether the problem was with the manifest or icon.
     virtual void OnWebstoreParseFailure(
+        const std::string& id,
         InstallHelperResultCode result_code,
         const std::string& error_message) = 0;
   };
@@ -50,6 +56,7 @@ class WebstoreInstallHelper : public UtilityProcessHost::Client,
   // Only one of |icon_data| (based64-encoded icon data) or |icon_url| can be
   // specified, but it is legal for both to be empty.
   WebstoreInstallHelper(Delegate* delegate,
+                        const std::string& id,
                         const std::string& manifest,
                         const std::string& icon_data,
                         const GURL& icon_url,
@@ -64,8 +71,8 @@ class WebstoreInstallHelper : public UtilityProcessHost::Client,
   void ReportResultsIfComplete();
   void ReportResultFromUIThread();
 
-  // Implementing the URLFetcher::Delegate interface.
-  virtual void OnURLFetchComplete(const URLFetcher* source) OVERRIDE;
+  // Implementing the content::URLFetcherDelegate interface.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
   // Implementing pieces of the UtilityProcessHost::Client interface.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
@@ -79,6 +86,9 @@ class WebstoreInstallHelper : public UtilityProcessHost::Client,
   // The client who we'll report results back to.
   Delegate* delegate_;
 
+  // The extension id of the manifest we're parsing.
+  std::string id_;
+
   // The manifest to parse.
   std::string manifest_;
 
@@ -91,7 +101,7 @@ class WebstoreInstallHelper : public UtilityProcessHost::Client,
   std::vector<unsigned char> fetched_icon_data_;
 
   // For fetching the icon, if needed.
-  scoped_ptr<URLFetcher> url_fetcher_;
+  scoped_ptr<content::URLFetcher> url_fetcher_;
   net::URLRequestContextGetter* context_getter_; // Only usable on UI thread.
 
   UtilityProcessHost* utility_host_;

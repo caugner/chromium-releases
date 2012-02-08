@@ -78,23 +78,9 @@ bool DeleteCache(const FilePath& path) {
   return true;
 }
 
-bool CopyTestCache(const std::string& name) {
-  FilePath path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &path);
-  path = path.AppendASCII("net");
-  path = path.AppendASCII("data");
-  path = path.AppendASCII("cache_tests");
-  path = path.AppendASCII(name);
-
-  FilePath dest = GetCacheFilePath();
-  if (!DeleteCache(dest))
-    return false;
-  return file_util::CopyDirectory(path, dest, false);
-}
-
-bool CheckCacheIntegrity(const FilePath& path, bool new_eviction) {
+bool CheckCacheIntegrity(const FilePath& path, bool new_eviction, uint32 mask) {
   scoped_ptr<disk_cache::BackendImpl> cache(new disk_cache::BackendImpl(
-      path, base::MessageLoopProxy::current(), NULL));
+      path, mask, base::MessageLoopProxy::current(), NULL));
   if (!cache.get())
     return false;
   if (new_eviction)
@@ -105,7 +91,7 @@ bool CheckCacheIntegrity(const FilePath& path, bool new_eviction) {
   return cache->SelfCheck() >= 0;
 }
 
-ScopedTestCache::ScopedTestCache() : path_(GetCacheFilePath()) {
+ScopedTestCache::ScopedTestCache(const FilePath& path) : path_(path) {
   bool result = DeleteCache(path_);
   DCHECK(result);
 }

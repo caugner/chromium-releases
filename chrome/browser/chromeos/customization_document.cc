@@ -4,6 +4,8 @@
 
 #include "chrome/browser/chromeos/customization_document.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/json/json_reader.h"
@@ -19,7 +21,10 @@
 #include "chrome/browser/chromeos/system/statistics_provider.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/common/url_fetcher.h"
+
+using content::BrowserThread;
 
 // Manifest attributes names.
 
@@ -267,9 +272,9 @@ void ServicesCustomizationDocument::SetApplied(bool val) {
 void ServicesCustomizationDocument::StartFetching() {
   if (url_.SchemeIsFile()) {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(this,
-            &ServicesCustomizationDocument::ReadFileInBackground,
-            FilePath(url_.path())));
+        base::Bind(&ServicesCustomizationDocument::ReadFileInBackground,
+                   base::Unretained(this),  // this class is a singleton.
+                   FilePath(url_.path())));
   } else {
     StartFileFetch();
   }
@@ -281,10 +286,10 @@ void ServicesCustomizationDocument::ReadFileInBackground(const FilePath& file) {
   std::string manifest;
   if (file_util::ReadFileToString(file, &manifest)) {
     BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(
-            this,
+        base::IgnoreReturn<bool>(base::Bind(
             &ServicesCustomizationDocument::LoadManifestFromString,
-            manifest));
+            base::Unretained(this),  // this class is a singleton.
+            manifest)));
   } else {
     VLOG(1) << "Failed to load services customization manifest from: "
             << file.value();
@@ -293,20 +298,18 @@ void ServicesCustomizationDocument::ReadFileInBackground(const FilePath& file) {
 
 void ServicesCustomizationDocument::StartFileFetch() {
   DCHECK(url_.is_valid());
-  url_fetcher_.reset(new URLFetcher(url_, URLFetcher::GET, this));
-  url_fetcher_->set_request_context(
+  url_fetcher_.reset(content::URLFetcher::Create(
+      url_, content::URLFetcher::GET, this));
+  url_fetcher_->SetRequestContext(
       ProfileManager::GetDefaultProfile()->GetRequestContext());
   url_fetcher_->Start();
 }
 
 void ServicesCustomizationDocument::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
-  if (response_code == 200) {
+    const content::URLFetcher* source) {
+  if (source->GetResponseCode() == 200) {
+    std::string data;
+    source->GetResponseAsString(&data);
     LoadManifestFromString(data);
   } else {
     NetworkLibrary* network = CrosLibrary::Get()->GetNetworkLibrary();
@@ -318,8 +321,8 @@ void ServicesCustomizationDocument::OnURLFetchComplete(
       return;
     }
     LOG(ERROR) << "URL fetch for services customization failed:"
-               << " response code = " << response_code
-               << " URL = " << url.spec();
+               << " response code = " << source->GetResponseCode()
+               << " URL = " << source->GetURL().spec();
   }
 }
 

@@ -32,10 +32,10 @@ class NET_EXPORT_PRIVATE DiskCacheBasedSSLHostInfo
                             CertVerifier* cert_verifier,
                             HttpCache* http_cache);
 
-  // Implementation of SSLHostInfo
-  virtual void Start();
-  virtual int WaitForDataReady(OldCompletionCallback* callback);
-  virtual void Persist();
+  // SSLHostInfo implementation.
+  virtual void Start() OVERRIDE;
+  virtual int WaitForDataReady(const CompletionCallback& callback) OVERRIDE;
+  virtual void Persist() OVERRIDE;
 
  private:
   enum State {
@@ -46,8 +46,8 @@ class NET_EXPORT_PRIVATE DiskCacheBasedSSLHostInfo
     READ,
     READ_COMPLETE,
     WAIT_FOR_DATA_READY_DONE,
-    CREATE,
-    CREATE_COMPLETE,
+    CREATE_OR_OPEN,
+    CREATE_OR_OPEN_COMPLETE,
     WRITE,
     WRITE_COMPLETE,
     SET_DONE,
@@ -66,7 +66,7 @@ class NET_EXPORT_PRIVATE DiskCacheBasedSSLHostInfo
     disk_cache::Entry* entry() const { return entry_; }
 
     // CallbackRunner<Tuple1<int> >:
-    virtual void RunWithParams(const Tuple1<int>& params);
+    virtual void RunWithParams(const Tuple1<int>& params) OVERRIDE;
 
    private:
     base::WeakPtr<DiskCacheBasedSSLHostInfo> obj_;
@@ -88,13 +88,13 @@ class NET_EXPORT_PRIVATE DiskCacheBasedSSLHostInfo
   int DoOpenComplete(int rv);
   int DoReadComplete(int rv);
   int DoWriteComplete(int rv);
-  int DoCreateComplete(int rv);
+  int DoCreateOrOpenComplete(int rv);
 
   int DoGetBackend();
   int DoOpen();
   int DoRead();
   int DoWrite();
-  int DoCreate();
+  int DoCreateOrOpen();
 
   // DoWaitForDataReadyDone is the terminal state of the read operation.
   int DoWaitForDataReadyDone();
@@ -109,12 +109,13 @@ class NET_EXPORT_PRIVATE DiskCacheBasedSSLHostInfo
   CallbackImpl* callback_;
   State state_;
   bool ready_;
+  bool found_entry_;  // Controls the behavior of DoCreateOrOpen.
   std::string new_data_;
   const std::string hostname_;
   HttpCache* const http_cache_;
   disk_cache::Backend* backend_;
   disk_cache::Entry* entry_;
-  OldCompletionCallback* user_callback_;
+  CompletionCallback user_callback_;
   scoped_refptr<IOBuffer> read_buffer_;
   scoped_refptr<IOBuffer> write_buffer_;
   std::string data_;

@@ -13,7 +13,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/navigation_entry.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/common/url_fetcher.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "net/base/registry_controlled_domain.h"
@@ -96,31 +97,32 @@ AlternateNavURLFetcher::AlternateNavURLFetcher(
       state_(NOT_STARTED),
       navigated_to_entry_(false) {
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_INSTANT_COMMITTED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 AlternateNavURLFetcher::~AlternateNavURLFetcher() {
 }
 
-void AlternateNavURLFetcher::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
+void AlternateNavURLFetcher::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_NAV_ENTRY_PENDING: {
       // If we've already received a notification for the same controller, we
       // should delete ourselves as that indicates that the page is being
       // re-loaded so this instance is now stale.
       NavigationController* controller =
-          Source<NavigationController>(source).ptr();
+          content::Source<NavigationController>(source).ptr();
       if (controller_ == controller) {
         delete this;
       } else if (!controller_) {
         // Start listening for the commit notification.
         DCHECK(controller->pending_entry());
         registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                       Source<NavigationController>(controller));
+                       content::Source<NavigationController>(controller));
         StartFetch(controller);
       }
       break;
@@ -129,7 +131,7 @@ void AlternateNavURLFetcher::Observe(int type,
     case chrome::NOTIFICATION_INSTANT_COMMITTED: {
       // See above.
       NavigationController* controller =
-          &Source<TabContentsWrapper>(source)->controller();
+          &content::Source<TabContentsWrapper>(source)->controller();
       if (controller_ == controller) {
         delete this;
       } else if (!controller_) {
@@ -142,7 +144,7 @@ void AlternateNavURLFetcher::Observe(int type,
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
       // The page was navigated, we can show the infobar now if necessary.
       registrar_.Remove(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                        Source<NavigationController>(controller_));
+                        content::Source<NavigationController>(controller_));
       navigated_to_entry_ = true;
       ShowInfobarIfPossible();
       // WARNING: |this| may be deleted!
@@ -161,14 +163,10 @@ void AlternateNavURLFetcher::Observe(int type,
 }
 
 void AlternateNavURLFetcher::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
+    const content::URLFetcher* source) {
   DCHECK_EQ(fetcher_.get(), source);
-  SetStatusFromURLFetch(url, status, response_code);
+  SetStatusFromURLFetch(
+      source->GetURL(), source->GetStatus(), source->GetResponseCode());
   ShowInfobarIfPossible();
   // WARNING: |this| may be deleted!
 }
@@ -176,13 +174,13 @@ void AlternateNavURLFetcher::OnURLFetchComplete(
 void AlternateNavURLFetcher::StartFetch(NavigationController* controller) {
   controller_ = controller;
   registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
-                 Source<NavigationController>(controller_));
+                 content::Source<NavigationController>(controller_));
 
   DCHECK_EQ(NOT_STARTED, state_);
   state_ = IN_PROGRESS;
-  fetcher_.reset(new URLFetcher(GURL(alternate_nav_url_), URLFetcher::HEAD,
-                                this));
-  fetcher_->set_request_context(
+  fetcher_.reset(content::URLFetcher::Create(
+      GURL(alternate_nav_url_), content::URLFetcher::HEAD, this));
+  fetcher_->SetRequestContext(
       controller_->browser_context()->GetRequestContext());
   fetcher_->Start();
 }

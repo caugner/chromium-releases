@@ -13,10 +13,12 @@
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
+
+using content::BrowserThread;
 
 // use a resource map rather than hard-coded strings.
 static const char* kNewTabCSSPath = "css/newtab.css";

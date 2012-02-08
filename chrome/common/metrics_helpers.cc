@@ -47,7 +47,7 @@ class MetricsLogBase::XmlWrapper {
         buffer_(NULL),
         writer_(NULL) {
     buffer_ = xmlBufferCreate();
-    CHECK(buffer_);
+    DCHECK(buffer_);
 
     #if defined(OS_CHROMEOS)
       writer_ = xmlNewTextWriterDoc(&doc_, /* compression */ 0);
@@ -89,9 +89,6 @@ class MetricsLogBase::XmlWrapper {
   xmlTextWriterPtr writer_;
 };
 
-// static
-std::string MetricsLogBase::version_extension_;
-
 MetricsLogBase::MetricsLogBase(const std::string& client_id, int session_id,
                                const std::string& version_string)
     : start_time_(Time::Now()),
@@ -108,7 +105,13 @@ MetricsLogBase::MetricsLogBase(const std::string& client_id, int session_id,
 }
 
 MetricsLogBase::~MetricsLogBase() {
+  if (!locked_) {
+    locked_ = true;
+    int result = xmlTextWriterEndDocument(xml_wrapper_->writer());
+    DCHECK_GE(result, 0);
+  }
   delete xml_wrapper_;
+  xml_wrapper_ = NULL;
 }
 
 void MetricsLogBase::CloseLog() {
@@ -191,8 +194,8 @@ std::string MetricsLogBase::CreateHash(const std::string& value) {
   // name.  We can then use this logging to find out what histogram name was
   // being hashed to a given MD5 value by just running the version of Chromium
   // in question with --enable-logging.
-  VLOG(1) << "Metrics: Hash numeric [" << value
-          << "]=[" << reverse_uint64 << "]";
+  DVLOG(1) << "Metrics: Hash numeric [" << value
+           << "]=[" << reverse_uint64 << "]";
   return std::string(reinterpret_cast<char*>(digest.a), arraysize(digest.a));
 }
 

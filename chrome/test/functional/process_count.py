@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -16,7 +16,7 @@ class ProcessCountTest(pyauto.PyUITest):
     'win': 2,  # Processes: browser, tab.
     'mac': 2,  # Processes: browser, tab.
     'linux': 4,  # Processes: browser, tab, sandbox helper, zygote.
-    'chromeos': 5,  # Processes: browser, tab, sandbox helper, zygote, GPU.
+    'chromeos': 4,  # Processes: browser, tab, sandbox helper, zygote.
   }
 
   CHROME_PROCESS_NAME = {
@@ -64,12 +64,17 @@ class ProcessCountTest(pyauto.PyUITest):
     browser_info = [x for x in proc_info['browsers']
                     if x['process_name'] == self.chrome_proc_name]
     assert len(browser_info) == 1
-    num_actual = len(browser_info[0]['processes'])
+    # Utility & GPU processes may show up any time.  Ignore them.
+    processes = [x for x in browser_info[0]['processes']
+                 if x['child_process_type'] not in ('Utility', 'GPU')]
+    num_actual = len(processes)
 
     self.assertEqual(num_actual, num_expected,
-                     msg='Number of processes should be %d, but was %d.\n'
-                         'Actual process info:\n%s' % (
-                         num_expected, num_actual, self.pformat(proc_info)))
+                     msg='Number of processes (ignoring Utility/GPU processes) '
+                         'should be %d, but was %d.\n'
+                         'Actual processes:\n%s' % (
+                         num_expected, num_actual,
+                         [x['child_process_type'] for x in processes]))
 
   def testProcessCountFreshProfile(self):
     """Verifies the process count in a fresh profile."""
@@ -95,8 +100,7 @@ class ProcessCountTest(pyauto.PyUITest):
     """Verifies the process count when an extension is installed."""
     crx_file_path = os.path.abspath(
         os.path.join(self.DataDir(), 'extensions', 'page_action.crx'))
-    self.assertTrue(self.InstallExtension(crx_file_path, False),
-                    msg='Extension install failed.')
+    self.InstallExtension(crx_file_path)
     self._VerifyProcessCount(self.proc_count_fresh_profile + 1)
 
   def testProcessCountCombination(self):
@@ -114,8 +118,7 @@ class ProcessCountTest(pyauto.PyUITest):
       self.GetPluginsInfo()
     crx_file_path = os.path.abspath(
         os.path.join(self.DataDir(), 'extensions', 'page_action.crx'))
-    self.assertTrue(self.InstallExtension(crx_file_path, False),
-                    msg='Extension install failed.')
+    self.InstallExtension(crx_file_path)
 
     for _ in xrange(2):
       self.AppendTab(pyauto.GURL('about:blank'), 0)

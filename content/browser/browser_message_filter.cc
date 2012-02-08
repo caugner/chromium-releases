@@ -4,12 +4,16 @@
 
 #include "content/browser/browser_message_filter.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
 #include "base/process.h"
 #include "base/process_util.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/result_codes.h"
+#include "content/public/common/result_codes.h"
 #include "ipc/ipc_sync_message.h"
+
+using content::BrowserThread;
 
 BrowserMessageFilter::BrowserMessageFilter()
     : channel_(NULL), peer_handle_(base::kNullProcessHandle) {
@@ -47,7 +51,8 @@ bool BrowserMessageFilter::Send(IPC::Message* message) {
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        NewRunnableMethod(this, &BrowserMessageFilter::Send, message));
+        base::IgnoreReturn<bool>(
+            base::Bind(&BrowserMessageFilter::Send, this, message)));
     return true;
   }
 
@@ -73,8 +78,8 @@ bool BrowserMessageFilter::OnMessageReceived(const IPC::Message& message) {
 
   BrowserThread::PostTask(
       thread, FROM_HERE,
-      NewRunnableMethod(
-          this, &BrowserMessageFilter::DispatchMessage, message));
+      base::IgnoreReturn<bool>(
+          base::Bind(&BrowserMessageFilter::DispatchMessage, this, message)));
   return true;
 }
 
@@ -98,7 +103,7 @@ void BrowserMessageFilter::BadMessageReceived() {
 
 bool BrowserMessageFilter::CheckCanDispatchOnUI(const IPC::Message& message,
                                                 IPC::Message::Sender* sender) {
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   // On Windows there's a potential deadlock with sync messsages going in
   // a circle from browser -> plugin -> renderer -> browser.
   // On Linux we can avoid this by avoiding sync messages from browser->plugin.

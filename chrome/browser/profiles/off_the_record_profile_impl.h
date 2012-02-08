@@ -11,7 +11,7 @@
 #include "chrome/browser/profiles/off_the_record_profile_io_data.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "content/common/notification_observer.h"
+#include "content/public/browser/notification_observer.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -27,7 +27,7 @@ using base::TimeDelta;
 ////////////////////////////////////////////////////////////////////////////////
 class OffTheRecordProfileImpl : public Profile,
                                 public BrowserList::Observer,
-                                public NotificationObserver {
+                                public content::NotificationObserver {
  public:
   explicit OffTheRecordProfileImpl(Profile* real_profile);
   virtual ~OffTheRecordProfileImpl();
@@ -53,6 +53,7 @@ class OffTheRecordProfileImpl : public Profile,
   virtual ExtensionSpecialStoragePolicy*
       GetExtensionSpecialStoragePolicy() OVERRIDE;
   virtual SSLHostState* GetSSLHostState() OVERRIDE;
+  virtual GAIAInfoUpdateService* GetGAIAInfoUpdateService() OVERRIDE;
   virtual HistoryService* GetHistoryService(ServiceAccessType sat) OVERRIDE;
   virtual HistoryService* GetHistoryServiceWithoutCreating() OVERRIDE;
   virtual FaviconService* GetFaviconService(ServiceAccessType sat) OVERRIDE;
@@ -125,18 +126,21 @@ class OffTheRecordProfileImpl : public Profile,
 #endif  // defined(OS_CHROMEOS)
 
   virtual PrefProxyConfigTracker* GetProxyConfigTracker() OVERRIDE;
+
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
   virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
+  virtual GURL GetHomePage() OVERRIDE;
+  virtual NetworkActionPredictor* GetNetworkActionPredictor() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   void CreateQuotaManagerAndClients();
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // The real underlying profile.
   Profile* profile_;
@@ -144,9 +148,12 @@ class OffTheRecordProfileImpl : public Profile,
   // Weak pointer owned by |profile_|.
   PrefService* prefs_;
 
-  scoped_ptr<ExtensionProcessManager> extension_process_manager_;
-
   OffTheRecordProfileIOData::Handle io_data_;
+
+  // Must be freed before |io_data_|. While |extension_process_manager_| still
+  // lives, we handle incoming resource requests from extension processes and
+  // those require access to the ResourceContext owned by |io_data_|.
+  scoped_ptr<ExtensionProcessManager> extension_process_manager_;
 
   // We use a non-persistent content settings map for OTR.
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
@@ -161,7 +168,6 @@ class OffTheRecordProfileImpl : public Profile,
   // profile because then the main profile would learn some of the host names
   // the user visited while OTR.
   scoped_ptr<SSLHostState> ssl_host_state_;
-
   // Use a separate FindBarState so search terms do not leak back to the main
   // profile.
   scoped_ptr<FindBarState> find_bar_state_;
@@ -182,7 +188,7 @@ class OffTheRecordProfileImpl : public Profile,
   // The file_system context for this profile.
   scoped_refptr<fileapi::FileSystemContext> file_system_context_;
 
-  scoped_refptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
+  scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   scoped_ptr<ChromeURLDataManager> chrome_url_data_manager_;
 

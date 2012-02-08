@@ -10,11 +10,13 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/bookmarks/bookmark_utils.h"
 #include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/extensions/apps_promo.h"
+#include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
@@ -27,7 +29,6 @@
 #include "chrome/browser/net/http_server_properties_manager.h"
 #include "chrome/browser/net/net_pref_observer.h"
 #include "chrome/browser/net/predictor.h"
-#include "chrome/browser/net/pref_proxy_config_service.h"
 #include "chrome/browser/net/ssl_config_service_manager.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification_ui_manager.h"
@@ -38,10 +39,10 @@
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/printing/print_job_manager.h"
+#include "chrome/browser/profiles/gaia_info_update_service.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/remoting/firewall_traversal_observer.h"
 #include "chrome/browser/renderer_host/web_cache_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
@@ -53,6 +54,7 @@
 #include "chrome/browser/ui/search_engines/keyword_editor_controller.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/flags_ui.h"
+#include "chrome/browser/ui/webui/ntp/new_tab_page_handler.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/options/extension_settings_handler.h"
 #include "chrome/browser/ui/webui/plugins_ui.h"
@@ -61,8 +63,8 @@
 #include "chrome/browser/web_resource/promo_resource_service.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/host_zoom_map.h"
-#include "content/browser/renderer_host/browser_render_process_host.h"
 #include "content/browser/ssl/ssl_manager.h"
+#include "content/public/browser/render_process_host.h"
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/presentation_mode_prefs.h"
@@ -80,13 +82,15 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/audio_mixer_alsa.h"
 #include "chrome/browser/chromeos/customization_document.h"
-#include "chrome/browser/chromeos/login/signed_settings_temp_storage.h"
+#include "chrome/browser/chromeos/login/signed_settings_cache.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/preferences.h"
+#include "chrome/browser/chromeos/proxy_config_service_impl.h"
 #include "chrome/browser/chromeos/status/input_method_menu.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
-#include "chrome/browser/chromeos/user_cros_settings_provider.h"
+#else
+#include "chrome/browser/extensions/default_apps.h"
 #endif
 
 namespace browser {
@@ -104,8 +108,10 @@ void RegisterLocalState(PrefService* local_state) {
   KeywordEditorController::RegisterPrefs(local_state);
   MetricsLog::RegisterPrefs(local_state);
   MetricsService::RegisterPrefs(local_state);
+  NewTabPageHandler::RegisterPrefs(local_state);
   printing::PrintJobManager::RegisterPrefs(local_state);
   PromoResourceService::RegisterPrefs(local_state);
+
 #if defined(ENABLE_SAFE_BROWSING)
   SafeBrowsingService::RegisterPrefs(local_state);
 #endif
@@ -118,7 +124,7 @@ void RegisterLocalState(PrefService* local_state) {
   geolocation::RegisterPrefs(local_state);
   BackgroundModeManager::RegisterPrefs(local_state);
   NotificationUIManager::RegisterPrefs(local_state);
-  PrefProxyConfigService::RegisterPrefs(local_state);
+  PrefProxyConfigTrackerImpl::RegisterPrefs(local_state);
   SSLConfigServiceManager::RegisterPrefs(local_state);
 #if defined(ENABLE_CONFIGURATION_POLICY)
   policy::CloudPolicySubsystem::RegisterPrefs(local_state);
@@ -128,12 +134,12 @@ void RegisterLocalState(PrefService* local_state) {
 #if defined(OS_CHROMEOS)
   chromeos::AudioMixerAlsa::RegisterPrefs(local_state);
   chromeos::UserManager::RegisterPrefs(local_state);
-  chromeos::UserCrosSettingsProvider::RegisterPrefs(local_state);
   chromeos::WizardController::RegisterPrefs(local_state);
   chromeos::InputMethodMenu::RegisterPrefs(local_state);
   chromeos::ServicesCustomizationDocument::RegisterPrefs(local_state);
-  chromeos::SignedSettingsTempStorage::RegisterPrefs(local_state);
+  chromeos::signed_settings_cache::RegisterPrefs(local_state);
   chromeos::NetworkMenuButton::RegisterPrefs(local_state);
+  chromeos::ProxyConfigServiceImpl::RegisterPrefs(local_state);
 #endif
 }
 
@@ -158,11 +164,12 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   ProfileImpl::RegisterUserPrefs(user_prefs);
   PromoResourceService::RegisterUserPrefs(user_prefs);
   HostContentSettingsMap::RegisterUserPrefs(user_prefs);
+  CookieSettings::RegisterUserPrefs(user_prefs);
   DevToolsWindow::RegisterUserPrefs(user_prefs);
   PinnedTabCodec::RegisterUserPrefs(user_prefs);
   ExtensionPrefs::RegisterUserPrefs(user_prefs);
   TranslatePrefs::RegisterUserPrefs(user_prefs);
-  PrefProxyConfigService::RegisterPrefs(user_prefs);
+  PrefProxyConfigTrackerImpl::RegisterPrefs(user_prefs);
 #if defined(TOOLKIT_VIEWS)
   BrowserActionsContainer::RegisterUserPrefs(user_prefs);
 #elif defined(TOOLKIT_GTK)
@@ -170,12 +177,12 @@ void RegisterUserPrefs(PrefService* user_prefs) {
 #endif
 #if defined(OS_CHROMEOS)
   chromeos::Preferences::RegisterUserPrefs(user_prefs);
+  chromeos::ProxyConfigServiceImpl::RegisterPrefs(user_prefs);
 #endif
   SigninManager::RegisterUserPrefs(user_prefs);
   InstantController::RegisterUserPrefs(user_prefs);
   NetPrefObserver::RegisterPrefs(user_prefs);
   ProtocolHandlerRegistry::RegisterPrefs(user_prefs);
-  FirewallTraversalObserver::RegisterUserPrefs(user_prefs);
 #if defined(OS_MACOSX)
   PresentationModePrefs::RegisterUserPrefs(user_prefs);
 #endif
@@ -183,7 +190,12 @@ void RegisterUserPrefs(PrefService* user_prefs) {
   policy::URLBlacklistManager::RegisterPrefs(user_prefs);
 #endif
   SyncPromoUI::RegisterUserPrefs(user_prefs);
+  GAIAInfoUpdateService::RegisterUserPrefs(user_prefs);
   chrome_browser_net::HttpServerPropertiesManager::RegisterPrefs(user_prefs);
+#if !defined(OS_CHROMEOS)
+  default_apps::RegisterUserPrefs(user_prefs);
+#endif
+  extensions::ComponentLoader::RegisterUserPrefs(user_prefs);
 }
 
 void MigrateBrowserPrefs(PrefService* user_prefs, PrefService* local_state) {

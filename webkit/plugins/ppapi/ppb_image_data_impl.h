@@ -12,12 +12,12 @@
 #include "ppapi/shared_impl/resource.h"
 #include "ppapi/thunk/ppb_image_data_api.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 
 namespace skia {
 class PlatformCanvas;
 }
 
-struct PPB_ImageDataTrusted;
 class SkBitmap;
 
 namespace webkit {
@@ -30,7 +30,7 @@ class PPB_ImageData_Impl : public ::ppapi::Resource,
   // If you call this constructor, you must also call Init before use. Normally
   // you should use the static Create function, but this constructor is needed
   // for some internal uses of ImageData (like Graphics2D).
-  explicit PPB_ImageData_Impl(PP_Instance instance);
+  WEBKIT_PLUGINS_EXPORT explicit PPB_ImageData_Impl(PP_Instance instance);
   virtual ~PPB_ImageData_Impl();
 
   static PP_Resource Create(PP_Instance pp_instance,
@@ -38,9 +38,9 @@ class PPB_ImageData_Impl : public ::ppapi::Resource,
                             const PP_Size& size,
                             PP_Bool init_to_zero);
 
-  bool Init(PP_ImageDataFormat format,
-            int width, int height,
-            bool init_to_zero);
+  WEBKIT_PLUGINS_EXPORT bool Init(PP_ImageDataFormat format,
+                                  int width, int height,
+                                  bool init_to_zero);
 
   int width() const { return width_; }
   int height() const { return height_; }
@@ -98,7 +98,7 @@ class PPB_ImageData_Impl : public ::ppapi::Resource,
 //   image_data->mapped_canvas()->blah();  // Guaranteed valid.
 class ImageDataAutoMapper {
  public:
-  ImageDataAutoMapper(PPB_ImageData_Impl* image_data)
+  explicit ImageDataAutoMapper(PPB_ImageData_Impl* image_data)
         : image_data_(image_data) {
     if (image_data_->is_mapped()) {
       is_valid_ = true;

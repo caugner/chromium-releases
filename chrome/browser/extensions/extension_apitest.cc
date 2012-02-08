@@ -12,11 +12,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
 
 namespace {
 
 const char kTestServerPort[] = "testServer.port";
+const char kTestDataDirectory[] = "testDataDirectory";
 
 };  // namespace
 
@@ -28,9 +30,9 @@ ExtensionApiTest::ResultCatcher::ResultCatcher()
     : profile_restriction_(NULL),
       waiting_(false) {
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_PASSED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_TEST_FAILED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 ExtensionApiTest::ResultCatcher::~ResultCatcher() {
@@ -60,10 +62,10 @@ bool ExtensionApiTest::ResultCatcher::GetNextResult() {
 }
 
 void ExtensionApiTest::ResultCatcher::Observe(
-    int type, const NotificationSource& source,
-    const NotificationDetails& details) {
+    int type, const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (profile_restriction_ &&
-      Source<Profile>(source).ptr() != profile_restriction_) {
+      content::Source<Profile>(source).ptr() != profile_restriction_) {
     return;
   }
 
@@ -79,7 +81,7 @@ void ExtensionApiTest::ResultCatcher::Observe(
     case chrome::NOTIFICATION_EXTENSION_TEST_FAILED:
       VLOG(1) << "Got EXTENSION_TEST_FAILED notification.";
       results_.push_back(false);
-      messages_.push_back(*(Details<std::string>(details).ptr()));
+      messages_.push_back(*(content::Details<std::string>(details).ptr()));
       if (waiting_)
         MessageLoopForUI::current()->Quit();
       break;
@@ -92,6 +94,8 @@ void ExtensionApiTest::ResultCatcher::Observe(
 void ExtensionApiTest::SetUpInProcessBrowserTestFixture() {
   DCHECK(!test_config_.get()) << "Previous test did not clear config state.";
   test_config_.reset(new DictionaryValue());
+  test_config_->SetString(kTestDataDirectory,
+                          net::FilePathToFileURL(test_data_dir_).spec());
   ExtensionTestGetConfigFunction::set_test_config_state(test_config_.get());
 }
 
@@ -232,8 +236,8 @@ bool ExtensionApiTest::StartTestServer() {
     return false;
 
   // Build a dictionary of values that tests can use to build URLs that
-  // access the test server.  Tests can see these values using the extension
-  // API function chrome.test.getConfig().
+  // access the test server and local file system.  Tests can see these values
+  // using the extension API function chrome.test.getConfig().
   test_config_->SetInteger(kTestServerPort,
                            test_server()->host_port_pair().port());
 

@@ -8,12 +8,18 @@
 
 namespace aura {
 
-const int kWindowType_Toplevel = 0;
-const int kWindowType_Control = 1;
-const int kWindowType_Menu = 2;
-const int kWindowType_Tooltip = 3;
+enum WindowType {
+  WINDOW_TYPE_UNKNOWN = 0,
 
-const int kWindowType_Max = 4;
+  // Regular windows that should be laid out by the shell.
+  WINDOW_TYPE_NORMAL,
+
+  // Miscellaneous windows that should not be laid out by the shell.
+  WINDOW_TYPE_POPUP,
+
+  WINDOW_TYPE_MENU,
+  WINDOW_TYPE_TOOLTIP,
+};
 
 }  // namespace aura
 

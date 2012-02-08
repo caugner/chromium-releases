@@ -24,17 +24,17 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/image/image.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/image_view.h"
-#include "views/controls/label.h"
-#include "views/controls/link.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/focus/external_focus_tracker.h"
-#include "views/widget/widget.h"
-#include "views/window/non_client_view.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/link.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/focus/external_focus_tracker.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/non_client_view.h"
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
@@ -50,12 +50,7 @@ const int InfoBar::kDefaultArrowTargetHeight = 9;
 const int InfoBar::kMaximumArrowTargetHeight = 24;
 const int InfoBar::kDefaultArrowTargetHalfWidth = kDefaultArrowTargetHeight;
 const int InfoBar::kMaximumArrowTargetHalfWidth = 14;
-
-#ifdef TOUCH_UI
-const int InfoBar::kDefaultBarTargetHeight = 75;
-#else
 const int InfoBar::kDefaultBarTargetHeight = 36;
-#endif
 
 const int InfoBarView::kButtonButtonSpacing = 10;
 const int InfoBarView::kEndOfLabelSpacing = 16;
@@ -94,6 +89,7 @@ views::Link* InfoBarView::CreateLink(const string16& text,
   link->SetHorizontalAlignment(views::Label::ALIGN_LEFT);
   link->set_listener(listener);
   link->SetBackgroundColor(background()->get_color());
+  link->set_focusable(true);
   return link;
 }
 
@@ -112,6 +108,7 @@ views::MenuButton* InfoBarView::CreateMenuButton(
   menu_button->SetHighlightColor(SK_ColorBLACK);
   menu_button->SetHoverColor(SK_ColorBLACK);
   menu_button->SetFont(rb.GetFont(ResourceBundle::MediumFont));
+  menu_button->set_focusable(true);
   return menu_button;
 }
 
@@ -120,8 +117,7 @@ views::TextButton* InfoBarView::CreateTextButton(
     views::ButtonListener* listener,
     const string16& text,
     bool needs_elevation) {
-  views::TextButton* text_button =
-      new views::TextButton(listener, UTF16ToWideHack(text));
+  views::TextButton* text_button = new views::TextButton(listener, text);
   text_button->set_border(new InfoBarButtonBorder);
   text_button->set_animate_on_state_change(false);
   text_button->SetEnabledColor(SK_ColorBLACK);
@@ -152,6 +148,7 @@ views::TextButton* InfoBarView::CreateTextButton(
     }
   }
 #endif
+  text_button->set_focusable(true);
   return text_button;
 }
 
@@ -256,7 +253,7 @@ void InfoBarView::PaintChildren(gfx::Canvas* canvas) {
   // canvas_skia->clipPath(fill_path_);
   DCHECK_EQ(total_height(), height())
       << "Infobar piecewise heights do not match overall height";
-  canvas->ClipRectInt(0, arrow_height(), width(), bar_height());
+  canvas->ClipRect(gfx::Rect(0, arrow_height(), width(), bar_height()));
   views::View::PaintChildren(canvas);
   canvas->Restore();
 }
@@ -373,7 +370,7 @@ gfx::Size InfoBarView::GetPreferredSize() {
   return gfx::Size(0, total_height());
 }
 
-void InfoBarView::FocusWillChange(View* focused_before, View* focused_now) {
+void InfoBarView::OnWillChangeFocus(View* focused_before, View* focused_now) {
   // This will trigger some screen readers to read the entire contents of this
   // infobar.
   if (focused_before && focused_now && !Contains(focused_before) &&
@@ -381,4 +378,7 @@ void InfoBarView::FocusWillChange(View* focused_before, View* focused_now) {
     GetWidget()->NotifyAccessibilityEvent(
         this, ui::AccessibilityTypes::EVENT_ALERT, true);
   }
+}
+
+void InfoBarView::OnDidChangeFocus(View* focused_before, View* focused_now) {
 }

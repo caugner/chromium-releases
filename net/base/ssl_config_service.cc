@@ -4,6 +4,9 @@
 
 #include "net/base/ssl_config_service.h"
 
+#include "base/lazy_instance.h"
+#include "base/memory/ref_counted.h"
+#include "net/base/crl_set.h"
 #include "net/base/ssl_config_service_defaults.h"
 #include "net/base/ssl_false_start_blacklist.h"
 
@@ -28,7 +31,7 @@ SSLConfig::~SSLConfig() {
 bool SSLConfig::IsAllowedBadCert(X509Certificate* cert,
                                  CertStatus* cert_status) const {
   std::string der_cert;
-  if (!cert->GetDEREncoded(&der_cert))
+  if (!X509Certificate::GetDEREncoded(cert->os_cert_handle(), &der_cert))
     return false;
   return IsAllowedBadCert(der_cert, cert_status);
 }
@@ -56,9 +59,11 @@ bool SSLConfigService::IsKnownFalseStartIncompatibleServer(
 }
 
 static bool g_cached_info_enabled = false;
-static bool g_origin_bound_certs_enabled = false;
 static bool g_false_start_enabled = true;
 static bool g_dns_cert_provenance_checking = false;
+base::LazyInstance<scoped_refptr<CRLSet>,
+                   base::LeakyLazyInstanceTraits<scoped_refptr<CRLSet> > >
+    g_crl_set = LAZY_INSTANCE_INITIALIZER;
 
 // static
 void SSLConfigService::DisableFalseStart() {
@@ -82,14 +87,12 @@ bool SSLConfigService::dns_cert_provenance_checking_enabled() {
 
 // static
 void SSLConfigService::SetCRLSet(scoped_refptr<CRLSet> crl_set) {
-  // TODO(agl): not implemented yet.
+  g_crl_set.Get() = crl_set;
 }
 
 // static
 scoped_refptr<CRLSet> SSLConfigService::GetCRLSet() {
-  // TODO(agl): not implemented yet.
-  scoped_refptr<CRLSet> ret;
-  return ret;
+  return g_crl_set.Get();
 }
 
 void SSLConfigService::EnableCachedInfo() {
@@ -99,16 +102,6 @@ void SSLConfigService::EnableCachedInfo() {
 // static
 bool SSLConfigService::cached_info_enabled() {
   return g_cached_info_enabled;
-}
-
-// static
-void SSLConfigService::EnableOriginBoundCerts() {
-  g_origin_bound_certs_enabled = true;
-}
-
-// static
-bool SSLConfigService::origin_bound_certs_enabled() {
-  return g_origin_bound_certs_enabled;
 }
 
 void SSLConfigService::AddObserver(Observer* observer) {
@@ -128,7 +121,6 @@ void SSLConfigService::SetSSLConfigFlags(SSLConfig* ssl_config) {
   ssl_config->dns_cert_provenance_checking_enabled =
       g_dns_cert_provenance_checking;
   ssl_config->cached_info_enabled = g_cached_info_enabled;
-  ssl_config->origin_bound_certs_enabled = g_origin_bound_certs_enabled;
 }
 
 void SSLConfigService::ProcessConfigUpdate(const SSLConfig& orig_config,
@@ -138,7 +130,9 @@ void SSLConfigService::ProcessConfigUpdate(const SSLConfig& orig_config,
       (orig_config.ssl3_enabled != new_config.ssl3_enabled) ||
       (orig_config.tls1_enabled != new_config.tls1_enabled) ||
       (orig_config.disabled_cipher_suites !=
-       new_config.disabled_cipher_suites);
+       new_config.disabled_cipher_suites) ||
+      (orig_config.origin_bound_certs_enabled !=
+       new_config.origin_bound_certs_enabled);
 
   if (config_changed)
     FOR_EACH_OBSERVER(Observer, observer_list_, OnSSLConfigChanged());

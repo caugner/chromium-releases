@@ -13,7 +13,7 @@
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_log.h"
@@ -24,6 +24,8 @@
 #if defined(ENABLE_CONFIGURATION_POLICY)
 #include "chrome/browser/policy/url_blacklist_manager.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -73,7 +75,7 @@ void ChromeNetworkDelegate::InitializeReferrersEnabled(
 
 int ChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
-    net::OldCompletionCallback* callback,
+    const net::CompletionCallback& callback,
     GURL* new_url) {
 #if defined(ENABLE_CONFIGURATION_POLICY)
   // TODO(joaodasilva): This prevents extensions from seeing URLs that are
@@ -98,7 +100,7 @@ int ChromeNetworkDelegate::OnBeforeURLRequest(
 
 int ChromeNetworkDelegate::OnBeforeSendHeaders(
     net::URLRequest* request,
-    net::OldCompletionCallback* callback,
+    const net::CompletionCallback& callback,
     net::HttpRequestHeaders* headers) {
   return ExtensionWebRequestEventRouter::GetInstance()->OnBeforeSendHeaders(
       profile_, extension_info_map_.get(), request, callback, headers);
@@ -113,7 +115,7 @@ void ChromeNetworkDelegate::OnSendHeaders(
 
 int ChromeNetworkDelegate::OnHeadersReceived(
     net::URLRequest* request,
-    net::OldCompletionCallback* callback,
+    const net::CompletionCallback& callback,
     net::HttpResponseHeaders* original_response_headers,
     scoped_refptr<net::HttpResponseHeaders>* override_response_headers) {
   return ExtensionWebRequestEventRouter::GetInstance()->OnHeadersReceived(

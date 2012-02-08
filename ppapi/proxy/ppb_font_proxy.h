@@ -5,7 +5,7 @@
 #ifndef PPAPI_PROXY_PPB_FONT_PROXY_H_
 #define PPAPI_PROXY_PPB_FONT_PROXY_H_
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/synchronization/waitable_event.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/shared_impl/function_group_base.h"
@@ -14,17 +14,13 @@
 #include "ppapi/shared_impl/webkit_forwarding.h"
 #include "ppapi/thunk/ppb_font_api.h"
 
-struct PPB_Font_Dev;
-
 namespace ppapi {
 namespace proxy {
-
-class SerializedVarReturnValue;
 
 class PPB_Font_Proxy : public InterfaceProxy,
                        public ppapi::thunk::PPB_Font_FunctionAPI {
  public:
-  PPB_Font_Proxy(Dispatcher* dispatcher);
+  explicit PPB_Font_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_Font_Proxy();
 
   // FunctionGroupBase overrides.
@@ -36,7 +32,7 @@ class PPB_Font_Proxy : public InterfaceProxy,
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
-  static const InterfaceID kInterfaceID = INTERFACE_ID_PPB_FONT;
+  static const ApiID kApiID = API_ID_PPB_FONT;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PPB_Font_Proxy);

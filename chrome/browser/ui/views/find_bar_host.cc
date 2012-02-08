@@ -16,10 +16,10 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/focus/external_focus_tracker.h"
-#include "views/focus/view_storage.h"
-#include "views/widget/root_view.h"
-#include "views/widget/widget.h"
+#include "ui/views/focus/external_focus_tracker.h"
+#include "ui/views/focus/view_storage.h"
+#include "ui/views/widget/root_view.h"
+#include "ui/views/widget/widget.h"
 
 namespace browser {
 
@@ -168,9 +168,9 @@ FindBarTesting* FindBarHost::GetFindBarTesting() {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// FindBarWin, views::AcceleratorTarget implementation:
+// FindBarWin, ui::AcceleratorTarget implementation:
 
-bool FindBarHost::AcceleratorPressed(const views::Accelerator& accelerator) {
+bool FindBarHost::AcceleratorPressed(const ui::Accelerator& accelerator) {
   ui::KeyboardCode key = accelerator.key_code();
   if (key == ui::VKEY_RETURN && accelerator.IsCtrlDown()) {
     // Ctrl+Enter closes the Find session and navigates any link that is active.
@@ -178,7 +178,7 @@ bool FindBarHost::AcceleratorPressed(const views::Accelerator& accelerator) {
   } else if (key == ui::VKEY_ESCAPE) {
     // This will end the Find session and hide the window, causing it to loose
     // focus and in the process unregister us as the handler for the Escape
-    // accelerator through the FocusWillChange event.
+    // accelerator through the OnWillChangeFocus event.
     find_bar_controller_->EndFindSession(FindBarController::kKeepSelection);
   } else {
     NOTREACHED() << "Unknown accelerator";
@@ -302,13 +302,13 @@ void FindBarHost::RegisterAccelerators() {
   DropdownBarHost::RegisterAccelerators();
 
   // Register for Ctrl+Return.
-  views::Accelerator escape(ui::VKEY_RETURN, false, true, false);
+  ui::Accelerator escape(ui::VKEY_RETURN, false, true, false);
   focus_manager()->RegisterAccelerator(escape, this);
 }
 
 void FindBarHost::UnregisterAccelerators() {
   // Unregister Ctrl+Return.
-  views::Accelerator escape(ui::VKEY_RETURN, false, true, false);
+  ui::Accelerator escape(ui::VKEY_RETURN, false, true, false);
   focus_manager()->UnregisterAccelerator(escape, this);
 
   DropdownBarHost::UnregisterAccelerators();
@@ -316,6 +316,14 @@ void FindBarHost::UnregisterAccelerators() {
 
 ////////////////////////////////////////////////////////////////////////////////
 // private:
+
+void FindBarHost::GetWidgetPositionNative(gfx::Rect* avoid_overlapping_rect) {
+  gfx::Rect frame_rect = host()->GetTopLevelWidget()->GetWindowScreenBounds();
+  TabContentsView* tab_view = find_bar_controller_->tab_contents()->view();
+  gfx::Rect webcontents_rect;
+  tab_view->GetViewBounds(&webcontents_rect);
+  avoid_overlapping_rect->Offset(0, webcontents_rect.y() - frame_rect.y());
+}
 
 FindBarView* FindBarHost::find_bar_view() {
   return static_cast<FindBarView*>(view());

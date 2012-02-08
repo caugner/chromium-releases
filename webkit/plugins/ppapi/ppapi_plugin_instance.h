@@ -31,11 +31,12 @@
 #include "ppapi/thunk/ppb_instance_api.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCanvas.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/rect.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
+#include "webkit/plugins/webkit_plugins_export.h"
 
 struct PP_Var;
 struct PPP_Find_Dev;
@@ -44,7 +45,6 @@ struct PPP_Instance_Private;
 struct PPP_Messaging;
 struct PPP_MouseLock;
 struct PPP_Pdf;
-struct PPP_PolicyUpdate_Dev;
 struct PPP_Selection_Dev;
 struct PPP_Zoom_Dev;
 
@@ -59,6 +59,7 @@ struct WebCursorInfo;
 }
 
 namespace ppapi {
+struct InputEventData;
 struct PPP_Instance_Combined;
 class Resource;
 }
@@ -68,14 +69,12 @@ namespace ppapi {
 
 class FullscreenContainer;
 class MessageChannel;
-class ObjectVar;
 class PluginDelegate;
 class PluginModule;
 class PluginObject;
 class PPB_Graphics2D_Impl;
 class PPB_Graphics3D_Impl;
 class PPB_ImageData_Impl;
-class PPB_Surface3D_Impl;
 class PPB_URLLoader_Impl;
 class PPB_URLRequestInfo_Impl;
 
@@ -83,10 +82,11 @@ class PPB_URLRequestInfo_Impl;
 //
 // Note: to get from a PP_Instance to a PluginInstance*, use the
 // ResourceTracker.
-class PluginInstance : public base::RefCounted<PluginInstance>,
-                       public ::ppapi::FunctionGroupBase,
-                       public ::ppapi::thunk::PPB_Instance_FunctionAPI,
-                       public ::ppapi::InstanceImpl {
+class WEBKIT_PLUGINS_EXPORT PluginInstance :
+    public base::RefCounted<PluginInstance>,
+    public ::ppapi::FunctionGroupBase,
+    NON_EXPORTED_BASE(public ::ppapi::thunk::PPB_Instance_FunctionAPI),
+    public ::ppapi::InstanceImpl {
  public:
   // Create and return a PluginInstance object which supports the
   // PPP_Instance_1_0 interface.
@@ -163,7 +163,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   bool HandleDocumentLoad(PPB_URLLoader_Impl* loader);
   bool HandleInputEvent(const WebKit::WebInputEvent& event,
                         WebKit::WebCursorInfo* cursor_info);
-  void HandlePolicyUpdate(const std::string& policy_json);
   PP_Var GetInstanceObject();
   void ViewChanged(const gfx::Rect& position, const gfx::Rect& clip);
 
@@ -247,14 +246,15 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // In normal state, events come from webkit and painting goes back to it.
   // In fullscreen state, events come from the fullscreen container, and
   // painting goes back to it.
-  // In pending state, events from webkit are ignored, and as soon as we receive
-  // events from the fullscreen container, we go to the fullscreen state.
+  // In pending state, events from webkit are ignored, and as soon as we
+  // receive events from the fullscreen container, we go to the fullscreen
+  // state.
   bool FlashIsFullscreenOrPending();
 
   // Switches between fullscreen and normal mode. If |delay_report| is set to
   // false, it may report the new state through DidChangeView immediately. If
-  // true, it will delay it. When called from the plugin, delay_report should be
-  // true to avoid re-entrancy.
+  // true, it will delay it. When called from the plugin, delay_report should
+  // be true to avoid re-entrancy.
   void FlashSetFullscreen(bool fullscreen, bool delay_report);
 
   FullscreenContainer* fullscreen_container() const {
@@ -274,13 +274,12 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   //                       fullscreen_ = true
   bool IsFullscreenOrPending();
 
-  // Switches between fullscreen and normal mode. If |delay_report| is set to
-  // false, it may report the new state through DidChangeView immediately. If
-  // true, it will delay it. When called from the plugin, delay_report should be
-  // true to avoid re-entrancy. Returns true on success, false on failure
-  // (e.g. trying to enter fullscreen when not processing a user gesture or
-  // trying to set fullscreen when already in fullscreen mode).
-  bool SetFullscreen(bool fullscreen, bool delay_report);
+  // Switches between fullscreen and normal mode. The transition is
+  // asynchronous. WebKit will trigger corresponding VewChanged calls.
+  // Returns true on success, false on failure (e.g. trying to enter fullscreen
+  // when not processing a user gesture or trying to set fullscreen when
+  // already in fullscreen mode).
+  bool SetFullscreen(bool fullscreen);
 
   // Implementation of PPB_Flash.
   int32_t Navigate(PPB_URLRequestInfo_Impl* request,
@@ -292,16 +291,20 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
 
   PluginDelegate::PlatformContext3D* CreateContext3D();
 
-  // Returns true iff the plugin is a full-page plugin (i.e. not in an iframe or
-  // embedded in a page).
+  // Returns true iff the plugin is a full-page plugin (i.e. not in an iframe
+  // or embedded in a page).
   bool IsFullPagePlugin() const;
 
   void OnLockMouseACK(int32_t result);
   void OnMouseLockLost();
 
+  // Simulates an input event to the plugin by passing it down to WebKit,
+  // which sends it back up to the plugin as if it came from the user.
+  void SimulateInputEvent(const ::ppapi::InputEventData& input_event);
+
   // FunctionGroupBase overrides.
-  virtual ::ppapi::thunk::PPB_Instance_FunctionAPI* AsPPB_Instance_FunctionAPI()
-      OVERRIDE;
+  virtual ::ppapi::thunk::PPB_Instance_FunctionAPI*
+      AsPPB_Instance_FunctionAPI() OVERRIDE;
 
   // PPB_Instance_FunctionAPI implementation.
   virtual PP_Bool BindGraphics(PP_Instance instance,
@@ -349,7 +352,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   virtual int32_t LockMouse(PP_Instance instance,
                             PP_CompletionCallback callback) OVERRIDE;
   virtual void UnlockMouse(PP_Instance instance) OVERRIDE;
-  virtual void SubscribeToPolicyUpdates(PP_Instance instance) OVERRIDE;
   virtual PP_Var ResolveRelativeToDocument(
       PP_Instance instance,
       PP_Var relative,
@@ -377,7 +379,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   bool LoadMessagingInterface();
   bool LoadMouseLockInterface();
   bool LoadPdfInterface();
-  bool LoadPolicyUpdateInterface();
   bool LoadPrintInterface();
   bool LoadPrivateInterface();
   bool LoadSelectionInterface();
@@ -415,11 +416,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   // Get the bound 3D graphics context.
   // Returns NULL if bound graphics is not a 3D context.
   PPB_Graphics3D_Impl* GetBoundGraphics3D() const;
-
-  // DEPRECATED: PPB_Surface3D_Impl is being replaced with PPB_Graphics3D_Impl.
-  // Get the bound 3D graphics surface.
-  // Returns NULL if bound graphics is not a 3D surface.
-  PPB_Surface3D_Impl* GetBoundSurface3D() const;
 
   // Sets the id of the texture that the plugin draws to. The id is in the
   // compositor space so it can use it to composite with rest of the page.
@@ -512,7 +508,6 @@ class PluginInstance : public base::RefCounted<PluginInstance>,
   const PPP_InputEvent* plugin_input_event_interface_;
   const PPP_Instance_Private* plugin_private_interface_;
   const PPP_Pdf* plugin_pdf_interface_;
-  const PPP_PolicyUpdate_Dev* plugin_policy_updated_interface_;
   const PPP_Selection_Dev* plugin_selection_interface_;
   const PPP_Zoom_Dev* plugin_zoom_interface_;
 

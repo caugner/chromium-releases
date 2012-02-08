@@ -12,7 +12,7 @@
 #include "content/renderer/render_thread_impl.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebCursorInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebSize.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSize.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebWidget.h"
 #include "ui/gfx/gl/gpu_preference.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
@@ -424,6 +424,9 @@ const float kTexCoords[] = {
 
 bool RenderWidgetFullscreenPepper::InitContext() {
   gpu::gles2::GLES2Implementation* gl = context_->GetImplementation();
+  gl->ResizeCHROMIUM(size().width(), size().height());
+  gl->Viewport(0, 0, size().width(), size().height());
+
   program_ = gl->CreateProgram();
 
   GLuint vertex_shader =
@@ -486,6 +489,10 @@ void RenderWidgetFullscreenPepper::SwapBuffers() {
   context_->Echo(base::Bind(
       &RenderWidgetFullscreenPepper::OnSwapBuffersCompleteByRendererGLContext,
       weak_ptr_factory_.GetWeakPtr()));
+
+  // The compositor isn't actually active in this path, but pretend it is for
+  // scheduling purposes.
+  didCommitAndDrawCompositorFrame();
 }
 
 void RenderWidgetFullscreenPepper::OnLostContext(
@@ -497,7 +504,7 @@ void RenderWidgetFullscreenPepper::OnLostContext(
   // created when the plugin recreates its own.
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      base::Bind(DestroyContext, context_, program_, buffer_));
+      base::Bind(&DestroyContext, context_, program_, buffer_));
   context_ = NULL;
   program_ = 0;
   buffer_ = 0;

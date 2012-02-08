@@ -9,11 +9,12 @@
 #include "ppapi/c/ppb_instance.h"
 #include "ppapi/c/ppb_messaging.h"
 #include "ppapi/c/ppb_mouse_lock.h"
+#include "ppapi/proxy/enter_proxy.h"
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
-#include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
 #include "ppapi/shared_impl/url_util_impl.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/thunk.h"
@@ -41,7 +42,8 @@ InterfaceProxy* CreateInstanceProxy(Dispatcher* dispatcher) {
 }  // namespace
 
 PPB_Instance_Proxy::PPB_Instance_Proxy(Dispatcher* dispatcher)
-    : InterfaceProxy(dispatcher) {
+    : InterfaceProxy(dispatcher),
+      callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
 }
 
 PPB_Instance_Proxy::~PPB_Instance_Proxy() {
@@ -52,7 +54,7 @@ const InterfaceProxy::Info* PPB_Instance_Proxy::GetInfoPrivate() {
   static const Info info = {
     ppapi::thunk::GetPPB_Instance_Private_Thunk(),
     PPB_INSTANCE_PRIVATE_INTERFACE,
-    INTERFACE_ID_NONE,  // 1_0 is the canonical one.
+    API_ID_NONE,  // 1_0 is the canonical one.
     false,
     &CreateInstanceProxy,
   };
@@ -68,6 +70,7 @@ bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(PPB_Instance_Proxy, msg)
+    // Plugin -> Host messages.
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_GetWindowObject,
                         OnMsgGetWindowObject)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_GetOwnerElementObject,
@@ -112,6 +115,11 @@ bool PPB_Instance_Proxy::OnMessageReceived(const IPC::Message& msg) {
                         OnMsgGetDocumentURL)
     IPC_MESSAGE_HANDLER(PpapiHostMsg_PPBInstance_GetPluginInstanceURL,
                         OnMsgGetPluginInstanceURL)
+
+    // Host -> Plugin messages.
+    IPC_MESSAGE_HANDLER(PpapiMsg_PPBInstance_MouseLockComplete,
+                        OnMsgMouseLockComplete)
+
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -123,13 +131,14 @@ PPB_Instance_FunctionAPI* PPB_Instance_Proxy::AsPPB_Instance_FunctionAPI() {
 
 PP_Bool PPB_Instance_Proxy::BindGraphics(PP_Instance instance,
                                          PP_Resource device) {
-  Resource* object = PluginResourceTracker::GetInstance()->GetResource(device);
+  Resource* object =
+      PpapiGlobals::Get()->GetResourceTracker()->GetResource(device);
   if (!object || object->pp_instance() != instance)
     return PP_FALSE;
 
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_BindGraphics(
-      INTERFACE_ID_PPB_INSTANCE, instance, object->host_resource(),
+      API_ID_PPB_INSTANCE, instance, object->host_resource(),
       &result));
   return result;
 }
@@ -137,21 +146,21 @@ PP_Bool PPB_Instance_Proxy::BindGraphics(PP_Instance instance,
 PP_Bool PPB_Instance_Proxy::IsFullFrame(PP_Instance instance) {
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_IsFullFrame(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result));
+      API_ID_PPB_INSTANCE, instance, &result));
   return result;
 }
 
 PP_Var PPB_Instance_Proxy::GetWindowObject(PP_Instance instance) {
   ReceiveSerializedVarReturnValue result;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_GetWindowObject(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result));
+      API_ID_PPB_INSTANCE, instance, &result));
   return result.Return(dispatcher());
 }
 
 PP_Var PPB_Instance_Proxy::GetOwnerElementObject(PP_Instance instance) {
   ReceiveSerializedVarReturnValue result;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_GetOwnerElementObject(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result));
+      API_ID_PPB_INSTANCE, instance, &result));
   return result.Return(dispatcher());
 }
 
@@ -164,7 +173,7 @@ PP_Var PPB_Instance_Proxy::ExecuteScript(PP_Instance instance,
 
   ReceiveSerializedVarReturnValue result;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_ExecuteScript(
-      INTERFACE_ID_PPB_INSTANCE, instance,
+      API_ID_PPB_INSTANCE, instance,
       SerializedVarSendInput(dispatcher(), script), &se, &result));
   return result.Return(dispatcher());
 }
@@ -176,7 +185,7 @@ PP_Var PPB_Instance_Proxy::GetDefaultCharSet(PP_Instance instance) {
 
   ReceiveSerializedVarReturnValue result;
   dispatcher->Send(new PpapiHostMsg_PPBInstance_GetDefaultCharSet(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result));
+      API_ID_PPB_INSTANCE, instance, &result));
   return result.Return(dispatcher);
 }
 
@@ -184,7 +193,7 @@ void PPB_Instance_Proxy::Log(PP_Instance instance,
                              int log_level,
                              PP_Var value) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_Log(
-      INTERFACE_ID_PPB_INSTANCE, instance, static_cast<int>(log_level),
+      API_ID_PPB_INSTANCE, instance, static_cast<int>(log_level),
       SerializedVarSendInput(dispatcher(), value)));
 }
 
@@ -193,7 +202,7 @@ void PPB_Instance_Proxy::LogWithSource(PP_Instance instance,
                                        PP_Var source,
                                        PP_Var value) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_LogWithSource(
-      INTERFACE_ID_PPB_INSTANCE, instance, static_cast<int>(log_level),
+      API_ID_PPB_INSTANCE, instance, static_cast<int>(log_level),
       SerializedVarSendInput(dispatcher(), source),
       SerializedVarSendInput(dispatcher(), value)));
 }
@@ -229,7 +238,7 @@ PP_Bool PPB_Instance_Proxy::SetFullscreen(PP_Instance instance,
                                           PP_Bool fullscreen) {
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_SetFullscreen(
-      INTERFACE_ID_PPB_INSTANCE, instance, fullscreen, &result));
+      API_ID_PPB_INSTANCE, instance, fullscreen, &result));
   return result;
 }
 
@@ -237,7 +246,7 @@ PP_Bool PPB_Instance_Proxy::FlashSetFullscreen(PP_Instance instance,
                                                PP_Bool fullscreen) {
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_FlashSetFullscreen(
-      INTERFACE_ID_PPB_INSTANCE, instance, fullscreen, &result));
+      API_ID_PPB_INSTANCE, instance, fullscreen, &result));
   return result;
 }
 
@@ -245,7 +254,7 @@ PP_Bool PPB_Instance_Proxy::GetScreenSize(PP_Instance instance,
                                           PP_Size* size) {
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_GetScreenSize(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result, size));
+      API_ID_PPB_INSTANCE, instance, &result, size));
   return result;
 }
 
@@ -253,14 +262,14 @@ PP_Bool PPB_Instance_Proxy::FlashGetScreenSize(PP_Instance instance,
                                                PP_Size* size) {
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_FlashGetScreenSize(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result, size));
+      API_ID_PPB_INSTANCE, instance, &result, size));
   return result;
 }
 
 int32_t PPB_Instance_Proxy::RequestInputEvents(PP_Instance instance,
                                                uint32_t event_classes) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_RequestInputEvents(
-      INTERFACE_ID_PPB_INSTANCE, instance, false, event_classes));
+      API_ID_PPB_INSTANCE, instance, false, event_classes));
 
   // We always register for the classes we can handle, this function validates
   // the flags so we can notify it if anything was invalid, without requiring
@@ -272,7 +281,7 @@ int32_t PPB_Instance_Proxy::RequestFilteringInputEvents(
     PP_Instance instance,
     uint32_t event_classes) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_RequestInputEvents(
-      INTERFACE_ID_PPB_INSTANCE, instance, true, event_classes));
+      API_ID_PPB_INSTANCE, instance, true, event_classes));
 
   // We always register for the classes we can handle, this function validates
   // the flags so we can notify it if anything was invalid, without requiring
@@ -283,7 +292,7 @@ int32_t PPB_Instance_Proxy::RequestFilteringInputEvents(
 void PPB_Instance_Proxy::ClearInputEventRequest(PP_Instance instance,
                                                 uint32_t event_classes) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_ClearInputEvents(
-      INTERFACE_ID_PPB_INSTANCE, instance, event_classes));
+      API_ID_PPB_INSTANCE, instance, event_classes));
 }
 
 void PPB_Instance_Proxy::ZoomChanged(PP_Instance instance,
@@ -299,18 +308,13 @@ void PPB_Instance_Proxy::ZoomLimitsChanged(PP_Instance instance,
   NOTIMPLEMENTED();
 }
 
-void PPB_Instance_Proxy::SubscribeToPolicyUpdates(PP_Instance instance) {
-  // Not proxied yet.
-  NOTIMPLEMENTED();
-}
-
 PP_Var PPB_Instance_Proxy::ResolveRelativeToDocument(
     PP_Instance instance,
     PP_Var relative,
     PP_URLComponents_Dev* components) {
   ReceiveSerializedVarReturnValue result;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_ResolveRelativeToDocument(
-      INTERFACE_ID_PPB_INSTANCE, instance,
+      API_ID_PPB_INSTANCE, instance,
       SerializedVarSendInput(dispatcher(), relative),
       &result));
   return URLUtilImpl::ConvertComponentsAndReturnURL(result.Return(dispatcher()),
@@ -321,7 +325,7 @@ PP_Bool PPB_Instance_Proxy::DocumentCanRequest(PP_Instance instance,
                                                PP_Var url) {
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_DocumentCanRequest(
-      INTERFACE_ID_PPB_INSTANCE, instance,
+      API_ID_PPB_INSTANCE, instance,
       SerializedVarSendInput(dispatcher(), url),
       &result));
   return result;
@@ -331,7 +335,7 @@ PP_Bool PPB_Instance_Proxy::DocumentCanAccessDocument(PP_Instance instance,
                                                       PP_Instance target) {
   PP_Bool result = PP_FALSE;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_DocumentCanAccessDocument(
-      INTERFACE_ID_PPB_INSTANCE, instance, target, &result));
+      API_ID_PPB_INSTANCE, instance, target, &result));
   return result;
 }
 
@@ -339,7 +343,7 @@ PP_Var PPB_Instance_Proxy::GetDocumentURL(PP_Instance instance,
                                           PP_URLComponents_Dev* components) {
   ReceiveSerializedVarReturnValue result;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_GetDocumentURL(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result));
+      API_ID_PPB_INSTANCE, instance, &result));
   return URLUtilImpl::ConvertComponentsAndReturnURL(result.Return(dispatcher()),
                                                     components);
 }
@@ -349,7 +353,7 @@ PP_Var PPB_Instance_Proxy::GetPluginInstanceURL(
       PP_URLComponents_Dev* components) {
   ReceiveSerializedVarReturnValue result;
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_GetPluginInstanceURL(
-      INTERFACE_ID_PPB_INSTANCE, instance, &result));
+      API_ID_PPB_INSTANCE, instance, &result));
   return URLUtilImpl::ConvertComponentsAndReturnURL(result.Return(dispatcher()),
                                                     components);
 }
@@ -357,7 +361,7 @@ PP_Var PPB_Instance_Proxy::GetPluginInstanceURL(
 void PPB_Instance_Proxy::PostMessage(PP_Instance instance,
                                      PP_Var message) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_PostMessage(
-      INTERFACE_ID_PPB_INSTANCE,
+      API_ID_PPB_INSTANCE,
       instance, SerializedVarSendInput(dispatcher(), message)));
 }
 
@@ -366,14 +370,23 @@ int32_t PPB_Instance_Proxy::LockMouse(PP_Instance instance,
   if (!callback.func)
     return PP_ERROR_BADARGUMENT;
 
+  // Save the mouse callback on the instance data.
+  InstanceData* data = static_cast<PluginDispatcher*>(dispatcher())->
+      GetInstanceData(instance);
+  if (!data)
+    return PP_ERROR_BADARGUMENT;
+  if (data->mouse_lock_callback.func)
+    return PP_ERROR_INPROGRESS;  // Already have a pending callback.
+  data->mouse_lock_callback = callback;
+
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_LockMouse(
-      INTERFACE_ID_PPB_INSTANCE, instance, SendCallback(callback)));
+      API_ID_PPB_INSTANCE, instance));
   return PP_OK_COMPLETIONPENDING;
 }
 
 void PPB_Instance_Proxy::UnlockMouse(PP_Instance instance) {
   dispatcher()->Send(new PpapiHostMsg_PPBInstance_UnlockMouse(
-      INTERFACE_ID_PPB_INSTANCE, instance));
+      API_ID_PPB_INSTANCE, instance));
 }
 
 void PPB_Instance_Proxy::OnMsgGetWindowObject(
@@ -518,15 +531,12 @@ void PPB_Instance_Proxy::OnMsgPostMessage(PP_Instance instance,
     enter.functions()->PostMessage(instance, message.Get(dispatcher()));
 }
 
-void PPB_Instance_Proxy::OnMsgLockMouse(PP_Instance instance,
-                                        uint32_t serialized_callback) {
-  EnterFunctionNoLock<PPB_Instance_FunctionAPI> enter(instance, true);
-  if (enter.failed())
-    return;
-  PP_CompletionCallback callback = ReceiveCallback(serialized_callback);
-  int32_t result = enter.functions()->LockMouse(instance, callback);
-  if (result != PP_OK_COMPLETIONPENDING)
-    PP_RunCompletionCallback(&callback, result);
+void PPB_Instance_Proxy::OnMsgLockMouse(PP_Instance instance) {
+  EnterHostFunctionForceCallback<PPB_Instance_FunctionAPI> enter(
+      instance, callback_factory_,
+      &PPB_Instance_Proxy::MouseLockCompleteInHost, instance);
+  if (enter.succeeded())
+    enter.SetResult(enter.functions()->LockMouse(instance, enter.callback()));
 }
 
 void PPB_Instance_Proxy::OnMsgUnlockMouse(PP_Instance instance) {
@@ -582,6 +592,26 @@ void PPB_Instance_Proxy::OnMsgGetPluginInstanceURL(
     result.Return(dispatcher(),
                   enter.functions()->GetPluginInstanceURL(instance, NULL));
   }
+}
+
+void PPB_Instance_Proxy::OnMsgMouseLockComplete(PP_Instance instance,
+                                                int32_t result) {
+  // Save the mouse callback on the instance data.
+  InstanceData* data = static_cast<PluginDispatcher*>(dispatcher())->
+      GetInstanceData(instance);
+  if (!data)
+    return;  // Instance was probably deleted.
+  if (!data->mouse_lock_callback.func) {
+    NOTREACHED();
+    return;
+  }
+  PP_RunAndClearCompletionCallback(&data->mouse_lock_callback, result);
+}
+
+void PPB_Instance_Proxy::MouseLockCompleteInHost(int32_t result,
+                                                 PP_Instance instance) {
+  dispatcher()->Send(new PpapiMsg_PPBInstance_MouseLockComplete(
+      API_ID_PPB_INSTANCE, instance, result));
 }
 
 }  // namespace proxy

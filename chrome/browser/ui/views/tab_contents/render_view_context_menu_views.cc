@@ -12,11 +12,11 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "grit/generated_resources.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/keycodes/keyboard_codes.h"
-#include "views/accelerator.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // RenderViewContextMenuViews, public:
@@ -69,32 +69,32 @@ bool RenderViewContextMenuViews::GetAcceleratorForCommandId(
   // that Ctrl+C, Ctrl+V, Ctrl+X, Ctrl-A, etc do what they normally do.
   switch (command_id) {
     case IDC_CONTENT_CONTEXT_UNDO:
-      *accel = views::Accelerator(ui::VKEY_Z, false, true, false);
+      *accel = ui::Accelerator(ui::VKEY_Z, false, true, false);
       return true;
 
     case IDC_CONTENT_CONTEXT_REDO:
       // TODO(jcampan): should it be Ctrl-Y?
-      *accel = views::Accelerator(ui::VKEY_Z, true, true, false);
+      *accel = ui::Accelerator(ui::VKEY_Z, true, true, false);
       return true;
 
     case IDC_CONTENT_CONTEXT_CUT:
-      *accel = views::Accelerator(ui::VKEY_X, false, true, false);
+      *accel = ui::Accelerator(ui::VKEY_X, false, true, false);
       return true;
 
     case IDC_CONTENT_CONTEXT_COPY:
-      *accel = views::Accelerator(ui::VKEY_C, false, true, false);
+      *accel = ui::Accelerator(ui::VKEY_C, false, true, false);
       return true;
 
     case IDC_CONTENT_CONTEXT_PASTE:
-      *accel = views::Accelerator(ui::VKEY_V, false, true, false);
+      *accel = ui::Accelerator(ui::VKEY_V, false, true, false);
       return true;
 
     case IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE:
-      *accel = views::Accelerator(ui::VKEY_V, true, true, false);
+      *accel = ui::Accelerator(ui::VKEY_V, true, true, false);
       return true;
 
     case IDC_CONTENT_CONTEXT_SELECTALL:
-      *accel = views::Accelerator(ui::VKEY_A, false, true, false);
+      *accel = ui::Accelerator(ui::VKEY_A, false, true, false);
       return true;
 
     default:
@@ -104,13 +104,15 @@ bool RenderViewContextMenuViews::GetAcceleratorForCommandId(
 
 void RenderViewContextMenuViews::UpdateMenuItem(int command_id,
                                                 bool enabled,
+                                                bool hidden,
                                                 const string16& title) {
   views::MenuItemView* item = menu_->GetMenuItemByID(command_id);
   if (!item)
     return;
 
   item->SetEnabled(enabled);
-  item->SetTitle(UTF16ToWideHack(title));
+  item->SetTitle(title);
+  item->SetVisible(!hidden);
 
   views::MenuItemView* parent = item->GetParentMenuItem();
   if (!parent)

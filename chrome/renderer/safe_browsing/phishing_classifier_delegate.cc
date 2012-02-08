@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
@@ -16,14 +17,16 @@
 #include "chrome/renderer/safe_browsing/feature_extractor_clock.h"
 #include "chrome/renderer/safe_browsing/phishing_classifier.h"
 #include "chrome/renderer/safe_browsing/scorer.h"
+#include "content/public/renderer/document_state.h"
 #include "content/public/renderer/navigation_state.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
+using content::DocumentState;
 using content::NavigationState;
 using content::RenderThread;
 
@@ -37,10 +40,10 @@ static GURL StripRef(const GURL& url) {
 
 typedef std::set<PhishingClassifierDelegate*> PhishingClassifierDelegates;
 static base::LazyInstance<PhishingClassifierDelegates>
-    g_delegates(base::LINKER_INITIALIZED);
+    g_delegates = LAZY_INSTANCE_INITIALIZER;
 
 static base::LazyInstance<scoped_ptr<const safe_browsing::Scorer> >
-    g_phishing_scorer(base::LINKER_INITIALIZED);
+    g_phishing_scorer = LAZY_INSTANCE_INITIALIZER;
 
 // static
 PhishingClassifierFilter* PhishingClassifierFilter::Create() {
@@ -65,10 +68,15 @@ bool PhishingClassifierFilter::OnControlMessageReceived(
 }
 
 void PhishingClassifierFilter::OnSetPhishingModel(const std::string& model) {
-  safe_browsing::Scorer* scorer = safe_browsing::Scorer::Create(model);
-  if (!scorer) {
-    DLOG(ERROR) << "Unable to create a PhishingScorer - corrupt model?";
-    return;
+  safe_browsing::Scorer* scorer = NULL;
+  // An empty model string means we should disable client-side phishing
+  // detection.
+  if (!model.empty()) {
+    scorer = safe_browsing::Scorer::Create(model);
+    if (!scorer) {
+      DLOG(ERROR) << "Unable to create a PhishingScorer - corrupt model?";
+      return;
+    }
   }
   PhishingClassifierDelegates::iterator i;
   for (i = g_delegates.Get().begin(); i != g_delegates.Get().end(); ++i) {
@@ -144,12 +152,13 @@ void PhishingClassifierDelegate::DidCommitProvisionalLoad(
   // this case, we need to properly deal with the fact that PageCaptured will
   // be called again for the in-page navigation.  We need to be sure not to
   // swap out the page text while the term feature extractor is still running.
-  NavigationState* state = NavigationState::FromDataSource(
+  DocumentState* document_state = DocumentState::FromDataSource(
       frame->dataSource());
-  CancelPendingClassification(state->was_within_same_page() ?
+  NavigationState* navigation_state = document_state->navigation_state();
+  CancelPendingClassification(navigation_state->was_within_same_page() ?
                               NAVIGATE_WITHIN_PAGE : NAVIGATE_AWAY);
   if (frame == render_view()->GetWebView()->mainFrame()) {
-    last_main_frame_transition_ = state->transition_type();
+    last_main_frame_transition_ = navigation_state->transition_type();
   }
 }
 
@@ -277,7 +286,8 @@ void PhishingClassifierDelegate::MaybeStartClassification() {
   is_classifying_ = true;
   classifier_->BeginClassification(
       &classifier_page_text_,
-      NewCallback(this, &PhishingClassifierDelegate::ClassificationDone));
+      base::Bind(&PhishingClassifierDelegate::ClassificationDone,
+                 base::Unretained(this)));
 }
 
 }  // namespace safe_browsing

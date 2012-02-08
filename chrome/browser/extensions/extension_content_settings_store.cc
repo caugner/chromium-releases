@@ -16,11 +16,12 @@
 #include "chrome/browser/content_settings/content_settings_utils.h"
 #include "chrome/browser/extensions/extension_content_settings_api_constants.h"
 #include "chrome/browser/extensions/extension_content_settings_helpers.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 
 namespace helpers = extension_content_settings_helpers;
 namespace keys = extension_content_settings_api_constants;
 
+using content::BrowserThread;
 using content_settings::ConcatenationIterator;
 using content_settings::Rule;
 using content_settings::RuleIterator;

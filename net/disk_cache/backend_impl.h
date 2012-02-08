@@ -17,6 +17,7 @@
 #include "net/disk_cache/in_flight_backend_io.h"
 #include "net/disk_cache/rankings.h"
 #include "net/disk_cache/stats.h"
+#include "net/disk_cache/stress_support.h"
 #include "net/disk_cache/trace.h"
 
 namespace net {
@@ -126,6 +127,14 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
 
   // Permanently deletes an entry, but still keeps track of it.
   void InternalDoomEntry(EntryImpl* entry);
+
+#if defined(NET_BUILD_STRESS_CACHE)
+  // Returns the address of the entry linked to the entry at a given |address|.
+  CacheAddr GetNextAddr(Addr address);
+
+  // Verifies that |entry| is not currently reachable through the index.
+  void NotLinked(EntryImpl* entry);
+#endif
 
   // Removes all references to this entry.
   void RemoveEntry(EntryImpl* entry);
@@ -248,23 +257,24 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   int SelfCheck();
 
   // Backend interface.
-  virtual int32 GetEntryCount() const;
+  virtual int32 GetEntryCount() const OVERRIDE;
   virtual int OpenEntry(const std::string& key, Entry** entry,
-                        OldCompletionCallback* callback);
+                        OldCompletionCallback* callback) OVERRIDE;
   virtual int CreateEntry(const std::string& key, Entry** entry,
-                          OldCompletionCallback* callback);
-  virtual int DoomEntry(const std::string& key, OldCompletionCallback* callback);
-  virtual int DoomAllEntries(OldCompletionCallback* callback);
+                          OldCompletionCallback* callback) OVERRIDE;
+  virtual int DoomEntry(const std::string& key,
+                        OldCompletionCallback* callback) OVERRIDE;
+  virtual int DoomAllEntries(OldCompletionCallback* callback) OVERRIDE;
   virtual int DoomEntriesBetween(const base::Time initial_time,
                                  const base::Time end_time,
-                                 OldCompletionCallback* callback);
+                                 OldCompletionCallback* callback) OVERRIDE;
   virtual int DoomEntriesSince(const base::Time initial_time,
-                               OldCompletionCallback* callback);
+                               OldCompletionCallback* callback) OVERRIDE;
   virtual int OpenNextEntry(void** iter, Entry** next_entry,
-                            OldCompletionCallback* callback);
-  virtual void EndEnumeration(void** iter);
-  virtual void GetStats(StatsItems* stats);
-  virtual void OnExternalCacheHit(const std::string& key);
+                            OldCompletionCallback* callback) OVERRIDE;
+  virtual void EndEnumeration(void** iter) OVERRIDE;
+  virtual void GetStats(StatsItems* stats) OVERRIDE;
+  virtual void OnExternalCacheHit(const std::string& key) OVERRIDE;
 
  private:
   typedef base::hash_map<CacheAddr, EntryImpl*> EntriesMap;
@@ -368,7 +378,7 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   bool disabled_;
   bool new_eviction_;  // What eviction algorithm should be used.
   bool first_timer_;  // True if the timer has not been called.
-  bool throttle_requests_;
+  bool user_load_;  // True if we see a high load coming from the caller.
 
   net::NetLog* net_log_;
 
@@ -376,7 +386,6 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   base::RepeatingTimer<BackendImpl> timer_;  // Usage timer.
   base::WaitableEvent done_;  // Signals the end of background work.
   scoped_refptr<TraceObject> trace_object_;  // Inits internal tracing.
-  ScopedRunnableMethodFactory<BackendImpl> factory_;
   base::WeakPtrFactory<BackendImpl> ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(BackendImpl);

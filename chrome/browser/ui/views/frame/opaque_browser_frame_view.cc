@@ -10,11 +10,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
@@ -25,13 +21,14 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/theme_provider.h"
@@ -39,17 +36,13 @@
 #include "ui/gfx/font.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/path.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/image_view.h"
-#include "views/widget/root_view.h"
-#include "views/window/window_shape.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/image_view.h"
+#include "ui/views/widget/root_view.h"
+#include "ui/views/window/window_shape.h"
 
 #if defined(USE_VIRTUAL_KEYBOARD)
 #include "chrome/browser/ui/virtual_keyboard/virtual_keyboard_manager.h"
-#endif
-
-#if !defined(OS_WIN)
-#include "views/window/hit_test.h"
 #endif
 
 namespace {
@@ -123,7 +116,7 @@ bool ConvertedContainsCheck(gfx::Rect bounds, const views::View* src,
 
 OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
                                                BrowserView* browser_view)
-    : BrowserNonClientFrameView(),
+    : BrowserNonClientFrameView(frame, browser_view),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           minimize_button_(new views::ImageButton(this))),
       ALLOW_THIS_IN_INITIALIZER_LIST(
@@ -132,10 +125,8 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
           restore_button_(new views::ImageButton(this))),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           close_button_(new views::ImageButton(this))),
-      window_icon_(NULL),
-      frame_(frame),
-      browser_view_(browser_view) {
-  ui::ThemeProvider* tp = frame_->GetThemeProvider();
+      window_icon_(NULL) {
+  ui::ThemeProvider* tp = frame->GetThemeProvider();
   SkColor color = tp->GetColor(ThemeService::COLOR_BUTTON_BACKGROUND);
   SkBitmap* background =
       tp->GetBitmapNamed(IDR_THEME_WINDOW_CONTROL_BACKGROUND);
@@ -145,13 +136,19 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
                              tp->GetBitmapNamed(IDR_MINIMIZE_H));
   minimize_button_->SetImage(views::CustomButton::BS_PUSHED,
                              tp->GetBitmapNamed(IDR_MINIMIZE_P));
-  if (browser_view_->IsBrowserTypeNormal()) {
+  if (browser_view->IsBrowserTypeNormal()) {
     minimize_button_->SetBackground(color, background,
         tp->GetBitmapNamed(IDR_MINIMIZE_BUTTON_MASK));
   }
   minimize_button_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_MINIMIZE));
   AddChildView(minimize_button_);
+#if defined(USE_AURA)
+  // TODO(jamescook): Remove this when Aura uses its own custom window frame,
+  // BrowserNonClientFrameViewAura.  Layout code depends on this button's
+  // position, so just hide it.
+  minimize_button_->SetVisible(false);
+#endif
 
   maximize_button_->SetImage(views::CustomButton::BS_NORMAL,
                              tp->GetBitmapNamed(IDR_MAXIMIZE));
@@ -159,7 +156,7 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
                              tp->GetBitmapNamed(IDR_MAXIMIZE_H));
   maximize_button_->SetImage(views::CustomButton::BS_PUSHED,
                              tp->GetBitmapNamed(IDR_MAXIMIZE_P));
-  if (browser_view_->IsBrowserTypeNormal()) {
+  if (browser_view->IsBrowserTypeNormal()) {
     maximize_button_->SetBackground(color, background,
         tp->GetBitmapNamed(IDR_MAXIMIZE_BUTTON_MASK));
   }
@@ -173,7 +170,7 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
                             tp->GetBitmapNamed(IDR_RESTORE_H));
   restore_button_->SetImage(views::CustomButton::BS_PUSHED,
                             tp->GetBitmapNamed(IDR_RESTORE_P));
-  if (browser_view_->IsBrowserTypeNormal()) {
+  if (browser_view->IsBrowserTypeNormal()) {
     restore_button_->SetBackground(color, background,
         tp->GetBitmapNamed(IDR_RESTORE_BUTTON_MASK));
   }
@@ -187,7 +184,7 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
                           tp->GetBitmapNamed(IDR_CLOSE_H));
   close_button_->SetImage(views::CustomButton::BS_PUSHED,
                           tp->GetBitmapNamed(IDR_CLOSE_P));
-  if (browser_view_->IsBrowserTypeNormal()) {
+  if (browser_view->IsBrowserTypeNormal()) {
     close_button_->SetBackground(color, background,
         tp->GetBitmapNamed(IDR_CLOSE_BUTTON_MASK));
   }
@@ -196,7 +193,7 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
   AddChildView(close_button_);
 
   // Initializing the TabIconView is expensive, so only do it if we need to.
-  if (browser_view_->ShouldShowWindowIcon()) {
+  if (browser_view->ShouldShowWindowIcon()) {
     window_icon_ = new TabIconView(this);
     window_icon_->set_is_light(true);
     AddChildView(window_icon_);
@@ -204,9 +201,9 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
   }
 
   UpdateAvatarInfo();
-  if (!browser_view_->IsOffTheRecord()) {
+  if (!browser_view->IsOffTheRecord()) {
     registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
 #if defined(USE_VIRTUAL_KEYBOARD)
@@ -236,7 +233,7 @@ gfx::Rect OpaqueBrowserFrameView::GetBoundsForReservedArea() const {
 
 int OpaqueBrowserFrameView::NonClientTopBorderHeight(
     bool restored) const {
-  views::WidgetDelegate* delegate = frame_->widget_delegate();
+  views::WidgetDelegate* delegate = frame()->widget_delegate();
   // |delegate| may be NULL if called from callback of InputMethodChanged while
   // a window is being destroyed.
   // See more discussion at http://crosbug.com/8958
@@ -247,8 +244,8 @@ int OpaqueBrowserFrameView::NonClientTopBorderHeight(
   }
 
   return FrameBorderThickness(restored) -
-      ((browser_view_->IsTabStripVisible() && !restored &&
-      frame_->IsMaximized()) ? kTabstripTopShadowThickness : 0);
+      ((browser_view()->IsTabStripVisible() && !restored &&
+      frame()->IsMaximized()) ? kTabstripTopShadowThickness : 0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -259,13 +256,13 @@ gfx::Rect OpaqueBrowserFrameView::GetBoundsForTabStrip(
   if (!tabstrip)
     return gfx::Rect();
 
-  int tabstrip_x = browser_view_->ShouldShowAvatar() ?
+  int tabstrip_x = browser_view()->ShouldShowAvatar() ?
       (avatar_bounds_.right() + kAvatarSideSpacing) :
       NonClientBorderThickness() + kTabStripIndent;
 
   int maximized_spacing = kNewTabCaptionMaximizedSpacing;
   int tabstrip_width = minimize_button_->x() - tabstrip_x -
-      (frame_->IsMaximized() ?
+      (frame()->IsMaximized() ?
           maximized_spacing : kNewTabCaptionRestoredSpacing);
   return gfx::Rect(tabstrip_x, GetHorizontalTabStripVerticalOffset(false),
       std::max(0, tabstrip_width), tabstrip->GetPreferredSize().height());
@@ -274,8 +271,8 @@ gfx::Rect OpaqueBrowserFrameView::GetBoundsForTabStrip(
 int OpaqueBrowserFrameView::GetHorizontalTabStripVerticalOffset(
     bool restored) const {
   return NonClientTopBorderHeight(restored) + ((!restored &&
-      (frame_->IsMaximized() ||
-      frame_->IsFullscreen())) ?
+      (frame()->IsMaximized() ||
+      frame()->IsFullscreen())) ?
       0 : kNonClientRestoredExtraThickness);
 }
 
@@ -285,12 +282,12 @@ void OpaqueBrowserFrameView::UpdateThrobber(bool running) {
 }
 
 gfx::Size OpaqueBrowserFrameView::GetMinimumSize() {
-  gfx::Size min_size(browser_view_->GetMinimumSize());
+  gfx::Size min_size(browser_view()->GetMinimumSize());
   int border_thickness = NonClientBorderThickness();
   min_size.Enlarge(2 * border_thickness,
                    NonClientTopBorderHeight(false) + border_thickness);
 
-  views::WidgetDelegate* delegate = frame_->widget_delegate();
+  views::WidgetDelegate* delegate = frame()->widget_delegate();
   int min_titlebar_width = (2 * FrameBorderThickness(false)) +
       kIconLeftSpacing +
       (delegate && delegate->ShouldShowWindowIcon() ?
@@ -327,18 +324,18 @@ int OpaqueBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
     return HTNOWHERE;
 
   // See if the point is within the avatar menu button.
-  if (avatar_button_.get() &&
-      avatar_button_->GetMirroredBounds().Contains(point))
+  if (avatar_button() &&
+      avatar_button()->GetMirroredBounds().Contains(point))
     return HTCLIENT;
 
-  int frame_component = frame_->client_view()->NonClientHitTest(point);
+  int frame_component = frame()->client_view()->NonClientHitTest(point);
 
   // See if we're in the sysmenu region.  We still have to check the tabstrip
   // first so that clicks in a tab don't get treated as sysmenu clicks.
   gfx::Rect sysmenu_rect(IconBounds());
   // In maximized mode we extend the rect to the screen corner to take advantage
   // of Fitts' Law.
-  if (frame_->IsMaximized())
+  if (frame()->IsMaximized())
     sysmenu_rect.SetRect(0, 0, sysmenu_rect.right(), sysmenu_rect.bottom());
   sysmenu_rect.set_x(GetMirroredXForRect(sysmenu_rect));
   if (sysmenu_rect.Contains(point))
@@ -361,7 +358,7 @@ int OpaqueBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
       minimize_button_->GetMirroredBounds().Contains(point))
     return HTMINBUTTON;
 
-  views::WidgetDelegate* delegate = frame_->widget_delegate();
+  views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (!delegate) {
     LOG(WARNING) << "delegate is NULL, returning safe default.";
     return HTCAPTION;
@@ -377,14 +374,10 @@ void OpaqueBrowserFrameView::GetWindowMask(const gfx::Size& size,
                                            gfx::Path* window_mask) {
   DCHECK(window_mask);
 
-  if (frame_->IsMaximized() || frame_->IsFullscreen())
+  if (frame()->IsMaximized() || frame()->IsFullscreen())
     return;
 
   views::GetDefaultWindowMask(size, window_mask);
-}
-
-void OpaqueBrowserFrameView::EnableClose(bool enable) {
-  close_button_->SetEnabled(enable);
 }
 
 void OpaqueBrowserFrameView::ResetWindowControls() {
@@ -402,17 +395,17 @@ void OpaqueBrowserFrameView::UpdateWindowIcon() {
 // OpaqueBrowserFrameView, views::View overrides:
 
 void OpaqueBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
-  if (frame_->IsFullscreen())
+  if (frame()->IsFullscreen())
     return;  // Nothing is visible, so don't bother to paint.
 
-  if (frame_->IsMaximized())
+  if (frame()->IsMaximized())
     PaintMaximizedFrameBorder(canvas);
   else
     PaintRestoredFrameBorder(canvas);
   PaintTitleBar(canvas);
-  if (browser_view_->IsToolbarVisible())
+  if (browser_view()->IsToolbarVisible())
     PaintToolbarBackground(canvas);
-  if (!frame_->IsMaximized())
+  if (!frame()->IsMaximized())
     PaintRestoredClientEdge(canvas);
 }
 
@@ -430,11 +423,11 @@ bool OpaqueBrowserFrameView::HitTest(const gfx::Point& l) const {
     return in_nonclient;
 
   // Otherwise claim it only if it's in a non-tab portion of the tabstrip.
-  if (!browser_view_->tabstrip())
+  if (!browser_view()->tabstrip())
     return false;
-  gfx::Rect tabstrip_bounds(browser_view_->tabstrip()->bounds());
+  gfx::Rect tabstrip_bounds(browser_view()->tabstrip()->bounds());
   gfx::Point tabstrip_origin(tabstrip_bounds.origin());
-  View::ConvertPointToView(frame_->client_view(), this, &tabstrip_origin);
+  View::ConvertPointToView(frame()->client_view(), this, &tabstrip_origin);
   tabstrip_bounds.set_origin(tabstrip_origin);
   if (l.y() > tabstrip_bounds.bottom())
     return false;
@@ -443,8 +436,8 @@ bool OpaqueBrowserFrameView::HitTest(const gfx::Point& l) const {
   // completely. We need to do this since we're not a parent of the tabstrip,
   // meaning ConvertPointToView would otherwise return something bogus.
   gfx::Point browser_view_point(l);
-  View::ConvertPointToView(parent(), browser_view_, &browser_view_point);
-  return browser_view_->IsPositionInWindowCaption(browser_view_point);
+  View::ConvertPointToView(parent(), browser_view(), &browser_view_point);
+  return browser_view()->IsPositionInWindowCaption(browser_view_point);
 }
 
 void OpaqueBrowserFrameView::GetAccessibleState(
@@ -458,13 +451,13 @@ void OpaqueBrowserFrameView::GetAccessibleState(
 void OpaqueBrowserFrameView::ButtonPressed(views::Button* sender,
                                            const views::Event& event) {
   if (sender == minimize_button_)
-    frame_->Minimize();
+    frame()->Minimize();
   else if (sender == maximize_button_)
-    frame_->Maximize();
+    frame()->Maximize();
   else if (sender == restore_button_)
-    frame_->Restore();
+    frame()->Restore();
   else if (sender == close_button_)
-    frame_->Close();
+    frame()->Close();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -474,12 +467,12 @@ bool OpaqueBrowserFrameView::ShouldTabIconViewAnimate() const {
   // This function is queried during the creation of the window as the
   // TabIconView we host is initialized, so we need to NULL check the selected
   // TabContents because in this condition there is not yet a selected tab.
-  TabContents* current_tab = browser_view_->GetSelectedTabContents();
+  TabContents* current_tab = browser_view()->GetSelectedTabContents();
   return current_tab ? current_tab->IsLoading() : false;
 }
 
 SkBitmap OpaqueBrowserFrameView::GetFaviconForTabIconView() {
-  views::WidgetDelegate* delegate = frame_->widget_delegate();
+  views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (!delegate) {
     LOG(WARNING) << "delegate is NULL, returning safe default.";
     return SkBitmap();
@@ -490,9 +483,10 @@ SkBitmap OpaqueBrowserFrameView::GetFaviconForTabIconView() {
 ///////////////////////////////////////////////////////////////////////////////
 // OpaqueBrowserFrameView, protected:
 
-void OpaqueBrowserFrameView::Observe(int type,
-                                     const NotificationSource& source,
-                                     const NotificationDetails& details) {
+void OpaqueBrowserFrameView::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
       UpdateAvatarInfo();
@@ -507,7 +501,7 @@ void OpaqueBrowserFrameView::Observe(int type,
 // OpaqueBrowserFrameView, private:
 
 int OpaqueBrowserFrameView::FrameBorderThickness(bool restored) const {
-  return (!restored && (frame_->IsMaximized() || frame_->IsFullscreen())) ?
+  return (!restored && (frame()->IsMaximized() || frame()->IsFullscreen())) ?
       0 : kFrameBorderThickness;
 }
 
@@ -518,7 +512,7 @@ int OpaqueBrowserFrameView::TopResizeHeight() const {
 int OpaqueBrowserFrameView::NonClientBorderThickness() const {
   // When we fill the screen, we don't show a client edge.
   return FrameBorderThickness(false) +
-      ((frame_->IsMaximized() || frame_->IsFullscreen()) ?
+      ((frame()->IsMaximized() || frame()->IsFullscreen()) ?
        0 : kClientEdgeThickness);
 }
 
@@ -529,13 +523,13 @@ void OpaqueBrowserFrameView::ModifyMaximizedFramePainting(
 int OpaqueBrowserFrameView::CaptionButtonY(bool restored) const {
   // Maximized buttons start at window top so that even if their images aren't
   // drawn flush with the screen edge, they still obey Fitts' Law.
-  return (!restored && frame_->IsMaximized()) ?
+  return (!restored && frame()->IsMaximized()) ?
       FrameBorderThickness(false) : kFrameShadowThickness;
 }
 
 int OpaqueBrowserFrameView::TitlebarBottomThickness(bool restored) const {
   return kTitlebarTopAndBottomEdgeThickness +
-      ((!restored && frame_->IsMaximized()) ? 0 : kClientEdgeThickness);
+      ((!restored && frame()->IsMaximized()) ? 0 : kClientEdgeThickness);
 }
 
 int OpaqueBrowserFrameView::IconSize() const {
@@ -552,7 +546,7 @@ gfx::Rect OpaqueBrowserFrameView::IconBounds() const {
   int size = IconSize();
   int frame_thickness = FrameBorderThickness(false);
   int y;
-  views::WidgetDelegate* delegate = frame_->widget_delegate();
+  views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (delegate && (delegate->ShouldShowWindowIcon() ||
                    delegate->ShouldShowWindowTitle())) {
     // Our frame border has a different "3D look" than Windows'.  Theirs has a
@@ -563,7 +557,7 @@ gfx::Rect OpaqueBrowserFrameView::IconBounds() const {
     // with restored windows, so when the window is restored, instead of
     // calculating the remaining space from below the frame border, we calculate
     // from below the 3D edge.
-    int unavailable_px_at_top = frame_->IsMaximized() ?
+    int unavailable_px_at_top = frame()->IsMaximized() ?
         frame_thickness : kTitlebarTopAndBottomEdgeThickness;
     // When the icon is shorter than the minimum space we reserve for the
     // caption button, we vertically center it.  We want to bias rounding to put
@@ -584,48 +578,67 @@ gfx::Rect OpaqueBrowserFrameView::IconBounds() const {
 void OpaqueBrowserFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {
   ui::ThemeProvider* tp = GetThemeProvider();
 
+#if defined(USE_AURA)
+  // TODO(jamescook): Remove this when Aura defaults to its own window frame,
+  // BrowserNonClientFrameViewAura.  Until then, use custom square corners to
+  // avoid performance penalties associated with transparent layers.
+  SkBitmap* top_left_corner = tp->GetBitmapNamed(IDR_AURA_WINDOW_TOP_LEFT);
+  SkBitmap* top_right_corner = tp->GetBitmapNamed(IDR_AURA_WINDOW_TOP_RIGHT);
+  SkBitmap* bottom_left_corner =
+      tp->GetBitmapNamed(IDR_AURA_WINDOW_BOTTOM_LEFT);
+  SkBitmap* bottom_right_corner =
+      tp->GetBitmapNamed(IDR_AURA_WINDOW_BOTTOM_RIGHT);
+#else
   SkBitmap* top_left_corner = tp->GetBitmapNamed(IDR_WINDOW_TOP_LEFT_CORNER);
-  SkBitmap* top_right_corner =
-      tp->GetBitmapNamed(IDR_WINDOW_TOP_RIGHT_CORNER);
-  SkBitmap* top_edge = tp->GetBitmapNamed(IDR_WINDOW_TOP_CENTER);
-  SkBitmap* right_edge = tp->GetBitmapNamed(IDR_WINDOW_RIGHT_SIDE);
-  SkBitmap* left_edge = tp->GetBitmapNamed(IDR_WINDOW_LEFT_SIDE);
+  SkBitmap* top_right_corner = tp->GetBitmapNamed(IDR_WINDOW_TOP_RIGHT_CORNER);
   SkBitmap* bottom_left_corner =
       tp->GetBitmapNamed(IDR_WINDOW_BOTTOM_LEFT_CORNER);
   SkBitmap* bottom_right_corner =
       tp->GetBitmapNamed(IDR_WINDOW_BOTTOM_RIGHT_CORNER);
+#endif
+  SkBitmap* top_edge = tp->GetBitmapNamed(IDR_WINDOW_TOP_CENTER);
+  SkBitmap* right_edge = tp->GetBitmapNamed(IDR_WINDOW_RIGHT_SIDE);
+  SkBitmap* left_edge = tp->GetBitmapNamed(IDR_WINDOW_LEFT_SIDE);
   SkBitmap* bottom_edge = tp->GetBitmapNamed(IDR_WINDOW_BOTTOM_CENTER);
 
   // Fill with the frame color first so we have a constant background for
   // areas not covered by the theme image.
   SkBitmap* theme_frame = GetFrameBitmap();
   int top_area_height = theme_frame->height();
-  if (browser_view_->IsTabStripVisible()) {
+  if (browser_view()->IsTabStripVisible()) {
     top_area_height = std::max(top_area_height,
-      GetBoundsForTabStrip(browser_view_->tabstrip()).bottom());
+      GetBoundsForTabStrip(browser_view()->tabstrip()).bottom());
   }
   SkColor frame_color = GetFrameColor();
-  canvas->FillRectInt(frame_color, 0, 0, width(), top_area_height);
+  canvas->FillRect(frame_color, gfx::Rect(0, 0, width(), top_area_height));
 
-  // Now fill down the sides.
-  canvas->FillRectInt(frame_color, 0, top_area_height, left_edge->width(),
-                      height() - top_area_height);
-  canvas->FillRectInt(frame_color, width() - right_edge->width(),
-                      top_area_height, right_edge->width(),
-                      height() - top_area_height);
-  // Now fill the bottom area.
-  canvas->FillRectInt(frame_color, left_edge->width(),
-                      height() - bottom_edge->height(),
-                      width() - left_edge->width() - right_edge->width(),
-                      bottom_edge->height());
+  int remaining_height = height() - top_area_height;
+  if (remaining_height > 0) {
+    // Now fill down the sides.
+    canvas->FillRect(frame_color,
+                     gfx::Rect(0, top_area_height, left_edge->width(),
+                               remaining_height));
+    canvas->FillRect(frame_color,
+                     gfx::Rect(width() - right_edge->width(),
+                               top_area_height, right_edge->width(),
+                               remaining_height));
+    int center_width = width() - left_edge->width() - right_edge->width();
+    if (center_width > 0) {
+      // Now fill the bottom area.
+      canvas->FillRect(frame_color,
+                       gfx::Rect(left_edge->width(),
+                                 height() - bottom_edge->height(),
+                                 center_width, bottom_edge->height()));
+    }
+  }
 
   // Draw the theme frame.
   canvas->TileImageInt(*theme_frame, 0, 0, width(), theme_frame->height());
 
   // Draw the theme frame overlay.
   if (tp->HasCustomImage(IDR_THEME_FRAME_OVERLAY) &&
-      browser_view_->IsBrowserTypeNormal() &&
-      !browser_view_->IsOffTheRecord()) {
+      browser_view()->IsBrowserTypeNormal() &&
+      !browser_view()->IsOffTheRecord()) {
     canvas->DrawBitmapInt(*tp->GetBitmapNamed(ShouldPaintAsActive() ?
         IDR_THEME_FRAME_OVERLAY : IDR_THEME_FRAME_OVERLAY_INACTIVE), 0, 0);
   }
@@ -636,7 +649,8 @@ void OpaqueBrowserFrameView::PaintRestoredFrameBorder(gfx::Canvas* canvas) {
   canvas->DrawBitmapInt(*top_left_corner, 0, 0, top_left_corner->width(),
       top_left_height, 0, 0, top_left_corner->width(), top_left_height, false);
   canvas->TileImageInt(*top_edge, top_left_corner->width(), 0,
-                       width() - top_right_corner->width(), top_edge->height());
+      width() - top_left_corner->width() - top_right_corner->width(),
+      top_edge->height());
   int top_right_height = std::min(top_right_corner->height(),
                                   height() - bottom_right_corner->height());
   canvas->DrawBitmapInt(*top_right_corner, 0, 0, top_right_corner->width(),
@@ -683,10 +697,10 @@ void OpaqueBrowserFrameView::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
   SkBitmap* theme_frame = GetFrameBitmap();
   int theme_frame_bottom = top_offset + theme_frame->height();
   int top_area_height =
-      GetBoundsForTabStrip(browser_view_->tabstrip()).bottom();
+      GetBoundsForTabStrip(browser_view()->tabstrip()).bottom();
   if (top_area_height > theme_frame_bottom) {
     SkColor frame_color = GetFrameColor();
-    canvas->FillRectInt(frame_color, 0, 0, width(), top_area_height);
+    canvas->FillRect(frame_color, gfx::Rect(0, 0, width(), top_area_height));
   }
 
   // Draw the theme frame.  It must be aligned with the tabstrip as if we were
@@ -712,14 +726,14 @@ void OpaqueBrowserFrameView::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
                        theme_frame->height());
   // Draw the theme frame overlay
   if (tp->HasCustomImage(IDR_THEME_FRAME_OVERLAY) &&
-      browser_view_->IsBrowserTypeNormal() &&
-      !browser_view_->IsOffTheRecord()) {
+      browser_view()->IsBrowserTypeNormal() &&
+      !browser_view()->IsOffTheRecord()) {
     SkBitmap* theme_overlay = tp->GetBitmapNamed(ShouldPaintAsActive() ?
         IDR_THEME_FRAME_OVERLAY : IDR_THEME_FRAME_OVERLAY_INACTIVE);
     canvas->DrawBitmapInt(*theme_overlay, 0, theme_background_y);
   }
 
-  if (!browser_view_->IsToolbarVisible()) {
+  if (!browser_view()->IsToolbarVisible()) {
     // There's no toolbar to edge the frame border, so we need to draw a bottom
     // edge.  The graphic we use for this has a built in client edge, so we clip
     // it off the bottom.
@@ -727,13 +741,13 @@ void OpaqueBrowserFrameView::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
         tp->GetBitmapNamed(IDR_APP_TOP_CENTER);
     int edge_height = top_center->height() - kClientEdgeThickness;
     canvas->TileImageInt(*top_center, 0,
-        frame_->client_view()->y() - edge_height, width(), edge_height);
+        frame()->client_view()->y() - edge_height, width(), edge_height);
   }
 }
 
 void OpaqueBrowserFrameView::PaintTitleBar(gfx::Canvas* canvas) {
   // The window icon is painted by the TabIconView.
-  views::WidgetDelegate* delegate = frame_->widget_delegate();
+  views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (!delegate) {
     LOG(WARNING) << "delegate is NULL";
     return;
@@ -753,11 +767,11 @@ void OpaqueBrowserFrameView::PaintTitleBar(gfx::Canvas* canvas) {
 }
 
 void OpaqueBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
-  gfx::Rect toolbar_bounds(browser_view_->GetToolbarBounds());
+  gfx::Rect toolbar_bounds(browser_view()->GetToolbarBounds());
   if (toolbar_bounds.IsEmpty())
     return;
   gfx::Point toolbar_origin(toolbar_bounds.origin());
-  ConvertPointToView(browser_view_, this, &toolbar_origin);
+  ConvertPointToView(browser_view(), this, &toolbar_origin);
   toolbar_bounds.set_origin(toolbar_origin);
 
   int x = toolbar_bounds.x();
@@ -782,9 +796,9 @@ void OpaqueBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
                      h));
   canvas->GetSkCanvas()->drawARGB(0, 255, 255, 255, SkXfermode::kClear_Mode);
 
-  SkColor theme_toolbar_color =
-      tp->GetColor(ThemeService::COLOR_TOOLBAR);
-  canvas->FillRectInt(theme_toolbar_color, x, bottom_y, w, bottom_edge_height);
+  SkColor theme_toolbar_color = tp->GetColor(ThemeService::COLOR_TOOLBAR);
+  canvas->FillRect(theme_toolbar_color,
+                   gfx::Rect(x, bottom_y, w, bottom_edge_height));
 
   // Tile the toolbar image starting at the frame edge on the left and where the
   // horizontal tabstrip is (or would be) on the top.
@@ -849,29 +863,31 @@ void OpaqueBrowserFrameView::PaintToolbarBackground(gfx::Canvas* canvas) {
       bottom_edge_height, false);
 
   // Draw the content/toolbar separator.
-  canvas->FillRectInt(ResourceBundle::toolbar_separator_color,
-      x + kClientEdgeThickness, toolbar_bounds.bottom() - kClientEdgeThickness,
-      w - (2 * kClientEdgeThickness), kClientEdgeThickness);
+  canvas->FillRect(ResourceBundle::toolbar_separator_color,
+                   gfx::Rect(x + kClientEdgeThickness,
+                             toolbar_bounds.bottom() - kClientEdgeThickness,
+                             w - (2 * kClientEdgeThickness),
+                             kClientEdgeThickness));
 }
 
 void OpaqueBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
   ui::ThemeProvider* tp = GetThemeProvider();
-  int client_area_top = frame_->client_view()->y();
+  int client_area_top = frame()->client_view()->y();
   int image_top = client_area_top;
 
   gfx::Rect client_area_bounds = CalculateClientAreaBounds(width(), height());
   SkColor toolbar_color = tp->GetColor(ThemeService::COLOR_TOOLBAR);
 
-  if (browser_view_->IsToolbarVisible()) {
+  if (browser_view()->IsToolbarVisible()) {
     // The client edge images always start below the toolbar corner images.  The
     // client edge filled rects start there or at the bottom of the toolbar,
     // whichever is shorter.
-    gfx::Rect toolbar_bounds(browser_view_->GetToolbarBounds());
+    gfx::Rect toolbar_bounds(browser_view()->GetToolbarBounds());
     image_top += toolbar_bounds.y() +
         tp->GetBitmapNamed(IDR_CONTENT_TOP_LEFT_CORNER)->height();
     client_area_top = std::min(image_top,
         client_area_top + toolbar_bounds.bottom() - kClientEdgeThickness);
-  } else if (!browser_view_->IsTabStripVisible()) {
+  } else if (!browser_view()->IsTabStripVisible()) {
     // The toolbar isn't going to draw a client edge for us, so draw one
     // ourselves.
     SkBitmap* top_left = tp->GetBitmapNamed(IDR_APP_TOP_LEFT);
@@ -890,11 +906,12 @@ void OpaqueBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
         top_right->width(), height, false);
 
     // Draw the toolbar color across the top edge.
-    canvas->FillRectInt(toolbar_color,
-        client_area_bounds.x() - kClientEdgeThickness,
-        client_area_top - kClientEdgeThickness,
-        client_area_bounds.width() + (2 * kClientEdgeThickness),
-        kClientEdgeThickness);
+    canvas->FillRect(
+        toolbar_color,
+        gfx::Rect(client_area_bounds.x() - kClientEdgeThickness,
+                  client_area_top - kClientEdgeThickness,
+                  client_area_bounds.width() + (2 * kClientEdgeThickness),
+                  kClientEdgeThickness));
   }
 
   int client_area_bottom =
@@ -925,21 +942,27 @@ void OpaqueBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
   // where not covered by the toolbar image.  NOTE: We do this after drawing the
   // images because the images are meant to alpha-blend atop the frame whereas
   // these rects are meant to be fully opaque, without anything overlaid.
-  canvas->FillRectInt(toolbar_color,
-      client_area_bounds.x() - kClientEdgeThickness, client_area_top,
-      kClientEdgeThickness,
-      client_area_bottom + kClientEdgeThickness - client_area_top);
-  canvas->FillRectInt(toolbar_color, client_area_bounds.x(), client_area_bottom,
-                      client_area_bounds.width(), kClientEdgeThickness);
-  canvas->FillRectInt(toolbar_color, client_area_bounds.right(),
-      client_area_top, kClientEdgeThickness,
-      client_area_bottom + kClientEdgeThickness - client_area_top);
+  canvas->FillRect(
+      toolbar_color,
+      gfx::Rect(client_area_bounds.x() - kClientEdgeThickness,
+                client_area_top,
+                kClientEdgeThickness,
+                client_area_bottom + kClientEdgeThickness - client_area_top));
+  canvas->FillRect(toolbar_color,
+                   gfx::Rect(client_area_bounds.x(), client_area_bottom,
+                             client_area_bounds.width(), kClientEdgeThickness));
+  canvas->FillRect(
+      toolbar_color,
+      gfx::Rect(client_area_bounds.right(),
+                client_area_top,
+                kClientEdgeThickness,
+                client_area_bottom + kClientEdgeThickness - client_area_top));
 }
 
 SkBitmap* OpaqueBrowserFrameView::GetFrameBitmap() const {
-  bool is_incognito = browser_view_->IsOffTheRecord();
+  bool is_incognito = browser_view()->IsOffTheRecord();
   int resource_id;
-  if (browser_view_->IsBrowserTypeNormal()) {
+  if (browser_view()->IsBrowserTypeNormal()) {
     if (ShouldPaintAsActive()) {
       resource_id = is_incognito ?
           IDR_THEME_FRAME_INCOGNITO : IDR_THEME_FRAME;
@@ -962,8 +985,8 @@ SkBitmap* OpaqueBrowserFrameView::GetFrameBitmap() const {
 }
 
 SkColor OpaqueBrowserFrameView::GetFrameColor() const {
-  bool is_incognito = browser_view_->IsOffTheRecord();
-  if (browser_view_->IsBrowserTypeNormal()) {
+  bool is_incognito = browser_view()->IsOffTheRecord();
+  if (browser_view()->IsBrowserTypeNormal()) {
     if (ShouldPaintAsActive()) {
       return GetThemeProvider()->GetColor(is_incognito ?
           ThemeService::COLOR_FRAME_INCOGNITO : ThemeService::COLOR_FRAME);
@@ -983,7 +1006,7 @@ SkColor OpaqueBrowserFrameView::GetFrameColor() const {
 }
 
 void OpaqueBrowserFrameView::LayoutWindowControls() {
-  bool is_maximized = frame_->IsMaximized();
+  bool is_maximized = frame()->IsMaximized();
   close_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
                                    views::ImageButton::ALIGN_BOTTOM);
   int caption_y = CaptionButtonY(false);
@@ -998,7 +1021,7 @@ void OpaqueBrowserFrameView::LayoutWindowControls() {
       close_button_size.width() + right_extra_width,
       close_button_size.height());
 
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
   // LayoutWindowControls could be triggered from
   // NativeWidgetGtk::UpdateWindowTitle(), which could happen when user
   // navigates in fullscreen mode. And because
@@ -1007,12 +1030,12 @@ void OpaqueBrowserFrameView::LayoutWindowControls() {
   // as maximized mode.
   // TODO(oshima): Optimize the relayout logic to defer the frame view's
   // relayout until it is necessary, i.e when it becomes visible.
-  if (is_maximized || frame_->IsFullscreen()) {
+  if (is_maximized || frame()->IsFullscreen()) {
     minimize_button_->SetVisible(false);
     restore_button_->SetVisible(false);
     maximize_button_->SetVisible(false);
 
-    if (browser_view_->browser()->is_devtools()) {
+    if (browser_view()->browser()->is_devtools()) {
       close_button_->SetVisible(true);
       minimize_button_->SetBounds(close_button_->bounds().x(), 0, 0, 0);
     } else {
@@ -1033,7 +1056,7 @@ void OpaqueBrowserFrameView::LayoutWindowControls() {
 
   // When the window is restored, we show a maximized button; otherwise, we show
   // a restore button.
-  bool is_restored = !is_maximized && !frame_->IsMinimized();
+  bool is_restored = !is_maximized && !frame()->IsMinimized();
   views::ImageButton* invisible_button = is_restored ?
       restore_button_ : maximize_button_;
   invisible_button->SetVisible(false);
@@ -1048,7 +1071,11 @@ void OpaqueBrowserFrameView::LayoutWindowControls() {
                             caption_y, visible_button_size.width(),
                             visible_button_size.height());
 
+#if !defined(USE_AURA)
+  // TODO(jamescook): Go back to showing minimize button when Aura uses its
+  // own custom window frame, BrowserNonClientFrameViewAura.
   minimize_button_->SetVisible(true);
+#endif
   minimize_button_->SetImageAlignment(views::ImageButton::ALIGN_LEFT,
                                       views::ImageButton::ALIGN_BOTTOM);
   gfx::Size minimize_button_size = minimize_button_->GetPreferredSize();
@@ -1062,7 +1089,7 @@ void OpaqueBrowserFrameView::LayoutTitleBar() {
   // The window title is based on the calculated icon position, even when there
   // is no icon.
   gfx::Rect icon_bounds(IconBounds());
-  views::WidgetDelegate* delegate = frame_->widget_delegate();
+  views::WidgetDelegate* delegate = frame()->widget_delegate();
   if (delegate && delegate->ShouldShowWindowIcon())
     window_icon_->SetBoundsRect(icon_bounds);
 
@@ -1087,20 +1114,20 @@ void OpaqueBrowserFrameView::LayoutAvatar() {
   // Even though the avatar is used for both incognito and profiles we always
   // use the incognito icon to layout the avatar button. The profile icon
   // can be customized so we can't depend on its size to perform layout.
-  SkBitmap incognito_icon = browser_view_->GetOTRAvatarIcon();
+  SkBitmap incognito_icon = browser_view()->GetOTRAvatarIcon();
 
   int avatar_bottom = GetHorizontalTabStripVerticalOffset(false) +
-      browser_view_->GetTabStripHeight() - kAvatarBottomSpacing;
+      browser_view()->GetTabStripHeight() - kAvatarBottomSpacing;
   int avatar_restored_y = avatar_bottom - incognito_icon.height();
-  int avatar_y = frame_->IsMaximized() ?
+  int avatar_y = frame()->IsMaximized() ?
       (NonClientTopBorderHeight(false) + kTabstripTopShadowThickness) :
       avatar_restored_y;
   avatar_bounds_.SetRect(NonClientBorderThickness() + kAvatarSideSpacing,
       avatar_y, incognito_icon.width(),
-      browser_view_->ShouldShowAvatar() ? (avatar_bottom - avatar_y) : 0);
+      browser_view()->ShouldShowAvatar() ? (avatar_bottom - avatar_y) : 0);
 
-  if (avatar_button_.get())
-    avatar_button_->SetBoundsRect(avatar_bounds_);
+  if (avatar_button())
+    avatar_button()->SetBoundsRect(avatar_bounds_);
 }
 
 gfx::Rect OpaqueBrowserFrameView::CalculateClientAreaBounds(int width,
@@ -1111,35 +1138,4 @@ gfx::Rect OpaqueBrowserFrameView::CalculateClientAreaBounds(int width,
                    std::max(0, width - (2 * border_thickness)),
                    std::max(0, height - GetReservedHeight() -
                        top_height - border_thickness));
-}
-
-void OpaqueBrowserFrameView::UpdateAvatarInfo() {
-  if (browser_view_->ShouldShowAvatar()) {
-    if (!avatar_button_.get()) {
-      avatar_button_.reset(new AvatarMenuButton(
-          browser_view_->browser(), !browser_view_->IsOffTheRecord()));
-      AddChildView(avatar_button_.get());
-      frame_->GetRootView()->Layout();
-    }
-  } else if (avatar_button_.get()) {
-    RemoveChildView(avatar_button_.get());
-    avatar_button_.reset();
-    frame_->GetRootView()->Layout();
-  }
-
-  if (!avatar_button_.get())
-    return;
-
-  if (browser_view_->IsOffTheRecord()) {
-    avatar_button_->SetIcon(browser_view_->GetOTRAvatarIcon());
-  } else {
-    ProfileInfoCache& cache =
-        g_browser_process->profile_manager()->GetProfileInfoCache();
-    Profile* profile = browser_view_->browser()->profile();
-    size_t index = cache.GetIndexOfProfileWithPath(profile->GetPath());
-    if (index != std::string::npos) {
-      avatar_button_->SetIcon(cache.GetAvatarIconOfProfileAtIndex(index));
-      avatar_button_->SetText(cache.GetNameOfProfileAtIndex(index));
-    }
-  }
 }

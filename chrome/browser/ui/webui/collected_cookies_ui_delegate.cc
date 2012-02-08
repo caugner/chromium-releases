@@ -9,9 +9,10 @@
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/content_settings/host_content_settings_map.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
 #include "chrome/browser/cookies_tree_model.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
@@ -19,9 +20,10 @@
 #include "chrome/browser/ui/webui/cookies_tree_model_util.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/jstemplate_builder.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -156,11 +158,10 @@ CollectedCookiesUIDelegate::CollectedCookiesUIDelegate(
     : wrapper_(wrapper),
       closed_(false) {
   TabSpecificContentSettings* content_settings = wrapper->content_settings();
-  HostContentSettingsMap* host_content_settings_map =
-      wrapper->profile()->GetHostContentSettingsMap();
+  PrefService* prefs = wrapper->profile()->GetPrefs();
 
   registrar_.Add(this, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN,
-                 Source<TabSpecificContentSettings>(content_settings));
+                 content::Source<TabSpecificContentSettings>(content_settings));
 
   allowed_cookies_tree_model_.reset(
       content_settings->GetAllowedCookiesTreeModel());
@@ -168,7 +169,7 @@ CollectedCookiesUIDelegate::CollectedCookiesUIDelegate(
       content_settings->GetBlockedCookiesTreeModel());
 
   CollectedCookiesSource* source = new CollectedCookiesSource(
-      host_content_settings_map->BlockThirdPartyCookies());
+      prefs->GetBoolean(prefs::kBlockThirdPartyCookies));
   wrapper->profile()->GetChromeURLDataManager()->AddDataSource(source);
 }
 
@@ -243,16 +244,17 @@ void CollectedCookiesUIDelegate::AddContentException(
     CookieTreeOriginNode* origin_node, ContentSetting setting) {
   if (origin_node->CanCreateContentException()) {
     Profile* profile = wrapper_->profile();
-    origin_node->CreateContentException(profile->GetHostContentSettingsMap(),
+    origin_node->CreateContentException(CookieSettings::GetForProfile(profile),
                                         setting);
 
     SetInfobarLabel(GetInfobarLabel(setting, origin_node->GetTitle()));
   }
 }
 
-void CollectedCookiesUIDelegate::Observe(int type,
-                                         const NotificationSource& source,
-                                         const NotificationDetails& details) {
+void CollectedCookiesUIDelegate::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK_EQ(type, chrome::NOTIFICATION_COLLECTED_COOKIES_SHOWN);
   CloseDialog();
 }

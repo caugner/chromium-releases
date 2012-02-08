@@ -5,6 +5,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
@@ -12,8 +13,10 @@
 #include "chrome/browser/extensions/app_notification_storage.h"
 #include "chrome/browser/extensions/app_notification_test_util.h"
 #include "chrome/common/extensions/extension_test_util.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 namespace util = app_notification_test_util;
 
@@ -40,7 +43,7 @@ class AppNotificationStorageTest : public testing::Test {
   }
 
   MessageLoop message_loop_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread file_thread_;
   ScopedTempDir dir_;
   FilePath storage_path_;
   scoped_ptr<AppNotificationStorage> storage_;
@@ -62,7 +65,7 @@ TEST_F(AppNotificationStorageTest, Basics) {
 
   // Add some items.
   AppNotificationList list;
-  util::AddNotifications(&list, 2, "whatever");
+  util::AddNotifications(&list, id1, 2, "whatever");
   EXPECT_TRUE(storage_->Set(id1, list));
   EXPECT_TRUE(DatabaseExistsOnDisk());
 
@@ -82,12 +85,12 @@ TEST_F(AppNotificationStorageTest, MultipleExtensions) {
 
   // Add items for id1.
   AppNotificationList list1;
-  util::AddNotifications(&list1, 2, "one");
+  util::AddNotifications(&list1, id1, 2, "one");
   EXPECT_TRUE(storage_->Set(id1, list1));
 
   // Add items for id2.
   AppNotificationList list2;
-  util::AddNotifications(&list2, 3, "two");
+  util::AddNotifications(&list2, id2, 3, "two");
   EXPECT_TRUE(storage_->Set(id2, list2));
 
   // Verify the items are present
@@ -124,8 +127,8 @@ TEST_F(AppNotificationStorageTest, ReplaceExisting) {
   std::string id = extension_test_util::MakeId("1");
   AppNotificationList list1;
   AppNotificationList list2;
-  util::AddNotifications(&list1, 5, "one");
-  util::AddNotifications(&list2, 7, "two");
+  util::AddNotifications(&list1, id, 5, "one");
+  util::AddNotifications(&list2, id, 7, "two");
 
   // Put list1 in, then replace with list2 and verify we get list2 back.
   EXPECT_TRUE(storage_->Set(id, list1));

@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_UI_WEBUI_CHROMEOS_LOGIN_USER_IMAGE_SCREEN_HANDLER_H_
 
 #include "base/memory/weak_ptr.h"
+#include "base/time.h"
 #include "chrome/browser/chromeos/login/user_image_screen_actor.h"
 #include "chrome/browser/chromeos/options/take_photo_dialog.h"
 #include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
@@ -46,6 +47,7 @@ class UserImageScreenHandler : public UserImageScreenActor,
   virtual void CheckCameraPresence() OVERRIDE;
   virtual bool IsCapturing() const OVERRIDE;
   virtual void AddProfileImage(const SkBitmap& image) OVERRIDE;
+  virtual void OnProfileImageAbsent() OVERRIDE;
 
   // WebUIMessageHandler implementation:
   virtual void RegisterMessages() OVERRIDE;
@@ -54,6 +56,9 @@ class UserImageScreenHandler : public UserImageScreenActor,
   virtual void OnPhotoAccepted(const SkBitmap& photo) OVERRIDE;
 
  private:
+  // Sends profile image as a data URL to the page.
+  void SendProfileImage(const std::string& data_url);
+
   // Opens the camera capture dialog.
   void HandleTakePhoto(const base::ListValue* args);
 
@@ -63,6 +68,9 @@ class UserImageScreenHandler : public UserImageScreenActor,
   // Called when user accept the image closing the screen.
   void HandleImageAccepted(const base::ListValue* args);
 
+  // Called when the user image screen has been loaded and shown.
+  void HandleScreenShown(const base::ListValue* args);
+
   // Called when the camera presence check has been completed.
   void OnCameraPresenceCheckDone();
 
@@ -71,19 +79,24 @@ class UserImageScreenHandler : public UserImageScreenActor,
   // Keeps whether screen should be shown right after initialization.
   bool show_on_init_;
 
-  // Index of the selected default user image. -1 if the photo is taken.
+  // Index of the selected user image.
   int selected_image_;
 
   // Last user photo, if taken.
   SkBitmap user_photo_;
 
-  // Downloaded user profile picture if present.
-  SkBitmap profile_picture_;
+  // Data URL for |user_photo_|.
+  std::string user_photo_data_url_;
 
-  // Its data URL.
+  // Data URL of the profile picture;
   std::string profile_picture_data_url_;
 
+  // True if user has no custom profile picture.
+  bool profile_picture_absent_;
+
   base::WeakPtrFactory<UserImageScreenHandler> weak_factory_;
+
+  base::Time screen_show_time_;
 
   DISALLOW_COPY_AND_ASSIGN(UserImageScreenHandler);
 };

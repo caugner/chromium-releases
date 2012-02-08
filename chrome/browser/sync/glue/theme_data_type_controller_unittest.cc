@@ -8,20 +8,21 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/task.h"
-#include "chrome/browser/sync/glue/theme_data_type_controller.h"
 #include "chrome/browser/sync/glue/change_processor_mock.h"
 #include "chrome/browser/sync/glue/data_type_controller_mock.h"
 #include "chrome/browser/sync/glue/model_associator_mock.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/glue/theme_data_type_controller.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
 #include "chrome/test/base/profile_mock.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 
 using browser_sync::ThemeDataTypeController;
 using browser_sync::ChangeProcessorMock;
 using browser_sync::DataTypeController;
 using browser_sync::ModelAssociatorMock;
 using browser_sync::StartCallback;
+using content::BrowserThread;
 using testing::_;
 using testing::DoAll;
 using testing::InvokeWithoutArgs;
@@ -34,7 +35,7 @@ class ThemeDataTypeControllerTest : public testing::Test {
       : ui_thread_(BrowserThread::UI, &message_loop_) {}
 
   virtual void SetUp() {
-    profile_sync_factory_.reset(new ProfileSyncFactoryMock());
+    profile_sync_factory_.reset(new ProfileSyncComponentsFactoryMock());
     theme_dtc_ =
         new ThemeDataTypeController(profile_sync_factory_.get(),
                                     &profile_, &service_);
@@ -45,8 +46,8 @@ class ThemeDataTypeControllerTest : public testing::Test {
     model_associator_ = new ModelAssociatorMock();
     change_processor_ = new ChangeProcessorMock();
     EXPECT_CALL(*profile_sync_factory_, CreateThemeSyncComponents(_, _)).
-        WillOnce(Return(ProfileSyncFactory::SyncComponents(model_associator_,
-                                                           change_processor_)));
+        WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
+            model_associator_, change_processor_)));
   }
 
   void SetAssociateExpectations() {
@@ -67,10 +68,14 @@ class ThemeDataTypeControllerTest : public testing::Test {
     EXPECT_CALL(*model_associator_, DisassociateModels(_));
   }
 
+  void PumpLoop() {
+    message_loop_.RunAllPending();
+  }
+
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
   scoped_refptr<ThemeDataTypeController> theme_dtc_;
-  scoped_ptr<ProfileSyncFactoryMock> profile_sync_factory_;
+  scoped_ptr<ProfileSyncComponentsFactoryMock> profile_sync_factory_;
   ProfileMock profile_;
   ProfileSyncServiceMock service_;
   ModelAssociatorMock* model_associator_;
@@ -165,4 +170,5 @@ TEST_F(ThemeDataTypeControllerTest, OnUnrecoverableError) {
   theme_dtc_->Start(NewCallback(&start_callback_, &StartCallback::Run));
   // This should cause theme_dtc_->Stop() to be called.
   theme_dtc_->OnUnrecoverableError(FROM_HERE, "Test");
+  PumpLoop();
 }

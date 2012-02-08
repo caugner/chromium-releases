@@ -165,6 +165,10 @@ class ThumbnailDatabase {
   // Checks whether a favicon is used by any URLs in the database.
   bool HasMappingFor(FaviconID id);
 
+  // Clones the existing mappings from |old_page_url| if |new_page_url| has no
+  // mappings. Otherwise, will leave mappings alone.
+  bool CloneIconMapping(const GURL& old_page_url, const GURL& new_page_url);
+
   // Temporary IconMapping -----------------------------------------------------
   //
   // Creates a temporary table to store icon mapping. Icon mapping will be
@@ -224,6 +228,8 @@ class ThumbnailDatabase {
 
  private:
   friend class ExpireHistoryBackend;
+  FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest,
+                           GetFaviconAfterMigrationToTopSites);
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, UpgradeToVersion4);
   FRIEND_TEST_ALL_PREFIXES(ThumbnailDatabaseTest, UpgradeToVersion5);
   FRIEND_TEST_ALL_PREFIXES(HistoryBackendTest, MigrationIconMapping);
@@ -280,6 +286,9 @@ class ThumbnailDatabase {
   IconMappingID AddIconMapping(const GURL& page_url,
                                FaviconID icon_id,
                                bool is_temporary);
+
+  // Returns True if the current database is latest.
+  bool IsLatestVersion();
 
   sql::Connection db_;
   sql::MetaTable meta_table_;

@@ -5,6 +5,10 @@
 #include <map>
 #include <string>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
@@ -12,8 +16,8 @@
 #include "base/stl_util.h"
 #include "base/task.h"
 #include "base/time.h"
-#include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service.h"
+#include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/session_change_processor.h"
@@ -24,24 +28,24 @@
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/internal_api/read_transaction.h"
 #include "chrome/browser/sync/internal_api/write_transaction.h"
-#include "chrome/browser/sync/profile_sync_factory_mock.h"
+#include "chrome/browser/sync/profile_sync_components_factory_mock.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/browser/sync/test/engine/test_id_factory.h"
+#include "chrome/browser/sync/test_profile_sync_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/profile_mock.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -51,6 +55,7 @@ using browser_sync::SessionChangeProcessor;
 using browser_sync::SessionDataTypeController;
 using browser_sync::SessionModelAssociator;
 using browser_sync::SyncBackendHost;
+using content::BrowserThread;
 using sync_api::ChangeRecord;
 using testing::_;
 using testing::Return;
@@ -137,7 +142,7 @@ void VerifySyncedSession(
       ASSERT_EQ(1U, tab->navigations.size());
       ASSERT_EQ(12, tab->navigations[0].index());
       ASSERT_EQ(tab->navigations[0].virtual_url(), GURL("http://foo/1"));
-      ASSERT_EQ(tab->navigations[0].referrer(), GURL("referrer"));
+      ASSERT_EQ(tab->navigations[0].referrer().url, GURL("referrer"));
       ASSERT_EQ(tab->navigations[0].title(), string16(ASCIIToUTF16("title")));
       ASSERT_EQ(tab->navigations[0].transition(),
                 content::PAGE_TRANSITION_TYPED);
@@ -149,7 +154,7 @@ void VerifySyncedSession(
 
 class ProfileSyncServiceSessionTest
     : public BrowserWithTestWindowTest,
-      public NotificationObserver {
+      public content::NotificationObserver {
  public:
   ProfileSyncServiceSessionTest()
       : io_thread_(BrowserThread::IO),
@@ -165,9 +170,7 @@ class ProfileSyncServiceSessionTest
   virtual void SetUp() {
     // BrowserWithTestWindowTest implementation.
     BrowserWithTestWindowTest::SetUp();
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_IO;
-    io_thread_.StartWithOptions(options);
+    io_thread_.StartIOThread();
     profile()->CreateRequestContext();
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     SessionService* session_service = new SessionService(temp_dir_.path());
@@ -177,12 +180,12 @@ class ProfileSyncServiceSessionTest
                                window_bounds_,
                                ui::SHOW_STATE_NORMAL);
     registrar_.Add(this, chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED,
-        NotificationService::AllSources());
+        content::NotificationService::AllSources());
   }
 
   void Observe(int type,
-      const NotificationSource& source,
-      const NotificationDetails& details) {
+      const content::NotificationSource& source,
+      const content::NotificationDetails& details) {
     switch (type) {
       case chrome::NOTIFICATION_FOREIGN_SESSION_UPDATED:
         notified_of_update_ = true;
@@ -216,11 +219,12 @@ class ProfileSyncServiceSessionTest
     BrowserWithTestWindowTest::TearDown();
   }
 
-  bool StartSyncService(Task* task, bool will_fail_association) {
+  bool StartSyncService(const base::Closure& callback,
+                        bool will_fail_association) {
     if (sync_service_.get())
       return false;
     sync_service_.reset(new TestProfileSyncService(
-        &factory_, profile(), "test user", false, task));
+        &factory_, profile(), "test user", false, callback));
     SessionServiceFactory::SetForTestProfile(profile(), helper_.service());
 
     // Register the session data type.
@@ -231,7 +235,7 @@ class ProfileSyncServiceSessionTest
         sync_service_.get(), model_associator_,
         true /* setup_for_test */);
     EXPECT_CALL(factory_, CreateSessionSyncComponents(_, _)).
-        WillOnce(Return(ProfileSyncFactory::SyncComponents(
+        WillOnce(Return(ProfileSyncComponentsFactory::SyncComponents(
             model_associator_, change_processor_)));
     EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
         WillOnce(ReturnNewDataTypeManager());
@@ -246,46 +250,49 @@ class ProfileSyncServiceSessionTest
     return true;
   }
 
-  BrowserThread io_thread_;
+  content::TestBrowserThread io_thread_;
   // Path used in testing.
   ScopedTempDir temp_dir_;
   SessionServiceTestHelper helper_;
   SessionModelAssociator* model_associator_;
   SessionChangeProcessor* change_processor_;
   SessionID window_id_;
-  ProfileSyncFactoryMock factory_;
+  ProfileSyncComponentsFactoryMock factory_;
   scoped_ptr<TestProfileSyncService> sync_service_;
   const gfx::Rect window_bounds_;
   bool notified_of_update_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 };
 
-class CreateRootTask : public Task {
+class CreateRootHelper {
  public:
-  explicit CreateRootTask(ProfileSyncServiceSessionTest* test)
-      : test_(test), success_(false) {
+  explicit CreateRootHelper(ProfileSyncServiceSessionTest* test)
+      : ALLOW_THIS_IN_INITIALIZER_LIST(callback_(
+            base::Bind(&CreateRootHelper::CreateRootCallback,
+                       base::Unretained(this), test))),
+        success_(false) {
   }
 
-  virtual ~CreateRootTask() {}
-  virtual void Run() {
-    success_ = ProfileSyncServiceTestHelper::CreateRoot(
-        syncable::SESSIONS,
-        test_->sync_service()->GetUserShare(),
-        test_->ids());
-  }
+  virtual ~CreateRootHelper() {}
 
+  const base::Closure& callback() const { return callback_; }
   bool success() { return success_; }
 
  private:
-  ProfileSyncServiceSessionTest* test_;
+  void CreateRootCallback(ProfileSyncServiceSessionTest* test) {
+    success_ = ProfileSyncServiceTestHelper::CreateRoot(
+        syncable::SESSIONS, test->sync_service()->GetUserShare(), test->ids());
+  }
+
+  base::Closure callback_;
   bool success_;
 };
 
 // Test that we can write this machine's session to a node and retrieve it.
 TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
   ASSERT_EQ(model_associator_->GetSessionService(), helper_.service());
 
   // Check that the DataTypeController associated the models.
@@ -312,9 +319,9 @@ TEST_F(ProfileSyncServiceSessionTest, WriteSessionToNode) {
 // Test that we can fill this machine's session, write it to a node,
 // and then retrieve it.
 TEST_F(ProfileSyncServiceSessionTest, WriteFilledSessionToNode) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   // Check that the DataTypeController associated the models.
   bool has_nodes;
@@ -358,15 +365,15 @@ TEST_F(ProfileSyncServiceSessionTest, WriteFilledSessionToNode) {
 
 // Test that we fail on a failed model association.
 TEST_F(ProfileSyncServiceSessionTest, FailModelAssociation) {
-  ASSERT_TRUE(StartSyncService(NULL, true));
+  ASSERT_TRUE(StartSyncService(base::Closure(), true));
   ASSERT_TRUE(sync_service_->unrecoverable_error_detected());
 }
 
 // Write a foreign session to a node, and then retrieve it.
 TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNode) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   // Check that the DataTypeController associated the models.
   bool has_nodes;
@@ -407,9 +414,9 @@ TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNode) {
 // Write a foreign session with one window to a node. Sync, then add a window.
 // Sync, then add a third window. Close the two windows.
 TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNodeThreeWindows) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   // Build a foreign session with one window and four tabs.
   std::string tag = "tag1";
@@ -520,9 +527,9 @@ TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNodeThreeWindows) {
 // Write a foreign session to a node, with the tabs arriving first, and then
 // retrieve it.
 TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNodeTabsFirst) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   // Fill an instance of session specifics with a foreign session's data.
   std::string tag = "tag1";
@@ -557,9 +564,9 @@ TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNodeTabsFirst) {
 
 // Write a foreign session to a node with some tabs that never arrive.
 TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNodeMissingTabs) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   // Fill an instance of session specifics with a foreign session's data.
   std::string tag = "tag1";
@@ -626,9 +633,9 @@ TEST_F(ProfileSyncServiceSessionTest, WriteForeignSessionToNodeMissingTabs) {
 
 // Test the DataTypeController on update.
 TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionUpdate) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
   int64 node_id = model_associator_->GetSyncIdFromSessionTag(
       model_associator_->GetCurrentMachineTag());
   ASSERT_FALSE(notified_of_update_);
@@ -644,9 +651,9 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionUpdate) {
 
 // Test the DataTypeController on add.
 TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionAdd) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   int64 node_id = model_associator_->GetSyncIdFromSessionTag(
       model_associator_->GetCurrentMachineTag());
@@ -663,9 +670,9 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionAdd) {
 
 // Test the DataTypeController on delete.
 TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionDelete) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   int64 node_id = model_associator_->GetSyncIdFromSessionTag(
       model_associator_->GetCurrentMachineTag());
@@ -683,9 +690,9 @@ TEST_F(ProfileSyncServiceSessionTest, UpdatedSyncNodeActionDelete) {
 }
 // Test the TabNodePool when it starts off empty.
 TEST_F(ProfileSyncServiceSessionTest, TabNodePoolEmpty) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   std::vector<int64> node_ids;
   ASSERT_EQ(0U, model_associator_->tab_pool_.capacity());
@@ -710,9 +717,9 @@ TEST_F(ProfileSyncServiceSessionTest, TabNodePoolEmpty) {
 
 // Test the TabNodePool when it starts off with nodes
 TEST_F(ProfileSyncServiceSessionTest, TabNodePoolNonEmpty) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   const size_t num_starting_nodes = 3;
   for (size_t i = 0; i < num_starting_nodes; ++i) {
@@ -742,9 +749,9 @@ TEST_F(ProfileSyncServiceSessionTest, TabNodePoolNonEmpty) {
 
 // Write a foreign session to a node, and then delete it.
 TEST_F(ProfileSyncServiceSessionTest, DeleteForeignSession) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   // Check that the DataTypeController associated the models.
   bool has_nodes;
@@ -796,9 +803,9 @@ TEST_F(ProfileSyncServiceSessionTest, DeleteForeignSession) {
 // Associate both a non-stale foreign session and a stale foreign session.
 // Ensure only the stale session gets deleted.
 TEST_F(ProfileSyncServiceSessionTest, DeleteStaleSessions) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   // Fill two instances of session specifics with a foreign session's data.
   std::string tag = "tag1";
@@ -859,9 +866,9 @@ TEST_F(ProfileSyncServiceSessionTest, DeleteStaleSessions) {
 // Write a stale foreign session to a node. Then update one of it's tabs so
 // the session is no longer stale. Ensure it doesn't get deleted.
 TEST_F(ProfileSyncServiceSessionTest, StaleSessionRefresh) {
-  CreateRootTask task(this);
-  ASSERT_TRUE(StartSyncService(&task, false));
-  ASSERT_TRUE(task.success());
+  CreateRootHelper create_root(this);
+  ASSERT_TRUE(StartSyncService(create_root.callback(), false));
+  ASSERT_TRUE(create_root.success());
 
   std::string tag = "tag1";
   sync_pb::SessionSpecifics meta;

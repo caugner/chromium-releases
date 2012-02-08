@@ -5,6 +5,8 @@
 cr.define('options', function() {
 
   var OptionsPage = options.OptionsPage;
+  var RepeatingButton = cr.ui.RepeatingButton;
+
   /////////////////////////////////////////////////////////////////////////////
   // SystemOptions class:
 
@@ -46,13 +48,15 @@ cr.define('options', function() {
 
       // TODO(kevers): Populate list of connected bluetooth devices.
       //               Set state of 'Enable bluetooth' checkbox.
-
-      $('bluetooth-find-devices').disabled =
-          $('enable-bluetooth-label') ? false : true;
       $('bluetooth-find-devices').onclick = function(event) {
         findBluetoothDevices_();
       };
-
+      $('enable-bluetooth').onclick = function(event) {
+        chrome.send('bluetoothEnableChange', [Boolean(true)]);
+      };
+      $('disable-bluetooth').onclick = function(event) {
+        chrome.send('bluetoothEnableChange', [Boolean(false)]);
+      };
       $('language-button').onclick = function(event) {
         OptionsPage.navigateToPage('language');
       };
@@ -63,27 +67,25 @@ cr.define('options', function() {
         chrome.send('accessibilityChange',
                     [String($('accesibility-check').checked)]);
       };
-
-      if (cr.isTouch) {
-        initializeBrightnessButton_('brightness-decrease-button',
-            'decreaseScreenBrightness');
-        initializeBrightnessButton_('brightness-increase-button',
-            'increaseScreenBrightness');
-      }
+      initializeBrightnessButton_('brightness-decrease-button',
+          'decreaseScreenBrightness');
+      initializeBrightnessButton_('brightness-increase-button',
+          'increaseScreenBrightness');
     }
   };
 
   /**
-   * Initializes a button for controlling screen brightness on touch builds of
-   * ChromeOS.
+   * Initializes a button for controlling screen brightness.
    * @param {string} id Button ID.
    * @param {string} callback Name of the callback function.
    */
   function initializeBrightnessButton_(id, callback) {
-    // TODO(kevers): Make brightness buttons auto-repeat if held.
-    $(id).onclick = function(event) {
+    var button = $(id);
+    cr.ui.decorate(button, RepeatingButton);
+    button.repeatInterval = 300;
+    button.addEventListener(RepeatingButton.Event.BUTTON_HELD, function(e) {
       chrome.send(callback);
-    }
+    });
   }
 
   /**
@@ -102,8 +104,6 @@ cr.define('options', function() {
       if (!data || data.status !== 'connected')
         $('bluetooth-device-list').removeChild(device);
     }
-    // TODO(kevers): Set arguments to a list of the currently connected
-    //               devices.
     chrome.send('findBluetoothDevices');
   }
 
@@ -136,32 +136,63 @@ cr.define('options', function() {
    */
   SystemOptions.showBluetoothSettings = function() {
     $('bluetooth-devices').hidden = false;
+  };
+
+  /**
+   * Sets the state of the checkbox indicating if bluetooth is turned on. The
+   * state of the "Find devices" button and the list of discovered devices may
+   * also be affected by a change to the state.
+   * @param {boolean} checked Flag Indicating if Bluetooth is turned on.
+   */
+  SystemOptions.setBluetoothState = function(checked) {
+    $('disable-bluetooth').hidden = !checked;
+    $('enable-bluetooth').hidden = checked;
+    $('bluetooth-finder-container').hidden = !checked;
+    $('no-bluetooth-devices-label').hidden = !checked;
+    if (!checked) {
+      setVisibility_('bluetooth-scanning-label', false);
+      setVisibility_('bluetooth-scanning-icon', false);
+    }
+    // Flush list of previously discovered devices if bluetooth is turned off.
+    if (!checked) {
+      var devices = $('bluetooth-device-list').childNodes;
+      for (var i = devices.length - 1; i >= 0; i--) {
+        var device = devices.item(i);
+        $('bluetooth-device-list').removeChild(device);
+      }
+    }
   }
 
   /**
-   * Adds an element to the list of available bluetooth devices.
-   * @param{{'deviceName': string,
-   *         'deviceId': string,
-   *         'deviceType': Constants.DEVICE_TYPE,
-   *         'deviceStatus': Constants.DEVICE_STATUS} device
+   * Adds an element to the list of available bluetooth devices. If an element
+   * with a matching address is found, the existing element is updated.
+   * @param {{name: string,
+   *          address: string,
+   *          icon: string,
+   *          paired: boolean,
+   *          connected: boolean}} device
    *     Decription of the bluetooth device.
    */
   SystemOptions.addBluetoothDevice = function(device) {
-    $('bluetooth-device-list').appendDevice(device);
-  }
+    if ($('bluetooth-device-list').appendDevice(device))
+      $('no-bluetooth-devices-label').hidden = true;
+  };
 
   /**
    * Hides the scanning label and icon that are used to indicate that a device
    * search is in progress.
    */
   SystemOptions.notifyBluetoothSearchComplete = function() {
-    // TDOO (kevers) - Reset state immediately once results are received
-    //                 asynchronously.
-    setTimeout(function() {
-      setVisibility_('bluetooth-scanning-label', false);
-      setVisibility_('bluetooth-scanning-icon', false);
-    }, 2000);
-  }
+    setVisibility_('bluetooth-scanning-label', false);
+    setVisibility_('bluetooth-scanning-icon', false);
+  };
+
+  /**
+   * Displays the Touchpad Controls section when we detect a touchpad.
+   */
+  SystemOptions.showTouchpadControls = function() {
+    $('touchpad-controls').hidden = false;
+  };
 
   // Export
   return {

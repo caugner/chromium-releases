@@ -19,33 +19,29 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "net/base/net_util.h"
+#include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/rect.h"
-#include "views/controls/button/image_button.h"
-#include "views/focus/focus_manager.h"
-#include "views/views_delegate.h"
-#include "views/widget/widget.h"
-#include "views/window/client_view.h"
-#include "views/window/non_client_view.h"
-#include "views/window/window_resources.h"
-#include "views/window/window_shape.h"
-
-#if defined(OS_LINUX)
-#include "views/window/hit_test.h"
-#endif
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/focus/focus_manager.h"
+#include "ui/views/views_delegate.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/client_view.h"
+#include "ui/views/window/non_client_view.h"
+#include "ui/views/window/window_resources.h"
+#include "ui/views/window/window_shape.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
-#include "views/widget/native_widget_win.h"
+#include "ui/views/widget/native_widget_win.h"
 #endif
 
 using base::TimeDelta;
@@ -168,7 +164,6 @@ class ConstrainedWindowFrameView
   virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
   virtual void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask)
       OVERRIDE;
-  virtual void EnableClose(bool enable) OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE {}
   virtual void UpdateWindowIcon() OVERRIDE {}
 
@@ -354,10 +349,6 @@ void ConstrainedWindowFrameView::GetWindowMask(const gfx::Size& size,
   views::GetDefaultWindowMask(size, window_mask);
 }
 
-void ConstrainedWindowFrameView::EnableClose(bool enable) {
-  close_button_->SetEnabled(enable);
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // ConstrainedWindowFrameView, views::View implementation:
 
@@ -433,36 +424,62 @@ gfx::Rect ConstrainedWindowFrameView::IconBounds() const {
 }
 
 void ConstrainedWindowFrameView::PaintFrameBorder(gfx::Canvas* canvas) {
+  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+#if defined(USE_AURA)
+  // TODO(jamescook): Remove this when Aura defaults to its own window frame,
+  // BrowserNonClientFrameViewAura.  Until then, use custom square corners to
+  // avoid performance penalties associated with transparent layers.
+  SkBitmap* top_left_corner = rb.GetBitmapNamed(IDR_AURA_WINDOW_TOP_LEFT);
+  SkBitmap* top_right_corner = rb.GetBitmapNamed(IDR_AURA_WINDOW_TOP_RIGHT);
+  SkBitmap* bottom_left_corner =
+      rb.GetBitmapNamed(IDR_AURA_WINDOW_BOTTOM_LEFT);
+  SkBitmap* bottom_right_corner =
+      rb.GetBitmapNamed(IDR_AURA_WINDOW_BOTTOM_RIGHT);
+  SkBitmap* top_edge = rb.GetBitmapNamed(IDR_WINDOW_TOP_CENTER);
+  SkBitmap* right_edge = rb.GetBitmapNamed(IDR_WINDOW_RIGHT_SIDE);
+  SkBitmap* left_edge = rb.GetBitmapNamed(IDR_WINDOW_LEFT_SIDE);
+  SkBitmap* bottom_edge = rb.GetBitmapNamed(IDR_WINDOW_BOTTOM_CENTER);
+#else
   SkBitmap* top_left_corner = resources_->GetPartBitmap(FRAME_TOP_LEFT_CORNER);
   SkBitmap* top_right_corner =
       resources_->GetPartBitmap(FRAME_TOP_RIGHT_CORNER);
-  SkBitmap* top_edge = resources_->GetPartBitmap(FRAME_TOP_EDGE);
-  SkBitmap* right_edge = resources_->GetPartBitmap(FRAME_RIGHT_EDGE);
-  SkBitmap* left_edge = resources_->GetPartBitmap(FRAME_LEFT_EDGE);
   SkBitmap* bottom_left_corner =
       resources_->GetPartBitmap(FRAME_BOTTOM_LEFT_CORNER);
   SkBitmap* bottom_right_corner =
       resources_->GetPartBitmap(FRAME_BOTTOM_RIGHT_CORNER);
+  SkBitmap* top_edge = resources_->GetPartBitmap(FRAME_TOP_EDGE);
+  SkBitmap* right_edge = resources_->GetPartBitmap(FRAME_RIGHT_EDGE);
+  SkBitmap* left_edge = resources_->GetPartBitmap(FRAME_LEFT_EDGE);
   SkBitmap* bottom_edge = resources_->GetPartBitmap(FRAME_BOTTOM_EDGE);
+#endif
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   SkBitmap* theme_frame = rb.GetBitmapNamed(IDR_THEME_FRAME);
   SkColor frame_color = ResourceBundle::frame_color;
 
   // Fill with the frame color first so we have a constant background for
   // areas not covered by the theme image.
-  canvas->FillRectInt(frame_color, 0, 0, width(), theme_frame->height());
-  // Now fill down the sides.
-  canvas->FillRectInt(frame_color, 0, theme_frame->height(), left_edge->width(),
-                      height() - theme_frame->height());
-  canvas->FillRectInt(frame_color, width() - right_edge->width(),
-                      theme_frame->height(), right_edge->width(),
-                      height() - theme_frame->height());
-  // Now fill the bottom area.
-  canvas->FillRectInt(frame_color,
-      left_edge->width(), height() - bottom_edge->height(),
-      width() - left_edge->width() - right_edge->width(),
-      bottom_edge->height());
+  canvas->FillRect(frame_color,
+                   gfx::Rect(0, 0, width(), theme_frame->height()));
+
+  int remaining_height = height() - theme_frame->height();
+  if (remaining_height > 0) {
+    // Now fill down the sides.
+    canvas->FillRect(frame_color, gfx::Rect(0, theme_frame->height(),
+                                            left_edge->width(),
+                                            remaining_height));
+    canvas->FillRect(frame_color, gfx::Rect(width() - right_edge->width(),
+                                            theme_frame->height(),
+                                            right_edge->width(),
+                                            remaining_height));
+    int center_width = width() - left_edge->width() - right_edge->width();
+    if (center_width > 0) {
+      // Now fill the bottom area.
+      canvas->FillRect(frame_color,
+                       gfx::Rect(left_edge->width(),
+                                 height() - bottom_edge->height(),
+                                 center_width, bottom_edge->height()));
+    }
+  }
 
   // Draw the theme frame.
   canvas->TileImageInt(*theme_frame, 0, 0, width(), theme_frame->height());
@@ -509,13 +526,8 @@ void ConstrainedWindowFrameView::PaintClientEdge(gfx::Canvas* canvas) {
   gfx::Rect frame_shadow_bounds(client_edge_bounds);
   frame_shadow_bounds.Inset(-kFrameShadowThickness, -kFrameShadowThickness);
 
-  canvas->FillRectInt(kContentsBorderShadow, frame_shadow_bounds.x(),
-                      frame_shadow_bounds.y(), frame_shadow_bounds.width(),
-                      frame_shadow_bounds.height());
-
-  canvas->FillRectInt(ResourceBundle::toolbar_color, client_edge_bounds.x(),
-                      client_edge_bounds.y(), client_edge_bounds.width(),
-                      client_edge_bounds.height());
+  canvas->FillRect(kContentsBorderShadow, frame_shadow_bounds);
+  canvas->FillRect(ResourceBundle::toolbar_color, client_edge_bounds);
 }
 
 void ConstrainedWindowFrameView::LayoutWindowControls() {
@@ -590,20 +602,8 @@ ConstrainedWindowViews::ConstrainedWindowViews(
   views::Widget::InitParams params;
   params.delegate = widget_delegate;
   params.native_widget = native_constrained_window_->AsNativeWidget();
-
-  if (views::Widget::IsPureViews() &&
-      views::ViewsDelegate::views_delegate &&
-      views::ViewsDelegate::views_delegate->GetDefaultParentView()) {
-    // Don't set parent so that constrained window is attached to
-    // desktop. This is necessary for key events to work under views desktop
-    // because key events need to be sent to toplevel window
-    // which has an inputmethod object that knows where to forward
-    // event.
-  } else {
-    params.child = true;
-    params.parent = wrapper->tab_contents()->GetNativeView();
-  }
-
+  params.child = true;
+  params.parent = wrapper->tab_contents()->GetNativeView();
   Init(params);
 
   wrapper_->constrained_window_tab_helper()->AddConstrainedDialog(this);
@@ -616,14 +616,11 @@ ConstrainedWindowViews::~ConstrainedWindowViews() {
 // ConstrainedWindowViews, ConstrainedWindow implementation:
 
 void ConstrainedWindowViews::ShowConstrainedWindow() {
-  // We marked the view as hidden during construction.  Mark it as
-  // visible now so FocusManager will let us receive focus.
-  non_client_view()->SetVisible(true);
   ConstrainedWindowTabHelper* helper =
       wrapper_->constrained_window_tab_helper();
   if (helper && helper->delegate())
     helper->delegate()->WillShowConstrainedWindow(wrapper_);
-  Activate();
+  Show();
   FocusConstrainedWindow();
 }
 
@@ -641,6 +638,10 @@ void ConstrainedWindowViews::FocusConstrainedWindow() {
       widget_delegate()->GetInitiallyFocusedView()) {
     widget_delegate()->GetInitiallyFocusedView()->RequestFocus();
   }
+}
+
+gfx::NativeWindow ConstrainedWindowViews::GetNativeWindow() {
+  return Widget::GetNativeWindow();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

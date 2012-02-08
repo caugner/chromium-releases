@@ -13,9 +13,9 @@
 #include "base/process_util.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/common/content_export.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/renderer_preferences.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/common/renderer_preferences.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/size.h"
 
@@ -41,7 +41,7 @@ enum ResourceRequestAction {
   CANCEL
 };
 
-class CONTENT_EXPORT InterstitialPage : public NotificationObserver,
+class CONTENT_EXPORT InterstitialPage : public content::NotificationObserver,
                                         public RenderViewHostDelegate {
  public:
   // The different state of actions the user can take in an interstitial.
@@ -102,7 +102,7 @@ class CONTENT_EXPORT InterstitialPage : public NotificationObserver,
   // Called when tab traversing.
   void FocusThroughTabTraversal(bool reverse);
 
-  virtual content::ViewType GetRenderViewType() const;
+  virtual content::ViewType GetRenderViewType() const OVERRIDE;
 
   // See description above field.
   void set_reload_on_dont_proceed(bool value) {
@@ -111,10 +111,10 @@ class CONTENT_EXPORT InterstitialPage : public NotificationObserver,
   bool reload_on_dont_proceed() const { return reload_on_dont_proceed_; }
 
  protected:
-  // NotificationObserver method:
+  // content::NotificationObserver method:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // RenderViewHostDelegate implementation:
   virtual View* GetViewDelegate() OVERRIDE;
@@ -129,7 +129,7 @@ class CONTENT_EXPORT InterstitialPage : public NotificationObserver,
                            int32 page_id,
                            const string16& title,
                            base::i18n::TextDirection title_direction) OVERRIDE;
-  virtual RendererPreferences GetRendererPrefs(
+  virtual content::RendererPreferences GetRendererPrefs(
       content::BrowserContext* browser_context) const OVERRIDE;
 
   // Invoked with the NavigationEntry that is going to be added to the
@@ -143,7 +143,7 @@ class CONTENT_EXPORT InterstitialPage : public NotificationObserver,
   TabContents* tab() const { return tab_; }
   const GURL& url() const { return url_; }
   RenderViewHost* render_view_host() const { return render_view_host_; }
-  void set_renderer_preferences(const RendererPreferences& prefs) {
+  void set_renderer_preferences(const content::RendererPreferences& prefs) {
     renderer_preferences_ = prefs;
   }
 
@@ -156,7 +156,7 @@ class CONTENT_EXPORT InterstitialPage : public NotificationObserver,
   virtual TabContentsView* CreateTabContentsView();
 
   // Notification magic.
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
  private:
   // AutomationProvider needs access to Proceed and DontProceed to simulate
@@ -239,7 +239,7 @@ class CONTENT_EXPORT InterstitialPage : public NotificationObserver,
   static InterstitialPageMap* tab_to_interstitial_page_;
 
   // Settings passed to the renderer.
-  RendererPreferences renderer_preferences_;
+  content::RendererPreferences renderer_preferences_;
 
   DISALLOW_COPY_AND_ASSIGN(InterstitialPage);
 };

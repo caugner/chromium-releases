@@ -7,6 +7,7 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include "base/mac/cocoa_protocols.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
 #import "chrome/browser/ui/cocoa/base_bubble_controller.h"
@@ -50,13 +51,20 @@ class Browser;
 ////////////////////////////////////////////////////////////////////////////////
 
 // This view controller manages the menu item XIB.
-@interface AvatarMenuItemController : NSViewController {
+@interface AvatarMenuItemController : NSViewController<NSAnimationDelegate> {
  @private
   // The parent menu controller; owns this.
   __weak AvatarMenuBubbleController* controller_;
 
   // The AvatarMenuModel::item.model_index field.
   size_t modelIndex_;
+
+  // Tracks whether this item is currently highlighted.
+  BOOL isHighlighted_;
+
+  // The animation showing the edit link, which is run after the user has
+  // dwelled over the item for a short delay.
+  scoped_nsobject<NSAnimation> linkAnimation_;
 
   // Instance variables that back the outlets.
   __weak NSImageView* iconView_;
@@ -69,6 +77,7 @@ class Browser;
   __weak NSButton* editButton_;
 }
 @property(readonly, nonatomic) size_t modelIndex;
+@property(assign, nonatomic) BOOL isHighlighted;
 @property(assign, nonatomic) IBOutlet NSImageView* iconView;
 @property(assign, nonatomic) IBOutlet NSImageView* activeView;
 @property(assign, nonatomic) IBOutlet NSTextField* nameField;
@@ -102,9 +111,6 @@ class Browser;
 
   // Used to highlight the background on hover.
   ScopedCrTrackingArea trackingArea_;
-
-  // Whether the mouse is inside the bounds of this view.
-  BOOL mouseInside_;
 }
 @property(assign, nonatomic) IBOutlet AvatarMenuItemController* viewController;
 @end

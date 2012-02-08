@@ -10,9 +10,9 @@
 #include "base/stringprintf.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDataSource.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 
 using WebKit::WebApplicationCacheHost;
 using WebKit::WebApplicationCacheHostClient;
@@ -297,9 +297,9 @@ bool WebApplicationCacheHostImpl::swapCache() {
 
 void WebApplicationCacheHostImpl::getAssociatedCacheInfo(
     WebApplicationCacheHost::CacheInfo* info) {
+  info->manifestURL = cache_info_.manifest_url;
   if (!cache_info_.is_complete)
     return;
-  info->manifestURL = cache_info_.manifest_url;
   info->creationTime = cache_info_.creation_time.ToDoubleT();
   info->updateTime = cache_info_.last_update_time.ToDoubleT();
   info->totalSize = cache_info_.size;

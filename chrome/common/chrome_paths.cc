@@ -280,13 +280,20 @@ bool PathProvider(int key, FilePath* result) {
     // The following are only valid in the development environment, and
     // will fail if executed from an installed executable (because the
     // generated path won't exist).
+    case chrome::DIR_GEN_TEST_DATA:
+      if (!PathService::Get(base::DIR_MODULE, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("test_data"));
+      if (!file_util::PathExists(cur))  // We don't want to create this.
+        return false;
+      break;
     case chrome::DIR_TEST_DATA:
       if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
         return false;
       cur = cur.Append(FILE_PATH_LITERAL("chrome"));
       cur = cur.Append(FILE_PATH_LITERAL("test"));
       cur = cur.Append(FILE_PATH_LITERAL("data"));
-      if (!file_util::PathExists(cur))  // we don't want to create this
+      if (!file_util::PathExists(cur))  // We don't want to create this.
         return false;
       break;
     case chrome::DIR_TEST_TOOLS:
@@ -295,10 +302,23 @@ bool PathProvider(int key, FilePath* result) {
       cur = cur.Append(FILE_PATH_LITERAL("chrome"));
       cur = cur.Append(FILE_PATH_LITERAL("tools"));
       cur = cur.Append(FILE_PATH_LITERAL("test"));
-      if (!file_util::PathExists(cur))  // we don't want to create this
+      if (!file_util::PathExists(cur))  // We don't want to create this
         return false;
       break;
-#if defined(OS_POSIX) && !defined(OS_MACOSX)
+    case chrome::DIR_LAYOUT_TESTS:
+      if (!PathService::Get(base::DIR_SOURCE_ROOT, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("third_party"));
+      cur = cur.Append(FILE_PATH_LITERAL("WebKit"));
+      cur = cur.Append(FILE_PATH_LITERAL("LayoutTests"));
+      if (file_util::DirectoryExists(cur))
+        break;
+      if (!PathService::Get(chrome::DIR_TEST_DATA, &cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("layout_tests"));
+      cur = cur.Append(FILE_PATH_LITERAL("LayoutTests"));
+      break;
+#if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_OPENBSD)
     case chrome::DIR_POLICY_FILES: {
 #if defined(GOOGLE_CHROME_BUILD)
       cur = FilePath(FILE_PATH_LITERAL("/etc/opt/chrome/policies"));
@@ -317,12 +337,12 @@ bool PathProvider(int key, FilePath* result) {
       if (!login)
         return false;
       cur = cur.AppendASCII(login);
-      if (!file_util::PathExists(cur))  // we don't want to create this
+      if (!file_util::PathExists(cur))  // We don't want to create this.
         return false;
       break;
     }
 #endif
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX)
     case chrome::DIR_USER_EXTERNAL_EXTENSIONS: {
       if (!PathService::Get(chrome::DIR_USER_DATA, &cur))
         return false;

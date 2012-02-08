@@ -90,8 +90,25 @@ class SyncFrontend {
   // encrypted using the accepted passphrase.
   virtual void OnPassphraseAccepted() = 0;
 
-  virtual void OnEncryptionComplete(
-      const syncable::ModelTypeSet& encrypted_types) = 0;
+  // Called when the set of encrypted types or the encrypt everything
+  // flag has been changed.  Note that encryption isn't complete until
+  // the OnEncryptionComplete() notification has been sent (see
+  // below).
+  //
+  // |encrypted_types| will always be a superset of
+  // Cryptographer::SensitiveTypes().  If |encrypt_everything| is
+  // true, |encrypted_types| will be the set of all known types.
+  //
+  // Until this function is called, observers can assume that the set
+  // of encrypted types is Cryptographer::SensitiveTypes() and that
+  // the encrypt everything flag is false.
+  virtual void OnEncryptedTypesChanged(
+      const syncable::ModelTypeSet& encrypted_types,
+      bool encrypt_everything) = 0;
+
+  // Called after we finish encrypting the current set of encrypted
+  // types.
+  virtual void OnEncryptionComplete() = 0;
 
   // Called to perform migration of |types|.
   virtual void OnMigrationNeededForTypes(
@@ -172,14 +189,14 @@ class SyncBackendHost {
   void Shutdown(bool sync_disabled);
 
   // Changes the set of data types that are currently being synced.
-  // The ready_task will be run when all of the requested data types
-  // are up-to-date and ready for activation.  The task will be
-  // cancelled upon shutdown.
+  // The ready_task will be run when configuration is done with the
+  // set of all types that failed configuration (i.e., if its argument
+  // is non-empty, then an error was encountered).
   virtual void ConfigureDataTypes(
       const syncable::ModelTypeSet& types_to_add,
       const syncable::ModelTypeSet& types_to_remove,
       sync_api::ConfigureReason reason,
-      base::Callback<void(bool)> ready_task,
+      base::Callback<void(const syncable::ModelTypeSet&)> ready_task,
       bool enable_nigori);
 
   // Makes an asynchronous call to syncer to switch to config mode. When done
@@ -188,13 +205,6 @@ class SyncBackendHost {
 
   // Turns on encryption of all present and future sync data.
   virtual void EnableEncryptEverything();
-
-  // Returns true if we have enabled encrypt everything, false if we only
-  // encrypt the sensitive types.
-  virtual bool EncryptEverythingEnabled() const;
-
-  // Returns the set of encrypted data types.
-  virtual syncable::ModelTypeSet GetEncryptedDataTypes() const;
 
   // Activates change processing for the given data type.  This must
   // be called synchronously with the data type's model association so
@@ -224,11 +234,6 @@ class SyncBackendHost {
   const FilePath& sync_data_folder_path() const {
     return sync_data_folder_path_;
   }
-
-  // Returns the authenticated username of the sync user, or empty if none
-  // exists. It will only exist if the authentication service provider (e.g
-  // GAIA) has confirmed the username is authentic.
-  string16 GetAuthenticatedUsername() const;
 
   // Determines if the underlying sync engine has made any local changes to
   // items that have not yet been synced with the server.
@@ -289,10 +294,12 @@ class SyncBackendHost {
     virtual void OnUpdatedToken(const std::string& token) OVERRIDE;
     virtual void OnClearServerDataFailed() OVERRIDE;
     virtual void OnClearServerDataSucceeded() OVERRIDE;
-    virtual void OnEncryptionComplete(
-        const syncable::ModelTypeSet& encrypted_types);
+    virtual void OnEncryptedTypesChanged(
+        const syncable::ModelTypeSet& encrypted_types,
+        bool encrypt_everything) OVERRIDE;
+    virtual void OnEncryptionComplete() OVERRIDE;
     virtual void OnActionableError(
-        const browser_sync::SyncProtocolError& sync_error);
+        const browser_sync::SyncProtocolError& sync_error) OVERRIDE;
 
     struct DoInitializeOptions {
       DoInitializeOptions(
@@ -406,6 +413,12 @@ class SyncBackendHost {
         const WeakHandle<JsBackend>& js_backend,
         bool success);
 
+    // Called when configuration of the Nigori node has completed as
+    // part of the initialization process.
+    void HandleNigoriConfigurationCompletedOnFrontendLoop(
+        const WeakHandle<JsBackend>& js_backend,
+        const syncable::ModelTypeSet& failed_configuration_types);
+
    private:
     friend class base::RefCountedThreadSafe<SyncBackendHost::Core>;
     friend class SyncBackendHostForProfileSyncTest;
@@ -445,10 +458,14 @@ class SyncBackendHost {
     // Invoked when an updated token is available from the sync server.
     void NotifyUpdatedToken(const std::string& token);
 
-    // Invoked when sync finishes encrypting new datatypes or has become aware
-    // of new datatypes requiring encryption.
-    void NotifyEncryptionComplete(const syncable::ModelTypeSet&
-                                      encrypted_types);
+    // Invoked when the set of encrypted types or the encrypt
+    // everything flag changes.
+    void NotifyEncryptedTypesChanged(
+        const syncable::ModelTypeSet& encrypted_types,
+        bool encrypt_everything);
+
+    // Invoked when sync finishes encrypting new datatypes.
+    void NotifyEncryptionComplete();
 
     // Called from Core::OnSyncCycleCompleted to handle updating frontend
     // thread components.
@@ -526,9 +543,10 @@ class SyncBackendHost {
     PendingConfigureDataTypesState();
     ~PendingConfigureDataTypesState();
 
-    // A task that should be called once data type configuration is
-    // complete.
-    base::Callback<void(bool)> ready_task;
+    // The ready_task will be run when configuration is done with the
+    // set of all types that failed configuration (i.e., if its
+    // argument is non-empty, then an error was encountered).
+    base::Callback<void(const syncable::ModelTypeSet&)> ready_task;
 
     // The set of types that we are waiting to be initially synced in a
     // configuration cycle.

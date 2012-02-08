@@ -69,33 +69,6 @@ struct ViewHostMsg_AccEvent {
   };
 };
 
-// Values that may be OR'd together to form the 'flags' parameter of the
-// ViewMsg_EnablePreferredSizeChangedMode message.
-enum ViewHostMsg_EnablePreferredSizeChangedMode_Flags {
-  kPreferredSizeNothing,
-  kPreferredSizeWidth = 1 << 0,
-  // Requesting the height currently requires a polling loop in render_view.cc.
-  kPreferredSizeHeightThisIsSlow = 1 << 1,
-};
-
-struct ViewHostMsg_RunFileChooser_Mode {
- public:
-  enum Value {
-    // Requires that the file exists before allowing the user to pick it.
-    Open,
-
-    // Like Open, but allows picking multiple files to open.
-    OpenMultiple,
-
-    // Like Open, but selects a folder.
-    OpenFolder,
-
-    // Allows picking a nonexistent file, and prompts to overwrite if the file
-    // already exists.
-    Save,
-  };
-};
-
 // Values that may be OR'd together to form the 'flags' parameter of a
 // ViewHostMsg_UpdateRect_Params structure.
 struct ViewHostMsg_UpdateRect_Flags {
@@ -134,21 +107,6 @@ struct ViewMsg_Navigate_Type {
     // Navigation type not categorized by the other types.
     NORMAL
   };
-};
-
-// The user has completed a find-in-page; this type defines what actions the
-// renderer should take next.
-struct ViewMsg_StopFinding_Params {
-  enum Action {
-    kClearSelection,
-    kKeepSelection,
-    kActivateSelection
-  };
-
-  ViewMsg_StopFinding_Params() : action(kClearSelection) {}
-
-  // The action that should be taken when the find is completed.
-  Action action;
 };
 
 #endif  // CONTENT_COMMON_VIEW_MESSAGES_ENUMS_H_

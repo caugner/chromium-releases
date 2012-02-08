@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -22,6 +22,13 @@ BUILD_VIEWVC_URL = 'http://src.chromium.org/viewvc/chrome?view=rev&revision=%d'
 CHANGELOG_URL = 'http://build.chromium.org/f/chromium/' \
                 'perf/dashboard/ui/changelog.html?url=/trunk/src&range=%d:%d'
 
+# DEPS file URL.
+DEPS_FILE= 'http://src.chromium.org/viewvc/chrome/trunk/src/DEPS?revision=%d'
+
+# WebKit Changelogs URL.
+WEBKIT_CHANGELOG_URL = 'http://trac.webkit.org/log/' \
+                       'trunk/?rev=%d&stop_rev=%d&verbose=on'
+
 ###############################################################################
 
 import math
@@ -37,6 +44,7 @@ import threading
 import urllib
 from xml.etree import ElementTree
 import zipfile
+
 
 class PathContext(object):
   """A PathContext is used to carry the information used to construct URLs and
@@ -211,9 +219,9 @@ def FetchRevision(context, rev, filename, quit_event=None, progress_event=None):
                     displayed.
   """
   def ReportHook(blocknum, blocksize, totalsize):
-    if quit_event and quit_event.is_set():
+    if quit_event and quit_event.isSet():
      raise RuntimeError("Aborting download of revision %d" % rev)
-    if progress_event and progress_event.is_set():
+    if progress_event and progress_event.isSet():
       size = blocknum * blocksize
       if totalsize == -1:  # Total size not known.
         progress = "Received %d bytes" % size
@@ -228,8 +236,8 @@ def FetchRevision(context, rev, filename, quit_event=None, progress_event=None):
   download_url = context.GetDownloadURL(rev)
   try:
     urllib.urlretrieve(download_url, filename, ReportHook)
-    if progress_event and progress_event.is_set():
-      print()
+    if progress_event and progress_event.isSet():
+      print
   except RuntimeError, e:
     pass
 
@@ -260,6 +268,7 @@ def RunRevision(context, revision, zipfile, profile, args):
 
   return (subproc.returncode, stdout, stderr)
 
+
 def AskIsGoodBuild(rev, status, stdout, stderr):
   """Ask the user whether build |rev| is good or bad."""
   # Loop until we get a response that we can parse.
@@ -269,6 +278,7 @@ def AskIsGoodBuild(rev, status, stdout, stderr):
       return response == 'g'
     if response and response == 'q':
       raise SystemExit()
+
 
 def Bisect(platform,
            good_rev=0,
@@ -424,6 +434,20 @@ def Bisect(platform,
   return (revlist[good], revlist[bad])
 
 
+def GetWebKitRevisionForChromiumRevision(rev):
+  """Returns the webkit revision that was in chromium's DEPS file at
+  chromium revision |rev|."""
+  # . doesn't match newlines without re.DOTALL, so this is safe.
+  webkit_re = re.compile(r'webkit_revision.:\D*(\d+)')
+  url = urllib.urlopen(DEPS_FILE % rev)
+  m = webkit_re.search(url.read())
+  url.close()
+  if m:
+    return int(m.group(1))
+  else:
+    raise Exception('Could not get webkit revision for cr rev %d' % rev)
+
+
 def main():
   usage = ('%prog [options] [-- chromium-options]\n'
            'Perform binary search on the snapshot builds.\n'
@@ -492,12 +516,27 @@ def main():
   (last_known_good_rev, first_known_bad_rev) = Bisect(
       opts.archive, good_rev, bad_rev, args, opts.profile)
 
+  # Get corresponding webkit revisions.
+  try:
+    last_known_good_webkit_rev = GetWebKitRevisionForChromiumRevision(
+        last_known_good_rev)
+    first_known_bad_webkit_rev = GetWebKitRevisionForChromiumRevision(
+        first_known_bad_rev)
+  except Exception, e:
+    # Silently ignore the failure.
+    last_known_good_webkit_rev, first_known_bad_webkit_rev = 0, 0
+
   # We're done. Let the user know the results in an official manner.
   print('You are probably looking for build %d.' % first_known_bad_rev)
-  print('CHANGELOG URL:')
-  print(CHANGELOG_URL % (last_known_good_rev, first_known_bad_rev))
-  print('Built at revision:')
-  print(BUILD_VIEWVC_URL % first_known_bad_rev)
+  if last_known_good_webkit_rev != first_known_bad_webkit_rev:
+    print 'WEBKIT CHANGELOG URL:'
+    print WEBKIT_CHANGELOG_URL % (first_known_bad_webkit_rev,
+                                  last_known_good_webkit_rev)
+  print 'CHANGELOG URL:'
+  print CHANGELOG_URL % (last_known_good_rev, first_known_bad_rev)
+  print 'Built at revision:'
+  print BUILD_VIEWVC_URL % first_known_bad_rev
+
 
 if __name__ == '__main__':
   sys.exit(main())

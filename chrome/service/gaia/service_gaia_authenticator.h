@@ -8,10 +8,11 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/common/net/gaia/gaia_authenticator.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 
 namespace base {
 class MessageLoopProxy;
@@ -21,7 +22,7 @@ class MessageLoopProxy;
 // we cannot rely on the existence of a Profile)
 class ServiceGaiaAuthenticator
     : public base::RefCountedThreadSafe<ServiceGaiaAuthenticator>,
-      public URLFetcher::Delegate,
+      public content::URLFetcherDelegate,
       public gaia::GaiaAuthenticator {
  public:
   ServiceGaiaAuthenticator(const std::string& user_agent,
@@ -30,14 +31,16 @@ class ServiceGaiaAuthenticator
                            base::MessageLoopProxy* io_message_loop_proxy);
   virtual ~ServiceGaiaAuthenticator();
 
-  // URLFetcher::Delegate implementation.
-  virtual void OnURLFetchComplete(const URLFetcher *source) OVERRIDE;
+  // content::URLFetcherDelegate implementation.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source) OVERRIDE;
 
  protected:
   // GaiaAuthenticator overrides.
-  virtual bool Post(const GURL& url, const std::string& post_body,
-                    unsigned long* response_code, std::string* response_body);
-  virtual int GetBackoffDelaySeconds(int current_backoff_delay);
+  virtual bool Post(const GURL& url,
+                    const std::string& post_body,
+                    unsigned long* response_code,
+                    std::string* response_body) OVERRIDE;
+  virtual int GetBackoffDelaySeconds(int current_backoff_delay) OVERRIDE;
 
  private:
   void DoPost(const GURL& post_url, const std::string& post_body);

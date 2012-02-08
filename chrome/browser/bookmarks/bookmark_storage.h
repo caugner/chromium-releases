@@ -11,8 +11,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/bookmarks/bookmark_index.h"
 #include "chrome/common/important_file_writer.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class BookmarkModel;
 class BookmarkNode;
@@ -30,16 +30,16 @@ class BookmarkLoadDetails {
  public:
   BookmarkLoadDetails(BookmarkNode* bb_node,
                       BookmarkNode* other_folder_node,
-                      BookmarkNode* synced_folder_node,
+                      BookmarkNode* mobile_folder_node,
                       BookmarkIndex* index,
                       int64 max_id);
   ~BookmarkLoadDetails();
 
   BookmarkNode* bb_node() { return bb_node_.get(); }
   BookmarkNode* release_bb_node() { return bb_node_.release(); }
-  BookmarkNode* synced_folder_node() { return synced_folder_node_.get(); }
-  BookmarkNode* release_synced_folder_node() {
-    return synced_folder_node_.release();
+  BookmarkNode* mobile_folder_node() { return mobile_folder_node_.get(); }
+  BookmarkNode* release_mobile_folder_node() {
+    return mobile_folder_node_.release();
   }
   BookmarkNode* other_folder_node() { return other_folder_node_.get(); }
   BookmarkNode* release_other_folder_node() {
@@ -74,7 +74,7 @@ class BookmarkLoadDetails {
  private:
   scoped_ptr<BookmarkNode> bb_node_;
   scoped_ptr<BookmarkNode> other_folder_node_;
-  scoped_ptr<BookmarkNode> synced_folder_node_;
+  scoped_ptr<BookmarkNode> mobile_folder_node_;
   scoped_ptr<BookmarkIndex> index_;
   int64 max_id_;
   std::string computed_checksum_;
@@ -89,7 +89,7 @@ class BookmarkLoadDetails {
 // as notifying the BookmarkStorage every time the model changes.
 //
 // Internally BookmarkStorage uses BookmarkCodec to do the actual read/write.
-class BookmarkStorage : public NotificationObserver,
+class BookmarkStorage : public content::NotificationObserver,
                         public ImportantFileWriter::DataSerializer,
                         public base::RefCountedThreadSafe<BookmarkStorage> {
  public:
@@ -107,21 +107,19 @@ class BookmarkStorage : public NotificationObserver,
   // a pending save, it is saved immediately.
   void BookmarkModelDeleted();
 
-  // ImportantFileWriter::DataSerializer
-  virtual bool SerializeData(std::string* output);
+  // Callback from backend with the results of the bookmark file. This may be
+  // called multiple times, with different paths. This happens when we migrate
+  // bookmark data from database.
+  void OnLoadFinished(bool file_exists,
+                      const FilePath& path);
+
+  // ImportantFileWriter::DataSerializer implementation.
+  virtual bool SerializeData(std::string* output) OVERRIDE;
 
  private:
   friend class base::RefCountedThreadSafe<BookmarkStorage>;
 
   virtual ~BookmarkStorage();
-
-  class LoadTask;
-
-  // Callback from backend with the results of the bookmark file.
-  // This may be called multiple times, with different paths. This happens when
-  // we migrate bookmark data from database.
-  void OnLoadFinished(bool file_exists,
-                      const FilePath& path);
 
   // Loads bookmark data from |file| and notifies the model when finished.
   void DoLoadBookmarks(const FilePath& file);
@@ -137,10 +135,10 @@ class BookmarkStorage : public NotificationObserver,
   // the temporary file, and notifies the model.
   void FinishHistoryMigration();
 
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Serializes the data and schedules save using ImportantFileWriter.
   // Returns true on successful serialization.
@@ -156,7 +154,7 @@ class BookmarkStorage : public NotificationObserver,
   ImportantFileWriter writer_;
 
   // Helper to ensure that we unregister from notifications on destruction.
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   // Path to temporary file created during migrating bookmarks from history.
   const FilePath tmp_history_path_;

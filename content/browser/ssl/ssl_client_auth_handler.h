@@ -8,13 +8,14 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "content/browser/browser_thread.h"
 #include "content/common/content_export.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "net/base/ssl_cert_request_info.h"
 
 namespace net {
+class HttpNetworkSession;
 class URLRequest;
 class X509Certificate;
 }  // namespace net
@@ -24,8 +25,8 @@ class X509Certificate;
 // It is self-owned and deletes itself when the UI reports the user selection or
 // when the net::URLRequest is cancelled.
 class CONTENT_EXPORT SSLClientAuthHandler
-    : public base::RefCountedThreadSafe<SSLClientAuthHandler,
-                                        BrowserThread::DeleteOnIOThread> {
+    : public base::RefCountedThreadSafe<
+          SSLClientAuthHandler, content::BrowserThread::DeleteOnIOThread> {
  public:
   SSLClientAuthHandler(net::URLRequest* request,
                        net::SSLCertRequestInfo* cert_request_info);
@@ -51,13 +52,18 @@ class CONTENT_EXPORT SSLClientAuthHandler
   // Returns the SSLCertRequestInfo for this handler.
   net::SSLCertRequestInfo* cert_request_info() { return cert_request_info_; }
 
+  // Returns the session the URL request is associated with.
+  const net::HttpNetworkSession* http_network_session() const {
+    return http_network_session_;
+  }
+
  protected:
   virtual ~SSLClientAuthHandler();
 
  private:
-  friend class base::RefCountedThreadSafe<SSLClientAuthHandler,
-                                          BrowserThread::DeleteOnIOThread>;
-  friend class BrowserThread;
+  friend class base::RefCountedThreadSafe<
+      SSLClientAuthHandler, content::BrowserThread::DeleteOnIOThread>;
+  friend class content::BrowserThread;
   friend class DeleteTask<SSLClientAuthHandler>;
 
   // Notifies that the user has selected a cert.
@@ -71,13 +77,17 @@ class CONTENT_EXPORT SSLClientAuthHandler
   // The net::URLRequest that triggered this client auth.
   net::URLRequest* request_;
 
+  // The HttpNetworkSession |request_| is associated with.
+  const net::HttpNetworkSession* http_network_session_;
+
   // The certs to choose from.
   scoped_refptr<net::SSLCertRequestInfo> cert_request_info_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLClientAuthHandler);
 };
 
-class CONTENT_EXPORT SSLClientAuthObserver : public NotificationObserver {
+class CONTENT_EXPORT SSLClientAuthObserver
+    : public content::NotificationObserver {
  public:
   SSLClientAuthObserver(net::SSLCertRequestInfo* cert_request_info,
                         SSLClientAuthHandler* handler);
@@ -86,10 +96,10 @@ class CONTENT_EXPORT SSLClientAuthObserver : public NotificationObserver {
   // UI should implement this to close the dialog.
   virtual void OnCertSelectedByNotification() = 0;
 
-  // NotificationObserver implementation:
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // Begins observing notifications from other SSLClientAuthHandler instances.
   // If another instance chooses a cert for a matching SSLCertRequestInfo, we
@@ -106,7 +116,7 @@ class CONTENT_EXPORT SSLClientAuthObserver : public NotificationObserver {
 
   scoped_refptr<SSLClientAuthHandler> handler_;
 
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(SSLClientAuthObserver);
 };

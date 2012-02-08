@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -30,7 +31,6 @@ namespace net {
 // by IO and origin bound cert management UI.
 class NET_EXPORT DefaultOriginBoundCertStore : public OriginBoundCertStore {
  public:
-  class OriginBoundCert;
   class PersistentStore;
 
   // The key for each OriginBoundCert* in OriginBoundCertMap is the
@@ -51,19 +51,23 @@ class NET_EXPORT DefaultOriginBoundCertStore : public OriginBoundCertStore {
   // It may be posted to the current thread, or it may run on the thread that
   // actually does the flushing. Your Task should generally post a notification
   // to the thread you actually want to be notified on.
-  void FlushStore(Task* completion_task);
+  void FlushStore(const base::Closure& completion_task);
 
   // OriginBoundCertStore implementation.
-  virtual bool GetOriginBoundCert(const std::string& origin,
-                          std::string* private_key_result,
-                          std::string* cert_result) OVERRIDE;
-  virtual void SetOriginBoundCert(const std::string& origin,
-                          const std::string& private_key,
-                          const std::string& cert) OVERRIDE;
+  virtual bool GetOriginBoundCert(
+      const std::string& origin,
+      SSLClientCertType* type,
+      std::string* private_key_result,
+      std::string* cert_result) OVERRIDE;
+  virtual void SetOriginBoundCert(
+      const std::string& origin,
+      SSLClientCertType type,
+      const std::string& private_key,
+      const std::string& cert) OVERRIDE;
   virtual void DeleteOriginBoundCert(const std::string& origin) OVERRIDE;
   virtual void DeleteAll() OVERRIDE;
   virtual void GetAllOriginBoundCerts(
-      std::vector<OriginBoundCertInfo>* origin_bound_certs) OVERRIDE;
+      std::vector<OriginBoundCert>* origin_bound_certs) OVERRIDE;
   virtual int GetCertCount() OVERRIDE;
 
  private:
@@ -112,25 +116,6 @@ class NET_EXPORT DefaultOriginBoundCertStore : public OriginBoundCertStore {
   DISALLOW_COPY_AND_ASSIGN(DefaultOriginBoundCertStore);
 };
 
-// The OriginBoundCert class contains a private key in addition to the origin
-// and the cert.
-class NET_EXPORT DefaultOriginBoundCertStore::OriginBoundCert {
- public:
-  OriginBoundCert();
-  OriginBoundCert(const std::string& origin,
-                  const std::string& privatekey,
-                  const std::string& cert);
-
-  const std::string& origin() const { return origin_; }
-  const std::string& private_key() const { return private_key_; }
-  const std::string& cert() const { return cert_; }
-
- private:
-  std::string origin_;
-  std::string private_key_;
-  std::string cert_;
-};
-
 typedef base::RefCountedThreadSafe<DefaultOriginBoundCertStore::PersistentStore>
     RefcountedPersistentStore;
 
@@ -143,7 +128,7 @@ class NET_EXPORT DefaultOriginBoundCertStore::PersistentStore
   // called only once at startup. Note that the certs are individually allocated
   // and that ownership is transferred to the caller upon return.
   virtual bool Load(
-      std::vector<DefaultOriginBoundCertStore::OriginBoundCert*>* certs) = 0;
+      std::vector<OriginBoundCert*>* certs) = 0;
 
   virtual void AddOriginBoundCert(const OriginBoundCert& cert) = 0;
 
@@ -154,7 +139,7 @@ class NET_EXPORT DefaultOriginBoundCertStore::PersistentStore
   virtual void SetClearLocalStateOnExit(bool clear_local_state) = 0;
 
   // Flush the store and post the given Task when complete.
-  virtual void Flush(Task* completion_task) = 0;
+  virtual void Flush(const base::Closure& completion_task) = 0;
 
  protected:
   PersistentStore();

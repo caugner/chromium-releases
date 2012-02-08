@@ -5,7 +5,6 @@
 
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,14 +18,18 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+#if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
+#endif
+
 class PanelAppBrowserTest : public ExtensionBrowserTest {
  public:
   virtual void SetUpCommandLine(CommandLine* command_line) {
     ExtensionBrowserTest::SetUpCommandLine(command_line);
-    command_line->AppendSwitch(switches::kEnablePanels);
   }
 
   void LoadAndLaunchExtension(const char* name) {
+#if defined(OS_MACOSX)
     // Opening panels on a Mac causes NSWindowController of the Panel window
     // to be autoreleased. We need a pool drained after it's done so the test
     // can close correctly. The NSWindowController of the Panel window controls
@@ -34,6 +37,7 @@ class PanelAppBrowserTest : public ExtensionBrowserTest {
     // possible. In real Chrome, this is done by message pump.
     // On non-Mac platform, this is an empty class.
     base::mac::ScopedNSAutoreleasePool autorelease_pool;
+#endif
 
     EXPECT_TRUE(LoadExtension(test_data_dir_.AppendASCII(name)));
 
@@ -49,6 +53,7 @@ class PanelAppBrowserTest : public ExtensionBrowserTest {
         extension,
         // Overriding manifest to open in a panel.
         extension_misc::LAUNCH_PANEL,
+        GURL(),
         NEW_WINDOW);
 
     // Now we have a new browser instance.
@@ -61,7 +66,7 @@ class PanelAppBrowserTest : public ExtensionBrowserTest {
     size_t browser_count = BrowserList::size();
     ui_test_utils::WindowedNotificationObserver signal(
         chrome::NOTIFICATION_BROWSER_CLOSED,
-        Source<Browser>(browser));
+        content::Source<Browser>(browser));
     browser->CloseWindow();
     signal.Wait();
     // Now we have one less browser instance.

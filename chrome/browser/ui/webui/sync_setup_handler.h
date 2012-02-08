@@ -36,7 +36,7 @@ class SyncSetupHandler : public GaiaOAuthConsumer,
   virtual void ShowConfigure(const base::DictionaryValue& args) OVERRIDE;
   virtual void ShowPassphraseEntry(const base::DictionaryValue& args) OVERRIDE;
   virtual void ShowSettingUp() OVERRIDE;
-  virtual void ShowSetupDone(const std::wstring& user) OVERRIDE;
+  virtual void ShowSetupDone(const string16& user) OVERRIDE;
   virtual void SetFlow(SyncSetupFlow* flow) OVERRIDE;
   virtual void Focus() OVERRIDE;
 
@@ -46,7 +46,8 @@ class SyncSetupHandler : public GaiaOAuthConsumer,
       const GoogleServiceAuthError& error) OVERRIDE;
 
   static void GetStaticLocalizedValues(
-      base::DictionaryValue* localized_strings);
+      base::DictionaryValue* localized_strings,
+      WebUI* web_ui);
 
   // Initializes the sync setup flow and shows the setup UI.
   void OpenSyncSetup();
@@ -80,11 +81,21 @@ class SyncSetupHandler : public GaiaOAuthConsumer,
 
   SyncSetupFlow* flow() { return flow_; }
 
+  // Subclasses must implement to step the SyncSetupWizard to the correct state
+  // before showing the Setup UI.
+  virtual void StepWizardForShowSetupUI() = 0;
+
   // Subclasses must implement this to show the setup UI that's appropriate
   // for the page this is contained in.
   virtual void ShowSetupUI() = 0;
 
  private:
+  // If a wizard already exists, focus it and return true.
+  bool FocusExistingWizard();
+
+  // Invokes the javascript call to close the setup overlay.
+  void CloseOverlay();
+
   // Returns true if the given login data is valid, false otherwise. If the
   // login data is not valid then on return |error_message| will be set to  a
   // localized error message. Note, |error_message| must not be NULL.

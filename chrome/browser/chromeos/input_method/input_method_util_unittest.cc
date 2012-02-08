@@ -13,9 +13,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(TOUCH_UI)
-// Since TOUCH_UI build only supports a few keyboard layouts, we skip the tests
-// for now.
+#if defined(USE_VIRTUAL_KEYBOARD)
+// Since USE_VIRTUAL_KEYBOARD build only supports a few keyboard layouts, we
+// skip the tests for now.
 #define TestGetFirstLoginInputMethodIds_Dvorak_And_Ja \
   DISABLED_TestGetFirstLoginInputMethodIds_Dvorak_And_Ja
 #define TestGetFirstLoginInputMethodIds_JP_And_Ja \
@@ -27,7 +27,7 @@
 #define TestGetKeyboardLayoutName DISABLED_TestGetKeyboardLayoutName
 #define TestGetLanguageCodesFromInputMethodIds \
   DISABLED_TestGetLanguageCodesFromInputMethodIds
-#endif  // TOUCH_UI
+#endif  // USE_VIRTUAL_KEYBOARD
 
 namespace chromeos {
 namespace input_method {
@@ -38,7 +38,8 @@ InputMethodDescriptor GetDesc(IBusController* controller,
                               const std::string& id,
                               const std::string& raw_layout,
                               const std::string& language_code) {
-  return controller->CreateInputMethodDescriptor(id, raw_layout, language_code);
+  return controller->CreateInputMethodDescriptor(id, "", raw_layout,
+                                                 language_code);
 }
 
 class TestableInputMethodUtil : public InputMethodUtil {

@@ -20,6 +20,7 @@ netInternalsTest.test('netInternalsTourTabs', function() {
     import: true,
     proxy: true,
     events: true,
+    timeline: true,
     dns: true,
     sockets: true,
     spdy: true,
@@ -29,7 +30,8 @@ netInternalsTest.test('netInternalsTourTabs', function() {
     tests: true,
     hsts: true,
     logs: cr.isChromeOS,
-    prerender: true
+    prerender: true,
+    chromeos: cr.isChromeOS
   };
 
   netInternalsTest.checkTabHandleVisibility(tabVisibilityState, true);

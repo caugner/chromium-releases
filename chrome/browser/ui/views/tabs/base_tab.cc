@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/tabs/tab_strip_selection_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -29,7 +30,7 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/font.h"
-#include "views/controls/button/image_button.h"
+#include "ui/views/controls/button/image_button.h"
 
 // How long the pulse throb takes.
 static const int kPulseDurationMs = 200;
@@ -88,7 +89,7 @@ void DrawIconCenter(gfx::Canvas* canvas,
   int dst_y = bounds.y() - (icon_height - bounds.height()) / 2;
   // NOTE: the clipping is a work around for 69528, it shouldn't be necessary.
   canvas->Save();
-  canvas->ClipRectInt(dst_x, dst_y, icon_width, icon_height);
+  canvas->ClipRect(gfx::Rect(dst_x, dst_y, icon_width, icon_height));
   canvas->DrawBitmapInt(image,
                         image_offset, 0, icon_width, icon_height,
                         dst_x, dst_y, icon_width, icon_height,
@@ -288,6 +289,8 @@ bool BaseTab::OnMousePressed(const views::MouseEvent& event) {
     return false;
 
   if (event.IsOnlyLeftMouseButton()) {
+    TabStripSelectionModel original_selection;
+    original_selection.Copy(controller()->GetSelectionModel());
     if (event.IsShiftDown() && event.IsControlDown()) {
       controller()->AddSelectionFromAnchorTo(this);
     } else if (event.IsShiftDown()) {
@@ -303,7 +306,7 @@ bool BaseTab::OnMousePressed(const views::MouseEvent& event) {
     } else if (IsActive()) {
       controller()->ClickActiveTab(this);
     }
-    controller()->MaybeStartDrag(this, event);
+    controller()->MaybeStartDrag(this, event, original_selection);
   }
   return true;
 }
@@ -370,7 +373,7 @@ void BaseTab::OnMouseExited(const views::MouseEvent& event) {
   hover_animation_->Hide();
 }
 
-bool BaseTab::GetTooltipText(const gfx::Point& p, string16* tooltip) {
+bool BaseTab::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
   if (data_.title.empty())
     return false;
 
@@ -444,7 +447,7 @@ void BaseTab::PaintIcon(gfx::Canvas* canvas) {
                    icon_size, icon_size, bounds, false);
   } else {
     canvas->Save();
-    canvas->ClipRectInt(0, 0, width(), height());
+    canvas->ClipRect(GetLocalBounds());
     if (should_display_crashed_favicon_) {
       ResourceBundle& rb = ResourceBundle::GetSharedInstance();
       SkBitmap crashed_favicon(*rb.GetBitmapNamed(IDR_SAD_FAVICON));

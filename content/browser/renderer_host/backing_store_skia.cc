@@ -4,7 +4,7 @@
 
 #include "content/browser/renderer_host/backing_store_skia.h"
 
-#include "content/browser/renderer_host/render_process_host.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "ui/gfx/canvas.h"
@@ -42,10 +42,13 @@ size_t BackingStoreSkia::MemorySize() {
 }
 
 void BackingStoreSkia::PaintToBackingStore(
-    RenderProcessHost* process,
+    content::RenderProcessHost* process,
     TransportDIB::Id bitmap,
     const gfx::Rect& bitmap_rect,
-    const std::vector<gfx::Rect>& copy_rects) {
+    const std::vector<gfx::Rect>& copy_rects,
+    const base::Closure& completion_callback,
+    bool* scheduled_completion_callback) {
+  *scheduled_completion_callback = false;
   if (bitmap_rect.IsEmpty())
     return;
 
@@ -60,6 +63,9 @@ void BackingStoreSkia::PaintToBackingStore(
   if (!dib)
     return;
 
+  SkPaint copy_paint;
+  copy_paint.setXfermodeMode(SkXfermode::kSrc_Mode);
+
   SkBitmap sk_bitmap;
   sk_bitmap.setConfig(SkBitmap::kARGB_8888_Config, width, height);
   sk_bitmap.setPixels(dib->memory());
@@ -73,7 +79,7 @@ void BackingStoreSkia::PaintToBackingStore(
     SkRect dstrect = SkRect::MakeXYWH(
         SkIntToScalar(copy_rect.x()), SkIntToScalar(copy_rect.y()),
         SkIntToScalar(w), SkIntToScalar(h));
-    canvas_.get()->drawBitmapRect(sk_bitmap, &srcrect, dstrect);
+    canvas_.get()->drawBitmapRect(sk_bitmap, &srcrect, dstrect, &copy_paint);
   }
 }
 

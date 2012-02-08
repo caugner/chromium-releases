@@ -7,18 +7,18 @@
 #include <cmath>
 
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/debugger/devtools_window.h"
 #include "chrome/browser/spellchecker/spellchecker_platform_engine.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/history_overlay_controller.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/common/spellcheck_messages.h"
-#include "content/browser/debugger/devtools_client_host.h"
 #include "content/browser/mac/closure_blocks_leopard_compat.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_view_host_observer.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
+#include "content/public/browser/render_view_host_observer.h"
 
 // Declare things that are part of the 10.7 SDK.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
@@ -64,12 +64,12 @@ namespace ChromeRenderWidgetHostViewMacDelegateInternal {
 
 // Filters the message sent to RenderViewHost to know if spellchecking is
 // enabled or not for the currently focused element.
-class SpellCheckRenderViewObserver : public RenderViewHostObserver {
+class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
  public:
   SpellCheckRenderViewObserver(
       RenderViewHost* host,
       ChromeRenderWidgetHostViewMacDelegate* view_delegate)
-      : RenderViewHostObserver(host),
+      : content::RenderViewHostObserver(host),
         view_delegate_(view_delegate) {
   }
 
@@ -77,8 +77,8 @@ class SpellCheckRenderViewObserver : public RenderViewHostObserver {
   }
 
  private:
-  // RenderViewHostObserver implementation.
-  virtual void RenderViewHostDestroyed() OVERRIDE {
+  // content::RenderViewHostObserver implementation.
+  virtual void RenderViewHostDestroyed(RenderViewHost* rvh) OVERRIDE {
     // The parent implementation destroys the observer, scoping the lifetime of
     // the observer to the RenderViewHost. Since this class is acting as a
     // bridge to the view for the delegate below, and is owned by that delegate,
@@ -165,8 +165,8 @@ class SpellCheckRenderViewObserver : public RenderViewHostObserver {
 
   if (!render_widget_host_ || !render_widget_host_->IsRenderView())
     return NO;
-  bool isDevtoolsRwhv = DevToolsClientHost::FindOwnerClientHost(
-      static_cast<RenderViewHost*>(render_widget_host_)) != NULL;
+  bool isDevtoolsRwhv = DevToolsWindow::IsDevToolsWindow(
+      static_cast<RenderViewHost*>(render_widget_host_));
   if (isDevtoolsRwhv)
     return NO;
 

@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "base/message_loop.h"
+#include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/content_settings/mock_settings_observer.h"
 #include "chrome/browser/mock_browsing_data_appcache_helper.h"
@@ -13,11 +15,12 @@
 #include "chrome/browser/mock_browsing_data_database_helper.h"
 #include "chrome/browser/mock_browsing_data_file_system_helper.h"
 #include "chrome/browser/mock_browsing_data_indexed_db_helper.h"
-#include "chrome/browser/mock_browsing_data_quota_helper.h"
 #include "chrome/browser/mock_browsing_data_local_storage_helper.h"
+#include "chrome/browser/mock_browsing_data_quota_helper.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/common/notification_details.h"
+#include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_types.h"
+#include "content/test/test_browser_thread.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,6 +28,7 @@
 #include "base/utf_string_conversions.h"
 
 using ::testing::_;
+using content::BrowserThread;
 
 namespace {
 
@@ -271,8 +275,8 @@ class CookiesTreeModelTest : public testing::Test {
 
  protected:
   MessageLoop message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
 
   scoped_ptr<TestingProfile> profile_;
   scoped_refptr<MockBrowsingDataCookieHelper>
@@ -948,6 +952,7 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
   TestingProfile profile;
   HostContentSettingsMap* content_settings =
       profile.GetHostContentSettingsMap();
+  CookieSettings* cookie_settings = CookieSettings::GetForProfile(&profile);
   MockSettingsObserver observer;
 
   CookieTreeRootNode* root =
@@ -972,9 +977,9 @@ TEST_F(CookiesTreeModelTest, ContentSettings) {
                   ContentSettingsPattern::Wildcard(),
                   false));
   origin->CreateContentException(
-      content_settings, CONTENT_SETTING_SESSION_ONLY);
-  EXPECT_EQ(CONTENT_SETTING_SESSION_ONLY,
-      content_settings->GetCookieContentSetting(host, host, true));
+      cookie_settings, CONTENT_SETTING_SESSION_ONLY);
+  EXPECT_TRUE(cookie_settings->IsReadingCookieAllowed(host, host));
+  EXPECT_TRUE(cookie_settings->IsCookieSessionOnly(host));
 }
 
 TEST_F(CookiesTreeModelTest, FileSystemFilter) {

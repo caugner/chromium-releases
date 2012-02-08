@@ -19,8 +19,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_source.h"
+#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -31,16 +32,16 @@
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/insets.h"
 #include "ui/gfx/native_widget_types.h"
-#include "views/bubble/bubble_border.h"
-#include "views/controls/button/button.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/button/text_button.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_model_adapter.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/controls/native/native_view_host.h"
-#include "views/painter.h"
-#include "views/widget/widget.h"
+#include "ui/views/bubble/bubble_border.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/button/text_button.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_model_adapter.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/native/native_view_host.h"
+#include "ui/views/painter.h"
+#include "ui/views/widget/widget.h"
 
 using views::Widget;
 
@@ -108,7 +109,8 @@ BalloonViewImpl::BalloonViewImpl(BalloonCollection* collection)
   set_parent_owned(false);
 
   views::BubbleBorder* bubble_border =
-      new views::BubbleBorder(views::BubbleBorder::FLOAT);
+      new views::BubbleBorder(views::BubbleBorder::FLOAT,
+                              views::BubbleBorder::NO_SHADOW);
   set_border(bubble_border);
 }
 
@@ -188,7 +190,7 @@ void BalloonViewImpl::SizeContentsWindow() {
 
   gfx::Rect contents_rect = GetContentsRectangle();
   html_container_->SetBounds(contents_rect);
-  html_container_->MoveAboveWidget(frame_container_);
+  html_container_->StackAboveWidget(frame_container_);
 
   gfx::Path path;
   GetContentsMask(contents_rect, &path);
@@ -211,7 +213,8 @@ void BalloonViewImpl::RepositionToBalloon() {
     gfx::Rect contents_rect = GetContentsRectangle();
     html_container_->SetBounds(contents_rect);
     html_contents_->SetPreferredSize(contents_rect.size());
-    RenderWidgetHostView* view = html_contents_->render_view_host()->view();
+    RenderWidgetHostView* view =
+        html_contents_->tab_contents()->GetRenderWidgetHostView();
     if (view)
       view->SetSize(contents_rect.size());
     return;
@@ -227,9 +230,11 @@ void BalloonViewImpl::RepositionToBalloon() {
 
 void BalloonViewImpl::Update() {
   DCHECK(html_contents_.get()) << "BalloonView::Update called before Show";
-  if (html_contents_->render_view_host())
-    html_contents_->render_view_host()->NavigateToURL(
-        balloon_->notification().content_url());
+  if (!html_contents_->tab_contents())
+    return;
+  html_contents_->tab_contents()->controller().LoadURL(
+      balloon_->notification().content_url(), content::Referrer(),
+      content::PAGE_TRANSITION_LINK, std::string());
 }
 
 void BalloonViewImpl::AnimationProgressed(const ui::Animation* animation) {
@@ -257,7 +262,8 @@ void BalloonViewImpl::AnimationProgressed(const ui::Animation* animation) {
   html_container_->SetShape(path.CreateNativeRegion());
 
   html_contents_->SetPreferredSize(contents_rect.size());
-  RenderWidgetHostView* view = html_contents_->render_view_host()->view();
+  RenderWidgetHostView* view =
+      html_contents_->tab_contents()->GetRenderWidgetHostView();
   if (view)
     view->SetSize(contents_rect.size());
 }
@@ -342,9 +348,9 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   params.bounds = balloon_rect;
   frame_container_->Init(params);
   frame_container_->SetContentsView(this);
-  frame_container_->MoveAboveWidget(html_container_);
+  frame_container_->StackAboveWidget(html_container_);
 
-  // SetAlwaysOnTop should be called after MoveAboveWidget because otherwise
+  // SetAlwaysOnTop should be called after StackAboveWidget because otherwise
   // the top-most flag will be removed.
   html_container_->SetAlwaysOnTop(true);
   frame_container_->SetAlwaysOnTop(true);
@@ -379,7 +385,7 @@ void BalloonViewImpl::Show(Balloon* balloon) {
 
   notification_registrar_.Add(
     this, chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED,
-    Source<Balloon>(balloon));
+    content::Source<Balloon>(balloon));
 }
 
 void BalloonViewImpl::CreateOptionsMenu() {
@@ -491,8 +497,8 @@ void BalloonViewImpl::OnPaint(gfx::Canvas* canvas) {
 
   // Draw a 1-pixel gray line between the content and the menu bar.
   int line_width = GetTotalWidth() - kLeftMargin - kRightMargin;
-  canvas->FillRectInt(kControlBarSeparatorLineColor,
-      kLeftMargin, 1 + GetShelfHeight(), line_width, 1);
+  canvas->FillRect(kControlBarSeparatorLineColor,
+                   gfx::Rect(kLeftMargin, 1 + GetShelfHeight(), line_width, 1));
 
   View::OnPaint(canvas);
   OnPaintBorder(canvas);
@@ -503,8 +509,8 @@ void BalloonViewImpl::OnBoundsChanged(const gfx::Rect& previous_bounds) {
 }
 
 void BalloonViewImpl::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   if (type != chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED) {
     NOTREACHED();
     return;
@@ -514,6 +520,6 @@ void BalloonViewImpl::Observe(int type,
   // (e.g., because of a crash), we want to close the balloon.
   notification_registrar_.Remove(
       this, chrome::NOTIFICATION_NOTIFY_BALLOON_DISCONNECTED,
-      Source<Balloon>(balloon_));
+      content::Source<Balloon>(balloon_));
   Close(false);
 }

@@ -11,8 +11,8 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/search_engines/template_url_fetcher_ui_callbacks.h"
 #include "chrome/common/render_messages.h"
-#include "content/common/view_messages.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/common/frame_navigate_params.h"
 
 namespace {
 
@@ -32,9 +32,9 @@ SearchEngineTabHelper::SearchEngineTabHelper(TabContents* tab_contents)
 SearchEngineTabHelper::~SearchEngineTabHelper() {
 }
 
-void SearchEngineTabHelper::DidNavigateMainFramePostCommit(
+void SearchEngineTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& /*details*/,
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   GenerateKeywordIfNecessary(params);
 }
 
@@ -127,7 +127,7 @@ void SearchEngineTabHelper::OnPageHasOSDD(
 }
 
 void SearchEngineTabHelper::GenerateKeywordIfNecessary(
-    const ViewHostMsg_FrameNavigate_Params& params) {
+    const content::FrameNavigateParams& params) {
   if (!params.searchable_form_url.is_valid())
     return;
 
@@ -198,7 +198,8 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
     // the later.
     // TODO(sky): Need a way to set the favicon that doesn't involve generating
     // its url.
-    new_url->SetFaviconURL(TemplateURL::GenerateFaviconURL(params.referrer));
+    new_url->SetFaviconURL(
+        TemplateURL::GenerateFaviconURL(params.referrer.url));
   }
   new_url->set_safe_for_autoreplace(true);
   url_service->Add(new_url);

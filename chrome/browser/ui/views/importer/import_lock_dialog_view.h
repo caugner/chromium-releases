@@ -9,8 +9,8 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "views/view.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/view.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class Label;
@@ -33,8 +33,7 @@ class ImportLockDialogView : public views::DialogDelegateView {
   virtual void Layout() OVERRIDE;
 
   // views::DialogDelegate:
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual bool Accept() OVERRIDE;

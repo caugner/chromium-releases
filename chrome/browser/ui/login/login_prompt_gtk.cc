@@ -6,6 +6,7 @@
 
 #include <gtk/gtk.h>
 
+#include "base/string16.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_manager.h"
 #include "chrome/browser/tab_contents/tab_contents_view_gtk.h"
@@ -14,17 +15,19 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/login/login_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::BrowserThread;
 using webkit_glue::PasswordForm;
 
 // ----------------------------------------------------------------------------
@@ -49,17 +52,17 @@ class LoginHandlerGtk : public LoginHandler,
   }
 
   // LoginModelObserver implementation.
-  virtual void OnAutofillDataAvailable(const std::wstring& username,
-                                       const std::wstring& password) {
+  virtual void OnAutofillDataAvailable(const string16& username,
+                                       const string16& password) {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
     // NOTE: Would be nice to use gtk_entry_get_text_length, but it is fairly
     // new and not always in our GTK version.
     if (strlen(gtk_entry_get_text(GTK_ENTRY(username_entry_))) == 0) {
       gtk_entry_set_text(GTK_ENTRY(username_entry_),
-                         WideToUTF8(username).c_str());
+                         UTF16ToUTF8(username).c_str());
       gtk_entry_set_text(GTK_ENTRY(password_entry_),
-                         WideToUTF8(password).c_str());
+                         UTF16ToUTF8(password).c_str());
       gtk_editable_select_region(GTK_EDITABLE(username_entry_), 0, -1);
     }
   }
@@ -175,7 +178,7 @@ void LoginHandlerGtk::OnPromptHierarchyChanged(GtkWidget* sender,
                                                GtkWidget* previous_toplevel) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (!GTK_WIDGET_TOPLEVEL(gtk_widget_get_toplevel(ok_)))
+  if (!gtk_widget_is_toplevel(gtk_widget_get_toplevel(ok_)))
     return;
 
   // Now that we have attached ourself to the window, we can make our OK

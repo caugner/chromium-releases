@@ -12,7 +12,7 @@
 #include "ui/aura_shell/shell_window_ids.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 namespace aura_shell {
 namespace internal {
@@ -32,7 +32,7 @@ void StatusAreaView::OnPaint(gfx::Canvas* canvas) {
   canvas->DrawBitmapInt(status_mock_, 0, 0);
 }
 
-views::Widget* CreateStatusArea() {
+AURA_SHELL_EXPORT views::Widget* CreateStatusArea() {
   StatusAreaView* status_area_view = new StatusAreaView;
   views::Widget* widget = new views::Widget;
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_CONTROL);
@@ -41,10 +41,11 @@ views::Widget* CreateStatusArea() {
   params.parent = Shell::GetInstance()->GetContainer(
       aura_shell::internal::kShellWindowId_StatusContainer);
   params.delegate = status_area_view;
+  params.transparent = true;
   widget->Init(params);
   widget->SetContentsView(status_area_view);
   widget->Show();
-  widget->GetNativeView()->set_name("StatusAreaView");
+  widget->GetNativeView()->SetName("StatusAreaView");
   return widget;
 }
 

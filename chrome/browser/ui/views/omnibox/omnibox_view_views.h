@@ -13,10 +13,10 @@
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/toolbar/toolbar_model.h"
-#include "content/common/notification_observer.h"
+#include "content/public/browser/notification_observer.h"
 #include "ui/base/range/range.h"
-#include "views/controls/textfield/textfield_controller.h"
-#include "views/view.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/view.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class AutocompleteEditController;
@@ -35,7 +35,7 @@ class TabContents;
 // Instant.
 class OmniboxViewViews : public views::View,
                          public OmniboxView,
-                         public NotificationObserver,
+                         public content::NotificationObserver,
                          public views::TextfieldController {
  public:
   // The internal view class name.
@@ -46,7 +46,7 @@ class OmniboxViewViews : public views::View,
                    Profile* profile,
                    CommandUpdater* command_updater,
                    bool popup_window_mode,
-                   views::View* location_bar);
+                   LocationBarView* location_bar);
   virtual ~OmniboxViewViews();
 
   // Initialize, create the underlying views, etc;
@@ -60,6 +60,9 @@ class OmniboxViewViews : public views::View,
 
   // Called when KeyRelease event is generated on textfield.
   bool HandleKeyReleaseEvent(const views::KeyEvent& event);
+
+  // Called when the mouse press event is generated on textfield.
+  bool HandleMousePressEvent(const views::MouseEvent& event);
 
   // Called when Focus is set/unset on textfield.
   void HandleFocusIn();
@@ -99,7 +102,7 @@ class OmniboxViewViews : public views::View,
   virtual bool IsSelectAll() OVERRIDE;
   virtual bool DeleteAtEndPressed() OVERRIDE;
   virtual void GetSelectionBounds(string16::size_type* start,
-                                  string16::size_type* end) OVERRIDE;
+                                  string16::size_type* end) const OVERRIDE;
   virtual void SelectAll(bool reversed) OVERRIDE;
   virtual void RevertAll() OVERRIDE;
   virtual void UpdatePopup() OVERRIDE;
@@ -121,13 +124,14 @@ class OmniboxViewViews : public views::View,
   virtual string16 GetInstantSuggestion() const OVERRIDE;
   virtual int TextWidth() const OVERRIDE;
   virtual bool IsImeComposing() const OVERRIDE;
+  virtual int GetMaxEditWidth(int entry_width) const OVERRIDE;
   virtual views::View* AddToView(views::View* parent) OVERRIDE;
   virtual int OnPerformDrop(const views::DropTargetEvent& event) OVERRIDE;
 
-  // NotificationObserver:
+  // content::NotificationObserver:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // views::TextfieldController:
   virtual void ContentsChanged(views::Textfield* sender,
@@ -184,6 +188,7 @@ class OmniboxViewViews : public views::View,
 
   // Was the delete key pressed with an empty selection at the end of the edit?
   bool delete_at_end_pressed_;
+  LocationBarView* location_bar_view_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViews);
 };

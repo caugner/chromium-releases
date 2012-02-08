@@ -35,17 +35,9 @@ class GPUCrashTest : public InProcessBrowserTest {
     EnableDOMAutomation();
     InProcessBrowserTest::SetUpCommandLine(command_line);
 
-    // OverrideGLImplementation and kDisableAcceleratedCompositing for
-    // OS_MACOSX are Taken verbatim from gpu_pixel_browsertest.cc and
-    // gpu_browsertest.cc.
-    EXPECT_TRUE(test_launcher_utils::OverrideGLImplementation(
-        command_line,
-        gfx::kGLImplementationOSMesaName));
-#if defined(OS_MACOSX)
-    // Accelerated compositing does not work with OSMesa. AcceleratedSurface
-    // assumes GL contexts are native.
-    command_line->AppendSwitch(switches::kDisableAcceleratedCompositing);
-#endif
+    // GPU tests require gpu acceleration.
+    // We do not care which GL backend is used.
+    command_line->AppendSwitchASCII(switches::kUseGL, "any");
   }
   virtual void SetUpInProcessBrowserTestFixture() {
     FilePath test_dir;
@@ -55,8 +47,13 @@ class GPUCrashTest : public InProcessBrowserTest {
   FilePath gpu_test_dir_;
 };
 
-
-IN_PROC_BROWSER_TEST_F(GPUCrashTest, Kill) {
+// Currently Kill timeout on GPU Debug bots: http://crbug.com/101513
+#if !defined(NDEBUG)
+#define MAYBE_Kill DISABLED_Kill
+#else
+#define MAYBE_Kill Kill
+#endif
+IN_PROC_BROWSER_TEST_F(GPUCrashTest, MAYBE_Kill) {
   ui_test_utils::DOMMessageQueue message_queue;
 
   ui_test_utils::NavigateToURL(

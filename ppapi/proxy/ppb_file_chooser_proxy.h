@@ -15,9 +15,6 @@
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
 #include "ppapi/thunk/ppb_file_chooser_api.h"
 
-struct PPB_FileChooser_Dev;
-struct PPB_FileChooserTrusted;
-
 namespace ppapi {
 
 class HostResource;
@@ -25,11 +22,9 @@ struct PPB_FileRef_CreateInfo;
 
 namespace proxy {
 
-class SerializedVarReceiveInput;
-
 class PPB_FileChooser_Proxy : public InterfaceProxy {
  public:
-  PPB_FileChooser_Proxy(Dispatcher* dispatcher);
+  explicit PPB_FileChooser_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_FileChooser_Proxy();
 
   static const Info* GetTrustedInfo();
@@ -42,7 +37,7 @@ class PPB_FileChooser_Proxy : public InterfaceProxy {
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
 
-  static const InterfaceID kInterfaceID = INTERFACE_ID_PPB_FILE_CHOOSER;
+  static const ApiID kApiID = API_ID_PPB_FILE_CHOOSER;
 
  private:
   // Plugin -> host message handlers.

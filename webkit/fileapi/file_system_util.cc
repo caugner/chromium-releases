@@ -12,9 +12,9 @@
 #include "base/utf_string_conversions.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "webkit/fileapi/file_system_types.h"
 
 namespace fileapi {
@@ -62,8 +62,8 @@ bool CrackFileSystemURL(const GURL& url, GURL* origin_url, FileSystemType* type,
     return false;
 
   std::string path = net::UnescapeURLComponent(bare_url.path(),
-      UnescapeRule::SPACES | UnescapeRule::URL_SPECIAL_CHARS |
-      UnescapeRule::CONTROL_CHARS);
+      net::UnescapeRule::SPACES | net::UnescapeRule::URL_SPECIAL_CHARS |
+      net::UnescapeRule::CONTROL_CHARS);
   if (path.compare(0, strlen(kPersistentDir), kPersistentDir) == 0) {
     file_system_type = kFileSystemTypePersistent;
     path = path.substr(strlen(kPersistentDir));

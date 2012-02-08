@@ -193,42 +193,46 @@ bool BookmarkNodeData::ReadFromClipboard() {
 }
 
 bool BookmarkNodeData::ClipboardContainsBookmarks() {
-#if defined(TOUCH_UI)
-  // Temporarily disabling clipboard due to bug 96448.
-  // TODO(wyck): Reenable when cause of message loop hang in
-  // gtk_clipboard_wait_for_contents is determined and fixed.
-  return false;
-#else
   return g_browser_process->clipboard()->IsFormatAvailableByString(
       BookmarkNodeData::kClipboardFormatString, ui::Clipboard::BUFFER_STANDARD);
-#endif
 }
 #else
 void BookmarkNodeData::WriteToClipboard(Profile* profile) const {
-  bookmark_pasteboard_helper_mac::WriteToClipboard(elements,
-                                                   profile_path_.value());
+  bookmark_pasteboard_helper_mac::WriteToPasteboard(
+      bookmark_pasteboard_helper_mac::kCopyPastePasteboard,
+      elements,
+      profile_path_.value());
 }
 
 bool BookmarkNodeData::ReadFromClipboard() {
-  // TODO(evan): bookmark_pasteboard_helper_mac should just use FilePaths.
-  FilePath::StringType buf;
-  if (!bookmark_pasteboard_helper_mac::ReadFromClipboard(elements, &buf))
+  FilePath file_path;
+  if (!bookmark_pasteboard_helper_mac::ReadFromPasteboard(
+      bookmark_pasteboard_helper_mac::kCopyPastePasteboard,
+      elements,
+      &file_path)) {
     return false;
-  profile_path_ = FilePath(buf);
+  }
+
+  profile_path_ = file_path;
   return true;
 }
 
 bool BookmarkNodeData::ReadFromDragClipboard() {
-  // TODO(evan): bookmark_pasteboard_helper_mac should just use FilePaths.
-  FilePath::StringType buf;
-  if (!bookmark_pasteboard_helper_mac::ReadFromDragClipboard(elements, &buf))
+  FilePath file_path;
+  if (!bookmark_pasteboard_helper_mac::ReadFromPasteboard(
+      bookmark_pasteboard_helper_mac::kDragPasteboard,
+      elements,
+      &file_path)) {
     return false;
-  profile_path_ = FilePath(buf);
+  }
+
+  profile_path_ = file_path;
   return true;
 }
 
 bool BookmarkNodeData::ClipboardContainsBookmarks() {
-  return bookmark_pasteboard_helper_mac::ClipboardContainsBookmarks();
+  return bookmark_pasteboard_helper_mac::PasteboardContainsBookmarks(
+      bookmark_pasteboard_helper_mac::kCopyPastePasteboard);
 }
 #endif  // !defined(OS_MACOSX)
 

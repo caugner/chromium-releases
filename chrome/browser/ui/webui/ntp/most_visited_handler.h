@@ -12,8 +12,8 @@
 #include "chrome/browser/history/history_types.h"
 #include "content/browser/cancelable_request.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class GURL;
 class PageUsageData;
@@ -26,16 +26,12 @@ class Value;
 
 // The handler for Javascript messages related to the "most visited" view.
 //
-// This class manages two preferences:
+// This class manages one preference:
 // - The URL blacklist: URLs we do not want to show in the thumbnails list.  It
 //   is a dictionary for quick access (it associates a dummy boolean to the URL
 //   string).
-// - Pinned URLs: This is a dictionary for the pinned URLs for the the most
-//   visited part of the new tab page. The key of the dictionary is a hash of
-//   the URL and the value is a dictionary with title, url and index.  This is
-//   owned by the PrefService.
 class MostVisitedHandler : public WebUIMessageHandler,
-                           public NotificationObserver {
+                           public content::NotificationObserver {
  public:
 
   MostVisitedHandler();
@@ -57,16 +53,10 @@ class MostVisitedHandler : public WebUIMessageHandler,
   // Callback for the "clearMostVisitedURLsBlacklist" message.
   void HandleClearBlacklist(const base::ListValue* args);
 
-  // Callback for the "addPinnedURL" message.
-  void HandleAddPinnedURL(const base::ListValue* args);
-
-  // Callback for the "removePinnedURL" message.
-  void HandleRemovePinnedURL(const base::ListValue* args);
-
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   const std::vector<GURL>& most_visited_urls() const {
     return most_visited_urls_;
@@ -89,21 +79,13 @@ class MostVisitedHandler : public WebUIMessageHandler,
   // Puts the passed URL in the blacklist (so it does not show as a thumbnail).
   void BlacklistURL(const GURL& url);
 
-  // Returns the key used in url_blacklist_ and pinned_urls_ for the passed
-  // |url|.
+  // Returns the key used in url_blacklist_ for the passed |url|.
   std::string GetDictionaryKeyForURL(const std::string& url);
-
-  // Gets the page data for a pinned URL at a given index. This returns
-  // true if found.
-  bool GetPinnedURLAtIndex(int index, MostVisitedPage* page);
-
-  void AddPinnedURL(const MostVisitedPage& page, int index);
-  void RemovePinnedURL(const GURL& url);
 
   // Sends pages_value_ to the javascript side to and resets page_value_.
   void SendPagesValue();
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Our consumer for the history service.
   CancelableRequestConsumerTSimple<PageUsageData*> cancelable_consumer_;

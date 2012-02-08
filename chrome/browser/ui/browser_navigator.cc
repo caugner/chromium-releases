@@ -10,16 +10,15 @@
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_about_handler.h"
-// TODO(alicet): clean up dependencies on defaults.h and max tab count.
-#include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/google/google_url_tracker.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/rlz/rlz.h"
-#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/tab_contents/tab_util.h"
+#include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -33,6 +32,7 @@
 #include "content/browser/browser_url_handler.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_service.h"
 #include "net/http/http_util.h"
 
 namespace {
@@ -41,9 +41,6 @@ namespace {
 // multiple tabs, such as app frames and popups. This function returns false for
 // those types of Browser.
 bool WindowCanOpenTabs(Browser* browser) {
-  if (browser->tab_count() >= browser_defaults::kMaxTabCount)
-    return false;
-
   return browser->CanSupportWindowFeature(Browser::FEATURE_TABSTRIP) ||
       browser->tabstrip_model()->empty();
 }
@@ -69,27 +66,38 @@ bool CompareURLsWithReplacements(
 }
 
 // Change some of the navigation parameters based on the particular URL.
-// Currently this applies to chrome://settings, the bookmark manager,
-// and chrome://extensions, which we always want to open in a normal
-// (not incognito) window. Guest session is an exception.
-// chrome://extensions is on the list because it redirects to
-// chrome://settings.
-void AdjustNavigateParamsForURL(browser::NavigateParams* params) {
-  if (!params->target_contents &&
-      browser::IsURLAllowedInIncognito(params->url)) {
-    Profile* profile =
-        params->browser ? params->browser->profile() : params->profile;
-
-    if ((profile->IsOffTheRecord() && !Profile::IsGuestSession()) ||
-        params->disposition == OFF_THE_RECORD) {
-      profile = profile->GetOriginalProfile();
-
-      params->disposition = SINGLETON_TAB;
-      params->profile = profile;
-      params->browser = Browser::GetOrCreateTabbedBrowser(profile);
-      params->window_action = browser::NavigateParams::SHOW_WINDOW;
-    }
+// Currently this applies to some chrome:// pages which we always want to open
+// in a non-incognito window. Note that even though a ChromeOS guest session is
+// technically an incognito window, these URLs are allowed.
+// Returns true on success. Otherwise, if changing params leads the browser into
+// an erroneous state, returns false.
+bool AdjustNavigateParamsForURL(browser::NavigateParams* params) {
+  if (params->target_contents != NULL ||
+      browser::IsURLAllowedInIncognito(params->url) ||
+      Profile::IsGuestSession()) {
+    return true;
   }
+
+  Profile* profile =
+      params->browser ? params->browser->profile() : params->profile;
+
+  if (profile->IsOffTheRecord() || params->disposition == OFF_THE_RECORD) {
+    profile = profile->GetOriginalProfile();
+
+    // If incognito is forced, we punt.
+    PrefService* prefs = profile->GetPrefs();
+    if (prefs && IncognitoModePrefs::GetAvailability(prefs) ==
+            IncognitoModePrefs::FORCED) {
+      return false;
+    }
+
+    params->disposition = SINGLETON_TAB;
+    params->profile = profile;
+    params->browser = Browser::GetOrCreateTabbedBrowser(profile);
+    params->window_action = browser::NavigateParams::SHOW_WINDOW;
+  }
+
+  return true;
 }
 
 // Returns a Browser that can host the navigation or tab addition specified in
@@ -234,6 +242,30 @@ Profile* GetSourceProfile(browser::NavigateParams* params,
   return params->browser->profile();
 }
 
+void LoadURLInContents(TabContents* target_contents,
+                       const GURL& url,
+                       browser::NavigateParams* params,
+                       const std::string& extra_headers) {
+  if (params->transferred_global_request_id != GlobalRequestID()) {
+    target_contents->controller().TransferURL(
+        url,
+        params->referrer,
+        params->transition, extra_headers,
+        params->transferred_global_request_id,
+        params->is_renderer_initiated);
+  } else if (params->is_renderer_initiated) {
+    target_contents->controller().LoadURLFromRenderer(
+        url,
+        params->referrer,
+        params->transition,  extra_headers);
+  } else {
+    target_contents->controller().LoadURL(
+        url,
+        params->referrer,
+        params->transition,  extra_headers);
+  }
+
+}
 
 // This class makes sure the Browser object held in |params| is made visible
 // by the time it goes out of scope, provided |params| wants it to be shown.
@@ -367,7 +399,9 @@ NavigateParams::~NavigateParams() {
 
 void Navigate(NavigateParams* params) {
   Browser* source_browser = params->browser;
-  AdjustNavigateParamsForURL(params);
+
+  if (!AdjustNavigateParamsForURL(params))
+    return;
 
   // Adjust disposition based on size of popup window.
   if (params->disposition == NEW_POPUP &&
@@ -382,20 +416,13 @@ void Navigate(NavigateParams* params) {
   if (!params->browser)
     return;
 
-  if (params->browser->tab_count() >= browser_defaults::kMaxTabCount &&
-      (params->disposition == NEW_POPUP ||
-       params->disposition == NEW_FOREGROUND_TAB ||
-       params->disposition == NEW_BACKGROUND_TAB)) {
-      return;
-  }
-
   // Navigate() must not return early after this point.
 
   if (GetSourceProfile(params, source_browser) != params->browser->profile()) {
     // A tab is being opened from a link from a different profile, we must reset
     // source information that may cause state to be shared.
     params->source_contents = NULL;
-    params->referrer = GURL();
+    params->referrer = content::Referrer();
   }
 
   // Make sure the Browser is shown if params call for it.
@@ -445,7 +472,7 @@ void Navigate(NavigateParams* params) {
   if (!params->target_contents && singleton_index < 0) {
     GURL url;
     if (params->url.is_empty()) {
-      url = params->browser->GetHomePage();
+      url = params->browser->profile()->GetHomePage();
       params->transition = content::PageTransitionFromInt(
           params->transition | content::PAGE_TRANSITION_HOME_PAGE);
     } else {
@@ -496,13 +523,9 @@ void Navigate(NavigateParams* params) {
     if (!HandleNonNavigationAboutURL(url)) {
       // Perform the actual navigation, tracking whether it came from the
       // renderer.
-      if (params->is_renderer_initiated) {
-        params->target_contents->controller().LoadURLFromRenderer(
-            url, params->referrer, params->transition, extra_headers);
-      } else {
-        params->target_contents->controller().LoadURL(
-            url, params->referrer, params->transition, extra_headers);
-      }
+
+      LoadURLInContents(params->target_contents->tab_contents(),
+                        url, params, extra_headers);
     }
   } else {
     // |target_contents| was specified non-NULL, and so we assume it has already
@@ -550,13 +573,7 @@ void Navigate(NavigateParams* params) {
     } else if (params->path_behavior == NavigateParams::IGNORE_AND_NAVIGATE &&
         target->GetURL() != params->url) {
       InitializeExtraHeaders(params, NULL, &extra_headers);
-      if (params->is_renderer_initiated) {
-        target->controller().LoadURLFromRenderer(
-            params->url, params->referrer, params->transition, extra_headers);
-      } else {
-        target->controller().LoadURL(
-            params->url, params->referrer, params->transition, extra_headers);
-      }
+      LoadURLInContents(target, params->url, params, extra_headers);
     }
 
     // If the singleton tab isn't already selected, select it.
@@ -565,10 +582,10 @@ void Navigate(NavigateParams* params) {
   }
 
   if (params->disposition != CURRENT_TAB) {
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         content::NOTIFICATION_TAB_ADDED,
-        Source<TabContentsDelegate>(params->browser),
-        Details<TabContents>(params->target_contents->tab_contents()));
+        content::Source<TabContentsDelegate>(params->browser),
+        content::Details<TabContents>(params->target_contents->tab_contents()));
   }
 }
 
@@ -618,10 +635,15 @@ int GetIndexOfSingletonTab(browser::NavigateParams* params) {
 }
 
 bool IsURLAllowedInIncognito(const GURL& url) {
-  return url.scheme() == chrome::kChromeUIScheme &&
+  // Most URLs are allowed in incognito; the following are exceptions.
+  // chrome://extensions is on the list because it redirects to
+  // chrome://settings.
+
+  return !(url.scheme() == chrome::kChromeUIScheme &&
       (url.host() == chrome::kChromeUISettingsHost ||
        url.host() == chrome::kChromeUIExtensionsHost ||
-       url.host() == chrome::kChromeUIBookmarksHost);
+       url.host() == chrome::kChromeUIBookmarksHost ||
+       url.host() == chrome::kChromeUISyncPromoHost));
 }
 
 }  // namespace browser

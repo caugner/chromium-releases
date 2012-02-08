@@ -6,11 +6,13 @@
 
 #include "base/file_path.h"
 #include "base/file_util.h"
-#include "content/browser/content_browser_client.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "net/base/net_errors.h"
 #include "webkit/quota/quota_manager.h"
+
+using content::BrowserThread;
 
 ChromeAppCacheService::ChromeAppCacheService(
     quota::QuotaManagerProxy* quota_manager_proxy)
@@ -28,12 +30,14 @@ void ChromeAppCacheService::InitializeOnIOThread(
   resource_context_ = resource_context;
   registrar_.Add(
       this, content::NOTIFICATION_PURGE_MEMORY,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
 
   // Init our base class.
-  Initialize(cache_path_,
-             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB),
-             BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
+  Initialize(
+      cache_path_,
+      BrowserThread::GetMessageLoopProxyForThread(
+          BrowserThread::FILE_USER_BLOCKING),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::CACHE));
   set_appcache_policy(this);
   set_special_storage_policy(special_storage_policy);
 }
@@ -56,9 +60,10 @@ bool ChromeAppCacheService::CanCreateAppCache(
       manifest_url, first_party, *resource_context_);
 }
 
-void ChromeAppCacheService::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void ChromeAppCacheService::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   DCHECK(type == content::NOTIFICATION_PURGE_MEMORY);
   PurgeMemory();

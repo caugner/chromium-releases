@@ -12,6 +12,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
@@ -28,21 +29,21 @@
 #include "grit/webkit_chromium_resources.h"
 #include "grit/webkit_resources.h"
 #include "grit/webkit_strings.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebCookie.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebData.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCookie.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrameClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginListBuilder.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "webkit/glue/media/audio_decoder.h"
-#include "webkit/plugins/npapi/plugin_instance.h"
-#include "webkit/plugins/webplugininfo.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/websocketstreamhandle_impl.h"
 #include "webkit/glue/webthread_impl.h"
 #include "webkit/glue/weburlloader_impl.h"
+#include "webkit/media/audio_decoder.h"
+#include "webkit/plugins/npapi/plugin_instance.h"
+#include "webkit/plugins/webplugininfo.h"
 
 #if defined(OS_LINUX)
 #include "v8/include/v8.h"
@@ -222,11 +223,11 @@ WebThemeEngine* WebKitPlatformSupportImpl::themeEngine() {
 }
 
 WebURLLoader* WebKitPlatformSupportImpl::createURLLoader() {
-  return new WebURLLoaderImpl();
+  return new WebURLLoaderImpl(this);
 }
 
 WebSocketStreamHandle* WebKitPlatformSupportImpl::createSocketStreamHandle() {
-  return new WebSocketStreamHandleImpl();
+  return new WebSocketStreamHandleImpl(this);
 }
 
 WebString WebKitPlatformSupportImpl::userAgent(const WebURL& url) {
@@ -289,6 +290,10 @@ void WebKitPlatformSupportImpl::histogramEnumeration(
   counter->Add(sample);
 }
 
+bool WebKitPlatformSupportImpl::isTraceEventEnabled() const {
+  return base::debug::TraceLog::GetCategory("webkit")->enabled;
+}
+
 void WebKitPlatformSupportImpl::traceEventBegin(const char* name, void* id,
                                                 const char* extra) {
   TRACE_EVENT_BEGIN_ETW(name, id, extra);
@@ -301,7 +306,8 @@ void WebKitPlatformSupportImpl::traceEventEnd(const char* name, void* id,
 
 namespace {
 
-WebData loadAudioSpatializationResource(const char* name) {
+WebData loadAudioSpatializationResource(WebKitPlatformSupportImpl* platform,
+                                        const char* name) {
 #ifdef IDR_AUDIO_SPATIALIZATION_T000_P000
   const size_t kExpectedSpatializationNameLength = 31;
   if (strlen(name) != kExpectedSpatializationNameLength) {
@@ -341,7 +347,7 @@ WebData loadAudioSpatializationResource(const char* name) {
       is_resource_index_good) {
     const int kFirstAudioResourceIndex = IDR_AUDIO_SPATIALIZATION_T000_P000;
     base::StringPiece resource =
-        GetDataResource(kFirstAudioResourceIndex + resource_index);
+        platform->GetDataResource(kFirstAudioResourceIndex + resource_index);
     return WebData(resource.data(), resource.size());
   }
 #endif  // IDR_AUDIO_SPATIALIZATION_T000_P000
@@ -429,7 +435,7 @@ WebData WebKitPlatformSupportImpl::loadResource(const char* name) {
 
   // Check the name prefix to see if it's an audio resource.
   if (StartsWithASCII(name, "IRC_Composite", true))
-    return loadAudioSpatializationResource(name);
+    return loadAudioSpatializationResource(this, name);
 
   for (size_t i = 0; i < arraysize(kDataResources); ++i) {
     if (!strcmp(name, kDataResources[i].name)) {
@@ -445,10 +451,10 @@ WebData WebKitPlatformSupportImpl::loadResource(const char* name) {
 bool WebKitPlatformSupportImpl::loadAudioResource(
     WebKit::WebAudioBus* destination_bus, const char* audio_file_data,
     size_t data_size, double sample_rate) {
-  return DecodeAudioFileData(destination_bus,
-                             audio_file_data,
-                             data_size,
-                             sample_rate);
+  return webkit_media::DecodeAudioFileData(destination_bus,
+                                           audio_file_data,
+                                           data_size,
+                                           sample_rate);
 }
 
 WebString WebKitPlatformSupportImpl::queryLocalizedString(
@@ -539,7 +545,7 @@ void WebKitPlatformSupportImpl::stopSharedTimer() {
 
 void WebKitPlatformSupportImpl::callOnMainThread(
     void (*func)(void*), void* context) {
-  main_loop_->PostTask(FROM_HERE, NewRunnableFunction(func, context));
+  main_loop_->PostTask(FROM_HERE, base::Bind(func, context));
 }
 
 WebKit::WebThread* WebKitPlatformSupportImpl::createThread(const char* name) {
@@ -591,8 +597,7 @@ WebKit::WebString WebKitPlatformSupportImpl::signedPublicKeyAndChallengeString(
     unsigned key_size_index,
     const WebKit::WebString& challenge,
     const WebKit::WebURL& url) {
-  NOTREACHED();
-  return WebKit::WebString();
+  return WebKit::WebString("");
 }
 
 #if defined(OS_LINUX)

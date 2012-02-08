@@ -16,7 +16,7 @@
 #include "chrome/browser/net/predictor.h"
 #include "chrome/browser/net/url_info.h"
 #include "chrome/common/net/predictor_common.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "net/base/address_list.h"
 #include "net/base/mock_host_resolver.h"
 #include "net/base/winsock_init.h"
@@ -24,6 +24,7 @@
 
 using base::Time;
 using base::TimeDelta;
+using content::BrowserThread;
 
 namespace chrome_browser_net {
 
@@ -99,8 +100,8 @@ class PredictorTest : public testing::Test {
   // must not outlive the message loop, otherwise bad things can happen
   // (like posting to a deleted message loop).
   MessageLoopForUI loop_;
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
 
  protected:
   scoped_ptr<net::MockCachingHostResolver> host_resolver_;
@@ -115,12 +116,10 @@ TEST_F(PredictorTest, StartupShutdownTest) {
 
 
 TEST_F(PredictorTest, ShutdownWhenResolutionIsPendingTest) {
-  scoped_refptr<net::WaitingHostResolverProc> resolver_proc(
-      new net::WaitingHostResolverProc(NULL));
-  host_resolver_->Reset(resolver_proc);
+  scoped_ptr<net::HostResolver> host_resolver(new net::HangingHostResolver());
 
   Predictor testing_master(true);
-  testing_master.SetHostResolver(host_resolver_.get());
+  testing_master.SetHostResolver(host_resolver.get());
 
   GURL localhost("http://localhost:80");
   UrlList names;
@@ -137,7 +136,6 @@ TEST_F(PredictorTest, ShutdownWhenResolutionIsPendingTest) {
   testing_master.Shutdown();
 
   // Clean up after ourselves.
-  resolver_proc->Signal();
   MessageLoop::current()->RunAllPending();
 }
 

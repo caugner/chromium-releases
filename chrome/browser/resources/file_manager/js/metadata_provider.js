@@ -11,7 +11,14 @@ function MetadataProvider(opt_workerPath) {
   // Pass all URLs to the metadata reader until we have a correct filter.
   this.urlFilter = /.*/;
 
-  this.dispatcher_ = new Worker(opt_workerPath || 'js/metadata_dispatcher.js');
+  if (!opt_workerPath) {
+    var path = document.location.pathname;
+    opt_workerPath = document.location.origin +
+        path.substring(0, path.lastIndexOf('/') + 1) +
+        'js/metadata_dispatcher.js';
+  }
+
+  this.dispatcher_ = new Worker(opt_workerPath);
   this.dispatcher_.onmessage = this.onMessage_.bind(this);
   this.dispatcher_.postMessage({verb: 'init'});
   // Initialization is not complete until the Worker sends back the
@@ -98,9 +105,9 @@ MetadataProvider.prototype.onResult_ = function(url, metadata) {
   this.cache_[url] = metadata;
 };
 
-MetadataProvider.prototype.onError_ = function(url, step, error) {
+MetadataProvider.prototype.onError_ = function(url, step, error, metadata) {
   console.warn('metadata: ' + url + ': ' + step + ': ' + error);
-  this.onResult_(url, {});
+  this.onResult_(url, metadata || {});
 };
 
 MetadataProvider.prototype.onLog_ = function(arglist) {

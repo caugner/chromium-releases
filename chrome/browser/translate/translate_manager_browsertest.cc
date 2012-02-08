@@ -7,8 +7,8 @@
 #include <set>
 #include <vector>
 
-#include "base/utf_string_conversions.h"
 #include "base/stringprintf.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/infobars/infobar.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
@@ -18,21 +18,20 @@
 #include "chrome/browser/translate/translate_infobar_delegate.h"
 #include "chrome/browser/translate/translate_manager.h"
 #include "chrome/browser/translate/translate_prefs.h"
-#include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_observer_mock.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/test/notification_observer_mock.h"
+#include "content/test/test_browser_thread.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_test_sink.h"
@@ -40,13 +39,14 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/cld/languages/public/languages.h"
 
+using content::BrowserThread;
 using testing::_;
 using testing::Pointee;
 using testing::Property;
 using WebKit::WebContextMenuData;
 
 class TranslateManagerTest : public TabContentsWrapperTestHarness,
-                             public NotificationObserver {
+                             public content::NotificationObserver {
  public:
   TranslateManagerTest()
       : ui_thread_(BrowserThread::UI, &message_loop_) {
@@ -144,10 +144,11 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     DCHECK_EQ(chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED, type);
-    removed_infobars_.insert(Details<InfoBarRemovedDetails>(details)->first);
+    removed_infobars_.insert(
+        content::Details<InfoBarRemovedDetails>(details)->first);
   }
 
  protected:
@@ -168,7 +169,8 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
 
     notification_registrar_.Add(this,
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
-        Source<InfoBarTabHelper>(contents_wrapper()->infobar_tab_helper()));
+        content::Source<InfoBarTabHelper>(
+            contents_wrapper()->infobar_tab_helper()));
   }
 
   virtual void TearDown() {
@@ -176,7 +178,8 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
 
     notification_registrar_.Remove(this,
         chrome::NOTIFICATION_TAB_CONTENTS_INFOBAR_REMOVED,
-        Source<InfoBarTabHelper>(contents_wrapper()->infobar_tab_helper()));
+        content::Source<InfoBarTabHelper>(
+            contents_wrapper()->infobar_tab_helper()));
 
     TabContentsWrapperTestHarness::TearDown();
   }
@@ -187,10 +190,10 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
     net::URLRequestStatus status;
     status.set_status(success ? net::URLRequestStatus::SUCCESS :
                                 net::URLRequestStatus::FAILED);
-    fetcher->delegate()->OnURLFetchComplete(fetcher, fetcher->original_url(),
-                                            status, success ? 200 : 500,
-                                            net::ResponseCookies(),
-                                            std::string());
+    fetcher->set_url(fetcher->GetOriginalURL());
+    fetcher->set_status(status);
+    fetcher->set_response_code(success ? 200 : 500);
+    fetcher->delegate()->OnURLFetchComplete(fetcher);
   }
 
   void SimulateSupportedLanguagesURLFetch(
@@ -215,10 +218,11 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
       }
       data += "}})";
     }
-    fetcher->delegate()->OnURLFetchComplete(fetcher, fetcher->original_url(),
-                                            status, success ? 200 : 500,
-                                            net::ResponseCookies(),
-                                            data);
+    fetcher->set_url(fetcher->GetOriginalURL());
+    fetcher->set_status(status);
+    fetcher->set_response_code(success ? 200 : 500);
+    fetcher->SetResponseString(data);
+    fetcher->delegate()->OnURLFetchComplete(fetcher);
   }
 
   void SetPrefObserverExpectation(const char* path) {
@@ -226,15 +230,15 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
         pref_observer_,
         Observe(int(chrome::NOTIFICATION_PREF_CHANGED),
                 _,
-                Property(&Details<std::string>::ptr, Pointee(path))));
+                Property(&content::Details<std::string>::ptr, Pointee(path))));
   }
 
-  NotificationObserverMock pref_observer_;
+  content::NotificationObserverMock pref_observer_;
 
  private:
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
   TestURLFetcherFactory url_fetcher_factory_;
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 
   // The infobars that have been removed.
   // WARNING: the pointers point to deleted objects, use only for comparison.
@@ -244,19 +248,20 @@ class TranslateManagerTest : public TabContentsWrapperTestHarness,
 };
 
 // An observer that keeps track of whether a navigation entry was committed.
-class NavEntryCommittedObserver : public NotificationObserver {
+class NavEntryCommittedObserver : public content::NotificationObserver {
  public:
   explicit NavEntryCommittedObserver(TabContents* tab_contents) {
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                   Source<NavigationController>(&tab_contents->controller()));
+                   content::Source<NavigationController>(
+                      &tab_contents->controller()));
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
     DCHECK(type == content::NOTIFICATION_NAV_ENTRY_COMMITTED);
     details_ =
-        *(Details<content::LoadCommittedDetails>(details).ptr());
+        *(content::Details<content::LoadCommittedDetails>(details).ptr());
   }
 
   const content::LoadCommittedDetails&
@@ -266,7 +271,7 @@ class NavEntryCommittedObserver : public NotificationObserver {
 
  private:
   content::LoadCommittedDetails details_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(NavEntryCommittedObserver);
 };
@@ -688,7 +693,8 @@ TEST_F(TranslateManagerTest, ReloadFromLocationBar) {
   // Create a pending navigation and simulate a page load.  That should be the
   // equivalent of typing the URL again in the location bar.
   NavEntryCommittedObserver nav_observer(contents());
-  contents()->controller().LoadURL(url, GURL(), content::PAGE_TRANSITION_TYPED,
+  contents()->controller().LoadURL(url, content::Referrer(),
+                                   content::PAGE_TRANSITION_TYPED,
                                    std::string());
   rvh()->SendNavigate(0, url);
 
@@ -1227,6 +1233,7 @@ TEST_F(TranslateManagerTest, BeforeTranslateExtraButtons) {
   TranslateInfoBarDelegate* infobar;
   TestingProfile* test_profile =
       static_cast<TestingProfile*>(contents()->browser_context());
+  test_profile->CreateExtensionProcessManager();
   test_profile->set_incognito(true);
   for (int i = 0; i < 8; ++i) {
     SCOPED_TRACE(::testing::Message() << "Iteration " << i <<

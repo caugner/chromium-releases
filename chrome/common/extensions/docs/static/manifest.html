@@ -494,7 +494,11 @@ table.
        for hosted apps</b>; it's recommended for extensions and packaged apps.
        </td>
 </tr>
-
+<tr>
+  <td> "contentSettings" </td>
+  <td> Required if the extension uses the
+       <a href="contentSettings.html">chrome.contentSettings</a> module. </td>
+</tr>
 <tr>
   <td> "contextMenus" </td>
   <td> Required if the extension uses the
@@ -586,6 +590,17 @@ table.
   <td> "webNavigation" </td>
   <td> Required if the extension uses the
        <a href="webNavigation.html">chrome.webNavigation</a> module. </td>
+</tr>
+<tr>
+  <td> "webRequest" </td>
+  <td> Required if the extension uses the
+       <a href="webRequest.html">chrome.webRequest</a> module. </td>
+</tr>
+<tr>
+  <td> "webRequestBlocking" </td>
+  <td> Required if the extension uses the
+       <a href="webRequest.html">chrome.webRequest</a> module in a blocking
+       fashion. </td>
 </tr>
 </tr>
 </table>

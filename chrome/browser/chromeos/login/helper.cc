@@ -4,8 +4,8 @@
 
 #include "chrome/browser/chromeos/login/helper.h"
 
-#include "base/utf_string_conversions.h"
 #include "base/file_util.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/google/google_util.h"
 #include "googleurl/src/gurl.h"
@@ -16,12 +16,12 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/screen.h"
-#include "views/controls/button/menu_button.h"
-#include "views/controls/label.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/controls/throbber.h"
-#include "views/painter.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/button/menu_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/controls/throbber.h"
+#include "ui/views/painter.h"
+#include "ui/views/widget/widget.h"
 
 namespace chromeos {
 
@@ -161,7 +161,7 @@ views::Painter* CreateBackgroundPainter() {
 }
 
 gfx::Rect CalculateScreenBounds(const gfx::Size& size) {
-  gfx::Rect bounds(gfx::Screen::GetMonitorWorkAreaNearestWindow(NULL));
+  gfx::Rect bounds(gfx::Screen::GetMonitorAreaNearestWindow(NULL));
   if (!size.IsEmpty()) {
     int horizontal_diff = bounds.width() - size.width();
     int vertical_diff = bounds.height() - size.height();

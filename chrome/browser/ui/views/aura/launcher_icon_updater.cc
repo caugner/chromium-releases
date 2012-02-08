@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
@@ -85,6 +86,19 @@ void LauncherIconUpdater::TabChangedAt(
   }
 }
 
+void LauncherIconUpdater::TabReplacedAt(TabStripModel* tab_strip_model,
+                                        TabContentsWrapper* old_contents,
+                                        TabContentsWrapper* new_contents,
+                                        int index) {
+  Tabs::iterator i = std::find(tabs_.begin(), tabs_.end(), old_contents);
+  if (i != tabs_.end()) {
+    int pos = i - tabs_.begin();
+    tabs_[pos] = new_contents;
+    if (pos < kMaxCount)
+      UpdateLauncher();
+  }
+}
+
 void LauncherIconUpdater::UpdateLauncher() {
   if (tabs_.empty())
     return;  // Assume the window is going to be closed if there are no tabs.
@@ -92,6 +106,17 @@ void LauncherIconUpdater::UpdateLauncher() {
   int item_index = launcher_model_->ItemIndexByWindow(window_);
   if (item_index == -1)
     return;
+
+  if (launcher_model_->items()[item_index].type == aura_shell::TYPE_APP) {
+    // Use the app icon if we can.
+    SkBitmap image;
+    if (tabs_[0]->extension_tab_helper()->GetExtensionAppIcon())
+      image = *tabs_[0]->extension_tab_helper()->GetExtensionAppIcon();
+    else
+      image = tabs_[0]->favicon_tab_helper()->GetFavicon();
+    launcher_model_->SetAppImage(item_index, image);
+    return;
+  }
 
   aura_shell::LauncherTabbedImages images;
   size_t count = std::min(static_cast<size_t>(kMaxCount), tabs_.size());

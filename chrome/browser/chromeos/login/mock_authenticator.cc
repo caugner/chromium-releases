@@ -5,7 +5,9 @@
 #include "chrome/browser/chromeos/login/mock_authenticator.h"
 
 #include "base/bind.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace chromeos {
 
@@ -60,20 +62,6 @@ void MockAuthenticator::OnLoginFailure(const LoginFailure& failure) {
         BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask);
 }
 
-std::string MockAuthenticator::EncryptToken(const std::string& token) {
-  return std::string();
-}
-
-std::string MockAuthenticator::DecryptToken(
-    const std::string& encrypted_token) {
-  return std::string();
-}
-
-std::string MockAuthenticator::DecryptLegacyToken(
-    const std::string& encrypted_token) {
-  return std::string();
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // MockLoginUtils
 
@@ -85,12 +73,9 @@ MockLoginUtils::MockLoginUtils(const std::string& expected_username,
 
 MockLoginUtils::~MockLoginUtils() {}
 
-bool MockLoginUtils::ShouldWaitForWifi() {
-  return false;
-}
-
 void MockLoginUtils::PrepareProfile(
     const std::string& username,
+    const std::string& display_email,
     const std::string& password,
     const GaiaAuthConsumer::ClientLoginResult& res,
     bool pending_requests,

@@ -20,18 +20,14 @@
 #include "chrome/browser/sync/protocol/autofill_specifics.pb.h"
 #include "chrome/browser/webdata/autofill_change.h"
 #include "chrome/browser/webdata/autofill_entry.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_types.h"
 
 class AutofillProfile;
 class AutofillTable;
 class ProfileSyncServiceAutofillTest;
 class WebDataService;
-
-namespace browser_sync {
-class UnrecoverableErrorHandler;
-}
 
 extern const char kAutofillProfileTag[];
 
@@ -41,7 +37,7 @@ extern const char kAutofillProfileTag[];
 // ProcessSyncChanges() and for each local change Observe() is called.
 class AutofillProfileSyncableService
     : public SyncableService,
-      public NotificationObserver,
+      public content::NotificationObserver,
       public base::NonThreadSafe {
  public:
   explicit AutofillProfileSyncableService(WebDataService* web_data_service);
@@ -60,10 +56,10 @@ class AutofillProfileSyncableService
       const tracked_objects::Location& from_here,
       const SyncChangeList& change_list) OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  protected:
   // A convenience wrapper of a bunch of state we pass around while
@@ -134,7 +130,7 @@ class AutofillProfileSyncableService
   }
 
   WebDataService* web_data_service_;  // WEAK
-  NotificationRegistrar notification_registrar_;
+  content::NotificationRegistrar notification_registrar_;
 
   // Cached Autofill profiles. *Warning* deleted profiles are still in the
   // vector - use the |profiles_map_| to iterate through actual profiles.

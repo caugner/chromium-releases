@@ -4,49 +4,41 @@
 
 #include "chrome/browser/sync/util/extensions_activity_monitor.h"
 
-#include "base/task.h"
-#include "chrome/browser/extensions/extension_bookmarks_module.h"
+#include "base/bind.h"
+#include "chrome/browser/bookmarks/bookmark_extension_api.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
 namespace {
-// A helper task to register an ExtensionsActivityMonitor as an observer of
+
+// A helper callback to register an ExtensionsActivityMonitor as an observer of
 // events on the UI thread (even though the monitor may live on another thread).
 // This liberates ExtensionsActivityMonitor from having to be ref counted.
-class RegistrationTask : public Task {
- public:
-  RegistrationTask(ExtensionsActivityMonitor* monitor,
-                   NotificationRegistrar* registrar)
-      : monitor_(monitor), registrar_(registrar) {}
-  virtual ~RegistrationTask() {}
+void RegistrationCallback(ExtensionsActivityMonitor* monitor,
+                          content::NotificationRegistrar* registrar) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  virtual void Run() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // It would be nice if we could specify a Source for each specific function
+  // we wanted to observe, but the actual function objects are allocated on
+  // the fly so there is no reliable object to point to (same problem if we
+  // wanted to use the string name).  Thus, we use all sources and filter in
+  // Observe.
+  registrar->Add(monitor,
+                 chrome::NOTIFICATION_EXTENSION_BOOKMARKS_API_INVOKED,
+                 content::NotificationService::AllSources());
+}
 
-    // It would be nice if we could specify a Source for each specific function
-    // we wanted to observe, but the actual function objects are allocated on
-    // the fly so there is no reliable object to point to (same problem if we
-    // wanted to use the string name).  Thus, we use all sources and filter in
-    // Observe.
-    registrar_->Add(monitor_,
-                    chrome::NOTIFICATION_EXTENSION_BOOKMARKS_API_INVOKED,
-                    NotificationService::AllSources());
-  }
-
- private:
-  ExtensionsActivityMonitor* monitor_;
-  NotificationRegistrar* registrar_;
-  DISALLOW_COPY_AND_ASSIGN(RegistrationTask);
-};
 }  // namespace
 
 ExtensionsActivityMonitor::ExtensionsActivityMonitor() {
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          new RegistrationTask(this, &registrar_));
+                          base::Bind(&RegistrationCallback, this, &registrar_));
 }
 
 ExtensionsActivityMonitor::~ExtensionsActivityMonitor() {
@@ -80,13 +72,15 @@ void ExtensionsActivityMonitor::PutRecords(const Records& records) {
   }
 }
 
-void ExtensionsActivityMonitor::Observe(int type,
-                                        const NotificationSource& source,
-                                        const NotificationDetails& details) {
+void ExtensionsActivityMonitor::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   base::AutoLock lock(records_lock_);
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  const Extension* extension = Source<const Extension>(source).ptr();
-  const BookmarksFunction* f = Details<const BookmarksFunction>(details).ptr();
+  const Extension* extension = content::Source<const Extension>(source).ptr();
+  const BookmarksFunction* f =
+      content::Details<const BookmarksFunction>(details).ptr();
   if (f->name() == "bookmarks.update" ||
       f->name() == "bookmarks.move" ||
       f->name() == "bookmarks.create" ||

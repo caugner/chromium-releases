@@ -9,7 +9,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/stats_counters.h"
 #include "chrome/common/chrome_content_client.h"
-#include "content/app/content_main_delegate.h"
+#include "content/public/app/content_main_delegate.h"
 
 // Chrome implementation of ContentMainDelegate.
 class ChromeMainDelegate : public content::ContentMainDelegate {
@@ -28,7 +28,7 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
   virtual void SandboxInitialized(const std::string& process_type) OVERRIDE;
   virtual int RunProcess(
       const std::string& process_type,
-      const MainFunctionParams& main_function_params) OVERRIDE;
+      const content::MainFunctionParams& main_function_params) OVERRIDE;
   virtual void ProcessExiting(const std::string& process_type) OVERRIDE;
 
 #if defined(OS_MACOSX)
@@ -38,7 +38,7 @@ class ChromeMainDelegate : public content::ContentMainDelegate {
   virtual bool DelaySandboxInitialization(
       const std::string& process_type) OVERRIDE;
 #elif defined(OS_POSIX)
-  virtual ZygoteForkDelegate* ZygoteStarting() OVERRIDE;
+  virtual content::ZygoteForkDelegate* ZygoteStarting() OVERRIDE;
   virtual void ZygoteForked() OVERRIDE;
 #endif
 

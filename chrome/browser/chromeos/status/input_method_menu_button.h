@@ -11,25 +11,24 @@
 #include "base/compiler_specific.h"
 #include "chrome/browser/chromeos/status/input_method_menu.h"
 #include "chrome/browser/chromeos/status/status_area_button.h"
-#include "views/controls/menu/view_menu_delegate.h"
+#include "ui/views/controls/menu/view_menu_delegate.h"
 
 namespace chromeos {
-
-class StatusAreaHost;
 
 // A class for the button in the status area which expands the dropdown menu for
 // switching input method and keyboard layout.
 class InputMethodMenuButton : public StatusAreaButton,
                               public views::ViewMenuDelegate {
  public:
-  explicit InputMethodMenuButton(StatusAreaHost* host);
+  explicit InputMethodMenuButton(StatusAreaButton::Delegate* delegate);
   virtual ~InputMethodMenuButton();
 
   // views::View implementation.
-  virtual void OnLocaleChanged();
+  virtual void OnLocaleChanged() OVERRIDE;
 
   // views::ViewMenuDelegate implementation.
-  virtual void RunMenu(views::View* unused_source, const gfx::Point& pt);
+  virtual void RunMenu(views::View* unused_source,
+                       const gfx::Point& pt) OVERRIDE;
 
   // InputMethodMenu implementation.
   virtual void UpdateUI(const std::string& input_method_id,

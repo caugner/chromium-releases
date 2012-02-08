@@ -4,9 +4,12 @@
 
 #include "chrome/browser/chromeos/net/network_change_notifier_chromeos.h"
 
-#include "base/task.h"
+#include "base/bind.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -46,7 +49,7 @@ class OnlineStatusReportThreadTask : public CancelableTask {
     parent_->OnOnlineStateNotificationFired();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(
+        base::Bind(
            &NetworkChangeNotifierChromeos::NotifyObserversOfOnlineStateChange));
   }
 
@@ -63,23 +66,27 @@ NetworkChangeNotifierChromeos::NetworkChangeNotifierChromeos()
       connection_state_(chromeos::STATE_UNKNOWN),
       online_notification_task_(NULL) {
 
-  chromeos::NetworkLibrary* net =
-      chromeos::CrosLibrary::Get()->GetNetworkLibrary();
-  net->AddNetworkManagerObserver(this);
-
-  chromeos::PowerLibrary* power =
-      chromeos::CrosLibrary::Get()->GetPowerLibrary();
-  power->AddObserver(this);
-
-  UpdateNetworkState(net);
   BrowserThread::PostDelayedTask(
          BrowserThread::UI, FROM_HERE,
-         NewRunnableFunction(
+         base::Bind(
              &NetworkChangeNotifierChromeos::UpdateInitialState, this),
          kInitialNotificationCheckDelayMS);
 }
 
 NetworkChangeNotifierChromeos::~NetworkChangeNotifierChromeos() {
+}
+
+void NetworkChangeNotifierChromeos::Init() {
+  chromeos::NetworkLibrary* network_library =
+      chromeos::CrosLibrary::Get()->GetNetworkLibrary();
+  network_library->AddNetworkManagerObserver(this);
+
+  DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
+
+  UpdateNetworkState(network_library);
+}
+
+void NetworkChangeNotifierChromeos::Shutdown() {
   if (online_notification_task_) {
     online_notification_task_->Cancel();
     online_notification_task_ = NULL;
@@ -91,19 +98,18 @@ NetworkChangeNotifierChromeos::~NetworkChangeNotifierChromeos() {
   lib->RemoveNetworkManagerObserver(this);
   lib->RemoveObserverForAllNetworks(this);
 
-  chromeos::PowerLibrary* power =
-      chromeos::CrosLibrary::Get()->GetPowerLibrary();
-  power->RemoveObserver(this);
+  DBusThreadManager::Get()->GetPowerManagerClient()->RemoveObserver(this);
 }
 
-void NetworkChangeNotifierChromeos::PowerChanged(PowerLibrary* obj) {
+void NetworkChangeNotifierChromeos::PowerChanged(
+    const PowerSupplyStatus& status) {
 }
 
 void NetworkChangeNotifierChromeos::SystemResumed() {
   // Force invalidation of various net resources on system resume.
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableFunction(
+      base::Bind(
           &NetworkChangeNotifier::NotifyObserversOfIPAddressChange));
 }
 
@@ -166,7 +172,7 @@ void NetworkChangeNotifierChromeos::UpdateNetworkState(
     DVLOG(1) << "NotifyObserversOfIPAddressChange!!";
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableFunction(
+        base::Bind(
             &NetworkChangeNotifier::NotifyObserversOfIPAddressChange));
   }
 }
@@ -254,4 +260,4 @@ void NetworkChangeNotifierChromeos::UpdateInitialState(
   self->UpdateNetworkState(net);
 }
 
-}  // namespace net
+}  // namespace chromeos

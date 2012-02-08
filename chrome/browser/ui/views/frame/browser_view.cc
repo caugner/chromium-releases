@@ -27,6 +27,7 @@
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/extensions/extension_tts_api.h"
 #include "chrome/browser/instant/instant_controller.h"
+#include "chrome/browser/native_window_notification_source.h"
 #include "chrome/browser/ntp_background_util.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/avatar_menu_model.h"
@@ -43,11 +44,13 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/toolbar/wrench_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/avatar_menu_bubble_view.h"
+#include "chrome/browser/ui/views/avatar_menu_button.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_bar_view.h"
 #include "chrome/browser/ui/views/browser_dialogs.h"
 #include "chrome/browser/ui/views/default_search_view.h"
@@ -57,12 +60,10 @@
 #include "chrome/browser/ui/views/fullscreen_exit_bubble_views.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/location_bar/location_icon_view.h"
-#include "chrome/browser/ui/views/page_info_window.h"
 #include "chrome/browser/ui/views/status_bubble_views.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tabs/browser_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_factory.h"
-#include "chrome/browser/ui/views/theme_install_bubble_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/browser/ui/views/update_recommended_message_box.h"
 #include "chrome/browser/ui/views/window.h"
@@ -72,7 +73,6 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "chrome/common/native_window_notification_source.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/download/download_manager.h"
@@ -81,7 +81,7 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -90,34 +90,37 @@
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
 #include "grit/webkit_resources.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/accessibility/accessible_view_state.h"
+#include "ui/base/hit_test.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
-#include "views/controls/single_split_view.h"
-#include "views/events/event.h"
-#include "views/focus/external_focus_tracker.h"
-#include "views/focus/view_storage.h"
-#include "views/layout/grid_layout.h"
-#include "views/widget/native_widget.h"
-#include "views/widget/root_view.h"
-#include "views/widget/widget.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/controls/single_split_view.h"
+#include "ui/views/events/event.h"
+#include "ui/views/focus/external_focus_tracker.h"
+#include "ui/views/focus/view_storage.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/widget/native_widget.h"
+#include "ui/views/widget/root_view.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/dialog_delegate.h"
 
 #if defined(USE_AURA)
+#include "chrome/browser/ui/views/accelerator_table.h"
+#include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
 #include "chrome/browser/ui/views/aura/launcher_icon_updater.h"
 #include "ui/aura_shell/launcher/launcher.h"
 #include "ui/aura_shell/launcher/launcher_model.h"
 #include "ui/aura_shell/shell.h"
-#include "ui/base/view_prop.h"
+#include "ui/gfx/screen.h"
 #elif defined(OS_WIN)
 #include "chrome/browser/aeropeek_manager.h"
 #include "chrome/browser/jumplist_win.h"
 #include "ui/base/message_box_win.h"
-#include "views/widget/native_widget_win.h"
+#include "ui/views/widget/native_widget_win.h"
 #elif defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/ui/views/accelerator_table_linux.h"
-#include "views/window/hit_test.h"
+#include "chrome/browser/ui/views/accelerator_table.h"
 #if !defined(TOUCH_UI)
 #include "chrome/browser/ui/views/handle_web_keyboard_event.h"
 #endif
@@ -125,15 +128,14 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/ui/views/keyboard_overlay_dialog_view.h"
-#else
+#include "chrome/browser/ui/webui/chromeos/mobile_setup_dialog.h"
+#endif
+
+#if !defined(OS_CHROMEOS) || defined(USE_AURA)
 #include "chrome/browser/ui/views/download/download_shelf_view.h"
 #endif
 
-#if defined(OS_WIN) && !defined(USE_AURA)
-#include "ui/base/view_prop.h"
-#endif
-
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
 #include "chrome/browser/ui/touch/status_bubble_touch.h"
 #endif
 
@@ -141,29 +143,38 @@ using base::TimeDelta;
 using views::ColumnSet;
 using views::GridLayout;
 
+namespace {
 // The height of the status bubble.
-static const int kStatusBubbleHeight = 20;
+const int kStatusBubbleHeight = 20;
 // The name of a key to store on the window handle so that other code can
 // locate this object using just the handle.
-static const char* const kBrowserViewKey = "__BROWSER_VIEW__";
+const char* const kBrowserViewKey = "__BROWSER_VIEW__";
 // How frequently we check for hung plugin windows.
-static const int kDefaultHungPluginDetectFrequency = 2000;
+const int kDefaultHungPluginDetectFrequency = 2000;
 
 // Minimal height of devtools pane or content pane when devtools are docked
 // to the browser window.
 const int kMinDevToolsHeight = 50;
 const int kMinContentsHeight = 50;
 
+#if defined(USE_AURA) && defined(OS_CHROMEOS)
+// If a popup window is larger than this fraction of the screen, create a tab.
+const float kPopupMaxWidthFactor = 0.5;
+const float kPopupMaxHeightFactor = 0.6;
+#endif
+
 // How long do we wait before we consider a window hung (in ms).
-static const int kDefaultPluginMessageResponseTimeout = 30000;
+const int kDefaultPluginMessageResponseTimeout = 30000;
 // The number of milliseconds between loading animation frames.
-static const int kLoadingAnimationFrameTimeMs = 30;
+const int kLoadingAnimationFrameTimeMs = 30;
 // The amount of space we expect the window border to take up.
-static const int kWindowBorderWidth = 5;
+const int kWindowBorderWidth = 5;
 
 // How round the 'new tab' style bookmarks bar is.
-static const int kNewtabBarRoundness = 5;
+const int kNewtabBarRoundness = 5;
 // ------------
+
+}  // namespace
 
 // Returned from BrowserView::GetClassName.
 const char BrowserView::kViewClassName[] = "browser/ui/views/BrowserView";
@@ -324,16 +335,22 @@ BrowserView::BrowserView(Browser* browser)
       hung_window_detector_(&hung_plugin_action_),
       ticker_(0),
 #endif
-      force_location_bar_focus_(false)
-                 {
+      force_location_bar_focus_(false) {
   browser_->tabstrip_model()->AddObserver(this);
 
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_SIDEBAR_CHANGED,
-                 Source<SidebarManager>(SidebarManager::GetInstance()));
+  registrar_.Add(
+      this,
+      chrome::NOTIFICATION_SIDEBAR_CHANGED,
+      content::Source<SidebarManager>(SidebarManager::GetInstance()));
 }
 
 BrowserView::~BrowserView() {
+#if defined(USE_AURA)
+  // Destroy LauncherIconUpdater early on as it listens to the TabstripModel,
+  // which is destroyed by the browser.
+  icon_updater_.reset();
+#endif
+
   browser_->tabstrip_model()->RemoveObserver(this);
 
 #if defined(OS_WIN) && !defined(USE_AURA)
@@ -352,7 +369,7 @@ BrowserView::~BrowserView() {
   }
 #endif
 
-#if !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) || defined(USE_AURA)
   // We destroy the download shelf before |browser_| to remove its child
   // download views from the set of download observers (since the observed
   // downloads can be destroyed along with |browser_| and the observer
@@ -378,8 +395,10 @@ BrowserView::~BrowserView() {
 // static
 BrowserView* BrowserView::GetBrowserViewForNativeWindow(
     gfx::NativeWindow window) {
-  return reinterpret_cast<BrowserView*>(
-      ui::ViewProp::GetValue(window, kBrowserViewKey));
+  views::Widget* widget = views::Widget::GetWidgetForNativeWindow(window);
+  return widget ?
+      reinterpret_cast<BrowserView*>(widget->GetNativeWindowProperty(
+          kBrowserViewKey)) : NULL;
 }
 #endif
 
@@ -456,7 +475,7 @@ bool BrowserView::ShouldShowAvatar() const {
   return AvatarMenuModel::ShouldShowAvatarMenu();
 }
 
-bool BrowserView::AcceleratorPressed(const views::Accelerator& accelerator) {
+bool BrowserView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 #if defined(OS_CHROMEOS)
   // If accessibility is enabled, stop speech and return false so that key
   // combinations involving Search can be used for extra accessibility
@@ -469,7 +488,7 @@ bool BrowserView::AcceleratorPressed(const views::Accelerator& accelerator) {
   }
 #endif
 
-  std::map<views::Accelerator, int>::const_iterator iter =
+  std::map<ui::Accelerator, int>::const_iterator iter =
       accelerator_table_.find(accelerator);
   DCHECK(iter != accelerator_table_.end());
   int command_id = iter->second;
@@ -484,18 +503,17 @@ bool BrowserView::GetAccelerator(int cmd_id, ui::Accelerator* accelerator) {
   // anywhere so we need to check for them explicitly here.
   switch (cmd_id) {
     case IDC_CUT:
-      *accelerator = views::Accelerator(ui::VKEY_X, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_X, false, true, false);
       return true;
     case IDC_COPY:
-      *accelerator = views::Accelerator(ui::VKEY_C, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_C, false, true, false);
       return true;
     case IDC_PASTE:
-      *accelerator = views::Accelerator(ui::VKEY_V, false, true, false);
+      *accelerator = ui::Accelerator(ui::VKEY_V, false, true, false);
       return true;
   }
   // Else, we retrieve the accelerator information from the accelerator table.
-  std::map<views::Accelerator, int>::iterator it =
-      accelerator_table_.begin();
+  std::map<ui::Accelerator, int>::iterator it = accelerator_table_.begin();
   for (; it != accelerator_table_.end(); ++it) {
     if (it->second == cmd_id) {
       *accelerator = it->first;
@@ -610,8 +628,6 @@ void BrowserView::SetBounds(const gfx::Rect& bounds) {
 }
 
 void BrowserView::Close() {
-  BrowserBubbleHost::Close();
-
   frame_->Close();
 }
 
@@ -766,16 +782,31 @@ bool BrowserView::IsMinimized() const {
   return frame_->IsMinimized();
 }
 
+void BrowserView::Maximize() {
+  frame_->Maximize();
+}
+
+void BrowserView::Minimize() {
+  frame_->Minimize();
+}
+
+void BrowserView::Restore() {
+  frame_->Restore();
+}
+
 void BrowserView::EnterFullscreen(
     const GURL& url, FullscreenExitBubbleType bubble_type) {
   if (IsFullscreen())
     return;  // Nothing to do.
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
   ProcessFullscreen(true, url, bubble_type);
 #else
-  // On Linux changing fullscreen is async. Ask the window to change it's
+  // On Linux/gtk changing fullscreen is async. Ask the window to change it's
   // fullscreen state, and when done invoke ProcessFullscreen.
+  fullscreen_request_.pending = true;
+  fullscreen_request_.url = url;
+  fullscreen_request_.bubble_type = bubble_type;
   frame_->SetFullscreen(true);
 #endif
 }
@@ -784,9 +815,10 @@ void BrowserView::ExitFullscreen() {
   if (!IsFullscreen())
     return;  // Nothing to do.
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(USE_AURA)
   ProcessFullscreen(false, GURL(), FEB_TYPE_NONE);
 #else
+  fullscreen_request_.pending = false;
   // On Linux changing fullscreen is async. Ask the window to change it's
   // fullscreen state, and when done invoke ProcessFullscreen.
   frame_->SetFullscreen(false);
@@ -809,9 +841,18 @@ bool BrowserView::IsFullscreenBubbleVisible() const {
 }
 
 void BrowserView::FullScreenStateChanged() {
-  bool is_fullscreen = IsFullscreen();
-  ProcessFullscreen(is_fullscreen, GURL(), is_fullscreen ?
-      FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION : FEB_TYPE_NONE);
+  if (IsFullscreen()) {
+    if (fullscreen_request_.pending) {
+      fullscreen_request_.pending = false;
+      ProcessFullscreen(true, fullscreen_request_.url,
+                        fullscreen_request_.bubble_type);
+    } else {
+      ProcessFullscreen(true, GURL(),
+                        FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION);
+    }
+  } else {
+    ProcessFullscreen(false, GURL(), FEB_TYPE_NONE);
+  }
 }
 
 void BrowserView::RestoreFocus() {
@@ -857,17 +898,14 @@ void BrowserView::UpdateToolbar(TabContentsWrapper* contents,
 }
 
 void BrowserView::FocusToolbar() {
-  // Start the traversal within the main toolbar, passing it the storage id
-  // of the view where focus should be returned if the user exits the toolbar.
-  SaveFocusedView();
-  toolbar_->SetPaneFocus(last_focused_view_storage_id_, NULL);
+  // Start the traversal within the main toolbar. SetPaneFocus stores
+  // the current focused view before changing focus.
+  toolbar_->SetPaneFocus(NULL);
 }
 
 void BrowserView::FocusBookmarksToolbar() {
-  if (active_bookmark_bar_ && bookmark_bar_view_->IsVisible()) {
-    SaveFocusedView();
-    bookmark_bar_view_->SetPaneFocus(last_focused_view_storage_id_, NULL);
-  }
+  if (active_bookmark_bar_ && bookmark_bar_view_->IsVisible())
+    bookmark_bar_view_->SetPaneFocus(bookmark_bar_view_.get());
 }
 
 void BrowserView::FocusAppMenu() {
@@ -881,8 +919,7 @@ void BrowserView::FocusAppMenu() {
   if (toolbar_->IsAppMenuFocused()) {
     RestoreFocus();
   } else {
-    SaveFocusedView();
-    toolbar_->SetPaneFocusAndFocusAppMenu(last_focused_view_storage_id_);
+    toolbar_->SetPaneFocusAndFocusAppMenu();
   }
 }
 
@@ -897,7 +934,7 @@ void BrowserView::RotatePaneFocus(bool forwards) {
   // with NULL to represent the tab contents getting focus. If one of these
   // is currently invisible or has no focusable children it will be
   // automatically skipped.
-  std::vector<AccessiblePaneView*> accessible_panes;
+  std::vector<views::AccessiblePaneView*> accessible_panes;
   GetAccessiblePanes(&accessible_panes);
   int pane_count = static_cast<int>(accessible_panes.size());
 
@@ -911,7 +948,7 @@ void BrowserView::RotatePaneFocus(bool forwards) {
   int count = static_cast<int>(accessible_views.size());
 
   // Figure out which view (if any) currently has the focus.
-  views::View* focused_view = GetFocusManager()->GetFocusedView();
+  const views::View* focused_view = GetFocusManager()->GetFocusedView();
   int index = -1;
   if (focused_view) {
     for (int i = 0; i < count; ++i) {
@@ -926,7 +963,7 @@ void BrowserView::RotatePaneFocus(bool forwards) {
   // If the focus isn't currently in a pane, save the focus so we
   // can restore it if the user presses Escape.
   if (focused_view && index >= pane_count)
-    SaveFocusedView();
+    GetFocusManager()->StoreFocusedView();
 
   // Try to focus the next pane; if SetPaneFocusAndFocusDefault returns
   // false it means the pane didn't have any focusable controls, so skip
@@ -938,24 +975,13 @@ void BrowserView::RotatePaneFocus(bool forwards) {
       index = ((index - 1) + count) % count;
 
     if (index < pane_count) {
-      if (accessible_panes[index]->SetPaneFocusAndFocusDefault(
-              last_focused_view_storage_id_)) {
+      if (accessible_panes[index]->SetPaneFocusAndFocusDefault())
         break;
-      }
     } else {
       accessible_views[index]->RequestFocus();
       break;
     }
   }
-}
-
-void BrowserView::SaveFocusedView() {
-  views::ViewStorage* view_storage = views::ViewStorage::GetInstance();
-  if (view_storage->RetrieveView(last_focused_view_storage_id_))
-    view_storage->RemoveView(last_focused_view_storage_id_);
-  views::View* focused_view = GetFocusManager()->GetFocusedView();
-  if (focused_view)
-    view_storage->StoreView(last_focused_view_storage_id_, focused_view);
 }
 
 void BrowserView::DestroyBrowser() {
@@ -1004,8 +1030,12 @@ void BrowserView::ConfirmSetDefaultSearchProvider(TabContents* tab_contents,
 
 void BrowserView::ConfirmAddSearchProvider(const TemplateURL* template_url,
                                            Profile* profile) {
+#if defined(USE_AURA)
+  browser::ConfirmAddSearchProvider(template_url, profile);
+#else
   browser::EditSearchEngine(GetWidget()->GetNativeWindow(), template_url, NULL,
                             profile);
+#endif
 }
 
 void BrowserView::ToggleBookmarkBar() {
@@ -1078,7 +1108,7 @@ void BrowserView::SetDownloadShelfVisible(bool visible) {
 }
 
 bool BrowserView::IsDownloadShelfVisible() const {
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
   return false;
 #else
   return download_shelf_.get() && download_shelf_->IsShowing();
@@ -1086,7 +1116,7 @@ bool BrowserView::IsDownloadShelfVisible() const {
 }
 
 DownloadShelf* BrowserView::GetDownloadShelf() {
-#if defined(OS_CHROMEOS)
+#if defined(OS_CHROMEOS) && !defined(USE_AURA)
   NOTREACHED();
   return NULL;
 #else
@@ -1106,17 +1136,10 @@ void BrowserView::ShowCollectedCookiesDialog(TabContentsWrapper* wrapper) {
   browser::ShowCollectedCookiesDialog(GetNativeHandle(), wrapper);
 }
 
-void BrowserView::ShowThemeInstallBubble() {
-  TabContents* tab_contents = browser_->GetSelectedTabContents();
-  if (!tab_contents)
-    return;
-  ThemeInstallBubbleView::Show(tab_contents);
-}
-
 void BrowserView::ConfirmBrowserCloseWithPendingDownloads() {
   DownloadInProgressDialogView* view =
       new DownloadInProgressDialogView(browser_.get());
-  browser::CreateViewsWindow(GetNativeHandle(), view)->Show();
+  browser::CreateViewsWindow(GetNativeHandle(), view, STYLE_GENERIC)->Show();
 }
 
 void BrowserView::ShowCreateWebAppShortcutsDialog(
@@ -1146,7 +1169,8 @@ void BrowserView::ShowPageInfo(Profile* profile,
                                const GURL& url,
                                const NavigationEntry::SSLStatus& ssl,
                                bool show_history) {
-  browser::ShowPageInfoBubble(this, profile, url, ssl, show_history);
+  browser::ShowPageInfoBubble(GetLocationBarView()->location_icon_view(),
+                              profile, url, ssl, show_history);
 }
 
 void BrowserView::ShowAppMenu() {
@@ -1180,12 +1204,12 @@ bool BrowserView::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
   // it'll be best if we can unify these conversion tables.
   // See http://crbug.com/54315
   views::KeyEvent views_event(reinterpret_cast<GdkEvent*>(event.os_event));
-  views::Accelerator accelerator(views_event.key_code(),
-                                 views_event.IsShiftDown(),
-                                 views_event.IsControlDown(),
-                                 views_event.IsAltDown());
+  ui::Accelerator accelerator(views_event.key_code(),
+                              views_event.IsShiftDown(),
+                              views_event.IsControlDown(),
+                              views_event.IsAltDown());
 #else
-  views::Accelerator accelerator(
+  ui::Accelerator accelerator(
       static_cast<ui::KeyboardCode>(event.windowsKeyCode),
       (event.modifiers & NativeWebKeyboardEvent::ShiftKey) ==
           NativeWebKeyboardEvent::ShiftKey,
@@ -1291,6 +1315,22 @@ gfx::Rect BrowserView::GetInstantBounds() {
 
 WindowOpenDisposition BrowserView::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
+#if defined(USE_AURA) && defined(OS_CHROMEOS)
+  // If a popup is larger than a given fraction of the screen, turn it into
+  // a foreground tab. Also check for width or height == 0, which would
+  // indicate a tab sized popup window.
+  gfx::Size size = gfx::Screen::GetMonitorAreaNearestWindow(
+      GetWidget()->GetNativeView()).size();
+  int max_width = size.width() * kPopupMaxWidthFactor;
+  int max_height = size.height() * kPopupMaxHeightFactor;
+
+  if (bounds.width() > max_width ||
+      bounds.width() == 0 ||
+      bounds.height() > max_height ||
+      bounds.height() == 0) {
+    return NEW_FOREGROUND_TAB;
+  }
+#endif
   return NEW_POPUP;
 }
 
@@ -1299,6 +1339,10 @@ FindBar* BrowserView::CreateFindBar() {
 }
 
 #if defined(OS_CHROMEOS)
+void BrowserView::ShowMobileSetup() {
+  MobileSetupDialog::Show();
+}
+
 void BrowserView::ShowKeyboardOverlay(gfx::NativeWindow owning_window) {
 #if defined(TOOLKIT_USES_GTK)
   KeyboardOverlayDialogView::ShowDialog(owning_window, this);
@@ -1335,14 +1379,14 @@ ToolbarView* BrowserView::GetToolbarView() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// BrowserView, NotificationObserver implementation:
+// BrowserView, content::NotificationObserver implementation:
 
 void BrowserView::Observe(int type,
-                          const NotificationSource& source,
-                          const NotificationDetails& details) {
+                          const content::NotificationSource& source,
+                          const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_SIDEBAR_CHANGED:
-      if (Details<SidebarContainer>(details)->tab_contents() ==
+      if (content::Details<SidebarContainer>(details)->tab_contents() ==
           browser_->GetSelectedTabContents()) {
         UpdateSidebar();
       }
@@ -1631,8 +1675,6 @@ void BrowserView::OnWidgetMove() {
   if (status_bubble_.get())
     status_bubble_->Reposition();
 
-  BrowserBubbleHost::WindowMoved();
-
   browser::HideBookmarkBubbleView();
 
   // Close the omnibox popup, if any.
@@ -1673,10 +1715,10 @@ bool BrowserView::CanClose() {
   }
 
   // Empty TabStripModel, it's now safe to allow the Window to be closed.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_WINDOW_CLOSED,
-      Source<gfx::NativeWindow>(frame_->GetNativeWindow()),
-      NotificationService::NoDetails());
+      content::Source<gfx::NativeWindow>(frame_->GetNativeWindow()),
+      content::NotificationService::NoDetails());
   return true;
 }
 
@@ -1714,7 +1756,7 @@ gfx::Size BrowserView::GetMinimumSize() {
 // BrowserView, protected
 
 void BrowserView::GetAccessiblePanes(
-    std::vector<AccessiblePaneView*>* panes) {
+    std::vector<views::AccessiblePaneView*>* panes) {
   // This should be in the order of pane traversal of the panes using F6.
   // If one of these is invisible or has no focusable children, it will be
   // automatically skipped.
@@ -1723,7 +1765,7 @@ void BrowserView::GetAccessiblePanes(
     panes->push_back(bookmark_bar_view_.get());
   if (infobar_container_)
     panes->push_back(infobar_container_);
-#if !defined(OS_CHROMEOS)
+#if !defined(OS_CHROMEOS) || defined(USE_AURA)
   if (download_shelf_.get())
     panes->push_back(download_shelf_.get());
 #endif
@@ -1810,9 +1852,9 @@ bool BrowserView::DrawInfoBarArrows(int* x) const {
   return true;
 }
 
-bool BrowserView::SplitHandleMoved(views::SingleSplitView* view) {
-  for (int i = 0; i < view->child_count(); ++i)
-    view->child_at(i)->InvalidateLayout();
+bool BrowserView::SplitHandleMoved(views::SingleSplitView* sender) {
+  for (int i = 0; i < sender->child_count(); ++i)
+    sender->child_at(i)->InvalidateLayout();
   SchedulePaint();
   Layout();
   return false;
@@ -1904,15 +1946,12 @@ void BrowserView::Init() {
   contents_split_->set_id(VIEW_ID_CONTENTS_SPLIT);
   contents_split_->SetAccessibleName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_WEB_CONTENTS));
-#if !defined(TOUCH_UI)
-  // In TOUCH_UI we paint the background in native_tab_contents_view.
   contents_split_->set_background(
       views::Background::CreateSolidBackground(bg_color));
-#endif
   AddChildView(contents_split_);
   set_contents_view(contents_split_);
 
-#if defined(TOUCH_UI)
+#if defined(USE_VIRTUAL_KEYBOARD)
   status_bubble_.reset(new StatusBubbleTouch(contents_));
 #else
   status_bubble_.reset(new StatusBubbleViews(contents_));
@@ -1939,10 +1978,14 @@ void BrowserView::Init() {
   ignore_layout_ = false;
 
 #if defined(USE_AURA)
-  icon_updater_.reset(new LauncherIconUpdater(
-      browser_->tabstrip_model(),
-      aura_shell::Shell::GetInstance()->launcher()->model(),
-      frame_->GetNativeWindow()));
+  aura_shell::LauncherItemType type;
+  if (ChromeShellDelegate::ShouldCreateLauncherItemForBrowser(browser_.get(),
+                                                              &type)) {
+    icon_updater_.reset(new LauncherIconUpdater(
+        browser_->tabstrip_model(),
+        aura_shell::Shell::GetInstance()->launcher()->model(),
+        frame_->GetNativeWindow()));
+  }
 #endif
 }
 
@@ -2241,10 +2284,10 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
 #endif
 
   // Toggle fullscreen mode.
-#if defined(OS_WIN) && !defined(USE_AURA)
+#if defined(OS_WIN) || defined(USE_AURA)
   frame_->SetFullscreen(fullscreen);
-#endif  // No need to invoke SetFullscreen for linux as this code is executed
-        // once we're already fullscreen on linux.
+#endif  // No need to invoke SetFullscreen for linux/gtk as this code
+        // is executed once we're already fullscreen on linux.
 
   browser_->WindowFullscreenStateChanged();
 
@@ -2274,10 +2317,7 @@ void BrowserView::ProcessFullscreen(bool fullscreen,
 }
 
 void BrowserView::LoadAccelerators() {
-#if defined(USE_AURA)
-  // TODO(beng):
-  NOTIMPLEMENTED();
-#elif defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   HACCEL accelerator_table = AtlLoadAccelerators(IDR_MAINFRAME);
   DCHECK(accelerator_table);
 
@@ -2299,7 +2339,7 @@ void BrowserView::LoadAccelerators() {
     bool alt_down = (accelerators[i].fVirt & FALT) == FALT;
     bool ctrl_down = (accelerators[i].fVirt & FCONTROL) == FCONTROL;
     bool shift_down = (accelerators[i].fVirt & FSHIFT) == FSHIFT;
-    views::Accelerator accelerator(
+    ui::Accelerator accelerator(
         static_cast<ui::KeyboardCode>(accelerators[i].key),
         shift_down, ctrl_down, alt_down);
     accelerator_table_[accelerator] = accelerators[i].cmd;
@@ -2315,10 +2355,10 @@ void BrowserView::LoadAccelerators() {
   DCHECK(focus_manager);
   // Let's fill our own accelerator table.
   for (size_t i = 0; i < browser::kAcceleratorMapLength; ++i) {
-    views::Accelerator accelerator(browser::kAcceleratorMap[i].keycode,
-                                   browser::kAcceleratorMap[i].shift_pressed,
-                                   browser::kAcceleratorMap[i].ctrl_pressed,
-                                   browser::kAcceleratorMap[i].alt_pressed);
+    ui::Accelerator accelerator(browser::kAcceleratorMap[i].keycode,
+                                browser::kAcceleratorMap[i].shift_pressed,
+                                browser::kAcceleratorMap[i].ctrl_pressed,
+                                browser::kAcceleratorMap[i].alt_pressed);
     accelerator_table_[accelerator] = browser::kAcceleratorMap[i].command_id;
 
     // Also register with the focus manager.
@@ -2448,7 +2488,7 @@ void BrowserView::InitHangMonitor() {
 }
 
 void BrowserView::UpdateAcceleratorMetrics(
-    const views::Accelerator& accelerator, int command_id) {
+    const ui::Accelerator& accelerator, int command_id) {
   const ui::KeyboardCode key_code = accelerator.key_code();
   if (command_id == IDC_HELP_PAGE && key_code == ui::VKEY_F1)
     UserMetrics::RecordAction(UserMetricsAction("ShowHelpTabViaF1"));
@@ -2589,14 +2629,19 @@ BrowserWindow* BrowserWindow::CreateBrowserWindow(Browser* browser) {
 
 void BrowserView::ShowAvatarBubble(TabContents* tab_contents,
                                    const gfx::Rect& rect) {
-  gfx::Point origin(rect.right(), rect.bottom());
+  gfx::Point origin(rect.origin());
   views::View::ConvertPointToScreen(GetTabContentsContainerView(), &origin);
-  gfx::Rect bounds;
-  bounds.set_origin(origin);
+  gfx::Rect bounds(origin, rect.size());
 
-  AvatarMenuBubbleView* bubble_view = new AvatarMenuBubbleView(browser_.get());
-  // Bubble::Show() takes ownership of the view.
-  Bubble::Show(this->GetWidget(), bounds,
-               views::BubbleBorder::TOP_RIGHT,
-               bubble_view, bubble_view);
+  AvatarMenuBubbleView* bubble = new AvatarMenuBubbleView(this,
+      views::BubbleBorder::TOP_RIGHT, bounds, browser_.get());
+  browser::CreateViewsBubble(bubble);
+  bubble->SetAlignment(views::BubbleBorder::ALIGN_EDGE_TO_ANCHOR_EDGE);
+  bubble->Show();
+}
+
+void BrowserView::ShowAvatarBubbleFromAvatarButton() {
+  AvatarMenuButton* button = frame_->GetAvatarMenuButton();
+  if (button)
+    button->ShowAvatarBubble();
 }

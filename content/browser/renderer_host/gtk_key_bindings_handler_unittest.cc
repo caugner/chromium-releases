@@ -14,9 +14,9 @@
 #include "base/logging.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
-#include "content/common/content_paths.h"
 #include "content/common/edit_command.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/common/content_paths.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 class GtkKeyBindingsHandlerTest : public testing::Test {
@@ -67,7 +67,7 @@ class GtkKeyBindingsHandlerTest : public testing::Test {
       event.group = keys[0].group;
       event.is_modifier = 0;
       g_free(keys);
-      return NativeWebKeyboardEvent(&event);
+      return NativeWebKeyboardEvent(reinterpret_cast<GdkEvent*>(&event));
     }
     LOG(ERROR) << "Failed to create key event for keyval:" << keyval;
     return NativeWebKeyboardEvent();

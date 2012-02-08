@@ -11,6 +11,7 @@
 
 #include "chrome/browser/safe_browsing/safe_browsing_store.h"
 
+#include "base/callback.h"
 #include "base/file_util.h"
 
 // Implement SafeBrowsingStore in terms of a flat file.  The file
@@ -116,7 +117,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
 
   // Get all add hash prefixes and full-length hashes, respectively, from
   // the store.
-  virtual bool GetAddPrefixes(std::vector<SBAddPrefix>* add_prefixes) OVERRIDE;
+  virtual bool GetAddPrefixes(SBAddPrefixes* add_prefixes) OVERRIDE;
   virtual bool GetAddFullHashes(
       std::vector<SBAddFullHash>* add_full_hashes) OVERRIDE;
 
@@ -127,7 +128,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
                             base::Time receive_time,
                             const SBFullHash& full_hash) OVERRIDE;
   virtual bool WriteSubPrefix(int32 chunk_id,
-                              int32 add_chunk_id, SBPrefix prefix);
+                              int32 add_chunk_id, SBPrefix prefix) OVERRIDE;
   virtual bool WriteSubHash(int32 chunk_id, int32 add_chunk_id,
                             const SBFullHash& full_hash) OVERRIDE;
   virtual bool FinishChunk() OVERRIDE;
@@ -138,7 +139,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   virtual bool FinishUpdate(
       const std::vector<SBAddFullHash>& pending_adds,
       const std::set<SBPrefix>& prefix_misses,
-      std::vector<SBAddPrefix>* add_prefixes_result,
+      SBAddPrefixes* add_prefixes_result,
       std::vector<SBAddFullHash>* add_full_hashes_result) OVERRIDE;
   virtual bool CancelUpdate() OVERRIDE;
 
@@ -162,7 +163,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   // Update store file with pending full hashes.
   virtual bool DoUpdate(const std::vector<SBAddFullHash>& pending_adds,
                         const std::set<SBPrefix>& prefix_misses,
-                        std::vector<SBAddPrefix>* add_prefixes_result,
+                        SBAddPrefixes* add_prefixes_result,
                         std::vector<SBAddFullHash>* add_full_hashes_result);
 
   // Enumerate different format-change events for histogramming
@@ -222,7 +223,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
     // TODO(shess): Figure out if this is overkill.  Some amount of
     // pre-reserved space is probably reasonable between each chunk
     // collected.
-    std::vector<SBAddPrefix>().swap(add_prefixes_);
+    SBAddPrefixes().swap(add_prefixes_);
     std::vector<SBSubPrefix>().swap(sub_prefixes_);
     std::vector<SBAddFullHash>().swap(add_hashes_);
     std::vector<SBSubFullHash>().swap(sub_hashes_);
@@ -241,7 +242,7 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
 
   // Buffers for collecting data between BeginChunk() and
   // FinishChunk().
-  std::vector<SBAddPrefix> add_prefixes_;
+  SBAddPrefixes add_prefixes_;
   std::vector<SBSubPrefix> sub_prefixes_;
   std::vector<SBAddFullHash> add_hashes_;
   std::vector<SBSubFullHash> sub_hashes_;
@@ -270,10 +271,6 @@ class SafeBrowsingStoreFile : public SafeBrowsingStore {
   // slower than plain set<>.
   base::hash_set<int32> add_del_cache_;
   base::hash_set<int32> sub_del_cache_;
-
-  // Count number of add_prefix items added during the course of an
-  // update, for purposes of optimizing vector sizing at commit time.
-  size_t add_prefixes_added_;
 
   base::Closure corruption_callback_;
 

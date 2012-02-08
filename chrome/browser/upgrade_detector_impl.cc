@@ -6,9 +6,12 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/command_line.h"
+#include "base/file_path.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
+#include "base/path_service.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/task.h"
@@ -17,7 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/installer/util/browser_distribution.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_WIN)
@@ -28,6 +31,8 @@
 #include "base/process_util.h"
 #include "base/version.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -63,20 +68,12 @@ int GetCheckForUpgradeEveryMs() {
 // callback task. Otherwise it just deletes the task.
 class DetectUpgradeTask : public Task {
  public:
-  DetectUpgradeTask(Task* upgrade_detected_task,
+  DetectUpgradeTask(const base::Closure& upgrade_detected_task,
                     bool* is_unstable_channel,
                     bool* is_critical_upgrade)
       : upgrade_detected_task_(upgrade_detected_task),
         is_unstable_channel_(is_unstable_channel),
         is_critical_upgrade_(is_critical_upgrade) {
-  }
-
-  virtual ~DetectUpgradeTask() {
-    if (upgrade_detected_task_) {
-      // This has to get deleted on the same thread it was created.
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              new DeleteTask<Task>(upgrade_detected_task_));
-    }
   }
 
   virtual void Run() {
@@ -89,21 +86,24 @@ class DetectUpgradeTask : public Task {
     // Get the version of the currently *installed* instance of Chrome,
     // which might be newer than the *running* instance if we have been
     // upgraded in the background.
+    FilePath exe_path;
+    if (!PathService::Get(base::DIR_EXE, &exe_path)) {
+      NOTREACHED() << "Failed to find executable path";
+      return;
+    }
+
+    bool system_install =
+        !InstallUtil::IsPerUserInstall(exe_path.value().c_str());
+
     // TODO(tommi): Check if using the default distribution is always the right
     // thing to do.
     BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    installed_version.reset(InstallUtil::GetChromeVersion(dist, false));
+    installed_version.reset(InstallUtil::GetChromeVersion(dist,
+                                                          system_install));
 
     if (installed_version.get()) {
-#if defined(OS_WIN)
-      // Critical version detection is only supported for user-level Chrome
-      // since elevation is needed for system-level Chrome (and this runs in
-      // the background -- don't want to prompt).
-      critical_update.reset(InstallUtil::GetCriticalUpdateVersion(dist));
-#endif
-    } else {
-      // User-level Chrome is not installed, check system-level.
-      installed_version.reset(InstallUtil::GetChromeVersion(dist, true));
+      critical_update.reset(
+          InstallUtil::GetCriticalUpdateVersion(dist, system_install));
     }
 #elif defined(OS_MACOSX)
     installed_version.reset(
@@ -153,12 +153,12 @@ class DetectUpgradeTask : public Task {
       // Fire off the upgrade detected task.
       BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
                               upgrade_detected_task_);
-      upgrade_detected_task_ = NULL;
+      upgrade_detected_task_.Reset();
     }
   }
 
  private:
-  Task* upgrade_detected_task_;
+  base::Closure upgrade_detected_task_;
   bool* is_unstable_channel_;
   bool* is_critical_upgrade_;
 };
@@ -166,7 +166,7 @@ class DetectUpgradeTask : public Task {
 }  // namespace
 
 UpgradeDetectorImpl::UpgradeDetectorImpl()
-    : ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       is_unstable_channel_(false) {
   CommandLine command_line(*CommandLine::ForCurrentProcess());
   if (command_line.HasSwitch(switches::kDisableBackgroundNetworking))
@@ -190,9 +190,10 @@ UpgradeDetectorImpl::~UpgradeDetectorImpl() {
 }
 
 void UpgradeDetectorImpl::CheckForUpgrade() {
-  method_factory_.RevokeAll();
-  Task* callback_task =
-      method_factory_.NewRunnableMethod(&UpgradeDetectorImpl::UpgradeDetected);
+  weak_factory_.InvalidateWeakPtrs();
+  base::Closure callback_task =
+      base::Bind(&UpgradeDetectorImpl::UpgradeDetected,
+                 weak_factory_.GetWeakPtr());
   // We use FILE as the thread to run the upgrade detection code on all
   // platforms. For Linux, this is because we don't want to block the UI thread
   // while launching a background process and reading its output; on the Mac and

@@ -4,23 +4,29 @@
 
 #include "chrome/browser/ui/webui/cloud_print_signin_dialog.h"
 
+#include <string>
+#include <vector>
+
 #include "base/bind.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/printing/cloud_print/cloud_print_url.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
+#include "chrome/browser/ui/webui/print_preview_ui.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_source.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+
+using content::BrowserThread;
 
 // This module implements a sign in dialog for cloud print.
 // it is based heavily off "chrome/browser/printing/print_dialog_cloud.cc".
@@ -31,20 +37,20 @@ namespace cloud_print_signin_dialog {
 // The flow handler sends our dialog to the correct URL, saves size info,
 // and closes the dialog when sign in is complete.
 class CloudPrintSigninFlowHandler : public WebUIMessageHandler,
-                                    public NotificationObserver {
+                                    public content::NotificationObserver {
  public:
   explicit CloudPrintSigninFlowHandler(TabContents* parent_tab);
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
  private:
   // Records the final size of the dialog in prefs.
   void StoreDialogSize();
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
   TabContents* parent_tab_;
 };
 
@@ -60,13 +66,14 @@ void CloudPrintSigninFlowHandler::RegisterMessages() {
       pending_entry->set_url(CloudPrintURL(
           Profile::FromWebUI(web_ui_)).GetCloudPrintSigninURL());
     registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                   Source<NavigationController>(controller));
+                   content::Source<NavigationController>(controller));
   }
 }
 
-void CloudPrintSigninFlowHandler::Observe(int type,
-                                          const NotificationSource& source,
-                                          const NotificationDetails& details) {
+void CloudPrintSigninFlowHandler::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
     GURL url = web_ui_->tab_contents()->GetURL();
     GURL dialog_url = CloudPrintURL(
@@ -76,7 +83,8 @@ void CloudPrintSigninFlowHandler::Observe(int type,
         url.scheme() == dialog_url.scheme()) {
       StoreDialogSize();
       web_ui_->tab_contents()->render_view_host()->ClosePage();
-      parent_tab_->controller().Reload(false);
+      static_cast<PrintPreviewUI*>(
+          parent_tab_->web_ui())->OnReloadPrintersList();
     }
   }
 }
@@ -173,7 +181,9 @@ void CreateCloudPrintSigninDialogImpl(TabContents* parent_tab) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   HtmlDialogUIDelegate* dialog_delegate =
       new CloudPrintSigninDelegate(parent_tab);
-  BrowserList::GetLastActive()->BrowserShowHtmlDialog(dialog_delegate, NULL);
+  BrowserList::GetLastActive()->BrowserShowHtmlDialog(dialog_delegate,
+                                                      NULL,
+                                                      STYLE_GENERIC);
 }
 
 void CreateCloudPrintSigninDialog(TabContents* parent_tab) {
@@ -184,4 +194,3 @@ void CreateCloudPrintSigninDialog(TabContents* parent_tab) {
       base::Bind(&CreateCloudPrintSigninDialogImpl, parent_tab));
 }
 }  // namespace cloud_print_signin_dialog
-

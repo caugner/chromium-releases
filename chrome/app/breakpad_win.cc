@@ -526,7 +526,8 @@ bool ShowRestartDialogIfCrashed(bool* exit_now) {
                             restart_data, len);
   restart_data[len] = 0;
   // The CHROME_RESTART var contains the dialog strings separated by '|'.
-  // See PrepareRestartOnCrashEnviroment() function for details.
+  // See ChromeBrowserMainPartsWin::PrepareRestartOnCrashEnviroment()
+  // for details.
   std::vector<std::wstring> dlg_strings;
   base::SplitString(restart_data, L'|', &dlg_strings);
   delete[] restart_data;
@@ -563,17 +564,16 @@ extern "C" int __declspec(dllexport) CrashForException(
 static bool MetricsReportingControlledByPolicy(bool* result) {
   std::wstring key_name = UTF8ToWide(policy::key::kMetricsReportingEnabled);
   DWORD value = 0;
-  // TODO(joshia): why hkcu_policy_key opens HKEY_LOCAL_MACHINE?
-  base::win::RegKey hkcu_policy_key(HKEY_LOCAL_MACHINE,
-                                    policy::kRegistrySubKey, KEY_READ);
-  if (hkcu_policy_key.ReadValueDW(key_name.c_str(), &value) == ERROR_SUCCESS) {
+  base::win::RegKey hklm_policy_key(HKEY_LOCAL_MACHINE,
+                                    policy::kRegistryMandatorySubKey, KEY_READ);
+  if (hklm_policy_key.ReadValueDW(key_name.c_str(), &value) == ERROR_SUCCESS) {
     *result = value != 0;
     return true;
   }
 
-  base::win::RegKey hklm_policy_key(HKEY_CURRENT_USER,
-                                    policy::kRegistrySubKey, KEY_READ);
-  if (hklm_policy_key.ReadValueDW(key_name.c_str(), &value) == ERROR_SUCCESS) {
+  base::win::RegKey hkcu_policy_key(HKEY_CURRENT_USER,
+                                    policy::kRegistryMandatorySubKey, KEY_READ);
+  if (hkcu_policy_key.ReadValueDW(key_name.c_str(), &value) == ERROR_SUCCESS) {
     *result = value != 0;
     return true;
   }
@@ -678,9 +678,12 @@ static DWORD __stdcall InitCrashReporterThread(void* param) {
   if (command.HasSwitch(switches::kFullMemoryCrashReport)) {
     dump_type = kFullDumpType;
   } else {
+    std::wstring channel_name(
+        GoogleUpdateSettings::GetChromeChannel(!is_per_user_install));
+
     // Capture more detail in crash dumps for beta and dev channel builds.
-    if (channel_string == L"dev" || channel_string == L"beta" ||
-        channel_string == GoogleChromeSxSDistribution::ChannelName())
+    if (channel_name == L"dev" || channel_name == L"beta" ||
+        channel_name == GoogleChromeSxSDistribution::ChannelName())
       dump_type = kLargerDumpType;
   }
 

@@ -10,14 +10,13 @@
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/status_bubble.h"
 #include "chrome/browser/ui/views/frame/app_panel_browser_frame_view.h"
-#include "chrome/browser/ui/views/frame/browser_frame_views.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "ui/base/hit_test.h"
 #include "ui/gfx/font.h"
-#include "views/views_delegate.h"
-#include "views/widget/root_view.h"
-#include "views/widget/widget.h"
-#include "views/window/hit_test.h"
+#include "ui/views/views_delegate.h"
+#include "ui/views/widget/root_view.h"
+#include "ui/views/widget/widget.h"
 
 // static
 const gfx::Font& BrowserFrame::GetTitleFont() {
@@ -78,10 +77,8 @@ gboolean BrowserFrameGtk::OnWindowStateEvent(GtkWidget* widget,
 
 gboolean BrowserFrameGtk::OnConfigureEvent(GtkWidget* widget,
                                            GdkEventConfigure* event) {
-  browser_view_->WindowMoved();
   return views::NativeWidgetGtk::OnConfigureEvent(widget, event);
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeBrowserFrame, public:
@@ -90,8 +87,5 @@ gboolean BrowserFrameGtk::OnConfigureEvent(GtkWidget* widget,
 NativeBrowserFrame* NativeBrowserFrame::CreateNativeBrowserFrame(
     BrowserFrame* browser_frame,
     BrowserView* browser_view) {
-  if (views::Widget::IsPureViews() &&
-      views::ViewsDelegate::views_delegate->GetDefaultParentView())
-    return new BrowserFrameViews(browser_frame, browser_view);
   return new BrowserFrameGtk(browser_frame, browser_view);
 }

@@ -9,13 +9,10 @@
 #include <cerrno>
 
 #include "base/compiler_specific.h"
-#include "base/memory/singleton.h"
 #include "base/time.h"
-#include "media/base/audio_decoder_config.h"
 #include "media/base/channel_layout.h"
 #include "media/base/media_export.h"
-#include "media/video/video_decode_engine.h"
-#include "ui/gfx/size.h"
+#include "media/base/video_frame.h"
 
 // Include FFmpeg header files.
 extern "C" {
@@ -31,6 +28,9 @@ MSVC_POP_WARNING();
 }  // extern "C"
 
 namespace media {
+
+class AudioDecoderConfig;
+class VideoDecoderConfig;
 
 // Wraps FFmpeg's av_free() in a class that can be passed as a template argument
 // to scoped_ptr_malloc.
@@ -74,8 +74,12 @@ void AudioDecoderConfigToAVCodecContext(
     const AudioDecoderConfig& config,
     AVCodecContext* codec_context);
 
-VideoCodec CodecIDToVideoCodec(CodecID codec_id);
-CodecID VideoCodecToCodecID(VideoCodec video_codec);
+void AVStreamToVideoDecoderConfig(
+    const AVStream* stream,
+    VideoDecoderConfig* config);
+void VideoDecoderConfigToAVCodecContext(
+    const VideoDecoderConfig& config,
+    AVCodecContext* codec_context);
 
 // Converts FFmpeg's channel layout to chrome's ChannelLayout.  |channels| can
 // be used when FFmpeg's channel layout is not informative in order to make a
@@ -89,12 +93,9 @@ VideoFrame::Format PixelFormatToVideoFormat(PixelFormat pixel_format);
 // Converts video formats to its corresponding FFmpeg's pixel formats.
 PixelFormat VideoFormatToPixelFormat(VideoFrame::Format video_format);
 
-// Calculates duration of one frame in the |stream| based on its frame rate.
-base::TimeDelta GetFrameDuration(AVStream* stream);
-
-// Calculates the natural width and height of the video using the video's
-// encoded dimensions and sample_aspect_ratio.
-gfx::Size GetNaturalSize(AVStream* stream);
+// Calculates the duration of one frame based on the frame rate specified by
+// |config|.
+base::TimeDelta GetFrameDuration(const VideoDecoderConfig& config);
 
 // Closes & destroys all AVStreams in the context and then closes &
 // destroys the AVFormatContext.

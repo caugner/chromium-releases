@@ -13,8 +13,8 @@
 #include "base/message_loop.h"
 #include "base/time.h"
 #include "net/base/address_family.h"
+#include "net/base/address_list.h"
 #include "net/base/auth.h"
-#include "net/base/host_resolver_proc.h"
 #include "net/base/ssl_cert_request_info.h"
 #include "net/base/ssl_info.h"
 #include "net/http/http_network_session.h"
@@ -239,6 +239,7 @@ SSLSocketDataProvider::SSLSocketDataProvider(bool async, int result)
     : connect(async, result),
       next_proto_status(SSLClientSocket::kNextProtoUnsupported),
       was_npn_negotiated(false),
+      client_cert_sent(false),
       cert_request_info(NULL) {
 }
 
@@ -655,16 +656,19 @@ bool MockClientSocket::IsConnectedAndIdle() const {
 }
 
 int MockClientSocket::GetPeerAddress(AddressList* address) const {
-  return net::SystemHostResolverProc("192.0.2.33", ADDRESS_FAMILY_UNSPECIFIED,
-                                     0, address, NULL);
+  IPAddressNumber ip;
+  bool rv = ParseIPLiteralToNumber("192.0.2.33", &ip);
+  CHECK(rv);
+  *address = AddressList::CreateFromIPAddress(ip, 0);
+  return OK;
 }
 
 int MockClientSocket::GetLocalAddress(IPEndPoint* address) const {
   IPAddressNumber ip;
-  if (!ParseIPLiteralToNumber("192.0.2.33", &ip))
-    return ERR_FAILED;
+  bool rv = ParseIPLiteralToNumber("192.0.2.33", &ip);
+  CHECK(rv);
   *address = IPEndPoint(ip, 123);
-      return OK;
+  return OK;
 }
 
 const BoundNetLog& MockClientSocket::NetLog() const {
@@ -676,7 +680,7 @@ void MockClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
 }
 
 void MockClientSocket::GetSSLCertRequestInfo(
-    net::SSLCertRequestInfo* cert_request_info) {
+  net::SSLCertRequestInfo* cert_request_info) {
 }
 
 int MockClientSocket::ExportKeyingMaterial(const base::StringPiece& label,
@@ -688,8 +692,9 @@ int MockClientSocket::ExportKeyingMaterial(const base::StringPiece& label,
 }
 
 SSLClientSocket::NextProtoStatus
-MockClientSocket::GetNextProto(std::string* proto) {
+MockClientSocket::GetNextProto(std::string* proto, std::string* server_protos) {
   proto->clear();
+  server_protos->clear();
   return SSLClientSocket::kNextProtoUnsupported;
 }
 
@@ -1133,7 +1138,8 @@ base::TimeDelta MockSSLClientSocket::GetConnectTimeMicros() const {
 
 void MockSSLClientSocket::GetSSLInfo(net::SSLInfo* ssl_info) {
   ssl_info->Reset();
-  ssl_info->cert = data_->cert_;
+  ssl_info->cert = data_->cert;
+  ssl_info->client_cert_sent = data_->client_cert_sent;
 }
 
 void MockSSLClientSocket::GetSSLCertRequestInfo(
@@ -1149,8 +1155,9 @@ void MockSSLClientSocket::GetSSLCertRequestInfo(
 }
 
 SSLClientSocket::NextProtoStatus MockSSLClientSocket::GetNextProto(
-    std::string* proto) {
+    std::string* proto, std::string* server_protos) {
   *proto = data_->next_proto;
+  *server_protos = data_->server_protos;
   return data_->next_proto_status;
 }
 

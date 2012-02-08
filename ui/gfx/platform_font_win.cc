@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,7 @@ PlatformFontWin::PlatformFontWin(NativeFont native_font) {
   InitWithCopyOfHFONT(native_font);
 }
 
-PlatformFontWin::PlatformFontWin(const string16& font_name,
+PlatformFontWin::PlatformFontWin(const std::string& font_name,
                                  int font_size) {
   InitWithFontNameAndSize(font_name, font_size);
 }
@@ -117,23 +117,15 @@ int PlatformFontWin::GetStyle() const {
   return font_ref_->style();
 }
 
-string16 PlatformFontWin::GetFontName() const {
+std::string PlatformFontWin::GetFontName() const {
   return font_ref_->font_name();
 }
 
 int PlatformFontWin::GetFontSize() const {
   LOGFONT font_info;
   GetObject(font_ref_->hfont(), sizeof(LOGFONT), &font_info);
-  long lf_height = font_info.lfHeight;
-  HDC hdc = GetDC(NULL);
-  int device_caps = GetDeviceCaps(hdc, LOGPIXELSY);
-  int font_size = 0;
-  if (device_caps != 0) {
-    float font_size_float = -static_cast<float>(lf_height)*72/device_caps;
-    font_size = static_cast<int>(::ceil(font_size_float - 0.5));
-  }
-  ReleaseDC(NULL, hdc);
-  return font_size;
+  DCHECK_LT(font_info.lfHeight, 0);
+  return -font_info.lfHeight;
 }
 
 NativeFont PlatformFontWin::GetNativeFont() const {
@@ -150,13 +142,10 @@ void PlatformFontWin::InitWithCopyOfHFONT(HFONT hfont) {
   font_ref_ = CreateHFontRef(CreateFontIndirect(&font_info));
 }
 
-void PlatformFontWin::InitWithFontNameAndSize(const string16& font_name,
+void PlatformFontWin::InitWithFontNameAndSize(const std::string& font_name,
                                               int font_size) {
-  HDC hdc = GetDC(NULL);
-  long lf_height = -MulDiv(font_size, GetDeviceCaps(hdc, LOGPIXELSY), 72);
-  ReleaseDC(NULL, hdc);
-  HFONT hf = ::CreateFont(lf_height, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                          font_name.c_str());
+  HFONT hf = ::CreateFont(-font_size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                          UTF8ToUTF16(font_name).c_str());
   font_ref_ = CreateHFontRef(hf);
 }
 
@@ -235,7 +224,7 @@ PlatformFontWin::HFontRef::HFontRef(HFONT hfont,
 
   LOGFONT font_info;
   GetObject(hfont_, sizeof(LOGFONT), &font_info);
-  font_name_ = string16(font_info.lfFaceName);
+  font_name_ = UTF16ToUTF8(string16(font_info.lfFaceName));
 }
 
 PlatformFontWin::HFontRef::~HFontRef() {
@@ -261,7 +250,7 @@ PlatformFont* PlatformFont::CreateFromNativeFont(NativeFont native_font) {
 }
 
 // static
-PlatformFont* PlatformFont::CreateFromNameAndSize(const string16& font_name,
+PlatformFont* PlatformFont::CreateFromNameAndSize(const std::string& font_name,
                                                   int font_size) {
   return new PlatformFontWin(font_name, font_size);
 }

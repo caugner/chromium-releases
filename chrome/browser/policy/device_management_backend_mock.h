@@ -4,6 +4,7 @@
 
 #ifndef CHROME_BROWSER_POLICY_DEVICE_MANAGEMENT_BACKEND_MOCK_H_
 #define CHROME_BROWSER_POLICY_DEVICE_MANAGEMENT_BACKEND_MOCK_H_
+#pragma once
 
 #include "chrome/browser/policy/device_management_backend.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -40,6 +41,17 @@ class DevicePolicyResponseDelegateMock
   virtual ~DevicePolicyResponseDelegateMock();
 
   MOCK_METHOD1(HandlePolicyResponse, void(const em::DevicePolicyResponse&));
+  MOCK_METHOD1(OnError, void(DeviceManagementBackend::ErrorCode error));
+};
+
+class DeviceAutoEnrollmentResponseDelegateMock
+    : public DeviceManagementBackend::DeviceAutoEnrollmentResponseDelegate {
+ public:
+  DeviceAutoEnrollmentResponseDelegateMock();
+  virtual ~DeviceAutoEnrollmentResponseDelegateMock();
+
+  MOCK_METHOD1(HandleAutoEnrollmentResponse,
+               void(const em::DeviceAutoEnrollmentResponse&));
   MOCK_METHOD1(OnError, void(DeviceManagementBackend::ErrorCode error));
 };
 

@@ -10,10 +10,15 @@
 
 class ChromeBrowserMainPartsMac : public ChromeBrowserMainPartsPosix {
  public:
-  explicit ChromeBrowserMainPartsMac(const MainFunctionParams& parameters);
+  explicit ChromeBrowserMainPartsMac(
+      const content::MainFunctionParams& parameters);
 
+  // BrowserParts overrides.
   virtual void PreEarlyInitialization() OVERRIDE;
   virtual void PreMainMessageLoopStart() OVERRIDE;
+
+  // ChromeBrowserMainParts overrides.
+  virtual void ShowMissingLocaleMessageBox() OVERRIDE;
 
   // Perform platform-specific work that needs to be done after the main event
   // loop has ended. The embedder must be sure to call this.

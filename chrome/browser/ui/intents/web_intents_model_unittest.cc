@@ -5,13 +5,16 @@
 #include "base/file_util.h"
 #include "base/scoped_temp_dir.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/values.h"
 #include "base/utf_string_conversions.h"
+#include "base/values.h"
 #include "chrome/browser/intents/web_intents_registry.h"
-#include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/browser/ui/intents/web_intents_model.h"
+#include "chrome/browser/webdata/web_data_service.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/models/tree_node_model.h"
+
+using content::BrowserThread;
 
 class WebIntentsModelTest : public testing::Test {
  public:
@@ -40,7 +43,7 @@ class WebIntentsModelTest : public testing::Test {
 
   void LoadRegistry() {
     {
-      WebIntentServiceData service;
+      webkit_glue::WebIntentServiceData service;
       service.service_url = GURL("http://www.google.com/share");
       service.action = ASCIIToUTF16("SHARE");
       service.type = ASCIIToUTF16("text/url");
@@ -48,7 +51,7 @@ class WebIntentsModelTest : public testing::Test {
       registry_.RegisterIntentProvider(service);
     }
     {
-      WebIntentServiceData service;
+      webkit_glue::WebIntentServiceData service;
       service.service_url = GURL("http://picasaweb.google.com/share");
       service.action = ASCIIToUTF16("EDIT");
       service.type = ASCIIToUTF16("image/*");
@@ -56,7 +59,7 @@ class WebIntentsModelTest : public testing::Test {
       registry_.RegisterIntentProvider(service);
     }
     {
-      WebIntentServiceData service;
+      webkit_glue::WebIntentServiceData service;
       service.service_url = GURL("http://www.digg.com/share");
       service.action = ASCIIToUTF16("SHARE");
       service.type = ASCIIToUTF16("text/url");
@@ -66,8 +69,8 @@ class WebIntentsModelTest : public testing::Test {
   }
 
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread db_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread db_thread_;
   scoped_refptr<WebDataService> wds_;
   WebIntentsRegistry registry_;
   ScopedTempDir temp_dir_;
@@ -81,7 +84,7 @@ class WaitingWebIntentsObserver : public WebIntentsModel::Observer {
 
   virtual void TreeModelEndBatch(WebIntentsModel* model) {
     event_.Signal();
-     MessageLoop::current()->Quit();
+    MessageLoop::current()->Quit();
   }
 
   virtual void TreeNodesAdded(ui::TreeModel* model,
@@ -103,7 +106,6 @@ class WaitingWebIntentsObserver : public WebIntentsModel::Observer {
   void Wait() {
     MessageLoop::current()->Run();
     event_.Wait();
-    LOG(INFO) << "DONE!";
   }
 
   base::WaitableEvent event_;
@@ -159,7 +161,7 @@ TEST_F(WebIntentsModelTest, LoadFromWebData) {
   WebIntentsModel intents_model(&registry_);
   intents_model.AddWebIntentsTreeObserver(&obs);
   obs.Wait();
-  EXPECT_EQ(3, obs.added_);
+  EXPECT_EQ(6, obs.added_);
 
   WebIntentsTreeNode* node = intents_model.GetTreeNode("www.google.com");
   ASSERT_NE(static_cast<WebIntentsTreeNode*>(NULL), node);
@@ -181,4 +183,29 @@ TEST_F(WebIntentsModelTest, LoadFromWebData) {
   ASSERT_NE(static_cast<WebIntentsTreeNode*>(NULL), node);
   EXPECT_EQ(WebIntentsTreeNode::TYPE_ORIGIN, node->Type());
   EXPECT_EQ(ASCIIToUTF16("www.digg.com"), node->GetTitle());
+}
+
+TEST_F(WebIntentsModelTest, TestMultipleIntentsOnHost) {
+  LoadRegistry();
+  webkit_glue::WebIntentServiceData service;
+  service.service_url = GURL("http://www.google.com/edit");
+  service.action = ASCIIToUTF16("EDIT");
+  service.type = ASCIIToUTF16("text/plain");
+  service.title = ASCIIToUTF16("Edit");
+  registry_.RegisterIntentProvider(service);
+
+  WaitingWebIntentsObserver obs;
+  WebIntentsModel intents_model(&registry_);
+  intents_model.AddWebIntentsTreeObserver(&obs);
+  obs.Wait();
+  EXPECT_EQ(7, obs.added_);
+
+  WebIntentsTreeNode* node = intents_model.GetTreeNode("www.google.com");
+  ASSERT_EQ(2, node->child_count());
+  node = node->GetChild(1);
+  ASSERT_EQ(WebIntentsTreeNode::TYPE_SERVICE, node->Type());
+  ASSERT_EQ(WebIntentsTreeNode::TYPE_SERVICE, node->Type());
+  ServiceTreeNode* snode = static_cast<ServiceTreeNode*>(node);
+  EXPECT_EQ(ASCIIToUTF16("EDIT"), snode->Action());
+  EXPECT_EQ(ASCIIToUTF16("http://www.google.com/edit"), snode->ServiceUrl());
 }

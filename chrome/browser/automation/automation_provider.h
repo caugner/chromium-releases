@@ -12,6 +12,7 @@
 #define CHROME_BROWSER_AUTOMATION_AUTOMATION_PROVIDER_H_
 #pragma once
 
+#include <list>
 #include <map>
 #include <string>
 #include <vector>
@@ -25,18 +26,18 @@
 #include "chrome/browser/autofill/field_types.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/content_settings.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/cancelable_request.h"
 #include "content/browser/tab_contents/navigation_entry.h"
-#include "content/common/notification_observer.h"
+#include "content/browser/trace_controller.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_observer.h"
 #include "ipc/ipc_channel.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "ui/gfx/native_widget_types.h"
-#include "views/events/event.h"
+#include "ui/views/events/event.h"
 #endif  // defined(OS_WIN) && !defined(USE_AURA)
 
-class PopupMenuWaiter;
 class TabContents;
 struct AutomationMsg_Find_Params;
 struct Reposition_Params;
@@ -46,18 +47,14 @@ namespace IPC {
 class ChannelProxy;
 }
 
-class AutofillProfile;
 class AutomationBrowserTracker;
 class AutomationExtensionTracker;
-class AutomationOmniboxTracker;
 class AutomationResourceMessageFilter;
 class AutomationTabTracker;
 class AutomationWindowTracker;
 class Browser;
-class CreditCard;
 class DownloadItem;
 class Extension;
-class ExtensionPortContainer;
 class ExtensionTestResultNotificationObserver;
 class ExternalTabContainer;
 class FilePath;
@@ -69,7 +66,6 @@ class NavigationControllerRestoredObserver;
 class Profile;
 class RenderViewHost;
 class TabContents;
-struct AutocompleteMatchData;
 
 namespace base {
 class DictionaryValue;
@@ -83,8 +79,9 @@ class AutomationProvider
     : public IPC::Channel::Listener,
       public IPC::Message::Sender,
       public base::SupportsWeakPtr<AutomationProvider>,
-      public base::RefCountedThreadSafe<AutomationProvider,
-                                        BrowserThread::DeleteOnUIThread> {
+      public base::RefCountedThreadSafe<
+          AutomationProvider, content::BrowserThread::DeleteOnUIThread>,
+      public TraceSubscriber {
  public:
   explicit AutomationProvider(Profile* profile);
 
@@ -160,7 +157,8 @@ class AutomationProvider
       const DownloadItem* download);
 
  protected:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
   friend class DeleteTask<AutomationProvider>;
   virtual ~AutomationProvider();
 
@@ -222,6 +220,16 @@ class AutomationProvider
   bool reinitialize_on_channel_error_;
 
  private:
+  // Storage for EndTracing() to resume operations after a callback.
+  struct TracingData {
+    std::list<std::string> trace_output;
+    scoped_ptr<IPC::Message> reply_message;
+  };
+
+  // TraceSubscriber:
+  virtual void OnEndTracingComplete() OVERRIDE;
+  virtual void OnTraceDataCollected(const std::string& trace_fragment) OVERRIDE;
+
   void OnUnhandledMessage();
 
   // Clear and reinitialize the automation IPC channel.
@@ -254,6 +262,10 @@ class AutomationProvider
   // |ViewHostMsg_JavaScriptStressTestControl_Commands| in render_messages.h
   // for information on the arguments.
   void JavaScriptStressTestControl(int handle, int cmd, int param);
+
+  void BeginTracing(const std::string& categories, bool* success);
+  void EndTracing(IPC::Message* reply_message);
+  void GetTracingOutput(std::string* chunk, bool* success);
 
   void WaitForExtensionTestResult(IPC::Message* reply_message);
 
@@ -374,8 +386,8 @@ class AutomationProvider
 #endif  // defined(OS_WIN) && !defined(USE_AURA)
 
   scoped_ptr<IPC::ChannelProxy> channel_;
-  scoped_ptr<NotificationObserver> new_tab_ui_load_observer_;
-  scoped_ptr<NotificationObserver> find_in_page_observer_;
+  scoped_ptr<content::NotificationObserver> new_tab_ui_load_observer_;
+  scoped_ptr<content::NotificationObserver> find_in_page_observer_;
   scoped_ptr<ExtensionTestResultNotificationObserver>
       extension_test_result_observer_;
   scoped_ptr<AutomationExtensionTracker> extension_tracker_;
@@ -394,6 +406,10 @@ class AutomationProvider
 
   // ID of automation channel.
   std::string channel_id_;
+
+  // Trace data that has been collected but not flushed to the automation
+  // client.
+  TracingData tracing_data_;
 
   DISALLOW_COPY_AND_ASSIGN(AutomationProvider);
 };

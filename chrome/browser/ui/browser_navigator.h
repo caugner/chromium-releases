@@ -8,7 +8,9 @@
 
 #include <string>
 
+#include "content/browser/renderer_host/global_request_id.h"
 #include "content/public/common/page_transition_types.h"
+#include "content/public/common/referrer.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/rect.h"
 #include "webkit/glue/window_open_disposition.h"
@@ -49,7 +51,7 @@ struct NavigateParams {
 
   // The URL/referrer to be loaded. Ignored if |target_contents| is non-NULL.
   GURL url;
-  GURL referrer;
+  content::Referrer referrer;
 
   // [in]  A TabContents to be navigated or inserted into the target Browser's
   //       tabstrip. If NULL, |url| or the homepage will be used instead. When
@@ -180,6 +182,11 @@ struct NavigateParams {
   // creating a Browser.
   Profile* profile;
 
+  // Refers to a navigation that was parked in the browser in order to be
+  // transferred to another RVH. Only used in case of a redirection of a request
+  // to a different site that created a new RVH.
+  GlobalRequestID transferred_global_request_id;
+
  private:
   NavigateParams();
 };
@@ -191,9 +198,7 @@ void Navigate(NavigateParams* params);
 // Otherwise, returns -1.
 int GetIndexOfSingletonTab(NavigateParams* params);
 
-// Returns true if the url is not allowed to open in incognito window.
-// Currently, chrome://settings, the bookmark manager, and chrome://extensions
-// are part this list.
+// Returns true if the url is allowed to open in incognito window.
 bool IsURLAllowedInIncognito(const GURL& url);
 
 }  // namespace browser

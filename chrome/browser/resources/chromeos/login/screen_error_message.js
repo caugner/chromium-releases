@@ -23,6 +23,11 @@ cr.define('login', function() {
     PROXY_CONNECTION_FAILED: 'frame error:130'
   };
 
+  // Frame loading errors.
+  const NET_ERROR = {
+    ABORTED_BY_USER: 3
+  };
+
   // Link which starts guest session for captive portal fixing.
   const FIX_CAPTIVE_PORTAL_ID = 'captive-portal-fix-link';
 
@@ -59,12 +64,18 @@ cr.define('login', function() {
                   ['login.ErrorMessageScreen.updateState']);
 
       cr.ui.DropDown.decorate($('offline-networks-list'));
+      this.updateLocalizedContent_();
+    },
 
+    /**
+     * Updates localized content of the screen that is not updated via template.
+     */
+    updateLocalizedContent_: function() {
       $('captive-portal-message-text').innerHTML = localStrings.getStringF(
-          'captivePortalMessage',
-          '<b id="' + CURRENT_NETWORK_NAME_ID + '"></b>',
-          '<a id="' + FIX_CAPTIVE_PORTAL_ID + '" class="signin-link" href="#">',
-          '</a>');
+        'captivePortalMessage',
+        '<b id="' + CURRENT_NETWORK_NAME_ID + '"></b>',
+        '<a id="' + FIX_CAPTIVE_PORTAL_ID + '" class="signin-link" href="#">',
+        '</a>');
       $(FIX_CAPTIVE_PORTAL_ID).onclick = function() {
         chrome.send('fixCaptivePortal');
       };
@@ -78,14 +89,26 @@ cr.define('login', function() {
         // Schedules a immediate retry.
         currentScreen.doReload();
       };
+
+      // TODO(altimofeev): Support offline sign-in as well.
+      $('error-guest-signin').innerHTML = localStrings.getStringF(
+          'guestSignin',
+          '<a id="error-guest-signin-link" class="signin-link" href="#">',
+          '</a>');
+      $('error-guest-signin-link').onclick = function() {
+        chrome.send('launchIncognito');
+      };
     },
 
-    onBeforeShow: function() {
-      cr.ui.DropDown.setActive('offline-networks-list', true);
+    onBeforeShow: function(lastNetworkType) {
+      cr.ui.DropDown.show('offline-networks-list', false, lastNetworkType);
+
+      $('error-guest-signin').hidden = $('guestSignin').hidden ||
+          !$('add-user-header-bar-item').hidden;
     },
 
     onBeforeHide: function() {
-      cr.ui.DropDown.setActive('offline-networks-list', false);
+      cr.ui.DropDown.hide('offline-networks-list');
     },
 
     update: function() {
@@ -96,8 +119,12 @@ cr.define('login', function() {
 
     /**
      * Shows or hides offline message based on network on/offline state.
+     * @param {Integer} state Current state of the network (see NET_STATE).
+     * @param {string} network Name of the current network.
+     * @param {string} reason Reason the callback was called.
+     * @param {int} lastNetworkType Last active network type.
      */
-    updateState_: function(state, network, reason) {
+    updateState_: function(state, network, reason, lastNetworkType) {
       var currentScreen = Oobe.getInstance().currentScreen;
       var offlineMessage = this;
       var isOnline = (state == NET_STATE.ONLINE);
@@ -118,7 +145,7 @@ cr.define('login', function() {
         console.log('Show offline message, state=' + state +
                     ', network=' + network +
                     ', isUnderCaptivePortal=' + isUnderCaptivePortal);
-        offlineMessage.onBeforeShow();
+        offlineMessage.onBeforeShow(lastNetworkType);
 
         if (isUnderCaptivePortal) {
           if (isProxyError) {
@@ -174,9 +201,11 @@ cr.define('login', function() {
    * @param {Integer} state Current state of the network (see NET_STATE).
    * @param {string} network Name of the current network.
    * @param {string} reason Reason the callback was called.
+   * @param {int} lastNetworkType Last active network type.
    */
-  ErrorMessageScreen.updateState = function(state, network, reason) {
-    $('error-message').updateState_(state, network, reason);
+  ErrorMessageScreen.updateState = function(
+      state, network, reason, lastNetworkType) {
+    $('error-message').updateState_(state, network, reason, lastNetworkType);
   };
 
   /**
@@ -186,6 +215,11 @@ cr.define('login', function() {
    */
   ErrorMessageScreen.onFrameError = function(error) {
     console.log('Gaia frame error = ' + error);
+    if (error == NET_ERROR.ABORTED_BY_USER) {
+      // Gaia frame was reloaded. Nothing to do here.
+      return;
+    }
+    $('gaia-signin').onFrameError(error);
     // Offline and simple captive portal cases are handled by the
     // NetworkStateInformer, so only the case when browser is online is
     // valuable.
@@ -217,6 +251,14 @@ cr.define('login', function() {
       // Schedules a retry.
       currentScreen.scheduleRetry();
     }
+  };
+
+  /**
+   * Updates screen localized content like links since they're not updated
+   * via template.
+   */
+  ErrorMessageScreen.updateLocalizedContent = function() {
+    $('error-message').updateLocalizedContent_();
   };
 
   return {

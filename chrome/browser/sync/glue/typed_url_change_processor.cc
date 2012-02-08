@@ -18,7 +18,9 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/browser/notification_service_impl.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -47,8 +49,8 @@ TypedUrlChangeProcessor::TypedUrlChangeProcessor(
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
   // When running in unit tests, there is already a NotificationService object.
   // Since only one can exist at a time per thread, check first.
-  if (!NotificationService::current())
-    notification_service_.reset(new NotificationService);
+  if (!content::NotificationService::current())
+    notification_service_.reset(new NotificationServiceImpl);
   StartObserving();
 }
 
@@ -56,24 +58,28 @@ TypedUrlChangeProcessor::~TypedUrlChangeProcessor() {
   DCHECK(expected_loop_ == MessageLoop::current());
 }
 
-void TypedUrlChangeProcessor::Observe(int type,
-                                      const NotificationSource& source,
-                                      const NotificationDetails& details) {
+void TypedUrlChangeProcessor::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(expected_loop_ == MessageLoop::current());
   if (!observing_)
     return;
 
-  VLOG(1) << "Observed typed_url change.";
+  DVLOG(1) << "Observed typed_url change.";
   DCHECK(running());
   DCHECK(chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED == type ||
          chrome::NOTIFICATION_HISTORY_URLS_DELETED == type ||
          chrome::NOTIFICATION_HISTORY_URL_VISITED == type);
   if (type == chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED) {
-    HandleURLsModified(Details<history::URLsModifiedDetails>(details).ptr());
+    HandleURLsModified(
+        content::Details<history::URLsModifiedDetails>(details).ptr());
   } else if (type == chrome::NOTIFICATION_HISTORY_URLS_DELETED) {
-    HandleURLsDeleted(Details<history::URLsDeletedDetails>(details).ptr());
+    HandleURLsDeleted(
+        content::Details<history::URLsDeletedDetails>(details).ptr());
   } else if (type == chrome::NOTIFICATION_HISTORY_URL_VISITED) {
-    HandleURLsVisited(Details<history::URLVisitedDetails>(details).ptr());
+    HandleURLsVisited(
+        content::Details<history::URLVisitedDetails>(details).ptr());
   }
 }
 
@@ -92,6 +98,7 @@ void TypedUrlChangeProcessor::HandleURLsModified(
 
 bool TypedUrlChangeProcessor::CreateOrUpdateSyncNode(
     history::URLRow url, sync_api::WriteTransaction* trans) {
+  DCHECK_GT(url.typed_count(), 0);
   // Get the visits for this node.
   history::VisitVector visit_vector;
   if (!TypedUrlModelAssociator::FixupURLAndGetVisits(
@@ -181,6 +188,7 @@ bool TypedUrlChangeProcessor::ShouldSyncVisit(
   // tend to be more broadly distributed such that there's no need to sync up
   // every visit to preserve their relative ordering.
   return (transition == content::PAGE_TRANSITION_TYPED &&
+          typed_count > 0 &&
           (typed_count < kTypedUrlVisitThrottleThreshold ||
            (typed_count % kTypedUrlVisitThrottleMultiple) == 0));
 }
@@ -199,9 +207,9 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
     return;
   }
 
-  DCHECK(pending_titles_.empty() && pending_new_urls_.empty() &&
-         pending_new_visits_.empty() && pending_deleted_visits_.empty() &&
-         pending_updated_urls_.empty() && pending_deleted_urls_.empty());
+  DCHECK(pending_new_urls_.empty() && pending_new_visits_.empty() &&
+         pending_deleted_visits_.empty() && pending_updated_urls_.empty() &&
+         pending_deleted_urls_.empty());
 
   for (sync_api::ChangeRecordList::const_iterator it =
            changes.Get().begin(); it != changes.Get().end(); ++it) {
@@ -231,74 +239,21 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
 
     const sync_pb::TypedUrlSpecifics& typed_url(
         sync_node.GetTypedUrlSpecifics());
-    GURL url(typed_url.url());
+    DCHECK(typed_url.visits_size());
+    if (!typed_url.visits_size()) {
+      continue;
+    }
 
-    if (sync_api::ChangeRecord::ACTION_ADD == it->action) {
-      DCHECK(typed_url.visits_size());
-      if (!typed_url.visits_size()) {
-        continue;
-      }
+    if (!model_associator_->UpdateFromSyncDB(
+            typed_url, &pending_new_visits_, &pending_deleted_visits_,
+            &pending_updated_urls_, &pending_new_urls_)) {
+      error_handler()->OnUnrecoverableError(
+          FROM_HERE, "Could not get existing url's visits.");
+      return;
+    }
 
-      history::URLRow new_url(GURL(typed_url.url()));
-      TypedUrlModelAssociator::UpdateURLRowFromTypedUrlSpecifics(
-          typed_url, &new_url);
-
-      model_associator_->Associate(&new_url.url().spec(), it->id);
-      pending_new_urls_.push_back(new_url);
-
-      std::vector<history::VisitInfo> added_visits;
-      for (int c = 0; c < typed_url.visits_size(); ++c) {
-        DCHECK(c == 0 || typed_url.visits(c) > typed_url.visits(c - 1));
-        added_visits.push_back(history::VisitInfo(
-            base::Time::FromInternalValue(typed_url.visits(c)),
-            content::PageTransitionFromInt(typed_url.visit_transitions(c))));
-      }
-
-      pending_new_visits_.push_back(
-          std::pair<GURL, std::vector<history::VisitInfo> >(
-              url, added_visits));
-    } else {
-      DCHECK_EQ(sync_api::ChangeRecord::ACTION_UPDATE, it->action);
-      history::URLRow old_url;
-      if (!history_backend_->GetURL(url, &old_url)) {
-        LOG(ERROR) << "Could not fetch history row for " << url;
-        continue;
-      }
-
-      history::VisitVector visits;
-      if (!TypedUrlModelAssociator::FixupURLAndGetVisits(
-              history_backend_, &old_url, &visits)) {
-        error_handler()->OnUnrecoverableError(FROM_HERE,
-            "Could not get the url's visits.");
-        return;
-      }
-
-      history::URLRow new_url(old_url);
-      TypedUrlModelAssociator::UpdateURLRowFromTypedUrlSpecifics(
-          typed_url, &new_url);
-
-      pending_updated_urls_.push_back(
-        std::pair<history::URLID, history::URLRow>(old_url.id(), new_url));
-
-      if (old_url.title().compare(new_url.title()) != 0) {
-        pending_titles_.push_back(
-            std::pair<GURL, string16>(new_url.url(), new_url.title()));
-      }
-
-      std::vector<history::VisitInfo> added_visits;
-      history::VisitVector removed_visits;
-      TypedUrlModelAssociator::DiffVisits(visits, typed_url,
-                                          &added_visits, &removed_visits);
-      if (added_visits.size()) {
-        pending_new_visits_.push_back(
-            std::pair<GURL, std::vector<history::VisitInfo> >(
-                url, added_visits));
-      }
-      if (removed_visits.size()) {
-        pending_deleted_visits_.insert(pending_deleted_visits_.end(),
-                                       removed_visits.begin(),
-                                       removed_visits.end());
-      }
+    if (it->action == sync_api::ChangeRecord::ACTION_ADD) {
+      model_associator_->Associate(&typed_url.url(), it->id);
     }
   }
 }
@@ -308,12 +263,13 @@ void TypedUrlChangeProcessor::CommitChangesFromSyncModel() {
   if (!running())
     return;
 
-  StopObserving();
+  // Make sure we stop listening for changes while we're modifying the backend,
+  // so we don't try to re-apply these changes to the sync DB.
+  ScopedStopObserving<TypedUrlChangeProcessor> stop_observing(this);
   if (!pending_deleted_urls_.empty())
     history_backend_->DeleteURLs(pending_deleted_urls_);
 
-  if (!model_associator_->WriteToHistoryBackend(&pending_titles_,
-                                                &pending_new_urls_,
+  if (!model_associator_->WriteToHistoryBackend(&pending_new_urls_,
                                                 &pending_updated_urls_,
                                                 &pending_new_visits_,
                                                 &pending_deleted_visits_)) {
@@ -322,14 +278,11 @@ void TypedUrlChangeProcessor::CommitChangesFromSyncModel() {
     return;
   }
 
-  pending_titles_.clear();
   pending_new_urls_.clear();
   pending_updated_urls_.clear();
   pending_new_visits_.clear();
   pending_deleted_visits_.clear();
   pending_deleted_urls_.clear();
-
-  StartObserving();
 }
 
 void TypedUrlChangeProcessor::StartImpl(Profile* profile) {
@@ -349,13 +302,13 @@ void TypedUrlChangeProcessor::StartObserving() {
   DCHECK(profile_);
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
-      Source<Profile>(profile_));
+      content::Source<Profile>(profile_));
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-      Source<Profile>(profile_));
+      content::Source<Profile>(profile_));
   notification_registrar_.Add(
       this, chrome::NOTIFICATION_HISTORY_URL_VISITED,
-      Source<Profile>(profile_));
+      content::Source<Profile>(profile_));
 }
 
 void TypedUrlChangeProcessor::StopObserving() {
@@ -363,13 +316,13 @@ void TypedUrlChangeProcessor::StopObserving() {
   DCHECK(profile_);
   notification_registrar_.Remove(
       this, chrome::NOTIFICATION_HISTORY_TYPED_URLS_MODIFIED,
-      Source<Profile>(profile_));
+      content::Source<Profile>(profile_));
   notification_registrar_.Remove(
       this, chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-      Source<Profile>(profile_));
+      content::Source<Profile>(profile_));
   notification_registrar_.Remove(
       this, chrome::NOTIFICATION_HISTORY_URL_VISITED,
-      Source<Profile>(profile_));
+      content::Source<Profile>(profile_));
 }
 
 }  // namespace browser_sync

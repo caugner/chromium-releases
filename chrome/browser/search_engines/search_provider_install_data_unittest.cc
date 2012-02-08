@@ -5,9 +5,9 @@
 #include <string>
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/search_engines/search_provider_install_data.h"
 #include "chrome/browser/search_engines/template_url.h"
@@ -17,10 +17,12 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 // Create a TemplateURL. The caller owns the returned TemplateURL*.
 static TemplateURL* CreateTemplateURL(const std::string& url,
@@ -92,7 +94,7 @@ bool TestGetInstallState::RunTests() {
 
   BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)->PostTask(
       FROM_HERE,
-      NewRunnableMethod(this, &TestGetInstallState::StartTestOnIOThread));
+      base::Bind(&TestGetInstallState::StartTestOnIOThread, this));
   // Run the current message loop. When the test is finished on the I/O thread,
   // it invokes Quit, which unblocks this.
   MessageLoop::current()->Run();
@@ -107,8 +109,7 @@ TestGetInstallState::~TestGetInstallState() {
 
 void TestGetInstallState::StartTestOnIOThread() {
   install_data_->CallWhenLoaded(
-      NewRunnableMethod(this,
-                        &TestGetInstallState::DoInstallStateTests));
+      base::Bind(&TestGetInstallState::DoInstallStateTests, this));
 }
 
 void TestGetInstallState::DoInstallStateTests() {
@@ -168,7 +169,7 @@ class SearchProviderInstallDataTest : public testing::Test {
     install_data_ = new SearchProviderInstallData(
         util_.GetWebDataService(),
         content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-        Source<SearchProviderInstallDataTest>(this));
+        content::Source<SearchProviderInstallDataTest>(this));
   }
 
   virtual void TearDown() {
@@ -179,10 +180,10 @@ class SearchProviderInstallDataTest : public testing::Test {
 
     // Make sure that the install data class on the UI thread gets cleaned up.
     // It doesn't matter that this happens after install_data_ is deleted.
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         content::NOTIFICATION_RENDERER_PROCESS_TERMINATED,
-        Source<SearchProviderInstallDataTest>(this),
-        NotificationService::NoDetails());
+        content::Source<SearchProviderInstallDataTest>(this),
+        content::NotificationService::NoDetails());
 
     util_.TearDown();
     testing::Test::TearDown();
@@ -207,8 +208,8 @@ class SearchProviderInstallDataTest : public testing::Test {
         prefs::kDefaultSearchProviderPrepopulateID, new StringValue(""));
     util_.model()->Observe(
         chrome::NOTIFICATION_PREF_CHANGED,
-        Source<PrefService>(util_.profile()->GetTestingPrefService()),
-        Details<std::string>(NULL));
+        content::Source<PrefService>(util_.profile()->GetTestingPrefService()),
+        content::Details<std::string>(NULL));
   }
 
  protected:

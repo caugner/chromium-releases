@@ -8,6 +8,7 @@
 
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "build/build_config.h"
 #include "ipc/ipc_channel.h"
@@ -50,14 +51,14 @@ class GpuChannelManager : public IPC::Channel::Listener,
   void RemoveChannel(int renderer_id);
 
   // Listener overrides.
-  virtual bool OnMessageReceived(const IPC::Message& msg);
+  virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
 
   // Sender overrides.
-  virtual bool Send(IPC::Message* msg);
+  virtual bool Send(IPC::Message* msg) OVERRIDE;
 
   void LoseAllContexts();
 
-  ScopedRunnableMethodFactory<GpuChannelManager> method_factory_;
+  base::WeakPtrFactory<GpuChannelManager> weak_factory_;
 
   int GenerateRouteID();
   void AddRoute(int32 routing_id, IPC::Channel::Listener* listener);
@@ -76,7 +77,6 @@ class GpuChannelManager : public IPC::Channel::Listener,
       int32 render_view_id,
       int32 renderer_id,
       const GPUCreateCommandBufferConfig& init_params);
-  void OnResizeViewACK(int32 renderer_id, int32 command_buffer_route_id);
 
   void OnLoseAllContexts();
 

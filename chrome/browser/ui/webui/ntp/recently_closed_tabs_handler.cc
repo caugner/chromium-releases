@@ -8,49 +8,39 @@
 #include "base/bind_helpers.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sessions/session_utils.h"
 #include "chrome/browser/sessions/tab_restore_service_delegate.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/browser/ui/webui/web_ui_util.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/tab_contents/tab_contents.h"
 
 namespace {
 
-bool TabToValue(const TabRestoreService::Tab& tab,
+void TabToValue(const TabRestoreService::Tab& tab,
                 DictionaryValue* dictionary) {
-  if (tab.navigations.empty())
-    return false;
-
   const TabNavigation& current_navigation =
       tab.navigations.at(tab.current_navigation_index);
-  if (current_navigation.virtual_url() == GURL(chrome::kChromeUINewTabURL))
-    return false;
   NewTabUI::SetURLTitleAndDirection(dictionary, current_navigation.title(),
                                     current_navigation.virtual_url());
   dictionary->SetString("type", "tab");
   dictionary->SetDouble("timestamp", tab.timestamp.ToDoubleT());
-  return true;
 }
 
-bool WindowToValue(const TabRestoreService::Window& window,
+void WindowToValue(const TabRestoreService::Window& window,
                    DictionaryValue* dictionary) {
-  if (window.tabs.empty()) {
-    NOTREACHED();
-    return false;
-  }
+  DCHECK(!window.tabs.empty());
+
   scoped_ptr<ListValue> tab_values(new ListValue());
   for (size_t i = 0; i < window.tabs.size(); ++i) {
-    scoped_ptr<DictionaryValue> tab_value(new DictionaryValue());
-    if (TabToValue(window.tabs[i], tab_value.get()))
-      tab_values->Append(tab_value.release());
+    DictionaryValue* tab_value = new DictionaryValue();
+    TabToValue(window.tabs[i], tab_value);
+    tab_values->Append(tab_value);
   }
-  if (tab_values->GetSize() == 0)
-    return false;
+
   dictionary->SetString("type", "window");
   dictionary->SetDouble("timestamp", window.timestamp.ToDoubleT());
   dictionary->Set("tabs", tab_values.release());
-  return true;
 }
 
 }  // namespace
@@ -76,22 +66,21 @@ void RecentlyClosedTabsHandler::HandleReopenTab(const ListValue* args) {
   if (!delegate || !tab_restore_service_)
     return;
 
-  int session_to_restore;
-  if (!ExtractIntegerValue(args, &session_to_restore))
-    return;
+  double index = -1.0;
+  CHECK(args->GetDouble(1, &index));
 
-  TabRestoreService::Entries entries;
-  SessionUtils::FilteredEntries(tab_restore_service_->entries(), &entries);
-  int index = 0;
-  for (TabRestoreService::Entries::const_iterator iter = entries.begin();
-       iter != entries.end(); ++iter, ++index) {
-    if (session_to_restore == (*iter)->id)
-      break;
-  }
   // There are actually less than 20 restore tab items displayed in the UI.
-  UMA_HISTOGRAM_ENUMERATION("NewTabPage.SessionRestore", index, 20);
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.SessionRestore",
+                            static_cast<int>(index), 20);
 
-  tab_restore_service_->RestoreEntryById(delegate, session_to_restore, true);
+  double session_to_restore = 0.0;
+  CHECK(args->GetDouble(0, &session_to_restore));
+
+  WindowOpenDisposition disposition =
+      web_ui_util::GetDispositionFromClick(args, 2);
+  tab_restore_service_->RestoreEntryById(delegate,
+                                         static_cast<int>(session_to_restore),
+                                         disposition);
   // The current tab has been nuked at this point; don't touch any member
   // variables.
 }
@@ -120,10 +109,8 @@ void RecentlyClosedTabsHandler::HandleGetRecentlyClosedTabs(
 void RecentlyClosedTabsHandler::TabRestoreServiceChanged(
     TabRestoreService* service) {
   ListValue list_value;
-  TabRestoreService::Entries entries;
-  SessionUtils::FilteredEntries(service->entries(), &entries);
-
-  AddRecentlyClosedEntries(entries, &list_value);
+  TabRestoreService::Entries entries = service->entries();
+  CreateRecentlyClosedValues(entries, &list_value);
 
   web_ui_->CallJavascriptFunction("recentlyClosedTabs", list_value);
 }
@@ -134,7 +121,7 @@ void RecentlyClosedTabsHandler::TabRestoreServiceDestroyed(
 }
 
 // static
-void RecentlyClosedTabsHandler::AddRecentlyClosedEntries(
+void RecentlyClosedTabsHandler::CreateRecentlyClosedValues(
     const TabRestoreService::Entries& entries, ListValue* entry_list_value) {
   const int max_count = 10;
   int added_count = 0;
@@ -145,17 +132,17 @@ void RecentlyClosedTabsHandler::AddRecentlyClosedEntries(
        it != entries.end() && added_count < max_count; ++it) {
     TabRestoreService::Entry* entry = *it;
     scoped_ptr<DictionaryValue> entry_dict(new DictionaryValue());
-    if ((entry->type == TabRestoreService::TAB &&
-         TabToValue(
-             *static_cast<TabRestoreService::Tab*>(entry),
-             entry_dict.get())) ||
-        (entry->type == TabRestoreService::WINDOW &&
-         WindowToValue(
-             *static_cast<TabRestoreService::Window*>(entry),
-             entry_dict.get()))) {
-      entry_dict->SetInteger("sessionId", entry->id);
-      entry_list_value->Append(entry_dict.release());
-      added_count++;
+    if (entry->type == TabRestoreService::TAB) {
+      TabToValue(*static_cast<TabRestoreService::Tab*>(entry),
+                 entry_dict.get());
+    } else  {
+      DCHECK_EQ(entry->type, TabRestoreService::WINDOW);
+      WindowToValue(*static_cast<TabRestoreService::Window*>(entry),
+                    entry_dict.get());
     }
+
+    entry_dict->SetInteger("sessionId", entry->id);
+    entry_list_value->Append(entry_dict.release());
+    added_count++;
   }
 }

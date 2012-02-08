@@ -82,16 +82,6 @@ cr.define('options', function() {
         var addLanguageList = $('add-language-overlay-language-list');
         addLanguageList.addEventListener('click',
             this.handleAddLanguageListClick_.bind(this));
-        // Listen to user clicks on the "Change touch keyboard settings..."
-        // button.
-        if (cr.isTouch) {
-          var virtualKeyboardButton = $('language-options-virtual-keyboard');
-          // TODO(yusukes): would be better to hide the button if no virtual
-          // keyboard is registered.
-          virtualKeyboardButton.onclick = function(e) {
-            OptionsPage.navigateToPage('virtualKeyboards');
-          };
-        }
       } else {
         // Listen to add language dialog ok button.
         var addLanguageOkButton = $('add-language-overlay-ok-button');
@@ -99,15 +89,23 @@ cr.define('options', function() {
             this.handleAddLanguageOkButtonClick_.bind(this));
 
         // Show experimental features if enabled.
-        if (templateData.experimentalSpellCheckFeatures == 'true') {
+        if (templateData.experimentalSpellCheckFeatures == 'true')
           $('auto-spell-correction-option').hidden = false;
-        }
-      }
 
-      if(!cr.isChromeOS) {
         // Handle spell check enable/disable.
         Preferences.getInstance().addEventListener(this.enableSpellCheckPref,
             this.updateEnableSpellCheck_.bind(this));
+      }
+
+      // Listen to user clicks on the "Change touch keyboard settings..."
+      // button (if it exists).
+      var virtualKeyboardButton = $('language-options-virtual-keyboard');
+      if (virtualKeyboardButton) {
+        // TODO(yusukes): would be better to hide the button if no virtual
+        // keyboard is registered.
+        virtualKeyboardButton.onclick = function(e) {
+          OptionsPage.navigateToPage('virtualKeyboards');
+        };
       }
     },
 

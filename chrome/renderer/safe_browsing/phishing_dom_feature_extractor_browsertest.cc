@@ -21,7 +21,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScriptSource.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 
 using ::testing::ContainerEq;
 using ::testing::DoAll;
@@ -64,7 +64,8 @@ class PhishingDOMFeatureExtractorTest : public RenderViewFakeResourcesTest {
     success_ = false;
     extractor_->ExtractFeatures(
         features,
-        NewCallback(this, &PhishingDOMFeatureExtractorTest::ExtractionDone));
+        base::Bind(&PhishingDOMFeatureExtractorTest::ExtractionDone,
+                   base::Unretained(this)));
     message_loop_.Run();
     return success_;
   }

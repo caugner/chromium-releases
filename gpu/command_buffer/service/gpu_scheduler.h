@@ -5,9 +5,12 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GPU_SCHEDULER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GPU_SCHEDULER_H_
 
+#include <queue>
+
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/shared_memory.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/service/cmd_buffer_engine.h"
@@ -20,7 +23,9 @@ namespace gpu {
 // a command buffer and forwarded to a command parser. TODO(apatrick): This
 // class should not know about the decoder. Do not add additional dependencies
 // on it.
-class GpuScheduler : public CommandBufferEngine {
+class GpuScheduler
+    : public CommandBufferEngine,
+      public base::SupportsWeakPtr<GpuScheduler> {
  public:
   GpuScheduler(CommandBuffer* command_buffer,
                gles2::GLES2Decoder* decoder,
@@ -41,15 +46,17 @@ class GpuScheduler : public CommandBufferEngine {
 
   // Sets a callback that is invoked just before scheduler is rescheduled.
   // Takes ownership of callback object.
-  void SetScheduledCallback(Callback0::Type* scheduled_callback);
+  void SetScheduledCallback(const base::Closure& scheduled_callback);
 
   // Implementation of CommandBufferEngine.
-  virtual Buffer GetSharedMemoryBuffer(int32 shm_id);
-  virtual void set_token(int32 token);
-  virtual bool SetGetOffset(int32 offset);
-  virtual int32 GetGetOffset();
+  virtual Buffer GetSharedMemoryBuffer(int32 shm_id) OVERRIDE;
+  virtual void set_token(int32 token) OVERRIDE;
+  virtual bool SetGetOffset(int32 offset) OVERRIDE;
+  virtual int32 GetGetOffset() OVERRIDE;
 
-  void SetCommandProcessedCallback(Callback0::Type* callback);
+  void SetCommandProcessedCallback(const base::Closure& callback);
+
+  void DeferToFence(base::Closure task);
 
  private:
 
@@ -71,8 +78,19 @@ class GpuScheduler : public CommandBufferEngine {
   // Greater than zero if this is waiting to be rescheduled before continuing.
   int unscheduled_count_;
 
-  scoped_ptr<Callback0::Type> scheduled_callback_;
-  scoped_ptr<Callback0::Type> command_processed_callback_;
+  // The GpuScheduler will unschedule itself in the event that further GL calls
+  // are issued to it before all these fences have been crossed by the GPU.
+  struct UnscheduleFence {
+    UnscheduleFence();
+    ~UnscheduleFence();
+
+    uint32 fence;
+    base::Closure task;
+  };
+  std::queue<UnscheduleFence> unschedule_fences_;
+
+  base::Closure scheduled_callback_;
+  base::Closure command_processed_callback_;
 };
 
 }  // namespace gpu

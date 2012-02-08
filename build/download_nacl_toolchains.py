@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -15,10 +15,10 @@ def Main(args):
     args = [
       '--nacl-newlib-only',
       '--file-hash', 'linux_x86_newlib',
-           '8337d5ec327d857a49b500723ec9b792f4973abc',
+           '1deb316302fde89a2200dff6550cf510ae90b89b',
       '--base-url', ('https://commondatastorage.googleapis.com/'
                      'nativeclient-archive2/special_chromeos'),
-      '--x86-version', '6561',
+      '--x86-version', '7258',
     ]
     print 'NOTE: Special handling for chromeos'
     print 'Running with these argument instead:'
@@ -36,7 +36,8 @@ def Main(args):
   sys.path.insert(0, nacl_build_dir)
   import download_toolchains
   download_toolchains.Main(args)
+  return 0
 
 
 if __name__ == '__main__':
-  Main(sys.argv[1:])
+  sys.exit(Main(sys.argv[1:]))

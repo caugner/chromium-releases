@@ -10,14 +10,16 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/file_path.h"
+#include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/search_engines/template_url_id.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "sql/init_status.h"
 
+class AutocompleteSyncableService;
 class AutofillChange;
 class AutofillProfile;
 class AutofillProfileSyncableService;
@@ -31,7 +33,6 @@ class Profile;
 class SkBitmap;
 class TemplateURL;
 class WebDatabase;
-struct WebIntentServiceData;
 
 namespace base {
 class Thread;
@@ -40,6 +41,7 @@ class Thread;
 namespace webkit_glue {
 struct FormField;
 struct PasswordForm;
+struct WebIntentServiceData;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -104,6 +106,11 @@ struct WDKeywordsResult {
   int64 default_search_provider_id;
   // Version of the built-in keywords. A value of 0 indicates a first run.
   int builtin_keyword_version;
+  // Backup of the default search provider ID.
+  int64 default_search_provider_id_backup;
+  // Indicates if default search provider has been changed by something
+  // other than user's action in the browser.
+  bool did_default_search_provider_change;
 };
 
 //
@@ -166,8 +173,8 @@ template <class T> class WDObjectResult : public WDTypedResult {
 class WebDataServiceConsumer;
 
 class WebDataService
-    : public base::RefCountedThreadSafe<WebDataService,
-                                        BrowserThread::DeleteOnUIThread> {
+    : public base::RefCountedThreadSafe<
+          WebDataService, content::BrowserThread::DeleteOnUIThread> {
  public:
   // All requests return an opaque handle of the following type.
   typedef int Handle;
@@ -358,19 +365,24 @@ class WebDataService
   //
   //////////////////////////////////////////////////////////////////////////////
 
-  // Adds a web intent provider registration.
-  void AddWebIntent(const WebIntentServiceData& service);
+  // Adds a web intent service registration.
+  void AddWebIntentService(const webkit_glue::WebIntentServiceData& service);
 
-  // Removes a web intent provider registration.
-  void RemoveWebIntent(const WebIntentServiceData& service);
+  // Removes a web intent service registration.
+  void RemoveWebIntentService(const webkit_glue::WebIntentServiceData& service);
 
-  // Get all web intent providers registered for the specified |action|.
+  // Get all web intent services registered for the specified |action|.
   // |consumer| must not be NULL.
-  Handle GetWebIntents(const string16& action,
-                       WebDataServiceConsumer* consumer);
+  Handle GetWebIntentServices(const string16& action,
+                              WebDataServiceConsumer* consumer);
 
-  // Get all web intent providers registered. |consumer| must not be NULL.
-  Handle GetAllWebIntents(WebDataServiceConsumer* consumer);
+  // Get all web intent services registered using the specified |service_url|.
+  // |consumer| must not be NULL.
+  Handle GetWebIntentServicesForURL(const string16& service_url,
+                                    WebDataServiceConsumer* consumer);
+
+  // Get all web intent services registered. |consumer| must not be NULL.
+  Handle GetAllWebIntentServices(WebDataServiceConsumer* consumer);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -513,11 +525,15 @@ class WebDataService
       const base::Time& delete_begin,
       const base::Time& delete_end);
 
-  // TODO(georgey): Add support for autocomplete as well: http://crbug.com/95759
   // Returns the syncable service for Autofill addresses and credit cards stored
   // in this table. The returned service is owned by |this| object.
   virtual AutofillProfileSyncableService*
       GetAutofillProfileSyncableService() const;
+
+  // Returns the syncable service for field autocomplete stored in this table.
+  // The returned service is owned by |this| object.
+  virtual AutocompleteSyncableService*
+      GetAutocompleteSyncableService() const;
 
   // Testing
 #ifdef UNIT_TEST
@@ -547,7 +563,8 @@ class WebDataService
   //
   //////////////////////////////////////////////////////////////////////////////
  private:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
   friend class DeleteTask<WebDataService>;
   friend class ShutdownTask;
 
@@ -576,7 +593,8 @@ class WebDataService
   void Commit();
 
   // Schedule a task on our worker thread.
-  void ScheduleTask(const base::Closure& task);
+  void ScheduleTask(const tracked_objects::Location& from_here,
+                    const base::Closure& task);
 
   // Schedule a commit if one is not already pending.
   void ScheduleCommit();
@@ -611,10 +629,13 @@ class WebDataService
   // Web Intents.
   //
   //////////////////////////////////////////////////////////////////////////////
-  void AddWebIntentImpl(GenericRequest<WebIntentServiceData>* request);
-  void RemoveWebIntentImpl(GenericRequest<WebIntentServiceData>* request);
-  void GetWebIntentsImpl(GenericRequest<string16>* request);
-  void GetAllWebIntentsImpl(GenericRequest<std::string>* request);
+  void AddWebIntentServiceImpl(
+      GenericRequest<webkit_glue::WebIntentServiceData>* request);
+  void RemoveWebIntentServiceImpl(
+      GenericRequest<webkit_glue::WebIntentServiceData>* request);
+  void GetWebIntentServicesImpl(GenericRequest<string16>* request);
+  void GetWebIntentServicesForURLImpl(GenericRequest<string16>* request);
+  void GetAllWebIntentServicesImpl(GenericRequest<std::string>* request);
 
   //////////////////////////////////////////////////////////////////////////////
   //
@@ -684,8 +705,9 @@ class WebDataService
   // Syncable services for the database data.  We own the services, but don't
   // use |scoped_ptr|s because the lifetimes must be managed on the database
   // thread.
-  // Currently only Autofill profiles (and credit cards) use the new Sync API,
-  // but all the database data should migrate to this API over time.
+  // Currently only Autocomplete and Autofill profiles use the new Sync API, but
+  // all the database data should migrate to this API over time.
+  AutocompleteSyncableService* autocomplete_syncable_service_;
   AutofillProfileSyncableService* autofill_profile_syncable_service_;
 
   // Whether the database failed to initialize.  We use this to avoid

@@ -7,22 +7,25 @@
 #include <gdk/gdkkeysyms.h>
 
 #include "base/bind.h"
+#include "base/message_loop.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/constrained_window_tab_helper.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 
-#if defined(TOUCH_UI)
-#include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
-#elif defined(TOOLKIT_VIEWS)
+#if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_gtk.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #else
+#include "chrome/browser/tab_contents/chrome_tab_contents_view_wrapper_gtk.h"
 #include "chrome/browser/tab_contents/tab_contents_view_gtk.h"
 #endif
+
+using content::BrowserThread;
 
 ConstrainedWindowGtkDelegate::~ConstrainedWindowGtkDelegate() {
 }
@@ -131,12 +134,14 @@ void ConstrainedWindowGtk::FocusConstrainedWindow() {
 
 ConstrainedWindowGtk::TabContentsViewType*
     ConstrainedWindowGtk::ContainingView() {
-#if defined(TOOLKIT_VIEWS) && !defined(TOUCH_UI)
+#if defined(TOOLKIT_VIEWS)
   return static_cast<NativeTabContentsViewGtk*>(
       static_cast<TabContentsViewViews*>(wrapper_->view())->
           native_tab_contents_view());
 #else
-  return static_cast<TabContentsViewType*>(wrapper_->view());
+  return static_cast<TabContentsViewType*>(
+      static_cast<TabContentsViewGtk*>(wrapper_->view())->
+          wrapper());
 #endif
 }
 
@@ -158,7 +163,7 @@ gboolean ConstrainedWindowGtk::OnKeyPress(GtkWidget* sender,
 void ConstrainedWindowGtk::OnHierarchyChanged(GtkWidget* sender,
                                               GtkWidget* previous_toplevel) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (!GTK_WIDGET_TOPLEVEL(gtk_widget_get_toplevel(widget())))
+  if (!gtk_widget_is_toplevel(gtk_widget_get_toplevel(widget())))
     return;
 
   FocusConstrainedWindow();

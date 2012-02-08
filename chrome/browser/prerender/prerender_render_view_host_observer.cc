@@ -7,19 +7,18 @@
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/common/icon_messages.h"
 #include "chrome/common/render_messages.h"
-#include "content/common/view_messages.h"
-#include "ipc/ipc_message_macros.h"
 
 namespace prerender {
 
 PrerenderRenderViewHostObserver::PrerenderRenderViewHostObserver(
     PrerenderContents* prerender_contents,
     RenderViewHost* render_view_host)
-    : RenderViewHostObserver(render_view_host),
+    : content::RenderViewHostObserver(render_view_host),
       prerender_contents_(prerender_contents) {
 }
 
-void PrerenderRenderViewHostObserver::RenderViewHostDestroyed() {
+void PrerenderRenderViewHostObserver::RenderViewHostDestroyed(
+    RenderViewHost* rvh) {
   // The base class deletes |this| on RenderViewHost destruction but we want the
   // lifetime to be tied to the PrerenderContents instead, so we'll do nothing
   // here.
@@ -28,7 +27,7 @@ void PrerenderRenderViewHostObserver::RenderViewHostDestroyed() {
 bool PrerenderRenderViewHostObserver::OnMessageReceived(
     const IPC::Message& message) {
   if (!prerender_contents_)
-    return RenderViewHostObserver::OnMessageReceived(message);
+    return content::RenderViewHostObserver::OnMessageReceived(message);
 
   bool handled = true;
   // The following messages we do want to consume.
@@ -43,7 +42,7 @@ bool PrerenderRenderViewHostObserver::OnMessageReceived(
 
   // Pass the message through.
   if (!handled)
-    handled = RenderViewHostObserver::OnMessageReceived(message);
+    handled = content::RenderViewHostObserver::OnMessageReceived(message);
 
   return handled;
 }
@@ -51,7 +50,7 @@ bool PrerenderRenderViewHostObserver::OnMessageReceived(
 // The base class declares this as protected so this is just here to make it
 // public so it is visible to the caller.
 bool PrerenderRenderViewHostObserver::Send(IPC::Message* message) {
-  return RenderViewHostObserver::Send(message);
+  return content::RenderViewHostObserver::Send(message);
 }
 
 void PrerenderRenderViewHostObserver::OnUpdateFaviconURL(

@@ -16,12 +16,12 @@
 #include "testing/gtest/include/gtest/gtest_prod.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/models/tree_node_model.h"
-#include "views/context_menu_controller.h"
-#include "views/controls/button/button.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/controls/textfield/textfield_controller.h"
-#include "views/controls/tree/tree_view.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/context_menu_controller.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/controls/textfield/textfield_controller.h"
+#include "ui/views/controls/tree/tree_view.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class Label;
@@ -80,27 +80,25 @@ class BookmarkEditorView : public BookmarkEditor,
 
   virtual ~BookmarkEditorView();
 
-  // DialogDelegate methods:
-  virtual bool IsDialogButtonEnabled(
-      MessageBoxFlags::DialogButton button) const OVERRIDE;
+  // views::DialogDelegateView:
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
+  virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
   virtual bool IsModal() const OVERRIDE;
   virtual bool CanResize() const  OVERRIDE;
   virtual string16 GetWindowTitle() const  OVERRIDE;
   virtual bool Accept() OVERRIDE;
-  virtual bool AreAcceleratorsEnabled(
-      MessageBoxFlags::DialogButton button) OVERRIDE;
+  virtual bool AreAcceleratorsEnabled(ui::DialogButton button) OVERRIDE;
   virtual views::View* GetContentsView()  OVERRIDE;
 
-  // views::View.
+  // views::View:
   virtual void Layout() OVERRIDE;
   virtual gfx::Size GetPreferredSize() OVERRIDE;
   virtual void ViewHierarchyChanged(bool is_add,
                                     views::View* parent,
                                     views::View* child) OVERRIDE;
 
-  // views::TreeViewObserver.
-  virtual void OnTreeViewSelectionChanged(
-      views::TreeView* tree_view) OVERRIDE;
+  // views::TreeViewController:
+  virtual void OnTreeViewSelectionChanged(views::TreeView* tree_view) OVERRIDE;
   virtual bool CanEdit(views::TreeView* tree_view,
                        ui::TreeModelNode* node) OVERRIDE;
 
@@ -210,7 +208,7 @@ class BookmarkEditorView : public BookmarkEditor,
   GURL GetInputURL() const;
 
   // Returns the title the user has input.
-  std::wstring GetInputTitle() const;
+  string16 GetInputTitle() const;
 
   // Invoked when the url or title has possibly changed. Updates the background
   // of Textfields and ok button appropriately.

@@ -10,12 +10,12 @@
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "views/controls/menu/menu_item_view.h"
-#include "views/controls/menu/menu_runner.h"
-#include "views/widget/widget.h"
+#include "ui/views/controls/menu/menu_item_view.h"
+#include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/widget/widget.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // BookmarkContextMenu, public:
@@ -43,10 +43,10 @@ BookmarkContextMenu::~BookmarkContextMenu() {
 }
 
 void BookmarkContextMenu::RunMenuAt(const gfx::Point& point) {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BOOKMARK_CONTEXT_MENU_SHOWN,
-      Source<BookmarkContextMenu>(this),
-      NotificationService::NoDetails());
+      content::Source<BookmarkContextMenu>(this),
+      content::NotificationService::NoDetails());
   // width/height don't matter here.
   if (menu_runner_->RunMenuAt(
           parent_widget_, NULL, gfx::Rect(point.x(), point.y(), 0, 0),
@@ -88,8 +88,8 @@ void BookmarkContextMenu::CloseMenu() {
 }
 
 void BookmarkContextMenu::AddItemWithStringId(int command_id, int string_id) {
-  menu_->AppendMenuItemWithLabel(
-      command_id, UTF16ToWide(l10n_util::GetStringUTF16(string_id)));
+  menu_->AppendMenuItemWithLabel(command_id,
+                                 l10n_util::GetStringUTF16(string_id));
 }
 
 void BookmarkContextMenu::AddSeparator() {
@@ -98,7 +98,7 @@ void BookmarkContextMenu::AddSeparator() {
 
 void BookmarkContextMenu::AddCheckboxItem(int command_id, int string_id) {
   menu_->AppendMenuItem(command_id,
-                        UTF16ToWide(l10n_util::GetStringUTF16(string_id)),
+                        l10n_util::GetStringUTF16(string_id),
                         views::MenuItemView::CHECKBOX);
 }
 

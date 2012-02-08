@@ -5,15 +5,16 @@
 #include "content/common/npobject_stub.h"
 
 #include "base/command_line.h"
-#include "content/common/content_client.h"
 #include "content/common/np_channel_base.h"
 #include "content/common/npobject_util.h"
 #include "content/common/plugin_messages.h"
+#include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "third_party/npapi/bindings/npruntime.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebBindings.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
+#include "webkit/plugins/npapi/plugin_host.h"
 
 using WebKit::WebBindings;
 
@@ -37,7 +38,7 @@ NPObjectStub::NPObjectStub(
 
 NPObjectStub::~NPObjectStub() {
   channel_->RemoveRoute(route_id_);
-  CHECK(!npobject_);
+  DCHECK(!npobject_);
 }
 
 void NPObjectStub::DeleteSoon() {
@@ -324,7 +325,7 @@ void NPObjectStub::OnEnumeration(std::vector<NPIdentifier_Param>* value,
     value->push_back(param);
   }
 
-  NPN_MemFree(value_np);
+  webkit::npapi::PluginHost::Singleton()->host_functions()->memfree(value_np);
 }
 
 void NPObjectStub::OnConstruct(const std::vector<NPVariant_Param>& args,

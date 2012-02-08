@@ -27,8 +27,8 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityPolicy.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebVector.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -230,7 +230,7 @@ bool UserScriptSlave::UpdateScripts(base::SharedMemoryHandle shared_memory) {
   return true;
 }
 
-GURL UserScriptSlave::GetLatestURLForFrame(WebFrame* frame) {
+GURL UserScriptSlave::GetDataSourceURLForFrame(WebFrame* frame) {
   // Normally we would use frame->document().url() to determine the document's
   // URL, but to decide whether to inject a content script, we use the URL from
   // the data source. This "quirk" helps prevents content scripts from
@@ -247,7 +247,7 @@ GURL UserScriptSlave::GetLatestURLForFrame(WebFrame* frame) {
 
 void UserScriptSlave::InjectScripts(WebFrame* frame,
                                     UserScript::RunLocation location) {
-  GURL data_source_url = GetLatestURLForFrame(frame);
+  GURL data_source_url = GetDataSourceURLForFrame(frame);
   if (data_source_url.is_empty())
     return;
 

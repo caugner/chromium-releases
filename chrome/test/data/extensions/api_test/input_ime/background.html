@@ -1,41 +1,6 @@
-<script>
-  function setMenuItemsTest() {
-    chrome.experimental.input.setMenuItems({
-      "engineID": "test",
-      "items": [{
-        "id": "Menu 1",
-        "label": "Menu 1",
-        "style": "check",
-        "visible": true,
-        "enabled": true
-      }, {
-        "id": "Menu 2",
-        "label": "Menu 2",
-        "style": "radio",
-        "visible": true,
-        "enabled": true
-      }]
-    }, function () {
-      chrome.test.assertNoLastError();
-      chrome.test.succeed();
-    });
-  }
-
-  function updateMenuItemsTest() {
-    chrome.experimental.input.updateMenuItems({
-      "engineID": "test",
-      "items": [{
-        "id": "Menu 1",
-        "enabled": false
-      }, {
-        "id": "Menu 2",
-        "visible": false,
-      }]
-    }, function () {
-      chrome.test.assertNoLastError();
-      chrome.test.succeed();
-    });
-  }
-
-  chrome.test.runTests([setMenuItemsTest, updateMenuItemsTest]);
-</script>
+<!--
+ * Copyright (c) 2011 The Chromium Authors. All rights reserved.  Use of this
+ * source code is governed by a BSD-style license that can be found in the
+ * LICENSE file.
+-->
+<script src="background.js"></script>

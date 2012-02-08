@@ -14,17 +14,19 @@
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
-#include "chrome/browser/webdata/web_data_service.h"
-#include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
-#include "chrome/test/base/testing_profile.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "content/browser/browser_thread.h"
+#include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
+#include "chrome/browser/webdata/web_data_service.h"
+#include "chrome/test/base/testing_profile.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/rect.h"
 #include "webkit/glue/form_data.h"
 #include "webkit/glue/form_field.h"
 
+using content::BrowserThread;
 using ::testing::_;
 using ::testing::AnyNumber;
 using ::testing::Mock;
@@ -152,10 +154,10 @@ class TestFormStructure : public FormStructure {
     ASSERT_EQ(field_count(), server_types.size());
 
     for (size_t i = 0; i < field_count(); ++i) {
-      AutofillField* field = (*fields())[i];
-      ASSERT_TRUE(field);
-      field->set_heuristic_type(heuristic_types[i]);
-      field->set_server_type(server_types[i]);
+      AutofillField* form_field = field(i);
+      ASSERT_TRUE(form_field);
+      form_field->set_heuristic_type(heuristic_types[i]);
+      form_field->set_server_type(server_types[i]);
     }
 
     UpdateAutofillCount();
@@ -178,10 +180,11 @@ class TestAutofillManager : public AutofillManager {
   TestAutofillManager(TabContentsWrapper* tab_contents,
                       TestPersonalDataManager* personal_manager)
       : AutofillManager(tab_contents, personal_manager),
-        autofill_enabled_(true) {
+        autofill_enabled_(true),
+        did_finish_async_form_submit_(false),
+        message_loop_is_running_(false) {
     set_metric_logger(new MockAutofillMetrics);
   }
-  virtual ~TestAutofillManager() {}
 
   virtual bool IsAutofillEnabled() const { return autofill_enabled_; }
 
@@ -210,8 +213,46 @@ class TestAutofillManager : public AutofillManager {
     form_structures()->push_back(form_structure);
   }
 
+  void FormSubmitted(const FormData& form, const TimeTicks& timestamp) {
+    if (!OnFormSubmitted(form, timestamp))
+      return;
+
+    // Wait for the asynchronous FormSubmitted() call to complete.
+    if (!did_finish_async_form_submit_) {
+      // TODO(isherman): It seems silly to need this variable.  Is there some
+      // way I can just query the message loop's state?
+      message_loop_is_running_ = true;
+      MessageLoop::current()->Run();
+    } else {
+      did_finish_async_form_submit_ = false;
+    }
+  }
+
+  virtual void UploadFormDataAsyncCallback(
+      const FormStructure* submitted_form,
+      const base::TimeTicks& load_time,
+      const base::TimeTicks& interaction_time,
+      const base::TimeTicks& submission_time) OVERRIDE {
+    if (message_loop_is_running_) {
+      MessageLoop::current()->Quit();
+      message_loop_is_running_ = false;
+    } else {
+      did_finish_async_form_submit_ = true;
+    }
+
+    AutofillManager::UploadFormDataAsyncCallback(submitted_form,
+                                                 load_time,
+                                                 interaction_time,
+                                                 submission_time);
+  }
+
  private:
+  // AutofillManager is ref counted.
+  virtual ~TestAutofillManager() {}
+
   bool autofill_enabled_;
+  bool did_finish_async_form_submit_;
+  bool message_loop_is_running_;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillManager);
 };
@@ -223,30 +264,33 @@ class AutofillMetricsTest : public TabContentsWrapperTestHarness {
   AutofillMetricsTest();
   virtual ~AutofillMetricsTest();
 
-  virtual void SetUp();
+  virtual void SetUp() OVERRIDE;
+  virtual void TearDown() OVERRIDE;
 
  protected:
   AutofillCCInfoBarDelegate* CreateDelegate(MockAutofillMetrics* metric_logger,
                                             CreditCard** created_card);
 
-  scoped_ptr<TestAutofillManager> autofill_manager_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
+
+  scoped_refptr<TestAutofillManager> autofill_manager_;
   TestPersonalDataManager personal_data_;
 
  private:
-  BrowserThread browser_thread_;
-
   DISALLOW_COPY_AND_ASSIGN(AutofillMetricsTest);
 };
 
 AutofillMetricsTest::AutofillMetricsTest()
   : TabContentsWrapperTestHarness(),
-    browser_thread_(BrowserThread::UI, &message_loop_) {
+    ui_thread_(BrowserThread::UI, &message_loop_),
+    file_thread_(BrowserThread::FILE) {
 }
 
 AutofillMetricsTest::~AutofillMetricsTest() {
   // Order of destruction is important as AutofillManager relies on
   // PersonalDataManager to be around when it gets destroyed.
-  autofill_manager_.reset(NULL);
+  autofill_manager_ = NULL;
 }
 
 void AutofillMetricsTest::SetUp() {
@@ -256,8 +300,15 @@ void AutofillMetricsTest::SetUp() {
       profile, TestPersonalDataManager::Build);
 
   TabContentsWrapperTestHarness::SetUp();
-  autofill_manager_.reset(new TestAutofillManager(contents_wrapper(),
-                                                  &personal_data_));
+  autofill_manager_ = new TestAutofillManager(contents_wrapper(),
+                                              &personal_data_);
+
+  file_thread_.Start();
+}
+
+void AutofillMetricsTest::TearDown() {
+  file_thread_.Stop();
+  TabContentsWrapperTestHarness::TearDown();
 }
 
 AutofillCCInfoBarDelegate* AutofillMetricsTest::CreateDelegate(
@@ -420,8 +471,8 @@ TEST_F(AutofillMetricsTest, QualityMetrics) {
                   AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_SOME));
 
   // Simulate form submission.
-  EXPECT_NO_FATAL_FAILURE(autofill_manager_->OnFormSubmitted(form,
-                                                             TimeTicks::Now()));
+  EXPECT_NO_FATAL_FAILURE(autofill_manager_->FormSubmitted(form,
+                                                           TimeTicks::Now()));
 }
 
 // Test that we log the appropriate additional metrics when Autofill failed.
@@ -538,8 +589,8 @@ TEST_F(AutofillMetricsTest, QualityMetricsForFailure) {
   }
 
   // Simulate form submission.
-  EXPECT_NO_FATAL_FAILURE(autofill_manager_->OnFormSubmitted(form,
-                                                             TimeTicks::Now()));
+  EXPECT_NO_FATAL_FAILURE(autofill_manager_->FormSubmitted(form,
+                                                           TimeTicks::Now()));
 }
 
 // Test that we behave sanely when the cached form differs from the submitted
@@ -696,8 +747,8 @@ TEST_F(AutofillMetricsTest, SaneMetricsWithCacheMismatch) {
                                std::string()));
 
   // Simulate form submission.
-  EXPECT_NO_FATAL_FAILURE(autofill_manager_->OnFormSubmitted(form,
-                                                             TimeTicks::Now()));
+  EXPECT_NO_FATAL_FAILURE(autofill_manager_->FormSubmitted(form,
+                                                           TimeTicks::Now()));
 }
 
 // Test that we don't log quality metrics for non-autofillable forms.
@@ -723,8 +774,8 @@ TEST_F(AutofillMetricsTest, NoQualityMetricsForNonAutofillableForms) {
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,
                                std::string())).Times(0);
-  EXPECT_NO_FATAL_FAILURE(autofill_manager_->OnFormSubmitted(form,
-                                                             TimeTicks::Now()));
+  EXPECT_NO_FATAL_FAILURE(autofill_manager_->FormSubmitted(form,
+                                                           TimeTicks::Now()));
 
   // Search forms are not auto-fillable.
   form.action = GURL("http://example.com/search?q=Elvis%20Presley");
@@ -736,8 +787,8 @@ TEST_F(AutofillMetricsTest, NoQualityMetricsForNonAutofillableForms) {
   EXPECT_CALL(*autofill_manager_->metric_logger(),
               LogQualityMetric(AutofillMetrics::FIELD_SUBMITTED,
                                std::string())).Times(0);
-  EXPECT_NO_FATAL_FAILURE(autofill_manager_->OnFormSubmitted(form,
-                                                             TimeTicks::Now()));
+  EXPECT_NO_FATAL_FAILURE(autofill_manager_->FormSubmitted(form,
+                                                           TimeTicks::Now()));
 }
 
 // Test that we recored the experiment id appropriately.
@@ -862,8 +913,8 @@ TEST_F(AutofillMetricsTest, QualityMetricsWithExperimentId) {
                                        ADDRESS_HOME_COUNTRY, experiment_id));
 
   // Simulate form submission.
-  EXPECT_NO_FATAL_FAILURE(autofill_manager_->OnFormSubmitted(form,
-                                                             TimeTicks::Now()));
+  EXPECT_NO_FATAL_FAILURE(autofill_manager_->FormSubmitted(form,
+                                                           TimeTicks::Now()));
 }
 
 // Test that the profile count is logged correctly.
@@ -926,12 +977,14 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
               LogAddressSuggestionsCount(2)).Times(1);
 
   // Simulate activating the autofill popup for the phone field.
-  autofill_manager_->OnQueryFormFieldAutofill(0, form, field);
+  autofill_manager_->OnQueryFormFieldAutofill(
+      0, form, field, gfx::Rect(), false);
 
   // Simulate activating the autofill popup for the email field after typing.
   // No new metric should be logged, since we're still on the same page.
   autofill_test::CreateTestFormField("Email", "email", "b", "email", &field);
-  autofill_manager_->OnQueryFormFieldAutofill(0, form, field);
+  autofill_manager_->OnQueryFormFieldAutofill(
+      0, form, field, gfx::Rect(), false);
 
   // Reset the autofill manager state.
   autofill_manager_->Reset();
@@ -943,7 +996,8 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
               LogAddressSuggestionsCount(1)).Times(1);
 
   // Simulate activating the autofill popup for the email field after typing.
-  autofill_manager_->OnQueryFormFieldAutofill(0, form, field);
+  autofill_manager_->OnQueryFormFieldAutofill(
+      0, form, field, gfx::Rect(), false);
 
   // Reset the autofill manager state again.
   autofill_manager_->Reset();
@@ -956,7 +1010,8 @@ TEST_F(AutofillMetricsTest, AddressSuggestionsCount) {
 
   // Simulate activating the autofill popup for the email field after typing.
   form.fields[0].is_autofilled = true;
-  autofill_manager_->OnQueryFormFieldAutofill(0, form, field);
+  autofill_manager_->OnQueryFormFieldAutofill(
+      0, form, field, gfx::Rect(), false);
 }
 
 // Test that we log whether Autofill is enabled when filling a form.
@@ -1106,7 +1161,7 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
         *autofill_manager_->metric_logger(),
         LogUserHappinessMetric(
             AutofillMetrics::SUBMITTED_NON_FILLABLE_FORM)).Times(0);
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::Now());
+    autofill_manager_->FormSubmitted(form, TimeTicks::Now());
   }
 
   // Add more fields to the form.
@@ -1128,7 +1183,7 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogUserHappinessMetric(
                     AutofillMetrics::SUBMITTED_NON_FILLABLE_FORM));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::Now());
+    autofill_manager_->FormSubmitted(form, TimeTicks::Now());
   }
 
   // Fill in two of the fields.
@@ -1141,7 +1196,7 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogUserHappinessMetric(
                     AutofillMetrics::SUBMITTED_NON_FILLABLE_FORM));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::Now());
+    autofill_manager_->FormSubmitted(form, TimeTicks::Now());
   }
 
   // Fill in the third field.
@@ -1153,7 +1208,7 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogUserHappinessMetric(
                     AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_NONE));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::Now());
+    autofill_manager_->FormSubmitted(form, TimeTicks::Now());
   }
 
 
@@ -1166,7 +1221,7 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogUserHappinessMetric(
                     AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_SOME));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::Now());
+    autofill_manager_->FormSubmitted(form, TimeTicks::Now());
   }
 
   // Mark all of the fillable fields as autofilled.
@@ -1179,7 +1234,7 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogUserHappinessMetric(
                     AutofillMetrics::SUBMITTED_FILLABLE_FORM_AUTOFILLED_ALL));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::Now());
+    autofill_manager_->FormSubmitted(form, TimeTicks::Now());
   }
 
   // Clear out the third field's value.
@@ -1191,7 +1246,7 @@ TEST_F(AutofillMetricsTest, UserHappinessFormLoadAndSubmission) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogUserHappinessMetric(
                     AutofillMetrics::SUBMITTED_NON_FILLABLE_FORM));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::Now());
+    autofill_manager_->FormSubmitted(form, TimeTicks::Now());
   }
 }
 
@@ -1344,7 +1399,7 @@ TEST_F(AutofillMetricsTest, FormFillDuration) {
     EXPECT_CALL(*autofill_manager_->metric_logger(),
                 LogFormFillDurationFromInteractionWithoutAutofill(_)).Times(0);
     autofill_manager_->OnFormsSeen(forms, TimeTicks::FromInternalValue(1));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::FromInternalValue(17));
+    autofill_manager_->FormSubmitted(form, TimeTicks::FromInternalValue(17));
     autofill_manager_->Reset();
     Mock::VerifyAndClearExpectations(autofill_manager_->metric_logger());
   }
@@ -1364,7 +1419,7 @@ TEST_F(AutofillMetricsTest, FormFillDuration) {
     autofill_manager_->OnFormsSeen(forms, TimeTicks::FromInternalValue(1));
     autofill_manager_->OnTextFieldDidChange(form, form.fields.front(),
                                             TimeTicks::FromInternalValue(3));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::FromInternalValue(17));
+    autofill_manager_->FormSubmitted(form, TimeTicks::FromInternalValue(17));
     autofill_manager_->Reset();
     Mock::VerifyAndClearExpectations(autofill_manager_->metric_logger());
   }
@@ -1385,7 +1440,7 @@ TEST_F(AutofillMetricsTest, FormFillDuration) {
     autofill_manager_->OnFormsSeen(forms, TimeTicks::FromInternalValue(1));
     autofill_manager_->OnDidFillAutofillFormData(
         TimeTicks::FromInternalValue(5));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::FromInternalValue(17));
+    autofill_manager_->FormSubmitted(form, TimeTicks::FromInternalValue(17));
     autofill_manager_->Reset();
     Mock::VerifyAndClearExpectations(autofill_manager_->metric_logger());
   }
@@ -1409,7 +1464,7 @@ TEST_F(AutofillMetricsTest, FormFillDuration) {
         TimeTicks::FromInternalValue(5));
     autofill_manager_->OnTextFieldDidChange(form, form.fields.front(),
                                             TimeTicks::FromInternalValue(3));
-    autofill_manager_->OnFormSubmitted(form, TimeTicks::FromInternalValue(17));
+    autofill_manager_->FormSubmitted(form, TimeTicks::FromInternalValue(17));
     autofill_manager_->Reset();
     Mock::VerifyAndClearExpectations(autofill_manager_->metric_logger());
   }

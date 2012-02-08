@@ -10,6 +10,7 @@
       'mac_bundle': 1,
       'variables': {
         'use_system_xdg_utils%': 0,
+        'enable_wexit_time_destructors': 1,
       },
       'sources': [
         'app/breakpad_win.cc',
@@ -41,6 +42,10 @@
         'INFOPLIST_FILE': 'app/app-Info.plist',
       },
       'conditions': [
+        ['OS == "android"', {
+          # Don't put the 'chrome' target in 'all' on android
+          'suppress_wildcard': 1,
+        }],
         ['os_posix == 1 and OS != "mac"', {
           'actions': [
             {
@@ -400,8 +405,8 @@
             }],
           ],
           'dependencies': [
-            'packed_extra_resources',
-            'packed_resources',
+            'chrome_resources.gyp:packed_extra_resources',
+            'chrome_resources.gyp:packed_resources',
             # Copy Flash Player files to PRODUCT_DIR if applicable. Let the .gyp
             # file decide what to do on a per-OS basis; on Mac, internal plugins
             # go inside the framework, so this dependency is in chrome_dll.gypi.
@@ -410,10 +415,10 @@
         }],
         ['OS=="linux"', {
           'conditions': [
-            # For now, do not build nacl_helper on ARM or when disable_nacl=1
-            ['disable_nacl!=1 and target_arch!="arm"', {
+            # For now, do not build nacl_helper when disable_nacl=1
+            ['disable_nacl!=1', {
               'dependencies': [
-                'nacl_helper_bootstrap',
+                '../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',
                 'nacl_helper',
                 ],
             }],
@@ -433,19 +438,8 @@
           },
         }],
         ['OS=="win"', {
-          'conditions': [
-            ['optimize_with_syzygy==1', {
-              # With syzygy enabled there is an intermediate target which
-              # builds an initial version of chrome_dll, then optimizes it
-              # to its final location.  The optimization step also
-              # depends on chrome_exe, so here we depend on the initial
-              # chrome_dll.
-              'dependencies': ['chrome_dll_initial',]
-            }, {
-              'dependencies': ['chrome_dll',]
-            }],
-          ],
           'dependencies': [
+            'chrome_dll',
             'chrome_version_resources',
             'installer_util',
             'installer_util_strings',
@@ -495,6 +489,9 @@
             'app/client_util.cc',
           ],
         }],
+        ['OS=="win" and component=="shared_library"', {
+          'defines': ['COMPILE_CONTENT_STATICALLY'],
+        }]
       ],
     },
   ],
@@ -512,8 +509,8 @@
             '../content/app/startup_helper_win.cc',
             '../content/common/debug_flags.cc',  # Needed for sandbox_policy.cc
             '../content/common/hi_res_timer_manager_win.cc',
+            '../content/common/sandbox_init_win.cc',
             '../content/common/sandbox_policy.cc',
-            '../content/common/sandbox_init_wrapper_win.cc',
             '../content/public/common/content_switches.cc',
             '<(SHARED_INTERMEDIATE_DIR)/chrome_version/nacl64_exe_version.rc',
           ],
@@ -534,6 +531,7 @@
           ],
           'defines': [
             '<@(nacl_win64_defines)',
+            'COMPILE_CONTENT_STATICALLY',
           ],
           'include_dirs': [
             '<(SHARED_INTERMEDIATE_DIR)/chrome',

@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/string_piece.h"
@@ -41,13 +42,20 @@ const int kLargeFontSizeDelta = 8;
 
 ResourceBundle* ResourceBundle::g_shared_instance_ = NULL;
 
-/* static */
+// static
 // TODO(glen): Finish moving these into theme provider (dialogs still
-//    depend on these colors).
+//             depend on these colors).
+#if defined(USE_AURA)
+const SkColor ResourceBundle::frame_color =
+     SkColorSetRGB(109, 109, 109);
+const SkColor ResourceBundle::frame_color_inactive =
+     SkColorSetRGB(176, 176, 176);
+#else
 const SkColor ResourceBundle::frame_color =
      SkColorSetRGB(66, 116, 201);
 const SkColor ResourceBundle::frame_color_inactive =
      SkColorSetRGB(161, 182, 228);
+#endif
 const SkColor ResourceBundle::frame_color_app_panel =
      SK_ColorWHITE;
 const SkColor ResourceBundle::frame_color_app_panel_inactive =
@@ -114,6 +122,11 @@ void ResourceBundle::CleanupSharedInstance() {
 }
 
 /* static */
+bool ResourceBundle::HasSharedInstance() {
+  return g_shared_instance_ != NULL;
+}
+
+/* static */
 ResourceBundle& ResourceBundle::GetSharedInstance() {
   // Must call InitSharedInstance before this function.
   CHECK(g_shared_instance_ != NULL);
@@ -161,7 +174,12 @@ std::string ResourceBundle::LoadLocaleResources(
     return std::string();
   }
   locale_resources_data_.reset(LoadResourcesDataPak(locale_file_path));
-  CHECK(locale_resources_data_.get()) << "failed to load locale.pak";
+  if (!locale_resources_data_.get()) {
+    UMA_HISTOGRAM_ENUMERATION("ResourceBundle.LoadLocaleResourcesError",
+                              logging::GetLastSystemErrorCode(), 16000);
+    NOTREACHED() << "failed to load locale.pak";
+    return std::string();
+  }
   return app_locale;
 }
 

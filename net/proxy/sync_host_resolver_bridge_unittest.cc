@@ -32,10 +32,10 @@ class BlockableHostResolver : public HostResolver {
 
   virtual int Resolve(const RequestInfo& info,
                       AddressList* addresses,
-                      OldCompletionCallback* callback,
+                      const CompletionCallback& callback,
                       RequestHandle* out_req,
                       const BoundNetLog& net_log) OVERRIDE {
-    EXPECT_TRUE(callback);
+    EXPECT_FALSE(callback.is_null());
     EXPECT_TRUE(out_req);
     *out_req = reinterpret_cast<RequestHandle*>(1);  // Magic value.
 
@@ -57,14 +57,6 @@ class BlockableHostResolver : public HostResolver {
   virtual void CancelRequest(RequestHandle req) OVERRIDE {
     EXPECT_EQ(reinterpret_cast<RequestHandle*>(1), req);
     was_request_cancelled_ = true;
-  }
-
-  virtual void AddObserver(Observer* observer) OVERRIDE {
-    NOTREACHED();
-  }
-
-  virtual void RemoveObserver(Observer* observer) OVERRIDE {
-    NOTREACHED();
   }
 
   // Waits until Resolve() has been called.
@@ -109,6 +101,17 @@ class SyncProxyResolver : public ProxyResolver {
 
   virtual void CancelRequest(RequestHandle request) OVERRIDE {
     NOTREACHED();
+  }
+
+  virtual LoadState GetLoadState(RequestHandle request) const OVERRIDE {
+    NOTREACHED();
+    return LOAD_STATE_IDLE;
+  }
+
+  virtual LoadState GetLoadStateThreadSafe(
+      RequestHandle request) const OVERRIDE {
+    NOTREACHED();
+    return LOAD_STATE_IDLE;
   }
 
   virtual void Shutdown() OVERRIDE {

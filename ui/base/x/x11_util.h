@@ -68,6 +68,10 @@ UI_EXPORT bool QueryRenderSupport(Display* dpy);
 // Return the default screen number for the display
 int GetDefaultScreen(Display* display);
 
+// TODO(xiyuan): Fix the stale XCursorCache problem per http://crbug.com/102759.
+// A special cursor that makes GetXCursor below to clear its XCursorCache.
+const int kCursorClearXCursorCache = -1;
+
 // Returns an X11 Cursor, sharable across the process.
 // |cursor_shape| is an X font cursor shape, see XCreateFontCursor().
 UI_EXPORT Cursor GetXCursor(int cursor_shape);
@@ -118,6 +122,9 @@ UI_EXPORT bool GetAtomArrayProperty(XID window,
                                     std::vector<Atom>* value);
 UI_EXPORT bool GetStringProperty(
     XID window, const std::string& property_name, std::string* value);
+
+// Gets the X atom for default display corresponding to atom_name.
+Atom GetAtom(const char* atom_name);
 
 // Get |window|'s parent window, or None if |window| is the root window.
 XID GetParentWindow(XID window);
@@ -171,15 +178,44 @@ UI_EXPORT XID CreatePictureFromSkiaPixmap(Display* display, XID pixmap);
 // server side visual depth as needed.  Destination is assumed to be the same
 // dimensions as |data| or larger.  |data| is also assumed to be in row order
 // with each line being exactly |width| * 4 bytes long.
-UI_EXPORT void PutARGBImage(Display* display, void* visual, int depth,
-                            XID pixmap, void* pixmap_gc, const uint8* data,
+UI_EXPORT void PutARGBImage(Display* display,
+                            void* visual, int depth,
+                            XID pixmap, void* pixmap_gc,
+                            const uint8* data,
                             int width, int height);
+
+// Same as above only more general:
+// - |data_width| and |data_height| refer to the data image
+// - |src_x|, |src_y|, |copy_width| and |copy_height| define source region
+// - |dst_x|, |dst_y|, |copy_width| and |copy_height| define destination region
+UI_EXPORT void PutARGBImage(Display* display,
+                            void* visual, int depth,
+                            XID pixmap, void* pixmap_gc,
+                            const uint8* data,
+                            int data_width, int data_height,
+                            int src_x, int src_y,
+                            int dst_x, int dst_y,
+                            int copy_width, int copy_height);
 
 void FreePicture(Display* display, XID picture);
 void FreePixmap(Display* display, XID pixmap);
 
-// Get the window manager name.
-UI_EXPORT bool GetWindowManagerName(std::string* name);
+enum WindowManagerName {
+  WM_UNKNOWN,
+  WM_BLACKBOX,
+  WM_CHROME_OS,
+  WM_COMPIZ,
+  WM_ENLIGHTENMENT,
+  WM_ICE_WM,
+  WM_KWIN,
+  WM_METACITY,
+  WM_MUTTER,
+  WM_OPENBOX,
+  WM_XFWM4,
+};
+// Attempts to guess the window maager. Returns WM_UNKNOWN if we can't
+// determine it for one reason or another.
+UI_EXPORT WindowManagerName GuessWindowManager();
 
 // Change desktop for |window| to the desktop of |destination| window.
 UI_EXPORT bool ChangeWindowDesktop(XID window, XID destination);

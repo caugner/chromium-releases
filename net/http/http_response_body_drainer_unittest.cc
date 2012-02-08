@@ -6,9 +6,10 @@
 
 #include <cstring>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/ssl_config_service_defaults.h"
@@ -69,7 +70,7 @@ class MockHttpStream : public HttpStream {
         stall_reads_forever_(false),
         num_chunks_(0),
         is_complete_(false),
-        ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {}
+        ALLOW_THIS_IN_INITIALIZER_LIST(ptr_factory_(this)) {}
   virtual ~MockHttpStream() {}
 
   // HttpStream implementation:
@@ -120,6 +121,8 @@ class MockHttpStream : public HttpStream {
 
   virtual void LogNumRttVsBytesMetrics() const OVERRIDE {}
 
+  virtual void Drain(HttpNetworkSession*) OVERRIDE {}
+
   // Methods to tweak/observer mock behavior:
   void StallReadsForever() { stall_reads_forever_ = true; }
 
@@ -137,7 +140,7 @@ class MockHttpStream : public HttpStream {
   bool stall_reads_forever_;
   int num_chunks_;
   bool is_complete_;
-  ScopedRunnableMethodFactory<MockHttpStream> method_factory_;
+  base::WeakPtrFactory<MockHttpStream> ptr_factory_;
 };
 
 int MockHttpStream::ReadResponseBody(
@@ -157,7 +160,7 @@ int MockHttpStream::ReadResponseBody(
     user_callback_ = callback;
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        method_factory_.NewRunnableMethod(&MockHttpStream::CompleteRead));
+        base::Bind(&MockHttpStream::CompleteRead, ptr_factory_.GetWeakPtr()));
     return ERR_IO_PENDING;
   }
 
@@ -250,6 +253,24 @@ TEST_F(HttpResponseBodyDrainerTest, DrainBodyTooLarge) {
   mock_stream_->set_num_chunks(too_many_chunks);
   drainer_->Start(session_);
   EXPECT_TRUE(result_waiter_.WaitForResult());
+}
+
+TEST_F(HttpResponseBodyDrainerTest, StartBodyTooLarge) {
+  TestOldCompletionCallback callback;
+  int too_many_chunks =
+      HttpResponseBodyDrainer::kDrainBodyBufferSize / kMagicChunkSize;
+  too_many_chunks += 1;  // Now it's too large.
+
+  mock_stream_->set_num_chunks(0);
+  drainer_->StartWithSize(session_, too_many_chunks * kMagicChunkSize);
+  EXPECT_TRUE(result_waiter_.WaitForResult());
+}
+
+TEST_F(HttpResponseBodyDrainerTest, StartWithNothingToDo) {
+  TestOldCompletionCallback callback;
+  mock_stream_->set_num_chunks(0);
+  drainer_->StartWithSize(session_, 0);
+  EXPECT_FALSE(result_waiter_.WaitForResult());
 }
 
 }  // namespace

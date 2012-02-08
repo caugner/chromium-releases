@@ -6,7 +6,10 @@
 
 #include "chrome/browser/net/gaia/token_service_unittest.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/message_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/password_manager/encryptor.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -15,16 +18,19 @@
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "content/test/test_url_fetcher_factory.h"
 
+using content::BrowserThread;
+
 TokenAvailableTracker::TokenAvailableTracker() {}
 
 TokenAvailableTracker::~TokenAvailableTracker() {}
 
-void TokenAvailableTracker::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void TokenAvailableTracker::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   TestNotificationTracker::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_TOKEN_AVAILABLE) {
-    Details<const TokenService::TokenAvailableDetails> full = details;
+    content::Details<const TokenService::TokenAvailableDetails> full = details;
     details_ = *full.ptr();
   }
 }
@@ -34,11 +40,12 @@ TokenFailedTracker::TokenFailedTracker() {}
 TokenFailedTracker::~TokenFailedTracker() {}
 
 void TokenFailedTracker::Observe(int type,
-                                 const NotificationSource& source,
-                                 const NotificationDetails& details) {
+                                 const content::NotificationSource& source,
+                                 const content::NotificationDetails& details) {
   TestNotificationTracker::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_TOKEN_REQUEST_FAILED) {
-    Details<const TokenService::TokenRequestFailedDetails> full = details;
+    content::Details<const TokenService::TokenRequestFailedDetails> full =
+        details;
     details_ = *full.ptr();
   }
 }
@@ -68,9 +75,9 @@ void TokenServiceTestHarness::SetUp() {
   WaitForDBLoadCompletion();
 
   success_tracker_.ListenFor(chrome::NOTIFICATION_TOKEN_AVAILABLE,
-                             Source<TokenService>(&service_));
+                             content::Source<TokenService>(&service_));
   failure_tracker_.ListenFor(chrome::NOTIFICATION_TOKEN_REQUEST_FAILED,
-                             Source<TokenService>(&service_));
+                             content::Source<TokenService>(&service_));
 
   service_.Initialize("test", profile_.get());
 }
@@ -92,7 +99,9 @@ void TokenServiceTestHarness::WaitForDBLoadCompletion() {
   // operations should be complete.
   base::WaitableEvent done(false, false);
   BrowserThread::PostTask(
-      BrowserThread::DB, FROM_HERE, new SignalingTask(&done));
+      BrowserThread::DB,
+      FROM_HERE,
+      base::Bind(&base::WaitableEvent::Signal, base::Unretained(&done)));
   done.Wait();
 
   // Notifications should be returned from the DB thread onto the UI thread.
@@ -105,6 +114,25 @@ class TokenServiceTest : public TokenServiceTestHarness {
     TokenServiceTestHarness::SetUp();
     service_.UpdateCredentials(credentials_);
     service_.UpdateOAuthCredentials(oauth_token_, oauth_secret_);
+  }
+ protected:
+  void TestLoadSingleToken(
+      std::map<std::string, std::string>* db_tokens,
+      std::map<std::string, std::string>* memory_tokens,
+      const std::string& service) {
+    std::string token = service + "_token";
+    (*db_tokens)[service] = token;
+    size_t prev_success_size = success_tracker_.size();
+    service_.LoadTokensIntoMemory(*db_tokens, memory_tokens);
+
+    // Check notification.
+    EXPECT_EQ(prev_success_size + 1, success_tracker_.size());
+    TokenService::TokenAvailableDetails details = success_tracker_.details();
+    EXPECT_EQ(details.service(), service);
+    EXPECT_EQ(details.token(), token);
+    // Check memory tokens.
+    EXPECT_EQ(1U, memory_tokens->count(service));
+    EXPECT_EQ((*memory_tokens)[service], token);
   }
 };
 
@@ -133,6 +161,20 @@ TEST_F(TokenServiceTest, NotificationSuccess) {
   // MSVC doesn't like this comparison as EQ.
   EXPECT_TRUE(details.service() == GaiaConstants::kSyncService);
   EXPECT_EQ(details.token(), "token");
+}
+
+TEST_F(TokenServiceTest, NotificationOAuthLoginTokenSuccess) {
+  EXPECT_EQ(0U, success_tracker_.size());
+  EXPECT_EQ(0U, failure_tracker_.size());
+  service_.OnOAuthLoginTokenSuccess("rt1", "at1", 3600);
+  EXPECT_EQ(1U, success_tracker_.size());
+  EXPECT_EQ(0U, failure_tracker_.size());
+
+  TokenService::TokenAvailableDetails details = success_tracker_.details();
+  // MSVC doesn't like this comparison as EQ.
+  EXPECT_TRUE(details.service() ==
+      GaiaConstants::kGaiaOAuth2LoginRefreshToken);
+  EXPECT_EQ(details.token(), "rt1");
 }
 
 TEST_F(TokenServiceTest, NotificationSuccessOAuth) {
@@ -164,6 +206,22 @@ TEST_F(TokenServiceTest, NotificationFailed) {
   EXPECT_TRUE(details.error() == error);  // Struct has no print function.
 }
 
+TEST_F(TokenServiceTest, NotificationOAuthLoginTokenFailed) {
+  EXPECT_EQ(0U, success_tracker_.size());
+  EXPECT_EQ(0U, failure_tracker_.size());
+  GoogleServiceAuthError error(GoogleServiceAuthError::REQUEST_CANCELED);
+  service_.OnOAuthLoginTokenFailure(error);
+  EXPECT_EQ(0U, success_tracker_.size());
+  EXPECT_EQ(1U, failure_tracker_.size());
+
+  TokenService::TokenRequestFailedDetails details = failure_tracker_.details();
+
+  // MSVC doesn't like this comparison as EQ.
+  EXPECT_TRUE(details.service() ==
+      GaiaConstants::kGaiaOAuth2LoginRefreshToken);
+  EXPECT_TRUE(details.error() == error);  // Struct has no print function.
+}
+
 TEST_F(TokenServiceTest, NotificationFailedOAuth) {
   EXPECT_EQ(0U, success_tracker_.size());
   EXPECT_EQ(0U, failure_tracker_.size());
@@ -191,6 +249,21 @@ TEST_F(TokenServiceTest, OnTokenSuccessUpdate) {
   service_.OnIssueAuthTokenSuccess(GaiaConstants::kSyncService, "");
   EXPECT_TRUE(service_.HasTokenForService(GaiaConstants::kSyncService));
   EXPECT_EQ(service_.GetTokenForService(GaiaConstants::kSyncService), "");
+}
+
+TEST_F(TokenServiceTest, OnOAuth2LoginTokenSuccessUpdate) {
+  std::string service = GaiaConstants::kGaiaOAuth2LoginRefreshToken;
+  service_.OnOAuthLoginTokenSuccess("rt1", "at1", 3600);
+  EXPECT_TRUE(service_.HasOAuthLoginToken());
+  EXPECT_EQ(service_.GetOAuth2LoginRefreshToken(), "rt1");
+
+  service_.OnOAuthLoginTokenSuccess("rt2", "at2", 3600);
+  EXPECT_TRUE(service_.HasOAuthLoginToken());
+  EXPECT_EQ(service_.GetOAuth2LoginRefreshToken(), "rt2");
+
+  service_.OnOAuthLoginTokenSuccess("rt3", "at3", 3600);
+  EXPECT_TRUE(service_.HasOAuthLoginToken());
+  EXPECT_EQ(service_.GetOAuth2LoginRefreshToken(), "rt3");
 }
 
 TEST_F(TokenServiceTest, OnTokenSuccess) {
@@ -315,16 +388,20 @@ TEST_F(TokenServiceTest, LoadTokensIntoMemoryBasic) {
   EXPECT_TRUE(memory_tokens.empty());
   EXPECT_EQ(0U, success_tracker_.size());
 
-  db_tokens[GaiaConstants::kSyncServiceOAuth] = "token";
-  service_.LoadTokensIntoMemory(db_tokens, &memory_tokens);
-  EXPECT_EQ(1U, success_tracker_.size());
-
-  TokenService::TokenAvailableDetails details = success_tracker_.details();
-  // MSVC doesn't like this comparison as EQ.
-  EXPECT_TRUE(details.service() == GaiaConstants::kSyncServiceOAuth);
-  EXPECT_EQ(details.token(), "token");
-  EXPECT_EQ(1U, memory_tokens.count(GaiaConstants::kSyncServiceOAuth));
-  EXPECT_EQ(memory_tokens[GaiaConstants::kSyncServiceOAuth], "token");
+  std::string service;
+  std::string token;
+  for (int i = 0; i < TokenService::kNumServices; ++i) {
+    service = TokenService::kServices[i];
+    TestLoadSingleToken(&db_tokens, &memory_tokens, service);
+  }
+  for (int i = 0; i < TokenService::kNumOAuthServices; ++i) {
+    service = TokenService::kOAuthServices[i];
+    TestLoadSingleToken(&db_tokens, &memory_tokens, service);
+  }
+  service = GaiaConstants::kGaiaOAuth2LoginRefreshToken;
+  TestLoadSingleToken(&db_tokens, &memory_tokens, service);
+  service = GaiaConstants::kGaiaOAuth2LoginAccessToken;
+  TestLoadSingleToken(&db_tokens, &memory_tokens, service);
 }
 
 TEST_F(TokenServiceTest, LoadTokensIntoMemoryAdvanced) {

@@ -5,6 +5,7 @@
 #include "chrome/browser/background/background_contents_service.h"
 
 #include "base/basictypes.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
@@ -26,10 +27,9 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -44,9 +44,8 @@ void CloseBalloon(const std::string id) {
 void ScheduleCloseBalloon(const std::string& extension_id) {
   if (!MessageLoop::current())  // For unit_tests
     return;
-  MessageLoop::current()->PostTask(FROM_HERE,
-      NewRunnableFunction(&CloseBalloon,
-          kNotificationPrefix + extension_id));
+  MessageLoop::current()->PostTask(
+      FROM_HERE, base::Bind(&CloseBalloon, kNotificationPrefix + extension_id));
 }
 
 class CrashNotificationDelegate : public NotificationDelegate {
@@ -98,7 +97,7 @@ class CrashNotificationDelegate : public NotificationDelegate {
 
 void ShowBalloon(const Extension* extension, Profile* profile) {
   string16 message = l10n_util::GetStringFUTF16(
-      extension->is_hosted_app() ?  IDS_BACKGROUND_CRASHED_APP_BALLOON_MESSAGE :
+      extension->is_app() ?  IDS_BACKGROUND_CRASHED_APP_BALLOON_MESSAGE :
       IDS_BACKGROUND_CRASHED_EXTENSION_BALLOON_MESSAGE,
       UTF8ToUTF16(extension->name()));
   string16 content_url = DesktopNotificationService::CreateDataUrl(
@@ -161,73 +160,77 @@ BackgroundContentsService::GetBackgroundContents() const
 void BackgroundContentsService::StartObserving(Profile* profile) {
   // On startup, load our background pages after extension-apps have loaded.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSIONS_READY,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   // Track the lifecycle of all BackgroundContents in the system to allow us
   // to store an up-to-date list of the urls. Start tracking contents when they
   // have been opened via CreateBackgroundContents(), and stop tracking them
   // when they are closed by script.
   registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_CLOSED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   // Stop tracking BackgroundContents when they have been deleted (happens
   // during shutdown or if the render process dies).
   registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   // Track when the BackgroundContents navigates to a new URL so we can update
   // our persisted information as appropriate.
   registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   // Listen for new extension installs so that we can load any associated
   // background page.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_LOADED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   // Track when the extensions crash so that the user can be notified
   // about it, and the crashed contents can be restarted.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
   registrar_.Add(this, chrome::NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   // Listen for extensions to be unloaded so we can shutdown associated
   // BackgroundContents.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 
   // Make sure the extension-crash balloons are removed when the extension is
   // uninstalled/reloaded. We cannot do this from UNLOADED since a crashed
   // extension is unloaded immediately after the crash, not when user reloads or
   // uninstalls the extension.
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNINSTALLED,
-                 Source<Profile>(profile));
+                 content::Source<Profile>(profile));
 }
 
-void BackgroundContentsService::Observe(int type,
-                                        const NotificationSource& source,
-                                        const NotificationDetails& details) {
+void BackgroundContentsService::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSIONS_READY:
-      LoadBackgroundContentsFromManifests(Source<Profile>(source).ptr());
-      LoadBackgroundContentsFromPrefs(Source<Profile>(source).ptr());
+      LoadBackgroundContentsFromManifests(
+          content::Source<Profile>(source).ptr());
+      LoadBackgroundContentsFromPrefs(content::Source<Profile>(source).ptr());
       break;
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_DELETED:
-      BackgroundContentsShutdown(Details<BackgroundContents>(details).ptr());
+      BackgroundContentsShutdown(
+          content::Details<BackgroundContents>(details).ptr());
       break;
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_CLOSED:
-      DCHECK(IsTracked(Details<BackgroundContents>(details).ptr()));
-      UnregisterBackgroundContents(Details<BackgroundContents>(details).ptr());
+      DCHECK(IsTracked(content::Details<BackgroundContents>(details).ptr()));
+      UnregisterBackgroundContents(
+          content::Details<BackgroundContents>(details).ptr());
       break;
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_NAVIGATED: {
-      DCHECK(IsTracked(Details<BackgroundContents>(details).ptr()));
+      DCHECK(IsTracked(content::Details<BackgroundContents>(details).ptr()));
 
       // Do not register in the pref if the extension has a manifest-specified
       // background page.
       BackgroundContents* bgcontents =
-          Details<BackgroundContents>(details).ptr();
-      Profile* profile = Source<Profile>(source).ptr();
+          content::Details<BackgroundContents>(details).ptr();
+      Profile* profile = content::Source<Profile>(source).ptr();
       const string16& appid = GetParentApplicationId(bgcontents);
       ExtensionService* extension_service = profile->GetExtensionService();
       // extension_service can be NULL when running tests.
@@ -241,8 +244,9 @@ void BackgroundContentsService::Observe(int type,
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_LOADED: {
-      const Extension* extension = Details<const Extension>(details).ptr();
-      Profile* profile = Source<Profile>(source).ptr();
+      const Extension* extension =
+          content::Details<const Extension>(details).ptr();
+      Profile* profile = content::Source<Profile>(source).ptr();
       if (extension->is_hosted_app() &&
           extension->background_url().is_valid()) {
         // If there is a background page specified in the manifest for a hosted
@@ -265,18 +269,19 @@ void BackgroundContentsService::Observe(int type,
     }
     case chrome::NOTIFICATION_EXTENSION_PROCESS_TERMINATED:
     case chrome::NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED: {
-      Profile* profile = Source<Profile>(source).ptr();
+      Profile* profile = content::Source<Profile>(source).ptr();
       const Extension* extension = NULL;
       if (type == chrome::NOTIFICATION_BACKGROUND_CONTENTS_TERMINATED) {
         BackgroundContents* bg =
-            Details<BackgroundContents>(details).ptr();
+            content::Details<BackgroundContents>(details).ptr();
         std::string extension_id = UTF16ToASCII(
             BackgroundContentsServiceFactory::GetForProfile(profile)->
                 GetParentApplicationId(bg));
         extension =
           profile->GetExtensionService()->GetExtensionById(extension_id, false);
       } else {
-        ExtensionHost* extension_host = Details<ExtensionHost>(details).ptr();
+        ExtensionHost* extension_host =
+            content::Details<ExtensionHost>(details).ptr();
         extension = extension_host->extension();
       }
       if (!extension)
@@ -287,18 +292,18 @@ void BackgroundContentsService::Observe(int type,
       // notifications for this extension to be cancelled by
       // DesktopNotificationService. For this reason, instead of showing the
       // balloon right now, we schedule it to show a little later.
-      MessageLoop::current()->PostTask(FROM_HERE,
-          NewRunnableFunction(&ShowBalloon, extension, profile));
+      MessageLoop::current()->PostTask(
+          FROM_HERE, base::Bind(&ShowBalloon, extension, profile));
       break;
     }
     case chrome::NOTIFICATION_EXTENSION_UNLOADED:
-      switch (Details<UnloadedExtensionInfo>(details)->reason) {
-        // Intentionally fall through.
-        case extension_misc::UNLOAD_REASON_DISABLE:
+      switch (content::Details<UnloadedExtensionInfo>(details)->reason) {
+        case extension_misc::UNLOAD_REASON_DISABLE:    // Fall through.
+        case extension_misc::UNLOAD_REASON_TERMINATE:  // Fall through.
         case extension_misc::UNLOAD_REASON_UNINSTALL:
           ShutdownAssociatedBackgroundContents(
-              ASCIIToUTF16(
-                  Details<UnloadedExtensionInfo>(details)->extension->id()));
+              ASCIIToUTF16(content::Details<UnloadedExtensionInfo>(details)->
+                  extension->id()));
           break;
         case extension_misc::UNLOAD_REASON_UPDATE: {
           // If there is a manifest specified background page, then shut it down
@@ -306,7 +311,7 @@ void BackgroundContentsService::Observe(int type,
           // then it will be loaded from LOADED callback. Otherwise, leave
           // BackgroundContents in place.
           const Extension* extension =
-              Details<UnloadedExtensionInfo>(details)->extension;
+              content::Details<UnloadedExtensionInfo>(details)->extension;
           if (extension->background_url().is_valid())
             ShutdownAssociatedBackgroundContents(ASCIIToUTF16(extension->id()));
           break;
@@ -314,15 +319,15 @@ void BackgroundContentsService::Observe(int type,
         default:
           NOTREACHED();
           ShutdownAssociatedBackgroundContents(
-              ASCIIToUTF16(
-                  Details<UnloadedExtensionInfo>(details)->extension->id()));
+              ASCIIToUTF16(content::Details<UnloadedExtensionInfo>(details)->
+                  extension->id()));
           break;
       }
       break;
 
     case chrome::NOTIFICATION_EXTENSION_UNINSTALLED: {
       // Remove any "This extension has crashed" balloons.
-      ScheduleCloseBalloon(*Details<const std::string>(details).ptr());
+      ScheduleCloseBalloon(*content::Details<const std::string>(details).ptr());
       break;
     }
 
@@ -448,11 +453,10 @@ void BackgroundContentsService::LoadBackgroundContents(
       frame_name,
       application_id);
 
-  RenderViewHost* render_view_host = contents->render_view_host();
   // TODO(atwilson): Create RenderViews asynchronously to avoid increasing
   // startup latency (http://crbug.com/47236).
-  render_view_host->CreateRenderView(frame_name);
-  render_view_host->NavigateToURL(url);
+  contents->tab_contents()->controller().LoadURL(
+      url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
 }
 
 BackgroundContents* BackgroundContentsService::CreateBackgroundContents(
@@ -469,10 +473,10 @@ BackgroundContents* BackgroundContentsService::CreateBackgroundContents(
                                              frame_name,
                                              application_id};
   BackgroundContentsOpened(&details);
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_BACKGROUND_CONTENTS_OPENED,
-      Source<Profile>(profile),
-      Details<BackgroundContentsOpenedDetails>(&details));
+      content::Source<Profile>(profile),
+      content::Details<BackgroundContentsOpenedDetails>(&details));
   return contents;
 }
 

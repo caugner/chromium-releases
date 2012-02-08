@@ -7,20 +7,19 @@
 #pragma once
 
 #include <map>
+#include <string>
 
 #include "base/basictypes.h"
 #include "content/browser/webui/web_ui.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/window_container_type.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/common/window_container_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPopupType.h"
-#include "ui/gfx/rect.h"
 #include "webkit/glue/webpreferences.h"
 #include "webkit/glue/window_open_disposition.h"
 
 class BackgroundContents;
 class Profile;
-class RenderProcessHost;
 class RenderViewHost;
 class RenderViewHostDelegate;
 class RenderWidgetHost;
@@ -31,36 +30,28 @@ struct ViewHostMsg_CreateWindow_Params;
 
 namespace content {
 class BrowserContext;
+class RenderProcessHost;
+}
+
+namespace gfx {
+class Rect;
 }
 
 // Provides helper methods that provide common implementations of some
 // RenderViewHostDelegate::View methods.
-class RenderViewHostDelegateViewHelper : public NotificationObserver {
+class RenderViewHostDelegateViewHelper : public content::NotificationObserver {
  public:
   RenderViewHostDelegateViewHelper();
   virtual ~RenderViewHostDelegateViewHelper();
-
-  // Creates a new renderer for window.open. This will either be a
-  // BackgroundContents (if the window_container_type ==
-  // WINDOW_CONTAINER_TYPE_BACKGROUND and permissions allow) or a TabContents.
-  // If a TabContents is created, it is returned. Otherwise NULL is returned.
-  TabContents* CreateNewWindow(
-      int route_id,
-      Profile* profile,
-      SiteInstance* site,
-      WebUI::TypeID webui_type,
-      RenderViewHostDelegate* opener,
-      WindowContainerType window_container_type,
-      const string16& frame_name);
 
   // Creates a new RenderWidgetHost and saves it for later retrieval by
   // GetCreatedWidget.
   RenderWidgetHostView* CreateNewWidget(int route_id,
                                         WebKit::WebPopupType popup_type,
-                                        RenderProcessHost* process);
+                                        content::RenderProcessHost* process);
 
   RenderWidgetHostView* CreateNewFullscreenWidget(
-      int route_id, RenderProcessHost* process);
+      int route_id, content::RenderProcessHost* process);
 
   // Finds the new RenderWidgetHost and returns it. Note that this can only be
   // called once as this call also removes it from the internal map.
@@ -92,10 +83,23 @@ class RenderViewHostDelegateViewHelper : public NotificationObserver {
                                                     int route_id);
 
  private:
-  // NotificationObserver implementation
+  // content::NotificationObserver implementation
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
+
+  // Creates a new renderer for window.open. This will either be a
+  // BackgroundContents (if the window_container_type ==
+  // WINDOW_CONTAINER_TYPE_BACKGROUND and permissions allow) or a TabContents.
+  // If a TabContents is created, it is returned. Otherwise NULL is returned.
+  TabContents* CreateNewWindow(
+      int route_id,
+      Profile* profile,
+      SiteInstance* site,
+      WebUI::TypeID webui_type,
+      RenderViewHostDelegate* opener,
+      WindowContainerType window_container_type,
+      const string16& frame_name);
 
   BackgroundContents* MaybeCreateBackgroundContents(
       int route_id,
@@ -115,7 +119,7 @@ class RenderViewHostDelegateViewHelper : public NotificationObserver {
   PendingWidgetViews pending_widget_views_;
 
   // Registers and unregisters us for notifications.
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderViewHostDelegateViewHelper);
 };
@@ -125,8 +129,7 @@ class RenderViewHostDelegateViewHelper : public NotificationObserver {
 // RenderViewHostDelegate methods.
 class RenderViewHostDelegateHelper {
  public:
-  static WebPreferences GetWebkitPrefs(content::BrowserContext* browser_context,
-                                       bool is_web_ui);
+  static WebPreferences GetWebkitPrefs(RenderViewHost* rvh);
 
   static void UpdateInspectorSetting(content::BrowserContext* browser_context,
                                      const std::string& key,

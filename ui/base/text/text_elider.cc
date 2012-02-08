@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <vector>
-
 #include "ui/base/text/text_elider.h"
+
+#include <string>
+#include <vector>
 
 #include "base/file_path.h"
 #include "base/i18n/break_iterator.h"
@@ -43,7 +44,7 @@ string16 CutString(const string16& text,
   // TODO(tony): This is wrong, it might split the string in the middle of a
   // surrogate pair.
   const string16 kInsert = insert_ellipsis ? UTF8ToUTF16(kEllipsis) :
-                                             ASCIIToUTF16("");
+                                             string16();
   if (!cut_in_middle)
     return text.substr(0, length) + kInsert;
   // We put the extra character, if any, before the cut.
@@ -58,8 +59,7 @@ string16 BuildPathFromComponents(const string16& path_prefix,
                                  const std::vector<string16>& path_elements,
                                  const string16& filename,
                                  size_t num_components) {
-  static const string16 kEllipsisAndSlash = UTF8ToUTF16(kEllipsis) +
-                                            kForwardSlash;
+  const string16 kEllipsisAndSlash = UTF8ToUTF16(kEllipsis) + kForwardSlash;
 
   // Add the initial elements of the path.
   string16 path = path_prefix;
@@ -87,8 +87,7 @@ string16 ElideComponentizedPath(const string16& url_path_prefix,
                                 int available_pixel_width) {
   size_t url_path_number_of_elements = url_path_elements.size();
 
-  static const string16 kEllipsisAndSlash = UTF8ToUTF16(kEllipsis) +
-                                            kForwardSlash;
+  const string16 kEllipsisAndSlash = UTF8ToUTF16(kEllipsis) + kForwardSlash;
 
   for (size_t i = url_path_number_of_elements - 1; i > 0; --i) {
     string16 elided_path = BuildPathFromComponents(url_path_prefix,
@@ -120,7 +119,7 @@ string16 ElideUrl(const GURL& url,
   // Get a formatted string and corresponding parsing of the url.
   url_parse::Parsed parsed;
   string16 url_string = net::FormatUrl(url, languages, net::kFormatUrlOmitAll,
-      UnescapeRule::SPACES, &parsed, NULL, NULL);
+      net::UnescapeRule::SPACES, &parsed, NULL, NULL);
   if (available_pixel_width <= 0)
     return url_string;
 
@@ -165,7 +164,7 @@ string16 ElideUrl(const GURL& url,
   size_t domain_start_index = url_host.find(url_domain);
   if (domain_start_index > 0)
     url_subdomain = url_host.substr(0, domain_start_index);
-  static const string16 kWwwPrefix = UTF8ToUTF16("www.");
+  const string16 kWwwPrefix = UTF8ToUTF16("www.");
   if ((url_subdomain == kWwwPrefix || url_subdomain.empty() ||
       url.SchemeIsFile())) {
     url_subdomain.clear();
@@ -183,7 +182,7 @@ string16 ElideUrl(const GURL& url,
       url_domain.clear();
       url_subdomain.clear();
 
-      static const string16 kColon = UTF8ToUTF16(":");
+      const string16 kColon = UTF8ToUTF16(":");
       url_host = url_domain = file_path_split.at(0).substr(1) + kColon;
       url_path_query_etc = url_path = file_path_split.at(1);
     }
@@ -261,11 +260,9 @@ string16 ElideUrl(const GURL& url,
   // the pixel width of kEllipsis. Otherwise, subdomain remains,
   // which means that this case has been resolved earlier.
   string16 url_elided_domain = url_subdomain + url_domain;
-  int pixel_width_url_elided_domain = pixel_width_url_domain;
   if (pixel_width_url_subdomain > kPixelWidthDotsTrailer) {
     if (!url_subdomain.empty()) {
       url_elided_domain = kEllipsisAndSlash[0] + url_domain;
-      pixel_width_url_elided_domain += kPixelWidthDotsTrailer;
     } else {
       url_elided_domain = url_domain;
     }
@@ -401,7 +398,7 @@ SortedDisplayURL::SortedDisplayURL(const GURL& url,
   string16 host_minus_www = net::StripWWW(sort_host_);
   url_parse::Parsed parsed;
   display_url_ = net::FormatUrl(url, languages,
-      net::kFormatUrlOmitAll, UnescapeRule::SPACES, &parsed, &prefix_end_,
+      net::kFormatUrlOmitAll, net::UnescapeRule::SPACES, &parsed, &prefix_end_,
       NULL);
   if (sort_host_.length() > host_minus_www.length()) {
     prefix_end_ += sort_host_.length() - host_minus_www.length();
@@ -521,7 +518,7 @@ class RectangleString {
         suppressed_(false),
         output_(output) {}
 
-  // Perform deferred initializions following creation.  Must be called
+  // Perform deferred initializations following creation.  Must be called
   // before any input can be added via AddString().
   void Init() { output_->clear(); }
 
@@ -532,7 +529,7 @@ class RectangleString {
   void AddString(const string16& input);
 
   // Perform any deferred output processing.  Must be called after the
-  // last  AddString() call has occured.
+  // last AddString() call has occurred.
   bool Finalize();
 
  private:
@@ -540,8 +537,8 @@ class RectangleString {
   // either by itself or by breaking it into words.
   void AddLine(const string16& line);
 
-  // Add a word to the rectangluar region at the current position,
-  // either by itelf or by breaking it into characters.
+  // Add a word to the rectangular region at the current position,
+  // either by itself or by breaking it into characters.
   void AddWord(const string16& word);
 
   // Add text to the output string if the rectangular boundaries
@@ -578,7 +575,7 @@ class RectangleString {
   bool suppressed_;
 
   // String onto which the output is accumulated.
-  string16 *output_;
+  string16* output_;
 };
 
 void RectangleString::AddString(const string16& input) {
@@ -639,7 +636,7 @@ void RectangleString::AddWord(const string16& word) {
       }
       chars.Advance();
     }
-    // add last remaining fragment, if any.
+    // Add the last remaining fragment, if any.
     if (array_start != chars.array_pos())
       Append(word.substr(array_start, chars.array_pos() - array_start));
   }

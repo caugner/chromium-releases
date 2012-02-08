@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/ntp/app_launcher_handler.h"
-#include "chrome/browser/ui/webui/ntp/bookmarks_handler.h"
 #include "chrome/browser/ui/webui/ntp/favicon_webui_handler.h"
 #include "chrome/browser/ui/webui/ntp/foreign_session_handler.h"
 #include "chrome/browser/ui/webui/ntp/most_visited_handler.h"
@@ -35,21 +34,22 @@
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache.h"
 #include "chrome/browser/ui/webui/ntp/ntp_resource_cache_factory.h"
 #include "chrome/browser/ui/webui/ntp/recently_closed_tabs_handler.h"
-#include "chrome/browser/ui/webui/ntp/shown_sections_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -82,8 +82,6 @@ NewTabUI::NewTabUI(TabContents* contents)
   link_transition_type_ = content::PAGE_TRANSITION_AUTO_BOOKMARK;
 
   if (!GetProfile()->IsOffTheRecord()) {
-    PrefService* pref_service = GetProfile()->GetPrefs();
-    AddMessageHandler((new ShownSectionsHandler(pref_service))->Attach(this));
     AddMessageHandler((new browser_sync::ForeignSessionHandler())->
         Attach(this));
     AddMessageHandler((new MostVisitedHandler())->Attach(this));
@@ -98,10 +96,7 @@ NewTabUI::NewTabUI(TabContents* contents)
       AddMessageHandler((new AppLauncherHandler(service))->Attach(this));
 
     AddMessageHandler((new NewTabPageHandler())->Attach(this));
-    if (NTP4Enabled()) {
-      AddMessageHandler((new BookmarksHandler())->Attach(this));
-      AddMessageHandler((new FaviconWebUIHandler())->Attach(this));
-    }
+    AddMessageHandler((new FaviconWebUIHandler())->Attach(this));
   }
 
   if (NTPLoginHandler::ShouldShow(GetProfile()))
@@ -118,11 +113,8 @@ NewTabUI::NewTabUI(TabContents* contents)
 
   // Listen for theme installation.
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(
+                 content::Source<ThemeService>(
                      ThemeServiceFactory::GetForProfile(GetProfile())));
-  // Listen for bookmark bar visibility changes.
-  pref_change_registrar_.Init(GetProfile()->GetPrefs());
-  pref_change_registrar_.Add(prefs::kShowBookmarkBar, this);
 }
 
 NewTabUI::~NewTabUI() {
@@ -138,10 +130,10 @@ void NewTabUI::PaintTimeout() {
     // Painting has quieted down.  Log this as the full time to run.
     base::TimeDelta load_time = last_paint_ - start_;
     int load_time_ms = static_cast<int>(load_time.InMilliseconds());
-    NotificationService::current()->Notify(
+    content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_INITIAL_NEW_TAB_UI_LOAD,
-        Source<Profile>(GetProfile()),
-        Details<int>(&load_time_ms));
+        content::Source<Profile>(GetProfile()),
+        content::Details<int>(&load_time_ms));
     UMA_HISTOGRAM_TIMES("NewTabUI load", load_time);
   } else {
     // Not enough quiet time has elapsed.
@@ -156,17 +148,20 @@ void NewTabUI::StartTimingPaint(RenderViewHost* render_view_host) {
   start_ = base::TimeTicks::Now();
   last_paint_ = start_;
   registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
-      Source<RenderWidgetHost>(render_view_host));
+      content::Source<RenderWidgetHost>(render_view_host));
   timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(kTimeoutMs), this,
                &NewTabUI::PaintTimeout);
 
 }
+
 void NewTabUI::RenderViewCreated(RenderViewHost* render_view_host) {
   StartTimingPaint(render_view_host);
+  ChromeWebUI::RenderViewCreated(render_view_host);
 }
 
 void NewTabUI::RenderViewReused(RenderViewHost* render_view_host) {
   StartTimingPaint(render_view_host);
+  ChromeWebUI::RenderViewReused(render_view_host);
 }
 
 bool NewTabUI::CanShowBookmarkBar() const {
@@ -174,15 +169,12 @@ bool NewTabUI::CanShowBookmarkBar() const {
   bool disabled_by_policy =
       prefs->IsManagedPreference(prefs::kShowBookmarkBar) &&
       !prefs->GetBoolean(prefs::kShowBookmarkBar);
-  return
-      browser_defaults::bookmarks_enabled &&
-      !disabled_by_policy &&
-      !NTP4BookmarkFeaturesEnabled();
+  return browser_defaults::bookmarks_enabled && !disabled_by_policy;
 }
 
 void NewTabUI::Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_BROWSER_THEME_CHANGED: {
       InitializeCSSCaches();
@@ -192,20 +184,6 @@ void NewTabUI::Observe(int type,
               IDR_THEME_NTP_ATTRIBUTION) ?
           "true" : "false"));
       CallJavascriptFunction("themeChanged", args);
-      break;
-    }
-    case chrome::NOTIFICATION_PREF_CHANGED: {
-      const std::string& pref_name = *Details<std::string>(details).ptr();
-      if (pref_name == prefs::kShowBookmarkBar) {
-        if (!NTP4Enabled() && CanShowBookmarkBar()) {
-          if (GetProfile()->GetPrefs()->GetBoolean(prefs::kShowBookmarkBar))
-            CallJavascriptFunction("bookmarkBarAttached");
-          else
-            CallJavascriptFunction("bookmarkBarDetached");
-        }
-      } else {
-        NOTREACHED();
-      }
       break;
     }
     case content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT: {
@@ -225,36 +203,9 @@ void NewTabUI::InitializeCSSCaches() {
 
 // static
 void NewTabUI::RegisterUserPrefs(PrefService* prefs) {
-  prefs->RegisterIntegerPref(prefs::kNTPPrefVersion,
-                             0,
-                             PrefService::UNSYNCABLE_PREF);
-
   NewTabPageHandler::RegisterUserPrefs(prefs);
   AppLauncherHandler::RegisterUserPrefs(prefs);
   MostVisitedHandler::RegisterUserPrefs(prefs);
-  ShownSectionsHandler::RegisterUserPrefs(prefs);
-  if (NTP4Enabled())
-    BookmarksHandler::RegisterUserPrefs(prefs);
-
-  UpdateUserPrefsVersion(prefs);
-}
-
-// static
-bool NewTabUI::UpdateUserPrefsVersion(PrefService* prefs) {
-  const int old_pref_version = prefs->GetInteger(prefs::kNTPPrefVersion);
-  if (old_pref_version != current_pref_version()) {
-    MigrateUserPrefs(prefs, old_pref_version, current_pref_version());
-    prefs->SetInteger(prefs::kNTPPrefVersion, current_pref_version());
-    return true;
-  }
-  return false;
-}
-
-// static
-void NewTabUI::MigrateUserPrefs(PrefService* prefs, int old_pref_version,
-                                int new_pref_version) {
-  ShownSectionsHandler::MigrateUserPrefs(prefs, old_pref_version,
-                                         current_pref_version());
 }
 
 // static
@@ -293,21 +244,6 @@ void NewTabUI::SetURLTitleAndDirection(DictionaryValue* dictionary,
   dictionary->SetString("direction", direction);
 }
 
-// static
-bool NewTabUI::NTP4Enabled() {
-#if defined(TOUCH_UI)
-  return CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage);
-#else
-  return !CommandLine::ForCurrentProcess()->HasSwitch(switches::kNewTabPage);
-#endif
-}
-
-// static
-bool NewTabUI::NTP4BookmarkFeaturesEnabled() {
-  CommandLine* cl = CommandLine::ForCurrentProcess();
-  return NTP4Enabled() && cl->HasSwitch(switches::kEnableNTPBookmarkFeatures);
-}
-
 ///////////////////////////////////////////////////////////////////////////////
 // NewTabHTMLSource
 
@@ -321,9 +257,7 @@ void NewTabUI::NewTabHTMLSource::StartDataRequest(const std::string& path,
                                                   int request_id) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (AppLauncherHandler::HandlePing(profile_, path)) {
-    return;
-  } else if (!path.empty() && path[0] != '#') {
+  if (!path.empty() && path[0] != '#') {
     // A path under new-tab was requested; it's likely a bad relative
     // URL from the new tab page, but in any case it's an error.
     NOTREACHED() << path << " should not have been requested on the NTP";

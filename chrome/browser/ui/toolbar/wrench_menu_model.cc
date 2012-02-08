@@ -35,8 +35,8 @@
 #include "chrome/common/profiling.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/user_metrics.h"
-#include "content/common/notification_service.h"
-#include "content/common/notification_source.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -181,11 +181,8 @@ void ToolsMenuModel::Build(Browser* browser) {
   AddSubMenuWithStringId(IDC_ENCODING_MENU, IDS_ENCODING_MENU,
                          encoding_menu_model_.get());
   AddItemWithStringId(IDC_VIEW_SOURCE, IDS_VIEW_SOURCE);
-#if !defined(TOUCH_UI)
-  // Disable dev-tools/console since it isn't touch-friendly yet.
   AddItemWithStringId(IDC_DEV_TOOLS, IDS_DEV_TOOLS);
   AddItemWithStringId(IDC_DEV_TOOLS_CONSOLE, IDS_DEV_TOOLS_CONSOLE);
-#endif
 
 #if defined(ENABLE_PROFILING) && !defined(NO_TCMALLOC)
   AddSeparator();
@@ -207,10 +204,11 @@ WrenchMenuModel::WrenchMenuModel(ui::AcceleratorProvider* provider,
 
   tabstrip_model_->AddObserver(this);
 
-  registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-                 Source<HostZoomMap>(browser_->profile()->GetHostZoomMap()));
+  registrar_.Add(
+      this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
+      content::Source<HostZoomMap>(browser_->profile()->GetHostZoomMap()));
   registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 WrenchMenuModel::~WrenchMenuModel() {
@@ -274,11 +272,11 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
         std::string username = browser_->GetProfile()->GetPrefs()->GetString(
             prefs::kGoogleServicesUsername);
         if (!username.empty()) {
-          return l10n_util::GetStringFUTF16(IDS_SHOW_SYNC_SETUP_USERNAME,
+          return l10n_util::GetStringFUTF16(IDS_SYNC_MENU_SYNCED_LABEL,
                                             UTF8ToUTF16(username));
         }
       }
-      return l10n_util::GetStringFUTF16(IDS_SHOW_SYNC_SETUP,
+      return l10n_util::GetStringFUTF16(IDS_SYNC_MENU_PRE_SYNCED_LABEL,
           l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
     }
     default:
@@ -412,8 +410,8 @@ void WrenchMenuModel::TabStripModelDeleted() {
 }
 
 void WrenchMenuModel::Observe(int type,
-                              const NotificationSource& source,
-                              const NotificationDetails& details) {
+                              const content::NotificationSource& source,
+                              const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_ZOOM_LEVEL_CHANGED:
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
@@ -496,7 +494,7 @@ void WrenchMenuModel::Build() {
     const string16 short_product_name =
         l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
     AddItem(IDC_SHOW_SYNC_SETUP, l10n_util::GetStringFUTF16(
-        IDS_SHOW_SYNC_SETUP, short_product_name));
+        IDS_SYNC_MENU_PRE_SYNCED_LABEL, short_product_name));
     AddSeparator();
   }
 

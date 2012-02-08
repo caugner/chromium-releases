@@ -5,6 +5,7 @@
 #include "net/base/dnsrr_resolver.h"
 
 #if defined(OS_POSIX)
+#include <netinet/in.h>
 #include <resolv.h>
 #endif
 
@@ -12,6 +13,8 @@
 #include <windns.h>
 #endif
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/singleton.h"
@@ -19,7 +22,6 @@
 #include "base/stl_util.h"
 #include "base/string_piece.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/threading/worker_pool.h"
 #include "net/base/dns_reloader.h"
 #include "net/base/dns_util.h"
@@ -160,7 +162,7 @@ class RRResolverWorker {
     DCHECK_EQ(MessageLoop::current(), origin_loop_);
 
     return base::WorkerPool::PostTask(
-        FROM_HERE, NewRunnableMethod(this, &RRResolverWorker::Run),
+        FROM_HERE, base::Bind(&RRResolverWorker::Run, base::Unretained(this)),
         true /* task is slow */);
   }
 
@@ -174,7 +176,13 @@ class RRResolverWorker {
 
  private:
 
-#if defined(OS_POSIX)
+#if defined(OS_ANDROID)
+
+  void Run() {
+    NOTIMPLEMENTED();
+  }
+
+#elif defined(OS_POSIX)
 
   void Run() {
     // Runs on a worker thread.
@@ -187,7 +195,11 @@ class RRResolverWorker {
     bool r = true;
 #if defined(OS_MACOSX) || defined(OS_OPENBSD)
     if ((_res.options & RES_INIT) == 0) {
+#if defined(OS_OPENBSD)
+      if (res_init() != 0)
+#else
       if (res_ninit(&_res) != 0)
+#endif
         r = false;
     }
 #else
@@ -368,8 +380,8 @@ class RRResolverWorker {
       base::AutoLock locked(lock_);
       canceled = canceled_;
       if (!canceled) {
-        origin_loop_->PostTask(
-            FROM_HERE, NewRunnableMethod(this, &RRResolverWorker::DoReply));
+        origin_loop_->PostTask(FROM_HERE, base::Bind(
+            &RRResolverWorker::DoReply, base::Unretained(this)));
       }
     }
 
@@ -398,9 +410,9 @@ bool RRResponse::HasExpired(const base::Time current_time) const {
   return current_time >= expiry;
 }
 
+#if defined(OS_POSIX) && !defined(OS_ANDROID)
 bool RRResponse::ParseFromResponse(const uint8* p, unsigned len,
                                    uint16 rrtype_requested) {
-#if defined(OS_POSIX)
   name.clear();
   ttl = 0;
   dnssec = false;
@@ -479,10 +491,10 @@ bool RRResponse::ParseFromResponse(const uint8* p, unsigned len,
       signatures.push_back(std::string(rrdata.data(), rrdata.size()));
     }
   }
-#endif  // defined(OS_POSIX)
 
   return true;
 }
+#endif  // defined(OS_POSIX) && !defined(OS_ANDROID)
 
 
 // An RRResolverJob is a one-to-one counterpart of an RRResolverWorker. It
@@ -578,8 +590,9 @@ intptr_t DnsRRResolver::Resolve(const std::string& name, uint16 rrtype,
       // We need a typed NULL pointer in order to make the templates work out.
       static const RRResponse* kNoResponse = NULL;
       MessageLoop::current()->PostTask(
-          FROM_HERE, NewRunnableMethod(handle, &RRResolverHandle::Post, error,
-                                       kNoResponse));
+          FROM_HERE, base::Bind(
+              &RRResolverHandle::Post, base::Unretained(handle), error,
+              kNoResponse));
       return reinterpret_cast<intptr_t>(handle);
     } else {
       // entry has expired.
@@ -671,6 +684,3 @@ void DnsRRResolver::HandleResult(const std::string& name, uint16 rrtype,
 }
 
 }  // namespace net
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(net::RRResolverHandle);
-DISABLE_RUNNABLE_METHOD_REFCOUNT(net::RRResolverWorker);

@@ -7,7 +7,6 @@
 #pragma once
 
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "content/common/property_bag.h"
 
 class ConstrainedWindow;
 class HtmlDialogUIDelegate;
@@ -15,6 +14,10 @@ class Profile;
 class RenderViewHost;
 class TabContents;
 class TabContentsWrapper;
+
+namespace base {
+template<class T> class PropertyAccessor;
+}
 
 class ConstrainedHtmlUIDelegate {
  public:
@@ -62,14 +65,15 @@ class ConstrainedHtmlUI : public ChromeWebUI {
 
   // Returns a property accessor that can be used to set the
   // ConstrainedHtmlUIDelegate property on a TabContents.
-  static PropertyAccessor<ConstrainedHtmlUIDelegate*>&
+  static base::PropertyAccessor<ConstrainedHtmlUIDelegate*>&
       GetPropertyAccessor();
 
- private:
+ protected:
   // Returns the TabContents' PropertyBag's ConstrainedHtmlUIDelegate.
   // Returns NULL if that property is not set.
   ConstrainedHtmlUIDelegate* GetConstrainedDelegate();
 
+ private:
   // JS Message Handler
   void OnDialogCloseMessage(const base::ListValue* args);
 

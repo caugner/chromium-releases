@@ -7,14 +7,15 @@
 #pragma once
 
 #include "chrome/browser/chromeos/frame/bubble_window_style.h"
+#include "chrome/browser/ui/dialog_style.h"
 
 #if defined(TOOLKIT_USES_GTK)
 // TODO(msw): While I dislike the includes and code to be mixed into the same
 // preprocessor conditional, this seems okay as I can hopefully fix this up
 // in a matter of days / crbug.com/98322.
-#include "views/widget/native_widget_gtk.h"
+#include "ui/views/widget/native_widget_gtk.h"
 #else // TOOLKIT_USES_GTK
-#include "views/view.h"
+#include "ui/views/view.h"
 #endif
 
 namespace views {
@@ -29,11 +30,11 @@ namespace chromeos {
 class BubbleWindow : public views::NativeWidgetGtk {
  public:
   static views::Widget* Create(gfx::NativeWindow parent,
-                               BubbleWindowStyle style,
+                               DialogStyle style,
                                views::WidgetDelegate* widget_delegate);
 
  protected:
-  BubbleWindow(views::Widget* window, BubbleWindowStyle style);
+  BubbleWindow(views::Widget* window, DialogStyle style);
 
   // Overridden from views::NativeWidgetGtk:
   virtual void InitNativeWidget(
@@ -41,7 +42,7 @@ class BubbleWindow : public views::NativeWidgetGtk {
   virtual views::NonClientFrameView* CreateNonClientFrameView() OVERRIDE;
 
  private:
-  BubbleWindowStyle style_;
+  DialogStyle style_;
 
   DISALLOW_COPY_AND_ASSIGN(BubbleWindow);
 };
@@ -55,7 +56,7 @@ namespace chromeos {
 class BubbleWindow {
  public:
   static views::Widget* Create(gfx::NativeWindow parent,
-                               BubbleWindowStyle style,
+                               DialogStyle style,
                                views::WidgetDelegate* widget_delegate) {
     NOTIMPLEMENTED();
     return NULL;

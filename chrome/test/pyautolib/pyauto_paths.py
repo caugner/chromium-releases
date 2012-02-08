@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -43,8 +42,10 @@ def GetChromeDriverExe():
   exe_name = 'chromedriver'
   if sys.platform == 'win32':
     exe_name += '.exe'
-  for dir in GetBuildDirs() + [os.getcwd()]:
-    exe = os.path.join(dir, exe_name)
-    if os.path.exists(exe):
-      return exe
+
+  import pyautolib
+  dir = os.path.dirname(pyautolib.__file__)
+  exe = os.path.join(dir, exe_name)
+  if os.path.exists(exe):
+    return exe
   return None

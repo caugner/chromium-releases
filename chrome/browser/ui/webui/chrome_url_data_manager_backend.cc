@@ -25,7 +25,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/url_util.h"
 #include "grit/platform_locale_settings.h"
 #include "net/base/io_buffer.h"
@@ -36,6 +36,8 @@
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "webkit/appcache/view_appcache_internals_job.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -59,33 +61,33 @@ class ChromeURLContentSecurityPolicyExceptionSet
     insert(chrome::kChromeUICreditsHost);
     insert(chrome::kChromeUIDevToolsHost);
     insert(chrome::kChromeUIDialogHost);
+    insert(chrome::kChromeUIInputWindowDialogHost);
     insert(chrome::kChromeUINewTabHost);
 #if defined(OS_CHROMEOS)
-    insert(chrome::kChromeUIActiveDownloadsHost);
-    insert(chrome::kChromeUIEnterpriseEnrollmentHost);
-    insert(chrome::kChromeUIKeyboardOverlayHost);
-    insert(chrome::kChromeUIOobeHost);
     insert(chrome::kChromeUIMobileSetupHost);
+    insert(chrome::kChromeUIOobeHost);
+    insert(chrome::kChromeUIOSCreditsHost);
     insert(chrome::kChromeUIProxySettingsHost);
     insert(chrome::kChromeUIRegisterPageHost);
     insert(chrome::kChromeUISimUnlockHost);
     insert(chrome::kChromeUISystemInfoHost);
-#else
-    insert(chrome::kChromeUISyncPromoHost);
 #endif
 #if defined(TOUCH_UI)
     insert(chrome::kChromeUIKeyboardHost);
 #endif
-#if defined(OS_CHROMEOS) || defined(TOUCH_UI)
+#if defined(OS_CHROMEOS) || defined(USE_AURA)
     insert(chrome::kChromeUICollectedCookiesHost);
     insert(chrome::kChromeUIHttpAuthHost);
     insert(chrome::kChromeUIRepostFormWarningHost);
+#endif
+#if defined(USE_AURA)
+    insert(chrome::kChromeUIAppListHost);
 #endif
   }
 };
 
 base::LazyInstance<ChromeURLContentSecurityPolicyExceptionSet>
-    g_chrome_url_content_security_policy_exceptions(base::LINKER_INITIALIZED);
+    g_chrome_url_content_security_policy_exceptions = LAZY_INSTANCE_INITIALIZER;
 
 // Parse a URL into the components used to resolve its request. |source_name|
 // is the hostname and |path| is the remaining portion of the URL.

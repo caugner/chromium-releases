@@ -14,19 +14,19 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "views/events/event.h"
-#include "views/ime/input_method.h"
-#include "views/views_delegate.h"
-#include "views/widget/widget.h"
+#include "ui/views/events/event.h"
+#include "ui/views/ime/input_method.h"
+#include "ui/views/views_delegate.h"
+#include "ui/views/widget/widget.h"
 
 #if defined(USE_VIRTUAL_KEYBOARD)
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #endif
 
-#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
-#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#if defined(OS_CHROMEOS) && defined(USE_VIRTUAL_KEYBOARD)
 #include "chrome/browser/chromeos/input_method/ibus_controller.h"
-#include "chrome/browser/chromeos/login/webui_login_display.h"
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
 #endif
 
 namespace {
@@ -74,17 +74,11 @@ uint16 UnicodeIdentifierStringToInt(const std::string& key_identifier) {
 }
 
 views::Widget* GetTopLevelWidget(Browser* browser) {
-  if (views::ViewsDelegate::views_delegate) {
-    views::View* view = views::ViewsDelegate::views_delegate->
-                        GetDefaultParentView();
-    if (view)
-      return view->GetWidget();
-  }
-
-#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
-  views::Widget* login_window = chromeos::WebUILoginDisplay::GetLoginWindow();
-  if (login_window)
-    return login_window;
+#if defined(OS_CHROMEOS) && defined(USE_VIRTUAL_KEYBOARD)
+  chromeos::LoginDisplayHost* host =
+      chromeos::BaseLoginDisplayHost::default_host();
+  if (host)
+    return views::Widget::GetWidgetForNativeWindow(host->GetNativeWindow());
 #endif
 
   if (!browser)
@@ -166,10 +160,10 @@ bool SendKeyboardEventInputFunction::RunImpl() {
 
 #if defined(USE_VIRTUAL_KEYBOARD)
 bool HideKeyboardFunction::RunImpl() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_HIDE_KEYBOARD_INVOKED,
-      Source<HideKeyboardFunction>(this),
-      NotificationService::NoDetails());
+      content::Source<HideKeyboardFunction>(this),
+      content::NotificationService::NoDetails());
   return true;
 }
 
@@ -185,15 +179,15 @@ bool SetKeyboardHeightFunction::RunImpl() {
   // TODO(penghuang) Check the height is not greater than height of browser view
   // and set the height of virtual keyboard directly instead of using
   // notification.
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_SET_KEYBOARD_HEIGHT_INVOKED,
-      Source<SetKeyboardHeightFunction>(this),
-      Details<int>(&height));
+      content::Source<SetKeyboardHeightFunction>(this),
+      content::Details<int>(&height));
   return true;
 }
 #endif
 
-#if defined(OS_CHROMEOS) && defined(TOUCH_UI)
+#if defined(OS_CHROMEOS) && defined(USE_VIRTUAL_KEYBOARD)
 // TODO(yusukes): This part should be moved to extension_input_api_chromeos.cc.
 bool SendHandwritingStrokeFunction::RunImpl() {
   // TODO(yusukes): Add a parameter for an input context ID.

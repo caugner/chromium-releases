@@ -16,6 +16,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class Extension;
+class ExtensionTabHelperDelegate;
 class TabContentsWrapper;
 struct WebApplicationInfo;
 
@@ -37,6 +38,9 @@ class ExtensionTabHelper
 
   // Copies the internal state from another ExtensionTabHelper.
   void CopyStateFrom(const ExtensionTabHelper& source);
+
+  ExtensionTabHelperDelegate* delegate() const { return delegate_; }
+  void set_delegate(ExtensionTabHelperDelegate* d) { delegate_ = d; }
 
   // Call this after updating a page action to notify clients about the changes.
   void PageActionStateChanged();
@@ -89,9 +93,9 @@ class ExtensionTabHelper
 
  private:
   // TabContentsObserver overrides.
-  virtual void DidNavigateMainFramePostCommit(
+  virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params) OVERRIDE;
+      const content::FrameNavigateParams& params) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // ExtensionFunctionDispatcher::Delegate overrides.
@@ -127,12 +131,15 @@ class ExtensionTabHelper
                                       const std::string& error) OVERRIDE;
 
   // AppNotifyChannelSetup::Delegate.
-  virtual void AppNotifyChannelSetupComplete(const std::string& channel_id,
-                                             const std::string& error,
-                                             int return_route_id,
-                                             int callback_id);
+  virtual void AppNotifyChannelSetupComplete(
+      const std::string& channel_id,
+      const std::string& error,
+      const AppNotifyChannelSetup* setup) OVERRIDE;
 
   // Data for app extensions ---------------------------------------------------
+
+  // Delegate for notifying our owner about stuff. Not owned by us.
+  ExtensionTabHelperDelegate* delegate_;
 
   // If non-null this tab is an app tab and this is the extension the tab was
   // created for.

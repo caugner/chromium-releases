@@ -14,7 +14,7 @@
 #include <vector>
 
 #include "base/process_util.h"
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "content/common/content_export.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -26,23 +26,22 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/surface/transport_dib.h"
 
-namespace gfx {
-class Rect;
-class Size;
-}
-namespace IPC {
-class Message;
-}
+struct GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params;
+struct GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params;
 
 class BackingStore;
-class RenderProcessHost;
 class RenderWidgetHost;
 class WebCursor;
 struct NativeWebKeyboardEvent;
 struct ViewHostMsg_AccessibilityNotification_Params;
 
-namespace webkit_glue {
-struct WebAccessibility;
+namespace content {
+class RenderProcessHost;
+}
+
+namespace gfx {
+class Rect;
+class Size;
 }
 
 namespace webkit {
@@ -51,7 +50,7 @@ struct WebPluginGeometry;
 }
 }
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(USE_AURA)
 namespace WebKit {
 struct WebScreenInfo;
 }
@@ -109,7 +108,7 @@ class RenderWidgetHostView {
   virtual void Blur() = 0;
 
   // Returns true if the View currently has the focus.
-  virtual bool HasFocus() = 0;
+  virtual bool HasFocus() const = 0;
 
   // Shows/hides the view.  These must always be called together in pairs.
   // It is not legal to call Hide() multiple times in a row.
@@ -172,9 +171,9 @@ class RenderWidgetHostView {
   virtual void SetTooltipText(const string16& tooltip_text) = 0;
 
   // Notifies the View that the renderer text selection has changed.
-  virtual void SelectionChanged(const string16& text,
-                                size_t offset,
-                                const ui::Range& range) {}
+  CONTENT_EXPORT virtual void SelectionChanged(const string16& text,
+                                               size_t offset,
+                                               const ui::Range& range);
 
   // Notifies the View that the renderer selection bounds has changed.
   // |start_rect| and |end_rect| are the bounds end of the selection in the
@@ -188,6 +187,22 @@ class RenderWidgetHostView {
 
   // Allocate a backing store for this view
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) = 0;
+
+  // Called when accelerated compositing state changes.
+  virtual void OnAcceleratedCompositingStateChange() = 0;
+  // |params.window| and |params.surface_id| indicate which accelerated
+  // surface's buffers swapped. |params.renderer_id| and |params.route_id|
+  // are used to formulate a reply to the GPU process to prevent it from getting
+  // too far ahead. They may all be zero, in which case no flow control is
+  // enforced; this case is currently used for accelerated plugins.
+  virtual void AcceleratedSurfaceBuffersSwapped(
+      const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
+      int gpu_host_id) = 0;
+  // Similar to above, except |params.(x|y|width|height)| define the region
+  // of the surface that changed.
+  virtual void AcceleratedSurfacePostSubBuffer(
+      const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
+      int gpu_host_id) = 0;
 
 #if defined(OS_MACOSX)
   // Tells the view whether or not to accept first responder status.  If |flag|
@@ -244,18 +259,6 @@ class RenderWidgetHostView {
       int32 width,
       int32 height,
       TransportDIB::Handle transport_dib) = 0;
-  // |window| and |surface_id| indicate which accelerated surface's
-  // buffers swapped. |renderer_id| and |route_id| are used to formulate
-  // a reply to the GPU process to prevent it from getting too far ahead.
-  // They may all be zero, in which case no flow control is enforced;
-  // this case is currently used for accelerated plugins.
-  virtual void AcceleratedSurfaceBuffersSwapped(
-      gfx::PluginWindowHandle window,
-      uint64 surface_id,
-      int renderer_id,
-      int32 route_id,
-      int gpu_host_id) = 0;
-  virtual void GpuRenderingStateDidChange() = 0;
 #endif
 
 #if defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
@@ -264,39 +267,26 @@ class RenderWidgetHostView {
       int32 height,
       uint64* surface_id,
       TransportDIB::Handle* surface_handle) = 0;
-  virtual void AcceleratedSurfaceBuffersSwapped(
-      uint64 surface_id,
-      int32 route_id,
-      int gpu_host_id) = 0;
   virtual void AcceleratedSurfaceRelease(uint64 surface_id) = 0;
 #endif
 
 #if defined(TOOLKIT_USES_GTK)
   virtual void CreatePluginContainer(gfx::PluginWindowHandle id) = 0;
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) = 0;
-  virtual void AcceleratedCompositingActivated(bool activated) = 0;
 #endif
 
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   virtual void WillWmDestroy() = 0;
-  virtual void ShowCompositorHostWindow(bool show) = 0;
 #endif
 
-#if defined(OS_POSIX)
-  static void GetDefaultScreenInfo(WebKit::WebScreenInfo* results);
+#if defined(OS_POSIX) || defined(USE_AURA)
+  CONTENT_EXPORT static void GetDefaultScreenInfo(
+      WebKit::WebScreenInfo* results);
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) = 0;
   virtual gfx::Rect GetRootWindowBounds() = 0;
 #endif
 
   virtual gfx::PluginWindowHandle GetCompositingSurface() = 0;
-
-  // Toggles visual muting of the render view area. This is on when a
-  // constrained window is showing, for example. |color| is the shade of
-  // the overlay that covers the render view. If |animate| is true, the overlay
-  // gradually fades in; otherwise it takes effect immediately. To remove the
-  // fade effect, pass a NULL value for |color|. In this case, |animate| is
-  // ignored.
-  virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate) = 0;
 
   virtual void UnhandledWheelEvent(const WebKit::WebMouseWheelEvent& event) = 0;
 
@@ -353,6 +343,16 @@ class RenderWidgetHostView {
   // indicates what the change in position of the mouse would be had it not been
   // locked.
   bool mouse_locked_;
+
+  // A buffer containing the text inside and around the current selection range.
+  string16 selection_text_;
+
+  // The offset of the text stored in |selection_text_| relative to the start of
+  // the web page.
+  size_t selection_text_offset_;
+
+  // The current selection range relative to the start of the web page.
+  ui::Range selection_range_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostView);

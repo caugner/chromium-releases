@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
@@ -18,7 +19,6 @@
 #include "ppapi/c/dev/ppb_memory_dev.h"
 #include "ppapi/c/dev/ppb_zoom_dev.h"
 #include "ppapi/c/dev/ppp_find_dev.h"
-#include "ppapi/c/dev/ppp_policy_update_dev.h"
 #include "ppapi/c/dev/ppp_selection_dev.h"
 #include "ppapi/c/dev/ppp_zoom_dev.h"
 #include "ppapi/c/pp_input_event.h"
@@ -51,17 +51,18 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebRect.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebRect.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURL.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/event_conversion.h"
 #include "webkit/plugins/ppapi/fullscreen_container.h"
+#include "webkit/plugins/ppapi/host_globals.h"
 #include "webkit/plugins/ppapi/message_channel.h"
 #include "webkit/plugins/ppapi/npapi_glue.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
@@ -71,11 +72,9 @@
 #include "webkit/plugins/ppapi/ppb_graphics_2d_impl.h"
 #include "webkit/plugins/ppapi/ppb_graphics_3d_impl.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
-#include "webkit/plugins/ppapi/ppb_surface_3d_impl.h"
 #include "webkit/plugins/ppapi/ppb_url_loader_impl.h"
 #include "webkit/plugins/ppapi/ppb_url_request_info_impl.h"
 #include "webkit/plugins/ppapi/ppp_pdf.h"
-#include "webkit/plugins/ppapi/resource_tracker.h"
 #include "webkit/plugins/ppapi/string.h"
 #include "webkit/plugins/sad_plugin.h"
 
@@ -101,7 +100,9 @@
 #endif
 
 using base::StringPrintf;
+using ppapi::InputEventData;
 using ppapi::InputEventImpl;
+using ppapi::PpapiGlobals;
 using ppapi::StringVar;
 using ppapi::thunk::EnterResourceNoLock;
 using ppapi::thunk::PPB_Buffer_API;
@@ -109,7 +110,6 @@ using ppapi::thunk::PPB_Graphics2D_API;
 using ppapi::thunk::PPB_Graphics3D_API;
 using ppapi::thunk::PPB_ImageData_API;
 using ppapi::thunk::PPB_Instance_FunctionAPI;
-using ppapi::thunk::PPB_Surface3D_API;
 using ppapi::Var;
 using WebKit::WebBindings;
 using WebKit::WebCanvas;
@@ -242,7 +242,7 @@ void RectToPPRect(const gfx::Rect& input, PP_Rect* output) {
 // unchanged.
 bool SecurityOriginForInstance(PP_Instance instance_id,
                                WebKit::WebSecurityOrigin* security_origin) {
-  PluginInstance* instance = ResourceTracker::Get()->GetInstance(instance_id);
+  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
   if (!instance)
     return false;
 
@@ -285,7 +285,6 @@ PluginInstance::PluginInstance(
       plugin_input_event_interface_(NULL),
       plugin_private_interface_(NULL),
       plugin_pdf_interface_(NULL),
-      plugin_policy_updated_interface_(NULL),
       plugin_selection_interface_(NULL),
       plugin_zoom_interface_(NULL),
       checked_for_plugin_input_event_interface_(false),
@@ -306,7 +305,7 @@ PluginInstance::PluginInstance(
       text_input_caret_bounds_(0, 0, 0, 0),
       text_input_caret_set_(false),
       lock_mouse_callback_(PP_BlockUntilComplete()) {
-  pp_instance_ = ResourceTracker::Get()->AddInstance(this);
+  pp_instance_ = HostGlobals::Get()->AddInstance(this);
 
   memset(&current_print_settings_, 0, sizeof(current_print_settings_));
   DCHECK(delegate);
@@ -335,7 +334,7 @@ PluginInstance::~PluginInstance() {
   delegate_->InstanceDeleted(this);
   module_->InstanceDeleted(this);
 
-  ResourceTracker::Get()->InstanceDeleted(pp_instance_);
+  HostGlobals::Get()->InstanceDeleted(pp_instance_);
 }
 
 // NOTE: Any of these methods that calls into the plugin needs to take into
@@ -408,8 +407,6 @@ void PluginInstance::ScrollRect(int dx, int dy, const gfx::Rect& rect) {
 unsigned PluginInstance::GetBackingTextureId() {
   if (GetBoundGraphics3D())
     return GetBoundGraphics3D()->GetBackingTextureId();
-  else if (GetBoundSurface3D())
-    return GetBoundSurface3D()->GetBackingTextureId();
 
   return 0;
 }
@@ -423,10 +420,10 @@ void PluginInstance::CommitBackingTexture() {
 
 void PluginInstance::InstanceCrashed() {
   // Force free all resources and vars.
-  ResourceTracker::Get()->InstanceCrashed(pp_instance());
+  HostGlobals::Get()->InstanceCrashed(pp_instance());
 
   // Free any associated graphics.
-  SetFullscreen(false, false);
+  SetFullscreen(false);
   FlashSetFullscreen(false, false);
   bound_graphics_ = NULL;
   InvalidateRect(gfx::Rect());
@@ -629,10 +626,12 @@ void PluginInstance::UpdateCaretPosition(const gfx::Rect& caret,
   text_input_caret_ = caret;
   text_input_caret_bounds_ = bounding_box;
   text_input_caret_set_ = true;
+  delegate()->PluginCaretPositionChanged(this);
 }
 
 void PluginInstance::SetTextInputType(ui::TextInputType type) {
   text_input_type_ = type;
+  delegate()->PluginTextInputTypeChanged(this);
 }
 
 bool PluginInstance::IsPluginAcceptingCompositionEvents() const {
@@ -703,14 +702,6 @@ bool PluginInstance::HandleInputEvent(const WebKit::WebInputEvent& event,
   return rv;
 }
 
-void PluginInstance::HandlePolicyUpdate(const std::string& policy_json) {
-  if (!LoadPolicyUpdateInterface())
-    return;
-  plugin_policy_updated_interface_->PolicyUpdated(
-      pp_instance(),
-      StringVar::StringToPPVar(module()->pp_module(), policy_json));
-}
-
 void PluginInstance::HandleMessage(PP_Var message) {
   TRACE_EVENT0("ppapi", "PluginInstance::HandleMessage");
   // Keep a reference on the stack. See NOTE above.
@@ -748,12 +739,7 @@ void PluginInstance::ViewChanged(const gfx::Rect& position,
   if (desired_fullscreen_state_ || fullscreen_) {
     WebElement element = container_->element();
     WebDocument document = element.document();
-    // TODO(polina): temporary hack to ease WebKit/Chromium commit sequence.
-#ifdef WEBKIT_WEBDOCUMENT_HAS_FULLSCREENELEMENT
     bool is_fullscreen_element = (element == document.fullScreenElement());
-#else
-    bool is_fullscreen_element = desired_fullscreen_state_;
-#endif
     if (!fullscreen_ && desired_fullscreen_state_ &&
         delegate()->IsInFullscreenMode() && is_fullscreen_element) {
       // Entered fullscreen. Only possible via SetFullscreen().
@@ -813,8 +799,6 @@ void PluginInstance::ViewInitiatedPaint() {
     GetBoundGraphics2D()->ViewInitiatedPaint();
   else if (GetBoundGraphics3D())
     GetBoundGraphics3D()->ViewInitiatedPaint();
-  else if (GetBoundSurface3D())
-    GetBoundSurface3D()->ViewInitiatedPaint();
 }
 
 void PluginInstance::ViewFlushedPaint() {
@@ -824,8 +808,6 @@ void PluginInstance::ViewFlushedPaint() {
     GetBoundGraphics2D()->ViewFlushedPaint();
   else if (GetBoundGraphics3D())
     GetBoundGraphics3D()->ViewFlushedPaint();
-  else if (GetBoundSurface3D())
-    GetBoundSurface3D()->ViewFlushedPaint();
 }
 
 bool PluginInstance::GetBitmapForOptimizedPluginPaint(
@@ -870,7 +852,7 @@ string16 PluginInstance::GetSelectedText(bool html) {
   if (string)
     selection = UTF8ToUTF16(string->value());
   // Release the ref the plugin transfered to us.
-  ResourceTracker::Get()->GetVarTracker()->ReleaseVar(rv);
+  HostGlobals::Get()->GetVarTracker()->ReleaseVar(rv);
   return selection;
 }
 
@@ -889,7 +871,7 @@ string16 PluginInstance::GetLinkAtPosition(const gfx::Point& point) {
   if (string)
     link = UTF8ToUTF16(string->value());
   // Release the ref the plugin transfered to us.
-  ResourceTracker::Get()->GetVarTracker()->ReleaseVar(rv);
+  PpapiGlobals::Get()->GetVarTracker()->ReleaseVar(rv);
   return link;
 }
 
@@ -983,16 +965,6 @@ bool PluginInstance::LoadPdfInterface() {
   return !!plugin_pdf_interface_;
 }
 
-bool PluginInstance::LoadPolicyUpdateInterface() {
-  if (!plugin_policy_updated_interface_) {
-    plugin_policy_updated_interface_ =
-        static_cast<const PPP_PolicyUpdate_Dev*>(module_->GetPluginInterface(
-            PPP_POLICYUPDATE_DEV_INTERFACE));
-  }
-
-  return !!plugin_policy_updated_interface_;
-}
-
 bool PluginInstance::LoadPrintInterface() {
   if (!plugin_print_interface_) {
     plugin_print_interface_ = static_cast<const PPP_Printing_Dev*>(
@@ -1016,7 +988,6 @@ bool PluginInstance::LoadSelectionInterface() {
         static_cast<const PPP_Selection_Dev*>(module_->GetPluginInterface(
             PPP_SELECTION_DEV_INTERFACE));
   }
-
   return !!plugin_selection_interface_;
 }
 
@@ -1179,7 +1150,7 @@ bool PluginInstance::IsFullscreenOrPending() {
   return desired_fullscreen_state_;
 }
 
-bool PluginInstance::SetFullscreen(bool fullscreen, bool delay_report) {
+bool PluginInstance::SetFullscreen(bool fullscreen) {
   // Keep a reference on the stack. See NOTE above.
   scoped_refptr<PluginInstance> ref(this);
 
@@ -1565,15 +1536,6 @@ PPB_Graphics3D_Impl* PluginInstance::GetBoundGraphics3D() const {
   return NULL;
 }
 
-PPB_Surface3D_Impl* PluginInstance::GetBoundSurface3D() const {
-  if (bound_graphics_.get() == NULL)
-    return NULL;
-
-  if (bound_graphics_->AsPPB_Surface3D_API())
-    return static_cast<PPB_Surface3D_Impl*>(bound_graphics_.get());
-  return NULL;
-}
-
 void PluginInstance::setBackingTextureId(unsigned int id) {
   // If we have a fullscreen_container_ (under PPB_FlashFullscreen)
   // or desired_fullscreen_state is true (under PPB_Fullscreen),
@@ -1622,6 +1584,24 @@ void PluginInstance::OnMouseLockLost() {
     plugin_mouse_lock_interface_->MouseLockLost(pp_instance());
 }
 
+void PluginInstance::SimulateInputEvent(const InputEventData& input_event) {
+  WebView* web_view = container()->element().document().frame()->view();
+  if (!web_view) {
+    NOTREACHED();
+    return;
+  }
+
+  std::vector<linked_ptr<WebInputEvent> > events =
+      CreateSimulatedWebInputEvents(
+          input_event,
+          position().x() + position().width() / 2,
+          position().y() + position().height() / 2);
+  for (std::vector<linked_ptr<WebInputEvent> >::iterator it = events.begin();
+      it != events.end(); ++it) {
+    web_view->handleInputEvent(*it->get());
+  }
+}
+
 PPB_Instance_FunctionAPI* PluginInstance::AsPPB_Instance_FunctionAPI() {
   return this;
 }
@@ -1633,8 +1613,6 @@ PP_Bool PluginInstance::BindGraphics(PP_Instance instance,
       GetBoundGraphics2D()->BindToInstance(NULL);
     } else if (GetBoundGraphics3D()) {
       GetBoundGraphics3D()->BindToInstance(false);
-    } else if (GetBoundSurface3D()) {
-      GetBoundSurface3D()->BindToInstance(false);
     }
     bound_graphics_ = NULL;
   }
@@ -1658,9 +1636,6 @@ PP_Bool PluginInstance::BindGraphics(PP_Instance instance,
   EnterResourceNoLock<PPB_Graphics3D_API> enter_3d(device, false);
   PPB_Graphics3D_Impl* graphics_3d = enter_3d.succeeded() ?
       static_cast<PPB_Graphics3D_Impl*>(enter_3d.object()) : NULL;
-  EnterResourceNoLock<PPB_Surface3D_API> enter_surface_3d(device, false);
-  PPB_Surface3D_Impl* surface_3d = enter_surface_3d.succeeded() ?
-      static_cast<PPB_Surface3D_Impl*>(enter_surface_3d.object()) : NULL;
 
   if (graphics_2d) {
     if (graphics_2d->pp_instance() != pp_instance())
@@ -1681,16 +1656,6 @@ PP_Bool PluginInstance::BindGraphics(PP_Instance instance,
 
     bound_graphics_ = graphics_3d;
     setBackingTextureId(graphics_3d->GetBackingTextureId());
-  } else if (surface_3d) {
-    // Make sure graphics can only be bound to the instance it is
-    // associated with.
-    if (surface_3d->pp_instance() != pp_instance())
-      return PP_FALSE;
-    if (!surface_3d->BindToInstance(true))
-      return PP_FALSE;
-
-    bound_graphics_ = surface_3d;
-    setBackingTextureId(surface_3d->GetBackingTextureId());
   } else {
     // The device is not a valid resource type.
     return PP_FALSE;
@@ -1836,7 +1801,7 @@ PP_Bool PluginInstance::FlashIsFullscreen(PP_Instance instance) {
 
 PP_Bool PluginInstance::SetFullscreen(PP_Instance instance,
                                       PP_Bool fullscreen) {
-  return PP_FromBool(SetFullscreen(PP_ToBool(fullscreen), true));
+  return PP_FromBool(SetFullscreen(PP_ToBool(fullscreen)));
 }
 
 PP_Bool PluginInstance::FlashSetFullscreen(PP_Instance instance,
@@ -1881,18 +1846,7 @@ void PluginInstance::ZoomChanged(PP_Instance instance, double factor) {
   // plugin.  If we're in an iframe, then don't do anything.
   if (!IsFullPagePlugin())
     return;
-
-  double zoom_level = WebView::zoomFactorToZoomLevel(factor);
-  // The conversino from zoom level to factor, and back, can introduce rounding
-  // errors.  i.e. WebKit originally tells us 3.0, but by the time we tell the
-  // plugin and it tells us back, the level becomes 3.000000000004.  Need to
-  // round or else otherwise if the user zooms out, it will go to 3.0 instead of
-  // 2.0.
-  int rounded =
-      static_cast<int>(zoom_level + (zoom_level > 0 ? 0.001 : -0.001));
-  if (abs(rounded - zoom_level) < 0.001)
-    zoom_level = rounded;
-  container()->zoomLevelChanged(zoom_level);
+  container()->zoomLevelChanged(WebView::zoomFactorToZoomLevel(factor));
 }
 
 void PluginInstance::ZoomLimitsChanged(PP_Instance instance,
@@ -1929,10 +1883,6 @@ int32_t PluginInstance::LockMouse(PP_Instance instance,
 
 void PluginInstance::UnlockMouse(PP_Instance instance) {
   delegate()->UnlockMouse(this);
-}
-
-void PluginInstance::SubscribeToPolicyUpdates(PP_Instance instance) {
-  delegate()->SubscribeToPolicyUpdates(this);
 }
 
 PP_Var PluginInstance::ResolveRelativeToDocument(

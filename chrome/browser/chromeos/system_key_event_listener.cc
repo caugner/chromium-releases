@@ -4,13 +4,12 @@
 
 #include "chrome/browser/chromeos/system_key_event_listener.h"
 
-// TODO(saintlou): should we handle this define in gyp even if only used once?
 #define XK_MISCELLANY 1
 #include <X11/keysymdef.h>
 #include <X11/XF86keysym.h>
 #include <X11/XKBlib.h>
 
-#include "chrome/browser/accessibility_events.h"
+#include "chrome/browser/accessibility/accessibility_events.h"
 #include "chrome/browser/chromeos/audio_handler.h"
 #include "chrome/browser/chromeos/brightness_bubble.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
@@ -23,7 +22,9 @@
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/x/x11_util.h"
 
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
+#if defined(USE_WAYLAND)
+#include "base/message_pump_wayland.h"
+#elif !defined(TOOLKIT_USES_GTK)
 #include "base/message_pump_x.h"
 #endif
 
@@ -38,6 +39,12 @@ const double kStepPercentage = 4.0;
 // while we're muted and have the volume set to 0.  See
 // http://crosbug.com/13618.
 const double kVolumePercentOnVolumeUpWhileMuted = 25.0;
+
+// In ProcessedXEvent(), we should check only Alt, Shift, Control, and Caps Lock
+// modifiers, and should ignore Num Lock, Super, Hyper etc. See
+// http://crosbug.com/21842.
+const unsigned int kSupportedModifiers =
+    Mod1Mask | ShiftMask | ControlMask | LockMask;
 
 static SystemKeyEventListener* g_system_key_event_listener = NULL;
 
@@ -67,8 +74,11 @@ SystemKeyEventListener* SystemKeyEventListener::GetInstance() {
 
 SystemKeyEventListener::SystemKeyEventListener()
     : stopped_(false),
-      caps_lock_is_on_(input_method::XKeyboard::CapsLockIsEnabled()),
+      num_lock_mask_(input_method::XKeyboard::GetNumLockMask()),
       xkb_event_base_(0) {
+  input_method::XKeyboard::GetLockedModifiers(
+      num_lock_mask_, &caps_lock_is_on_, &num_lock_is_on_);
+
   Display* display = ui::GetXDisplay();
   key_brightness_down_ = XKeysymToKeycode(display,
                                           XF86XK_MonBrightnessDown);
@@ -117,10 +127,10 @@ SystemKeyEventListener::SystemKeyEventListener()
     LOG(WARNING) << "Could not install Xkb Indicator observer";
   }
 
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-  MessageLoopForUI::current()->AddObserver(this);
-#else
+#if defined(TOOLKIT_USES_GTK)
   gdk_window_add_filter(NULL, GdkEventFilter, this);
+#else
+  MessageLoopForUI::current()->AddObserver(this);
 #endif
 }
 
@@ -131,10 +141,10 @@ SystemKeyEventListener::~SystemKeyEventListener() {
 void SystemKeyEventListener::Stop() {
   if (stopped_)
     return;
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-  MessageLoopForUI::current()->RemoveObserver(this);
-#else
+#if defined(TOOLKIT_USES_GTK)
   gdk_window_remove_filter(NULL, GdkEventFilter, this);
+#else
+  MessageLoopForUI::current()->RemoveObserver(this);
 #endif
   stopped_ = true;
 }
@@ -155,15 +165,7 @@ void SystemKeyEventListener::RemoveCapsLockObserver(
   caps_lock_observers_.RemoveObserver(observer);
 }
 
-#if defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
-base::EventStatus SystemKeyEventListener::WillProcessEvent(
-    const base::NativeEvent& event) {
-  return ProcessedXEvent(event) ? base::EVENT_HANDLED : base::EVENT_CONTINUE;
-}
-
-void SystemKeyEventListener::DidProcessEvent(const base::NativeEvent& event) {
-}
-#else  // defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
+#if defined(TOOLKIT_USES_GTK)
 // static
 GdkFilterReturn SystemKeyEventListener::GdkEventFilter(GdkXEvent* gxevent,
                                                        GdkEvent* gevent,
@@ -174,29 +176,36 @@ GdkFilterReturn SystemKeyEventListener::GdkEventFilter(GdkXEvent* gxevent,
   return listener->ProcessedXEvent(xevent) ? GDK_FILTER_REMOVE
                                            : GDK_FILTER_CONTINUE;
 }
-#endif  // defined(TOUCH_UI) || !defined(TOOLKIT_USES_GTK)
+#else  // defined(TOOLKIT_USES_GTK)
+base::EventStatus SystemKeyEventListener::WillProcessEvent(
+    const base::NativeEvent& event) {
+  return ProcessedXEvent(event) ? base::EVENT_HANDLED : base::EVENT_CONTINUE;
+}
+
+void SystemKeyEventListener::DidProcessEvent(const base::NativeEvent& event) {
+}
+#endif  // defined(TOOLKIT_USES_GTK)
 
 void SystemKeyEventListener::GrabKey(int32 key, uint32 mask) {
-  uint32 num_lock_mask = Mod2Mask;
   uint32 caps_lock_mask = LockMask;
   Display* display = ui::GetXDisplay();
   Window root = DefaultRootWindow(display);
   XGrabKey(display, key, mask, root, True, GrabModeAsync, GrabModeAsync);
   XGrabKey(display, key, mask | caps_lock_mask, root, True,
            GrabModeAsync, GrabModeAsync);
-  XGrabKey(display, key, mask | num_lock_mask, root, True,
+  XGrabKey(display, key, mask | num_lock_mask_, root, True,
            GrabModeAsync, GrabModeAsync);
-  XGrabKey(display, key, mask | caps_lock_mask | num_lock_mask, root,
+  XGrabKey(display, key, mask | caps_lock_mask | num_lock_mask_, root,
            True, GrabModeAsync, GrabModeAsync);
 }
 
 void SystemKeyEventListener::OnBrightnessDown() {
-  DBusThreadManager::Get()->power_manager_client()->
+  DBusThreadManager::Get()->GetPowerManagerClient()->
       DecreaseScreenBrightness(true);
 }
 
 void SystemKeyEventListener::OnBrightnessUp() {
-  DBusThreadManager::Get()->power_manager_client()->
+  DBusThreadManager::Get()->GetPowerManagerClient()->
       IncreaseScreenBrightness();
 }
 
@@ -269,11 +278,14 @@ void SystemKeyEventListener::ShowVolumeBubble() {
 }
 
 bool SystemKeyEventListener::ProcessedXEvent(XEvent* xevent) {
+  input_method::InputMethodManager* input_method_manager =
+      input_method::InputMethodManager::GetInstance();
+
   if (xevent->type == KeyPress || xevent->type == KeyRelease) {
     // Change the current keyboard layout (or input method) if xevent is one of
     // the input method hotkeys.
     input_method::HotkeyManager* hotkey_manager =
-        input_method::InputMethodManager::GetInstance()->GetHotkeyManager();
+        input_method_manager->GetHotkeyManager();
     if (hotkey_manager->FilterKeyEvent(*xevent)) {
       return true;
     }
@@ -282,27 +294,48 @@ bool SystemKeyEventListener::ProcessedXEvent(XEvent* xevent) {
   if (xevent->type == xkb_event_base_) {
     XkbEvent* xkey_event = reinterpret_cast<XkbEvent*>(xevent);
     if (xkey_event->any.xkb_type == XkbStateNotify) {
-      const bool new_lock_state = (xkey_event->state.locked_mods) & LockMask;
-      if (caps_lock_is_on_ != new_lock_state) {
-        caps_lock_is_on_ = new_lock_state;
+      input_method::ModifierLockStatus new_caps_lock_state =
+          input_method::kDontChange;
+      input_method::ModifierLockStatus new_num_lock_state =
+          input_method::kDontChange;
+
+      bool enabled = (xkey_event->state.locked_mods) & LockMask;
+      if (caps_lock_is_on_ != enabled) {
+        caps_lock_is_on_ = enabled;
+        new_caps_lock_state =
+            enabled ? input_method::kEnableLock : input_method::kDisableLock;
         OnCapsLock(caps_lock_is_on_);
       }
+
+      enabled = (xkey_event->state.locked_mods) & num_lock_mask_;
+      if (num_lock_is_on_ != enabled) {
+        num_lock_is_on_ = enabled;
+        new_num_lock_state =
+            enabled ? input_method::kEnableLock : input_method::kDisableLock;
+      }
+
+      // Propagate the keyboard LED change to _ALL_ keyboards
+      input_method_manager->GetXKeyboard()->SetLockedModifiers(
+          new_caps_lock_state, new_num_lock_state);
+
       return true;
     }
   } else if (xevent->type == KeyPress) {
     const int32 keycode = xevent->xkey.keycode;
     if (keycode) {
+      const unsigned int state = (xevent->xkey.state & kSupportedModifiers);
+
       // Toggle Caps Lock if both Shift keys are pressed simultaneously.
       if (keycode == key_left_shift_ || keycode == key_right_shift_) {
-        const bool other_shift_is_held = (xevent->xkey.state & ShiftMask);
-        const bool other_mods_are_held =
-            (xevent->xkey.state & ~(ShiftMask | LockMask));
+        const bool other_shift_is_held = (state & ShiftMask);
+        const bool other_mods_are_held = (state & ~(ShiftMask | LockMask));
         if (other_shift_is_held && !other_mods_are_held)
-          input_method::XKeyboard::SetCapsLockEnabled(!caps_lock_is_on_);
+          input_method_manager->GetXKeyboard()->SetCapsLockEnabled(
+              !caps_lock_is_on_);
       }
 
       // Only doing non-Alt/Shift/Ctrl modified keys
-      if (!(xevent->xkey.state & (Mod1Mask | ShiftMask | ControlMask))) {
+      if (!(state & (Mod1Mask | ShiftMask | ControlMask))) {
         if (keycode == key_f6_ || keycode == key_brightness_down_) {
           if (keycode == key_f6_)
             UserMetrics::RecordAction(

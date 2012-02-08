@@ -38,7 +38,7 @@ void StarView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_PUSHBUTTON;
 }
 
-bool StarView::GetTooltipText(const gfx::Point& p, string16* tooltip) {
+bool StarView::GetTooltipText(const gfx::Point& p, string16* tooltip) const {
   // Don't show tooltip to distract user if BookmarkBubbleView is showing.
   if (browser::IsBookmarkBubbleViewShowing())
     return false;
@@ -63,16 +63,5 @@ bool StarView::OnKeyPressed(const views::KeyEvent& event) {
     command_updater_->ExecuteCommand(IDC_BOOKMARK_PAGE);
     return true;
   }
-  return false;
-}
-
-void StarView::BubbleClosing(Bubble* bubble, bool closed_by_escape) {
-}
-
-bool StarView::CloseOnEscape() {
-  return true;
-}
-
-bool StarView::FadeInOnShow() {
   return false;
 }

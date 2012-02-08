@@ -7,15 +7,15 @@
 #pragma once
 
 #include <gtk/gtk.h>
-#include <gtk/gtkprintunixdialog.h>
+#include <gtk/gtkunixprint.h>
 
 #include "base/compiler_specific.h"
 #include "base/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "printing/print_dialog_gtk_interface.h"
-#include "printing/printing_context_cairo.h"
+#include "printing/printing_context_gtk.h"
 #include "ui/base/gtk/gtk_signal.h"
 
 namespace printing {
@@ -23,17 +23,17 @@ class Metafile;
 class PrintSettings;
 }
 
-using printing::PrintingContextCairo;
+using printing::PrintingContextGtk;
 
 // Needs to be freed on the UI thread to clean up its GTK members variables.
 class PrintDialogGtk
     : public printing::PrintDialogGtkInterface,
-      public base::RefCountedThreadSafe<PrintDialogGtk,
-                                        BrowserThread::DeleteOnUIThread> {
+      public base::RefCountedThreadSafe<
+          PrintDialogGtk, content::BrowserThread::DeleteOnUIThread> {
  public:
   // Creates and returns a print dialog.
   static printing::PrintDialogGtkInterface* CreatePrintDialog(
-      PrintingContextCairo* context);
+      PrintingContextGtk* context);
 
   // printing::PrintDialogGtkInterface implementation.
   virtual void UseDefaultSettings() OVERRIDE;
@@ -41,17 +41,18 @@ class PrintDialogGtk
                               const printing::PageRanges& ranges,
                               printing::PrintSettings* settings) OVERRIDE;
   virtual void ShowDialog(
-      PrintingContextCairo::PrintSettingsCallback* callback) OVERRIDE;
+      const PrintingContextGtk::PrintSettingsCallback& callback) OVERRIDE;
   virtual void PrintDocument(const printing::Metafile* metafile,
                              const string16& document_name) OVERRIDE;
   virtual void AddRefToDialog() OVERRIDE;
   virtual void ReleaseDialog() OVERRIDE;
 
  private:
-  friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
+  friend struct content::BrowserThread::DeleteOnThread<
+      content::BrowserThread::UI>;
   friend class DeleteTask<PrintDialogGtk>;
 
-  explicit PrintDialogGtk(PrintingContextCairo* context);
+  explicit PrintDialogGtk(PrintingContextGtk* context);
   virtual ~PrintDialogGtk();
 
   // Handles dialog response.
@@ -72,8 +73,8 @@ class PrintDialogGtk
                          printing::PrintSettings* settings);
 
   // Printing dialog callback.
-  PrintingContextCairo::PrintSettingsCallback* callback_;
-  PrintingContextCairo* context_;
+  PrintingContextGtk::PrintSettingsCallback callback_;
+  PrintingContextGtk* context_;
 
   // Print dialog settings. PrintDialogGtk owns |dialog_| and holds references
   // to the other objects.

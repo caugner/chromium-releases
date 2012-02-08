@@ -15,18 +15,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
-#include "content/common/notification_observer.h"
+#include "content/public/browser/notification_observer.h"
 
-class NotificationDetails;
-class NotificationSource;
 class Profile;
 
-namespace content {
-class ResourceContext;
-}
-
 namespace base {
-class DictionaryValue;
 class ListValue;
 }
 
@@ -42,7 +35,7 @@ class PluginList;
 // enabled or disabled.
 // Except where otherwise noted, it can be used on every thread.
 class PluginPrefs : public base::RefCountedThreadSafe<PluginPrefs>,
-                    public NotificationObserver {
+                    public content::NotificationObserver {
  public:
   enum PolicyStatus {
     NO_POLICY = 0,  // Neither enabled or disabled by policy.
@@ -99,10 +92,10 @@ class PluginPrefs : public base::RefCountedThreadSafe<PluginPrefs>,
 
   void set_profile(Profile* profile) { profile_ = profile; }
 
-  // NotificationObserver method override.
+  // content::NotificationObserver method override.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   friend class base::RefCountedThreadSafe<PluginPrefs>;
@@ -119,8 +112,15 @@ class PluginPrefs : public base::RefCountedThreadSafe<PluginPrefs>,
   // Returns the plugin list to use, either the singleton or the override.
   webkit::npapi::PluginList* GetPluginList();
 
-  // Called on the file thread to update the plug-in state.
-  void EnablePluginInternal(bool enabled, const FilePath& path);
+  // Callback for after the plugin groups have been loaded.
+  void EnablePluginGroupInternal(
+      bool enabled,
+      const string16& group_name,
+      const std::vector<webkit::npapi::PluginGroup>& groups);
+  void EnablePluginInternal(
+      bool enabled,
+      const FilePath& path,
+      const std::vector<webkit::npapi::PluginGroup>& groups);
 
   // Called on the file thread to get the data necessary to update the saved
   // preferences.

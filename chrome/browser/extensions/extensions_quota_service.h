@@ -19,6 +19,7 @@
 #include <map>
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/time.h"
@@ -141,6 +142,20 @@ class QuotaLimitHeuristic {
                                    BucketList* buckets) = 0;
   };
 
+  // Maps all calls to the same bucket, regardless of |args|, for this
+  // QuotaLimitHeuristic.
+  class SingletonBucketMapper : public BucketMapper {
+   public:
+    SingletonBucketMapper() {}
+    virtual ~SingletonBucketMapper() {}
+    virtual void GetBucketsForArgs(const ListValue* args,
+                                   BucketList* buckets) OVERRIDE;
+
+   private:
+    Bucket bucket_;
+    DISALLOW_COPY_AND_ASSIGN(SingletonBucketMapper);
+  };
+
   // Ownership of |mapper| is given to the new QuotaLimitHeuristic.
   QuotaLimitHeuristic(const Config& config, BucketMapper* map);
   virtual ~QuotaLimitHeuristic();
@@ -175,7 +190,8 @@ class ExtensionsQuotaService::TimedLimit : public QuotaLimitHeuristic {
  public:
   TimedLimit(const Config& config, BucketMapper* map)
       : QuotaLimitHeuristic(config, map) {}
-  virtual bool Apply(Bucket* bucket, const base::TimeTicks& event_time);
+  virtual bool Apply(Bucket* bucket,
+                     const base::TimeTicks& event_time) OVERRIDE;
 };
 
 // A per-item heuristic to limit the number of events that can occur in a
@@ -186,7 +202,8 @@ class ExtensionsQuotaService::SustainedLimit : public QuotaLimitHeuristic {
   SustainedLimit(const base::TimeDelta& sustain,
                  const Config& config,
                  BucketMapper* map);
-  virtual bool Apply(Bucket* bucket, const base::TimeTicks& event_time);
+  virtual bool Apply(Bucket* bucket,
+                     const base::TimeTicks& event_time) OVERRIDE;
  private:
   // Specifies how long exhaustion of buckets is allowed to continue before
   // denying requests.

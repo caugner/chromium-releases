@@ -7,6 +7,8 @@
 #include "base/command_line.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
+#include "chrome/browser/prefs/incognito_mode_prefs.h"
+#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -16,10 +18,12 @@
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 
 namespace {
@@ -98,9 +102,57 @@ void BrowserNavigatorTest::RunSuppressTest(WindowOpenDisposition disposition) {
   EXPECT_EQ(old_url, browser()->GetSelectedTabContents()->GetURL());
 }
 
-void BrowserNavigatorTest::Observe(int type,
-                                   const NotificationSource& source,
-                                   const NotificationDetails& details) {
+void BrowserNavigatorTest::RunUseNonIncognitoWindowTest(const GURL& url) {
+  Browser* incognito_browser = CreateIncognitoBrowser();
+
+  EXPECT_EQ(2u, BrowserList::size());
+  EXPECT_EQ(1, browser()->tab_count());
+  EXPECT_EQ(1, incognito_browser->tab_count());
+
+  // Navigate to the page.
+  browser::NavigateParams p(MakeNavigateParams(incognito_browser));
+  p.disposition = SINGLETON_TAB;
+  p.url = url;
+  p.window_action = browser::NavigateParams::SHOW_WINDOW;
+  browser::Navigate(&p);
+
+  // This page should be opened in browser() window.
+  EXPECT_NE(incognito_browser, p.browser);
+  EXPECT_EQ(browser(), p.browser);
+  EXPECT_EQ(2, browser()->tab_count());
+  EXPECT_EQ(url, browser()->GetSelectedTabContents()->GetURL());
+}
+
+void BrowserNavigatorTest::RunDoNothingIfIncognitoIsForcedTest(
+    const GURL& url) {
+  Browser* browser = CreateIncognitoBrowser();
+
+  // Set kIncognitoModeAvailability to FORCED.
+  PrefService* prefs1 = browser->profile()->GetPrefs();
+  prefs1->SetInteger(prefs::kIncognitoModeAvailability,
+                     IncognitoModePrefs::FORCED);
+  PrefService* prefs2 = browser->profile()->GetOriginalProfile()->GetPrefs();
+  prefs2->SetInteger(prefs::kIncognitoModeAvailability,
+                     IncognitoModePrefs::FORCED);
+
+  // Navigate to the page.
+  browser::NavigateParams p(MakeNavigateParams(browser));
+  p.disposition = OFF_THE_RECORD;
+  p.url = url;
+  p.window_action = browser::NavigateParams::SHOW_WINDOW;
+  browser::Navigate(&p);
+
+  // The page should not be opened.
+  EXPECT_EQ(browser, p.browser);
+  EXPECT_EQ(1, browser->tab_count());
+  EXPECT_EQ(GURL(chrome::kAboutBlankURL),
+            browser->GetSelectedTabContents()->GetURL());
+}
+
+void BrowserNavigatorTest::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
       ++this->created_tab_contents_count_;
@@ -132,11 +184,11 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_SingletonTabExisting) {
   // Register for a notification if an additional tab_contents was instantiated.
   // Opening a Singleton tab that is already opened should not be opening a new
   // tab nor be creating a new TabContents object
-  NotificationRegistrar registrar;
+  content::NotificationRegistrar registrar;
 
   // As the registrar object goes out of scope, this will get unregistered
   registrar.Add(this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-                NotificationService::AllSources());
+                content::NotificationService::AllSources());
 
   browser()->AddSelectedTabWithURL(
       singleton_url1, content::PAGE_TRANSITION_LINK);
@@ -891,25 +943,7 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 // window.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        Disposition_Settings_UseNonIncognitoWindow) {
-  Browser* incognito_browser = CreateIncognitoBrowser();
-
-  EXPECT_EQ(2u, BrowserList::size());
-  EXPECT_EQ(1, browser()->tab_count());
-  EXPECT_EQ(1, incognito_browser->tab_count());
-
-  // Navigate to the settings page.
-  browser::NavigateParams p(MakeNavigateParams(incognito_browser));
-  p.disposition = SINGLETON_TAB;
-  p.url = GetSettingsURL();
-  p.window_action = browser::NavigateParams::SHOW_WINDOW;
-  browser::Navigate(&p);
-
-  // The settings page should be opened in browser() window.
-  EXPECT_NE(incognito_browser, p.browser);
-  EXPECT_EQ(browser(), p.browser);
-  EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(GetSettingsURL(),
-            browser()->GetSelectedTabContents()->GetURL());
+  RunUseNonIncognitoWindowTest(GetSettingsURL());
 }
 
 // This test verifies that the settings page isn't opened in the incognito
@@ -921,7 +955,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
   params.disposition = OFF_THE_RECORD;
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser::Navigate(&params);
     observer.Wait();
   }
@@ -931,29 +966,45 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
             browser()->GetSelectedTabContents()->GetURL().GetOrigin());
 }
 
+// Settings page is expected to always open in normal mode regardless
+// of whether the user is trying to open it in incognito mode or not.
+// This test verifies that if incognito mode is forced (by policy), settings
+// page doesn't open at all.
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       Disposition_Settings_DoNothingIfIncognitoIsForced) {
+  RunDoNothingIfIncognitoIsForcedTest(GetSettingsURL());
+}
+
 // This test verifies that the bookmarks page isn't opened in the incognito
 // window.
 IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        Disposition_Bookmarks_UseNonIncognitoWindow) {
-  Browser* incognito_browser = CreateIncognitoBrowser();
+  RunUseNonIncognitoWindowTest(GURL(chrome::kChromeUIBookmarksURL));
+}
 
-  EXPECT_EQ(2u, BrowserList::size());
-  EXPECT_EQ(1, browser()->tab_count());
-  EXPECT_EQ(1, incognito_browser->tab_count());
+// Bookmark manager is expected to always open in normal mode regardless
+// of whether the user is trying to open it in incognito mode or not.
+// This test verifies that if incognito mode is forced (by policy), bookmark
+// manager doesn't open at all.
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       Disposition_Bookmarks_DoNothingIfIncognitoIsForced) {
+  RunDoNothingIfIncognitoIsForcedTest(GURL(chrome::kChromeUIBookmarksURL));
+}
 
-  // Navigate to the settings page.
-  browser::NavigateParams p(MakeNavigateParams(incognito_browser));
-  p.disposition = SINGLETON_TAB;
-  p.url = GURL(chrome::kChromeUIBookmarksURL);
-  p.window_action = browser::NavigateParams::SHOW_WINDOW;
-  browser::Navigate(&p);
+// This test verifies that the sync promo page isn't opened in the incognito
+// window.
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       Disposition_SyncPromo_UseNonIncognitoWindow) {
+  RunUseNonIncognitoWindowTest(GURL(chrome::kChromeUISyncPromoURL));
+}
 
-  // The bookmarks page should be opened in browser() window.
-  EXPECT_NE(incognito_browser, p.browser);
-  EXPECT_EQ(browser(), p.browser);
-  EXPECT_EQ(2, browser()->tab_count());
-  EXPECT_EQ(GURL(chrome::kChromeUIBookmarksURL),
-            browser()->GetSelectedTabContents()->GetURL());
+// The Sync promo page is expected to always open in normal mode regardless of
+// whether the user is trying to open it in incognito mode or not.  This test
+// verifies that if incognito mode is forced (by policy), the sync promo page
+// doesn't open at all.
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       Disposition_SyncPromo_DoNothingIfIncognitoIsForced) {
+  RunDoNothingIfIncognitoIsForcedTest(GURL(chrome::kChromeUISyncPromoURL));
 }
 
 // This test makes sure a crashed singleton tab reloads from a new navigation.
@@ -988,7 +1039,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromDefaultToOptionsInSameTab) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
@@ -1005,7 +1057,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
@@ -1025,7 +1078,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
@@ -1044,7 +1098,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
@@ -1057,7 +1112,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromNTPToOptionsSingleton) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
@@ -1068,7 +1124,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
@@ -1081,7 +1138,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromNTPToOptionsPageInSameTab) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->ShowOptionsTab(chrome::kPersonalOptionsSubPage);
     observer.Wait();
   }
@@ -1094,7 +1152,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->ShowOptionsTab(chrome::kPersonalOptionsSubPage);
     observer.Wait();
   }
@@ -1107,13 +1166,15 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromOtherTabToSingletonOptions) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->AddSelectedTabWithURL(
         GetGoogleURL(), content::PAGE_TRANSITION_LINK);
     observer.Wait();
@@ -1121,7 +1182,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenOptionsDialog();
     observer.Wait();
   }
@@ -1172,7 +1234,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromDefaultToHistoryInSameTab) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->ShowHistoryTab();
     observer.Wait();
   }
@@ -1185,7 +1248,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromDefaultToBookmarksInSameTab) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->OpenBookmarkManager();
     observer.Wait();
   }
@@ -1198,7 +1262,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
                        NavigateFromDefaultToDownloadsInSameTab) {
   {
     ui_test_utils::WindowedNotificationObserver observer(
-        content::NOTIFICATION_LOAD_STOP, NotificationService::AllSources());
+        content::NOTIFICATION_LOAD_STOP,
+        content::NotificationService::AllSources());
     browser()->ShowDownloadsTab();
     observer.Wait();
   }

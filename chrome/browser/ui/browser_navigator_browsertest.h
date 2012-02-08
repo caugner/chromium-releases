@@ -9,9 +9,6 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/notification_types.h"
 
-class GURL;
-class NotificationDetails;
-class NotificationSource;
 class Profile;
 class TabContentsWrapper;
 
@@ -23,7 +20,7 @@ struct NavigateParams;
 // for the |BrowserGuestModeNavigation| which tests navigation while in guest
 // mode.
 class BrowserNavigatorTest : public InProcessBrowserTest,
-                             public NotificationObserver {
+                             public content::NotificationObserver {
  protected:
   browser::NavigateParams MakeNavigateParams() const;
   browser::NavigateParams MakeNavigateParams(Browser* browser) const;
@@ -34,10 +31,13 @@ class BrowserNavigatorTest : public InProcessBrowserTest,
   TabContentsWrapper* CreateTabContents();
 
   void RunSuppressTest(WindowOpenDisposition disposition);
+  void RunUseNonIncognitoWindowTest(const GURL& url);
+  void RunDoNothingIfIncognitoIsForcedTest(const GURL& url);
 
-  // NotificationObserver:
-  virtual void Observe(int type, const NotificationSource& source,
-                       const NotificationDetails& details);
+  // content::NotificationObserver:
+  virtual void Observe(int type,
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   size_t created_tab_contents_count_;
 };

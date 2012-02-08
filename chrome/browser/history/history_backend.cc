@@ -1000,6 +1000,15 @@ bool HistoryBackend::RemoveVisits(const VisitVector& visits) {
   return true;
 }
 
+bool HistoryBackend::GetVisitsSource(const VisitVector& visits,
+                                     VisitSourceMap* sources) {
+  if (!db_.get())
+    return false;
+
+  db_->GetVisitsSource(visits, sources);
+  return true;
+}
+
 bool HistoryBackend::GetURL(const GURL& url, history::URLRow* url_row) {
   if (db_.get())
     return db_->GetRowForURL(url, url_row) != 0;
@@ -1650,6 +1659,19 @@ void HistoryBackend::SetFaviconOutOfDateForPage(const GURL& page_url) {
   ScheduleCommit();
 }
 
+void HistoryBackend::CloneFavicon(const GURL& old_page_url,
+                                  const GURL& new_page_url) {
+  if (!thumbnail_db_.get())
+    return;
+
+  // Prevent cross-domain cloning.
+  if (old_page_url.GetOrigin() != new_page_url.GetOrigin())
+    return;
+
+  thumbnail_db_->CloneIconMapping(old_page_url, new_page_url);
+  ScheduleCommit();
+}
+
 void HistoryBackend::SetImportedFavicons(
     const std::vector<ImportedFaviconUsage>& favicon_usage) {
   if (!db_.get() || !thumbnail_db_.get())
@@ -2063,8 +2085,12 @@ void HistoryBackend::ProcessDBTask(
 void HistoryBackend::BroadcastNotifications(
     int type,
     HistoryDetails* details_deleted) {
-  DCHECK(delegate_.get());
-  delegate_->BroadcastNotifications(type, details_deleted);
+  // |delegate_| may be NULL if |this| is in the process of closing (closed by
+  // HistoryService -> HistroyBackend::Closing().
+  if (delegate_.get())
+    delegate_->BroadcastNotifications(type, details_deleted);
+  else
+    delete details_deleted;
 }
 
 // Deleting --------------------------------------------------------------------

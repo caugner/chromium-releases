@@ -12,7 +12,7 @@
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "content/browser/accessibility/browser_accessibility_delegate_mac.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
@@ -130,13 +130,6 @@ class RenderWidgetHostViewMacEditCommandHelper;
 - (void)setTakesFocusOnlyOnMouseDown:(BOOL)b;
 - (void)setCloseOnDeactivate:(BOOL)b;
 - (void)setToolTipAtMousePoint:(NSString *)string;
-// Set frame, then notify the RenderWidgetHost that the frame has been changed,
-// but do it in a separate task, using |performSelector:withObject:afterDelay:|.
-// This stops the flickering issue in http://crbug.com/31970
-- (void)setFrameWithDeferredUpdate:(NSRect)frame;
-// Notify the RenderWidgetHost that the frame was updated so it can resize
-// its contents.
-- (void)renderWidgetHostWasResized;
 // Cancel ongoing composition (abandon the marked text).
 - (void)cancelComposition;
 // Confirm ongoing composition.
@@ -194,7 +187,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
   virtual void Blur() OVERRIDE;
-  virtual bool HasFocus() OVERRIDE;
+  virtual bool HasFocus() const OVERRIDE;
   virtual void Show() OVERRIDE;
   virtual void Hide() OVERRIDE;
   virtual bool IsShowing() OVERRIDE;
@@ -219,6 +212,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
                                 const ui::Range& range) OVERRIDE;
   virtual void ShowingContextMenu(bool showing) OVERRIDE;
   virtual BackingStore* AllocBackingStore(const gfx::Size& size) OVERRIDE;
+  virtual void OnAcceleratedCompositingStateChange() OVERRIDE;
   virtual void SetTakesFocusOnlyOnMouseDown(bool flag) OVERRIDE;
   // See comment in RenderWidgetHostView!
   virtual gfx::Rect GetViewCocoaBounds() const OVERRIDE;
@@ -264,12 +258,11 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
       int32 height,
       TransportDIB::Handle transport_dib) OVERRIDE;
   virtual void AcceleratedSurfaceBuffersSwapped(
-      gfx::PluginWindowHandle window,
-      uint64 surface_id,
-      int renderer_id,
-      int32 route_id,
+      const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
       int gpu_host_id) OVERRIDE;
-  virtual void GpuRenderingStateDidChange() OVERRIDE;
+  virtual void AcceleratedSurfacePostSubBuffer(
+      const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
+      int gpu_host_id) OVERRIDE;
   virtual void GetScreenInfo(WebKit::WebScreenInfo* results) OVERRIDE;
   virtual gfx::Rect GetRootWindowBounds() OVERRIDE;
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
@@ -284,8 +277,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // Forces the textures associated with any accelerated plugin instances
   // to be reloaded.
   void ForceTextureReload();
-
-  virtual void SetVisuallyDeemphasized(const SkColor* color, bool animate);
 
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
@@ -314,12 +305,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // should be called after the software backing store has been painted to.
   void HandleDelayedGpuViewHiding();
 
-  // This is called from the display link thread, and provides the GPU
-  // process a notion of how quickly the browser is able to keep up with it.
-  void AcknowledgeSwapBuffers(int renderer_id,
-                              int32 route_id,
-                              int gpu_host_id);
-
   // These member variables should be private, but the associated ObjC class
   // needs access to them and can't be made a friend.
 
@@ -337,6 +322,9 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // |-callSetNeedsDisplayInRect:| but it has not been fulfilled yet.  Used to
   // prevent us from scheduling multiple calls.
   bool call_set_needs_display_in_rect_pending_;
+
+  // Whether last rendered frame was accelerated.
+  bool last_frame_was_accelerated_;
 
   // The invalid rect that needs to be painted by callSetNeedsDisplayInRect.
   // This value is only meaningful when
@@ -398,10 +386,12 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   string16 tooltip_text_;
 
   // Factory used to safely scope delayed calls to ShutdownHost().
-  ScopedRunnableMethodFactory<RenderWidgetHostViewMac> shutdown_factory_;
+  base::WeakPtrFactory<RenderWidgetHostViewMac> weak_factory_;
 
   // selected text on the renderer.
   std::string selected_text_;
+
+  bool accelerated_compositing_active_;
 
   // When rendering transitions from gpu to software, the gpu widget can't be
   // hidden until the software backing store has been updated. This variable is

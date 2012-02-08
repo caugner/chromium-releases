@@ -8,14 +8,17 @@
 
 #include <vector>
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/password_manager/login_database.h"
 #include "chrome/browser/password_manager/password_store.h"
 
 class MacKeychain;
+
+namespace content {
 class NotificationService;
+}
 
 // Implements PasswordStore on top of the OS X Keychain, with an internal
 // database for extra metadata. For an overview of the interactions with the
@@ -89,7 +92,7 @@ class PasswordStoreMac : public PasswordStore {
 
   // Since we aren't running on a well-known thread but still want to send out
   // notifications, we need to run our own service.
-  scoped_ptr<NotificationService> notification_service_;
+  scoped_ptr<content::NotificationService> notification_service_;
 
   DISALLOW_COPY_AND_ASSIGN(PasswordStoreMac);
 };

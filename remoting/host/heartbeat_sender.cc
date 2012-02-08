@@ -11,7 +11,7 @@
 #include "base/time.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/host_config.h"
-#include "remoting/jingle_glue/iq_request.h"
+#include "remoting/jingle_glue/iq_sender.h"
 #include "remoting/jingle_glue/jingle_thread.h"
 #include "remoting/jingle_glue/signal_strategy.h"
 #include "third_party/libjingle/source/talk/xmllite/xmlelement.h"
@@ -72,9 +72,8 @@ void HeartbeatSender::OnSignallingConnected(SignalStrategy* signal_strategy,
   state_ = STARTED;
 
   full_jid_ = full_jid;
-  request_.reset(signal_strategy->CreateIqRequest());
-  request_->set_callback(base::Bind(&HeartbeatSender::ProcessResponse,
-                                    base::Unretained(this)));
+
+  iq_sender_.reset(new IqSender(signal_strategy));
 
   DoSendStanza();
   timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(interval_ms_), this,
@@ -84,7 +83,9 @@ void HeartbeatSender::OnSignallingConnected(SignalStrategy* signal_strategy,
 void HeartbeatSender::OnSignallingDisconnected() {
   DCHECK(message_loop_->BelongsToCurrentThread());
   state_ = STOPPED;
-  request_.reset(NULL);
+  request_.reset();
+  iq_sender_.reset();
+  timer_.Stop();
 }
 
 // Ignore any notifications other than signalling
@@ -99,8 +100,10 @@ void HeartbeatSender::DoSendStanza() {
   DCHECK_EQ(state_, STARTED);
 
   VLOG(1) << "Sending heartbeat stanza to " << kChromotingBotJid;
-  request_->SendIq(IqRequest::MakeIqStanza(
-      buzz::STR_SET, kChromotingBotJid, CreateHeartbeatMessage()));
+  request_.reset(iq_sender_->SendIq(
+      buzz::STR_SET, kChromotingBotJid, CreateHeartbeatMessage(),
+      base::Bind(&HeartbeatSender::ProcessResponse,
+                 base::Unretained(this))));
 }
 
 void HeartbeatSender::ProcessResponse(const XmlElement* response) {
@@ -114,7 +117,7 @@ void HeartbeatSender::ProcessResponse(const XmlElement* response) {
   }
 
   // This method must only be called for error or result stanzas.
-  DCHECK_EQ(buzz::STR_RESULT, type);
+  DCHECK_EQ(std::string(buzz::STR_RESULT), type);
 
   const XmlElement* result_element =
       response->FirstNamed(QName(kChromotingXmlNamespace, kHeartbeatResultTag));

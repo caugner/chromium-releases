@@ -11,11 +11,13 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/size.h"
+
+using content::BrowserThread;
 
 class ImageLoadingTrackerTest : public testing::Test,
                                 public ImageLoadingTracker::Observer {
@@ -89,9 +91,9 @@ class ImageLoadingTrackerTest : public testing::Test,
   int image_loaded_count_;
   bool quit_in_image_loaded_;
   MessageLoop ui_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
+  content::TestBrowserThread io_thread_;
 };
 
 // Tests asking ImageLoadingTracker to cache pushes the result to the Extension.
@@ -162,10 +164,10 @@ TEST_F(ImageLoadingTrackerTest, DeleteExtensionWhileWaitingForCache) {
   // Send out notification the extension was uninstalled.
   UnloadedExtensionInfo details(extension.get(),
                                 extension_misc::UNLOAD_REASON_UNINSTALL);
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_EXTENSION_UNLOADED,
-      NotificationService::AllSources(),
-      Details<UnloadedExtensionInfo>(&details));
+      content::NotificationService::AllSources(),
+      content::Details<UnloadedExtensionInfo>(&details));
 
   // Chuck the extension, that way if anyone tries to access it we should crash
   // or get valgrind errors.

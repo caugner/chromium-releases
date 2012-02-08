@@ -7,6 +7,7 @@
 #include "base/metrics/histogram.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/content_settings_details.h"
 #include "chrome/browser/content_settings/content_settings_provider.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
@@ -23,25 +24,26 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/browser_child_process_host.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/site_instance.h"
 #include "content/browser/worker_host/worker_process_host.h"
-#include "content/common/desktop_notification_messages.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/common/show_desktop_notification_params.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources.h"
+#include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
+using content::BrowserThread;
 using WebKit::WebNotificationPresenter;
 using WebKit::WebTextDirection;
 
@@ -125,7 +127,7 @@ NotificationPermissionInfoBarDelegate::
 
 gfx::Image* NotificationPermissionInfoBarDelegate::GetIcon() const {
   return &ResourceBundle::GetSharedInstance().GetNativeImageNamed(
-     IDR_PRODUCT_LOGO_32);
+      IDR_INFOBAR_DESKTOP_NOTIFICATIONS);
 }
 
 InfoBarDelegate::Type
@@ -226,10 +228,10 @@ DesktopNotificationService::~DesktopNotificationService() {
 void DesktopNotificationService::StartObserving() {
   if (!profile_->IsOffTheRecord()) {
     notification_registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                                Source<Profile>(profile_));
+                                content::Source<Profile>(profile_));
   }
   notification_registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
-                              Source<Profile>(profile_));
+                              content::Source<Profile>(profile_));
 }
 
 void DesktopNotificationService::StopObserving() {
@@ -258,24 +260,26 @@ void DesktopNotificationService::DenyPermission(const GURL& origin) {
       CONTENT_SETTING_BLOCK);
 }
 
-void DesktopNotificationService::Observe(int type,
-                                         const NotificationSource& source,
-                                         const NotificationDetails& details) {
+void DesktopNotificationService::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_EXTENSION_UNLOADED) {
     // Remove all notifications currently shown or queued by the extension
     // which was unloaded.
     const Extension* extension =
-        Details<UnloadedExtensionInfo>(details)->extension;
+        content::Details<UnloadedExtensionInfo>(details)->extension;
     if (extension)
-      ui_manager_->CancelAllBySourceOrigin(extension->url());
+      GetUIManager()->CancelAllBySourceOrigin(extension->url());
   } else if (type == chrome::NOTIFICATION_PROFILE_DESTROYED) {
     StopObserving();
   }
 }
 
-ContentSetting DesktopNotificationService::GetDefaultContentSetting() {
+ContentSetting DesktopNotificationService::GetDefaultContentSetting(
+    std::string* provider_id) {
   return profile_->GetHostContentSettingsMap()->GetDefaultContentSetting(
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
+      CONTENT_SETTINGS_TYPE_NOTIFICATIONS, provider_id);
 }
 
 void DesktopNotificationService::SetDefaultContentSetting(
@@ -284,18 +288,13 @@ void DesktopNotificationService::SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS, setting);
 }
 
-bool DesktopNotificationService::IsDefaultContentSettingManaged() const {
-  return profile_->GetHostContentSettingsMap()->IsDefaultContentSettingManaged(
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
-}
-
 void DesktopNotificationService::ResetToDefaultContentSetting() {
   profile_->GetHostContentSettingsMap()->SetDefaultContentSetting(
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS, CONTENT_SETTING_DEFAULT);
 }
 
 void DesktopNotificationService::GetNotificationsSettings(
-    HostContentSettingsMap::SettingsForOneType* settings) {
+    ContentSettingsForOneType* settings) {
   profile_->GetHostContentSettingsMap()->GetSettingsForOneType(
       CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
       NO_RESOURCE_IDENTIFIER,
@@ -367,7 +366,7 @@ void DesktopNotificationService::RequestPermission(
 
 void DesktopNotificationService::ShowNotification(
     const Notification& notification) {
-  ui_manager_->Add(notification, profile_);
+  GetUIManager()->Add(notification, profile_);
 }
 
 bool DesktopNotificationService::CancelDesktopNotification(
@@ -375,11 +374,11 @@ bool DesktopNotificationService::CancelDesktopNotification(
   scoped_refptr<NotificationObjectProxy> proxy(
       new NotificationObjectProxy(process_id, route_id, notification_id,
                                   false));
-  return ui_manager_->CancelById(proxy->id());
+  return GetUIManager()->CancelById(proxy->id());
 }
 
 bool DesktopNotificationService::ShowDesktopNotification(
-    const DesktopNotificationHostMsg_Show_Params& params,
+    const content::ShowDesktopNotificationHostMsgParams& params,
     int process_id, int route_id, DesktopNotificationSource source) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   const GURL& origin = params.origin;
@@ -418,10 +417,18 @@ string16 DesktopNotificationService::DisplayNameForOrigin(
 }
 
 void DesktopNotificationService::NotifySettingsChange() {
-  NotificationService::current()->Notify(
+  content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_DESKTOP_NOTIFICATION_SETTINGS_CHANGED,
-      Source<DesktopNotificationService>(this),
-      NotificationService::NoDetails());
+      content::Source<DesktopNotificationService>(this),
+      content::NotificationService::NoDetails());
+}
+
+NotificationUIManager* DesktopNotificationService::GetUIManager() {
+  // We defer setting ui_manager_ to the global singleton until we need it
+  // in order to avoid UI dependent construction during startup.
+  if (!ui_manager_)
+    ui_manager_ = g_browser_process->notification_ui_manager();
+  return ui_manager_;
 }
 
 WebKit::WebNotificationPresenter::Permission

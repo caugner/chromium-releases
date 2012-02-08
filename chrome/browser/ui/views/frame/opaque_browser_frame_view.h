@@ -10,24 +10,18 @@
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_non_client_frame_view.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "views/controls/button/button.h"
-#include "views/window/non_client_view.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "ui/views/controls/button/button.h"
+#include "ui/views/window/non_client_view.h"
 
 class BrowserView;
-namespace gfx {
-class Font;
-}
-class AvatarMenuButton;
-class TabContents;
 namespace views {
 class ImageButton;
-class ImageView;
 }
 
 class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
-                               public NotificationObserver,
+                               public content::NotificationObserver,
                                public views::ButtonListener,
                                public TabIconView::TabIconViewModel {
  public:
@@ -42,7 +36,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual gfx::Size GetMinimumSize() OVERRIDE;
 
  protected:
-  BrowserView* browser_view() const { return browser_view_; }
   views::ImageButton* minimize_button() const { return minimize_button_; }
   views::ImageButton* maximize_button() const { return maximize_button_; }
   views::ImageButton* restore_button() const { return restore_button_; }
@@ -68,10 +61,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
       SkBitmap** left_corner,
       SkBitmap** right_corner);
 
-  // Expose these to subclasses.
-  BrowserFrame* frame() { return frame_; }
-  BrowserView* browser_view() { return browser_view_; }
-
   // Overridden from views::NonClientFrameView:
   virtual gfx::Rect GetBoundsForClientView() const OVERRIDE;
   virtual gfx::Rect GetWindowBoundsForClientBounds(
@@ -79,7 +68,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual int NonClientHitTest(const gfx::Point& point) OVERRIDE;
   virtual void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask)
       OVERRIDE;
-  virtual void EnableClose(bool enable) OVERRIDE;
   virtual void ResetWindowControls() OVERRIDE;
   virtual void UpdateWindowIcon() OVERRIDE;
 
@@ -98,10 +86,10 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   virtual SkBitmap GetFaviconForTabIconView() OVERRIDE;
 
  protected:
-  // NotificationObserver implementation:
+  // content::NotificationObserver implementation:
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
  private:
   // Returns the thickness of the border that makes up the window frame edges.
@@ -156,9 +144,6 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // Returns the bounds of the client area for the specified view size.
   gfx::Rect CalculateClientAreaBounds(int width, int height) const;
 
-  // Updates the title and icon of the avatar button.
-  void UpdateAvatarInfo();
-
   // The layout rect of the title, if visible.
   gfx::Rect title_bounds_;
 
@@ -174,20 +159,10 @@ class OpaqueBrowserFrameView : public BrowserNonClientFrameView,
   // The Window icon.
   TabIconView* window_icon_;
 
-  // The frame that hosts this view.
-  BrowserFrame* frame_;
-
-  // The BrowserView hosted within this View.
-  BrowserView* browser_view_;
-
   // The bounds of the ClientView.
   gfx::Rect client_view_bounds_;
 
-  // Menu button that displays that either the incognito icon or the profile
-  // icon.
-  scoped_ptr<AvatarMenuButton> avatar_button_;
-
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   DISALLOW_COPY_AND_ASSIGN(OpaqueBrowserFrameView);
 };

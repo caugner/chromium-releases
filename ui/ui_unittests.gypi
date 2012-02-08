@@ -49,9 +49,11 @@
         'base/animation/multi_animation_unittest.cc',
         'base/animation/slide_animation_unittest.cc',
         'base/clipboard/clipboard_unittest.cc',
+        'base/clipboard/custom_data_helper_unittest.cc',
         'base/cocoa/base_view_unittest.mm',
         'base/gtk/gtk_expanded_container_unittest.cc',
         'base/gtk/gtk_im_context_util_unittest.cc',
+        'base/ime/character_composer_unittest.cc',
         'base/l10n/l10n_util_mac_unittest.mm',
         'base/l10n/l10n_util_unittest.cc',
         'base/models/tree_node_iterator_unittest.cc',
@@ -78,34 +80,22 @@
         'gfx/insets_unittest.cc',
         'gfx/rect_unittest.cc',
         'gfx/run_all_unittests.cc',
+        'gfx/screen_unittest.cc',
         'gfx/skbitmap_operations_unittest.cc',
         'gfx/skia_util_unittest.cc',
         'gfx/test_suite.cc',
         'gfx/test_suite.h',
-        'views/rendering/border_unittest.cc',
-        'views/view_unittest.cc',
-        'views/widget/native_widget_win_unittest.cc',
-        'views/widget/root_view_unittest.cc',
-        'views/widget/widget_test_util.cc',
-        'views/widget/widget_test_util.h',
-        'views/widget/widget_unittest.cc',
         '<(SHARED_INTERMEDIATE_DIR)/ui/gfx/gfx_resources.rc',
       ],
       'include_dirs': [
         '../',
       ],
       'conditions': [
-        ['toolkit_views2==1', {
-          'dependencies': [
-            'v2',
-          ],
-        }],
         ['OS == "win"', {
           'sources': [
             'base/dragdrop/os_exchange_data_win_unittest.cc',
             'base/view_prop_unittest.cc',
             # TODO(brettw) re-enable this when the dependencies on WindowImpl are fixed!
-            'gfx/canvas_direct2d_unittest.cc',
             'gfx/icon_util_unittest.cc',
             'gfx/native_theme_win_unittest.cc',
           ],
@@ -131,6 +121,11 @@
               '-loleacc.lib',
             ],
           },
+        }],
+        ['OS == "linux" and toolkit_views==1', {
+          'sources': [
+            'base/x/events_x_unittest.cc',
+          ],
         }],
         ['OS != "mac"', {
           'sources': [
@@ -168,6 +163,17 @@
         ['toolkit_views==1', {
           'sources': [
             'gfx/render_text_unittest.cc',
+          ],
+        }],
+        ['use_aura==1', {
+          'sources!': [
+            'base/view_prop_unittest.cc',
+            'gfx/screen_unittest.cc',
+          ],
+        }],
+        ['use_ibus != 1', {
+          'sources/': [
+            ['exclude', 'base/ime/character_composer_unittest.cc'],
           ],
         }],
       ],

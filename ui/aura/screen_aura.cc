@@ -9,18 +9,7 @@
 #include "ui/aura/window.h"
 #include "ui/gfx/native_widget_types.h"
 
-namespace {
-
-gfx::Rect GetMonitorAreaOrWorkAreaNearestPoint(const gfx::Point& point,
-                                               bool work_area) {
-  // TODO(oshima): Take point/work_area into account. Support multiple monitors.
-  return gfx::Rect(aura::Desktop::GetInstance()->GetSize());
-}
-
-}  // namespace
-
 namespace aura {
-namespace internal {
 
 ScreenAura::ScreenAura() {
 }
@@ -34,31 +23,44 @@ gfx::Point ScreenAura::GetCursorScreenPointImpl() {
 
 gfx::Rect ScreenAura::GetMonitorWorkAreaNearestWindowImpl(
     gfx::NativeWindow window) {
-  gfx::Rect bounds = GetMonitorAreaNearestWindow(window);
-  // Emulate that a work area can be smaller than its monitor.
-  bounds.Inset(10, 10, 10, 10);
-  return bounds;
+  return GetWorkAreaBounds();
 }
 
 gfx::Rect ScreenAura::GetMonitorAreaNearestWindowImpl(
     gfx::NativeWindow window) {
-  // TODO(oshima): Take point/work_area into account. Support multiple monitors.
-  return gfx::Rect(aura::Desktop::GetInstance()->GetSize());
+  return GetBounds();
 }
 
 gfx::Rect ScreenAura::GetMonitorWorkAreaNearestPointImpl(
     const gfx::Point& point) {
-  return GetMonitorAreaOrWorkAreaNearestPoint(point, true);
+  return GetWorkAreaBounds();
 }
 
 gfx::Rect ScreenAura::GetMonitorAreaNearestPointImpl(const gfx::Point& point) {
-  return GetMonitorAreaOrWorkAreaNearestPoint(point, false);
+  return GetBounds();
 }
 
 gfx::NativeWindow ScreenAura::GetWindowAtCursorScreenPointImpl() {
   const gfx::Point point = GetCursorScreenPoint();
-  return Desktop::GetInstance()->window()->GetTopWindowContainingPoint(point);
+  return Desktop::GetInstance()->GetTopWindowContainingPoint(point);
 }
 
-}  // namespace internal
+gfx::Rect ScreenAura::GetBounds() {
+  return gfx::Rect(aura::Desktop::GetInstance()->GetHostSize());
+}
+
+gfx::Rect ScreenAura::GetWorkAreaBounds() {
+  gfx::Rect bounds(GetBounds());
+  bounds.Inset(work_area_insets_);
+  return bounds;
+}
+
+gfx::Size ScreenAura::GetPrimaryMonitorSizeImpl() {
+  return GetMonitorWorkAreaNearestPoint(gfx::Point()).size();
+}
+
+int ScreenAura::GetNumMonitorsImpl() {
+  return 1;
+}
+
 }  // namespace aura

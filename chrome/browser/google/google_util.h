@@ -38,6 +38,9 @@ bool GetBrand(std::string* brand);
 // install. Returns false if the information is not available.
 bool GetReactivationBrand(std::string* brand);
 
+// True if |url| represents a valid Google home page URL.
+bool IsGoogleHomePageUrl(const std::string& url);
+
 // True if a build is strictly organic, according to its brand code.
 bool IsOrganic(const std::string& brand);
 
@@ -45,6 +48,9 @@ bool IsOrganic(const std::string& brand);
 // a slightly different set of brand codes from the standard IsOrganic
 // method.
 bool IsOrganicFirstRun(const std::string& brand);
+
+// True if |brand| is an internet cafe brand code.
+bool IsInternetCafeBrandCode(const std::string& brand);
 
 // This class is meant to be used only from test code, and sets the brand
 // code returned by the function GetBrand() above while the object exists.

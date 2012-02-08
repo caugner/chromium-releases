@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -14,7 +14,7 @@ def Main(args):
 
   if not is_integration_bot and sys.platform == 'darwin':
     # TODO: Reenable.
-    sys.stdout.write('Skipping nacl_integration, see http://crbug.com/100518\n')
+    sys.stdout.write('Skipping nacl_integration, see http://crbug.com/105406\n')
     return
 
   # On the main Chrome waterfall, we may need to control where the tests are
@@ -63,16 +63,13 @@ def Main(args):
         'run_fault_pq_dep_pm_nameservice_chrome_browser_test',
         ])
 
-  if sys.platform == 'darwin':
-    # The following test is failing on Mac OS X 10.5.  This may be
-    # because of a kernel bug that we might need to work around.
-    # See http://code.google.com/p/nativeclient/issues/detail?id=1835
-    # TODO(mseaborn): Remove this when the issue is resolved.
-    tests_to_disable.append('run_async_messaging_test')
-    # The following test fails on debug builds of Chromium.
-    # See http://code.google.com/p/nativeclient/issues/detail?id=2077
-    # TODO(mseaborn): Remove this when the issue is resolved.
-    tests_to_disable.append('run_ppapi_example_font_test')
+    if sys.platform == 'darwin':
+      # TODO(mseaborn) fix
+      # http://code.google.com/p/nativeclient/issues/detail?id=1835
+      tests_to_disable.append('run_ppapi_crash_browser_test')
+
+  if sys.platform in ('win32', 'cygwin'):
+    tests_to_disable.append('run_ppapi_ppp_input_event_browser_test')
 
   script_dir = os.path.dirname(os.path.abspath(__file__))
   test_dir = os.path.dirname(script_dir)
@@ -81,6 +78,11 @@ def Main(args):
   nacl_integration_script = os.path.join(
       src_dir, 'native_client/build/buildbot_chrome_nacl_stage.py')
   cmd = [sys.executable,
+         '/b/build/scripts/slave/runtest.py',
+         '--run-python-script',
+         '--target=',
+         '--build-dir=',
+         '--',
          nacl_integration_script,
          '--disable_tests=%s' % ','.join(tests_to_disable)] + args
   sys.stdout.write('Running %s\n' % ' '.join(cmd))

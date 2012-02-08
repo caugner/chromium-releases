@@ -537,11 +537,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 }
 
 - (BOOL)canEditBookmark:(const BookmarkNode*)node {
-  // Don't allow edit/delete of the bar node, or of "Other Bookmarks"
-  if (node == nil ||
-      node == bookmarkModel_->bookmark_bar_node() ||
-      node == bookmarkModel_->other_node() ||
-      node == bookmarkModel_->synced_node())
+  // Don't allow edit/delete of the permanent nodes.
+  if (node == nil || bookmarkModel_->is_permanent_node(node))
     return NO;
   return YES;
 }
@@ -782,7 +779,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
     parent = bookmarkModel_->bookmark_bar_node();
   BookmarkEditor::Show([[self view] window],
                        browser_->profile(),
-                       BookmarkEditor::EditDetails::AddNodeInFolder(parent),
+                       BookmarkEditor::EditDetails::AddNodeInFolder(parent, -1),
                        BookmarkEditor::SHOW_TREE);
 }
 
@@ -799,7 +796,7 @@ void RecordAppLaunch(Profile* profile, GURL url) {
   BookmarkNode::Type type = senderNode->type();
   if (type == BookmarkNode::BOOKMARK_BAR ||
       type == BookmarkNode::OTHER_NODE ||
-      type == BookmarkNode::SYNCED ||
+      type == BookmarkNode::MOBILE ||
       type == BookmarkNode::FOLDER) {
     parent = senderNode;
     newIndex = parent->child_count();
@@ -919,9 +916,8 @@ void RecordAppLaunch(Profile* profile, GURL url) {
 // "click outside" these windows to detect when they logically lose
 // focus.
 - (void)watchForExitEvent:(BOOL)watch {
-  CrApplication* app = static_cast<CrApplication*>([NSApplication
-                                                    sharedApplication]);
-  DCHECK([app isKindOfClass:[CrApplication class]]);
+  BrowserCrApplication* app = static_cast<BrowserCrApplication*>(
+      [BrowserCrApplication sharedApplication]);
   if (watch) {
     if (!watchingForExitEvent_) {
       [app addEventHook:self];
@@ -2444,6 +2440,16 @@ static BOOL ValueInRangeInclusive(CGFloat low, CGFloat value, CGFloat high) {
 }
 
 - (void)draggingExited:(id<NSDraggingInfo>)info {
+  // Only close the folder menu if the user dragged up past the BMB. If the user
+  // dragged to below the BMB, they might be trying to drop a link into the open
+  // folder menu.
+  // TODO(asvitkine): Need a way to close the menu if the user dragged below but
+  //                  not into the menu.
+  NSRect bounds = [[self view] bounds];
+  NSPoint origin = [[self view] convertPoint:bounds.origin toView:nil];
+  if ([info draggingLocation].y > origin.y + bounds.size.height)
+    [self closeFolderAndStopTrackingMenus];
+
   // NOT the same as a cancel --> we may have moved the mouse into the submenu.
   if (hoverButton_) {
     [NSObject cancelPreviousPerformRequestsWithTarget:[hoverButton_ target]];

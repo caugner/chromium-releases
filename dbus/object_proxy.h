@@ -6,16 +6,15 @@
 #define DBUS_OBJECT_PROXY_H_
 #pragma once
 
-#include <map>
-#include <string>
-#include <vector>
 #include <dbus/dbus.h>
+
+#include <map>
+#include <set>
+#include <string>
 
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/time.h"
-
-class MessageLoop;
 
 namespace dbus {
 
@@ -73,7 +72,9 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
   // |callback| will be called in the origin thread, once the method call
   // is complete. As it's called in the origin thread, |callback| can
   // safely reference objects in the origin thread (i.e. UI thread in most
-  // cases).
+  // cases). If the caller is not interested in the response from the
+  // method (i.e. calling a method that does not return a value),
+  // EmptyResponseCallback() can be passed to the |callback| parameter.
   //
   // If the method call is successful, a pointer to Response object will
   // be passed to the callback. If unsuccessful, NULL will be passed to
@@ -105,6 +106,10 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
   //
   // BLOCKING CALL.
   virtual void Detach();
+
+  // Returns an empty callback that does nothing. Can be used for
+  // CallMethod().
+  static ResponseCallback EmptyResponseCallback();
 
  protected:
   // This is protected, so we can define sub classes.
@@ -187,7 +192,7 @@ class ObjectProxy : public base::RefCountedThreadSafe<ObjectProxy> {
   typedef std::map<std::string, SignalCallback> MethodTable;
   MethodTable method_table_;
 
-  std::vector<std::string> match_rules_;
+  std::set<std::string> match_rules_;
 
   DISALLOW_COPY_AND_ASSIGN(ObjectProxy);
 };

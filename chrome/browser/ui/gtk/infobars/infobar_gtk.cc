@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_source.h"
 #include "ui/base/gtk/gtk_expanded_container.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/gtk/gtk_signal_registrar.h"
@@ -96,7 +96,7 @@ InfoBarGtk::InfoBarGtk(InfoBarTabHelper* owner, InfoBarDelegate* delegate)
                    this);
 
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_THEME_CHANGED,
-                 Source<ThemeService>(theme_service_));
+                 content::Source<ThemeService>(theme_service_));
   UpdateBorderColor();
 }
 
@@ -280,8 +280,8 @@ void InfoBarGtk::PlatformSpecificOnHeightsRecalculated() {
 }
 
 void InfoBarGtk::Observe(int type,
-                         const NotificationSource& source,
-                         const NotificationDetails& details) {
+                         const content::NotificationSource& source,
+                         const content::NotificationDetails& details) {
   UpdateBorderColor();
 }
 

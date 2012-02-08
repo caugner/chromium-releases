@@ -7,15 +7,15 @@
 #pragma once
 
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view.h"
-#include "views/widget/native_widget_gtk.h"
+#include "ui/views/widget/native_widget_gtk.h"
 
 class ConstrainedWindowGtk;
 class TabContents;
-class TabContentsDragSource;
 class WebDragBookmarkHandlerGtk;
 
 namespace content {
 class WebDragDestGtk;
+class WebDragSourceGtk;
 }
 
 class NativeTabContentsViewGtk : public views::NativeWidgetGtk,
@@ -68,7 +68,7 @@ class NativeTabContentsViewGtk : public views::NativeWidgetGtk,
   bool ignore_next_char_event_;
 
   // Handles drags from this TabContentsView.
-  scoped_ptr<TabContentsDragSource> drag_source_;
+  scoped_ptr<content::WebDragSourceGtk> drag_source_;
 
   // The event for the last mouse down we handled. We need this for drags.
   GdkEventButton last_mouse_down_;

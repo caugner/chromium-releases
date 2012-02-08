@@ -8,18 +8,25 @@
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/metrics/field_trial.h"
 #include "base/tracked_objects.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/process_singleton.h"
-#include "content/browser/browser_main.h"
+#include "chrome/browser/ui/browser_init.h"
+#include "content/public/browser/browser_main_parts.h"
+#include "content/public/browser/browser_thread.h"
 
+class BrowserInit;
 class BrowserProcessImpl;
+class ChromeBrowserMainExtraParts;
 class FieldTrialSynchronizer;
 class HistogramSynchronizer;
 class MetricsService;
 class PrefService;
 class Profile;
+class StartupTimeBomb;
 class ShutdownWatcherHelper;
 class TranslateManager;
 
@@ -29,25 +36,52 @@ extern const char kMissingLocaleDataTitle[];
 extern const char kMissingLocaleDataMessage[];
 }
 
+namespace chrome_browser_metrics {
+class TrackingSynchronizer;
+}
+
+namespace content {
+struct MainFunctionParams;
+}
+
 class ChromeBrowserMainParts : public content::BrowserMainParts {
  public:
   virtual ~ChromeBrowserMainParts();
 
-  // Constructs metrics service and does related initialization, including
-  // creation of field trials. Call only after labs have been converted to
-  // switches.
-  MetricsService* SetupMetricsAndFieldTrials(
-      const CommandLine& parsed_command_line,
-      PrefService* local_state);
+  // Add additional ChromeBrowserMainExtraParts.
+  virtual void AddParts(ChromeBrowserMainExtraParts* parts);
 
  protected:
-  explicit ChromeBrowserMainParts(const MainFunctionParams& parameters);
+  explicit ChromeBrowserMainParts(
+      const content::MainFunctionParams& parameters);
 
-  virtual void PreMainMessageLoopRun() OVERRIDE;
-  int PreMainMessageLoopRunInternal();
-  virtual void MainMessageLoopRun() OVERRIDE;
-  virtual void PostMainMessageLoopRun() OVERRIDE;
+  // content::BrowserMainParts overrides.
+  virtual void PreEarlyInitialization() OVERRIDE;
+  virtual void PostEarlyInitialization() OVERRIDE;
   virtual void ToolkitInitialized() OVERRIDE;
+  virtual void PreMainMessageLoopStart() OVERRIDE;
+  virtual void PostMainMessageLoopStart() OVERRIDE;
+  virtual void PreCreateThreads() OVERRIDE;
+  virtual void PreStartThread(content::BrowserThread::ID identifier) OVERRIDE;
+  virtual void PostStartThread(content::BrowserThread::ID identifier) OVERRIDE;
+  virtual void PreMainMessageLoopRun() OVERRIDE;
+  virtual bool MainMessageLoopRun(int* result_code) OVERRIDE;
+  virtual void PostMainMessageLoopRun() OVERRIDE;
+  virtual void PreStopThread(content::BrowserThread::ID identifier) OVERRIDE;
+  virtual void PostStopThread(content::BrowserThread::ID identifier) OVERRIDE;
+  virtual void PostDestroyThreads() OVERRIDE;
+
+  // Displays a warning message that we can't find any locale data files.
+  virtual void ShowMissingLocaleMessageBox() = 0;
+
+  const content::MainFunctionParams& parameters() const {
+    return parameters_;
+  }
+  const CommandLine& parsed_command_line() const {
+    return parsed_command_line_;
+  }
+
+  Profile* profile() { return profile_; }
 
  private:
   // Methods for |EarlyInitialization()| ---------------------------------------
@@ -81,6 +115,11 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // Methods for |SetupMetricsAndFieldTrials()| --------------------------------
 
+  // Constructs metrics service and does related initialization, including
+  // creation of field trials. Call only after labs have been converted to
+  // switches.
+  MetricsService* SetupMetricsAndFieldTrials(PrefService* local_state);
+
   static MetricsService* InitializeMetrics(
       const CommandLine& parsed_command_line,
       const PrefService* local_state);
@@ -89,28 +128,45 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   void SetupFieldTrials(bool metrics_recording_enabled,
                         bool proxy_policy_is_set);
 
+  // Methods for Main Message Loop -------------------------------------------
+
+  int PreCreateThreadsImpl();
+  int PreMainMessageLoopRunImpl();
+
   // Members initialized on construction ---------------------------------------
+
+  const content::MainFunctionParams& parameters_;
+  const CommandLine& parsed_command_line_;
+  int result_code_;
+
+  // Create StartupTimeBomb object for watching jank during startup.
+  scoped_ptr<StartupTimeBomb> startup_watcher_;
 
   // Create ShutdownWatcherHelper object for watching jank during shutdown.
   // Please keep |shutdown_watcher| as the first object constructed, and hence
   // it is destroyed last.
   scoped_ptr<ShutdownWatcherHelper> shutdown_watcher_;
 
-#if defined(TRACK_ALL_TASK_OBJECTS)
   // Creating this object starts tracking the creation and deletion of Task
   // instance. This MUST be done before main_message_loop, so that it is
   // destroyed after the main_message_loop.
   tracked_objects::AutoTracking tracking_objects_;
-#endif
 
   // Statistical testing infrastructure for the entire browser. NULL until
   // SetupMetricsAndFieldTrials is called.
   scoped_ptr<base::FieldTrialList> field_trial_list_;
 
+  // Vector of additional ChromeBrowserMainExtraParts.
+  // Parts are deleted in the inverse order they are added.
+  std::vector<ChromeBrowserMainExtraParts*> chrome_extra_parts_;
+
   // Members initialized after / released before main_message_loop_ ------------
 
+  scoped_ptr<BrowserInit> browser_init_;
   scoped_ptr<BrowserProcessImpl> browser_process_;
   scoped_refptr<HistogramSynchronizer> histogram_synchronizer_;
+  scoped_refptr<chrome_browser_metrics::TrackingSynchronizer>
+      tracking_synchronizer_;
   scoped_ptr<ProcessSingleton> process_singleton_;
   scoped_ptr<FirstRun::MasterPrefs> master_prefs_;
   bool record_search_engine_;
@@ -122,9 +178,21 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Initialized in SetupMetricsAndFieldTrials.
   scoped_refptr<FieldTrialSynchronizer> field_trial_synchronizer_;
 
-  FRIEND_TEST(BrowserMainTest, WarmConnectionFieldTrial_WarmestSocket);
-  FRIEND_TEST(BrowserMainTest, WarmConnectionFieldTrial_Random);
-  FRIEND_TEST(BrowserMainTest, WarmConnectionFieldTrial_Invalid);
+  // Members initialized in PreMainMessageLoopRun, needed in
+  // PreMainMessageLoopRunThreadsCreated.
+  bool is_first_run_;
+  bool first_run_ui_bypass_;
+  MetricsService* metrics_;
+  PrefService* local_state_;
+  FilePath user_data_dir_;
+
+  // Members needed across shutdown methods.
+  bool restart_last_session_;
+
+  FRIEND_TEST_ALL_PREFIXES(BrowserMainTest,
+                           WarmConnectionFieldTrial_WarmestSocket);
+  FRIEND_TEST_ALL_PREFIXES(BrowserMainTest, WarmConnectionFieldTrial_Random);
+  FRIEND_TEST_ALL_PREFIXES(BrowserMainTest, WarmConnectionFieldTrial_Invalid);
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainParts);
 };
 
@@ -137,9 +205,6 @@ void RecordBreakpadStatusUMA(MetricsService* metrics);
 // Displays a warning message if some minimum level of OS support is not
 // present on the current platform.
 void WarnAboutMinimumSystemRequirements();
-
-// Displays a warning message that we can't find any locale data files.
-void ShowMissingLocaleMessageBox();
 
 // Records the time from our process' startup to the present time in
 // the UMA histogram |metric_name|.

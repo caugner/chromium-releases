@@ -5,10 +5,12 @@
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 class DownloadRequestLimiterTest
     : public TabContentsWrapperTestHarness,
@@ -84,8 +86,8 @@ class DownloadRequestLimiterTest
   // Number of times ShouldAllowDownload was invoked.
   int ask_allow_count_;
 
-  BrowserThread ui_thread_;
-  BrowserThread io_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread io_thread_;
 };
 
 TEST_F(DownloadRequestLimiterTest, Allow) {

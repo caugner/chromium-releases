@@ -7,6 +7,7 @@
 #include <sstream>
 #include <string>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/file_version_info.h"
@@ -22,7 +23,8 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/common/net/url_fetcher.h"
+#include "content/public/common/url_fetcher.h"
+#include "content/public/common/url_fetcher_delegate.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -79,20 +81,15 @@ const int64 kRetryDelayLimit = 14400000; // 4 hours
 }  // namespace
 
 
-// Simple URLFetcher::Delegate to clean up URLFetcher on completion.
-class BugReportUtil::PostCleanup : public URLFetcher::Delegate {
+// Simple content::URLFetcherDelegate to clean up URLFetcher on completion.
+class BugReportUtil::PostCleanup : public content::URLFetcherDelegate {
  public:
   PostCleanup(Profile* profile, std::string* post_body,
               int64 previous_delay) : profile_(profile),
                                       post_body_(post_body),
                                       previous_delay_(previous_delay) { }
-  // Overridden from URLFetcher::Delegate.
-  virtual void OnURLFetchComplete(const URLFetcher* source,
-                                  const GURL& url,
-                                  const net::URLRequestStatus& status,
-                                  int response_code,
-                                  const net::ResponseCookies& cookies,
-                                  const std::string& data);
+  // Overridden from content::URLFetcherDelegate.
+  virtual void OnURLFetchComplete(const content::URLFetcher* source);
 
  protected:
   virtual ~PostCleanup() {}
@@ -109,14 +106,9 @@ class BugReportUtil::PostCleanup : public URLFetcher::Delegate {
 // post cleanup object - that pointer will be deleted and deleted only on a
 // successful post to the feedback server.
 void BugReportUtil::PostCleanup::OnURLFetchComplete(
-    const URLFetcher* source,
-    const GURL& url,
-    const net::URLRequestStatus& status,
-    int response_code,
-    const net::ResponseCookies& cookies,
-    const std::string& data) {
-
+    const content::URLFetcher* source) {
   std::stringstream error_stream;
+  int response_code = source->GetResponseCode();
   if (response_code == kHttpPostSuccessNoContent) {
     // We've sent our report, delete the report data
     delete post_body_;
@@ -145,8 +137,8 @@ void BugReportUtil::PostCleanup::OnURLFetchComplete(
     }
   }
 
-  LOG(WARNING) << "FEEDBACK: Submission to feedback server (" << url
-               << ") status: " << error_stream.str();
+  LOG(WARNING) << "FEEDBACK: Submission to feedback server (" <<
+               source->GetURL() << ") status: " << error_stream.str();
 
   // Delete the URLFetcher.
   delete source;
@@ -179,7 +171,7 @@ void BugReportUtil::DispatchFeedback(Profile* profile,
                                      int64 delay) {
   DCHECK(post_body);
 
-  MessageLoop::current()->PostDelayedTask(FROM_HERE, NewRunnableFunction(
+  MessageLoop::current()->PostDelayedTask(FROM_HERE, base::Bind(
       &BugReportUtil::SendFeedback, profile, post_body, delay), delay);
 }
 
@@ -197,13 +189,12 @@ void BugReportUtil::SendFeedback(Profile* profile,
   else
     post_url = GURL(kBugReportPostUrl);
 
-  URLFetcher* fetcher = new URLFetcher(post_url, URLFetcher::POST,
-                            new BugReportUtil::PostCleanup(profile,
-                                                           post_body,
-                                                           previous_delay));
-  fetcher->set_request_context(profile->GetRequestContext());
+  content::URLFetcher* fetcher = content::URLFetcher::Create(
+      post_url, content::URLFetcher::POST,
+      new BugReportUtil::PostCleanup(profile, post_body, previous_delay));
+  fetcher->SetRequestContext(profile->GetRequestContext());
 
-  fetcher->set_upload_data(std::string(kProtBufMimeType), *post_body);
+  fetcher->SetUploadData(std::string(kProtBufMimeType), *post_body);
   fetcher->Start();
 }
 
@@ -376,7 +367,7 @@ void BugReportUtil::ReportPhishing(TabContents* currentTab,
       safe_browsing_util::GeneratePhishingReportUrl(
           kReportPhishingUrl, phishing_url,
           false /* not client-side detection */),
-      GURL(),
+      content::Referrer(),
       content::PAGE_TRANSITION_LINK,
       std::string());
 }

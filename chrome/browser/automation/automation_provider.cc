@@ -6,6 +6,7 @@
 
 #include <set>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/debug/trace_event.h"
@@ -27,7 +28,6 @@
 #include "base/values.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
-#include "chrome/browser/autofill/autofill_manager.h"
 #include "chrome/browser/automation/automation_browser_tracker.h"
 #include "chrome/browser/automation/automation_extension_tracker.h"
 #include "chrome/browser/automation/automation_provider_list.h"
@@ -51,6 +51,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_toolbar_model.h"
+#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/user_script_master.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -78,17 +79,14 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/debugger/devtools_manager.h"
 #include "content/browser/download/download_item.h"
 #include "content/browser/download/save_package.h"
-#include "content/browser/renderer_host/render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/common/view_messages.h"
+#include "content/public/browser/browser_thread.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
@@ -104,8 +102,69 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif  // defined(OS_CHROMEOS)
 
+using content::BrowserThread;
 using WebKit::WebFindOptions;
 using base::Time;
+
+namespace {
+
+void PopulateProxyConfig(const DictionaryValue& dict, net::ProxyConfig* pc) {
+  DCHECK(pc);
+  bool no_proxy = false;
+  if (dict.GetBoolean(automation::kJSONProxyNoProxy, &no_proxy)) {
+    // Make no changes to the ProxyConfig.
+    return;
+  }
+  bool auto_config;
+  if (dict.GetBoolean(automation::kJSONProxyAutoconfig, &auto_config)) {
+    pc->set_auto_detect(true);
+  }
+  std::string pac_url;
+  if (dict.GetString(automation::kJSONProxyPacUrl, &pac_url)) {
+    pc->set_pac_url(GURL(pac_url));
+  }
+  bool pac_mandatory;
+  if (dict.GetBoolean(automation::kJSONProxyPacMandatory, &pac_mandatory)) {
+    pc->set_pac_mandatory(pac_mandatory);
+  }
+  std::string proxy_bypass_list;
+  if (dict.GetString(automation::kJSONProxyBypassList, &proxy_bypass_list)) {
+    pc->proxy_rules().bypass_rules.ParseFromString(proxy_bypass_list);
+  }
+  std::string proxy_server;
+  if (dict.GetString(automation::kJSONProxyServer, &proxy_server)) {
+    pc->proxy_rules().ParseFromString(proxy_server);
+  }
+}
+
+void SetProxyConfigCallback(
+    const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
+    const std::string& proxy_config) {
+  // First, deserialize the JSON string. If this fails, log and bail.
+  JSONStringValueSerializer deserializer(proxy_config);
+  std::string error_msg;
+  scoped_ptr<Value> root(deserializer.Deserialize(NULL, &error_msg));
+  if (!root.get() || root->GetType() != Value::TYPE_DICTIONARY) {
+    DLOG(WARNING) << "Received bad JSON string for ProxyConfig: "
+                  << error_msg;
+    return;
+  }
+
+  scoped_ptr<DictionaryValue> dict(
+      static_cast<DictionaryValue*>(root.release()));
+  // Now put together a proxy configuration from the deserialized string.
+  net::ProxyConfig pc;
+  PopulateProxyConfig(*dict.get(), &pc);
+
+  net::ProxyService* proxy_service =
+      request_context_getter->GetURLRequestContext()->proxy_service();
+  DCHECK(proxy_service);
+  scoped_ptr<net::ProxyConfigService> proxy_config_service(
+      new net::ProxyConfigServiceFixed(pc));
+  proxy_service->ResetConfigService(proxy_config_service.release());
+}
+
+}  // namespace
 
 AutomationProvider::AutomationProvider(Profile* profile)
     : profile_(profile),
@@ -171,7 +230,7 @@ bool AutomationProvider::InitializeChannel(const std::string& channel_id) {
 #if defined(OS_CHROMEOS)
   // Wait for webui login to be ready.
   // Observer will delete itself.
-  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kWebUILogin) &&
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kLoginManager) &&
       !chromeos::UserManager::Get()->user_is_logged_in()) {
     login_webui_ready_ = false;
     new LoginWebuiReadyObserver(this);
@@ -270,21 +329,21 @@ DictionaryValue* AutomationProvider::GetDictionaryFromDownloadItem(
       std::string("DANGEROUS_BUT_VALIDATED");
 
   DictionaryValue* dl_item_value = new DictionaryValue;
-  dl_item_value->SetInteger("id", static_cast<int>(download->id()));
+  dl_item_value->SetInteger("id", static_cast<int>(download->GetId()));
   dl_item_value->SetString("url", download->GetURL().spec());
-  dl_item_value->SetString("referrer_url", download->referrer_url().spec());
+  dl_item_value->SetString("referrer_url", download->GetReferrerUrl().spec());
   dl_item_value->SetString("file_name",
                            download->GetFileNameToReportUser().value());
   dl_item_value->SetString("full_path",
                            download->GetTargetFilePath().value());
-  dl_item_value->SetBoolean("is_paused", download->is_paused());
+  dl_item_value->SetBoolean("is_paused", download->IsPaused());
   dl_item_value->SetBoolean("open_when_complete",
-                            download->open_when_complete());
-  dl_item_value->SetBoolean("is_temporary", download->is_temporary());
-  dl_item_value->SetBoolean("is_otr", download->is_otr());  // incognito
-  dl_item_value->SetString("state", state_to_string[download->state()]);
+                            download->GetOpenWhenComplete());
+  dl_item_value->SetBoolean("is_temporary", download->IsTemporary());
+  dl_item_value->SetBoolean("is_otr", download->IsOtr());  // incognito
+  dl_item_value->SetString("state", state_to_string[download->GetState()]);
   dl_item_value->SetString("safety_state",
-                           safety_state_to_string[download->safety_state()]);
+                           safety_state_to_string[download->GetSafetyState()]);
   dl_item_value->SetInteger("PercentComplete", download->PercentComplete());
 
   return dl_item_value;
@@ -325,6 +384,20 @@ void AutomationProvider::OnChannelConnected(int pid) {
   if (initial_tab_loads_complete_ && network_library_initialized_ &&
       login_webui_ready_)
     Send(new AutomationMsg_InitialLoadsComplete());
+}
+
+void AutomationProvider::OnEndTracingComplete() {
+  IPC::Message* reply_message = tracing_data_.reply_message.release();
+  if (reply_message) {
+    AutomationMsg_EndTracing::WriteReplyParams(
+        reply_message, tracing_data_.trace_output.size(), true);
+    Send(reply_message);
+  }
+}
+
+void AutomationProvider::OnTraceDataCollected(
+    const std::string& trace_fragment) {
+  tracing_data_.trace_output.push_back(trace_fragment);
 }
 
 bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
@@ -368,6 +441,9 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(AutomationMsg_RemoveBrowsingData, RemoveBrowsingData)
     IPC_MESSAGE_HANDLER(AutomationMsg_JavaScriptStressTestControl,
                         JavaScriptStressTestControl)
+    IPC_MESSAGE_HANDLER(AutomationMsg_BeginTracing, BeginTracing)
+    IPC_MESSAGE_HANDLER_DELAY_REPLY(AutomationMsg_EndTracing, EndTracing)
+    IPC_MESSAGE_HANDLER(AutomationMsg_GetTracingOutput, GetTracingOutput)
 #if defined(OS_WIN) && !defined(USE_AURA)
     // These are for use with external tabs.
     IPC_MESSAGE_HANDLER(AutomationMsg_CreateExternalTab, CreateExternalTab)
@@ -414,24 +490,6 @@ void AutomationProvider::OnMessageDeserializationFailure() {
              << "Closing the automation channel.";
   channel_->Close();
 }
-
-// This task just adds another task to the event queue.  This is useful if
-// you want to ensure that any tasks added to the event queue after this one
-// have already been processed by the time |task| is run.
-class InvokeTaskLaterTask : public Task {
- public:
-  explicit InvokeTaskLaterTask(Task* task) : task_(task) {}
-  virtual ~InvokeTaskLaterTask() {}
-
-  virtual void Run() {
-    MessageLoop::current()->PostTask(FROM_HERE, task_);
-  }
-
- private:
-  Task* task_;
-
-  DISALLOW_COPY_AND_ASSIGN(InvokeTaskLaterTask);
-};
 
 void AutomationProvider::HandleUnused(const IPC::Message& message, int handle) {
   if (window_tracker_->ContainsHandle(handle)) {
@@ -526,72 +584,6 @@ void AutomationProvider::SendFindRequest(
       options);
 }
 
-class SetProxyConfigTask : public Task {
- public:
-  SetProxyConfigTask(net::URLRequestContextGetter* request_context_getter,
-                     const std::string& new_proxy_config)
-      : request_context_getter_(request_context_getter),
-        proxy_config_(new_proxy_config) {}
-  virtual void Run() {
-    // First, deserialize the JSON string. If this fails, log and bail.
-    JSONStringValueSerializer deserializer(proxy_config_);
-    std::string error_msg;
-    scoped_ptr<Value> root(deserializer.Deserialize(NULL, &error_msg));
-    if (!root.get() || root->GetType() != Value::TYPE_DICTIONARY) {
-      DLOG(WARNING) << "Received bad JSON string for ProxyConfig: "
-                    << error_msg;
-      return;
-    }
-
-    scoped_ptr<DictionaryValue> dict(
-        static_cast<DictionaryValue*>(root.release()));
-    // Now put together a proxy configuration from the deserialized string.
-    net::ProxyConfig pc;
-    PopulateProxyConfig(*dict.get(), &pc);
-
-    net::ProxyService* proxy_service =
-        request_context_getter_->GetURLRequestContext()->proxy_service();
-    DCHECK(proxy_service);
-    scoped_ptr<net::ProxyConfigService> proxy_config_service(
-        new net::ProxyConfigServiceFixed(pc));
-    proxy_service->ResetConfigService(proxy_config_service.release());
-  }
-
-  void PopulateProxyConfig(const DictionaryValue& dict, net::ProxyConfig* pc) {
-    DCHECK(pc);
-    bool no_proxy = false;
-    if (dict.GetBoolean(automation::kJSONProxyNoProxy, &no_proxy)) {
-      // Make no changes to the ProxyConfig.
-      return;
-    }
-    bool auto_config;
-    if (dict.GetBoolean(automation::kJSONProxyAutoconfig, &auto_config)) {
-      pc->set_auto_detect(true);
-    }
-    std::string pac_url;
-    if (dict.GetString(automation::kJSONProxyPacUrl, &pac_url)) {
-      pc->set_pac_url(GURL(pac_url));
-    }
-    bool pac_mandatory;
-    if (dict.GetBoolean(automation::kJSONProxyPacMandatory, &pac_mandatory)) {
-      pc->set_pac_mandatory(pac_mandatory);
-    }
-    std::string proxy_bypass_list;
-    if (dict.GetString(automation::kJSONProxyBypassList, &proxy_bypass_list)) {
-      pc->proxy_rules().bypass_rules.ParseFromString(proxy_bypass_list);
-    }
-    std::string proxy_server;
-    if (dict.GetString(automation::kJSONProxyServer, &proxy_server)) {
-      pc->proxy_rules().ParseFromString(proxy_server);
-    }
-  }
-
- private:
-  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
-  std::string proxy_config_;
-};
-
-
 void AutomationProvider::SetProxyConfig(const std::string& new_proxy_config) {
   net::URLRequestContextGetter* context_getter =
       profile_->GetRequestContext();
@@ -599,7 +591,8 @@ void AutomationProvider::SetProxyConfig(const std::string& new_proxy_config) {
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      new SetProxyConfigTask(context_getter, new_proxy_config));
+      base::Bind(SetProxyConfigCallback, make_scoped_refptr(context_getter),
+                 new_proxy_config));
 }
 
 TabContents* AutomationProvider::GetTabContentsForHandle(
@@ -760,6 +753,41 @@ void AutomationProvider::JavaScriptStressTestControl(int tab_handle,
       view->routing_id(), cmd, param));
 }
 
+void AutomationProvider::BeginTracing(const std::string& categories,
+                                      bool* success) {
+  tracing_data_.trace_output.clear();
+  *success = TraceController::GetInstance()->BeginTracing(this, categories);
+}
+
+void AutomationProvider::EndTracing(IPC::Message* reply_message) {
+  bool success = false;
+  if (!tracing_data_.reply_message.get())
+    success = TraceController::GetInstance()->EndTracingAsync(this);
+  if (success) {
+    // Defer EndTracing reply until TraceController calls us back with all the
+    // events.
+    tracing_data_.reply_message.reset(reply_message);
+  } else {
+    // If failed to call EndTracingAsync, need to reply with failure now.
+    AutomationMsg_EndTracing::WriteReplyParams(reply_message, size_t(0), false);
+    Send(reply_message);
+  }
+}
+
+void AutomationProvider::GetTracingOutput(std::string* chunk,
+                                          bool* success) {
+  // The JSON data is sent back to the test in chunks, because IPC sends will
+  // fail if they are too large.
+  if (tracing_data_.trace_output.empty()) {
+    *chunk = "";
+    *success = false;
+  } else {
+    *chunk = tracing_data_.trace_output.front();
+    tracing_data_.trace_output.pop_front();
+    *success = true;
+  }
+}
+
 RenderViewHost* AutomationProvider::GetViewForTab(int tab_handle) {
   if (tab_tracker_->ContainsHandle(tab_handle)) {
     NavigationController* tab = tab_tracker_->GetResource(tab_handle);
@@ -807,13 +835,17 @@ void AutomationProvider::InstallExtension(
     if (extension_path.MatchesExtension(FILE_PATH_LITERAL(".crx"))) {
       ExtensionInstallUI* client =
           (with_ui ? new ExtensionInstallUI(profile_) : NULL);
-      scoped_refptr<CrxInstaller> installer(service->MakeCrxInstaller(client));
+      scoped_refptr<CrxInstaller> installer(
+          CrxInstaller::Create(service, client));
       if (!with_ui)
         installer->set_allow_silent_install(true);
       installer->set_install_cause(extension_misc::INSTALL_CAUSE_AUTOMATION);
       installer->InstallCrx(extension_path);
     } else {
-      service->LoadExtension(extension_path, with_ui);
+      scoped_refptr<extensions::UnpackedInstaller> installer(
+          extensions::UnpackedInstaller::Create(service));
+      installer->set_prompt_for_plugins(with_ui);
+      installer->Load(extension_path);
     }
   } else {
     AutomationMsg_InstallExtension::WriteReplyParams(reply_message, 0);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+  // Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "net/base/mock_host_resolver.h"
-#include "views/widget/widget.h"
+#include "ui/views/widget/widget.h"
 
 class VirtualKeyboardManagerTest : public InProcessBrowserTest,
-                            public NotificationObserver {
+                            public content::NotificationObserver {
  public:
   VirtualKeyboardManagerTest()
       : InProcessBrowserTest(),
@@ -25,7 +26,7 @@ class VirtualKeyboardManagerTest : public InProcessBrowserTest,
   void SetupNotificationListener() {
     registrar_.Add(this,
                    chrome::NOTIFICATION_KEYBOARD_VISIBILITY_CHANGED,
-                   NotificationService::AllSources());
+                   content::NotificationService::AllSources());
   }
 
  private:
@@ -35,14 +36,14 @@ class VirtualKeyboardManagerTest : public InProcessBrowserTest,
   }
 
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE {
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE {
     DCHECK_EQ(chrome::NOTIFICATION_KEYBOARD_VISIBILITY_CHANGED, type);
-    keyboard_visible_ = *Details<bool>(details).ptr();
+    keyboard_visible_ = *content::Details<bool>(details).ptr();
   }
 
   bool keyboard_visible_;
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 };
 
 IN_PROC_BROWSER_TEST_F(VirtualKeyboardManagerTest, TestVisibility) {
@@ -82,7 +83,7 @@ IN_PROC_BROWSER_TEST_F(VirtualKeyboardManagerTest, TestVisibility) {
   // Open a new tab that does not give focus to a textfield onload.
   ui_test_utils::WindowedNotificationObserver load_stop_observer(
       content::NOTIFICATION_LOAD_STOP,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   browser()->AddSelectedTabWithURL(base_url.Resolve("blank.html"),
                                    content::PAGE_TRANSITION_LINK);
   load_stop_observer.Wait();

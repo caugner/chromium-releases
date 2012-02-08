@@ -30,7 +30,7 @@ div#header {
   background: url('../../app/theme/extensions_section.png') 0px 20px no-repeat;
   display: inline;
   margin: 0;
-  padding-bottom: 43px;
+  padding-bottom: 20px;
   padding-left: 75px;
   padding-top: 40px;
 }
@@ -112,7 +112,7 @@ body.hideTmiModeInitial .showInTmiMode {
 body.hideTmiMode .showInTmiMode {
   height: 0 !important;
   opacity: 0;
-  -webkit-transition: all .1s ease-out;
+  -webkit-transition: all 100ms ease-out;
 }
 
 body.showTmiModeInitial .showInTmiMode {
@@ -121,7 +121,7 @@ body.showTmiModeInitial .showInTmiMode {
 
 body.showTmiMode .showInTmiMode {
   opacity: 1;
-  -webkit-transition: all .1s ease-in;
+  -webkit-transition: all 100ms ease-in;
 }
 
 .wbox-tmi-mode {

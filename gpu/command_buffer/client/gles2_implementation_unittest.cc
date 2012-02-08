@@ -73,7 +73,7 @@ class GLES2MockCommandBufferHelper : public CommandBuffer {
     return kTransferBufferId;
   }
 
-  virtual void DestroyTransferBuffer(int32) {  // NOLINT
+  virtual void DestroyTransferBuffer(int32 /* id */) {
     GPU_NOTREACHED();
   }
 
@@ -121,6 +121,7 @@ class MockGLES2CommandBuffer : public GLES2MockCommandBufferHelper {
 
   // This is so we can use all the gmock functions when Flush is called.
   MOCK_METHOD1(OnFlush, void(void* result));
+  MOCK_METHOD1(DestroyTransferBuffer, void(int32 id));
 };
 
 // GCC requires these declarations, but MSVC requires they not be present
@@ -187,8 +188,7 @@ struct Str7 {
 };
 #pragma pack(pop)
 
-// Test fixture for CommandBufferHelper test.
-class GLES2ImplementationTest : public testing::Test {
+class GLES2CommandBufferTestBase : public testing::Test {
  protected:
   static const int32 kNumCommandEntries = 400;
   static const int32 kCommandBufferSizeBytes =
@@ -197,6 +197,196 @@ class GLES2ImplementationTest : public testing::Test {
   static const int32 kTransferBufferId =
       GLES2MockCommandBufferHelper::kTransferBufferId;
   static const uint8 kInitialValue = 0xBD;
+
+  GLES2CommandBufferTestBase()
+      : commands_(NULL),
+        token_(0),
+        offset_(0),
+        initial_offset_(0),
+        alignment_(0) {
+  }
+
+  void SetupCommandBuffer(unsigned int offset, unsigned alignment) {
+    initial_offset_ = offset;
+    offset_ = offset;
+    alignment_ = alignment;
+
+    command_buffer_.reset(new MockGLES2CommandBuffer());
+    command_buffer_->Initialize(kCommandBufferSizeBytes);
+
+    EXPECT_EQ(kTransferBufferId,
+              command_buffer_->CreateTransferBuffer(kTransferBufferSize, -1));
+    transfer_buffer_ = command_buffer_->GetTransferBuffer(kTransferBufferId);
+    ClearTransferBuffer();
+
+    helper_.reset(new GLES2CmdHelper(command_buffer_.get()));
+    helper_->Initialize(kCommandBufferSizeBytes);
+  }
+
+  const void* GetPut() {
+    return helper_->GetSpace(0);
+  }
+
+  size_t MaxTransferBufferSize() {
+    return kTransferBufferSize - initial_offset_;
+  }
+
+  void ClearCommands() {
+    Buffer ring_buffer = command_buffer_->GetRingBuffer();
+    memset(ring_buffer.ptr, kInitialValue, ring_buffer.size);
+  }
+
+  bool NoCommandsWritten() {
+    return static_cast<const uint8*>(static_cast<const void*>(commands_))[0] ==
+           kInitialValue;
+  }
+
+  void ClearTransferBuffer() {
+    memset(transfer_buffer_.ptr, kInitialValue, kTransferBufferSize);
+  }
+
+  unsigned int RoundToAlignment(unsigned int size) {
+    return (size + alignment_ - 1) & ~(alignment_ - 1);
+  }
+
+  int GetNextToken() {
+    return ++token_;
+  }
+
+  uint32 AllocateTransferBuffer(size_t size) {
+    if (offset_ + size > kTransferBufferSize) {
+      offset_ = initial_offset_;
+    }
+    uint32 offset = offset_;
+    offset_ += RoundToAlignment(size);
+    return offset;
+  }
+
+  void* GetTransferAddressFromOffset(uint32 offset, size_t size) {
+    EXPECT_LE(offset + size, transfer_buffer_.size);
+    return static_cast<int8*>(transfer_buffer_.ptr) + offset;
+  }
+
+  template <typename T>
+  T* GetTransferAddressFromOffsetAs(uint32 offset, size_t size) {
+    return static_cast<T*>(GetTransferAddressFromOffset(offset, size));
+  }
+
+  Buffer transfer_buffer_;
+  CommandBufferEntry* commands_;
+  scoped_ptr<MockGLES2CommandBuffer> command_buffer_;
+  scoped_ptr<GLES2CmdHelper> helper_;
+  int token_;
+  uint32 offset_;
+  uint32 initial_offset_;
+  uint32 alignment_;
+};
+
+// GCC requires these declarations, but MSVC requires they not be present
+#ifndef _MSC_VER
+const int32 GLES2CommandBufferTestBase::kNumCommandEntries;
+const int32 GLES2CommandBufferTestBase::kCommandBufferSizeBytes;
+const size_t GLES2CommandBufferTestBase::kTransferBufferSize;
+const int32 GLES2CommandBufferTestBase::kTransferBufferId;
+const uint8 GLES2CommandBufferTestBase::kInitialValue;
+#endif
+
+class TransferBufferTest : public GLES2CommandBufferTestBase {
+ protected:
+  static const unsigned int kStartingOffset = 64;
+  static const unsigned int kAlignment = 4;
+
+  TransferBufferTest() { }
+
+  virtual void SetUp() {
+    SetupCommandBuffer(
+        GLES2Implementation::kStartingOffset,
+        GLES2Implementation::kAlignment);
+
+    transfer_buffer_.reset(new TransferBuffer(
+        helper_.get(),
+        kTransferBufferId,
+        GetTransferAddressFromOffset(0, 0),
+        kTransferBufferSize,
+        kStartingOffset,
+        kAlignment));
+  }
+
+  virtual void TearDown() {
+    transfer_buffer_.reset();
+  }
+
+  scoped_ptr<TransferBuffer> transfer_buffer_;
+};
+
+// GCC requires these declarations, but MSVC requires they not be present
+#ifndef _MSC_VER
+const unsigned int TransferBufferTest::kStartingOffset;
+const unsigned int TransferBufferTest::kAlignment;
+#endif
+
+TEST_F(TransferBufferTest, Basic) {
+  EXPECT_TRUE(transfer_buffer_->HaveBuffer());
+  EXPECT_EQ(kTransferBufferId, transfer_buffer_->GetShmId());
+}
+
+TEST_F(TransferBufferTest, Free) {
+  EXPECT_TRUE(transfer_buffer_->HaveBuffer());
+
+  // Free buffer.
+  EXPECT_CALL(*command_buffer_, DestroyTransferBuffer(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  transfer_buffer_->Free();
+  // See it's freed.
+  EXPECT_FALSE(transfer_buffer_->HaveBuffer());
+  // See that it gets reallocated.
+  EXPECT_EQ(kTransferBufferId, transfer_buffer_->GetShmId());
+  EXPECT_TRUE(transfer_buffer_->HaveBuffer());
+
+  // Free buffer.
+  EXPECT_CALL(*command_buffer_, DestroyTransferBuffer(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  transfer_buffer_->Free();
+  // See it's freed.
+  EXPECT_FALSE(transfer_buffer_->HaveBuffer());
+  // See that it gets reallocated.
+  EXPECT_TRUE(transfer_buffer_->GetResultBuffer() != NULL);
+  EXPECT_TRUE(transfer_buffer_->HaveBuffer());
+
+  // Free buffer.
+  EXPECT_CALL(*command_buffer_, DestroyTransferBuffer(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  transfer_buffer_->Free();
+  // See it's freed.
+  EXPECT_FALSE(transfer_buffer_->HaveBuffer());
+  // See that it gets reallocated.
+  EXPECT_TRUE(transfer_buffer_->GetBuffer() != NULL);
+  EXPECT_TRUE(transfer_buffer_->HaveBuffer());
+
+  // Free buffer.
+  EXPECT_CALL(*command_buffer_, DestroyTransferBuffer(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  transfer_buffer_->Free();
+  // See it's freed.
+  EXPECT_FALSE(transfer_buffer_->HaveBuffer());
+  // See that it gets reallocated.
+  transfer_buffer_->GetResultOffset();
+  EXPECT_TRUE(transfer_buffer_->HaveBuffer());
+
+  // Test freeing twice.
+  EXPECT_CALL(*command_buffer_, DestroyTransferBuffer(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  transfer_buffer_->Free();
+  transfer_buffer_->Free();
+}
+
+class GLES2ImplementationTest : public GLES2CommandBufferTestBase {
+ protected:
   static const GLint kMaxCombinedTextureImageUnits = 8;
   static const GLint kMaxCubeMapTextureSize = 64;
   static const GLint kMaxFragmentUniformVectors = 16;
@@ -211,11 +401,7 @@ class GLES2ImplementationTest : public testing::Test {
   static const GLint kNumShaderBinaryFormats = 0;
   static const GLuint kStartId = 1024;
 
-  GLES2ImplementationTest()
-      : commands_(NULL),
-        token_(0),
-        offset_(0) {
-  }
+  GLES2ImplementationTest() { }
 
   virtual void SetUp() {
     Initialize(false, true);
@@ -225,18 +411,9 @@ class GLES2ImplementationTest : public testing::Test {
   }
 
   void Initialize(bool shared_resources, bool bind_generates_resource) {
-    offset_ = GLES2Implementation::kStartingOffset;
-
-    command_buffer_.reset(new MockGLES2CommandBuffer());
-    command_buffer_->Initialize(kCommandBufferSizeBytes);
-
-    EXPECT_EQ(kTransferBufferId,
-              command_buffer_->CreateTransferBuffer(kTransferBufferSize, -1));
-    transfer_buffer_ = command_buffer_->GetTransferBuffer(kTransferBufferId);
-    ClearTransferBuffer();
-
-    helper_.reset(new GLES2CmdHelper(command_buffer_.get()));
-    helper_->Initialize(kCommandBufferSizeBytes);
+    SetupCommandBuffer(
+        GLES2Implementation::kStartingOffset,
+        GLES2Implementation::kAlignment);
 
     GLES2Implementation::GLState state;
     state.max_combined_texture_image_units = kMaxCombinedTextureImageUnits;
@@ -311,64 +488,8 @@ class GLES2ImplementationTest : public testing::Test {
     ClearCommands();
   }
 
-  const void* GetPut() {
-    return helper_->GetSpace(0);
-  }
-
-  size_t MaxTransferBufferSize() {
-    return kTransferBufferSize - GLES2Implementation::kStartingOffset;
-  }
-
-  void ClearCommands() {
-    Buffer ring_buffer = command_buffer_->GetRingBuffer();
-    memset(ring_buffer.ptr, kInitialValue, ring_buffer.size);
-  }
-
-  bool NoCommandsWritten() {
-    return static_cast<const uint8*>(static_cast<const void*>(commands_))[0] ==
-           kInitialValue;
-  }
-
-  void ClearTransferBuffer() {
-    memset(transfer_buffer_.ptr, kInitialValue, kTransferBufferSize);
-  }
-
-  static unsigned int RoundToAlignment(unsigned int size) {
-    return (size + GLES2Implementation::kAlignment - 1) &
-           ~(GLES2Implementation::kAlignment - 1);
-  }
-
-  int GetNextToken() {
-    return ++token_;
-  }
-
-  uint32 AllocateTransferBuffer(size_t size) {
-    if (offset_ + size > kTransferBufferSize) {
-      offset_ = GLES2Implementation::kStartingOffset;
-    }
-    uint32 offset = offset_;
-    offset_ += RoundToAlignment(size);
-    return offset;
-  }
-
-  void* GetTransferAddressFromOffset(uint32 offset, size_t size) {
-    EXPECT_LE(offset + size, transfer_buffer_.size);
-    return static_cast<int8*>(transfer_buffer_.ptr) + offset;
-  }
-
-  template <typename T>
-  T* GetTransferAddressFromOffsetAs(uint32 offset, size_t size) {
-    return static_cast<T*>(GetTransferAddressFromOffset(offset, size));
-  }
-
-  Buffer transfer_buffer_;
-  CommandBufferEntry* commands_;
-  scoped_ptr<MockGLES2CommandBuffer> command_buffer_;
-  scoped_ptr<GLES2CmdHelper> helper_;
   Sequence sequence_;
   scoped_ptr<GLES2Implementation> gl_;
-  int token_;
-  uint32 offset_;
 };
 
 class GLES2ImplementationStrictSharedTest : public GLES2ImplementationTest {
@@ -377,12 +498,6 @@ class GLES2ImplementationStrictSharedTest : public GLES2ImplementationTest {
     Initialize(true, false);
   }
 };
-
-// GCC requires these declarations, but MSVC requires they not be present
-#ifndef _MSC_VER
-const int32 GLES2ImplementationTest::kTransferBufferId;
-#endif
-
 
 TEST_F(GLES2ImplementationTest, ShaderSource) {
   const uint32 kBucketId = 1;  // This id is hardcoded into GLES2Implemenation
@@ -929,6 +1044,31 @@ TEST_F(GLES2ImplementationTest, ReadPixelsBadFormatType) {
       .RetiresOnSaturation();
 
   gl_->ReadPixels(0, 0, kWidth, kHeight, kFormat, kType, buffer.get());
+}
+
+TEST_F(GLES2ImplementationTest, FreeUnusedSharedMemory) {
+  struct Cmds {
+    BufferSubData buf;
+    cmd::SetToken set_token;
+  };
+  const GLenum kTarget = GL_ELEMENT_ARRAY_BUFFER;
+  const GLintptr kOffset = 15;
+  const GLsizeiptr kSize = 16;
+
+  uint32 offset = 0;
+  Cmds expected;
+  expected.buf.Init(
+    kTarget, kOffset, kSize, kTransferBufferId, offset);
+  expected.set_token.Init(GetNextToken());
+
+  void* mem = gl_->MapBufferSubDataCHROMIUM(
+      kTarget, kOffset, kSize, GL_WRITE_ONLY);
+  ASSERT_TRUE(mem != NULL);
+  gl_->UnmapBufferSubDataCHROMIUM(mem);
+  EXPECT_CALL(*command_buffer_, DestroyTransferBuffer(_))
+      .Times(1)
+      .RetiresOnSaturation();
+  gl_->FreeUnusedSharedMemory();
 }
 
 TEST_F(GLES2ImplementationTest, MapUnmapBufferSubDataCHROMIUM) {
@@ -1728,6 +1868,74 @@ TEST_F(GLES2ImplementationTest, TexImage2DSubRows) {
       kWidth / 2, 1, kFormat, kType, kPixelStoreUnpackAlignment, false,
       pixels.get() + padded_row_size + part_size,
       GetTransferAddressFromOffsetAs<uint8>(offset4, part_size)));
+}
+
+// Test TexSubImage2D with GL_PACK_FLIP_Y set and partial multirow transfers
+TEST_F(GLES2ImplementationTest, TexSubImage2DFlipY) {
+  const GLsizei kTextureWidth = MaxTransferBufferSize() / 4;
+  const GLsizei kTextureHeight = 7;
+  const GLsizei kSubImageWidth = MaxTransferBufferSize() / 8;
+  const GLsizei kSubImageHeight = 4;
+  const GLint kSubImageXOffset = 1;
+  const GLint kSubImageYOffset = 2;
+  const GLenum kFormat = GL_RGBA;
+  const GLenum kType = GL_UNSIGNED_BYTE;
+  const GLenum kTarget = GL_TEXTURE_2D;
+  const GLint kLevel = 0;
+  const GLint kBorder = 0;
+  const GLint kPixelStoreUnpackAlignment = 4;
+
+  struct Cmds {
+    PixelStorei pixel_store_i1;
+    TexImage2D tex_image_2d;
+    TexSubImage2D tex_sub_image_2d1;
+    cmd::SetToken set_token1;
+    TexSubImage2D tex_sub_image_2d2;
+    cmd::SetToken set_token2;
+  };
+
+  uint32 sub_2_high_size = 0;
+  ASSERT_TRUE(GLES2Util::ComputeImageDataSize(
+      kSubImageWidth, 2, kFormat, kType, kPixelStoreUnpackAlignment,
+      &sub_2_high_size));
+  uint32 offset1 = AllocateTransferBuffer(sub_2_high_size);
+  uint32 offset2 = AllocateTransferBuffer(sub_2_high_size);
+
+  Cmds expected;
+  expected.pixel_store_i1.Init(GL_UNPACK_ALIGNMENT, kPixelStoreUnpackAlignment);
+  expected.tex_image_2d.Init(
+      kTarget, kLevel, kFormat, kTextureWidth, kTextureHeight, kBorder, kFormat,
+      kType, 0, NULL);
+  expected.tex_sub_image_2d1.Init(kTarget, kLevel, kSubImageXOffset,
+      kSubImageYOffset + 2, kSubImageWidth, 2, kFormat, kType,
+      kTransferBufferId, offset1, false);
+  expected.set_token1.Init(GetNextToken());
+  expected.tex_sub_image_2d2.Init(kTarget, kLevel, kSubImageXOffset,
+      kSubImageYOffset, kSubImageWidth , 2, kFormat, kType, kTransferBufferId,
+      offset2, false);
+  expected.set_token2.Init(GetNextToken());
+
+  gl_->PixelStorei(GL_UNPACK_ALIGNMENT, kPixelStoreUnpackAlignment);
+  gl_->TexImage2D(
+      kTarget, kLevel, kFormat, kTextureWidth, kTextureHeight, kBorder, kFormat,
+      kType, NULL);
+  // this call should not emit commands (handled client-side)
+  gl_->PixelStorei(GL_UNPACK_FLIP_Y_CHROMIUM, GL_TRUE);
+  scoped_array<uint32> pixels(new uint32[kSubImageWidth * kSubImageHeight]);
+  for (int y = 0; y < kSubImageHeight; ++y) {
+    for (int x = 0; x < kSubImageWidth; ++x) {
+        pixels.get()[kSubImageWidth * y + x] = x | (y << 16);
+    }
+  }
+  gl_->TexSubImage2D(
+      GL_TEXTURE_2D, 0, kSubImageXOffset, kSubImageYOffset, kSubImageWidth,
+      kSubImageHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels.get());
+
+  EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
+  EXPECT_TRUE(CheckRect(
+      kSubImageWidth, 2, kFormat, kType, kPixelStoreUnpackAlignment, true,
+      reinterpret_cast<uint8*>(pixels.get() + 2 * kSubImageWidth),
+      GetTransferAddressFromOffsetAs<uint8>(offset2, sub_2_high_size)));
 }
 
 // Test that GenBuffer does not call GenSharedIds.

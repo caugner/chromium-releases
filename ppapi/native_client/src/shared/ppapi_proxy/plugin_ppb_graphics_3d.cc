@@ -212,25 +212,27 @@ bool PluginGraphics3D::InitFromBrowserResource(PP_Resource res) {
 
   // Create and initialize the objects required to issue GLES2 calls.
   command_buffer_.reset(new CommandBufferNacl(res, PluginCore::GetInterface()));
-  command_buffer_->Initialize(kRingBufferSize);
-  gles2_helper_.reset(new gpu::gles2::GLES2CmdHelper(command_buffer_.get()));
-  gpu::Buffer buffer = command_buffer_->GetRingBuffer();
-  DebugPrintf("PluginGraphics3D::InitFromBrowserResource: buffer size: %d\n",
-      buffer.size);
-  if (gles2_helper_->Initialize(buffer.size)) {
-    // Request id -1 to signify 'don't care'
-    int32 transfer_buffer_id =
-        command_buffer_->CreateTransferBuffer(kTransferBufferSize, -1);
-    gpu::Buffer transfer_buffer =
-        command_buffer_->GetTransferBuffer(transfer_buffer_id);
-    if (transfer_buffer.ptr) {
-      gles2_implementation_.reset(new gpu::gles2::GLES2Implementation(
-          gles2_helper_.get(),
-          transfer_buffer.size,
-          transfer_buffer.ptr,
-          transfer_buffer_id,
-          false));
-      return true;
+  if (command_buffer_->Initialize(kRingBufferSize)) {
+    gles2_helper_.reset(new gpu::gles2::GLES2CmdHelper(command_buffer_.get()));
+    gpu::Buffer buffer = command_buffer_->GetRingBuffer();
+    DebugPrintf("PluginGraphics3D::InitFromBrowserResource: buffer size: %d\n",
+        buffer.size);
+    if (gles2_helper_->Initialize(buffer.size)) {
+      // Request id -1 to signify 'don't care'
+      int32 transfer_buffer_id =
+          command_buffer_->CreateTransferBuffer(kTransferBufferSize, -1);
+      gpu::Buffer transfer_buffer =
+          command_buffer_->GetTransferBuffer(transfer_buffer_id);
+      if (transfer_buffer.ptr) {
+        gles2_implementation_.reset(new gpu::gles2::GLES2Implementation(
+            gles2_helper_.get(),
+            transfer_buffer.size,
+            transfer_buffer.ptr,
+            transfer_buffer_id,
+            false,
+            true));
+        return true;
+      }
     }
   }
   return false;
@@ -238,11 +240,11 @@ bool PluginGraphics3D::InitFromBrowserResource(PP_Resource res) {
 
 int32_t PluginGraphics3D::SwapBuffers(PP_Resource graphics3d_id,
                                       struct PP_CompletionCallback callback) {
-
   int32_t callback_id = CompletionCallbackTable::Get()->AddCallback(callback);
   if (callback_id == 0)  // Just like Chrome, for now disallow blocking calls.
     return PP_ERROR_BLOCKS_MAIN_THREAD;
 
+  impl()->SwapBuffers();
   int32_t pp_error;
   NaClSrpcError retval =
       PpbGraphics3DRpcClient::PPB_Graphics3D_SwapBuffers(
@@ -256,7 +258,6 @@ int32_t PluginGraphics3D::SwapBuffers(PP_Resource graphics3d_id,
   if ((PP_OK_COMPLETIONPENDING != pp_error) && (PP_OK != pp_error))
     return pp_error;
 
-  impl()->SwapBuffers();
   return PP_OK_COMPLETIONPENDING;
 }
 

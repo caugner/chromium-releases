@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_TAB_CONTENTS_TAB_CONTENTS_OBSERVER_H_
 #define CONTENT_BROWSER_TAB_CONTENTS_TAB_CONTENTS_OBSERVER_H_
 
+#include "base/process_util.h"
 #include "content/browser/tab_contents/navigation_controller.h"
 #include "content/common/content_export.h"
 #include "content/public/common/page_transition_types.h"
@@ -12,7 +13,11 @@
 #include "webkit/glue/window_open_disposition.h"
 
 class RenderViewHost;
-struct ViewHostMsg_FrameNavigate_Params;
+
+namespace content {
+struct FrameNavigateParams;
+struct Referrer;
+}
 
 // An observer API implemented by classes which are interested in various page
 // load events from TabContents.  They also get a chance to filter IPC messages.
@@ -20,15 +25,18 @@ class CONTENT_EXPORT TabContentsObserver : public IPC::Channel::Listener,
                                            public IPC::Message::Sender {
  public:
   virtual void RenderViewCreated(RenderViewHost* render_view_host);
+  virtual void RenderViewDeleted(RenderViewHost* render_view_host);
+  virtual void RenderViewReady();
+  virtual void RenderViewGone(base::TerminationStatus status);
   virtual void NavigateToPendingEntry(
       const GURL& url,
       NavigationController::ReloadType reload_type);
-  virtual void DidNavigateMainFramePostCommit(
+  virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params);
-  virtual void DidNavigateAnyFramePostCommit(
+      const content::FrameNavigateParams& params);
+  virtual void DidNavigateAnyFrame(
       const content::LoadCommittedDetails& details,
-      const ViewHostMsg_FrameNavigate_Params& params);
+      const content::FrameNavigateParams& params);
   // |render_view_host| is the RenderViewHost for which the provisional load is
   // happening.
   virtual void DidStartProvisionalLoadForFrame(
@@ -49,25 +57,32 @@ class CONTENT_EXPORT TabContentsObserver : public IPC::Channel::Listener,
                                       const GURL& validated_url,
                                       int error_code,
                                       const string16& error_description);
+  virtual void DocumentAvailableInMainFrame();
   virtual void DocumentLoadedInFrame(int64 frame_id);
-  virtual void DidFinishLoad(int64 frame_id);
+  virtual void DidFinishLoad(int64 frame_id,
+                             const GURL& validated_url,
+                             bool is_main_frame);
+  virtual void DidFailLoad(int64 frame_id,
+                           const GURL& validated_url,
+                           bool is_main_frame,
+                           int error_code,
+                           const string16& error_description);
   virtual void DidGetUserGesture();
   virtual void DidGetIgnoredUIEvent();
   virtual void DidBecomeSelected();
 
   virtual void DidStartLoading();
   virtual void DidStopLoading();
-  virtual void RenderViewGone();
   virtual void StopNavigation();
 
   virtual void DidOpenURL(const GURL& url,
-                          const GURL& referrer,
+                          const content::Referrer& referrer,
                           WindowOpenDisposition disposition,
                           content::PageTransition transition);
 
   virtual void DidOpenRequestedURL(TabContents* new_contents,
                                    const GURL& url,
-                                   const GURL& referrer,
+                                   const content::Referrer& referrer,
                                    WindowOpenDisposition disposition,
                                    content::PageTransition transition,
                                    int64 source_frame_id);
@@ -90,7 +105,7 @@ class CONTENT_EXPORT TabContentsObserver : public IPC::Channel::Listener,
 #endif
 
   // IPC::Message::Sender implementation.
-  virtual bool Send(IPC::Message* message);
+  virtual bool Send(IPC::Message* message) OVERRIDE;
   int routing_id() const;
 
  protected:
@@ -114,7 +129,7 @@ class CONTENT_EXPORT TabContentsObserver : public IPC::Channel::Listener,
   virtual void TabContentsDestroyed(TabContents* tab);
 
   // IPC::Channel::Listener implementation.
-  virtual bool OnMessageReceived(const IPC::Message& message);
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   TabContents* tab_contents() const { return tab_contents_; }
 
@@ -126,9 +141,6 @@ class CONTENT_EXPORT TabContentsObserver : public IPC::Channel::Listener,
   void TabContentsDestroyed();
 
   TabContents* tab_contents_;
-
-  // The routing ID of the associated TabContents.
-  int routing_id_;
 
   DISALLOW_COPY_AND_ASSIGN(TabContentsObserver);
 };

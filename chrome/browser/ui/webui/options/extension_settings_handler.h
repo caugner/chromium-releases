@@ -6,25 +6,25 @@
 #define CHROME_BROWSER_UI_WEBUI_OPTIONS_EXTENSION_SETTINGS_HANDLER_H_
 #pragma once
 
+#include <set>
 #include <string>
 #include <vector>
 
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/extension_warning_set.h"
-#include "chrome/browser/ui/shell_dialogs.h"
+#include "chrome/browser/ui/select_file_dialog.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 
 class Extension;
 class ExtensionService;
 class FilePath;
 class PrefService;
-class RenderProcessHost;
 class UserScript;
 
 namespace base {
@@ -142,10 +142,10 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
       base::DictionaryValue* localized_strings) OVERRIDE;
   virtual void Initialize() OVERRIDE;
 
-  // NotificationObserver implementation.
+  // content::NotificationObserver implementation.
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   // ExtensionUninstallDialog::Delegate implementation, used for receiving
   // notification about uninstall confirmation dialog selections.
@@ -157,8 +157,7 @@ class ExtensionSettingsHandler : public OptionsPageUIHandler,
   std::vector<ExtensionPage> GetActivePagesForExtension(
       const Extension* extension);
   void GetActivePagesForExtensionProcess(
-      RenderProcessHost* process,
-      const Extension* extension,
+      const std::set<RenderViewHost*>& views,
       std::vector<ExtensionPage> *result);
 
   // Returns the ExtensionUninstallDialog object for this class, creating it if

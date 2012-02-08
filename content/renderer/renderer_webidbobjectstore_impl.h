@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBObjectStore.h"
 
 namespace WebKit {
-class WebFrame;
 class WebIDBCallbacks;
 class WebIDBIndex;
 class WebIDBKey;
@@ -51,6 +50,7 @@ class RendererWebIDBObjectStoreImpl : public WebKit::WebIDBObjectStore {
       const WebKit::WebString& name,
       const WebKit::WebString& key_path,
       bool unique,
+      bool multi_entry,
       const WebKit::WebIDBTransaction& transaction,
       WebKit::WebExceptionCode& ec);
   // Transfers ownership of the WebIDBIndex to the caller.
@@ -65,6 +65,7 @@ class RendererWebIDBObjectStoreImpl : public WebKit::WebIDBObjectStore {
                   WebKit::WebIDBCallbacks* callbacks,
                   const WebKit::WebIDBTransaction& transaction,
                   WebKit::WebExceptionCode& ec);
+
  private:
   int32 idb_object_store_id_;
 };

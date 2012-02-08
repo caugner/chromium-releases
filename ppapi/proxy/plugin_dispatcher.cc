@@ -25,7 +25,6 @@
 #include "ppapi/proxy/ppp_class_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
 #include "ppapi/shared_impl/resource.h"
-#include "ppapi/shared_impl/tracker_base.h"
 
 #if defined(OS_POSIX)
 #include "base/eintr_wrapper.h"
@@ -43,8 +42,16 @@ InstanceToDispatcherMap* g_instance_to_dispatcher = NULL;
 }  // namespace
 
 InstanceData::InstanceData()
-    : fullscreen(PP_FALSE), flash_fullscreen(PP_FALSE) {
+    : fullscreen(PP_FALSE),
+      flash_fullscreen(PP_FALSE),
+      mouse_lock_callback(PP_BlockUntilComplete()) {
   memset(&position, 0, sizeof(position));
+}
+
+InstanceData::~InstanceData() {
+  // Run any pending mouse lock callback to prevent leaks.
+  if (mouse_lock_callback.func)
+    PP_RunAndClearCompletionCallback(&mouse_lock_callback, PP_ERROR_ABORTED);
 }
 
 PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
@@ -54,7 +61,6 @@ PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
       received_preferences_(false),
       plugin_dispatcher_id_(0) {
   SetSerializationRules(new PluginVarSerializationRules);
-  TrackerBase::Init(&PluginResourceTracker::GetTrackerBaseInstance);
 }
 
 PluginDispatcher::~PluginDispatcher() {
@@ -201,7 +207,7 @@ WebKitForwarding* PluginDispatcher::GetWebKitForwarding() {
   return plugin_delegate_->GetWebKitForwarding();
 }
 
-FunctionGroupBase* PluginDispatcher::GetFunctionAPI(InterfaceID id) {
+FunctionGroupBase* PluginDispatcher::GetFunctionAPI(ApiID id) {
   return GetInterfaceProxy(id);
 }
 
@@ -217,7 +223,7 @@ void PluginDispatcher::ForceFreeAllInstances() {
     if (i->second == this) {
       // Synthesize an "instance destroyed" message, this will notify the
       // plugin and also remove it from our list of tracked plugins.
-      PpapiMsg_PPPInstance_DidDestroy msg(INTERFACE_ID_PPP_INSTANCE, i->first);
+      PpapiMsg_PPPInstance_DidDestroy msg(API_ID_PPP_INSTANCE, i->first);
       OnMessageReceived(msg);
     }
   }

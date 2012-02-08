@@ -7,6 +7,7 @@
 
 #include <functional>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/singleton.h"
@@ -21,13 +22,16 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/test/test_browser_thread.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
+
+using content::BrowserThread;
 
 namespace {
 
@@ -200,13 +204,9 @@ class PrintDialogCloudTest : public InProcessBrowserTest {
         test_data_directory_.AppendASCII("printing/cloud_print_uitest.pdf");
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableFunction(&internal_cloud_print_helpers::CreateDialogImpl,
-                            path_to_pdf,
-                            string16(),
-                            string16(),
-                            std::string("application/pdf"),
-                            true,
-                            false));
+        base::Bind(&internal_cloud_print_helpers::CreateDialogImpl, path_to_pdf,
+                   string16(), string16(), std::string("application/pdf"), true,
+                   false));
   }
 
   bool handler_added_;
@@ -228,7 +228,7 @@ net::URLRequestJob* PrintDialogCloudTest::Factory(net::URLRequest* request,
 }
 
 #if defined(OS_WIN)
-// http://crbug.com/94864
+// http://crbug.com/94864 for OS_WIN issue
 #define MAYBE_HandlersRegistered DISABLED_HandlersRegistered
 #else
 #define MAYBE_HandlersRegistered HandlersRegistered
@@ -247,7 +247,8 @@ IN_PROC_BROWSER_TEST_F(PrintDialogCloudTest, MAYBE_HandlersRegistered) {
 
   // Close the dialog before finishing the test.
   ui_test_utils::WindowedNotificationObserver signal(
-      content::NOTIFICATION_TAB_CLOSED, NotificationService::AllSources());
+      content::NOTIFICATION_TAB_CLOSED,
+      content::NotificationService::AllSources());
   EXPECT_TRUE(ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_ESCAPE,
                                               false, false, false, false));
   signal.Wait();

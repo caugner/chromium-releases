@@ -6,17 +6,18 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/default_apps_trial.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/web_resource/notification_promo.h"
-#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -33,7 +34,7 @@ WebUIMessageHandler* NewTabPageHandler::Attach(WebUI* web_ui) {
   int shown_page_type = prefs->GetInteger(prefs::kNTPShownPage) >>
       kPageIdOffset;
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.DefaultPageType",
-                            shown_page_type, 4);
+                            shown_page_type, kHistogramEnumerationMax);
 
   static bool default_apps_trial_exists =
       base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name);
@@ -41,7 +42,7 @@ WebUIMessageHandler* NewTabPageHandler::Attach(WebUI* web_ui) {
     UMA_HISTOGRAM_ENUMERATION(
         base::FieldTrial::MakeName("NewTabPage.DefaultPageType",
                                    kDefaultAppsTrial_Name),
-        shown_page_type, 4);
+        shown_page_type, kHistogramEnumerationMax);
   }
 
   return WebUIMessageHandler::Attach(web_ui);
@@ -66,18 +67,17 @@ void NewTabPageHandler::RegisterMessages() {
 }
 
 void NewTabPageHandler::HandleCloseNotificationPromo(const ListValue* args) {
-  NotificationPromo notification_promo(
-      Profile::FromWebUI(web_ui())->GetPrefs(), NULL);
-  notification_promo.HandleClosed();
-  NotifyPromoResourceChanged();
+  scoped_refptr<NotificationPromo> notification_promo =
+      NotificationPromo::Create(Profile::FromWebUI(web_ui()), NULL);
+  notification_promo->HandleClosed();
+  Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
 }
 
 void NewTabPageHandler::HandleNotificationPromoViewed(const ListValue* args) {
-  NotificationPromo notification_promo(
-      Profile::FromWebUI(web_ui_)->GetPrefs(), NULL);
-  if (notification_promo.HandleViewed()) {
-    NotifyPromoResourceChanged();
-  }
+  scoped_refptr<NotificationPromo> notification_promo =
+      NotificationPromo::Create(Profile::FromWebUI(web_ui_), NULL);
+  if (notification_promo->HandleViewed())
+    Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED);
 }
 
 void NewTabPageHandler::HandlePageSelected(const ListValue* args) {
@@ -90,11 +90,16 @@ void NewTabPageHandler::HandlePageSelected(const ListValue* args) {
   int index = static_cast<int>(index_double);
 
   PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  int previous_shown_page =
+      prefs->GetInteger(prefs::kNTPShownPage) >> kPageIdOffset;
+  UMA_HISTOGRAM_ENUMERATION("NewTabPage.PreviousSelectedPageType",
+                            previous_shown_page, kHistogramEnumerationMax);
+
   prefs->SetInteger(prefs::kNTPShownPage, page_id | index);
 
   int shown_page_type = page_id >> kPageIdOffset;
   UMA_HISTOGRAM_ENUMERATION("NewTabPage.SelectedPageType",
-                            shown_page_type, 4);
+                            shown_page_type, kHistogramEnumerationMax);
 
   static bool default_apps_trial_exists =
       base::FieldTrialList::TrialExists(kDefaultAppsTrial_Name);
@@ -102,19 +107,21 @@ void NewTabPageHandler::HandlePageSelected(const ListValue* args) {
     UMA_HISTOGRAM_ENUMERATION(
         base::FieldTrial::MakeName("NewTabPage.SelectedPageType",
                                    kDefaultAppsTrial_Name),
-        shown_page_type, 4);
+        shown_page_type, kHistogramEnumerationMax);
   }
 }
 
 void NewTabPageHandler::HandleIntroMessageDismissed(const ListValue* args) {
-  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  PrefService* prefs = g_browser_process->local_state();
   prefs->SetInteger(prefs::kNTP4IntroDisplayCount, kIntroDisplayMax + 1);
+  Notify(chrome::NTP4_INTRO_PREF_CHANGED);
 }
 
 void NewTabPageHandler::HandleIntroMessageSeen(const ListValue* args) {
-  PrefService* prefs = Profile::FromWebUI(web_ui())->GetPrefs();
+  PrefService* prefs = g_browser_process->local_state();
   int intro_displays = prefs->GetInteger(prefs::kNTP4IntroDisplayCount);
   prefs->SetInteger(prefs::kNTP4IntroDisplayCount, intro_displays + 1);
+  Notify(chrome::NTP4_INTRO_PREF_CHANGED);
 }
 
 // static
@@ -122,6 +129,10 @@ void NewTabPageHandler::RegisterUserPrefs(PrefService* prefs) {
   // TODO(estade): should be syncable.
   prefs->RegisterIntegerPref(prefs::kNTPShownPage, APPS_PAGE_ID,
                              PrefService::UNSYNCABLE_PREF);
+}
+
+// static
+void NewTabPageHandler::RegisterPrefs(PrefService* prefs) {
   prefs->RegisterIntegerPref(prefs::kNTP4IntroDisplayCount, 0,
                              PrefService::UNSYNCABLE_PREF);
 }
@@ -129,19 +140,25 @@ void NewTabPageHandler::RegisterUserPrefs(PrefService* prefs) {
 // static
 void NewTabPageHandler::GetLocalizedValues(Profile* profile,
                                            DictionaryValue* values) {
-  if (!NewTabUI::NTP4Enabled())
-    return;
-
   values->SetInteger("most_visited_page_id", MOST_VISITED_PAGE_ID);
   values->SetInteger("apps_page_id", APPS_PAGE_ID);
-  values->SetInteger("bookmarks_page_id", BOOKMARKS_PAGE_ID);
 
   PrefService* prefs = profile->GetPrefs();
   int shown_page = prefs->GetInteger(prefs::kNTPShownPage);
   values->SetInteger("shown_page_type", shown_page & ~INDEX_MASK);
   values->SetInteger("shown_page_index", shown_page & INDEX_MASK);
 
-  int intro_displays = prefs->GetInteger(prefs::kNTP4IntroDisplayCount);
+  PrefService* local_state = g_browser_process->local_state();
+  int intro_displays = local_state->GetInteger(prefs::kNTP4IntroDisplayCount);
+  // This preference used to exist in profile, so check the profile if it has
+  // not been set in local state yet.
+  if (!intro_displays) {
+    prefs->RegisterIntegerPref(prefs::kNTP4IntroDisplayCount, 0,
+                               PrefService::UNSYNCABLE_PREF);
+    intro_displays = prefs->GetInteger(prefs::kNTP4IntroDisplayCount);
+    if (intro_displays)
+      local_state->SetInteger(prefs::kNTP4IntroDisplayCount, intro_displays);
+  }
   if (intro_displays <= kIntroDisplayMax) {
     values->SetString("ntp4_intro_message",
                       l10n_util::GetStringUTF16(IDS_NTP4_INTRO_MESSAGE));
@@ -154,11 +171,14 @@ void NewTabPageHandler::GetLocalizedValues(Profile* profile,
 // static
 void NewTabPageHandler::DismissIntroMessage(PrefService* prefs) {
   prefs->SetInteger(prefs::kNTP4IntroDisplayCount, kIntroDisplayMax + 1);
+  // No need to send notification to update resource cache, because this method
+  // is only called during startup before the ntp resource cache is constructed.
 }
 
-void NewTabPageHandler::NotifyPromoResourceChanged() {
-  NotificationService* service = NotificationService::current();
-  service->Notify(chrome::NOTIFICATION_PROMO_RESOURCE_STATE_CHANGED,
-                  Source<NewTabPageHandler>(this),
-                  NotificationService::NoDetails());
+void NewTabPageHandler::Notify(chrome::NotificationType notification_type) {
+  content::NotificationService* service =
+      content::NotificationService::current();
+  service->Notify(notification_type,
+                  content::Source<NewTabPageHandler>(this),
+                  content::NotificationService::NoDetails());
 }

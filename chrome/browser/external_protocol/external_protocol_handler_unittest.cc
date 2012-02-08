@@ -4,8 +4,11 @@
 
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 
-#include "content/browser/browser_thread.h"
+#include "base/message_loop.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+using content::BrowserThread;
 
 class FakeExternalProtocolHandlerWorker
     : public ShellIntegration::DefaultProtocolClientWorker {
@@ -97,9 +100,12 @@ class ExternalProtocolHandlerTest : public testing::Test {
         file_thread_(BrowserThread::FILE) {}
 
   virtual void SetUp() {
-    base::Thread::Options options;
-    options.message_loop_type = MessageLoop::TYPE_DEFAULT;
-    file_thread_.StartWithOptions(options);
+    file_thread_.Start();
+  }
+
+  virtual void TearDown() {
+    // Ensure that g_accept_requests gets set back to true after test execution.
+    ExternalProtocolHandler::PermitLaunchUrl();
   }
 
   void DoTest(ExternalProtocolHandler::BlockState block_state,
@@ -122,8 +128,8 @@ class ExternalProtocolHandlerTest : public testing::Test {
   }
 
   MessageLoopForUI ui_message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   FakeExternalProtocolHandlerDelegate delegate_;
 };

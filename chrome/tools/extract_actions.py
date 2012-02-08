@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 # Copyright (c) 2011 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -223,6 +223,15 @@ def AddChromeOSActions(actions):
   # Actions sent by Chrome OS cryptohome.
   actions.add('Cryptohome.PKCS11InitFail')
 
+def AddExtensionActions(actions):
+  """Add actions reported by extensions via chrome.experimental.metrics API.
+
+  Arguments:
+    actions: set of actions to add to.
+  """
+  # Actions sent by Chrome OS File Browser.
+  actions.add('FileBrowser.CreateNewFolder')
+
 def GrepForActions(path, actions):
   """Grep a source file for calls to UserMetrics functions.
 
@@ -413,6 +422,7 @@ def main(argv):
 
   AddClosedSourceActions(actions)
   AddChromeOSActions(actions)
+  AddExtensionActions(actions)
 
   if hash_output:
     f = open(chromeactions_path, "w")
@@ -429,6 +439,8 @@ def main(argv):
 
   if hash_output:
     print "Done. Do not forget to add chromeactions.txt to your changelist"
+  return 0
+
 
 if '__main__' == __name__:
-  main(sys.argv)
+  sys.exit(main(sys.argv))

@@ -14,14 +14,14 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include <tlhelp32.h>
-#elif defined(OS_MACOSX) || defined(OS_OPENBSD)
+#elif defined(OS_MACOSX) || defined(OS_BSD)
 // kinfo_proc is defined in <sys/sysctl.h>, but this forward declaration
 // is sufficient for the vector<kinfo_proc> below.
 struct kinfo_proc;
 // malloc_zone_t is defined in <malloc/malloc.h>, but this forward declaration
 // is sufficient for GetPurgeableZone() below.
 typedef struct _malloc_zone_t malloc_zone_t;
-#if !defined(OS_OPENBSD)
+#if !defined(OS_BSD)
 #include <mach/mach.h>
 #endif
 #elif defined(OS_POSIX)
@@ -31,6 +31,7 @@ typedef struct _malloc_zone_t malloc_zone_t;
 #endif
 
 #include <list>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -166,10 +167,12 @@ BASE_EXPORT void CloseProcessHandle(ProcessHandle process);
 // Win XP SP1 as well.
 BASE_EXPORT ProcessId GetProcId(ProcessHandle process);
 
-#if defined(OS_LINUX) || defined(OS_ANDROID)
+#if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_BSD)
 // Returns the path to the executable of the given process.
 BASE_EXPORT FilePath GetProcessExecutablePath(ProcessHandle process);
+#endif
 
+#if defined(OS_LINUX) || defined(OS_ANDROID)
 // Parse the data found in /proc/<pid>/stat and return the sum of the
 // CPU-related ticks.  Returns -1 on parse error.
 // Exposed for testing.
@@ -217,7 +220,8 @@ struct LaunchOptions {
                     start_hidden(false), inherit_handles(false), as_user(NULL),
                     empty_desktop_name(false), job_handle(NULL)
 #else
-                    environ(NULL), fds_to_remap(NULL), new_process_group(false)
+                    environ(NULL), fds_to_remap(NULL), maximize_rlimits(NULL),
+                    new_process_group(false)
 #if defined(OS_LINUX)
                   , clone_flags(0)
 #endif  // OS_LINUX
@@ -262,6 +266,11 @@ struct LaunchOptions {
   // This pointer is owned by the caller and must live through the
   // call to LaunchProcess().
   const file_handle_mapping_vector* fds_to_remap;
+
+  // Each element is an RLIMIT_* constant that should be raised to its
+  // rlim_max.  This pointer is owned by the caller and must live through
+  // the call to LaunchProcess().
+  const std::set<int>* maximize_rlimits;
 
   // If true, start the process in a new process group, instead of
   // inheriting the parent's process group.  The pgid of the child process
@@ -373,6 +382,15 @@ BASE_EXPORT void LaunchSynchronize(LaunchSynchronizationHandle handle);
 
 #endif  // defined(OS_MACOSX)
 #endif  // defined(OS_POSIX)
+
+#if defined(OS_WIN)
+// Set JOBOBJECT_EXTENDED_LIMIT_INFORMATION to JobObject |job_object|.
+// As its limit_info.BasicLimitInformation.LimitFlags has
+// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE.
+// When the provide JobObject |job_object| is closed, the binded process will
+// be terminated.
+BASE_EXPORT bool SetJobObjectAsKillOnJobClose(HANDLE job_object);
+#endif  // defined(OS_WIN)
 
 // Executes the application specified by |cl| and wait for it to exit. Stores
 // the output (stdout) in |output|. Redirects stderr to /dev/null. Returns true
@@ -490,6 +508,28 @@ BASE_EXPORT bool CleanupProcesses(const FilePath::StringType& executable_name,
                                   int exit_code,
                                   const ProcessFilter* filter);
 
+// This method ensures that the specified process eventually terminates, and
+// then it closes the given process handle.
+//
+// It assumes that the process has already been signalled to exit, and it
+// begins by waiting a small amount of time for it to exit.  If the process
+// does not appear to have exited, then this function starts to become
+// aggressive about ensuring that the process terminates.
+//
+// On Linux this method does not block the calling thread.
+// On OS X this method may block for up to 2 seconds.
+//
+// NOTE: The process handle must have been opened with the PROCESS_TERMINATE
+// and SYNCHRONIZE permissions.
+//
+BASE_EXPORT void EnsureProcessTerminated(ProcessHandle process_handle);
+
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+// The nicer version of EnsureProcessTerminated() that is patient and will
+// wait for |process_handle| to finish and then reap it.
+BASE_EXPORT void EnsureProcessGetsReaped(ProcessHandle process_handle);
+#endif
+
 // This class provides a way to iterate through a list of processes on the
 // current machine with a specified filter.
 // To use, create an instance and then call NextProcessEntry() until it returns
@@ -528,7 +568,7 @@ class BASE_EXPORT ProcessIterator {
 #if defined(OS_WIN)
   HANDLE snapshot_;
   bool started_iteration_;
-#elif defined(OS_MACOSX) || defined(OS_OPENBSD)
+#elif defined(OS_MACOSX) || defined(OS_BSD)
   std::vector<kinfo_proc> kinfo_procs_;
   size_t index_of_kinfo_proc_;
 #elif defined(OS_POSIX)
@@ -551,7 +591,7 @@ class BASE_EXPORT NamedProcessIterator : public ProcessIterator {
   virtual ~NamedProcessIterator();
 
  protected:
-  virtual bool IncludeEntry();
+  virtual bool IncludeEntry() OVERRIDE;
 
  private:
   FilePath::StringType executable_name_;

@@ -33,6 +33,7 @@
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
 #include "base/json/string_escape.h"
+#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop.h"
@@ -161,13 +162,9 @@ static const int kAllowedFtpPorts[] = {
 std::string::size_type CountTrailingChars(
     const std::string input,
     const std::string::value_type trailing_chars[]) {
-  const std::string::size_type last_good_char =
-      input.find_last_not_of(trailing_chars);
-
-  if (last_good_char == std::string::npos)
-    return input.length();
-  else
-    return input.length() - last_good_char - 1;
+  const size_t last_good_char = input.find_last_not_of(trailing_chars);
+  return (last_good_char == std::string::npos) ?
+      input.length() : (input.length() - last_good_char - 1);
 }
 
 // Similar to Base64Decode. Decodes a Q-encoded string to a sequence
@@ -175,71 +172,68 @@ std::string::size_type CountTrailingChars(
 bool QPDecode(const std::string& input, std::string* output) {
   std::string temp;
   temp.reserve(input.size());
-  std::string::const_iterator it = input.begin();
-  while (it != input.end()) {
+  for (std::string::const_iterator it = input.begin(); it != input.end();
+       ++it) {
     if (*it == '_') {
       temp.push_back(' ');
     } else if (*it == '=') {
-      if (input.end() - it < 3) {
+      if ((input.end() - it < 3) ||
+          !IsHexDigit(static_cast<unsigned char>(*(it + 1))) ||
+          !IsHexDigit(static_cast<unsigned char>(*(it + 2))))
         return false;
-      }
-      if (IsHexDigit(static_cast<unsigned char>(*(it + 1))) &&
-          IsHexDigit(static_cast<unsigned char>(*(it + 2)))) {
-        unsigned char ch = HexDigitToInt(*(it + 1)) * 16 +
-                           HexDigitToInt(*(it + 2));
-        temp.push_back(static_cast<char>(ch));
-        ++it;
-        ++it;
-      } else {
-        return false;
-      }
+      unsigned char ch = HexDigitToInt(*(it + 1)) * 16 +
+                         HexDigitToInt(*(it + 2));
+      temp.push_back(static_cast<char>(ch));
+      ++it;
+      ++it;
     } else if (0x20 < *it && *it < 0x7F) {
       // In a Q-encoded word, only printable ASCII characters
       // represent themselves. Besides, space, '=', '_' and '?' are
       // not allowed, but they're already filtered out.
-      DCHECK(*it != 0x3D && *it != 0x5F && *it != 0x3F);
+      DCHECK_NE('=', *it);
+      DCHECK_NE('?', *it);
+      DCHECK_NE('_', *it);
       temp.push_back(*it);
     } else {
       return false;
     }
-    ++it;
   }
   output->swap(temp);
   return true;
 }
 
 enum RFC2047EncodingType {Q_ENCODING, B_ENCODING};
-bool DecodeBQEncoding(const std::string& part, RFC2047EncodingType enc_type,
-                       const std::string& charset, std::string* output) {
+bool DecodeBQEncoding(const std::string& part,
+                      RFC2047EncodingType enc_type,
+                      const std::string& charset,
+                      std::string* output) {
   std::string decoded;
-  if (enc_type == B_ENCODING) {
-    if (!base::Base64Decode(part, &decoded)) {
-      return false;
-    }
-  } else {
-    if (!QPDecode(part, &decoded)) {
-      return false;
-    }
+  if (!((enc_type == B_ENCODING) ?
+      base::Base64Decode(part, &decoded) : QPDecode(part, &decoded)))
+    return false;
+
+  if (decoded.empty()) {
+    output->clear();
+    return true;
   }
 
   UErrorCode err = U_ZERO_ERROR;
   UConverter* converter(ucnv_open(charset.c_str(), &err));
-  if (U_FAILURE(err)) {
+  if (U_FAILURE(err))
     return false;
-  }
 
   // A single byte in a legacy encoding can be expanded to 3 bytes in UTF-8.
   // A 'two-byte character' in a legacy encoding can be expanded to 4 bytes
-  // in UTF-8. Therefore, the expansion ratio is 3 at most.
-  int length = static_cast<int>(decoded.length());
-  char* buf = WriteInto(output, length * 3);
-  length = ucnv_toAlgorithmic(UCNV_UTF8, converter, buf, length * 3,
-      decoded.data(), length, &err);
+  // in UTF-8. Therefore, the expansion ratio is 3 at most. Add one for a
+  // trailing '\0'.
+  size_t output_length = decoded.length() * 3 + 1;
+  char* buf = WriteInto(output, output_length);
+  output_length = ucnv_toAlgorithmic(UCNV_UTF8, converter, buf, output_length,
+                                     decoded.data(), decoded.length(), &err);
   ucnv_close(converter);
-  if (U_FAILURE(err)) {
+  if (U_FAILURE(err))
     return false;
-  }
-  output->resize(length);
+  output->resize(output_length);
   return true;
 }
 
@@ -490,17 +484,20 @@ void SetExemplarSetForLang(const std::string& lang,
   map.insert(std::make_pair(lang, lang_set));
 }
 
-static base::Lock lang_set_lock;
+static base::LazyInstance<base::Lock,
+                          base::LeakyLazyInstanceTraits<base::Lock> >
+    g_lang_set_lock = LAZY_INSTANCE_INITIALIZER;
 
 // Returns true if all the characters in component_characters are used by
 // the language |lang|.
 bool IsComponentCoveredByLang(const icu::UnicodeSet& component_characters,
                               const std::string& lang) {
-  static const icu::UnicodeSet kASCIILetters(0x61, 0x7a);  // [a-z]
+  CR_DEFINE_STATIC_LOCAL(
+      const icu::UnicodeSet, kASCIILetters, ('a', 'z'));
   icu::UnicodeSet* lang_set;
   // We're called from both the UI thread and the history thread.
   {
-    base::AutoLock lock(lang_set_lock);
+    base::AutoLock lock(g_lang_set_lock.Get());
     if (!GetExemplarSetForLang(lang, &lang_set)) {
       UErrorCode status = U_ZERO_ERROR;
       ULocaleData* uld = ulocdata_open(lang.c_str(), &status);
@@ -1113,8 +1110,13 @@ const FormatUrlType kFormatUrlOmitTrailingSlashOnBareHostname = 1 << 2;
 const FormatUrlType kFormatUrlOmitAll = kFormatUrlOmitUsernamePassword |
     kFormatUrlOmitHTTP | kFormatUrlOmitTrailingSlashOnBareHostname;
 
-// TODO(viettrungluu): We don't want non-POD globals; change this.
-std::multiset<int> explicitly_allowed_ports;
+static base::LazyInstance<std::multiset<int>,
+                          base::LeakyLazyInstanceTraits<std::multiset<int> > >
+    g_explicitly_allowed_ports = LAZY_INSTANCE_INITIALIZER;
+
+size_t GetCountOfExplicitlyAllowedPorts() {
+  return g_explicitly_allowed_ports.Get().size();
+}
 
 GURL FilePathToFileURL(const FilePath& path) {
   // Produce a URL like "file:///C:/foo" for a regular file, or
@@ -1457,7 +1459,7 @@ string16 GetSuggestedFilename(const GURL& url,
                               const std::string& referrer_charset,
                               const std::string& suggested_name,
                               const std::string& mime_type,
-                              const string16& default_name) {
+                              const std::string& default_name) {
   // TODO: this function to be updated to match the httpbis recommendations.
   // Talk to abarth for the latest news.
 
@@ -1507,7 +1509,7 @@ string16 GetSuggestedFilename(const GURL& url,
   }
 
 #if defined(OS_WIN)
-  string16 path = (filename.empty())? default_name : UTF8ToUTF16(filename);
+  string16 path = UTF8ToUTF16(filename.empty() ? default_name : filename);
   // On Windows we want to preserve or replace all characters including
   // whitespace to prevent file extension obfuscation on trusted websites
   // e.g. Gmail might think evil.exe. is safe, so we don't want it to become
@@ -1521,7 +1523,7 @@ string16 GetSuggestedFilename(const GURL& url,
   GenerateSafeFileName(mime_type, overwrite_extension, &result);
   return result.value();
 #else
-  std::string path = (filename.empty())? UTF16ToUTF8(default_name) : filename;
+  std::string path = filename.empty() ? default_name : filename;
   file_util::ReplaceIllegalCharactersInPath(&path, '-');
   FilePath result(path);
   GenerateSafeFileName(mime_type, overwrite_extension, &result);
@@ -1534,7 +1536,7 @@ FilePath GenerateFileName(const GURL& url,
                           const std::string& referrer_charset,
                           const std::string& suggested_name,
                           const std::string& mime_type,
-                          const string16& default_file_name) {
+                          const std::string& default_file_name) {
   string16 file_name = GetSuggestedFilename(url,
                                             content_disposition,
                                             referrer_charset,
@@ -1574,10 +1576,10 @@ bool IsPortAllowedByFtp(int port) {
 }
 
 bool IsPortAllowedByOverride(int port) {
-  if (explicitly_allowed_ports.empty())
+  if (g_explicitly_allowed_ports.Get().empty())
     return false;
 
-  return explicitly_allowed_ports.count(port) > 0;
+  return g_explicitly_allowed_ports.Get().count(port) > 0;
 }
 
 int SetNonBlocking(int fd) {
@@ -1991,17 +1993,18 @@ void SetExplicitlyAllowedPorts(const std::string& allowed_ports) {
       last = i + 1;
     }
   }
-  explicitly_allowed_ports = ports;
+  g_explicitly_allowed_ports.Get() = ports;
 }
 
 ScopedPortException::ScopedPortException(int port) : port_(port) {
-  explicitly_allowed_ports.insert(port);
+  g_explicitly_allowed_ports.Get().insert(port);
 }
 
 ScopedPortException::~ScopedPortException() {
-  std::multiset<int>::iterator it = explicitly_allowed_ports.find(port_);
-  if (it != explicitly_allowed_ports.end())
-    explicitly_allowed_ports.erase(it);
+  std::multiset<int>::iterator it =
+      g_explicitly_allowed_ports.Get().find(port_);
+  if (it != g_explicitly_allowed_ports.Get().end())
+    g_explicitly_allowed_ports.Get().erase(it);
   else
     NOTREACHED();
 }

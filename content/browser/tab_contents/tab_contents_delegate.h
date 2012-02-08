@@ -12,13 +12,27 @@
 #include "base/basictypes.h"
 #include "content/browser/tab_contents/navigation_entry.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/navigation_types.h"
+#include "content/public/browser/navigation_type.h"
 #include "content/public/common/page_transition_types.h"
 #include "ui/gfx/native_widget_types.h"
 #include "webkit/glue/window_open_disposition.h"
 
+class DownloadItem;
+class FilePath;
+class GURL;
+class TabContents;
+struct ContextMenuParams;
+struct NativeWebKeyboardEvent;
+struct OpenURLParams;
+
+namespace base {
+class ListValue;
+}
+
 namespace content {
 class BrowserContext;
+struct FileChooserParams;
+class IntentsHost;
 class JavaScriptDialogCreator;
 }
 
@@ -36,17 +50,6 @@ namespace webkit_glue {
 struct WebIntentData;
 }
 
-struct ContextMenuParams;
-struct OpenURLParams;
-class DownloadItem;
-class GURL;
-class HtmlDialogUIDelegate;
-struct NativeWebKeyboardEvent;
-class RenderViewHost;
-class TabContents;
-struct ViewHostMsg_RunFileChooser_Params;
-class FilePath;
-
 // Objects implement this interface to get notified about changes in the
 // TabContents and to provide necessary functionality.
 class CONTENT_EXPORT TabContentsDelegate {
@@ -62,14 +65,6 @@ class CONTENT_EXPORT TabContentsDelegate {
 
   // Returns the TabContents the URL is opened in, or NULL if the URL wasn't
   // opened immediately.
-  // Deprecated. Please use the two-arguments method instead.
-  // TODO(adriansc): Remove this method once refactoring changed all call sites.
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const GURL& url,
-                                      const GURL& referrer,
-                                      WindowOpenDisposition disposition,
-                                      content::PageTransition transition);
-
   virtual TabContents* OpenURLFromTab(TabContents* source,
                                       const OpenURLParams& params);
 
@@ -116,6 +111,10 @@ class CONTENT_EXPORT TabContentsDelegate {
   // Request the delegate to close this tab contents, and do whatever cleanup
   // it needs to do.
   virtual void CloseContents(TabContents* source);
+
+  // Informs the delegate that the underlying RenderViewHost has been swapped
+  // out so it can perform any cleanup necessary.
+  virtual void SwappedOut(TabContents* source);
 
   // Request the delegate to move this tab contents to the specified position
   // in screen coordinates.
@@ -242,6 +241,7 @@ class CONTENT_EXPORT TabContentsDelegate {
   // the renderer.
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event);
 
+  virtual void HandleMouseDown();
   virtual void HandleMouseUp();
   virtual void HandleMouseActivate();
 
@@ -296,7 +296,7 @@ class CONTENT_EXPORT TabContentsDelegate {
 
   // Called when a file selection is to be done.
   virtual void RunFileChooser(TabContents* tab,
-                              const ViewHostMsg_RunFileChooser_Params& params);
+                              const content::FileChooserParams& params);
 
   // Request to enumerate a directory.  This is equivalent to running the file
   // chooser in directory-enumeration mode and having the user select the given
@@ -323,13 +323,12 @@ class CONTENT_EXPORT TabContentsDelegate {
                                      const string16& action,
                                      const string16& type,
                                      const string16& href,
-                                     const string16& title);
+                                     const string16& title,
+                                     const string16& disposition);
 
-  // WebIntent notification handler.
+  // Web Intents notification handler. Takes ownership of the |intents_host|.
   virtual void WebIntentDispatch(TabContents* tab,
-                                 int routing_id,
-                                 const webkit_glue::WebIntentData& intent,
-                                 int intent_id);
+                                 content::IntentsHost* intents_host);
 
   // Result of string search in the page. This includes the number of matches
   // found and the selection rect (in screen coordinates) for the string found.
@@ -345,8 +344,14 @@ class CONTENT_EXPORT TabContentsDelegate {
   virtual void CrashedPlugin(TabContents* tab, const FilePath& plugin_path);
 
   // Invoked when the preferred size of the contents has been changed.
-  virtual void UpdatePreferredSize(TabContents* source,
+  virtual void UpdatePreferredSize(TabContents* tab,
                                    const gfx::Size& pref_size);
+
+  // Notification message from HTML UI.
+  virtual void WebUISend(TabContents* tab,
+                         const GURL& source_url,
+                         const std::string& name,
+                         const base::ListValue& args);
 
   // Requests to lock the mouse. Once the request is approved or rejected,
   // GotResponseToLockMouseRequest() will be called on the requesting tab

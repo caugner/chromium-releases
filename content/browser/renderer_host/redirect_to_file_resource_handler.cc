@@ -8,16 +8,18 @@
 #include "base/file_util.h"
 #include "base/file_util_proxy.h"
 #include "base/logging.h"
+#include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/task.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/common/resource_response.h"
+#include "content/public/common/resource_response.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/base/net_errors.h"
 #include "webkit/blob/deletable_file_reference.h"
 
+using content::BrowserThread;
 using webkit_blob::DeletableFileReference;
 
 // TODO(darin): Use the buffer sizing algorithm from AsyncResourceHandler.
@@ -49,7 +51,7 @@ bool RedirectToFileResourceHandler::OnUploadProgress(int request_id,
 bool RedirectToFileResourceHandler::OnRequestRedirected(
     int request_id,
     const GURL& new_url,
-    ResourceResponse* response,
+    content::ResourceResponse* response,
     bool* defer) {
   return next_handler_->OnRequestRedirected(request_id, new_url, response,
                                             defer);
@@ -57,10 +59,10 @@ bool RedirectToFileResourceHandler::OnRequestRedirected(
 
 bool RedirectToFileResourceHandler::OnResponseStarted(
     int request_id,
-    ResourceResponse* response) {
-  if (response->response_head.status.is_success()) {
+    content::ResourceResponse* response) {
+  if (response->status.is_success()) {
     DCHECK(deletable_file_ && !deletable_file_->path().empty());
-    response->response_head.download_file_path = deletable_file_->path();
+    response->download_file_path = deletable_file_->path();
   }
   return next_handler_->OnResponseStarted(request_id, response);
 }

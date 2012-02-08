@@ -5,13 +5,15 @@
 #include "chrome/browser/sync/glue/new_non_frontend_data_type_controller.h"
 
 #include "base/logging.h"
-#include "chrome/browser/sync/profile_sync_factory.h"
-#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/api/sync_error.h"
 #include "chrome/browser/sync/api/syncable_service.h"
 #include "chrome/browser/sync/glue/shared_change_processor_ref.h"
+#include "chrome/browser/sync/profile_sync_components_factory.h"
+#include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
+
+using content::BrowserThread;
 
 namespace browser_sync {
 
@@ -19,7 +21,7 @@ NewNonFrontendDataTypeController::NewNonFrontendDataTypeController()
     : shared_change_processor_(NULL) {}
 
 NewNonFrontendDataTypeController::NewNonFrontendDataTypeController(
-    ProfileSyncFactory* profile_sync_factory,
+    ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile)
     : NonFrontendDataTypeController(profile_sync_factory, profile),
       shared_change_processor_(NULL) {
@@ -38,6 +40,9 @@ void NewNonFrontendDataTypeController::Start(StartCallback* start_callback) {
 
   set_start_callback(start_callback);
 
+  shared_change_processor_ =
+      profile_sync_factory()->CreateSharedChangeProcessor();
+
   set_state(MODEL_STARTING);
   if (!StartModels()) {
     // If we are waiting for some external service to load before associating
@@ -45,9 +50,6 @@ void NewNonFrontendDataTypeController::Start(StartCallback* start_callback) {
     DCHECK(state() == MODEL_STARTING || state() == NOT_RUNNING);
     return;
   }
-
-  shared_change_processor_ =
-      profile_sync_factory()->CreateSharedChangeProcessor();
 
   // Kick off association on the thread the datatype resides on.
   set_state(ASSOCIATING);
@@ -124,7 +126,6 @@ void NewNonFrontendDataTypeController::StartAssociation() {
       new SharedChangeProcessorRef(shared_change_processor_));
   RecordAssociationTime(base::TimeTicks::Now() - start_time);
   if (error.IsSet()) {
-    local_service_->StopSyncing(type());
     StartFailed(ASSOCIATION_FAILED, error);
     return;
   }
@@ -154,8 +155,29 @@ void NewNonFrontendDataTypeController::StartDone(
           error));
 }
 
+void NewNonFrontendDataTypeController::StartDoneImpl(
+    DataTypeController::StartResult result,
+    DataTypeController::State new_state,
+    const SyncError& error) {
+  // If we failed to start up, and we haven't been stopped yet, we need to
+  // ensure we clean up the local service and shared change processor properly.
+  if (new_state != RUNNING && state() != NOT_RUNNING && state() != STOPPING &&
+      shared_change_processor_.get()) {
+    shared_change_processor_->Disconnect();
+    // We release our reference to shared_change_processor on the datatype's
+    // thread.
+    StopLocalServiceAsync();
+  }
+  NonFrontendDataTypeController::StartDoneImpl(result, new_state, error);
+}
+
 void NewNonFrontendDataTypeController::Stop() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  if (state() == NOT_RUNNING) {
+    // Stop() should never be called for datatypes that are already stopped.
+    NOTREACHED();
+    return;
+  }
 
   // Disconnect the change processor. At this point, the SyncableService
   // can no longer interact with the Syncer, even if it hasn't finished
@@ -173,16 +195,18 @@ void NewNonFrontendDataTypeController::Stop() {
     case ASSOCIATING:
       set_state(STOPPING);
       StartDoneImpl(ABORTED, NOT_RUNNING, SyncError());
-      // We continue on to deactivate the datatype.
+      // We continue on to deactivate the datatype and stop the local service.
       break;
     case DISABLED:
-      // If we're disabled we never succeded assocaiting and never activated the
-      // datatype.
+      // If we're disabled we never succeded associating and never activated the
+      // datatype. We would have already stopped the local service in
+      // StartDoneImpl(..).
       set_state(NOT_RUNNING);
       StopModels();
       return;
     default:
-      // Datatype was fully started.
+      // Datatype was fully started. Need to deactivate and stop the local
+      // service.
       DCHECK_EQ(state(), RUNNING);
       set_state(STOPPING);
       StopModels();

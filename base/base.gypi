@@ -15,7 +15,6 @@
           'third_party/dmg_fp/dmg_fp.h',
           'third_party/dmg_fp/g_fmt.cc',
           'third_party/dmg_fp/dtoa_wrapper.cc',
-          'third_party/dynamic_annotations/dynamic_annotations.h',
           'third_party/icu/icu_utf.cc',
           'third_party/icu/icu_utf.h',
           'third_party/nspr/prtime.cc',
@@ -46,7 +45,7 @@
           'base_paths_android.cc',
           'base_paths_mac.h',
           'base_paths_mac.mm',
-          'base_paths_linux.cc',
+          'base_paths_posix.cc',
           'base_paths_win.cc',
           'base_paths_win.h',
           'base_switches.h',
@@ -56,10 +55,13 @@
           'bind_internal.h',
           'bind_internal_win.h',
           'bits.h',
+          'build_time.cc',
+          'build_time.h',
           'callback.h',
           'callback_internal.cc',
           'callback_internal.h',
           'callback_old.h',
+          'cancelable_callback.h',
           'command_line.cc',
           'command_line.h',
           'compiler_specific.h',
@@ -111,8 +113,8 @@
           'file_version_info_win.h',
           'files/file_path_watcher.cc',
           'files/file_path_watcher.h',
+          'files/file_path_watcher_kqueue.cc',
           'files/file_path_watcher_linux.cc',
-          'files/file_path_watcher_mac.cc',
           'files/file_path_watcher_stub.cc',
           'files/file_path_watcher_win.cc',
           'float_util.h',
@@ -156,6 +158,8 @@
           'mac/scoped_nsautorelease_pool.mm',
           'mac/scoped_nsexception_enabler.h',
           'mac/scoped_nsexception_enabler.mm',
+          'mac/scoped_sending_event.h',
+          'mac/scoped_sending_event.mm',
           'mach_ipc_mac.h',
           'mach_ipc_mac.mm',
           'memory/linked_ptr.h',
@@ -171,6 +175,7 @@
           'memory/scoped_open_process.h',
           'memory/scoped_ptr.h',
           'memory/scoped_vector.h',
+          'memory/singleton.cc',
           'memory/singleton.h',
           'memory/weak_ptr.cc',
           'memory/weak_ptr.h',
@@ -192,11 +197,9 @@
           'metrics/stats_counters.h',
           'metrics/stats_table.cc',
           'metrics/stats_table.h',
-          'mime_util.h',
-          'mime_util_xdg.cc',
           'native_library.h',
-          'native_library_linux.cc',
           'native_library_mac.mm',
+          'native_library_posix.cc',
           'native_library_win.cc',
           'observer_list.h',
           'observer_list_threadsafe.h',
@@ -204,6 +207,8 @@
           'os_compat_android.h',
           'path_service.cc',
           'path_service.h',
+          'pending_task.cc',
+          'pending_task.h',
           'pickle.cc',
           'pickle.h',
           'platform_file.cc',
@@ -216,12 +221,19 @@
           'process_posix.cc',
           'process_util.cc',
           'process_util.h',
+          'process_util_freebsd.cc',
           'process_util_linux.cc',
           'process_util_mac.mm',
           'process_util_openbsd.cc',
           'process_util_posix.cc',
           'process_util_win.cc',
           'process_win.cc',
+          'profiler/scoped_profile.cc',
+          'profiler/scoped_profile.h',
+          'profiler/tracked_time.cc',
+          'profiler/tracked_time.h',
+          'property_bag.cc',
+          'property_bag.h',
           'rand_util.cc',
           'rand_util.h',
           'rand_util_c.h',
@@ -288,13 +300,11 @@
           'sys_info_posix.cc',
           'sys_info_win.cc',
           'sys_string_conversions.h',
-          'sys_string_conversions_linux.cc',
           'sys_string_conversions_mac.mm',
+          'sys_string_conversions_posix.cc',
           'sys_string_conversions_win.cc',
           'task.cc',
           'task.h',
-          'task_queue.cc',
-          'task_queue.h',
           'template_util.h',
           'threading/non_thread_safe.h',
           'threading/non_thread_safe_impl.cc',
@@ -336,6 +346,8 @@
           'timer.h',
           'tracked_objects.cc',
           'tracked_objects.h',
+          'tracking_info.cc',
+          'tracking_info.h',
           'tuple.h',
           'utf_offset_string_conversions.cc',
           'utf_offset_string_conversions.h',
@@ -351,8 +363,13 @@
           'version.h',
           'vlog.cc',
           'vlog.h',
+          'nix/mime_util_xdg.cc',
+          'nix/mime_util_xdg.h',
           'nix/xdg_util.cc',
           'nix/xdg_util.h',
+          'wayland/wayland_event.h',
+          'win/enum_variant.h',
+          'win/enum_variant.cc',
           'win/event_trace_consumer.h',
           'win/event_trace_controller.cc',
           'win/event_trace_controller.h',
@@ -362,6 +379,8 @@
           'win/i18n.h',
           'win/iat_patch_function.cc',
           'win/iat_patch_function.h',
+          'win/iunknown_impl.h',
+          'win/iunknown_impl.cc',
           'win/object_watcher.cc',
           'win/object_watcher.h',
           'win/registry.cc',
@@ -370,6 +389,7 @@
           'win/resource_util.h',
           'win/scoped_bstr.cc',
           'win/scoped_bstr.h',
+          'win/scoped_co_mem.h',
           'win/scoped_com_initializer.h',
           'win/scoped_comptr.h',
           'win/scoped_gdi_object.h',
@@ -400,12 +420,6 @@
           '$(SDKROOT)/System/Library/Frameworks/ApplicationServices.framework/Frameworks',
         ],
         'conditions': [
-          [ 'use_wayland == 1', {
-            'sources!': [
-              'message_pump_gtk.cc',
-              'message_pump_x.cc',
-            ],
-          }],
           [ 'use_glib==0', {
               'sources/': [
                 ['exclude', '^nix/'],
@@ -419,13 +433,19 @@
           [ 'toolkit_uses_gtk==0', {
             'sources!': [ 'message_pump_gtk.cc', ],
           }],
-          [ '(touchui==0 and use_aura==0) or OS == "win"', {
+          [ 'use_aura==0 or OS == "win" or OS == "mac"', {
             'sources!' : [ 'message_pump_x.cc', ],
           }, {
             'sources!' : [ 'message_pump_gtk.cc', ],
-            'sources/' : [ [ 'include', 'message_pump_x.cc', ] ],
+            'sources/' : [ [ 'include', '^message_pump_x\\.cc$', ] ],
           }],
-          [ 'OS != "linux"', {
+          [ 'use_wayland==1', {
+            'sources/': [
+              [ 'exclude', '^message_pump_gtk\\.cc$',],
+              [ 'exclude', '^message_pump_x\\.cc$',],
+            ],
+          }],
+          [ 'OS != "linux" and os_bsd != 1', {
               'sources!': [
                 # Not automatically excluded by the *linux.cc rules.
                 'linux_util.cc',
@@ -433,21 +453,21 @@
             },
           ],
           [ 'OS == "android"', {
+            'sources!': [
+              'files/file_path_watcher_kqueue.cc',
+              'system_monitor/system_monitor_posix.cc',
+            ],
             'sources/': [
-              ['exclude', '^debug/stack_trace.cc'],
-              ['exclude', '^debug/stack_trace_posix.cc'],
-              ['exclude', '^system_monitor/system_monitor_posix.cc'],
-              ['include', '^native_library_linux.cc'],
-              ['include', '^process_util_linux.cc'],
-              ['include', '^sys_info_linux.cc'],
-              ['include', '^sys_string_conversions_linux.cc'],
-              ['include', '^worker_pool_linux.cc'],
+              ['include', '^process_util_linux\\.cc$'],
+              ['include', '^sys_info_linux\\.cc$'],
+              ['include', '^sys_string_conversions_posix\\.cc$'],
+              ['include', '^worker_pool_linux\\.cc$'],
               # TODO(michaelbai): The below files are excluded because of the
               # missing JNI, add them back when JNI is ready.
               ['exclude', '^android/'],
-              ['exclude', '^message_pump_android.cc'],
-              ['exclude', '^base_paths_android.cc'],
-              ['exclude', '^debug/stack_trace_android.cc'],
+              ['exclude', '^base_paths_android\\.cc$'],
+              ['exclude', '^debug/stack_trace_android\\.cc$'],
+              ['exclude', '^message_pump_android\\.cc$'],
             ],
           }],
           [ 'OS != "mac"', {
@@ -480,6 +500,7 @@
             'sources!': [
               'event_recorder_stubs.cc',
               'file_descriptor_shuffle.cc',
+              'files/file_path_watcher_kqueue.cc',
               'files/file_path_watcher_stub.cc',
               'message_pump_libevent.cc',
               # Not using sha1_win.cc because it may have caused a
@@ -490,18 +511,26 @@
           },],
           [ 'OS == "linux"', {
             'sources!': [
+              'files/file_path_watcher_kqueue.cc',
               'files/file_path_watcher_stub.cc',
             ],
           }],
           [ 'OS == "mac"', {
-            'sources!': [
-              'files/file_path_watcher_stub.cc',
+            'sources/': [
+              ['exclude', '^files/file_path_watcher_stub\\.cc$'],
+              ['exclude', '^base_paths_posix\\.cc$'],
+              ['exclude', '^native_library_posix\\.cc$'],
+              ['exclude', '^sys_string_conversions_posix\\.cc$'],
             ],
           }],
-          [ 'OS == "openbsd"', {
+          [ 'os_bsd==1', {
             'sources/': [
-              ['include', '^base_paths_linux\\.cc$'],
-              ['include', '^sys_string_conversions_linux\\.cc$'],
+              ['exclude', '^files/file_path_watcher_linux\\.cc$'],
+              ['exclude', '^files/file_path_watcher_stub\\.cc$'],
+              ['exclude', '^file_util_linux\\.cc$'],
+              ['exclude', '^process_linux\\.cc$'],
+              ['exclude', '^process_util_linux\\.cc$'],
+              ['exclude', '^sys_info_linux\\.cc$'],
             ],
           }],
         ],
@@ -515,9 +544,11 @@
       'toolsets': ['host', 'target'],
       'variables': {
         'base_target': 1,
+        'enable_wexit_time_destructors': 1,
       },
       'dependencies': [
         'base_static',
+        '../testing/gtest.gyp:gtest_prod',
         '../third_party/modp_b64/modp_b64.gyp:modp_b64',
         'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
       ],
@@ -578,28 +609,55 @@
               ['exclude', '_nss\.cc$'],
             ],
         }],
-        [ 'OS == "android"', {
+        [ 'OS == "android" and _toolset == "host"', {
+          # Base for host support is the minimum required to run the
+          # ssl false start blacklist tool. It requires further changes
+          # to generically support host builds (and tests).
+          # Note: when building for host, gyp has OS == "android",
+          # hence the *_android.cc files are included but the actual code
+          # doesn't have OS_ANDROID / ANDROID defined.
+          'conditions': [
+            ['host_os == "linux"', {
+              'sources/': [
+                ['include', '^atomicops_internals_x86_gcc\\.cc$'],
+              ],
+              'dependencies': [
+                '../build/linux/system.gyp:glib',
+              ],
+              'export_dependent_settings': [
+                '../build/linux/system.gyp:glib',
+              ],
+            }],
+            ['host_os == "mac"', {
+              'sources/': [
+                ['exclude', '^native_library_linux\\.cc$'],
+                ['exclude', '^process_util_linux\\.cc$'],
+                ['exclude', '^sys_info_linux\\.cc$'],
+                ['exclude', '^sys_string_conversions_linux\\.cc$'],
+                ['exclude', '^worker_pool_linux\\.cc$'],
+              ],
+            }],
+          ],
+        }],
+        [ 'OS == "android" and _toolset == "target"', {
           'dependencies': [
             'symbolize',
-            '../third_party/ashmem/ashmem.gyp:ashmem#target',
-          ],
-          'defines': [
-            'USE_SYMBOLIZE',
+            '../third_party/ashmem/ashmem.gyp:ashmem',
           ],
           'link_settings': {
             'libraries': [
               '-llog',
             ],
           },
-          'conditions': [
-            [ '_toolset=="host" and host_os=="linux"', {
-              'dependencies': [
-                '../build/linux/system.gyp:glib',
-              ],
-            }],
+          'defines': [
+            'USE_SYMBOLIZE',
+          ],
+          'sources!': [
+            'debug/stack_trace.cc',
+            'debug/stack_trace_posix.cc',
           ],
         }],
-        [ 'OS == "freebsd" or OS == "openbsd"', {
+        [ 'os_bsd==1', {
           'include_dirs': [
             '/usr/local/include',
           ],
@@ -781,8 +839,17 @@
             '-Wextra',
           ],
           'sources': [
-            'third_party/symbolize/symbolize.cc',
+            'third_party/symbolize/config.h',
             'third_party/symbolize/demangle.cc',
+            'third_party/symbolize/demangle.h',
+            'third_party/symbolize/glog/logging.h',
+            'third_party/symbolize/glog/raw_logging.h',
+            'third_party/symbolize/symbolize.cc',
+            'third_party/symbolize/symbolize.h',
+            'third_party/symbolize/utilities.h',
+          ],
+          'include_dirs': [
+            '..',
           ],
         },
         {

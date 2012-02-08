@@ -22,6 +22,7 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/registry.h"
+#include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
 #include "base/win/scoped_handle.h"
@@ -32,7 +33,6 @@
 #include "chrome/browser/search_engines/template_url.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
 #include "chrome/browser/search_engines/template_url_service.h"
-#include "chrome/common/scoped_co_mem.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
@@ -462,30 +462,30 @@ void IEImporter::ImportHomepage() {
   bridge_->AddHomePage(homepage);
 }
 
-std::wstring IEImporter::ResolveInternetShortcut(const std::wstring& file) {
-  chrome::common::ScopedCoMem<wchar_t> url;
+string16 IEImporter::ResolveInternetShortcut(const string16& file) {
+  base::win::ScopedCoMem<wchar_t> url;
   base::win::ScopedComPtr<IUniformResourceLocator> url_locator;
   HRESULT result = url_locator.CreateInstance(CLSID_InternetShortcut, NULL,
                                               CLSCTX_INPROC_SERVER);
   if (FAILED(result))
-    return std::wstring();
+    return string16();
 
   base::win::ScopedComPtr<IPersistFile> persist_file;
   result = persist_file.QueryFrom(url_locator);
   if (FAILED(result))
-    return std::wstring();
+    return string16();
 
   // Loads the Internet Shortcut from persistent storage.
   result = persist_file->Load(file.c_str(), STGM_READ);
   if (FAILED(result))
-    return std::wstring();
+    return string16();
 
   result = url_locator->GetURL(&url);
   // GetURL can return S_FALSE (FAILED(S_FALSE) is false) when url == NULL.
   if (FAILED(result) || (url == NULL))
-    return std::wstring();
+    return string16();
 
-  return std::wstring(url);
+  return string16(url);
 }
 
 bool IEImporter::GetFavoritesInfo(IEImporter::FavoritesInfo* info) {

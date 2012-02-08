@@ -64,30 +64,13 @@ int CertDatabase::CheckUserCert(X509Certificate* cert_obj) {
 int CertDatabase::AddUserCert(X509Certificate* cert_obj) {
   CERTCertificate* cert = cert_obj->os_cert_handle();
   PK11SlotInfo* slot = NULL;
-  std::string nickname;
-
-  // Create a nickname for this certificate.
-  // We use the scheme used by Firefox:
-  // --> <subject's common name>'s <issuer's common name> ID.
-
-  std::string username, ca_name;
-  char* temp_username = CERT_GetCommonName(&cert->subject);
-  char* temp_ca_name = CERT_GetCommonName(&cert->issuer);
-  if (temp_username) {
-    username = temp_username;
-    PORT_Free(temp_username);
-  }
-  if (temp_ca_name) {
-    ca_name = temp_ca_name;
-    PORT_Free(temp_ca_name);
-  }
-  nickname = username + "'s " + ca_name + " ID";
 
   {
     crypto::AutoNSSWriteLock lock;
-    slot = PK11_ImportCertForKey(cert,
-                                 const_cast<char*>(nickname.c_str()),
-                                 NULL);
+    slot = PK11_ImportCertForKey(
+        cert,
+        cert_obj->GetDefaultNickname(net::USER_CERT).c_str(),
+        NULL);
   }
 
   if (!slot) {
@@ -161,11 +144,13 @@ int CertDatabase::ImportFromPKCS12(
     CryptoModule* module,
     const std::string& data,
     const string16& password,
-    bool is_extractable) {
+    bool is_extractable,
+    net::CertificateList* imported_certs) {
   int result = psm::nsPKCS12Blob_Import(module->os_module_handle(),
                                         data.data(), data.size(),
                                         password,
-                                        is_extractable);
+                                        is_extractable,
+                                        imported_certs);
   if (result == net::OK)
     CertDatabase::NotifyObserversOfUserCertAdded(NULL);
 

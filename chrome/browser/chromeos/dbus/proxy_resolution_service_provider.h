@@ -8,15 +8,16 @@
 
 #include <string>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/platform_thread.h"
 #include "chrome/browser/chromeos/dbus/cros_dbus_service.h"
+#include "dbus/exported_object.h"
 
 namespace dbus {
-class ExportedObject;
 class MethodCall;
 class Response;
 }
@@ -80,7 +81,8 @@ class ProxyResolutionServiceProvider
   virtual ~ProxyResolutionServiceProvider();
 
   // CrosDBusService::ServiceProviderInterface override.
-  virtual void Start(scoped_refptr<dbus::ExportedObject> exported_object);
+  virtual void Start(
+      scoped_refptr<dbus::ExportedObject> exported_object) OVERRIDE;
 
   // Creates the instance.
   static ProxyResolutionServiceProvider* Create();
@@ -102,13 +104,15 @@ class ProxyResolutionServiceProvider
   // Callback to be invoked when ChromeOS clients send network proxy
   // resolution requests to the service running in chrome executable.
   // Called on UI thread from dbus request.
-  dbus::Response* ResolveProxyHandler(dbus::MethodCall* method_call);
+  void ResolveProxyHandler(dbus::MethodCall* method_call,
+      dbus::ExportedObject::ResponseSender response_sender);
 
   // Calls ResolveProxyHandler() if weak_ptr is not NULL. Used to ensure a
   // safe shutdown.
-  static dbus::Response* CallResolveProxyHandler(
+  static void CallResolveProxyHandler(
       base::WeakPtr<ProxyResolutionServiceProvider> weak_ptr,
-      dbus::MethodCall* method_call);
+      dbus::MethodCall* method_call,
+      dbus::ExportedObject::ResponseSender response_sender);
 
   // Returns true if the current thread is on the origin thread.
   bool OnOriginThread();

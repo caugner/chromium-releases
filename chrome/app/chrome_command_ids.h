@@ -173,6 +173,7 @@
 #define IDC_EXTENSION_ERRORS            40031
 #define IDC_SHOW_SYNC_ERROR             40032
 #define IDC_SHOW_SETTINGS_CHANGES       40033
+#define IDC_SHOW_AVATAR_MENU            40034
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -216,6 +217,7 @@
 #define IDC_SYSTEM_OPTIONS              45000     // ChromeOS only
 #define IDC_INTERNET_OPTIONS            45100     // ChromeOS only
 #define IDC_LANGUAGE_OPTIONS            45200     // ChromeOS only
+#define IDC_LOCK_SCREEN                 45300     // ChromeOS only
 #define IDC_HISTORY_MENU                46000     // OSX only
 #define IDC_PROFILE_MAIN_MENU           46100     // OSX only
 #define IDC_INPUT_METHODS_MENU          46300     // Linux only
@@ -268,6 +270,7 @@
 #define IDC_CONTENT_CONTEXT_LOOK_UP_IN_DICTIONARY 50154
 #define IDC_CONTENT_CONTEXT_NO_SPELLING_SUGGESTIONS 50155
 #define IDC_CONTENT_CONTEXT_SPELLING_SUGGESTION 50156
+#define IDC_CONTENT_CONTEXT_SPELLING_TOGGLE 50157
 // Frame items.
 #define IDC_CONTENT_CONTEXT_RELOADFRAME 50160
 #define IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE 50161

@@ -25,7 +25,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "base/threading/non_thread_safe.h"
 #include "net/base/cache_type.h"
@@ -110,7 +109,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
     // BackendFactory implementation.
     virtual int CreateBackend(NetLog* net_log,
                               disk_cache::Backend** backend,
-                              OldCompletionCallback* callback);
+                              OldCompletionCallback* callback) OVERRIDE;
 
    private:
     CacheType type_;
@@ -192,9 +191,9 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   void OnExternalCacheHit(const GURL& url, const std::string& http_method);
 
   // HttpTransactionFactory implementation:
-  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans);
-  virtual HttpCache* GetCache();
-  virtual HttpNetworkSession* GetSession();
+  virtual int CreateTransaction(scoped_ptr<HttpTransaction>* trans) OVERRIDE;
+  virtual HttpCache* GetCache() OVERRIDE;
+  virtual HttpNetworkSession* GetSession() OVERRIDE;
 
  protected:
   // Disk cache entry data indices.
@@ -380,8 +379,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
 
   // The set of entries "under construction".
   PendingOpsMap pending_ops_;
-
-  ScopedRunnableMethodFactory<HttpCache> task_factory_;
 
   scoped_ptr<PlaybackCacheMap> playback_cache_map_;
 

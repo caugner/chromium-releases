@@ -15,7 +15,7 @@
 #include "chrome/common/url_constants.h"
 
 #if defined(OS_CHROMEOS)
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #endif
 
 static const char kCurrentScreenshotFilename[] = "current";
@@ -69,6 +69,7 @@ void ScreenshotSource::SendScreenshot(const std::string& screenshot_path,
 #if defined(OS_CHROMEOS)
   } else if (path.compare(0, strlen(kSavedScreenshotsBasePath),
                           kSavedScreenshotsBasePath) == 0) {
+    using content::BrowserThread;
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
                             base::Bind(&ScreenshotSource::SendSavedScreenshot,
                                        base::Unretained(this), path,

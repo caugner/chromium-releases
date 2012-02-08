@@ -15,6 +15,16 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "webkit/glue/webpreferences.h"
 
+#if defined(USE_AURA)
+#include "content/browser/renderer_host/render_widget_host_view_aura.h"
+#elif defined(OS_WIN)
+#include "content/browser/renderer_host/render_widget_host_view_win.h"
+#elif defined(TOOLKIT_USES_GTK)
+#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
+#elif defined(OS_MACOSX)
+#include "content/browser/renderer_host/render_widget_host_view_mac.h"
+#endif
+
 namespace content {
 
 MockContentBrowserClient::MockContentBrowserClient() {
@@ -24,13 +34,23 @@ MockContentBrowserClient::~MockContentBrowserClient() {
 }
 
 BrowserMainParts* MockContentBrowserClient::CreateBrowserMainParts(
-    const MainFunctionParams& parameters) {
+    const content::MainFunctionParams& parameters) {
   return NULL;
 }
 
 RenderWidgetHostView* MockContentBrowserClient::CreateViewForWidget(
     RenderWidgetHost* widget) {
-  return NULL;
+#if defined(USE_AURA)
+  return new RenderWidgetHostViewAura(widget);
+#elif defined(OS_WIN)
+  return new RenderWidgetHostViewWin(widget);
+#elif defined(TOOLKIT_USES_GTK)
+  return new RenderWidgetHostViewGtk(widget);
+#elif defined(OS_MACOSX)
+  return render_widget_host_view_mac::CreateRenderWidgetHostView(widget);
+#else
+#error Need to create your platform ViewForWidget here.
+#endif
 }
 
 TabContentsView* MockContentBrowserClient::CreateTabContentsView(
@@ -42,16 +62,12 @@ void MockContentBrowserClient::RenderViewHostCreated(
     RenderViewHost* render_view_host) {
 }
 
-void MockContentBrowserClient::BrowserRenderProcessHostCreated(
-    BrowserRenderProcessHost* host) {
+void MockContentBrowserClient::RenderProcessHostCreated(
+    RenderProcessHost* host) {
 }
 
 void MockContentBrowserClient::PluginProcessHostCreated(
     PluginProcessHost* host) {
-}
-
-void MockContentBrowserClient::WorkerProcessHostCreated(
-    WorkerProcessHost* host) {
 }
 
 WebUIFactory* MockContentBrowserClient::GetWebUIFactory() {
@@ -61,7 +77,7 @@ WebUIFactory* MockContentBrowserClient::GetWebUIFactory() {
 
 GURL MockContentBrowserClient::GetEffectiveURL(
     content::BrowserContext* browser_context, const GURL& url) {
-  return GURL();
+  return url;
 }
 
 bool MockContentBrowserClient::ShouldUseProcessPerSite(
@@ -77,6 +93,14 @@ bool MockContentBrowserClient::IsSuitableHost(
     RenderProcessHost* process_host,
     const GURL& site_url) {
   return true;
+}
+
+void MockContentBrowserClient::SiteInstanceGotProcess(
+    SiteInstance* site_instance) {
+}
+
+void MockContentBrowserClient::SiteInstanceDeleting(
+    SiteInstance* site_instance) {
 }
 
 bool MockContentBrowserClient::ShouldSwapProcessesForNavigation(
@@ -98,7 +122,8 @@ std::string MockContentBrowserClient::GetApplicationLocale() {
   return std::string();
 }
 
-std::string MockContentBrowserClient::GetAcceptLangs(const TabContents* tab) {
+std::string MockContentBrowserClient::GetAcceptLangs(
+    content::BrowserContext* context) {
   return std::string();
 }
 
@@ -136,6 +161,23 @@ bool MockContentBrowserClient::AllowSetCookie(
 
 bool MockContentBrowserClient::AllowSaveLocalState(
     const content::ResourceContext& context) {
+  return true;
+}
+
+bool MockContentBrowserClient::AllowWorkerDatabase(
+    int worker_route_id,
+    const GURL& url,
+    const string16& name,
+    const string16& display_name,
+    unsigned long estimated_size,
+    WorkerProcessHost* worker_process_host) {
+  return true;
+}
+
+bool MockContentBrowserClient::AllowWorkerFileSystem(
+    int worker_route_id,
+    const GURL& url,
+    WorkerProcessHost* worker_process_host) {
   return true;
 }
 
@@ -183,13 +225,14 @@ void MockContentBrowserClient::RequestDesktopNotificationPermission(
 
 WebKit::WebNotificationPresenter::Permission
     MockContentBrowserClient::CheckDesktopNotificationPermission(
-        const GURL& source_url,
-        const content::ResourceContext& context) {
+        const GURL& source_origin,
+        const content::ResourceContext& context,
+        int render_process_id) {
   return WebKit::WebNotificationPresenter::PermissionAllowed;
 }
 
 void MockContentBrowserClient::ShowDesktopNotification(
-    const DesktopNotificationHostMsg_Show_Params& params,
+    const content::ShowDesktopNotificationHostMsgParams& params,
     int render_process_id,
     int render_view_id,
     bool worker) {
@@ -202,9 +245,10 @@ void MockContentBrowserClient::CancelDesktopNotification(
 }
 
 bool MockContentBrowserClient::CanCreateWindow(
-    const GURL& source_url,
+    const GURL& source_origin,
     WindowContainerType container_type,
-    const content::ResourceContext& context) {
+    const content::ResourceContext& context,
+    int render_process_id) {
   return true;
 }
 
@@ -226,10 +270,6 @@ MHTMLGenerationManager* MockContentBrowserClient::GetMHTMLGenerationManager() {
   return NULL;
 }
 
-DevToolsManager* MockContentBrowserClient::GetDevToolsManager() {
-  return NULL;
-}
-
 net::NetLog* MockContentBrowserClient::GetNetLog() {
   return NULL;
 }
@@ -247,9 +287,7 @@ bool MockContentBrowserClient::IsFastShutdownPossible() {
   return true;
 }
 
-WebPreferences MockContentBrowserClient::GetWebkitPrefs(
-    content::BrowserContext* browser_context,
-    bool is_web_ui) {
+WebPreferences MockContentBrowserClient::GetWebkitPrefs(RenderViewHost* rvh) {
   return WebPreferences();
 }
 
@@ -276,6 +314,10 @@ FilePath MockContentBrowserClient::GetDefaultDownloadDirectory() {
     CHECK(result);
   }
   return download_dir_.path();
+}
+
+std::string MockContentBrowserClient::GetDefaultDownloadName() {
+  return std::string();
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)

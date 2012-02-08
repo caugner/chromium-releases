@@ -25,8 +25,8 @@
 #include "chrome/browser/ui/window_snapshot/window_snapshot.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_thread.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_thread.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -42,6 +42,8 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system/syslogs_provider.h"
 #endif
+
+using content::BrowserThread;
 
 namespace {
 
@@ -97,7 +99,7 @@ std::string GetUserEmail() {
   if (!manager)
     return std::string();
   else
-    return manager->logged_in_user().email();
+    return manager->logged_in_user().display_email();
 }
 #endif
 
@@ -137,12 +139,15 @@ void ShowHtmlBugReportView(Browser* browser,
   last_screenshot_png->clear();
 
   gfx::NativeWindow native_window = browser->window()->GetNativeHandle();
-  BugReportUtil::SetScreenshotSize(
-      browser::GrabWindowSnapshot(native_window, last_screenshot_png));
+  gfx::Rect snapshot_bounds = gfx::Rect(browser->window()->GetBounds().size());
+  bool success = browser::GrabWindowSnapshot(native_window,
+                                             last_screenshot_png,
+                                             snapshot_bounds);
+  BugReportUtil::SetScreenshotSize(success ? snapshot_bounds : gfx::Rect());
 
   std::string bug_report_url = std::string(chrome::kChromeUIBugReportURL) +
       "#" + base::IntToString(browser->active_index()) +
-      "?description=" + EscapeUrlEncodedData(description_template, false) +
+      "?description=" + net::EscapeUrlEncodedData(description_template, false) +
       "&issueType=" + base::IntToString(issue_type);
   browser->ShowSingletonTab(GURL(bug_report_url));
 }

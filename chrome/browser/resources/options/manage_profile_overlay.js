@@ -33,6 +33,9 @@ cr.define('options', function() {
     // An object containing all known profile names.
     profileNames_: {},
 
+    // The currently selected icon in the icon grid.
+    iconGridSelectedURL_: null,
+
     /**
      * Initialize the page.
      */
@@ -43,6 +46,9 @@ cr.define('options', function() {
       var self = this;
       var iconGrid = $('manage-profile-icon-grid');
       options.ProfilesIconGrid.decorate(iconGrid);
+      iconGrid.addEventListener('change', function(e) {
+        self.onIconGridSelectionChanged_();
+      });
 
       $('manage-profile-name').oninput = this.onNameChanged_.bind(this);
       $('manage-profile-cancel').onclick =
@@ -88,9 +94,20 @@ cr.define('options', function() {
      * @private
      */
     setProfileInfo_: function(profileInfo) {
+      this.iconGridSelectedURL_ = profileInfo.iconURL;
       this.profileInfo_ = profileInfo;
       $('manage-profile-name').value = profileInfo.name;
       $('manage-profile-icon-grid').selectedItem = profileInfo.iconURL;
+    },
+
+    /**
+     * Sets the name of the currently edited profile.
+     * @private
+     */
+    setProfileName_: function(name) {
+      if (this.profileInfo_)
+        this.profileInfo_.name = name;
+      $('manage-profile-name').value = name;
     },
 
     /**
@@ -101,6 +118,11 @@ cr.define('options', function() {
      */
     receiveDefaultProfileIcons_: function(iconURLs) {
       $('manage-profile-icon-grid').dataModel = new ArrayDataModel(iconURLs);
+
+      // Changing the dataModel resets the selectedItem. Re-select it, if there
+      // is one.
+      if (this.profileInfo_)
+        $('manage-profile-icon-grid').selectedItem = this.profileInfo_.iconURL;
 
       var grid = $('manage-profile-icon-grid');
       // Recalculate the measured item size.
@@ -174,6 +196,19 @@ cr.define('options', function() {
     },
 
     /**
+     * Called when the selected icon in the icon grid changes.
+     * @private
+     */
+    onIconGridSelectionChanged_: function() {
+      var iconURL = $('manage-profile-icon-grid').selectedItem;
+      if (!iconURL || iconURL == this.iconGridSelectedURL_)
+        return;
+      this.iconGridSelectedURL_ = iconURL;
+      chrome.send('profileIconSelectionChanged',
+                  [this.profileInfo_.filePath, iconURL]);
+    },
+
+    /**
      * Display the "Manage Profile" dialog.
      * @param {Object} profileInfo The profile object of the profile to manage.
      * @private
@@ -200,6 +235,8 @@ cr.define('options', function() {
       $('manage-profile-overlay-delete').hidden = false;
       $('delete-profile-message').textContent =
           localStrings.getStringF('deleteProfileMessage', profileInfo.name);
+      $('delete-profile-message').style.backgroundImage = 'url("' +
+          profileInfo.iconURL + '")';
 
       // Intentionally don't show the URL in the location bar as we don't want
       // people trying to navigate here by hand.
@@ -212,6 +249,7 @@ cr.define('options', function() {
     'receiveDefaultProfileIcons',
     'receiveProfileNames',
     'setProfileInfo',
+    'setProfileName',
     'showManageDialog',
     'showDeleteDialog',
   ].forEach(function(name) {

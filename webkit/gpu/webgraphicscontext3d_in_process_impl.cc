@@ -10,9 +10,10 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/string_split.h"
 #include "base/memory/scoped_ptr.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_bindings_skia_in_process.h"
@@ -61,7 +62,6 @@ WebGraphicsContext3DInProcessImpl::WebGraphicsContext3DInProcessImpl(
       multisample_color_buffer_(0),
       bound_fbo_(0),
       bound_texture_(0),
-      copy_texture_to_parent_texture_fbo_(0),
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
       scanline_(0),
 #endif
@@ -87,7 +87,6 @@ WebGraphicsContext3DInProcessImpl::~WebGraphicsContext3DInProcessImpl() {
       glDeleteRenderbuffersEXT(1, &depth_stencil_buffer_);
   }
   glDeleteTextures(1, &texture_);
-  glDeleteFramebuffersEXT(1, &copy_texture_to_parent_texture_fbo_);
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
   if (scanline_)
     delete[] scanline_;
@@ -233,8 +232,6 @@ bool WebGraphicsContext3DInProcessImpl::initialize(
     return false;
   }
 
-  glGenFramebuffersEXT(1, &copy_texture_to_parent_texture_fbo_);
-
   initialized_ = true;
   gl_context_->ReleaseCurrent(gl_surface_.get());
   return true;
@@ -334,6 +331,12 @@ void WebGraphicsContext3DInProcessImpl::prepareTexture() {
     makeContextCurrent();
     ResolveMultisampledFramebuffer(0, 0, cached_width_, cached_height_);
   }
+}
+
+void WebGraphicsContext3DInProcessImpl::postSubBufferCHROMIUM(
+    int x, int y, int width, int height) {
+  DCHECK(gl_context_->HasExtension("GL_CHROMIUM_post_sub_buffer"));
+  gl_surface_->PostSubBuffer(x, y, width, height);
 }
 
 namespace {
@@ -596,9 +599,6 @@ void WebGraphicsContext3DInProcessImpl::ClearRenderTarget() {
     glDisable(GL_DITHER);
 }
 
-void WebGraphicsContext3DInProcessImpl::setVisibility(bool visible) {
-}
-
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
 void WebGraphicsContext3DInProcessImpl::FlipVertically(
     unsigned char* framebuffer, unsigned int width, unsigned int height) {
@@ -711,6 +711,9 @@ void* WebGraphicsContext3DInProcessImpl::mapTexSubImage2DCHROMIUM(
 
 void WebGraphicsContext3DInProcessImpl::unmapTexSubImage2DCHROMIUM(
     const void* mem) {
+}
+
+void WebGraphicsContext3DInProcessImpl::setVisibilityCHROMIUM(bool visible) {
 }
 
 void WebGraphicsContext3DInProcessImpl::copyTextureToParentTextureCHROMIUM(
@@ -926,6 +929,14 @@ void WebGraphicsContext3DInProcessImpl::compileShader(WebGLId shader) {
   DCHECK(compileStatus == GL_TRUE);
 #endif
 }
+
+DELEGATE_TO_GL_8(compressedTexImage2D, CompressedTexImage2D,
+                 WGC3Denum, WGC3Dint, WGC3Denum, WGC3Dint, WGC3Dint,
+                 WGC3Dsizei, WGC3Dsizei, const void*)
+
+DELEGATE_TO_GL_9(compressedTexSubImage2D, CompressedTexSubImage2D,
+                 WGC3Denum, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint, WGC3Dint,
+                 WGC3Denum, WGC3Dsizei, const void*)
 
 void WebGraphicsContext3DInProcessImpl::copyTexImage2D(
     WGC3Denum target, WGC3Dint level, WGC3Denum internalformat, WGC3Dint x,
@@ -1243,13 +1254,20 @@ WebString WebGraphicsContext3DInProcessImpl::getShaderSource(WebGLId shader) {
 
 WebString WebGraphicsContext3DInProcessImpl::getString(WGC3Denum name) {
   makeContextCurrent();
-  std::string result(reinterpret_cast<const char*>(glGetString(name)));
+  std::string result;
   if (name == GL_EXTENSIONS) {
-    // GL_CHROMIUM_copy_texture_to_parent_texture requires the
-    // desktopGL-only function glGetTexLevelParameteriv (GLES2
-    // doesn't support it).
-    if (!is_gles2_)
-      result += " GL_CHROMIUM_copy_texture_to_parent_texture";
+    result = gl_context_->GetExtensions();
+    if (!is_gles2_) {
+      std::vector<std::string> split;
+      base::SplitString(result, ' ', &split);
+      if (std::find(split.begin(), split.end(), "GL_EXT_bgra") != split.end()) {
+        // If we support GL_EXT_bgra, pretend we support a couple of GLES2
+        // extension that are a subset of it.
+        result += " GL_EXT_texture_format_BGRA8888 GL_EXT_read_format_bgra";
+      }
+    }
+  } else {
+    result = reinterpret_cast<const char*>(glGetString(name));
   }
   return WebString::fromUTF8(result.c_str());
 }
@@ -1594,6 +1612,11 @@ void WebGraphicsContext3DInProcessImpl::deleteTexture(WebGLId texture) {
 WGC3Denum WebGraphicsContext3DInProcessImpl::getGraphicsResetStatusARB() {
   // TODO(kbr): this implementation doesn't support lost contexts yet.
   return GL_NO_ERROR;
+}
+
+void WebGraphicsContext3DInProcessImpl::texImageIOSurface2DCHROMIUM(
+    WGC3Denum target, WGC3Dint width, WGC3Dint height,
+    WGC3Duint ioSurfaceId, WGC3Duint plane) {
 }
 
 #if WEBKIT_USING_SKIA

@@ -1,4 +1,4 @@
-// Copyright (c) 2009 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,9 @@ class MockAppCacheService : public AppCacheService {
 
   // Just returns a canned completion code without actually
   // removing groups and caches in our mock storage instance.
-  virtual void DeleteAppCachesForOrigin(const GURL& origin,
-                                        net::OldCompletionCallback* callback);
+  virtual void DeleteAppCachesForOrigin(
+      const GURL& origin,
+      const net::CompletionCallback& callback) OVERRIDE;
 
   void set_quota_manager_proxy(quota::QuotaManagerProxy* proxy) {
     quota_manager_proxy_ = proxy;
@@ -36,6 +37,7 @@ class MockAppCacheService : public AppCacheService {
   }
 
   int delete_called_count() const { return delete_called_count_; }
+
  private:
   int mock_delete_appcaches_for_origin_result_;
   int delete_called_count_;

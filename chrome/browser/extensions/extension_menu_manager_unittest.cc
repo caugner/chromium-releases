@@ -6,6 +6,7 @@
 
 #include "base/json/json_reader.h"
 #include "base/memory/scoped_vector.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/utf_string_conversions.h"
@@ -18,12 +19,13 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/glue/context_menu.h"
 
+using content::BrowserThread;
 using testing::_;
 using testing::AtLeast;
 using testing::Return;
@@ -58,8 +60,8 @@ class ExtensionMenuManagerTest : public testing::Test {
  protected:
   TestingProfile profile_;
   MessageLoopForUI message_loop_;
-  BrowserThread ui_thread_;
-  BrowserThread file_thread_;
+  content::TestBrowserThread ui_thread_;
+  content::TestBrowserThread file_thread_;
 
   ExtensionMenuManager manager_;
   ExtensionList extensions_;
@@ -311,7 +313,8 @@ TEST_F(ExtensionMenuManagerTest, ChangeParent) {
 // Tests that we properly remove an extension's menu item when that extension is
 // unloaded.
 TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
-  NotificationService* notifier = NotificationService::current();
+  content::NotificationService* notifier =
+      content::NotificationService::current();
   ASSERT_TRUE(notifier != NULL);
 
   // Create a test extension.
@@ -335,8 +338,8 @@ TEST_F(ExtensionMenuManagerTest, ExtensionUnloadRemovesMenuItems) {
   UnloadedExtensionInfo details(
       extension1, extension_misc::UNLOAD_REASON_DISABLE);
   notifier->Notify(chrome::NOTIFICATION_EXTENSION_UNLOADED,
-                   Source<Profile>(&profile_),
-                   Details<UnloadedExtensionInfo>(&details));
+                   content::Source<Profile>(&profile_),
+                   content::Details<UnloadedExtensionInfo>(&details));
   ASSERT_EQ(NULL, manager_.MenuItems(extension1->id()));
   ASSERT_EQ(1u, manager_.MenuItems(extension2->id())->size());
   ASSERT_TRUE(manager_.GetItemById(id1) == NULL);

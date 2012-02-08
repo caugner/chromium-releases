@@ -10,11 +10,12 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 
 #if defined(TOOLKIT_USES_GTK)
-#include "chrome/browser/chromeos/wm_ipc.h"
+#include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 
 namespace chromeos {
@@ -48,7 +49,7 @@ IN_PROC_BROWSER_TEST_F(PanelTest, PanelOpenSmall) {
 
   ui_test_utils::WindowedNotificationObserver tab_added_observer(
       content::NOTIFICATION_TAB_ADDED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
   tab_added_observer.Wait();
 
@@ -74,8 +75,15 @@ IN_PROC_BROWSER_TEST_F(PanelTest, PanelOpenSmall) {
 #endif
 }
 
+#if defined(USE_AURA)
+// crbug.com/105129.
+#define MAYBE_PanelOpenLarge DISABLED_PanelOpenLarge
+#else
+#define MAYBE_PanelOpenLarge PanelOpenLarge
+#endif
+
 // Large popups should open as new tab.
-IN_PROC_BROWSER_TEST_F(PanelTest, PanelOpenLarge) {
+IN_PROC_BROWSER_TEST_F(PanelTest, MAYBE_PanelOpenLarge) {
   const std::string HTML =
       "<html><head><title>PanelOpen</title></head>"
       "<body onload='window.setTimeout(run_tests, 0)'>"
@@ -91,7 +99,7 @@ IN_PROC_BROWSER_TEST_F(PanelTest, PanelOpenLarge) {
   int old_tab_count = browser()->tab_count();
   ui_test_utils::WindowedNotificationObserver tab_added_observer(
       content::NOTIFICATION_TAB_ADDED,
-      NotificationService::AllSources());
+      content::NotificationService::AllSources());
   browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
   tab_added_observer.Wait();
 

@@ -13,7 +13,6 @@
 #include "base/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/logging.h"
-#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
@@ -24,6 +23,7 @@
 #include "testing/multiprocess_func_list.h"
 
 #if defined(OS_MACOSX)
+#include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/test/mock_chrome_application_mac.h"
 #endif
 
@@ -47,6 +47,26 @@ class MaybeTestDisabler : public testing::EmptyTestEventListener {
   }
 };
 
+class TestClientInitializer : public testing::EmptyTestEventListener {
+ public:
+  TestClientInitializer()
+      : old_command_line_(CommandLine::NO_PROGRAM) {
+  }
+
+  virtual void OnTestStart(const testing::TestInfo& test_info) OVERRIDE {
+    old_command_line_ = *CommandLine::ForCurrentProcess();
+  }
+
+  virtual void OnTestEnd(const testing::TestInfo& test_info) OVERRIDE {
+    *CommandLine::ForCurrentProcess() = old_command_line_;
+  }
+
+ private:
+  CommandLine old_command_line_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestClientInitializer);
+};
+
 }  // namespace
 
 const char TestSuite::kStrictFailureHandling[] = "strict_failure_handling";
@@ -59,7 +79,6 @@ TestSuite::TestSuite(int argc, char** argv) {
   CommandLine::Init(argc, argv);
   testing::InitGoogleTest(&argc, argv);
 #if defined(TOOLKIT_USES_GTK)
-  g_thread_init(NULL);
   gtk_init_check(&argc, &argv);
 #endif  // defined(TOOLKIT_USES_GTK)
   // Don't add additional code to this constructor.  Instead add it to
@@ -120,10 +139,18 @@ void TestSuite::CatchMaybeTests() {
   listeners.Append(new MaybeTestDisabler);
 }
 
+void TestSuite::ResetCommandLine() {
+  testing::TestEventListeners& listeners =
+      testing::UnitTest::GetInstance()->listeners();
+  listeners.Append(new TestClientInitializer);
+}
+
 // Don't add additional code to this method.  Instead add it to
 // Initialize().  See bug 6436.
 int TestSuite::Run() {
+#if defined(OS_MACOSX)
   base::mac::ScopedNSAutoreleasePool scoped_pool;
+#endif
 
   Initialize();
   std::string client_func =
@@ -152,10 +179,12 @@ int TestSuite::Run() {
            failing_count, failing_count == 1 ? "test" : "tests");
   }
 
+#if defined(OS_MACOSX)
   // This MUST happen before Shutdown() since Shutdown() tears down
   // objects (such as NotificationService::current()) that Cocoa
   // objects use to remove themselves as observers.
   scoped_pool.Recycle();
+#endif
 
   Shutdown();
 
@@ -226,6 +255,7 @@ void TestSuite::Initialize() {
 #endif
 
   CatchMaybeTests();
+  ResetCommandLine();
 
   TestTimeouts::Initialize();
 }

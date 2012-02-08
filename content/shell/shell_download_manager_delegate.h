@@ -8,7 +8,7 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "content/browser/download/download_manager_delegate.h"
+#include "content/public/browser/download_manager_delegate.h"
 
 class DownloadManager;
 struct DownloadStateInfo;
@@ -32,11 +32,10 @@ class ShellDownloadManagerDelegate
                                         FilePath* intermediate_path) OVERRIDE;
   virtual TabContents* GetAlternativeTabContentsToNotifyForDownload() OVERRIDE;
   virtual bool ShouldOpenFileBasedOnExtension(const FilePath& path) OVERRIDE;
-  virtual bool ShouldOpenDownload(DownloadItem* item) OVERRIDE;
   virtual bool ShouldCompleteDownload(DownloadItem* item) OVERRIDE;
+  virtual bool ShouldOpenDownload(DownloadItem* item) OVERRIDE;
   virtual bool GenerateFileHash() OVERRIDE;
-  virtual void OnResponseCompleted(DownloadItem* item,
-                                   const std::string& hash) OVERRIDE;
+  virtual void OnResponseCompleted(DownloadItem* item) OVERRIDE;
   virtual void AddItemToPersistentStore(DownloadItem* item) OVERRIDE;
   virtual void UpdateItemInPersistentStore(DownloadItem* item) OVERRIDE;
   virtual void UpdatePathForItemInPersistentStore(

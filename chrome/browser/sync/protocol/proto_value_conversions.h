@@ -13,7 +13,9 @@ class DictionaryValue;
 }
 
 namespace sync_pb {
+class AppNotificationSettings;
 class AppNotificationSpecifics;
+class AppSettingSpecifics;
 class AppSpecifics;
 class AutofillProfileSpecifics;
 class AutofillSpecifics;
@@ -54,6 +56,10 @@ namespace browser_sync {
 base::DictionaryValue* EncryptedDataToValue(
     const sync_pb::EncryptedData& encrypted_data);
 
+// Sub-protocol of AppSpecifics.
+base::DictionaryValue* AppSettingsToValue(
+    const sync_pb::AppNotificationSettings& app_notification_settings);
+
 // Sub-protocols of SessionSpecifics.
 
 base::DictionaryValue* SessionHeaderToValue(
@@ -77,6 +83,9 @@ base::DictionaryValue* PasswordSpecificsDataToValue(
 
 base::DictionaryValue* AppNotificationSpecificsToValue(
     const sync_pb::AppNotificationSpecifics& app_notification_specifics);
+
+base::DictionaryValue* AppSettingSpecificsToValue(
+    const sync_pb::AppSettingSpecifics& app_setting_specifics);
 
 base::DictionaryValue* AppSpecificsToValue(
     const sync_pb::AppSpecifics& app_specifics);

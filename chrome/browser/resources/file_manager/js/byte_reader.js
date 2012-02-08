@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-ByteReader = function(arrayBuffer) {
-  this.buf_ = arrayBuffer;
-  this.view_ = new DataView(arrayBuffer);
+ByteReader = function(arrayBuffer, opt_offset, opt_length) {
+  opt_offset = opt_offset || 0;
+  opt_length = opt_length || (arrayBuffer.byteLength - opt_offset);
+  this.view_ = new DataView(arrayBuffer, opt_offset, opt_length);
   this.pos_ = 0;
   this.seekStack_ = [];
   this.setByteOrder(ByteReader.BIG_ENDIAN);
@@ -26,10 +27,10 @@ ByteReader.SEEK_END = 2;  // Seek relative to the end of the buffer.
  */
 ByteReader.validateRead = function(pos, size, end) {
   if (pos < 0 || pos >= end)
-    throw 'Invalid read position';
+    throw new Error('Invalid read position');
 
   if (pos + size > end)
-    throw 'Read past end of buffer';
+    throw new Error('Read past end of buffer');
 };
 
 /**
@@ -144,6 +145,13 @@ ByteReader.readImage = function(dataView, pos, size, opt_end) {
 // Instance methods.
 
 /**
+ * Return true if the requested number of bytes can be read from the buffer.
+ */
+ByteReader.prototype.canRead = function(size) {
+   return this.pos_ + size <= this.view_.byteLength;
+},
+
+/**
  * Return true if the current position is past the end of the buffer.
  */
 ByteReader.prototype.eof = function() {
@@ -158,7 +166,7 @@ ByteReader.prototype.bof = function() {
 };
 
 /**
- * Return true if the current position is oustide the buffer.
+ * Return true if the current position is outside the buffer.
  */
 ByteReader.prototype.beof = function() {
   return this.pos_ >= this.view_.byteLength || this.pos_ < 0;
@@ -206,7 +214,7 @@ ByteReader.prototype.readScalar = function(width, opt_signed, opt_end) {
       break;
 
     default:
-      throw 'Invalid width: ' + width;
+      throw new Error('Invalid width: ' + width);
       break;
   }
 
@@ -263,7 +271,8 @@ ByteReader.prototype.readSlice = function(size, opt_end,
   this.validateRead(width, opt_end);
 
   var arrayConstructor = opt_arrayConstructor || Uint8Array;
-  var slice = new arrayConstructor(this.buf_, this.pos_, size);
+  var slice = new arrayConstructor(
+      this.view_.buffer, this.view_.byteOffset + this.pos, size);
   this.pos_ += size;
 
   return slice;
@@ -309,8 +318,8 @@ ByteReader.prototype.seek = function(pos, opt_seekStart, opt_end) {
     newPos = pos;
   }
 
-  if (newPos < 0 || newPos >= this.view_.byteLength)
-    throw 'Seek outside of buffer: ' + (newPos - opt_end);
+  if (newPos < 0 || newPos > this.view_.byteLength)
+    throw new Error('Seek outside of buffer: ' + (newPos - opt_end));
 
   this.pos_ = newPos;
 };

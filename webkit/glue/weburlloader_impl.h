@@ -6,13 +6,16 @@
 #define WEBKIT_GLUE_WEBURLLOADER_IMPL_H_
 
 #include "base/memory/ref_counted.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoader.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
+#include "webkit/glue/webkit_glue_export.h"
 
 namespace webkit_glue {
 
+class WebKitPlatformSupportImpl;
+
 class WebURLLoaderImpl : public WebKit::WebURLLoader {
  public:
-  WebURLLoaderImpl();
+  explicit WebURLLoaderImpl(WebKitPlatformSupportImpl* platform);
   virtual ~WebURLLoaderImpl();
 
   // WebURLLoader methods:
@@ -27,11 +30,12 @@ class WebURLLoaderImpl : public WebKit::WebURLLoader {
   virtual void cancel();
   virtual void setDefersLoading(bool value);
 
-  void UpdateRoutingId(int new_routing_id);
+  WEBKIT_GLUE_EXPORT void UpdateRoutingId(int new_routing_id);
 
  private:
   class Context;
   scoped_refptr<Context> context_;
+  WebKitPlatformSupportImpl* platform_;
 };
 
 }  // namespace webkit_glue

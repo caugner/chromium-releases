@@ -7,7 +7,8 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "content/common/sensors_listener.h"
+#include "content/common/content_export.h"
+#include "content/public/browser/sensors_listener.h"
 
 // The sensors API will unify various types of sensor data into a set of
 // channels, each of which provides change events and periodic updates.
@@ -22,7 +23,7 @@ namespace sensors {
 // TODO(cwolfe): Finish defining the initial set of channels and replace this
 // with the generic sensor provider.
 //
-class Provider {
+class CONTENT_EXPORT Provider {
  public:
   static Provider* GetInstance();
 
@@ -31,19 +32,20 @@ class Provider {
   //
   // This method may be called in any thread. Callbacks on a listener will
   // always be executed in the thread which added that listener.
-  virtual void AddListener(Listener* listener) = 0;
+  virtual void AddListener(content::SensorsListener* listener) = 0;
 
   // Removes a sensor listener.
   //
   // This method must be called in the same thread which added the listener.
   // If the listener is not currently subscribed, this method may be called in
   // any thread.
-  virtual void RemoveListener(Listener* listener) = 0;
+  virtual void RemoveListener(content::SensorsListener* listener) = 0;
 
   // Broadcasts a change to the coarse screen orientation.
   //
   // This method may be called in any thread.
-  virtual void ScreenOrientationChanged(const ScreenOrientation& change) = 0;
+  virtual void ScreenOrientationChanged(
+      content::ScreenOrientation change) = 0;
 
  protected:
   Provider();

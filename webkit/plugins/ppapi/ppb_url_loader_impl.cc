@@ -15,14 +15,14 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebKit.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebKitPlatformSupport.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLError.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoader.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLError.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLResponse.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLResponse.h"
 #include "webkit/appcache/web_application_cache_host_impl.h"
 #include "webkit/plugins/ppapi/common.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
@@ -131,15 +131,18 @@ int32_t PPB_URLLoader_Impl::Open(PP_Resource request_id,
 
   WebURLLoaderOptions options;
   if (has_universal_access_) {
-    // Universal access allows cross-origin requests and sends credentials.
+    options.allowCredentials = true;
     options.crossOriginRequestPolicy =
         WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
-    options.allowCredentials = true;
-  } else if (request_data_.allow_cross_origin_requests) {
-    // Otherwise, allow cross-origin requests with access control.
-    options.crossOriginRequestPolicy =
-        WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
+  } else {
+    // All other HTTP requests are untrusted.
+    options.untrustedHTTP = true;
     options.allowCredentials = request_data_.allow_credentials;
+    if (request_data_.allow_cross_origin_requests) {
+      // Allow cross-origin requests with access control.
+      options.crossOriginRequestPolicy =
+          WebURLLoaderOptions::CrossOriginRequestPolicyUseAccessControl;
+    }
   }
 
   is_asynchronous_load_suspended_ = false;

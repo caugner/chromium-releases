@@ -23,29 +23,21 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
 
   // Overridden from WindowSizer::StateProvider:
   virtual bool GetPersistentState(gfx::Rect* bounds,
-                                  bool* maximized,
                                   gfx::Rect* work_area) const {
-    DCHECK(bounds && maximized);
-
-    std::string key(prefs::kBrowserWindowPlacement);
-    if (!app_name_.empty()) {
-      key.append("_");
-      key.append(app_name_);
-    }
+    DCHECK(bounds);
 
     if (!browser_ || !browser_->profile()->GetPrefs())
       return false;
 
+    std::string window_name(browser_->GetWindowPlacementKey());
     const DictionaryValue* wp_pref =
-        browser_->profile()->GetPrefs()->GetDictionary(key.c_str());
+        browser_->profile()->GetPrefs()->GetDictionary(window_name.c_str());
     int top = 0, left = 0, bottom = 0, right = 0;
-    bool has_prefs =
-        wp_pref &&
-        wp_pref->GetInteger("top", &top) &&
-        wp_pref->GetInteger("left", &left) &&
-        wp_pref->GetInteger("bottom", &bottom) &&
-        wp_pref->GetInteger("right", &right) &&
-        wp_pref->GetBoolean("maximized", maximized);
+    bool has_prefs = wp_pref &&
+                     wp_pref->GetInteger("top", &top) &&
+                     wp_pref->GetInteger("left", &left) &&
+                     wp_pref->GetInteger("bottom", &bottom) &&
+                     wp_pref->GetInteger("right", &right);
     bounds->SetRect(left, top, std::max(0, right - left),
                     std::max(0, bottom - top));
 
@@ -110,42 +102,35 @@ class DefaultStateProvider : public WindowSizer::StateProvider {
 ///////////////////////////////////////////////////////////////////////////////
 // WindowSizer, public:
 
-WindowSizer::WindowSizer(
-    StateProvider* state_provider,
-    MonitorInfoProvider* monitor_info_provider)
+WindowSizer::WindowSizer(StateProvider* state_provider,
+                         MonitorInfoProvider* monitor_info_provider)
     : state_provider_(state_provider),
       monitor_info_provider_(monitor_info_provider) {
 }
 
 WindowSizer::~WindowSizer() {
-  if (state_provider_)
-    delete state_provider_;
-  if (monitor_info_provider_)
-    delete monitor_info_provider_;
 }
 
 // static
 void WindowSizer::GetBrowserWindowBounds(const std::string& app_name,
                                          const gfx::Rect& specified_bounds,
                                          const Browser* browser,
-                                         gfx::Rect* window_bounds,
-                                         bool* maximized) {
+                                         gfx::Rect* window_bounds) {
   const WindowSizer sizer(new DefaultStateProvider(app_name, browser),
                           CreateDefaultMonitorInfoProvider());
-  sizer.DetermineWindowBounds(specified_bounds, window_bounds, maximized);
+  sizer.DetermineWindowBounds(specified_bounds, window_bounds);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // WindowSizer, private:
 
 void WindowSizer::DetermineWindowBounds(const gfx::Rect& specified_bounds,
-                                        gfx::Rect* bounds,
-                                        bool* maximized) const {
+                                        gfx::Rect* bounds) const {
   *bounds = specified_bounds;
   if (bounds->IsEmpty()) {
     // See if there's saved placement information.
     if (!GetLastWindowBounds(bounds)) {
-      if (!GetSavedWindowBounds(bounds, maximized)) {
+      if (!GetSavedWindowBounds(bounds)) {
         // No saved placement, figure out some sensible default size based on
         // the user's screen size.
         GetDefaultWindowBounds(bounds);
@@ -156,7 +141,8 @@ void WindowSizer::DetermineWindowBounds(const gfx::Rect& specified_bounds,
 
 bool WindowSizer::GetLastWindowBounds(gfx::Rect* bounds) const {
   DCHECK(bounds);
-  if (!state_provider_ || !state_provider_->GetLastActiveWindowState(bounds))
+  if (!state_provider_.get() ||
+      !state_provider_->GetLastActiveWindowState(bounds))
     return false;
   gfx::Rect last_window_bounds = *bounds;
   bounds->Offset(kWindowTilePixels, kWindowTilePixels);
@@ -166,12 +152,11 @@ bool WindowSizer::GetLastWindowBounds(gfx::Rect* bounds) const {
   return true;
 }
 
-bool WindowSizer::GetSavedWindowBounds(gfx::Rect* bounds,
-                                       bool* maximized) const {
-  DCHECK(bounds && maximized);
+bool WindowSizer::GetSavedWindowBounds(gfx::Rect* bounds) const {
+  DCHECK(bounds);
   gfx::Rect saved_work_area;
-  if (!state_provider_ ||
-      !state_provider_->GetPersistentState(bounds, maximized, &saved_work_area))
+  if (!state_provider_.get() ||
+      !state_provider_->GetPersistentState(bounds, &saved_work_area))
     return false;
   AdjustBoundsToBeVisibleOnMonitorContaining(*bounds, saved_work_area, bounds);
   return true;
@@ -179,7 +164,7 @@ bool WindowSizer::GetSavedWindowBounds(gfx::Rect* bounds,
 
 void WindowSizer::GetDefaultWindowBounds(gfx::Rect* default_bounds) const {
   DCHECK(default_bounds);
-  DCHECK(monitor_info_provider_);
+  DCHECK(monitor_info_provider_.get());
 
   gfx::Rect work_area = monitor_info_provider_->GetPrimaryMonitorWorkArea();
 
@@ -212,7 +197,7 @@ void WindowSizer::GetDefaultWindowBounds(gfx::Rect* default_bounds) const {
 }
 
 bool WindowSizer::PositionIsOffscreen(int position, Edge edge) const {
-  DCHECK(monitor_info_provider_);
+  DCHECK(monitor_info_provider_.get());
   size_t monitor_count = monitor_info_provider_->GetMonitorCount();
   for (size_t i = 0; i < monitor_count; ++i) {
     gfx::Rect work_area = monitor_info_provider_->GetWorkAreaAt(i);
@@ -250,7 +235,7 @@ void WindowSizer::AdjustBoundsToBeVisibleOnMonitorContaining(
     const gfx::Rect& saved_work_area,
     gfx::Rect* bounds) const {
   DCHECK(bounds);
-  DCHECK(monitor_info_provider_);
+  DCHECK(monitor_info_provider_.get());
 
   // Find the size of the work area of the monitor that intersects the bounds
   // of the anchor window.

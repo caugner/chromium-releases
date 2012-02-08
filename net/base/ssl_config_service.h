@@ -97,12 +97,12 @@ struct NET_EXPORT SSLConfig {
                        // needs to clear tls1_enabled).
 
   // The list of application level protocols supported. If set, this will
-  // enable Next Protocol Negotiation (if supported). This is a list of 8-bit
-  // length prefixed strings. The order of the protocols doesn't matter expect
-  // for one case: if the server supports Next Protocol Negotiation, but there
-  // is no overlap between the server's and client's protocol sets, then the
-  // first protocol in this list will be requested by the client.
-  std::string next_protos;
+  // enable Next Protocol Negotiation (if supported). The order of the
+  // protocols doesn't matter expect for one case: if the server supports Next
+  // Protocol Negotiation, but there is no overlap between the server's and
+  // client's protocol sets, then the first protocol in this list will be
+  // requested by the client.
+  std::vector<std::string> next_protos;
 
   scoped_refptr<X509Certificate> client_cert;
 
@@ -151,7 +151,6 @@ class NET_EXPORT SSLConfigService
   static bool dns_cert_provenance_checking_enabled();
 
   // Sets and gets the current, global CRL set.
-  // TODO(agl): currently unused.
   static void SetCRLSet(scoped_refptr<CRLSet> crl_set);
   static scoped_refptr<CRLSet> GetCRLSet();
 
@@ -159,10 +158,6 @@ class NET_EXPORT SSLConfigService
   // just a digest of its certificate chain.
   static void EnableCachedInfo();
   static bool cached_info_enabled();
-
-  // Enables the TLS origin bound cert extension.
-  static void EnableOriginBoundCerts();
-  static bool origin_bound_certs_enabled();
 
   // Is SNI available in this configuration?
   static bool IsSNIAvailable(SSLConfigService* service);

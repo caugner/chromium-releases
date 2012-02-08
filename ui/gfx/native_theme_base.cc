@@ -14,32 +14,29 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
-namespace gfx {
+namespace {
 
-unsigned int NativeThemeBase::button_length_ = 14;
-#if defined(TOUCH_UI)
-unsigned int NativeThemeBase::scrollbar_width_ = 0;
-#else
-unsigned int NativeThemeBase::scrollbar_width_ = 15;
-#endif
+// Hardcoded colors for use when there is no system theme (Aura, ChromeOS).
+const SkColor kDefaultDialogBackgroundColor = SkColorSetRGB(200, 200, 200);
+const SkColor kInvalidColorIdColor = SkColorSetRGB(255, 0, 128);
 
 // These are the default dimensions of radio buttons and checkboxes.
-static const int kCheckboxAndRadioWidth = 13;
-static const int kCheckboxAndRadioHeight = 13;
+const int kCheckboxAndRadioWidth = 13;
+const int kCheckboxAndRadioHeight = 13;
 
 // These sizes match the sizes in Chromium Win.
-static const int kSliderThumbWidth = 11;
-static const int kSliderThumbHeight = 21;
+const int kSliderThumbWidth = 11;
+const int kSliderThumbHeight = 21;
 
-static const SkColor kSliderTrackBackgroundColor =
+const SkColor kSliderTrackBackgroundColor =
     SkColorSetRGB(0xe3, 0xdd, 0xd8);
-static const SkColor kSliderThumbLightGrey = SkColorSetRGB(0xf4, 0xf2, 0xef);
-static const SkColor kSliderThumbDarkGrey = SkColorSetRGB(0xea, 0xe5, 0xe0);
-static const SkColor kSliderThumbBorderDarkGrey =
+const SkColor kSliderThumbLightGrey = SkColorSetRGB(0xf4, 0xf2, 0xef);
+const SkColor kSliderThumbDarkGrey = SkColorSetRGB(0xea, 0xe5, 0xe0);
+const SkColor kSliderThumbBorderDarkGrey =
     SkColorSetRGB(0x9d, 0x96, 0x8e);
 
 // Get lightness adjusted color.
-static SkColor BrightenColor(const color_utils::HSL& hsl, SkAlpha alpha,
+SkColor BrightenColor(const color_utils::HSL& hsl, SkAlpha alpha,
     double lightness_amount) {
   color_utils::HSL adjusted = hsl;
   adjusted.l += lightness_amount;
@@ -51,16 +48,41 @@ static SkColor BrightenColor(const color_utils::HSL& hsl, SkAlpha alpha,
   return color_utils::HSLToSkColor(adjusted, alpha);
 }
 
-NativeThemeBase::NativeThemeBase() {
-}
+}  // namespace
 
-NativeThemeBase::~NativeThemeBase() {
-}
+namespace gfx {
+
+unsigned int NativeThemeBase::button_length_ = 14;
+unsigned int NativeThemeBase::scrollbar_width_ = 15;
 
 gfx::Size NativeThemeBase::GetPartSize(Part part,
                                        State state,
                                        const ExtraParams& extra) const {
   switch (part) {
+    // Please keep these in the order of NativeTheme::Part.
+    case kCheckbox:
+      return gfx::Size(kCheckboxAndRadioWidth, kCheckboxAndRadioHeight);
+    case kInnerSpinButton:
+      return gfx::Size(scrollbar_width_, 0);
+    case kMenuList:
+      return gfx::Size();  // No default size.
+    case kMenuCheck:
+    case kMenuCheckBackground:
+    case kMenuPopupArrow:
+      NOTIMPLEMENTED();
+      break;
+    case kMenuPopupBackground:
+      return gfx::Size();  // No default size.
+    case kMenuPopupGutter:
+    case kMenuPopupSeparator:
+      NOTIMPLEMENTED();
+      break;
+    case kMenuItemBackground:
+    case kProgressBar:
+    case kPushButton:
+      return gfx::Size();  // No default size.
+    case kRadio:
+      return gfx::Size(kCheckboxAndRadioWidth, kCheckboxAndRadioHeight);
     case kScrollbarDownArrow:
     case kScrollbarUpArrow:
       return gfx::Size(scrollbar_width_, button_length_);
@@ -73,39 +95,134 @@ gfx::Size NativeThemeBase::GetPartSize(Part part,
     case kScrollbarVerticalThumb:
       // This matches Firefox on Linux.
       return gfx::Size(scrollbar_width_, 2 * scrollbar_width_);
-      break;
     case kScrollbarHorizontalTrack:
       return gfx::Size(0, scrollbar_width_);
     case kScrollbarVerticalTrack:
       return gfx::Size(scrollbar_width_, 0);
-    case kCheckbox:
-    case kRadio:
-      return gfx::Size(kCheckboxAndRadioWidth, kCheckboxAndRadioHeight);
+    case kScrollbarHorizontalGripper:
+    case kScrollbarVerticalGripper:
+      NOTIMPLEMENTED();
+      break;
+    case kSliderTrack:
+      return gfx::Size();  // No default size.
     case kSliderThumb:
       // These sizes match the sizes in Chromium Win.
       return gfx::Size(kSliderThumbWidth, kSliderThumbHeight);
-    case kInnerSpinButton:
-      return gfx::Size(scrollbar_width_, 0);
-    case kPushButton:
+    case kTabPanelBackground:
+      NOTIMPLEMENTED();
+      break;
     case kTextField:
-    case kMenuList:
-    case kSliderTrack:
-    case kProgressBar:
       return gfx::Size();  // No default size.
-    case kMenuCheck:
-    case kMenuCheckBackground:
-    case kMenuPopupArrow:
-    case kMenuPopupBackground:
-    case kMenuPopupGutter:
-    case kMenuPopupSeparator:
-    case kMenuItemBackground:
-      NOTIMPLEMENTED() << " theme part: " << part;
+    case kTrackbarThumb:
+    case kTrackbarTrack:
+    case kWindowResizeGripper:
+      NOTIMPLEMENTED();
       break;
     default:
       NOTREACHED() << "Unknown theme part: " << part;
       break;
   }
   return gfx::Size();
+}
+
+void NativeThemeBase::Paint(SkCanvas* canvas,
+                            Part part,
+                            State state,
+                            const gfx::Rect& rect,
+                            const ExtraParams& extra) const {
+  switch (part) {
+    // Please keep these in the order of NativeTheme::Part.
+    case kCheckbox:
+      PaintCheckbox(canvas, state, rect, extra.button);
+      break;
+    case kInnerSpinButton:
+      PaintInnerSpinButton(canvas, state, rect, extra.inner_spin);
+      break;
+    case kMenuList:
+      PaintMenuList(canvas, state, rect, extra.menu_list);
+      break;
+    case kMenuCheck:
+    case kMenuCheckBackground:
+    case kMenuPopupArrow:
+      NOTIMPLEMENTED();
+      break;
+    case kMenuPopupBackground:
+      PaintMenuPopupBackground(canvas, state, rect, extra.menu_list);
+      break;
+    case kMenuPopupGutter:
+    case kMenuPopupSeparator:
+      NOTIMPLEMENTED();
+      break;
+    case kMenuItemBackground:
+      PaintMenuItemBackground(canvas, state, rect, extra.menu_list);
+      break;
+    case kProgressBar:
+      PaintProgressBar(canvas, state, rect, extra.progress_bar);
+      break;
+    case kPushButton:
+      PaintButton(canvas, state, rect, extra.button);
+      break;
+    case kRadio:
+      PaintRadio(canvas, state, rect, extra.button);
+      break;
+    case kScrollbarDownArrow:
+    case kScrollbarUpArrow:
+    case kScrollbarLeftArrow:
+    case kScrollbarRightArrow:
+      PaintArrowButton(canvas, rect, part, state);
+      break;
+    case kScrollbarHorizontalThumb:
+    case kScrollbarVerticalThumb:
+      PaintScrollbarThumb(canvas, part, state, rect);
+      break;
+    case kScrollbarHorizontalTrack:
+    case kScrollbarVerticalTrack:
+      PaintScrollbarTrack(canvas, part, state, extra.scrollbar_track, rect);
+      break;
+    case kScrollbarHorizontalGripper:
+    case kScrollbarVerticalGripper:
+      NOTIMPLEMENTED();
+      break;
+    case kSliderTrack:
+      PaintSliderTrack(canvas, state, rect, extra.slider);
+      break;
+    case kSliderThumb:
+      PaintSliderThumb(canvas, state, rect, extra.slider);
+      break;
+    case kTabPanelBackground:
+      NOTIMPLEMENTED();
+      break;
+    case kTextField:
+      PaintTextField(canvas, state, rect, extra.text_field);
+      break;
+    case kTrackbarThumb:
+    case kTrackbarTrack:
+    case kWindowResizeGripper:
+      NOTIMPLEMENTED();
+      break;
+    default:
+      NOTREACHED() << "Unknown theme part: " << part;
+      break;
+  }
+}
+
+SkColor NativeThemeBase::GetSystemColor(ColorId color_id) const {
+  // This implementation returns hardcoded colors. It's used by NativeThemeAura
+  // and NativeThemeChromeos and overridden by NativeThemeGtk.
+  switch (color_id) {
+    case kColorId_DialogBackground:
+      return kDefaultDialogBackgroundColor;
+    default:
+      NOTREACHED() << "Invalid color_id: " << color_id;
+      break;
+  }
+  return kInvalidColorIdColor;
+}
+
+NativeThemeBase::NativeThemeBase() {
+}
+
+NativeThemeBase::~NativeThemeBase() {
 }
 
 void NativeThemeBase::PaintArrowButton(
@@ -232,59 +349,6 @@ void NativeThemeBase::PaintArrowButton(
   path.close();
 
   canvas->drawPath(path, paint);
-}
-
-void NativeThemeBase::Paint(SkCanvas* canvas,
-                            Part part,
-                            State state,
-                            const gfx::Rect& rect,
-                            const ExtraParams& extra) const {
-  switch (part) {
-    case kScrollbarDownArrow:
-    case kScrollbarUpArrow:
-    case kScrollbarLeftArrow:
-    case kScrollbarRightArrow:
-      PaintArrowButton(canvas, rect, part, state);
-      break;
-    case kScrollbarHorizontalThumb:
-    case kScrollbarVerticalThumb:
-      PaintScrollbarThumb(canvas, part, state, rect);
-      break;
-    case kScrollbarHorizontalTrack:
-    case kScrollbarVerticalTrack:
-      PaintScrollbarTrack(canvas, part, state, extra.scrollbar_track, rect);
-      break;
-    case kCheckbox:
-      PaintCheckbox(canvas, state, rect, extra.button);
-      break;
-    case kRadio:
-      PaintRadio(canvas, state, rect, extra.button);
-      break;
-    case kPushButton:
-      PaintButton(canvas, state, rect, extra.button);
-      break;
-    case kTextField:
-      PaintTextField(canvas, state, rect, extra.text_field);
-      break;
-    case kMenuList:
-      PaintMenuList(canvas, state, rect, extra.menu_list);
-      break;
-    case kSliderTrack:
-      PaintSliderTrack(canvas, state, rect, extra.slider);
-      break;
-    case kSliderThumb:
-      PaintSliderThumb(canvas, state, rect, extra.slider);
-      break;
-    case kInnerSpinButton:
-      PaintInnerSpinButton(canvas, state, rect, extra.inner_spin);
-      break;
-    case kProgressBar:
-      PaintProgressBar(canvas, state, rect, extra.progress_bar);
-      break;
-    default:
-      NOTREACHED() << "Unknown theme part: " << part;
-      break;
-  }
 }
 
 void NativeThemeBase::PaintScrollbarTrack(SkCanvas* canvas,
@@ -619,6 +683,24 @@ void NativeThemeBase::PaintMenuList(
   canvas->drawPath(path, paint);
 }
 
+void NativeThemeBase::PaintMenuPopupBackground(
+    SkCanvas* canvas,
+    State state,
+    const gfx::Rect& rect,
+    const MenuListExtraParams& menu_list) const {
+  // This is the same as COLOR_TOOLBAR.
+  canvas->drawColor(SkColorSetRGB(210, 225, 246),
+                    SkXfermode::kSrc_Mode);
+}
+
+void NativeThemeBase::PaintMenuItemBackground(
+    SkCanvas* canvas,
+    State state,
+    const gfx::Rect& rect,
+    const MenuListExtraParams& menu_list) const {
+  // By default don't draw anything over the normal background.
+}
+
 void NativeThemeBase::PaintSliderTrack(SkCanvas* canvas,
                                        State state,
                                        const gfx::Rect& rect,
@@ -764,37 +846,6 @@ bool NativeThemeBase::IntersectsClipRectInt(
                      SkIntToScalar(y + h));
 }
 
-void NativeThemeBase::DrawVertLine(SkCanvas* canvas,
-                                   int x,
-                                   int y1,
-                                   int y2,
-                                   const SkPaint& paint) const {
-  SkIRect skrect;
-  skrect.set(x, y1, x + 1, y2 + 1);
-  canvas->drawIRect(skrect, paint);
-}
-
-void NativeThemeBase::DrawHorizLine(SkCanvas* canvas,
-                                    int x1,
-                                    int x2,
-                                    int y,
-                                    const SkPaint& paint) const {
-  SkIRect skrect;
-  skrect.set(x1, y, x2 + 1, y + 1);
-  canvas->drawIRect(skrect, paint);
-}
-
-void NativeThemeBase::DrawBox(SkCanvas* canvas,
-                              const gfx::Rect& rect,
-                              const SkPaint& paint) const {
-  const int right = rect.x() + rect.width() - 1;
-  const int bottom = rect.y() + rect.height() - 1;
-  DrawHorizLine(canvas, rect.x(), right, rect.y(), paint);
-  DrawVertLine(canvas, right, rect.y(), bottom, paint);
-  DrawHorizLine(canvas, rect.x(), right, bottom, paint);
-  DrawVertLine(canvas, rect.x(), rect.y(), bottom, paint);
-}
-
 void NativeThemeBase::DrawBitmapInt(
     SkCanvas* canvas, const SkBitmap& bitmap,
     int src_x, int src_y, int src_w, int src_h,
@@ -873,12 +924,6 @@ void NativeThemeBase::DrawTiledImage(SkCanvas* canvas,
   canvas->restore();
 }
 
-SkScalar NativeThemeBase::Clamp(SkScalar value,
-                                SkScalar min,
-                                SkScalar max) const {
-  return std::min(std::max(value, min), max);
-}
-
 SkColor NativeThemeBase::SaturateAndBrighten(SkScalar* hsv,
                                              SkScalar saturate_amount,
                                              SkScalar brighten_amount) const {
@@ -887,6 +932,43 @@ SkColor NativeThemeBase::SaturateAndBrighten(SkScalar* hsv,
   color[1] = Clamp(hsv[1] + saturate_amount, 0.0, 1.0);
   color[2] = Clamp(hsv[2] + brighten_amount, 0.0, 1.0);
   return SkHSVToColor(color);
+}
+
+void NativeThemeBase::DrawVertLine(SkCanvas* canvas,
+                                   int x,
+                                   int y1,
+                                   int y2,
+                                   const SkPaint& paint) const {
+  SkIRect skrect;
+  skrect.set(x, y1, x + 1, y2 + 1);
+  canvas->drawIRect(skrect, paint);
+}
+
+void NativeThemeBase::DrawHorizLine(SkCanvas* canvas,
+                                    int x1,
+                                    int x2,
+                                    int y,
+                                    const SkPaint& paint) const {
+  SkIRect skrect;
+  skrect.set(x1, y, x2 + 1, y + 1);
+  canvas->drawIRect(skrect, paint);
+}
+
+void NativeThemeBase::DrawBox(SkCanvas* canvas,
+                              const gfx::Rect& rect,
+                              const SkPaint& paint) const {
+  const int right = rect.x() + rect.width() - 1;
+  const int bottom = rect.y() + rect.height() - 1;
+  DrawHorizLine(canvas, rect.x(), right, rect.y(), paint);
+  DrawVertLine(canvas, right, rect.y(), bottom, paint);
+  DrawHorizLine(canvas, rect.x(), right, bottom, paint);
+  DrawVertLine(canvas, rect.x(), rect.y(), bottom, paint);
+}
+
+SkScalar NativeThemeBase::Clamp(SkScalar value,
+                                SkScalar min,
+                                SkScalar max) const {
+  return std::min(std::max(value, min), max);
 }
 
 SkColor NativeThemeBase::OutlineColor(SkScalar* hsv1, SkScalar* hsv2) const {

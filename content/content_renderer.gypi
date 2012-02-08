@@ -7,6 +7,7 @@
     '../jingle/jingle.gyp:jingle_glue',
     '../net/net.gyp:net',
     '../ppapi/ppapi_internal.gyp:ppapi_proxy',
+    '../ppapi/ppapi_internal.gyp:ppapi_shared',
     '../skia/skia.gyp:skia',
     '../third_party/ffmpeg/ffmpeg.gyp:ffmpeg',
     '../third_party/icu/icu.gyp:icuuc',
@@ -17,6 +18,7 @@
     '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
     '../ui/gfx/surface/surface.gyp:surface',
     '../v8/tools/gyp/v8.gyp:v8',
+    '../webkit/support/webkit_support.gyp:webkit_media',
     '../webkit/support/webkit_support.gyp:webkit_gpu',
   ],
   'include_dirs': [
@@ -24,6 +26,8 @@
   ],
   'sources': [
     'public/renderer/content_renderer_client.h',
+    'public/renderer/document_state.cc',
+    'public/renderer/document_state.h',
     'public/renderer/navigation_state.cc',
     'public/renderer/navigation_state.h',
     'public/renderer/render_process_observer.cc',
@@ -48,6 +52,8 @@
     'renderer/devtools_client.h',
     'renderer/external_popup_menu.cc',
     'renderer/external_popup_menu.h',
+    'renderer/gamepad_shared_memory_reader.cc',
+    'renderer/gamepad_shared_memory_reader.h',
     'renderer/geolocation_dispatcher.cc',
     'renderer/geolocation_dispatcher.h',
     'renderer/gpu/compositor_thread.cc',
@@ -66,16 +72,22 @@
     'renderer/gpu/transport_texture_service.h',
     'renderer/gpu/webgraphicscontext3d_command_buffer_impl.cc',
     'renderer/gpu/webgraphicscontext3d_command_buffer_impl.h',
+    'renderer/idle_user_detector.cc',
+    'renderer/idle_user_detector.h',
     'renderer/indexed_db_dispatcher.cc',
     'renderer/indexed_db_dispatcher.h',
     'renderer/intents_dispatcher.cc',
     'renderer/intents_dispatcher.h',
-    'renderer/java_bridge_channel.cc',
-    'renderer/java_bridge_channel.h',
+    'renderer/java/java_bridge_channel.cc',
+    'renderer/java/java_bridge_channel.h',
+    'renderer/java/java_bridge_dispatcher.cc',
+    'renderer/java/java_bridge_dispatcher.h',
     'renderer/load_progress_tracker.cc',
     'renderer/load_progress_tracker.h',
     'renderer/media/audio_device.cc',
     'renderer/media/audio_device.h',
+    'renderer/media/audio_hardware.cc',
+    'renderer/media/audio_hardware.h',
     'renderer/media/audio_input_device.cc',
     'renderer/media/audio_input_device.h',
     'renderer/media/audio_input_message_filter.cc',
@@ -135,7 +147,8 @@
     'renderer/render_widget_fullscreen_pepper.h',
     'renderer/renderer_accessibility.cc',
     'renderer/renderer_accessibility.h',
-    'renderer/renderer_glue.cc',
+    'renderer/renderer_clipboard_client.cc',
+    'renderer/renderer_clipboard_client.h',
     'renderer/renderer_main.cc',
     'renderer/renderer_main_platform_delegate.h',
     'renderer/renderer_main_platform_delegate_linux.cc',
@@ -177,10 +190,6 @@
     'renderer/websharedworker_proxy.h',
     'renderer/websharedworkerrepository_impl.cc',
     'renderer/websharedworkerrepository_impl.h',
-    'renderer/webworker_base.cc',
-    'renderer/webworker_base.h',
-    'renderer/webworker_proxy.cc',
-    'renderer/webworker_proxy.h',
     'renderer/web_ui_bindings.cc',
     'renderer/web_ui_bindings.h',
   ],
@@ -225,6 +234,12 @@
             'renderer/speech_input_dispatcher.h',
           ]
         }],
+        ['notifications==0', {
+          'sources!': [
+            'renderer/notification_provider.cc',
+            'renderer/active_notification_tracker.cc',
+          ],
+        }],
       ],
       'dependencies': [
         '../build/linux/system.gyp:gtk',
@@ -234,11 +249,6 @@
       'sources!': [
         'common/process_watcher_posix.cc',
       ],
-      'link_settings': {
-        'mac_bundle_resources': [
-          'renderer/renderer.sb',
-        ],
-      },
     }],
     ['OS=="win" and win_use_allocator_shim==1', {
       'dependencies': [
@@ -257,6 +267,18 @@
         'renderer/media/video_capture_module_impl.h',
         'renderer/media/webrtc_audio_device_impl.cc',
         'renderer/media/webrtc_audio_device_impl.h',
+      ],
+    }],
+    ['java_bridge==1', {
+      'defines': [
+        'ENABLE_JAVA_BRIDGE',
+      ],
+    }, {
+      'sources!': [
+        'renderer/java/java_bridge_channel.cc',
+        'renderer/java/java_bridge_channel.h',
+        'renderer/java/java_bridge_dispatcher.cc',
+        'renderer/java/java_bridge_dispatcher.h',
       ],
     }],
   ],

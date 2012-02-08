@@ -48,6 +48,13 @@ class CrxInstaller
     : public SandboxedExtensionUnpackerClient,
       public ExtensionInstallUI::Delegate {
  public:
+  // Extensions will be installed into frontend->install_directory(),
+  // then registered with |frontend|. Any install UI will be displayed
+  // using |client|. Pass NULL for |client| for silent install.
+  static scoped_refptr<CrxInstaller> Create(
+      ExtensionService* frontend,
+      ExtensionInstallUI* client);
+
   // This is pretty lame, but given the difficulty of connecting a particular
   // ExtensionFunction to a resulting download in the download manager, it's
   // currently necessary. This is the |id| of an extension to be installed
@@ -68,6 +75,9 @@ class CrxInstaller
     // Whether to use a bubble notification when an app is installed, instead of
     // the default behavior of transitioning to the new tab page.
     bool use_app_installed_bubble;
+
+    // Whether to skip the post install UI like the extension installed bubble.
+    bool skip_post_install_ui;
   };
 
   // Exempt the next extension install with |id| from displaying a confirmation
@@ -92,13 +102,6 @@ class CrxInstaller
   // only be called on the UI thread.
   static bool ClearWhitelistedInstallId(const std::string& id);
 
-  // Constructor.  Extensions will be installed into
-  // frontend_weak->install_directory() then registered with
-  // |frontend_weak|. Any install UI will be displayed using
-  // |client|. Pass NULL for |client| for silent install.
-  CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
-               ExtensionInstallUI* client);
-
   // Install the crx in |source_file|.
   void InstallCrx(const FilePath& source_file);
 
@@ -112,6 +115,9 @@ class CrxInstaller
   // Overridden from ExtensionInstallUI::Delegate:
   virtual void InstallUIProceed() OVERRIDE;
   virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
+
+  int creation_flags() const { return creation_flags_; }
+  void set_creation_flags(int val) { creation_flags_ = val; }
 
   const GURL& download_url() const { return download_url_; }
   void set_download_url(const GURL& val) { download_url_ = val; }
@@ -134,8 +140,15 @@ class CrxInstaller
   bool allow_silent_install() const { return allow_silent_install_; }
   void set_allow_silent_install(bool val) { allow_silent_install_ = val; }
 
-  bool is_gallery_install() const { return is_gallery_install_; }
-  void set_is_gallery_install(bool val) { is_gallery_install_ = val; }
+  bool is_gallery_install() const {
+    return (creation_flags_ & Extension::FROM_WEBSTORE) > 0;
+  }
+  void set_is_gallery_install(bool val) {
+    if (val)
+      creation_flags_ |= Extension::FROM_WEBSTORE;
+    else
+      creation_flags_ &= ~Extension::FROM_WEBSTORE;
+  }
 
   // The original download URL should be set when the WebstoreInstaller is
   // tracking the installation. The WebstoreInstaller uses this URL to match
@@ -173,6 +186,8 @@ class CrxInstaller
  private:
   friend class ExtensionUpdaterTest;
 
+  CrxInstaller(base::WeakPtr<ExtensionService> frontend_weak,
+               ExtensionInstallUI* client);
   virtual ~CrxInstaller();
 
   // Converts the source user script to an extension.
@@ -209,7 +224,7 @@ class CrxInstaller
   void ReportFailureFromUIThread(const std::string& error);
   void ReportSuccessFromFileThread();
   void ReportSuccessFromUIThread();
-  void NotifyCrxInstallComplete();
+  void NotifyCrxInstallComplete(const Extension* extension);
 
   // The file we're installing.
   FilePath source_file_;
@@ -243,9 +258,6 @@ class CrxInstaller
   // Whether we're supposed to delete the source file on destruction. Defaults
   // to false.
   bool delete_source_;
-
-  // Whether the install originated from the gallery.
-  bool is_gallery_install_;
 
   // The download URL, before redirects, if this is a gallery install.
   GURL original_download_url_;
@@ -311,6 +323,10 @@ class CrxInstaller
   // What caused this install?  Used only for histograms that report
   // on failure rates, broken down by the cause of the install.
   extension_misc::CrxInstallCause install_cause_;
+
+  // Creation flags to use for the extension.  These flags will be used
+  // when calling Extenion::Create() by the crx installer.
+  int creation_flags_;
 
   DISALLOW_COPY_AND_ASSIGN(CrxInstaller);
 };

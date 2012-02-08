@@ -9,13 +9,15 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/google/google_url_tracker.h"
 #include "chrome/browser/instant/instant_field_trial.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "googleurl/src/gurl.h"
 
 #if defined(OS_WIN) && defined(GOOGLE_CHROME_BUILD)
 #include "chrome/browser/google/google_util.h"
 #include "chrome/browser/rlz/rlz.h"
 #endif
+
+using content::BrowserThread;
 
 SearchTermsData::SearchTermsData() {
 }
@@ -31,7 +33,10 @@ std::string SearchTermsData::GoogleBaseSuggestURLValue() const {
   GURL::Replacements repl;
 
   // Replace any existing path with "/complete/".
-  static const std::string suggest_path("/complete/");
+  // SetPathStr() requires its argument to stay in scope as long as |repl| is,
+  // so "/complete/" can't be passed to SetPathStr() directly, it needs to be in
+  // a variable.
+  const std::string suggest_path("/complete/");
   repl.SetPathStr(suggest_path);
 
   // Clear the query and ref.

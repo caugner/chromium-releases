@@ -10,7 +10,6 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
 #import "chrome/browser/ui/cocoa/fullscreen_exit_bubble_controller.h"
@@ -18,16 +17,18 @@
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
 #import "chrome/browser/ui/cocoa/info_bubble_window.h"
 #include "chrome/browser/ui/fullscreen_exit_bubble_type.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "grit/generated_resources.h"
-#include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
+#include "grit/ui_strings.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
+#include "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
-#include "ui/base/models/accelerator_cocoa.h"
+#include "ui/base/accelerators/accelerator_cocoa.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 
 
 namespace {
-const int kBubbleOffsetY = 10;
 const float kInitialDelay = 3.8;
 const float kHideDuration = 0.7;
 } // namespace
@@ -93,7 +94,6 @@ const float kHideDuration = 0.7;
 - (void)deny:(id)sender {
   DCHECK(fullscreen_bubble::ShowButtonsForType(bubbleType_));
   browser_->OnDenyFullscreenPermission(bubbleType_);
-  [self hideSoon];
 }
 
 - (void)showButtons:(BOOL)show {
@@ -111,7 +111,6 @@ const float kHideDuration = 0.7;
 - (void)showWindow {
   // Completes nib load.
   InfoBubbleWindow* info_bubble = static_cast<InfoBubbleWindow*>([self window]);
-  [bubble_ setArrowLocation:info_bubble::kNoArrow];
   [info_bubble setCanBecomeKeyWindow:NO];
   if (!fullscreen_bubble::ShowButtonsForType(bubbleType_)) {
     [self showButtons:NO];
@@ -138,7 +137,6 @@ const float kHideDuration = 0.7;
   NSPoint origin;
   origin.x = (int)(maxWidth/2 - NSWidth(windowFrame)/2);
   origin.y = maxY - NSHeight(windowFrame);
-  origin.y -= kBubbleOffsetY;
   [[self window] setFrameOrigin:origin];
 }
 
@@ -167,6 +165,7 @@ const float kHideDuration = 0.7;
     // Only button-less bubbles auto-hide.
     [self hideSoon];
   }
+  // TODO(jeremya): show "Press Esc to exit" instead of a link on mouselock.
 
   // Relayout. A bit jumpy, but functional.
   [tweaker_ tweakUI:[self window]];
@@ -238,14 +237,16 @@ const float kHideDuration = 0.7;
   exitLabelPlaceholder_ = nil;  // Now released.
   [exitLabel_.get() setDelegate:self];
 
-  NSString *message = l10n_util::GetNSStringF(IDS_EXIT_FULLSCREEN_MODE,
-      base::SysNSStringToUTF16([[self class] keyCommandString]));
+  NSString* exitLinkText = l10n_util::GetNSString(IDS_EXIT_FULLSCREEN_MODE);
+  NSString* acceleratorText = [@" " stringByAppendingString:
+      l10n_util::GetNSStringF(IDS_EXIT_FULLSCREEN_MODE_ACCELERATOR,
+                              l10n_util::GetStringUTF16(IDS_APP_ESC_KEY))];
 
   NSFont* font = [NSFont systemFontOfSize:
       [NSFont systemFontSizeForControlSize:NSRegularControlSize]];
   [(HyperlinkTextView*)exitLabel_.get()
-        setMessageAndLink:@""
-                 withLink:message
+        setMessageAndLink:acceleratorText
+                 withLink:exitLinkText
                  atOffset:0
                      font:font
              messageColor:[NSColor blackColor]
@@ -263,6 +264,7 @@ const float kHideDuration = 0.7;
   [layoutManager ensureLayoutForTextContainer:textContainer];
   NSRect textFrame = [layoutManager usedRectForTextContainer:textContainer];
 
+  textFrame.size.width = ceil(NSWidth(textFrame));
   labelFrame.origin.x += NSWidth(labelFrame) - NSWidth(textFrame);
   labelFrame.size = textFrame.size;
   [exitLabel_ setFrame:labelFrame];

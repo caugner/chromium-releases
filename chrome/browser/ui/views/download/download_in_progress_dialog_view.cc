@@ -19,17 +19,26 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
-#include "views/border.h"
-#include "views/controls/label.h"
-#include "views/layout/grid_layout.h"
-#include "views/widget/widget.h"
+#include "ui/views/border.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/layout/grid_layout.h"
+#include "ui/views/widget/widget.h"
 
 DownloadInProgressDialogView::DownloadInProgressDialogView(Browser* browser)
     : browser_(browser),
       product_name_(l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)) {
-  int download_count =
-      DownloadServiceFactory::GetForProfile(
-          browser->profile())->GetDownloadManager()->in_progress_count();
+  int download_count;
+  Browser::DownloadClosePreventionType type =
+      browser_->OkToCloseWithInProgressDownloads(&download_count);
+
+  // This dialog should have been created within the same thread invocation
+  // as the original test that lead to us, so it should always not be ok
+  // to close.
+  DCHECK_NE(Browser::DOWNLOAD_CLOSE_OK, type);
+
+  // TODO(rdsmith): This dialog should be different depending on whether we're
+  // closing the last incognito window of a profile or doing browser shutdown.
+  // See http://crbug.com/88421.
 
   string16 warning_text;
   string16 explanation_text;
@@ -101,16 +110,16 @@ gfx::Size DownloadInProgressDialogView::GetPreferredSize() {
 }
 
 string16 DownloadInProgressDialogView::GetDialogButtonLabel(
-    ui::MessageBoxFlags::DialogButton button) const {
-  if (button == MessageBoxFlags::DIALOGBUTTON_OK)
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
     return ok_button_text_;
 
-  DCHECK_EQ(MessageBoxFlags::DIALOGBUTTON_CANCEL, button);
+  DCHECK_EQ(ui::DIALOG_BUTTON_CANCEL, button);
   return cancel_button_text_;
 }
 
 int DownloadInProgressDialogView::GetDefaultDialogButton() const {
-  return MessageBoxFlags::DIALOGBUTTON_CANCEL;
+  return ui::DIALOG_BUTTON_CANCEL;
 }
 
 bool DownloadInProgressDialogView::Cancel() {

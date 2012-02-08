@@ -9,26 +9,24 @@
 #include <string>
 #include <vector>
 
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/owner_manager.h"
 
-// There are two categories of operations that can be performed on the
-// Chrome OS owner-signed settings store:
-// 1) doing stuff to the whitelist (adding/removing/checking)
-// 2) Storing/Retrieving arbitrary name=value pairs
+// There are two operations that can be performed on the Chrome OS owner-signed
+// settings store: Storing and Retrieving the policy blob.
 //
-// Unfortunately, it is currently a limitation that only one of each
-// category can be in-flight at a time.  You can be doing exactly one thing
-// to the whitelist, and exactly one thing to the property store at a time.
-// I've filed an issue on me to remove that restriction.
-// http://code.google.com/p/chromium-os/issues/detail?id=6415
-
 // The pattern of use here is that the caller instantiates some
 // subclass of SignedSettings by calling one of the create
 // methods. Then, call Execute() on this object from the UI
 // thread. It'll go off and do work (on the FILE thread and over DBus),
 // and then call the appropriate method of the Delegate you passed in
 // -- again, on the UI thread.
+
+namespace base {
+class Value;
+}  // namespace base
 
 namespace enterprise_management {
 class PolicyFetchResponse;
@@ -38,6 +36,8 @@ namespace em = enterprise_management;
 
 namespace chromeos {
 class OwnershipService;
+
+extern const char kDevicePolicyType[];
 
 class SignedSettings : public base::RefCountedThreadSafe<SignedSettings>,
                        public OwnerManager::Delegate {
@@ -60,27 +60,6 @@ class SignedSettings : public base::RefCountedThreadSafe<SignedSettings>,
   SignedSettings();
   virtual ~SignedSettings();
 
-  // These are both "whitelist" operations, and only one instance of
-  // one type can be in flight at a time.
-  static SignedSettings* CreateCheckWhitelistOp(
-      const std::string& email,
-      SignedSettings::Delegate<bool>* d);
-
-  static SignedSettings* CreateWhitelistOp(const std::string& email,
-                                           bool add_to_whitelist,
-                                           SignedSettings::Delegate<bool>* d);
-
-  // These are both "property" operations, and only one instance of
-  // one type can be in flight at a time.
-  static SignedSettings* CreateStorePropertyOp(
-      const std::string& name,
-      const std::string& value,
-      SignedSettings::Delegate<bool>* d);
-
-  static SignedSettings* CreateRetrievePropertyOp(
-      const std::string& name,
-      SignedSettings::Delegate<std::string>* d);
-
   // These are both "policy" operations, and only one instance of
   // one type can be in flight at a time.
   static SignedSettings* CreateStorePolicyOp(
@@ -89,8 +68,6 @@ class SignedSettings : public base::RefCountedThreadSafe<SignedSettings>,
 
   static SignedSettings* CreateRetrievePolicyOp(
       SignedSettings::Delegate<const em::PolicyFetchResponse&>* d);
-
-  static bool EnumerateWhitelist(std::vector<std::string>* whitelisted);
 
   static ReturnCode MapKeyOpCode(OwnerManager::KeyOpCode code);
 
@@ -108,33 +85,12 @@ class SignedSettings : public base::RefCountedThreadSafe<SignedSettings>,
 
   void set_service(OwnershipService* service) { service_ = service; }
 
-  void TryToFetchPolicyAndCallBack();
-
   OwnershipService* service_;
 
  private:
   friend class SignedSettingsTest;
   friend class SignedSettingsHelperTest;
 
-  class Relay
-      : public SignedSettings::Delegate<const em::PolicyFetchResponse&> {
-   public:
-    // |s| must outlive your Relay instance.
-    explicit Relay(SignedSettings* s);
-    virtual ~Relay();
-    // Implementation of SignedSettings::Delegate
-    virtual void OnSettingsOpCompleted(SignedSettings::ReturnCode code,
-                                       const em::PolicyFetchResponse& value);
-   private:
-    SignedSettings* settings_;
-    DISALLOW_COPY_AND_ASSIGN(Relay);
-  };
-
-  // Format of this string is documented in device_management_backend.proto.
-  static const char kDevicePolicyType[];
-
-  scoped_ptr<Relay> relay_;
-  scoped_refptr<SignedSettings> polfetcher_;
   DISALLOW_COPY_AND_ASSIGN(SignedSettings);
 };
 

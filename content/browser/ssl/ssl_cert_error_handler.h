@@ -11,10 +11,6 @@
 #include "content/browser/ssl/ssl_error_handler.h"
 #include "net/base/ssl_info.h"
 
-namespace net {
-class X509Certificate;
-}
-
 // A CertError represents an error that occurred with the certificate in an
 // SSL session.  A CertError object exists both on the IO thread and on the UI
 // thread and allows us to cancel/continue a request it is associated with.
@@ -27,7 +23,7 @@ class SSLCertErrorHandler : public SSLErrorHandler {
                       const net::SSLInfo& ssl_info,
                       bool is_hsts_host);
 
-  virtual SSLCertErrorHandler* AsSSLCertErrorHandler();
+  virtual SSLCertErrorHandler* AsSSLCertErrorHandler() OVERRIDE;
 
   // These accessors are available on either thread
   const net::SSLInfo& ssl_info() const { return ssl_info_; }
@@ -36,8 +32,8 @@ class SSLCertErrorHandler : public SSLErrorHandler {
 
  protected:
   // SSLErrorHandler methods
-  virtual void OnDispatchFailed();
-  virtual void OnDispatched();
+  virtual void OnDispatchFailed() OVERRIDE;
+  virtual void OnDispatched() OVERRIDE;
 
  private:
   virtual ~SSLCertErrorHandler();

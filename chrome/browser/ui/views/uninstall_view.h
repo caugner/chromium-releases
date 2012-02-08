@@ -10,11 +10,11 @@
 
 #include "base/string16.h"
 #include "ui/base/models/combobox_model.h"
-#include "views/controls/combobox/combobox.h"
-#include "views/window/dialog_delegate.h"
+#include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class Checkbox;
+class Combobox;
 class Label;
 }
 
@@ -35,8 +35,7 @@ class UninstallView : public views::ButtonListener,
   // Overridden from views::DialogDelegateView:
   virtual bool Accept() OVERRIDE;
   virtual bool Cancel() OVERRIDE;
-  virtual string16 GetDialogButtonLabel(
-      ui::MessageBoxFlags::DialogButton button) const OVERRIDE;
+  virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
 
   // Overridden from views::WidgetDelegate:
   virtual string16 GetWindowTitle() const OVERRIDE;

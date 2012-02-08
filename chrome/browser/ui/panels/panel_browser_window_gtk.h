@@ -5,10 +5,13 @@
 #ifndef CHROME_BROWSER_UI_PANELS_PANEL_BROWSER_WINDOW_GTK_H_
 #define CHROME_BROWSER_UI_PANELS_PANEL_BROWSER_WINDOW_GTK_H_
 
+#include "base/memory/weak_ptr.h"
+#include "base/message_loop.h"
 #include "chrome/browser/ui/gtk/browser_window_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "ui/base/animation/animation_delegate.h"
+#include "ui/base/x/work_area_watcher_x_observer.h"
 
 class Panel;
 class PanelSettingsMenuModel;
@@ -21,17 +24,18 @@ class SlideAnimation;
 }
 
 class PanelBrowserWindowGtk : public BrowserWindowGtk,
-                              public NativePanel,
                               public MenuGtk::Delegate,
                               public MessageLoopForUI::Observer,
-                              public ui::AnimationDelegate {
+                              public NativePanel,
+                              public ui::AnimationDelegate,
+                              public ui::WorkAreaWatcherXObserver {
   friend class NativePanelTestingGtk;
  public:
   PanelBrowserWindowGtk(Browser* browser, Panel* panel,
                         const gfx::Rect& bounds);
   virtual ~PanelBrowserWindowGtk();
 
-  // BrowserWindowGtk overrides
+  // BrowserWindowGtk override
   virtual void Init() OVERRIDE;
 
   // BrowserWindow overrides
@@ -39,6 +43,9 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual void ShowSettingsMenu(GtkWidget* widget,
                                 GdkEventButton* event) OVERRIDE;
   virtual TitleDecoration GetWindowTitle(std::string* title) const OVERRIDE;
+
+  // ui::WorkAreaWatcherXObserver override
+  virtual void WorkAreaChanged() OVERRIDE;
 
  protected:
   // BrowserWindowGtk overrides
@@ -58,12 +65,12 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual void HandleFocusIn(GtkWidget* widget,
                              GdkEventFocus* event) OVERRIDE;
 
-
   // Overridden from NativePanel:
   virtual void ShowPanel() OVERRIDE;
   virtual void ShowPanelInactive() OVERRIDE;
   virtual gfx::Rect GetPanelBounds() const OVERRIDE;
   virtual void SetPanelBounds(const gfx::Rect& bounds) OVERRIDE;
+  virtual void SetPanelBoundsInstantly(const gfx::Rect& bounds) OVERRIDE;
   virtual void ClosePanel() OVERRIDE;
   virtual void ActivatePanel() OVERRIDE;
   virtual void DeactivatePanel() OVERRIDE;
@@ -85,6 +92,7 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event) OVERRIDE;
+  virtual void FullScreenModeChanged(bool is_full_screen) OVERRIDE;
   virtual Browser* GetPanelBrowser() const OVERRIDE;
   virtual void DestroyPanelBrowser() OVERRIDE;
   virtual gfx::Size WindowSizeFromContentSize(
@@ -92,6 +100,8 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual gfx::Size ContentSizeFromWindowSize(
       const gfx::Size& window_size) const OVERRIDE;
   virtual int TitleOnlyHeight() const OVERRIDE;
+  virtual gfx::Size IconOnlySize() const OVERRIDE;
+  virtual void EnsurePanelFullyVisible() OVERRIDE;
 
  private:
   void StartBoundsAnimation(const gfx::Rect& current_bounds);
@@ -109,6 +119,8 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   void DestroyDragWidget();
   void EndDrag(bool canceled);
   void CleanupDragDrop();
+
+  void SetBoundsInternal(const gfx::Rect& bounds, bool animate);
 
   GdkRectangle GetTitlebarRectForDrawAttention() const;
 
@@ -152,7 +164,7 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   // when the drag has ended when the user presses space or enter.  We queue
   // a task to end the drag and only run it if GTK+ didn't send us the
   // drag-failed event.
-  ScopedRunnableMethodFactory<PanelBrowserWindowGtk> drag_end_factory_;
+  base::WeakPtrFactory<PanelBrowserWindowGtk> drag_end_factory_;
 
   scoped_ptr<Panel> panel_;
   gfx::Rect bounds_;

@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/common/notification_service.h"
+#include "content/public/browser/notification_service.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 
@@ -31,7 +31,7 @@ namespace chromeos {
 BalloonCollectionImpl::BalloonCollectionImpl()
     : notification_ui_(new NotificationPanel()) {
   registrar_.Add(this, chrome::NOTIFICATION_BROWSER_CLOSED,
-                 NotificationService::AllSources());
+                 content::NotificationService::AllSources());
 }
 
 BalloonCollectionImpl::~BalloonCollectionImpl() {
@@ -57,12 +57,11 @@ void BalloonCollectionImpl::Add(const Notification& notification,
 bool BalloonCollectionImpl::AddWebUIMessageCallback(
     const Notification& notification,
     const std::string& message,
-    MessageCallback* callback) {
+    const MessageCallback& callback) {
   Balloon* balloon = FindBalloon(notification);
-  if (!balloon) {
-    delete callback;
+  if (!balloon)
     return false;
-  }
+
   BalloonViewHost* host =
       static_cast<BalloonViewHost*>(balloon->view()->GetHost());
   return host->AddWebUIMessageCallback(message, callback);
@@ -147,11 +146,12 @@ const BalloonCollectionImpl::Balloons&
   return base_.balloons();
 }
 
-void BalloonCollectionImpl::Observe(int type,
-                                    const NotificationSource& source,
-                                    const NotificationDetails& details) {
+void BalloonCollectionImpl::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   DCHECK(type == chrome::NOTIFICATION_BROWSER_CLOSED);
-  bool app_closing = *Details<bool>(details).ptr();
+  bool app_closing = *content::Details<bool>(details).ptr();
   // When exiting, we need to shutdown all renderers in
   // BalloonViewImpl before IO thread gets deleted in the
   // BrowserProcessImpl's destructor.  See http://crbug.com/40810

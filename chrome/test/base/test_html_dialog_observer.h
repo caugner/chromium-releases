@@ -7,18 +7,22 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
+class JsInjectionReadyObserver;
 class WebUI;
 
 // For browser_tests, which run on the UI thread, run a second message
 // MessageLoop to detect HtmlDialog creation and quit when the constructed
 // WebUI instance is captured and ready.
-class TestHtmlDialogObserver : public NotificationObserver {
+class TestHtmlDialogObserver : public content::NotificationObserver {
  public:
-  // Create and register a new TestHtmlDialogObserver.
-  TestHtmlDialogObserver();
+  // Create and register a new TestHtmlDialogObserver. If
+  // |js_injection_ready_observer| is non-NULL, notify it as soon as the RVH is
+  // available.
+  explicit TestHtmlDialogObserver(
+      JsInjectionReadyObserver* js_injection_ready_observer);
   virtual ~TestHtmlDialogObserver();
 
   // Waits for an HtmlDialog to be created. The WebUI instance is captured
@@ -26,12 +30,15 @@ class TestHtmlDialogObserver : public NotificationObserver {
   WebUI* GetWebUI();
 
  private:
-  // NotificationObserver:
-  virtual void Observe(int type, const NotificationSource& source,
-                       const NotificationDetails& details) OVERRIDE;
+  // content::NotificationObserver:
+  virtual void Observe(int type, const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
+  // Observer to take some action when the dialog is ready for JavaScript
+  // injection.
+  JsInjectionReadyObserver* js_injection_ready_observer_;
   WebUI* web_ui_;
   bool done_;
   bool running_;

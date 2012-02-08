@@ -31,7 +31,7 @@ class SpdyHttpStreamTest : public testing::Test {
     http_session_ = SpdySessionDependencies::SpdyCreateSession(&session_deps_);
     session_ = http_session_->spdy_session_pool()->Get(pair, BoundNetLog());
     transport_params_ = new TransportSocketParams(host_port_pair,
-                                      MEDIUM, GURL(), false, false);
+                                      MEDIUM, false, false);
     TestOldCompletionCallback callback;
     scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
     EXPECT_EQ(ERR_IO_PENDING,
@@ -39,7 +39,7 @@ class SpdyHttpStreamTest : public testing::Test {
                                 transport_params_,
                                 MEDIUM,
                                 &callback,
-                                http_session_->transport_socket_pool(),
+                                http_session_->GetTransportSocketPool(),
                                 BoundNetLog()));
     EXPECT_EQ(OK, callback.WaitForResult());
     return session_->InitializeWithSocket(connection.release(), false, OK);

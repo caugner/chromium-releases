@@ -11,6 +11,7 @@
 #include "content/common/media/audio_messages.h"
 #include "content/common/view_messages.h"
 #include "content/renderer/render_thread_impl.h"
+#include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_util.h"
 
 AudioInputDevice::AudioInputDevice(size_t buffer_size,
@@ -30,7 +31,11 @@ AudioInputDevice::AudioInputDevice(size_t buffer_size,
 #if defined(OS_MACOSX)
   VLOG(1) << "Using AUDIO_PCM_LOW_LATENCY as input mode on Mac OS X.";
   audio_parameters_.format = AudioParameters::AUDIO_PCM_LOW_LATENCY;
+#elif defined(OS_WIN)
+  VLOG(1) << "Using AUDIO_PCM_LOW_LATENCY as input mode on Windows.";
+  audio_parameters_.format = AudioParameters::AUDIO_PCM_LOW_LATENCY;
 #else
+  // TODO(henrika): add support for AUDIO_PCM_LOW_LATENCY on Linux as well.
   audio_parameters_.format = AudioParameters::AUDIO_PCM_LINEAR;
 #endif
   audio_parameters_.channels = channels;
@@ -122,8 +127,9 @@ void AudioInputDevice::InitializeOnIOThread() {
   // otherwise it will send a AudioInputHostMsg_StartDevice msg to the browser
   // and create the stream when getting a OnDeviceReady() callback.
   if (!session_id_) {
-    Send(new AudioInputHostMsg_CreateStream(stream_id_, audio_parameters_,
-                                            true));
+    Send(new AudioInputHostMsg_CreateStream(
+        stream_id_, audio_parameters_, true,
+        AudioManagerBase::kDefaultDeviceId));
   } else {
     Send(new AudioInputHostMsg_StartDevice(stream_id_, session_id_));
     pending_device_ready_ = true;
@@ -242,27 +248,28 @@ void AudioInputDevice::OnStateChanged(AudioStreamState state) {
   }
 }
 
-void AudioInputDevice::OnDeviceReady(int index) {
+void AudioInputDevice::OnDeviceReady(const std::string& device_id) {
   DCHECK(MessageLoop::current() == ChildProcess::current()->io_message_loop());
-  VLOG(1) << "OnDeviceReady (index=" << index << ")";
+  VLOG(1) << "OnDeviceReady (device_id=" << device_id << ")";
 
   // Takes care of the case when Stop() is called before OnDeviceReady().
   if (!pending_device_ready_)
     return;
 
-  // -1 means no device has been started.
-  if (index == -1) {
+  // If AudioInputDeviceManager returns an empty string, it means no device
+  // is ready for start.
+  if (device_id.empty()) {
     filter_->RemoveDelegate(stream_id_);
     stream_id_ = 0;
   } else {
     Send(new AudioInputHostMsg_CreateStream(
-        stream_id_, audio_parameters_, true));
+        stream_id_, audio_parameters_, true, device_id));
   }
 
   pending_device_ready_ = false;
   // Notify the client that the device has been started.
   if (event_handler_)
-    event_handler_->OnDeviceStarted(index);
+    event_handler_->OnDeviceStarted(device_id);
 }
 
 void AudioInputDevice::Send(IPC::Message* message) {

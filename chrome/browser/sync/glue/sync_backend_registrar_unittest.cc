@@ -9,7 +9,7 @@
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/test/engine/test_user_share.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/browser_thread.h"
+#include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -21,6 +21,7 @@ using ::testing::_;
 using ::testing::InSequence;
 using ::testing::Return;
 using ::testing::StrictMock;
+using content::BrowserThread;
 using syncable::FIRST_REAL_MODEL_TYPE;
 using syncable::AUTOFILL;
 using syncable::BOOKMARKS;
@@ -67,7 +68,7 @@ class SyncBackendRegistrarTest : public testing::Test {
   TestUserShare test_user_share_;
 
  private:
-  BrowserThread ui_thread_;
+  content::TestBrowserThread ui_thread_;
 };
 
 TEST_F(SyncBackendRegistrarTest, ConstructorEmpty) {
@@ -204,7 +205,7 @@ TEST_F(SyncBackendRegistrarTest, ActivateDeactivateUIDataType) {
 }
 
 TEST_F(SyncBackendRegistrarTest, ActivateDeactivateNonUIDataType) {
-  BrowserThread db_thread(BrowserThread::DB, &loop_);
+  content::TestBrowserThread db_thread(BrowserThread::DB, &loop_);
   InSequence in_sequence;
   TestingProfile profile;
   SyncBackendRegistrar registrar(ModelTypeSet(), "test", &profile, &loop_);

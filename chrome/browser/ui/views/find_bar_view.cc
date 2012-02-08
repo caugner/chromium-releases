@@ -26,11 +26,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
-#include "views/background.h"
-#include "views/controls/button/image_button.h"
-#include "views/controls/label.h"
-#include "views/controls/textfield/textfield.h"
-#include "views/widget/widget.h"
+#include "ui/views/background.h"
+#include "ui/views/controls/button/image_button.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/widget/widget.h"
 
 // The amount of whitespace to have before the find button.
 static const int kWhiteSpaceAfterMatchCountLabel = 1;
@@ -227,8 +227,8 @@ void FindBarView::OnPaint(gfx::Canvas* canvas) {
   // Now flip the canvas for the rest of the graphics if in RTL mode.
   canvas->Save();
   if (base::i18n::IsRTL()) {
-    canvas->TranslateInt(width(), 0);
-    canvas->ScaleInt(-1, 1);
+    canvas->Translate(gfx::Point(width(), 0));
+    canvas->Scale(-1, 1);
   }
 
   PaintDialogBorder(canvas, bounds);

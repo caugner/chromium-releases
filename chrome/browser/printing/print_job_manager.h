@@ -11,20 +11,18 @@
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class PrefService;
 
 namespace printing {
 
 class JobEventDetails;
-class PrintedDocument;
 class PrintJob;
-class PrintedPage;
 class PrinterQuery;
 
-class PrintJobManager : public NotificationObserver {
+class PrintJobManager : public content::NotificationObserver {
  public:
   PrintJobManager();
   virtual ~PrintJobManager();
@@ -51,10 +49,10 @@ class PrintJobManager : public NotificationObserver {
 
   static void RegisterPrefs(PrefService* prefs);
 
-  // NotificationObserver
+  // content::NotificationObserver
   virtual void Observe(int type,
-                       const NotificationSource& source,
-                       const NotificationDetails& details);
+                       const content::NotificationSource& source,
+                       const content::NotificationDetails& details) OVERRIDE;
 
   bool printing_enabled() {
     return *printing_enabled_;
@@ -68,15 +66,19 @@ class PrintJobManager : public NotificationObserver {
   void OnPrintJobEvent(PrintJob* print_job,
                        const JobEventDetails& event_details);
 
-  NotificationRegistrar registrar_;
+  content::NotificationRegistrar registrar_;
 
   // Used to serialize access to queued_workers_.
   base::Lock lock_;
 
-  // Printing is enabled/disabled. This variable is checked at only one place,
-  // by RenderMessageFilter::OnGetDefaultPrintSettings. If its value is true
+  // Printing is enabled/disabled. For printing with the native print dialog,
+  // this variable is checked at only one place, by
+  // PrintingMessageFilter::OnGetDefaultPrintSettings. If its value is true
   // at that point, then the initiated print flow will complete itself,
   // even if the value of this variable changes afterwards.
+  // In the print preview workflow, this variable is checked in
+  // PrintingMessageFilter::OnUpdatePrintSettings, which gets called multiple
+  // times in the print preview workflow.
   BooleanPrefMember printing_enabled_;
 
   PrinterQueries queued_queries_;

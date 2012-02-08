@@ -151,7 +151,11 @@ cr.define('cr.ui.login', function() {
           !oldStep.classList.contains('hidden')) {
         oldStep.addEventListener('webkitTransitionEnd', function f(e) {
           oldStep.removeEventListener('webkitTransitionEnd', f);
-          oldStep.classList.add('hidden');
+          if (oldStep.classList.contains('faded') ||
+              oldStep.classList.contains('left') ||
+              oldStep.classList.contains('right')) {
+            oldStep.classList.add('hidden');
+          }
         });
       } else {
         // First screen on OOBE launch.
@@ -218,16 +222,27 @@ cr.define('cr.ui.login', function() {
     },
 
     /**
-     * Updates headers and buttons of the screens.
+     * Updates localized content of the screens like headers, buttons and links.
      * Should be executed on language change.
      */
-    updateHeadersAndButtons_: function() {
+    updateLocalizedContent_: function() {
       $('button-strip').innerHTML = '';
       for (var i = 0, screenId; screenId = this.screens_[i]; ++i) {
         var screen = $(screenId);
         $('header-' + screenId).textContent = screen.header;
         this.appendButtons_(screen.buttons);
+        if (screen.updateLocalizedContent)
+          screen.updateLocalizedContent();
       }
+
+      // This screen is a special case as it's not registered with the rest of
+      // the screens.
+      login.ErrorMessageScreen.updateLocalizedContent();
+
+      // Trigger network drop-down to reload its state
+      // so that strings are reloaded.
+      // Will be reloaded if drowdown is actually shown.
+      cr.ui.DropDown.refresh();
     },
 
     /**
@@ -273,7 +288,6 @@ cr.define('cr.ui.login', function() {
   DisplayManager.showSigninUI = function(opt_email) {
     $('add-user-button').hidden = true;
     $('cancel-add-user-button').hidden = false;
-    $('add-user-header-bar-item').hidden = $('pod-row').pods.length == 0;
     chrome.send('showAddUser', [opt_email]);
   };
 
@@ -323,14 +337,14 @@ cr.define('cr.ui.login', function() {
       anchorPos.left += 60;
       anchorPos.top += 105;
     } else if (currentScreenId == SCREEN_ACCOUNT_PICKER &&
-               $('pod-row').activated) {
+               $('pod-row').activatedPod) {
       const MAX_LOGIN_ATTEMMPTS_IN_POD = 3;
       if (loginAttempts > MAX_LOGIN_ATTEMMPTS_IN_POD) {
-        Oobe.showSigninUI($('pod-row').activated.user.emailAddress);
+        $('pod-row').activatedPod.showSigninUI();
         return;
       }
 
-      anchor = $('pod-row').activated.mainInput;
+      anchor = $('pod-row').activatedPod.mainInput;
     }
     if (!anchor && !anchorPos) {
       console.log('Warning: Failed to find anchor for error :' +

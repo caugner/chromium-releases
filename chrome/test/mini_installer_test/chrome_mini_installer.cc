@@ -182,8 +182,15 @@ void ChromeMiniInstaller::InstallMiniInstaller(bool over_install,
                                                const FilePath& path) {
   LOG(INFO) << "Install level is: "
       << (system_install_ ? "system" : "user");
-  RunInstaller(CommandLine(path));
-
+  ASSERT_TRUE(file_util::PathExists(path));
+  CommandLine installer(path);
+  if (is_chrome_frame_) {
+    installer.AppendSwitch(installer::switches::kDoNotCreateShortcuts);
+    installer.AppendSwitch(installer::switches::kDoNotLaunchChrome);
+    installer.AppendSwitch(installer::switches::kDoNotRegisterForUpdateLaunch);
+    installer.AppendSwitch(installer::switches::kChromeFrame);
+  }
+  RunInstaller(installer);
   std::string version;
   ASSERT_TRUE(GetChromeVersionFromRegistry(&version))
       << "Install failed: unable to get version.";
@@ -196,7 +203,6 @@ CommandLine ChromeMiniInstaller::GetBaseMultiInstallCommand() {
     return CommandLine(CommandLine::NO_PROGRAM);
   CommandLine cmd(mini_installer);
   cmd.AppendSwitch(installer::switches::kMultiInstall);
-  cmd.AppendSwitch(installer::switches::kDoNotLaunchChrome);
   return cmd;
 }
 
@@ -206,8 +212,8 @@ void ChromeMiniInstaller::InstallChromeUsingMultiInstall() {
   RunInstaller(cmd);
 
   // Verify installation.
-  InstallationValidator::InstallationType type =
-      installer::ExpectValidInstallation(system_install_);
+  InstallationValidator::InstallationType type;
+  InstallationValidator::ValidateInstallationType(system_install_, &type);
   BrowserDistribution* dist = GetCurrentBrowserDistribution();
   ASSERT_TRUE(InstallUtil::IsMultiInstall(dist, system_install_));
   EXPECT_TRUE(type & InstallationValidator::ProductBits::CHROME_MULTI);
@@ -217,6 +223,9 @@ void ChromeMiniInstaller::InstallChromeUsingMultiInstall() {
 
 void ChromeMiniInstaller::InstallChromeFrameUsingMultiInstall() {
   CommandLine cmd = GetBaseMultiInstallCommand();
+  cmd.AppendSwitch(installer::switches::kDoNotCreateShortcuts);
+  cmd.AppendSwitch(installer::switches::kDoNotLaunchChrome);
+  cmd.AppendSwitch(installer::switches::kDoNotRegisterForUpdateLaunch);
   cmd.AppendSwitch(installer::switches::kChromeFrame);
   RunInstaller(cmd);
 
@@ -228,16 +237,21 @@ void ChromeMiniInstaller::InstallChromeFrameUsingMultiInstall() {
   EXPECT_TRUE(type & InstallationValidator::ProductBits::CHROME_FRAME_MULTI);
   // Launch IE
   LaunchIE(L"gcf:about:version");
-  // Check if Chrome process got spawned.
-  MiniInstallerTestUtil::VerifyProcessLaunch(installer::kChromeExe, false);
+  if (system_install_) {
+    MiniInstallerTestUtil::VerifyProcessLaunch(installer::kChromeExe, true);
+  } else {
+    MiniInstallerTestUtil::VerifyProcessLaunch(
+        installer::kChromeFrameHelperExe, true);
+  }
   FindChromeShortcut();
 }
 
-void ChromeMiniInstaller::InstallChromeAndChromeFrameReadyMode() {
+void ChromeMiniInstaller::InstallChromeAndChromeFrame(bool ready_mode) {
   CommandLine cmd = GetBaseMultiInstallCommand();
   cmd.AppendSwitch(installer::switches::kChrome);
   cmd.AppendSwitch(installer::switches::kChromeFrame);
-  cmd.AppendSwitch(installer::switches::kChromeFrameReadyMode);
+  if (ready_mode)
+    cmd.AppendSwitch(installer::switches::kChromeFrameReadyMode);
   RunInstaller(cmd);
   // Verify installation.
   InstallationValidator::InstallationType type =
@@ -245,8 +259,10 @@ void ChromeMiniInstaller::InstallChromeAndChromeFrameReadyMode() {
   BrowserDistribution* dist = GetCurrentBrowserDistribution();
   ASSERT_TRUE(InstallUtil::IsMultiInstall(dist, system_install_));
   EXPECT_TRUE(type & InstallationValidator::ProductBits::CHROME_MULTI);
-  EXPECT_TRUE(type &
-      InstallationValidator::ProductBits::CHROME_FRAME_READY_MODE);
+  if (ready_mode) {
+    EXPECT_TRUE(type &
+        InstallationValidator::ProductBits::CHROME_FRAME_READY_MODE);
+  }
   FindChromeShortcut();
   LaunchChrome(true);
   LaunchIE(L"gcf:about:version");
@@ -297,7 +313,15 @@ void ChromeMiniInstaller::InstallMetaInstaller() {
   // Install Google Chrome through meta installer.
   CommandLine installer(FilePath::FromWStringHack(
       mini_installer_constants::kChromeMetaInstallerExe));
+  ASSERT_TRUE(file_util::PathExists(installer.GetProgram()));
+  if (is_chrome_frame_) {
+    installer.AppendSwitch(installer::switches::kDoNotCreateShortcuts);
+    installer.AppendSwitch(installer::switches::kDoNotLaunchChrome);
+    installer.AppendSwitch(installer::switches::kDoNotRegisterForUpdateLaunch);
+    installer.AppendSwitch(installer::switches::kChromeFrame);
+  }
   RunInstaller(installer);
+
   ASSERT_TRUE(MiniInstallerTestUtil::VerifyProcessClose(
       mini_installer_constants::kChromeMetaInstallerExecutable));
 
@@ -348,7 +372,7 @@ void ChromeMiniInstaller::Repair(
     std::string build_number;
     ASSERT_TRUE(GetChromeVersionFromRegistry(&build_number));
     FilePath install_path;
-    ASSERT_TRUE(GetChromeInstallDirectoryLocation(&install_path));
+    ASSERT_TRUE(GetInstallDirectory(&install_path));
     install_path = install_path.AppendASCII(build_number);
     ASSERT_TRUE(file_util::Delete(install_path, true));
   } else if (repair_type == ChromeMiniInstaller::REGISTRY) {
@@ -455,7 +479,7 @@ void ChromeMiniInstaller::UnInstallChromeFrameWithIERunning() {
 void ChromeMiniInstaller::CleanChromeInstall() {
   DeletePvRegistryKey();
   FilePath install_path;
-  ASSERT_TRUE(GetChromeInstallDirectoryLocation(&install_path));
+  ASSERT_TRUE(GetInstallDirectory(&install_path));
   ASSERT_TRUE(file_util::Delete(install_path, true));
 }
 
@@ -617,9 +641,9 @@ void ChromeMiniInstaller::FindChromeShortcut() {
   }
 }
 
-bool ChromeMiniInstaller::GetChromeInstallDirectoryLocation(FilePath* path) {
+bool ChromeMiniInstaller::GetInstallDirectory(FilePath* path) {
   BrowserDistribution* dist = GetCurrentBrowserDistribution();
-  *path = installer::GetChromeInstallPath(system_install_, dist);
+    *path = installer::GetChromeInstallPath(system_install_, dist);
   FilePath parent;
   if (system_install_) {
     PathService::Get(base::DIR_PROGRAM_FILES, &parent);
@@ -639,20 +663,14 @@ FilePath ChromeMiniInstaller::GetStartMenuShortcutPath() {
   return path_name;
 }
 
-// Returns Chrome pv registry key value
-bool ChromeMiniInstaller::GetChromeVersionFromRegistry(
-    std::string* build_key_value) {
+bool ChromeMiniInstaller::GetChromeVersionFromRegistry(std::string* value) {
   BrowserDistribution* dist = GetCurrentBrowserDistribution();
-  RegKey key(GetRootRegistryKey(), dist->GetVersionKey().c_str(), KEY_READ);
-  std::wstring value;
-  LONG result = key.ReadValue(L"pv", &value);
-  if (result != ERROR_SUCCESS) {
-    LOG(WARNING) << "Registry read for Chrome version error: " << result;
+  scoped_ptr<Version> version(
+      InstallUtil::GetChromeVersion(dist, system_install_));
+  if (!version.get())
     return false;
-  }
-  *build_key_value = WideToASCII(value);
-  LOG(INFO) << "Build key value is " << build_key_value;
-  return true;
+  *value = version->GetString();
+  return !value->empty();
 }
 
 // Get HKEY based on install type.
@@ -663,16 +681,9 @@ HKEY ChromeMiniInstaller::GetRootRegistryKey() {
   return type;
 }
 
-// Launches the chrome installer and waits for it to end.
 void ChromeMiniInstaller::RunInstaller(const CommandLine& command) {
   ASSERT_TRUE(file_util::PathExists(command.GetProgram()));
   CommandLine installer(command);
-  if (is_chrome_frame_) {
-    installer.AppendSwitch(installer::switches::kDoNotCreateShortcuts);
-    installer.AppendSwitch(installer::switches::kDoNotLaunchChrome);
-    installer.AppendSwitch(installer::switches::kDoNotRegisterForUpdateLaunch);
-    installer.AppendSwitch(installer::switches::kChromeFrame);
-  }
   if (system_install_) {
     installer.AppendSwitch(installer::switches::kSystemLevel);
   }
@@ -691,7 +702,7 @@ void ChromeMiniInstaller::LaunchChrome(bool kill) {
   MiniInstallerTestUtil::CloseProcesses(installer::kChromeExe);
 
   FilePath install_path;
-  ASSERT_TRUE(GetChromeInstallDirectoryLocation(&install_path));
+  ASSERT_TRUE(GetInstallDirectory(&install_path));
   install_path = install_path.Append(installer::kChromeExe);
   CommandLine browser(install_path);
 

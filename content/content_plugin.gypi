@@ -34,6 +34,11 @@
   # These are layered in conditionals in the event other platforms
   # end up using this module as well.
   'conditions': [
+    ['os_bsd==1', {
+      'sources/': [
+        ['exclude', '^plugin/plugin_main_linux\\.cc$'],
+      ],
+    }],
     ['OS=="win"', {
       'include_dirs': [
         '<(DEPTH)/third_party/wtl/include',
@@ -43,6 +48,13 @@
       'dependencies': [
         '../build/linux/system.gyp:gtk',
       ],
+      'link_settings': {
+        'libraries': [
+          '-lXext',
+        ],
+      },
+    }],
+    ['use_aura==1 and OS!="win"', {
       'link_settings': {
         'libraries': [
           '-lXext',

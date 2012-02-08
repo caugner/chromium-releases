@@ -7,7 +7,7 @@
 #pragma once
 
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "views/widget/widget_delegate.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace aura_shell {
 namespace internal {
@@ -19,6 +19,7 @@ class StatusAreaView : public views::WidgetDelegateView {
 
   // Overridden from views::View:
   virtual gfx::Size GetPreferredSize() OVERRIDE;
+
  private:
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE;
 

@@ -3,8 +3,17 @@
 // found in the LICENSE file.
 
 #include "content/browser/download/mock_download_manager_delegate.h"
+#include "content/browser/download/download_item.h"
+#include "content/browser/download/download_manager.h"
+
+MockDownloadManagerDelegate::MockDownloadManagerDelegate() {
+}
 
 MockDownloadManagerDelegate::~MockDownloadManagerDelegate() {
+}
+
+void MockDownloadManagerDelegate::SetDownloadManager(DownloadManager* dm) {
+  download_manager_ = dm;
 }
 
 void MockDownloadManagerDelegate::Shutdown() {
@@ -36,11 +45,11 @@ bool MockDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
   return false;
 }
 
-bool MockDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
+bool MockDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
   return true;
 }
 
-bool MockDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
+bool MockDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
   return true;
 }
 
@@ -48,11 +57,11 @@ bool MockDownloadManagerDelegate::GenerateFileHash() {
   return false;
 }
 
-void MockDownloadManagerDelegate::OnResponseCompleted(DownloadItem* item,
-                                                      const std::string& hash) {
+void MockDownloadManagerDelegate::OnResponseCompleted(DownloadItem* item) {
 }
 
 void MockDownloadManagerDelegate::AddItemToPersistentStore(DownloadItem* item) {
+  download_manager_->OnItemAddedToPersistentStore(item->GetId(), item->GetId());
 }
 
 void MockDownloadManagerDelegate::UpdateItemInPersistentStore(

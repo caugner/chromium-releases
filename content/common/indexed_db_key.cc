@@ -1,11 +1,12 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2011 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/common/indexed_db_key.h"
 
 #include "base/logging.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 
 using WebKit::WebIDBKey;
 
@@ -22,12 +23,13 @@ IndexedDBKey::IndexedDBKey(const WebIDBKey& key) {
 IndexedDBKey::~IndexedDBKey() {
 }
 
-void IndexedDBKey::SetNull() {
-  type_ = WebIDBKey::NullType;
-}
-
 void IndexedDBKey::SetInvalid() {
   type_ = WebIDBKey::InvalidType;
+}
+
+void IndexedDBKey::SetArray(const std::vector<IndexedDBKey>& array) {
+  type_ = WebIDBKey::ArrayType;
+  array_ = array;
 }
 
 void IndexedDBKey::SetString(const string16& string) {
@@ -47,6 +49,12 @@ void IndexedDBKey::SetNumber(double number) {
 
 void IndexedDBKey::Set(const WebIDBKey& key) {
   type_ = key.type();
+  array_.clear();
+  if (key.type() == WebIDBKey::ArrayType) {
+    for (size_t i = 0; i < key.array().size(); ++i) {
+      array_.push_back(IndexedDBKey(key.array()[i]));
+    }
+  }
   string_ = key.type() == WebIDBKey::StringType ?
                 static_cast<string16>(key.string()) : string16();
   number_ = key.type() == WebIDBKey::NumberType ? key.number() : 0;
@@ -55,8 +63,8 @@ void IndexedDBKey::Set(const WebIDBKey& key) {
 
 IndexedDBKey::operator WebIDBKey() const {
   switch (type_) {
-    case WebIDBKey::NullType:
-      return WebIDBKey::createNull();
+    case WebIDBKey::ArrayType:
+      return WebIDBKey::createArray(array_);
     case WebIDBKey::StringType:
       return WebIDBKey::createString(string_);
     case WebIDBKey::DateType:

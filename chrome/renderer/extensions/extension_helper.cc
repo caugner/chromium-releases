@@ -4,13 +4,15 @@
 
 #include "chrome/renderer/extensions/extension_helper.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/json/json_value_serializer.h"
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/chrome_view_types.h"
+#include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
@@ -19,18 +21,20 @@
 #include "chrome/renderer/extensions/chrome_webstore_bindings.h"
 #include "chrome/renderer/extensions/event_bindings.h"
 #include "chrome/renderer/extensions/extension_dispatcher.h"
-#include "chrome/renderer/extensions/extension_process_bindings.h"
-#include "chrome/renderer/extensions/renderer_extension_bindings.h"
+#include "chrome/renderer/extensions/miscellaneous_bindings.h"
+#include "chrome/renderer/extensions/schema_generated_bindings.h"
 #include "chrome/renderer/extensions/user_script_idle_scheduler.h"
 #include "chrome/renderer/extensions/user_script_slave.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebConsoleMessage.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebURLRequest.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLRequest.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "webkit/glue/image_resource_fetcher.h"
 #include "webkit/glue/resource_fetcher.h"
 
+using extensions::MiscellaneousBindings;
+using extensions::SchemaGeneratedBindings;
 using WebKit::WebConsoleMessage;
 using WebKit::WebDataSource;
 using WebKit::WebFrame;
@@ -45,7 +49,8 @@ namespace {
 // document to another with adoptNode, and so having the object be a
 // RenderViewObserver means it might miss some notifications after it moves.
 typedef std::map<WebFrame*, UserScriptIdleScheduler*> SchedulerMap;
-static base::LazyInstance<SchedulerMap> g_schedulers(base::LINKER_INITIALIZED);
+static base::LazyInstance<SchedulerMap> g_schedulers =
+    LAZY_INSTANCE_INITIALIZER;
 }
 
 ExtensionHelper::ExtensionHelper(content::RenderView* render_view,
@@ -103,7 +108,8 @@ bool ExtensionHelper::InstallWebApplicationUsingDefinitionFile(
   app_definition_fetcher_.reset(new ResourceFetcher(
       pending_app_info_->manifest_url, render_view()->GetWebView()->mainFrame(),
       WebURLRequest::TargetIsSubresource,
-      NewCallback(this, &ExtensionHelper::DidDownloadApplicationDefinition)));
+      base::Bind(&ExtensionHelper::DidDownloadApplicationDefinition,
+                 base::Unretained(this))));
   return true;
 }
 
@@ -197,9 +203,14 @@ void ExtensionHelper::OnExtensionResponse(int request_id,
                                           bool success,
                                           const std::string& response,
                                           const std::string& error) {
-  ExtensionProcessBindings::HandleResponse(
+  std::string extension_id;
+  SchemaGeneratedBindings::HandleResponse(
       extension_dispatcher_->v8_context_set(), request_id, success,
-      response, error);
+      response, error, &extension_id);
+
+  if (CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableLazyBackgroundPages))
+    extension_dispatcher_->CheckIdleStatus(extension_id);
 }
 
 void ExtensionHelper::OnExtensionMessageInvoke(const std::string& extension_id,
@@ -212,7 +223,7 @@ void ExtensionHelper::OnExtensionMessageInvoke(const std::string& extension_id,
 
 void ExtensionHelper::OnExtensionDeliverMessage(int target_id,
                                                 const std::string& message) {
-  RendererExtensionBindings::DeliverMessage(
+  MiscellaneousBindings::DeliverMessage(
       extension_dispatcher_->v8_context_set().GetAll(),
       target_id,
       message,
@@ -301,8 +312,9 @@ void ExtensionHelper::DidDownloadApplicationDefinition(
               static_cast<int>(i),
               pending_app_info_->icons[i].width,
               WebURLRequest::TargetIsFavicon,
-              NewCallback(
-                  this, &ExtensionHelper::DidDownloadApplicationIcon))));
+              base::Bind(
+                  &ExtensionHelper::DidDownloadApplicationIcon,
+                  base::Unretained(this)))));
     }
   } else {
     Send(new ExtensionHostMsg_InstallApplication(routing_id(), *app_info));

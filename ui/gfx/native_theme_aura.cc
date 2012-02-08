@@ -4,10 +4,17 @@
 
 #include "ui/gfx/native_theme_aura.h"
 
+#include "base/basictypes.h"
 #include "grit/gfx_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/skbitmap_operations.h"
+
+namespace {
+
+const SkColor kMenuBackgroundColor = SkColorSetRGB(0xed, 0xed, 0xed);
+
+}  // namespace
 
 namespace gfx {
 
@@ -18,7 +25,7 @@ const NativeTheme* NativeTheme::instance() {
 
 // static
 const NativeThemeAura* NativeThemeAura::instance() {
-  static const NativeThemeAura s_native_theme;
+  CR_DEFINE_STATIC_LOCAL(NativeThemeAura, s_native_theme, ());
   return &s_native_theme;
 }
 
@@ -26,6 +33,14 @@ NativeThemeAura::NativeThemeAura() {
 }
 
 NativeThemeAura::~NativeThemeAura() {
+}
+
+void NativeThemeAura::PaintMenuPopupBackground(
+    SkCanvas* canvas,
+    State state,
+    const gfx::Rect& rect,
+    const MenuListExtraParams& menu_list) const {
+  canvas->drawColor(kMenuBackgroundColor, SkXfermode::kSrc_Mode);
 }
 
 void NativeThemeAura::PaintScrollbarTrack(

@@ -6,22 +6,29 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/shared_memory.h"
 #include "base/timer.h"
-#include "content/browser/browser_thread.h"
-#include "content/browser/content_browser_client.h"
+#include "content/browser/browser_thread_impl.h"
 #include "content/browser/renderer_host/backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/common/notification_details.h"
-#include "content/common/notification_observer.h"
-#include "content/common/notification_registrar.h"
-#include "content/common/notification_source.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/notification_details.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
 #include "content/test/test_browser_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas_skia.h"
 
+#if defined(USE_AURA)
+#include "content/browser/renderer_host/render_widget_host_view_aura.h"
+#endif
+
 using base::TimeDelta;
+using content::BrowserThread;
+
+using content::BrowserThreadImpl;
 
 using WebKit::WebInputEvent;
 using WebKit::WebMouseWheelEvent;
@@ -138,7 +145,7 @@ class TestView : public TestRenderWidgetHostView {
 
 class MockRenderWidgetHost : public RenderWidgetHost {
  public:
-  MockRenderWidgetHost(RenderProcessHost* process, int routing_id)
+  MockRenderWidgetHost(content::RenderProcessHost* process, int routing_id)
       : RenderWidgetHost(process, routing_id),
         prehandle_keyboard_event_(false),
         prehandle_keyboard_event_called_(false),
@@ -204,7 +211,7 @@ class MockRenderWidgetHost : public RenderWidgetHost {
 
 // MockPaintingObserver --------------------------------------------------------
 
-class MockPaintingObserver : public NotificationObserver {
+class MockPaintingObserver : public content::NotificationObserver {
  public:
   void WidgetDidReceivePaintAtSizeAck(RenderWidgetHost* host,
                                       int tag,
@@ -215,14 +222,15 @@ class MockPaintingObserver : public NotificationObserver {
   }
 
   void Observe(int type,
-               const NotificationSource& source,
-               const NotificationDetails& details) {
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) {
     if (type ==
         content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK) {
       RenderWidgetHost::PaintAtSizeAckDetails* size_ack_details =
-          Details<RenderWidgetHost::PaintAtSizeAckDetails>(details).ptr();
+          content::Details<RenderWidgetHost::PaintAtSizeAckDetails>(details).
+              ptr();
       WidgetDidReceivePaintAtSizeAck(
-          Source<RenderWidgetHost>(source).ptr(),
+          content::Source<RenderWidgetHost>(source).ptr(),
           size_ack_details->tag,
           size_ack_details->size);
     }
@@ -423,14 +431,18 @@ TEST_F(RenderWidgetHostTest, Background) {
 #if !defined(OS_MACOSX)
   scoped_ptr<RenderWidgetHostView> view(
       content::GetContentClient()->browser()->CreateViewForWidget(host_.get()));
+#if defined(USE_AURA)
+  // TODO(derat): Call this on all platforms: http://crbug.com/102450.
+  static_cast<RenderWidgetHostViewAura*>(view.get())->InitAsChild();
+#endif
   host_->SetView(view.get());
 
   // Create a checkerboard background to test with.
   gfx::CanvasSkia canvas(4, 4, true);
-  canvas.FillRectInt(SK_ColorBLACK, 0, 0, 2, 2);
-  canvas.FillRectInt(SK_ColorWHITE, 2, 0, 2, 2);
-  canvas.FillRectInt(SK_ColorWHITE, 0, 2, 2, 2);
-  canvas.FillRectInt(SK_ColorBLACK, 2, 2, 2, 2);
+  canvas.FillRect(SK_ColorBLACK, gfx::Rect(0, 0, 2, 2));
+  canvas.FillRect(SK_ColorWHITE, gfx::Rect(2, 0, 2, 2));
+  canvas.FillRect(SK_ColorWHITE, gfx::Rect(0, 2, 2, 2));
+  canvas.FillRect(SK_ColorBLACK, gfx::Rect(2, 2, 2, 2));
   const SkBitmap& background =
       canvas.sk_canvas()->getDevice()->accessBitmap(false);
 
@@ -526,7 +538,7 @@ TEST_F(RenderWidgetHostTest, GetBackingStore_RepaintAck) {
 // Test that we don't paint when we're hidden, but we still send the ACK. Most
 // of the rest of the painting is tested in the GetBackingStore* ones.
 TEST_F(RenderWidgetHostTest, HiddenPaint) {
-  BrowserThread ui_thread(BrowserThread::UI, MessageLoop::current());
+  BrowserThreadImpl ui_thread(BrowserThread::UI, MessageLoop::current());
   // Hide the widget, it should have sent out a message to the renderer.
   EXPECT_FALSE(host_->is_hidden_);
   host_->WasHidden();
@@ -564,12 +576,12 @@ TEST_F(RenderWidgetHostTest, PaintAtSize) {
   EXPECT_TRUE(
       process_->sink().GetUniqueMessageMatching(ViewMsg_PaintAtSize::ID));
 
-  NotificationRegistrar registrar;
+  content::NotificationRegistrar registrar;
   MockPaintingObserver observer;
   registrar.Add(
       &observer,
       content::NOTIFICATION_RENDER_WIDGET_HOST_DID_RECEIVE_PAINT_AT_SIZE_ACK,
-      Source<RenderWidgetHost>(host_.get()));
+      content::Source<RenderWidgetHost>(host_.get()));
 
   host_->OnMsgPaintAtSizeAck(kPaintAtSizeTag, gfx::Size(20, 30));
   EXPECT_EQ(host_.get(), observer.host());
@@ -621,13 +633,7 @@ TEST_F(RenderWidgetHostTest, IgnoreKeyEventsHandledByRenderer) {
   EXPECT_FALSE(host_->unhandled_keyboard_event_called());
 }
 
-// Fails on Linux Aura, see http://crbug.com/100345
-#if defined(USE_AURA) && !defined(OS_WIN)
-#define MAYBE_PreHandleRawKeyDownEvent FAILS_PreHandleRawKeyDownEvent
-#else
-#define MAYBE_PreHandleRawKeyDownEvent PreHandleRawKeyDownEvent
-#endif
-TEST_F(RenderWidgetHostTest, MAYBE_PreHandleRawKeyDownEvent) {
+TEST_F(RenderWidgetHostTest, PreHandleRawKeyDownEvent) {
   // Simluate the situation that the browser handled the key down event during
   // pre-handle phrase.
   host_->set_prehandle_keyboard_event(true);
@@ -737,7 +743,7 @@ TEST_F(RenderWidgetHostTest, StopAndStartHangMonitorTimeout) {
 
   // Wait long enough for first timeout and see if it fired.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          new MessageLoop::QuitTask(), 10);
+                                          new MessageLoop::QuitTask(), 40);
   MessageLoop::current()->Run();
   EXPECT_TRUE(host_->unresponsive_timer_fired());
 }

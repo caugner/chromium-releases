@@ -6,6 +6,7 @@
 
 #include "base/message_loop.h"
 #include "base/string_util.h"
+#include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/point.h"
@@ -237,11 +238,13 @@ void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
       break;
 
     case protocol::ConnectionToHost::CONNECTED:
-      scriptable_obj->SignalLoginChallenge();
       break;
 
     case protocol::ConnectionToHost::AUTHENTICATED:
       UnsetSolidFill();
+      scriptable_obj->SetConnectionStatus(
+          ChromotingScriptableObject::STATUS_CONNECTED,
+          ConvertConnectionError(error));
       break;
 
     case protocol::ConnectionToHost::CLOSED:
@@ -257,20 +260,6 @@ void PepperView::SetConnectionState(protocol::ConnectionToHost::State state,
           ChromotingScriptableObject::STATUS_FAILED,
           ConvertConnectionError(error));
       break;
-  }
-}
-
-void PepperView::UpdateLoginStatus(bool success, const std::string& info) {
-  DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
-
-  // TODO(hclam): Re-consider the way we communicate with Javascript.
-  ChromotingScriptableObject* scriptable_obj = instance_->GetScriptableObject();
-  if (success) {
-    scriptable_obj->SetConnectionStatus(
-        ChromotingScriptableObject::STATUS_CONNECTED,
-        ChromotingScriptableObject::ERROR_NONE);
-  } else {
-    scriptable_obj->SignalLoginChallenge();
   }
 }
 
@@ -321,21 +310,16 @@ double PepperView::GetVerticalScaleRatio() const {
 }
 
 void PepperView::AllocateFrame(media::VideoFrame::Format format,
-                               size_t width,
-                               size_t height,
-                               base::TimeDelta timestamp,
-                               base::TimeDelta duration,
+                               const SkISize& size,
                                scoped_refptr<media::VideoFrame>* frame_out,
-                               Task* done) {
+                               const base::Closure& done) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
-  *frame_out = media::VideoFrame::CreateFrame(media::VideoFrame::RGB32,
-                                              width, height,
-                                              base::TimeDelta(),
-                                              base::TimeDelta());
+  *frame_out = media::VideoFrame::CreateFrame(
+      media::VideoFrame::RGB32, size.width(), size.height(),
+      base::TimeDelta(), base::TimeDelta());
   (*frame_out)->AddRef();
-  done->Run();
-  delete done;
+  done.Run();
 }
 
 void PepperView::ReleaseFrame(media::VideoFrame* frame) {
@@ -347,14 +331,13 @@ void PepperView::ReleaseFrame(media::VideoFrame* frame) {
 
 void PepperView::OnPartialFrameOutput(media::VideoFrame* frame,
                                       RectVector* rects,
-                                      Task* done) {
+                                      const base::Closure& done) {
   DCHECK(context_->main_message_loop()->BelongsToCurrentThread());
 
   // TODO(ajwong): Clean up this API to be async so we don't need to use a
   // member variable as a hack.
   PaintFrame(frame, rects);
-  done->Run();
-  delete done;
+  done.Run();
 }
 
 void PepperView::OnPaintDone(base::Time paint_start) {

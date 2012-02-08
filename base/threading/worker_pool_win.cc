@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/pending_task.h"
 #include "base/task.h"
 #include "base/tracked_objects.h"
 
@@ -14,47 +15,21 @@ namespace base {
 
 namespace {
 
-struct PendingTask {
-  PendingTask(
-      const tracked_objects::Location& posted_from,
-      const base::Closure& task)
-      : posted_from(posted_from),
-        task(task) {
-#if defined(TRACK_ALL_TASK_OBJECTS)
-    post_births = tracked_objects::ThreadData::TallyABirthIfActive(posted_from);
-    time_posted = tracked_objects::ThreadData::Now();
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
-  }
-
-#if defined(TRACK_ALL_TASK_OBJECTS)
-  // Counter for location where the Closure was posted from.
-  tracked_objects::Births* post_births;
-
-  // Time the task was posted.
-  TimeTicks time_posted;
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
-
-  // The site this PendingTask was posted from.
-  tracked_objects::Location posted_from;
-
-  // The task to run.
-  base::Closure task;
-};
-
 DWORD CALLBACK WorkItemCallback(void* param) {
   PendingTask* pending_task = static_cast<PendingTask*>(param);
   UNSHIPPED_TRACE_EVENT2("task", "WorkItemCallback::Run",
                          "src_file", pending_task->posted_from.file_name(),
                          "src_func", pending_task->posted_from.function_name());
 
-#if defined(TRACK_ALL_TASK_OBJECTS)
-  TimeTicks start_of_run = tracked_objects::ThreadData::Now();
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
+  tracked_objects::TrackedTime start_time =
+      tracked_objects::ThreadData::NowForStartOfRun();
+
   pending_task->task.Run();
-#if defined(TRACK_ALL_TASK_OBJECTS)
-  tracked_objects::ThreadData::TallyADeathIfActive(pending_task->post_births,
-      pending_task->time_posted, TimeTicks::TimeTicks(), start_of_run);
-#endif  // defined(TRACK_ALL_TASK_OBJECTS)
+
+  tracked_objects::ThreadData::TallyRunOnWorkerThreadIfTracking(
+      pending_task->birth_tally,
+      tracked_objects::TrackedTime(pending_task->time_posted), start_time,
+      tracked_objects::ThreadData::NowForEndOfRun());
 
   delete pending_task;
   return 0;

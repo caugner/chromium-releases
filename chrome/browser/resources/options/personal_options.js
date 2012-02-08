@@ -7,10 +7,6 @@ cr.define('options', function() {
   var OptionsPage = options.OptionsPage;
   var ArrayDataModel = cr.ui.ArrayDataModel;
 
-  // State variables.
-  var syncEnabled = false;
-  var syncSetupCompleted = false;
-
   /**
    * Encapsulated handling of personal options page.
    * @constructor
@@ -20,8 +16,9 @@ cr.define('options', function() {
                      templateData.personalPageTabTitle,
                      'personal-page');
     if (cr.isChromeOS) {
-      // Email of the currently logged in user (or |kGuestUser|).
-      this.userEmail_ = localStrings.getString('userEmail');
+      // Username (canonical email) of the currently logged in user or
+      // |kGuestUser| if a guest session is active.
+      this.username_ = localStrings.getString('username');
     }
   }
 
@@ -30,6 +27,10 @@ cr.define('options', function() {
   PersonalOptions.prototype = {
     // Inherit PersonalOptions from OptionsPage.
     __proto__: options.OptionsPage.prototype,
+
+    // State variables.
+    syncEnabled: false,
+    syncSetupCompleted: false,
 
     // Initialize PersonalOptions page.
     initializePage: function() {
@@ -57,13 +58,7 @@ cr.define('options', function() {
       options.personal_options.ProfileList.decorate(profilesList);
       profilesList.autoExpands = true;
 
-      profilesList.onchange = function(event) {
-        var selectedProfile = profilesList.selectedItem;
-        var hasSelection = selectedProfile != null;
-        var hasSingleProfile = profilesList.dataModel.length == 1;
-        $('profiles-manage').disabled = !hasSelection;
-        $('profiles-delete').disabled = !hasSingleProfile && !hasSelection;
-      };
+      profilesList.onchange = self.setProfileViewButtonsStatus_;
       $('profiles-create').onclick = function(event) {
         chrome.send('createProfile');
       };
@@ -140,6 +135,9 @@ cr.define('options', function() {
         $('manage-passwords').disabled = true;
       }
 
+      $('mac-passwords-warning').hidden =
+          !(localStrings.getString('macPasswordsWarning'));
+
       if (PersonalOptions.disableAutofillManagement()) {
         $('autofill-settings').disabled = true;
 
@@ -174,6 +172,10 @@ cr.define('options', function() {
     setSyncStatusErrorVisible_: function(visible) {
       visible ? $('sync-status').classList.add('sync-error') :
                 $('sync-status').classList.remove('sync-error');
+    },
+
+    setCustomizeSyncButtonEnabled_: function(enabled) {
+      $('customize-sync').disabled = !enabled;
     },
 
     setSyncActionLinkEnabled_: function(enabled) {
@@ -216,6 +218,21 @@ cr.define('options', function() {
     },
 
     /**
+     * Helper function to set the status of profile view buttons to disabled or
+     * enabled, depending on the number of profiles and selection status of the
+     * profiles list.
+     */
+    setProfileViewButtonsStatus_: function() {
+      var profilesList = $('profiles-list');
+      var selectedProfile = profilesList.selectedItem;
+      var hasSelection = selectedProfile != null;
+      var hasSingleProfile = profilesList.dataModel.length == 1;
+      $('profiles-manage').disabled = !hasSelection ||
+          !selectedProfile.isCurrentProfile;
+      $('profiles-delete').disabled = !hasSelection && !hasSingleProfile;
+    },
+
+    /**
      * Display the correct dialog layout, depending on how many profiles are
      * available.
      * @param {number} numProfiles The number of profiles to display.
@@ -246,6 +263,7 @@ cr.define('options', function() {
       // add it to the list, even if the list is hidden so we can access it
       // later.
       $('profiles-list').dataModel = new ArrayDataModel(profiles);
+      this.setProfileViewButtonsStatus_();
     },
 
     setStartStopButtonVisible_: function(visible) {
@@ -275,11 +293,20 @@ cr.define('options', function() {
     },
 
     /**
+     * Get the start/stop sync button DOM element.
+     * @return {DOMElement} The start/stop sync button.
+     * @private
+     */
+    getStartStopSyncButton_: function() {
+      return $('start-stop-sync');
+    },
+
+    /**
      * (Re)loads IMG element with current user account picture.
      */
     updateAccountPicture_: function() {
       $('account-picture').src =
-          'chrome://userimage/' + this.userEmail_ +
+          'chrome://userimage/' + this.username_ +
           '?id=' + (new Date()).getTime();
     },
   };
@@ -303,18 +330,20 @@ cr.define('options', function() {
 
   if (cr.isChromeOS) {
     /**
-     * Returns email of the user logged in (ChromeOS only).
+     * Returns username (canonical email) of the user logged in (ChromeOS only).
      * @return {string} user email.
      */
-    PersonalOptions.getLoggedInUserEmail = function() {
-      return PersonalOptions.getInstance().userEmail_;
+    PersonalOptions.getLoggedInUsername = function() {
+      return PersonalOptions.getInstance().username_;
     };
   }
 
   // Forward public APIs to private implementations.
   [
+    'getStartStopSyncButton',
     'hideSyncSection',
     'setAutoLoginVisible',
+    'setCustomizeSyncButtonEnabled',
     'setGtkThemeButtonEnabled',
     'setProfilesInfo',
     'setProfilesSectionVisible',
@@ -331,7 +360,7 @@ cr.define('options', function() {
     'updateAccountPicture',
   ].forEach(function(name) {
     PersonalOptions[name] = function(value) {
-      PersonalOptions.getInstance()[name + '_'](value);
+      return PersonalOptions.getInstance()[name + '_'](value);
     };
   });
 

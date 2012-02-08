@@ -24,10 +24,13 @@ class DesktopHostWin : public DesktopHost, public ui::WindowImpl {
   virtual void SetDesktop(Desktop* desktop) OVERRIDE;
   virtual gfx::AcceleratedWidget GetAcceleratedWidget() OVERRIDE;
   virtual void Show() OVERRIDE;
+  virtual void ToggleFullScreen() OVERRIDE;
   virtual gfx::Size GetSize() const OVERRIDE;
   virtual void SetSize(const gfx::Size& size) OVERRIDE;
+  virtual gfx::Point GetLocationOnNativeScreen() const OVERRIDE;
   virtual void SetCursor(gfx::NativeCursor cursor) OVERRIDE;
   virtual gfx::Point QueryMouseLocation() OVERRIDE;
+  virtual void PostNativeEvent(const base::NativeEvent& native_event) OVERRIDE;
 
  private:
   BEGIN_MSG_MAP_EX(DesktopHostWin)
@@ -40,6 +43,9 @@ class DesktopHostWin : public DesktopHost, public ui::WindowImpl {
     MESSAGE_HANDLER_EX(WM_KEYUP, OnKeyEvent)
     MESSAGE_HANDLER_EX(WM_SYSKEYDOWN, OnKeyEvent)
     MESSAGE_HANDLER_EX(WM_SYSKEYUP, OnKeyEvent)
+    MESSAGE_HANDLER_EX(WM_CHAR, OnKeyEvent)
+    MESSAGE_HANDLER_EX(WM_SYSCHAR, OnKeyEvent)
+    MESSAGE_HANDLER_EX(WM_IME_CHAR, OnKeyEvent)
 
     MSG_WM_CLOSE(OnClose)
     MSG_WM_PAINT(OnPaint)
@@ -53,6 +59,11 @@ class DesktopHostWin : public DesktopHost, public ui::WindowImpl {
   void OnSize(UINT param, const CSize& size);
 
   Desktop* desktop_;
+
+  bool fullscreen_;
+  RECT saved_window_rect_;
+  DWORD saved_window_style_;
+  DWORD saved_window_ex_style_;
 
   DISALLOW_COPY_AND_ASSIGN(DesktopHostWin);
 };

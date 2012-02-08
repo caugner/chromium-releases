@@ -12,8 +12,10 @@
 #include "base/callback.h"
 #include "base/message_loop.h"
 #include "chrome/browser/automation/ui_controls_internal.h"
-#include "content/browser/browser_thread.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/keycodes/keyboard_code_conversion_mac.h"
+
+using content::BrowserThread;
 
 // Implementation details: We use [NSApplication sendEvent:] instead
 // of [NSApplication postEvent:atStart:] so that the event gets sent
@@ -379,7 +381,7 @@ void MoveMouseToCenterAndPress(
 
   SendMouseMoveNotifyWhenDone(
       center.x, center.y,
-      base::Bind(&ui_controls::ClickTask, button, state, task));
+      base::Bind(&ui_controls::internal::ClickTask, button, state, task));
 }
 
 }  // ui_controls

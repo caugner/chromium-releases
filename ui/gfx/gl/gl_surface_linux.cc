@@ -6,15 +6,21 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#if !defined(USE_WAYLAND)
 #include "third_party/mesa/MesaLib/include/GL/osmesa.h"
+#endif
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface_egl.h"
+#if !defined(USE_WAYLAND)
 #include "ui/gfx/gl/gl_surface_glx.h"
 #include "ui/gfx/gl/gl_surface_osmesa.h"
+#endif
 #include "ui/gfx/gl/gl_surface_stub.h"
 
 namespace gfx {
+
+#if !defined(USE_WAYLAND)
 
 namespace {
 Display* g_osmesa_display;
@@ -36,6 +42,8 @@ class NativeViewGLSurfaceOSMesa : public GLSurfaceOSMesa {
   virtual void Destroy();
   virtual bool IsOffscreen();
   virtual bool SwapBuffers();
+  virtual std::string GetExtensions();
+  virtual bool PostSubBuffer(int x, int y, int width, int height);
 
  private:
   bool UpdateSize();
@@ -48,35 +56,14 @@ class NativeViewGLSurfaceOSMesa : public GLSurfaceOSMesa {
   DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceOSMesa);
 };
 
-bool GLSurface::InitializeOneOff() {
-  static bool initialized = false;
-  if (initialized)
-    return true;
+#endif //  !USE_WAYLAND
 
-  static const GLImplementation kAllowedGLImplementations[] = {
-    kGLImplementationDesktopGL,
-    kGLImplementationEGLGLES2,
-    kGLImplementationOSMesaGL
-  };
-
-  if (!InitializeRequestedGLBindings(
-      kAllowedGLImplementations,
-      kAllowedGLImplementations + arraysize(kAllowedGLImplementations),
-      kGLImplementationDesktopGL)) {
-    LOG(ERROR) << "InitializeRequestedGLBindings failed.";
-    return false;
-  }
-
+bool GLSurface::InitializeOneOffInternal() {
   switch (GetGLImplementation()) {
+#if !defined(USE_WAYLAND)
     case kGLImplementationDesktopGL:
       if (!GLSurfaceGLX::InitializeOneOff()) {
         LOG(ERROR) << "GLSurfaceGLX::InitializeOneOff failed.";
-        return false;
-      }
-      break;
-    case kGLImplementationEGLGLES2:
-      if (!GLSurfaceEGL::InitializeOneOff()) {
-        LOG(ERROR) << "GLSurfaceEGL::InitializeOneOff failed.";
         return false;
       }
       break;
@@ -86,13 +73,21 @@ bool GLSurface::InitializeOneOff() {
         return false;
       }
       break;
+#endif
+    case kGLImplementationEGLGLES2:
+      if (!GLSurfaceEGL::InitializeOneOff()) {
+        LOG(ERROR) << "GLSurfaceEGL::InitializeOneOff failed.";
+        return false;
+      }
+      break;
     default:
       break;
   }
 
-  initialized = true;
   return true;
 }
+
+#if !defined(USE_WAYLAND)
 
 NativeViewGLSurfaceOSMesa::NativeViewGLSurfaceOSMesa(
     gfx::PluginWindowHandle window)
@@ -201,6 +196,59 @@ bool NativeViewGLSurfaceOSMesa::SwapBuffers() {
   return true;
 }
 
+std::string NativeViewGLSurfaceOSMesa::GetExtensions() {
+  std::string extensions = gfx::GLSurfaceOSMesa::GetExtensions();
+  extensions += extensions.empty() ? "" : " ";
+  extensions += "GL_CHROMIUM_post_sub_buffer";
+  return extensions;
+}
+
+bool NativeViewGLSurfaceOSMesa::PostSubBuffer(
+    int x, int y, int width, int height) {
+  // Update the size before blitting so that the blit size is exactly the same
+  // as the window.
+  if (!UpdateSize()) {
+    LOG(ERROR) << "Failed to update size of GLContextOSMesa.";
+    return false;
+  }
+
+  gfx::Size size = GetSize();
+
+  // Move (0,0) from lower-left to upper-left
+  y = size.height() - y - height;
+
+  XWindowAttributes attributes;
+  if (!XGetWindowAttributes(g_osmesa_display, window_, &attributes)) {
+    LOG(ERROR) << "XGetWindowAttributes failed for window " << window_ << ".";
+    return false;
+  }
+
+  // Copy the frame into the pixmap.
+  ui::PutARGBImage(g_osmesa_display,
+                   attributes.visual,
+                   attributes.depth,
+                   pixmap_,
+                   pixmap_graphics_context_,
+                   static_cast<const uint8*>(GetHandle()),
+                   size.width(),
+                   size.height(),
+                   x, y,
+                   x, y,
+                   width,
+                   height);
+
+  // Copy the pixmap to the window.
+  XCopyArea(g_osmesa_display,
+            pixmap_,
+            window_,
+            window_graphics_context_,
+            x, y,
+            width, height,
+            x, y);
+
+  return true;
+}
+
 bool NativeViewGLSurfaceOSMesa::UpdateSize() {
   // Get the window size.
   XWindowAttributes attributes;
@@ -250,6 +298,8 @@ bool NativeViewGLSurfaceOSMesa::UpdateSize() {
   return true;
 }
 
+#endif //  !USE_WAYLAND
+
 scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
     bool software,
     gfx::PluginWindowHandle window) {
@@ -257,6 +307,7 @@ scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
     return NULL;
 
   switch (GetGLImplementation()) {
+#if !defined(USE_WAYLAND)
     case kGLImplementationOSMesaGL: {
       scoped_refptr<GLSurface> surface(
           new NativeViewGLSurfaceOSMesa(window));
@@ -265,17 +316,18 @@ scoped_refptr<GLSurface> GLSurface::CreateViewGLSurface(
 
       return surface;
     }
-    case kGLImplementationEGLGLES2: {
-      scoped_refptr<GLSurface> surface(new NativeViewGLSurfaceEGL(
-          false, window));
+    case kGLImplementationDesktopGL: {
+      scoped_refptr<GLSurface> surface(new NativeViewGLSurfaceGLX(
+          window));
       if (!surface->Initialize())
         return NULL;
 
       return surface;
     }
-    case kGLImplementationDesktopGL: {
-      scoped_refptr<GLSurface> surface(new NativeViewGLSurfaceGLX(
-          window));
+#endif
+    case kGLImplementationEGLGLES2: {
+      scoped_refptr<GLSurface> surface(new NativeViewGLSurfaceEGL(
+          false, window));
       if (!surface->Initialize())
         return NULL;
 
@@ -296,6 +348,7 @@ scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(
     return NULL;
 
   switch (GetGLImplementation()) {
+#if !defined(USE_WAYLAND)
     case kGLImplementationOSMesaGL: {
       scoped_refptr<GLSurface> surface(new GLSurfaceOSMesa(OSMESA_RGBA,
                                                            size));
@@ -304,15 +357,16 @@ scoped_refptr<GLSurface> GLSurface::CreateOffscreenGLSurface(
 
       return surface;
     }
-    case kGLImplementationEGLGLES2: {
-      scoped_refptr<GLSurface> surface(new PbufferGLSurfaceEGL(false, size));
+    case kGLImplementationDesktopGL: {
+      scoped_refptr<GLSurface> surface(new PbufferGLSurfaceGLX(size));
       if (!surface->Initialize())
         return NULL;
 
       return surface;
     }
-    case kGLImplementationDesktopGL: {
-      scoped_refptr<GLSurface> surface(new PbufferGLSurfaceGLX(size));
+#endif
+    case kGLImplementationEGLGLES2: {
+      scoped_refptr<GLSurface> surface(new PbufferGLSurfaceEGL(false, size));
       if (!surface->Initialize())
         return NULL;
 

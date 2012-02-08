@@ -7,11 +7,9 @@
 #include "base/base_paths.h"
 #include "base/command_line.h"
 #include "base/file_path.h"
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/native_library.h"
 #include "base/path_service.h"
-#include "base/synchronization/lock.h"
 #include "base/threading/thread_restrictions.h"
 #include "ui/gfx/gl/gl_bindings.h"
 #include "ui/gfx/gl/gl_implementation.h"
@@ -46,18 +44,19 @@ base::NativeLibrary LoadLibrary(const char* filename) {
   return LoadLibrary(FilePath(filename));
 }
 
-// TODO(backer): Find a more principled (less heavy handed) way to prevent a
-// race in the bindings initialization.
-#if (defined(TOOLKIT_VIEWS) && !defined(OS_CHROMEOS)) || defined(TOUCH_UI)
-base::LazyInstance<base::Lock> g_lock(base::LINKER_INITIALIZED);
-#endif
-
 }  // namespace anonymous
 
-bool InitializeGLBindings(GLImplementation implementation) {
-#if (defined(TOOLKIT_VIEWS) && !defined(OS_CHROMEOS)) || defined(TOUCH_UI)
-  base::AutoLock locked(g_lock.Get());
+void GetAllowedGLImplementations(std::vector<GLImplementation>* impls) {
+#if !defined(USE_WAYLAND)
+  impls->push_back(kGLImplementationDesktopGL);
 #endif
+  impls->push_back(kGLImplementationEGLGLES2);
+#if !defined(USE_WAYLAND)
+  impls->push_back(kGLImplementationOSMesaGL);
+#endif
+}
+
+bool InitializeGLBindings(GLImplementation implementation) {
   // Prevent reinitialization with a different implementation. Once the gpu
   // unit tests have initialized with kGLImplementationMock, we don't want to
   // later switch to another GL implementation.
@@ -103,7 +102,11 @@ bool InitializeGLBindings(GLImplementation implementation) {
       break;
     }
     case kGLImplementationDesktopGL: {
+#if defined(OS_OPENBSD)
+      base::NativeLibrary library = LoadLibrary("libGL.so");
+#else
       base::NativeLibrary library = LoadLibrary("libGL.so.1");
+#endif
       if (!library)
         return false;
 
@@ -175,6 +178,33 @@ bool InitializeGLBindings(GLImplementation implementation) {
   return true;
 }
 
+bool InitializeGLExtensionBindings(GLImplementation implementation,
+    GLContext* context) {
+  switch (implementation) {
+#if !defined(USE_WAYLAND)
+    case kGLImplementationOSMesaGL:
+      InitializeGLExtensionBindingsGL(context);
+      InitializeGLExtensionBindingsOSMESA(context);
+      break;
+    case kGLImplementationDesktopGL:
+      InitializeGLExtensionBindingsGL(context);
+      InitializeGLExtensionBindingsGLX(context);
+      break;
+#endif
+    case kGLImplementationEGLGLES2:
+      InitializeGLExtensionBindingsGL(context);
+      InitializeGLExtensionBindingsEGL(context);
+      break;
+    case kGLImplementationMockGL:
+      InitializeGLExtensionBindingsGL(context);
+      break;
+    default:
+      return false;
+  }
+
+  return true;
+}
+
 void InitializeDebugGLBindings() {
   InitializeDebugGLBindingsEGL();
   InitializeDebugGLBindingsGL();
@@ -182,6 +212,18 @@ void InitializeDebugGLBindings() {
   InitializeDebugGLBindingsGLX();
   InitializeDebugGLBindingsOSMESA();
 #endif
+}
+
+void ClearGLBindings() {
+  ClearGLBindingsEGL();
+  ClearGLBindingsGL();
+#if !defined(USE_WAYLAND)
+  ClearGLBindingsGLX();
+  ClearGLBindingsOSMESA();
+#endif
+  SetGLImplementation(kGLImplementationNone);
+
+  UnloadGLNativeLibraries();
 }
 
 }  // namespace gfx
