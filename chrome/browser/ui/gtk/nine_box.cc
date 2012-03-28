@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include "base/logging.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/image/image.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/point.h"
 
 namespace {
@@ -77,7 +77,7 @@ NineBox::NineBox(int top_left, int top, int top_right, int left, int center,
 NineBox::NineBox(int image, int top_margin, int bottom_margin, int left_margin,
                  int right_margin)
     : unref_images_on_destroy_(true) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   GdkPixbuf* pixbuf = rb.GetNativeImageNamed(image);
   int width = gdk_pixbuf_get_width(pixbuf);
   int height = gdk_pixbuf_get_height(pixbuf);
@@ -121,8 +121,10 @@ void NineBox::RenderToWidget(GtkWidget* dst) const {
 }
 
 void NineBox::RenderToWidgetWithOpacity(GtkWidget* dst, double opacity) const {
-  int dst_width = dst->allocation.width;
-  int dst_height = dst->allocation.height;
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(dst, &allocation);
+  int dst_width = allocation.width;
+  int dst_height = allocation.height;
 
   // The upper-left and lower-right corners of the center square in the
   // rendering of the ninebox.
@@ -136,13 +138,13 @@ void NineBox::RenderToWidgetWithOpacity(GtkWidget* dst, double opacity) const {
   if (x2 < x1 || y2 < y1)
     return;
 
-  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(dst->window));
+  cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(gtk_widget_get_window(dst)));
   // For widgets that have their own window, the allocation (x,y) coordinates
   // are GdkWindow relative. For other widgets, the coordinates are relative
   // to their container.
-  if (GTK_WIDGET_NO_WINDOW(dst)) {
+  if (!gtk_widget_get_has_window(dst)) {
     // Transform our cairo from window to widget coordinates.
-    cairo_translate(cr, dst->allocation.x, dst->allocation.y);
+    cairo_translate(cr, allocation.x, allocation.y);
   }
 
   if (base::i18n::IsRTL()) {

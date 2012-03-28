@@ -12,8 +12,8 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "net/base/net_util.h"
 
 GeolocationSettingsState::GeolocationSettingsState(Profile* profile)
@@ -32,11 +32,11 @@ void GeolocationSettingsState::OnGeolocationPermissionSet(
 void GeolocationSettingsState::DidNavigate(
     const content::LoadCommittedDetails& details) {
   if (details.entry)
-    embedder_url_ = details.entry->url();
+    embedder_url_ = details.entry->GetURL();
   if (state_map_.empty())
     return;
   if (!details.entry ||
-      details.previous_url.GetOrigin() != details.entry->url().GetOrigin()) {
+      details.previous_url.GetOrigin() != details.entry->GetURL().GetOrigin()) {
     state_map_.clear();
     return;
   }

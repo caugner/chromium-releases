@@ -17,11 +17,9 @@ namespace ppapi {
 
 // NPObjectVar -----------------------------------------------------------------
 
-NPObjectVar::NPObjectVar(PP_Module module,
-                         PP_Instance instance,
+NPObjectVar::NPObjectVar(PP_Instance instance,
                          NPObject* np_object)
-    : Var(module),
-      pp_instance_(instance),
+    : pp_instance_(instance),
       np_object_(np_object) {
   WebBindings::retainObject(np_object_);
   HostGlobals::Get()->host_var_tracker()->AddNPObjectVar(this);
@@ -35,17 +33,6 @@ NPObjectVar::~NPObjectVar() {
 
 NPObjectVar* NPObjectVar::AsNPObjectVar() {
   return this;
-}
-
-PP_Var NPObjectVar::GetPPVar() {
-  int32 id = GetOrCreateVarID();
-  if (!id)
-    return PP_MakeNull();
-
-  PP_Var result;
-  result.type = PP_VARTYPE_OBJECT;
-  result.value.as_id = id;
-  return result;
 }
 
 PP_VarType NPObjectVar::GetType() const {

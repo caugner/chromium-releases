@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,6 @@
 #include "content/public/browser/notification_types.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_mount_point_provider.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 
 // Mock listener used by test below.
 class MockSelectFileDialogListener : public SelectFileDialog::Listener {
@@ -76,12 +75,21 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
     listener_.reset(new MockSelectFileDialogListener());
     dialog_ = new SelectFileDialogExtension(listener_.get());
 
+    // We have to provide at least one mount point.
+    // File manager looks for "Downloads" mount point, so use this name.
+    FilePath tmp_path;
+    PathService::Get(base::DIR_TEMP, &tmp_path);
+    ASSERT_TRUE(tmp_dir_.CreateUniqueTempDirUnderPath(tmp_path));
+    downloads_dir_ = tmp_dir_.path().Append("Downloads");
+    file_util::CreateDirectory(downloads_dir_);
+
     // Must run after our setup because it actually runs the test.
     ExtensionBrowserTest::SetUp();
   }
 
   virtual void TearDown() OVERRIDE {
     ExtensionBrowserTest::TearDown();
+
     // Delete the dialog first, as it holds a pointer to the listener.
     dialog_ = NULL;
     listener_.reset();
@@ -92,10 +100,8 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
 
   // Creates a file system mount point for a directory.
   void AddMountPoint(const FilePath& path) {
-    fileapi::FileSystemPathManager* path_manager =
-        browser()->profile()->GetFileSystemContext()->path_manager();
     fileapi::ExternalFileSystemMountPointProvider* provider =
-        path_manager->external_provider();
+        browser()->profile()->GetFileSystemContext()->external_provider();
     provider->AddMountPoint(path);
   }
 
@@ -185,6 +191,9 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
 
   scoped_ptr<MockSelectFileDialogListener> second_listener_;
   scoped_refptr<SelectFileDialogExtension> second_dialog_;
+
+  ScopedTempDir tmp_dir_;
+  FilePath downloads_dir_;
 };
 
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest, CreateAndDestroy) {
@@ -215,11 +224,7 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest, DestroyListener) {
 #endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
                        MAYBE_SelectFileAndCancel) {
-  // Add tmp mount point even though this test won't use it directly.
-  // We need this to make sure that at least one top-level directory exists
-  // in the file browser.
-  FilePath tmp_dir("/tmp");
-  AddMountPoint(tmp_dir);
+  AddMountPoint(downloads_dir_);
 
   gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
 
@@ -243,17 +248,9 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
 #endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
                        MAYBE_SelectFileAndOpen) {
-  // Allow the tmp directory to be mounted.  We explicitly use /tmp because
-  // it it whitelisted for file system access on Chrome OS.
-  FilePath tmp_dir("/tmp");
-  AddMountPoint(tmp_dir);
+  AddMountPoint(downloads_dir_);
 
-  // Create a directory with a single file in it.  ScopedTempDir will delete
-  // itself and our temp file when it goes out of scope.
-  ScopedTempDir scoped_temp_dir;
-  ASSERT_TRUE(scoped_temp_dir.CreateUniqueTempDirUnderPath(tmp_dir));
-  FilePath temp_dir = scoped_temp_dir.path();
-  FilePath test_file = temp_dir.AppendASCII("file_manager_test.html");
+  FilePath test_file = downloads_dir_.AppendASCII("file_manager_test.html");
 
   // Create an empty file to give us something to select.
   FILE* fp = file_util::OpenFile(test_file, "w");
@@ -288,17 +285,9 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
 #endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
                        MAYBE_SelectFileAndSave) {
-  // Allow the tmp directory to be mounted.  We explicitly use /tmp because
-  // it it whitelisted for file system access on Chrome OS.
-  FilePath tmp_dir("/tmp");
-  AddMountPoint(tmp_dir);
+  AddMountPoint(downloads_dir_);
 
-  // Create a directory with a single file in it.  ScopedTempDir will delete
-  // itself and our temp file when it goes out of scope.
-  ScopedTempDir scoped_temp_dir;
-  ASSERT_TRUE(scoped_temp_dir.CreateUniqueTempDirUnderPath(tmp_dir));
-  FilePath temp_dir = scoped_temp_dir.path();
-  FilePath test_file = temp_dir.AppendASCII("file_manager_test.html");
+  FilePath test_file = downloads_dir_.AppendASCII("file_manager_test.html");
 
   gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
 
@@ -328,11 +317,7 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
 #endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
                        MAYBE_OpenSingletonTabAndCancel) {
-  // Add tmp mount point even though this test won't use it directly.
-  // We need this to make sure that at least one top-level directory exists
-  // in the file browser.
-  FilePath tmp_dir("/tmp");
-  AddMountPoint(tmp_dir);
+  AddMountPoint(downloads_dir_);
 
   gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
 
@@ -362,11 +347,7 @@ IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
 #endif
 IN_PROC_BROWSER_TEST_F(SelectFileDialogExtensionBrowserTest,
                        MAYBE_OpenTwoDialogs) {
-  // Add tmp mount point even though this test won't use it directly.
-  // We need this to make sure that at least one top-level directory exists
-  // in the file browser.
-  FilePath tmp_dir("/tmp");
-  AddMountPoint(tmp_dir);
+  AddMountPoint(downloads_dir_);
 
   gfx::NativeWindow owning_window = browser()->window()->GetNativeHandle();
 

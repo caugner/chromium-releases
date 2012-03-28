@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,8 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
@@ -26,6 +26,7 @@
 #endif
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 // Strings used in alignment properties.
 const char* ThemeService::kAlignmentTop = "top";
@@ -83,11 +84,10 @@ const SkColor kDefaultColorToolbar = SkColorSetRGB(223, 223, 223);
 const SkColor kDefaultColorTabText = SK_ColorBLACK;
 #if defined(OS_MACOSX)
 const SkColor kDefaultColorBackgroundTabText = SK_ColorBLACK;
-const SkColor kDefaultColorBookmarkText = SK_ColorBLACK;
 #else
 const SkColor kDefaultColorBackgroundTabText = SkColorSetRGB(64, 64, 64);
-const SkColor kDefaultColorBookmarkText = SkColorSetRGB(18, 50, 114);
 #endif
+const SkColor kDefaultColorBookmarkText = SK_ColorBLACK;
 #if defined(OS_WIN)
 const SkColor kDefaultColorNTPBackground =
     color_utils::GetSysSkColor(COLOR_WINDOW);
@@ -327,7 +327,7 @@ void ThemeService::SetTheme(const Extension* extension) {
   SaveThemeID(extension->id());
 
   NotifyThemeChanged();
-  UserMetrics::RecordAction(UserMetricsAction("Themes_Installed"));
+  content::RecordAction(UserMetricsAction("Themes_Installed"));
 }
 
 void ThemeService::RemoveUnusedThemes() {
@@ -338,8 +338,8 @@ void ThemeService::RemoveUnusedThemes() {
     return;
   std::string current_theme = GetThemeID();
   std::vector<std::string> remove_list;
-  const ExtensionList* extensions = service->extensions();
-  for (ExtensionList::const_iterator it = extensions->begin();
+  const ExtensionSet* extensions = service->extensions();
+  for (ExtensionSet::const_iterator it = extensions->begin();
        it != extensions->end(); ++it) {
     if ((*it)->is_theme() && (*it)->id() != current_theme) {
       remove_list.push_back((*it)->id());
@@ -352,7 +352,7 @@ void ThemeService::RemoveUnusedThemes() {
 void ThemeService::UseDefaultTheme() {
   ClearAllThemeData();
   NotifyThemeChanged();
-  UserMetrics::RecordAction(UserMetricsAction("Themes_Reset"));
+  content::RecordAction(UserMetricsAction("Themes_Reset"));
 }
 
 void ThemeService::SetNativeTheme() {
@@ -585,7 +585,7 @@ void ThemeService::LoadThemePrefs() {
     }
 
     if (loaded_pack) {
-      UserMetrics::RecordAction(UserMetricsAction("Themes.Loaded"));
+      content::RecordAction(UserMetricsAction("Themes.Loaded"));
     } else {
       // TODO(erg): We need to pop up a dialog informing the user that their
       // theme is being migrated.
@@ -596,11 +596,11 @@ void ThemeService::LoadThemePrefs() {
         if (extension) {
           DLOG(ERROR) << "Migrating theme";
           BuildFromExtension(extension);
-          UserMetrics::RecordAction(UserMetricsAction("Themes.Migrated"));
+          content::RecordAction(UserMetricsAction("Themes.Migrated"));
         } else {
           DLOG(ERROR) << "Theme is mysteriously gone.";
           ClearAllThemeData();
-          UserMetrics::RecordAction(UserMetricsAction("Themes.Gone"));
+          content::RecordAction(UserMetricsAction("Themes.Gone"));
         }
       }
     }

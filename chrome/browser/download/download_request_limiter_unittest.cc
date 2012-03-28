@@ -1,20 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/navigation_controller.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
 
-class DownloadRequestLimiterTest
-    : public TabContentsWrapperTestHarness,
-      public DownloadRequestLimiter::Callback {
+class DownloadRequestLimiterTest : public TabContentsWrapperTestHarness {
  public:
   DownloadRequestLimiterTest()
       : ui_thread_(BrowserThread::UI, &message_loop_),
@@ -38,15 +36,12 @@ class DownloadRequestLimiterTest
     TabContentsWrapperTestHarness::TearDown();
   }
 
-  virtual void ContinueDownload() {
-    continue_count_++;
-  }
-  virtual void CancelDownload() {
-    cancel_count_++;
-  }
-
   void CanDownload() {
-    download_request_limiter_->CanDownloadImpl(contents_wrapper(), -1, this);
+    download_request_limiter_->CanDownloadImpl(
+        contents_wrapper(),
+        -1,
+        base::Bind(&DownloadRequestLimiterTest::ContinueDownload,
+                   base::Unretained(this)));
     message_loop_.RunAllPending();
   }
 
@@ -56,6 +51,14 @@ class DownloadRequestLimiterTest
   }
 
  protected:
+  void ContinueDownload(bool allow) {
+    if (allow) {
+      continue_count_++;
+    } else {
+      cancel_count_++;
+    }
+  }
+
   class DownloadRequestLimiterTestDelegate
       : public DownloadRequestLimiter::TestingDelegate {
    public:

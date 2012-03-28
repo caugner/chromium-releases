@@ -6,11 +6,11 @@
 #define NET_DISK_CACHE_MEM_ENTRY_IMPL_H_
 #pragma once
 
+#include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
 #include "base/memory/scoped_ptr.h"
 #include "net/base/net_log.h"
 #include "net/disk_cache/disk_cache.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 
 namespace disk_cache {
 
@@ -100,22 +100,23 @@ class MemEntryImpl : public Entry {
   virtual int32 GetDataSize(int index) const OVERRIDE;
   virtual int ReadData(
       int index, int offset, net::IOBuffer* buf, int buf_len,
-      net::OldCompletionCallback* completion_callback) OVERRIDE;
-  virtual int WriteData(int index, int offset, net::IOBuffer* buf, int buf_len,
-                        net::OldCompletionCallback* completion_callback,
-                        bool truncate) OVERRIDE;
+      const net::CompletionCallback& callback) OVERRIDE;
+  virtual int WriteData(
+      int index, int offset, net::IOBuffer* buf, int buf_len,
+      const net::CompletionCallback& callback, bool truncate) OVERRIDE;
   virtual int ReadSparseData(
       int64 offset, net::IOBuffer* buf, int buf_len,
-      net::OldCompletionCallback* completion_callback) OVERRIDE;
+      const net::CompletionCallback& callback) OVERRIDE;
   virtual int WriteSparseData(
       int64 offset, net::IOBuffer* buf, int buf_len,
-      net::OldCompletionCallback* completion_callback) OVERRIDE;
-  virtual int GetAvailableRange(int64 offset, int len, int64* start,
-                                OldCompletionCallback* callback) OVERRIDE;
+      const net::CompletionCallback& callback) OVERRIDE;
+  virtual int GetAvailableRange(
+      int64 offset, int len, int64* start,
+      const net::CompletionCallback& callback) OVERRIDE;
   virtual bool CouldBeSparse() const OVERRIDE;
   virtual void CancelSparseIO() OVERRIDE {}
   virtual int ReadyForSparseIO(
-      net::OldCompletionCallback* completion_callback) OVERRIDE;
+      const net::CompletionCallback& callback) OVERRIDE;
 
  private:
   typedef base::hash_map<int, MemEntryImpl*> EntryMap;

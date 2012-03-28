@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,12 @@
 #include "chrome/browser/ui/browser.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu_bridge.h"
 #include "chrome/browser/ui/cocoa/event_utils.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
 #include "ui/base/text/text_elider.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -33,7 +37,7 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
   string16 title = ui::ElideText(node->GetTitle(),
                                  font,
                                  kMaximumMenuPixelsWide,
-                                 false);
+                                 ui::ELIDE_AT_END);
   return base::SysUTF16ToNSString(title);
 }
 
@@ -61,7 +65,8 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
 }
 
 - (void)dealloc {
-  [[self menu] setDelegate:nil];
+  if ([[self menu] delegate] == self)
+    [[self menu] setDelegate:nil];
   [super dealloc];
 }
 
@@ -92,8 +97,10 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
     browser = Browser::Create(bridge_->GetProfile());
   WindowOpenDisposition disposition =
       event_utils::WindowOpenDispositionFromNSEvent([NSApp currentEvent]);
-  browser->OpenURL(node->url(), GURL(), disposition,
-                   content::PAGE_TRANSITION_AUTO_BOOKMARK);
+  OpenURLParams params(
+      node->url(), Referrer(), disposition,
+      content::PAGE_TRANSITION_AUTO_BOOKMARK, false);
+  browser->OpenURL(params);
 }
 
 // Open sites under BookmarkNode with the specified disposition.
@@ -116,11 +123,11 @@ const NSUInteger kMaximumMenuPixelsWide = 300;
                           disposition);
 
   if (disposition == NEW_FOREGROUND_TAB) {
-    UserMetrics::RecordAction(UserMetricsAction("OpenAllBookmarks"));
+    content::RecordAction(UserMetricsAction("OpenAllBookmarks"));
   } else if (disposition == NEW_WINDOW) {
-    UserMetrics::RecordAction(UserMetricsAction("OpenAllBookmarksNewWindow"));
+    content::RecordAction(UserMetricsAction("OpenAllBookmarksNewWindow"));
   } else {
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OpenAllBookmarksIncognitoWindow"));
   }
 }

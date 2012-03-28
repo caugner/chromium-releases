@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,11 +21,12 @@ class SyncBackendHostMock : public SyncBackendHost {
   SyncBackendHostMock();
   virtual ~SyncBackendHostMock();
 
-  MOCK_METHOD5(ConfigureDataTypes,
-               void(const std::set<syncable::ModelType>&,
-                    const std::set<syncable::ModelType>&,
+  MOCK_METHOD6(ConfigureDataTypes,
+               void(syncable::ModelTypeSet,
+                    syncable::ModelTypeSet,
                     sync_api::ConfigureReason,
-                    base::Callback<void(const syncable::ModelTypeSet&)>,
+                    base::Callback<void(syncable::ModelTypeSet)>,
+                    base::Callback<void()>,
                     bool));
   MOCK_METHOD0(StartSyncingWithServer, void());
 };

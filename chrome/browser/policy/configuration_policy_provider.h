@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,6 @@
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
-#include "base/values.h"
-#include "policy/configuration_policy_type.h"
 
 namespace policy {
 
@@ -60,6 +58,11 @@ class ConfigurationPolicyProvider {
   // It is possible that OnProviderGoingAway is called first though, and
   // OnUpdatePolicy won't be called if that happens.
   virtual void RefreshPolicies() = 0;
+
+  // Utility method that converts deprecated policies into their corresponding
+  // actual policies. Subclasses can use this to fix deprecated policies in
+  // PolicyMaps that they obtained from elsewhere.
+  static void FixDeprecatedPolicies(PolicyMap* policies);
 
  protected:
   // Sends a policy update notification to observers.

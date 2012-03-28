@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,10 +15,13 @@
 #include "base/string16.h"
 #include "base/threading/thread.h"
 #include "chrome/common/automation_constants.h"
+#include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/webdriver/frame_path.h"
 #include "chrome/test/webdriver/webdriver_automation.h"
 #include "chrome/test/webdriver/webdriver_basic_types.h"
+#include "chrome/test/webdriver/webdriver_capabilities_parser.h"
 #include "chrome/test/webdriver/webdriver_element_id.h"
+#include "chrome/test/webdriver/webdriver_logging.h"
 
 class FilePath;
 
@@ -34,13 +37,19 @@ namespace webdriver {
 class Error;
 class ValueParser;
 
-// A window ID and frame path combination that uniquely identifies a specific
+// A view ID and frame path combination that uniquely identifies a specific
 // frame within a session.
 struct FrameId {
-  FrameId(int window_id, const FramePath& frame_path);
-  FrameId& operator=(const FrameId& other);
-  int window_id;
+  FrameId();
+  FrameId(const WebViewId& view_id, const FramePath& frame_path);
+
+  WebViewId view_id;
   FramePath frame_path;
+};
+
+enum StorageType {
+  kLocalStorageType = 0,
+  kSessionStorageType
 };
 
 // Every connection made by WebDriver maps to a session object.
@@ -49,33 +58,15 @@ struct FrameId {
 // A session manages its own lifetime.
 class Session {
  public:
-  struct Options {
-    Options();
-    ~Options();
-
-    // True if the session should simulate OS-level input. Currently only
-    // applies to keyboard input.
-    bool use_native_events;
-
-    // True if the session should not wait for page loads and navigate
-    // asynchronously.
-    bool load_async;
-  };
-
   // Adds this |Session| to the |SessionManager|. The session manages its own
-  // lifetime. Do not call delete.
-  explicit Session(const Options& options);
+  // lifetime. Call |Terminate|, not delete, if you need to quit.
+  Session();
 
   // Removes this |Session| from the |SessionManager|.
   ~Session();
 
-  // Starts the session thread and a new browser, using the exe found at
-  // |browser_exe| and duplicating the provided |user_data_dir|.
-  // If |browser_exe| is empty, it will search in all the default locations.
-  // It |user_data_dir| is empty, it will use a temporary dir.
-  // Returns true on success. On failure, the session will delete
-  // itself and return an error code.
-  Error* Init(const Automation::BrowserOptions& options);
+  // Initializes the session with the given capabilities.
+  Error* Init(const base::DictionaryValue* capabilities_dict);
 
   // Should be called before executing a command.
   Error* BeforeExecuteCommand();
@@ -124,6 +115,8 @@ class Session {
   // Send the given keys to the given element dictionary. This function takes
   // ownership of |element|.
   Error* SendKeys(const ElementId& element, const string16& keys);
+  // Send the given keys to the active element.
+  Error* SendKeys(const string16& keys);
 
   // Sets the file paths to the file upload control under the given location.
   Error* DragAndDropFilePaths(const Point& location,
@@ -150,12 +143,13 @@ class Session {
   Error* DeleteCookie(const std::string& url, const std::string& cookie_name);
   Error* SetCookie(const std::string& url, base::DictionaryValue* cookie_dict);
 
-  // Gets all the currently existing window IDs. Returns true on success.
-  Error* GetWindowIds(std::vector<int>* window_ids);
+  // Gets all the currently open views.
+  Error* GetViews(std::vector<WebViewInfo>* views);
 
-  // Switches the window used by default. |name| is either an ID returned by
-  // |GetWindowIds| or the name attribute of a DOM window.
-  Error* SwitchToWindow(const std::string& name);
+  // Switches the view used by default. |id_or_name| is either a view ID
+  // returned by |GetViews| or the name attribute of a DOM window.
+  // Only tabs are considered when searching by name.
+  Error* SwitchToView(const std::string& id_or_name);
 
   // Switches the frame used by default. |name_or_id| is either the name or id
   // of a frame element.
@@ -179,6 +173,12 @@ class Session {
   // Note: The session will be deleted if this closes the last window in the
   // session.
   Error* CloseWindow();
+
+  // Gets the bounds for the specified window.
+  Error* GetWindowBounds(const WebViewId& window, Rect* bounds);
+
+  // Sets the bounds for the specified window.
+  Error* SetWindowBounds(const WebViewId& window, const Rect& bounds);
 
   // Gets the message of the currently active JavaScript modal dialog.
   Error* GetAlertMessage(std::string* text);
@@ -304,17 +304,70 @@ class Session {
   Error* GetAttribute(const ElementId& element, const std::string& key,
                       base::Value** value);
 
-  // Waits for all tabs to stop loading. Returns true on success.
-  Error* WaitForAllTabsToStopLoading();
+  // Waits for all views to stop loading. Returns true on success.
+  Error* WaitForAllViewsToStopLoading();
 
   // Install packed extension at |path|.
   Error* InstallExtensionDeprecated(const FilePath& path);
 
-  // Get installed extensions IDs.
-  Error* GetInstalledExtensions(std::vector<std::string>* extension_ids);
-
   // Install extension at |path|.
   Error* InstallExtension(const FilePath& path, std::string* extension_id);
+
+  Error* GetExtensionsInfo(base::ListValue* extension_ids);
+
+  Error* IsPageActionVisible(const WebViewId& tab_id,
+                             const std::string& extension_id,
+                             bool* is_visible);
+
+  Error* SetExtensionState(const std::string& extension_id,
+                           bool enable);
+
+  Error* ClickExtensionButton(const std::string& extension_id,
+                              bool browser_action);
+
+  Error* UninstallExtension(const std::string& extension_id);
+
+  // Sets the preference to the given value. This function takes ownership
+  // of |value|. If the preference is a user preference (instead of local
+  // state preference) |is_user_pref| should be true.
+  Error* SetPreference(const std::string& pref,
+                       bool is_user_pref,
+                       base::Value* value);
+
+  // Returns a copy of the current log entries. Caller is responsible for
+  // returned value.
+  base::ListValue* GetLog() const;
+
+  // Gets the browser connection state.
+  Error* GetBrowserConnectionState(bool* online);
+
+  // Gets the status of the application cache.
+  Error* GetAppCacheStatus(int* status);
+
+  // Sets an item in the HTML5 localStorage object.
+  Error* SetStorageItem(StorageType type,
+                        const std::string& key,
+                        const std::string& value);
+
+  // Gets the value of an item in the HTML5 localStorage object.
+  Error* GetStorageItem(StorageType type,
+                        const std::string& key,
+                        std::string* value);
+
+  // Removes an item from the HTML5 localStorage object.
+  Error* RemoveStorageItem(StorageType type,
+                           const std::string& key,
+                           std::string* value);
+
+  // Gets the total number of items in the HTML5 localStorage object.
+  Error* GetStorageSize(StorageType type, int* size);
+
+  // Removes all items in the HTML5 localStorage object.
+  Error* ClearStorage(StorageType type);
+
+  // Gets the keys of all items of the HTML5 localStorage object. If there are
+  // no errors, the function sets |value| and the caller takes ownership.
+  Error* GetStorageKeys(StorageType type, base::ListValue** keys);
 
   const std::string& id() const;
 
@@ -328,24 +381,17 @@ class Session {
 
   const Point& get_mouse_position() const;
 
-  const Options& options() const;
+  const Logger& logger() const;
 
-  // Gets the browser connection state.
-  Error* GetBrowserConnectionState(bool* online);
-
-  // Gets the status of the application cache.
-  Error* GetAppCacheStatus(int* status);
+  const Capabilities& capabilities() const;
 
  private:
-  void RunSessionTask(Task* task);
-  void RunSessionTaskOnSessionThread(
-      Task* task,
-      base::WaitableEvent* done_event);
   void RunSessionTask(const base::Closure& task);
   void RunClosureOnSessionThread(
       const base::Closure& task,
       base::WaitableEvent* done_event);
   void InitOnSessionThread(const Automation::BrowserOptions& options,
+                           int* build_no,
                            Error** error);
   void TerminateOnSessionThread();
 
@@ -355,8 +401,14 @@ class Session {
   Error* ExecuteScriptAndParseValue(const FrameId& frame_id,
                                     const std::string& script,
                                     base::Value** value);
-
-  void SendKeysOnSessionThread(const string16& keys, Error** error);
+  void SendKeysOnSessionThread(const string16& keys,
+                               bool release_modifiers,
+                               Error** error);
+  Error* ProcessWebMouseEvents(const std::vector<WebMouseEvent>& events);
+  WebMouseEvent CreateWebMouseEvent(automation::MouseEventType type,
+                                    automation::MouseButton button,
+                                    const Point& point,
+                                    int click_count);
   Error* SwitchToFrameWithJavaScriptLocatedFrame(
       const std::string& script,
       base::ListValue* args);
@@ -384,6 +436,11 @@ class Session {
       bool center,
       bool verify_clickable_at_middle,
       Point* location);
+  Error* PostBrowserStartInit();
+  Error* InitForWebsiteTesting();
+
+  scoped_ptr<InMemoryLog> session_log_;
+  Logger logger_;
 
   const std::string id_;
   FrameId current_target_;
@@ -413,13 +470,19 @@ class Session {
   std::string alert_prompt_text_;
   bool has_alert_prompt_text_;
 
-  Options options_;
+  Capabilities capabilities_;
+
+  // Current state of all modifier keys.
+  int sticky_modifiers_;
+
+  // Chrome's build number. This is the 3rd number in Chrome's version string
+  // (e.g., 18.0.995.0 -> 995). Only valid after Chrome has started.
+  // See http://dev.chromium.org/releases/version-numbers.
+  int build_no_;
 
   DISALLOW_COPY_AND_ASSIGN(Session);
 };
 
 }  // namespace webdriver
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(webdriver::Session);
 
 #endif  // CHROME_TEST_WEBDRIVER_WEBDRIVER_SESSION_H_

@@ -14,13 +14,12 @@
 #include "base/i18n/string_search.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/stl_util.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file.h"
 #include "content/browser/download/download_file_manager.h"
-#include "content/browser/download/download_id.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_persistent_store_info.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_stats.h"
@@ -28,10 +27,14 @@
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
-#include "content/public/browser/download_manager_delegate.h"
 #include "net/base/net_util.h"
 
 using content::BrowserThread;
+using content::DownloadFile;
+using content::DownloadId;
+using content::DownloadItem;
+using content::DownloadManager;
+using content::WebContents;
 
 // A DownloadItem normally goes through the following states:
 //      * Created (when download starts)
@@ -118,27 +121,60 @@ class NullDownloadRequestHandle : public DownloadRequestHandleInterface {
 
 }  // namespace
 
+namespace content {
+
+// Our download table ID starts at 1, so we use 0 to represent a download that
+// has started, but has not yet had its data persisted in the table. We use fake
+// database handles in incognito mode starting at -1 and progressively getting
+// more negative.
+// static
+const int DownloadItem::kUninitializedHandle = 0;
+
+const char DownloadItem::kEmptyFileHash[] = "";
+
+}
+
+// Infrastructure in DownloadItemImpl::Delegate to assert invariant that
+// delegate always outlives all attached DownloadItemImpls.
+DownloadItemImpl::Delegate::Delegate()
+    : count_(0) {}
+
+DownloadItemImpl::Delegate::~Delegate() {
+  DCHECK_EQ(0, count_);
+}
+
+void DownloadItemImpl::Delegate::Attach() {
+  ++count_;
+}
+
+void DownloadItemImpl::Delegate::Detach() {
+  DCHECK_LT(0, count_);
+  --count_;
+}
+
 // Our download table ID starts at 1, so we use 0 to represent a download that
 // has started, but has not yet had its data persisted in the table. We use fake
 // database handles in incognito mode starting at -1 and progressively getting
 // more negative.
 
 // Constructor for reading from the history service.
-DownloadItemImpl::DownloadItemImpl(DownloadManager* download_manager,
+DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
+                                   DownloadId download_id,
                                    const DownloadPersistentStoreInfo& info)
-    : download_id_(download_manager->GetNextId()),
+    : download_id_(download_id),
       full_path_(info.path),
       url_chain_(1, info.url),
       referrer_url_(info.referrer_url),
       total_bytes_(info.total_bytes),
       received_bytes_(info.received_bytes),
       bytes_per_sec_(0),
+      last_reason_(DOWNLOAD_INTERRUPT_REASON_NONE),
       start_tick_(base::TimeTicks()),
       state_(static_cast<DownloadState>(info.state)),
       start_time_(info.start_time),
       end_time_(info.end_time),
       db_handle_(info.db_handle),
-      download_manager_(download_manager),
+      delegate_(delegate),
       is_paused_(false),
       open_when_complete_(false),
       file_externally_removed_(false),
@@ -150,6 +186,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadManager* download_manager,
       opened_(info.opened),
       open_enabled_(true),
       delegate_delayed_complete_(false) {
+  delegate_->Attach();
   if (IsInProgress())
     state_ = CANCELLED;
   if (IsComplete())
@@ -159,14 +196,13 @@ DownloadItemImpl::DownloadItemImpl(DownloadManager* download_manager,
 
 // Constructing for a regular download:
 DownloadItemImpl::DownloadItemImpl(
-    DownloadManager* download_manager,
+    Delegate* delegate,
     const DownloadCreateInfo& info,
     DownloadRequestHandleInterface* request_handle,
     bool is_otr)
     : state_info_(info.original_name, info.save_info.file_path,
                   info.has_user_gesture, info.transition_type,
-                  info.prompt_user_for_save_location, info.path_uniquifier,
-                  DownloadStateInfo::NOT_DANGEROUS),
+                  info.prompt_user_for_save_location),
       request_handle_(request_handle),
       download_id_(info.download_id),
       full_path_(info.path),
@@ -186,7 +222,7 @@ DownloadItemImpl::DownloadItemImpl(
       state_(IN_PROGRESS),
       start_time_(info.start_time),
       db_handle_(DownloadItem::kUninitializedHandle),
-      download_manager_(download_manager),
+      delegate_(delegate),
       is_paused_(false),
       open_when_complete_(false),
       file_externally_removed_(false),
@@ -198,11 +234,12 @@ DownloadItemImpl::DownloadItemImpl(
       opened_(false),
       open_enabled_(true),
       delegate_delayed_complete_(false) {
+  delegate_->Attach();
   Init(true /* actively downloading */);
 }
 
 // Constructing for the "Save Page As..." feature:
-DownloadItemImpl::DownloadItemImpl(DownloadManager* download_manager,
+DownloadItemImpl::DownloadItemImpl(Delegate* delegate,
                                    const FilePath& path,
                                    const GURL& url,
                                    bool is_otr,
@@ -220,7 +257,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadManager* download_manager,
       state_(IN_PROGRESS),
       start_time_(base::Time::Now()),
       db_handle_(DownloadItem::kUninitializedHandle),
-      download_manager_(download_manager),
+      delegate_(delegate),
       is_paused_(false),
       open_when_complete_(false),
       file_externally_removed_(false),
@@ -232,6 +269,7 @@ DownloadItemImpl::DownloadItemImpl(DownloadManager* download_manager,
       opened_(false),
       open_enabled_(true),
       delegate_delayed_complete_(false) {
+  delegate_->Attach();
   Init(true /* actively downloading */);
 }
 
@@ -240,7 +278,10 @@ DownloadItemImpl::~DownloadItemImpl() {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   TransitionTo(REMOVING);
-  download_manager_->AssertQueueStateConsistent(this);
+  STLDeleteContainerPairSecondPointers(
+      external_data_map_.begin(), external_data_map_.end());
+  delegate_->AssertStateConsistent(this);
+  delegate_->Detach();
 }
 
 void DownloadItemImpl::AddObserver(Observer* observer) {
@@ -273,8 +314,7 @@ bool DownloadItemImpl::CanOpenDownload() {
 }
 
 bool DownloadItemImpl::ShouldOpenFileBasedOnExtension() {
-  return download_manager_->delegate()->ShouldOpenFileBasedOnExtension(
-      GetUserVerifiedFilePath());
+  return delegate_->ShouldOpenFileBasedOnExtension(GetUserVerifiedFilePath());
 }
 
 void DownloadItemImpl::OpenDownload() {
@@ -293,11 +333,11 @@ void DownloadItemImpl::OpenDownload() {
   // don't generally have the proper interface for that to the external
   // program that opens the file.  So instead we spawn a check to update
   // the UI if the file has been deleted in parallel with the open.
-  download_manager_->CheckForFileRemoval(this);
+  delegate_->CheckForFileRemoval(this);
   download_stats::RecordOpen(GetEndTime(), !GetOpened());
   opened_ = true;
   FOR_EACH_OBSERVER(Observer, observers_, OnDownloadOpened(this));
-  download_manager_->MarkDownloadOpened(this);
+  delegate_->DownloadOpened(this);
 
   // For testing: If download opening is disabled on this item,
   // make the rest of the routine a no-op.
@@ -320,17 +360,33 @@ void DownloadItemImpl::DangerousDownloadValidated() {
 
   UMA_HISTOGRAM_ENUMERATION("Download.DangerousDownloadValidated",
                             GetDangerType(),
-                            DownloadStateInfo::DANGEROUS_TYPE_MAX);
+                            content::DOWNLOAD_DANGER_TYPE_MAX);
 
   safety_state_ = DANGEROUS_BUT_VALIDATED;
   UpdateObservers();
 
-  download_manager_->MaybeCompleteDownload(this);
+  delegate_->MaybeCompleteDownload(this);
 }
 
-void DownloadItemImpl::UpdateSize(int64 bytes_so_far) {
+void DownloadItemImpl::ProgressComplete(int64 bytes_so_far,
+                                        const std::string& final_hash) {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  hash_ = final_hash;
+  hash_state_ = "";
+
+  received_bytes_ = bytes_so_far;
+
+  // If we've received more data than we were expecting (bad server info?),
+  // revert to 'unknown size mode'.
+  if (received_bytes_ > total_bytes_)
+    total_bytes_ = 0;
+}
+
+void DownloadItemImpl::UpdateProgress(int64 bytes_so_far,
+                                      const std::string& hash_state) {
+  hash_state_ = hash_state;
 
   received_bytes_ = bytes_so_far;
 
@@ -343,7 +399,9 @@ void DownloadItemImpl::UpdateSize(int64 bytes_so_far) {
 // Updates from the download thread may have been posted while this download
 // was being cancelled in the UI thread, so we'll accept them unless we're
 // complete.
-void DownloadItemImpl::UpdateProgress(int64 bytes_so_far, int64 bytes_per_sec) {
+void DownloadItemImpl::UpdateProgress(int64 bytes_so_far,
+                                      int64 bytes_per_sec,
+                                      const std::string& hash_state) {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -352,7 +410,7 @@ void DownloadItemImpl::UpdateProgress(int64 bytes_so_far, int64 bytes_per_sec) {
     return;
   }
   bytes_per_sec_ = bytes_per_sec;
-  UpdateSize(bytes_so_far);
+  UpdateProgress(bytes_so_far, hash_state);
   UpdateObservers();
 }
 
@@ -376,7 +434,7 @@ void DownloadItemImpl::Cancel(bool user_cancel) {
 
   TransitionTo(CANCELLED);
   if (user_cancel)
-    download_manager_->DownloadCancelledInternal(this);
+    delegate_->DownloadCancelled(this);
 }
 
 void DownloadItemImpl::MarkAsComplete() {
@@ -400,13 +458,17 @@ void DownloadItemImpl::OnAllDataSaved(
 
   DCHECK(!all_data_saved_);
   all_data_saved_ = true;
-  UpdateSize(size);
-  hash_ = final_hash;
+  ProgressComplete(size, final_hash);
 }
 
 void DownloadItemImpl::OnDownloadedFileRemoved() {
   file_externally_removed_ = true;
   UpdateObservers();
+}
+
+void DownloadItemImpl::MaybeCompleteDownload() {
+  // TODO(rdsmith): Move logic for this function here.
+  delegate_->MaybeCompleteDownload(this);
 }
 
 void DownloadItemImpl::Completed() {
@@ -418,7 +480,7 @@ void DownloadItemImpl::Completed() {
   DCHECK(all_data_saved_);
   end_time_ = base::Time::Now();
   TransitionTo(COMPLETE);
-  download_manager_->DownloadCompleted(GetId());
+  delegate_->DownloadCompleted(this);
   download_stats::RecordDownloadCompleted(start_tick_, received_bytes_);
 
   if (auto_opened_) {
@@ -462,7 +524,9 @@ void DownloadItemImpl::UpdateTarget() {
     state_info_.target_name = full_path_.BaseName();
 }
 
-void DownloadItemImpl::Interrupted(int64 size, InterruptReason reason) {
+void DownloadItemImpl::Interrupted(int64 size,
+                                   const std::string& hash_state,
+                                   InterruptReason reason) {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
@@ -470,7 +534,7 @@ void DownloadItemImpl::Interrupted(int64 size, InterruptReason reason) {
     return;
 
   last_reason_ = reason;
-  UpdateSize(size);
+  UpdateProgress(size, hash_state);
   download_stats::RecordDownloadInterrupted(reason,
                                             received_bytes_,
                                             total_bytes_);
@@ -483,12 +547,14 @@ void DownloadItemImpl::Delete(DeleteReason reason) {
 
   switch (reason) {
     case DELETE_DUE_TO_USER_DISCARD:
-      UMA_HISTOGRAM_ENUMERATION("Download.UserDiscard", GetDangerType(),
-                                DownloadStateInfo::DANGEROUS_TYPE_MAX);
+      UMA_HISTOGRAM_ENUMERATION(
+          "Download.UserDiscard", GetDangerType(),
+          content::DOWNLOAD_DANGER_TYPE_MAX);
       break;
     case DELETE_DUE_TO_BROWSER_SHUTDOWN:
-      UMA_HISTOGRAM_ENUMERATION("Download.Discard", GetDangerType(),
-                                DownloadStateInfo::DANGEROUS_TYPE_MAX);
+      UMA_HISTOGRAM_ENUMERATION(
+          "Download.Discard", GetDangerType(),
+          content::DOWNLOAD_DANGER_TYPE_MAX);
       break;
     default:
       NOTREACHED();
@@ -504,12 +570,12 @@ void DownloadItemImpl::Remove() {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  download_manager_->AssertQueueStateConsistent(this);
+  delegate_->AssertStateConsistent(this);
   Cancel(true);
-  download_manager_->AssertQueueStateConsistent(this);
+  delegate_->AssertStateConsistent(this);
 
   TransitionTo(REMOVING);
-  download_manager_->RemoveDownload(db_handle_);
+  delegate_->DownloadRemoved(this);
   // We have now been deleted.
 }
 
@@ -543,6 +609,10 @@ int DownloadItemImpl::PercentComplete() const {
 
 void DownloadItemImpl::OnPathDetermined(const FilePath& path) {
   full_path_ = path;
+  // If we prompted the user, then target_name is stale.  Allow it to be
+  // populated by UpdateTarget().
+  if (PromptUserForSaveLocation())
+    state_info_.target_name.clear();
   UpdateTarget();
 }
 
@@ -580,19 +650,26 @@ void DownloadItemImpl::OnDownloadCompleting(DownloadFileManager* file_manager) {
   DCHECK_NE(DANGEROUS, GetSafetyState());
   DCHECK(file_manager);
 
+  // If we prompted the user for save location, then we should overwrite the
+  // target.  Otherwise, if the danger state was NOT_DANGEROUS, we already
+  // uniquified the path and should overwrite.
+  bool should_overwrite =
+      (PromptUserForSaveLocation() ||
+       GetDangerType() == content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS);
   if (NeedsRename()) {
     BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
         base::Bind(&DownloadFileManager::RenameCompletingDownloadFile,
-                   file_manager, GetGlobalId(),
-                   GetTargetFilePath(), GetSafetyState() == SAFE));
+                   file_manager, download_id_,
+                   GetTargetFilePath(), should_overwrite));
     return;
   }
 
   Completed();
 
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          base::Bind(&DownloadFileManager::CompleteDownload,
-                                     file_manager, GetGlobalId()));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&DownloadFileManager::CompleteDownload,
+                 file_manager, download_id_));
 }
 
 void DownloadItemImpl::OnDownloadRenamedToFinalName(const FilePath& full_path) {
@@ -607,7 +684,7 @@ void DownloadItemImpl::OnDownloadRenamedToFinalName(const FilePath& full_path) {
 
   Rename(full_path);
 
-  if (download_manager_->delegate()->ShouldOpenDownload(this)) {
+  if (delegate_->ShouldOpenDownload(this)) {
     Completed();
   } else {
     delegate_delayed_complete_ = true;
@@ -630,11 +707,8 @@ bool DownloadItemImpl::MatchesQuery(const string16& query) const {
   //   L"/\x4f60\x597d\x4f60\x597d",
   //   "/%E4%BD%A0%E5%A5%BD%E4%BD%A0%E5%A5%BD"
   std::string languages;
-  TabContents* tab = GetTabContents();
-  if (tab) {
-    languages = content::GetContentClient()->browser()->GetAcceptLangs(
-        tab->browser_context());
-  }
+  languages = content::GetContentClient()->browser()->GetAcceptLangs(
+      GetBrowserContext());
   string16 url_formatted(net::FormatUrl(GetURL(), languages));
   if (base::i18n::StringSearchIgnoringCaseAndAccents(query, url_formatted))
     return true;
@@ -654,7 +728,7 @@ void DownloadItemImpl::SetFileCheckResults(const DownloadStateInfo& state) {
   UpdateSafetyState();
 }
 
-DownloadStateInfo::DangerType DownloadItemImpl::GetDangerType() const {
+content::DownloadDangerType DownloadItemImpl::GetDangerType() const {
   return state_info_.danger;
 }
 
@@ -665,21 +739,21 @@ bool DownloadItemImpl::IsDangerous() const {
 void DownloadItemImpl::MarkFileDangerous() {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  state_info_.danger = DownloadStateInfo::DANGEROUS_FILE;
+  state_info_.danger = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE;
   UpdateSafetyState();
 }
 
 void DownloadItemImpl::MarkUrlDangerous() {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  state_info_.danger = DownloadStateInfo::DANGEROUS_URL;
+  state_info_.danger = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL;
   UpdateSafetyState();
 }
 
 void DownloadItemImpl::MarkContentDangerous() {
   // TODO(rdsmith): Change to DCHECK after http://crbug.com/85408 resolved.
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  state_info_.danger = DownloadStateInfo::DANGEROUS_CONTENT;
+  state_info_.danger = content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT;
   UpdateSafetyState();
 }
 
@@ -696,7 +770,7 @@ DownloadPersistentStoreInfo DownloadItemImpl::GetPersistentStoreInfo() const {
                                      GetOpened());
 }
 
-TabContents* DownloadItemImpl::GetTabContents() const {
+WebContents* DownloadItemImpl::GetWebContents() const {
   // TODO(rdsmith): Remove null check after removing GetTabContents() from
   // paths that might be used by DownloadItems created from history import.
   // Currently such items have null request_handle_s, where other items
@@ -704,6 +778,10 @@ TabContents* DownloadItemImpl::GetTabContents() const {
   if (request_handle_.get())
     return request_handle_->GetTabContents();
   return NULL;
+}
+
+content::BrowserContext* DownloadItemImpl::GetBrowserContext() const {
+  return delegate_->GetBrowserContext();
 }
 
 FilePath DownloadItemImpl::GetTargetFilePath() const {
@@ -728,9 +806,10 @@ void DownloadItemImpl::OffThreadCancel(DownloadFileManager* file_manager) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   request_handle_->CancelRequest();
 
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-                          base::Bind(&DownloadFileManager::CancelDownload,
-                                     file_manager, GetGlobalId()));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&DownloadFileManager::CancelDownload,
+                 file_manager, download_id_));
 }
 
 void DownloadItemImpl::Init(bool active) {
@@ -738,9 +817,8 @@ void DownloadItemImpl::Init(bool active) {
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   UpdateTarget();
-  if (active) {
+  if (active)
     download_stats::RecordDownloadCount(download_stats::START_COUNT);
-  }
   VLOG(20) << __FUNCTION__ << "() " << DebugString(true);
 }
 
@@ -801,6 +879,8 @@ std::string DownloadItemImpl::DebugString(bool verbose) const {
         " is_paused = %c"
         " is_otr = %c"
         " safety_state = %s"
+        " last_modified = '%s'"
+        " etag = '%s'"
         " url_chain = \n\t\"%s\"\n\t"
         " target_name = \"%" PRFilePath "\""
         " full_path = \"%" PRFilePath "\"",
@@ -810,6 +890,8 @@ std::string DownloadItemImpl::DebugString(bool verbose) const {
         IsPaused() ? 'T' : 'F',
         IsOtr() ? 'T' : 'F',
         DebugSafetyStateString(GetSafetyState()),
+        GetLastModifiedTime().c_str(),
+        GetETag().c_str(),
         url_list.c_str(),
         state_info_.target_name.value().c_str(),
         GetFullPath().value().c_str());
@@ -859,15 +941,15 @@ void DownloadItemImpl::SetTotalBytes(int64 total_bytes) {
 }
 const std::string& DownloadItemImpl::GetHash() const { return hash_; }
 int64 DownloadItemImpl::GetReceivedBytes() const { return received_bytes_; }
+const std::string& DownloadItemImpl::GetHashState() const {
+  return hash_state_;
+}
 int32 DownloadItemImpl::GetId() const { return download_id_.local(); }
 DownloadId DownloadItemImpl::GetGlobalId() const { return download_id_; }
 base::Time DownloadItemImpl::GetStartTime() const { return start_time_; }
 base::Time DownloadItemImpl::GetEndTime() const { return end_time_; }
 void DownloadItemImpl::SetDbHandle(int64 handle) { db_handle_ = handle; }
 int64 DownloadItemImpl::GetDbHandle() const { return db_handle_; }
-DownloadManager* DownloadItemImpl::GetDownloadManager() {
-  return download_manager_;
-}
 bool DownloadItemImpl::IsPaused() const { return is_paused_; }
 bool DownloadItemImpl::GetOpenWhenComplete() const {
   return open_when_complete_;
@@ -895,6 +977,10 @@ const FilePath& DownloadItemImpl::GetSuggestedPath() const {
 bool DownloadItemImpl::IsTemporary() const { return is_temporary_; }
 void DownloadItemImpl::SetOpened(bool opened) { opened_ = opened; }
 bool DownloadItemImpl::GetOpened() const { return opened_; }
+const std::string& DownloadItemImpl::GetLastModifiedTime() const {
+  return last_modified_time_;
+}
+const std::string& DownloadItemImpl::GetETag() const { return etag_; }
 InterruptReason DownloadItemImpl::GetLastReason() const {
   return last_reason_;
 }
@@ -903,3 +989,23 @@ bool DownloadItemImpl::NeedsRename() const {
   return state_info_.target_name != full_path_.BaseName();
 }
 void DownloadItemImpl::MockDownloadOpenForTesting() { open_enabled_ = false; }
+
+DownloadItem::ExternalData*
+DownloadItemImpl::GetExternalData(const void* key) {
+  if (!ContainsKey(external_data_map_, key))
+    return NULL;
+  return external_data_map_[key];
+}
+
+void DownloadItemImpl::SetExternalData(
+    const void* key, DownloadItem::ExternalData* data) {
+  std::map<const void*, ExternalData*>::iterator it =
+      external_data_map_.find(key);
+
+  if (it == external_data_map_.end()) {
+    external_data_map_[key] = data;
+  } else if (it->second != data) {
+    delete it->second;
+    it->second = data;
+  }
+}

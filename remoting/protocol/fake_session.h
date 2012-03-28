@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
+#include "net/base/completion_callback.h"
 #include "net/socket/socket.h"
 #include "net/socket/stream_socket.h"
 #include "remoting/protocol/session.h"
@@ -26,6 +28,11 @@ extern const char kTestJid[];
 // Read() reads data from another buffer that can be set with AppendInputData().
 // Pending reads are supported, so if there is a pending read AppendInputData()
 // calls the read callback.
+//
+// Two fake sockets can be connected to each other using the
+// PairWith() method, e.g.: a->PairWith(b). After this all data
+// written to |a| can be read from |b| and vica versa. Two connected
+// sockets |a| and |b| must be created and used on the same thread.
 class FakeSocket : public net::StreamSocket {
  public:
   FakeSocket();
@@ -33,21 +40,22 @@ class FakeSocket : public net::StreamSocket {
 
   const std::string& written_data() const { return written_data_; }
 
-  void AppendInputData(const char* data, int data_size);
+  void AppendInputData(const std::vector<char>& data);
+  void PairWith(FakeSocket* peer_socket);
   int input_pos() const { return input_pos_; }
   bool read_pending() const { return read_pending_; }
 
-  // net::Socket interface.
+  // net::Socket implementation.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback) OVERRIDE;
+                   const net::CompletionCallback& callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback) OVERRIDE;
+                    const net::CompletionCallback& callback) OVERRIDE;
 
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
 
   // net::StreamSocket interface.
-  virtual int Connect(net::OldCompletionCallback* callback) OVERRIDE;
+  virtual int Connect(const net::CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
@@ -65,7 +73,8 @@ class FakeSocket : public net::StreamSocket {
   bool read_pending_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_;
-  net::OldCompletionCallback* read_callback_;
+  net::CompletionCallback read_callback_;
+  base::WeakPtr<FakeSocket> peer_socket_;
 
   std::string written_data_;
   std::string input_data_;
@@ -74,6 +83,7 @@ class FakeSocket : public net::StreamSocket {
   net::BoundNetLog net_log_;
 
   MessageLoop* message_loop_;
+  base::WeakPtrFactory<FakeSocket> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeSocket);
 };
@@ -93,11 +103,11 @@ class FakeUdpSocket : public net::Socket {
   void AppendInputPacket(const char* data, int data_size);
   int input_pos() const { return input_pos_; }
 
-  // net::Socket interface.
+  // net::Socket implementation.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback) OVERRIDE;
+                   const net::CompletionCallback& callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback) OVERRIDE;
+                    const net::CompletionCallback& callback) OVERRIDE;
 
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
@@ -106,7 +116,7 @@ class FakeUdpSocket : public net::Socket {
   bool read_pending_;
   scoped_refptr<net::IOBuffer> read_buffer_;
   int read_buffer_size_;
-  net::OldCompletionCallback* read_callback_;
+  net::CompletionCallback read_callback_;
 
   std::vector<std::string> written_packets_;
   std::vector<std::string> input_packets_;
@@ -137,9 +147,12 @@ class FakeSession : public Session {
   FakeSocket* GetStreamChannel(const std::string& name);
   FakeUdpSocket* GetDatagramChannel(const std::string& name);
 
-  // Session interface.
+  // Session implementation.
   virtual void SetStateChangeCallback(
       const StateChangeCallback& callback) OVERRIDE;
+
+  virtual void SetRouteChangeCallback(
+      const RouteChangeCallback& callback) OVERRIDE;
 
   virtual Session::Error error() OVERRIDE;
 

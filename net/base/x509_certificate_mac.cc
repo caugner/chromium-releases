@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/logging.h"
+#include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/singleton.h"
 #include "base/pickle.h"
@@ -21,14 +22,22 @@
 #include "crypto/cssm_init.h"
 #include "crypto/nss_util.h"
 #include "crypto/rsa_private_key.h"
+#include "crypto/sha2.h"
 #include "net/base/asn1_util.h"
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_verify_result.h"
+#include "net/base/crl_set.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_root_certs.h"
 #include "net/base/x509_certificate_known_roots_mac.h"
 #include "third_party/apple_apsl/cssmapplePriv.h"
 #include "third_party/nss/mozilla/security/nss/lib/certdb/cert.h"
+
+// From 10.7.2 libsecurity_keychain-55035/lib/SecTrustPriv.h, for use with
+// SecTrustCopyExtendedResult.
+#ifndef kSecEVOrganizationName
+#define kSecEVOrganizationName CFSTR("Organization")
+#endif
 
 using base::mac::ScopedCFTypeRef;
 using base::Time;
@@ -51,11 +60,7 @@ int NetErrorFromOSStatus(OSStatus status) {
     case errSecAuthFailed:
       return ERR_ACCESS_DENIED;
     default: {
-      base::mac::ScopedCFTypeRef<CFStringRef> error_string(
-          SecCopyErrorMessageString(status, NULL));
-      LOG(ERROR) << "Unknown error " << status
-                 << " (" << base::SysCFStringRefToUTF8(error_string) << ")"
-                 << " mapped to ERR_FAILED";
+      OSSTATUS_LOG(ERROR, status) << "Unknown error mapped to ERR_FAILED";
       return ERR_FAILED;
     }
   }
@@ -119,11 +124,8 @@ CertStatus CertStatusFromOSStatus(OSStatus status) {
       // Failure was due to something Chromium doesn't define a
       // specific status for (such as basic constraints violation, or
       // unknown critical extension)
-      base::mac::ScopedCFTypeRef<CFStringRef> error_string(
-          SecCopyErrorMessageString(status, NULL));
-      LOG(WARNING) << "Unknown error " << status
-                   << " (" << base::SysCFStringRefToUTF8(error_string) << ")"
-                   << " mapped to CERT_STATUS_INVALID";
+      OSSTATUS_LOG(WARNING, status)
+          << "Unknown error mapped to CERT_STATUS_INVALID";
       return CERT_STATUS_INVALID;
     }
   }
@@ -257,6 +259,17 @@ class CSSMCachedCertificate {
   CSSM_CL_HANDLE cl_handle_;
   CSSM_HANDLE cached_cert_handle_;
 };
+
+void GetCertDistinguishedName(const CSSMCachedCertificate& cached_cert,
+                              const CSSM_OID* oid,
+                              CertPrincipal* result) {
+  CSSMFieldValue distinguished_name;
+  OSStatus status = cached_cert.GetField(oid, &distinguished_name);
+  if (status || !distinguished_name.field())
+    return;
+  result->ParseDistinguishedName(distinguished_name.field()->Data,
+                                 distinguished_name.field()->Length);
+}
 
 void GetCertDateForOID(const CSSMCachedCertificate& cached_cert,
                        const CSSM_OID* oid,
@@ -523,8 +536,8 @@ void AddCertificatesFromBytes(const char* data, size_t length,
   OSStatus status = SecKeychainItemImport(local_data, NULL, &input_format,
                                           NULL, 0, NULL, NULL, &items);
   if (status) {
-    DLOG(WARNING) << status << " Unable to import items from data of length "
-                  << length;
+    OSSTATUS_DLOG(WARNING, status)
+        << "Unable to import items from data of length " << length;
     return;
   }
 
@@ -674,20 +687,70 @@ void AppendPublicKeyHashes(CFArrayRef chain,
   }
 }
 
+bool CheckRevocationWithCRLSet(CFArrayRef chain, CRLSet* crl_set) {
+  if (CFArrayGetCount(chain) == 0)
+    return true;
+
+  // We iterate from the root certificate down to the leaf, keeping track of
+  // the issuer's SPKI at each step.
+  std::string issuer_spki_hash;
+  for (CFIndex i = CFArrayGetCount(chain) - 1; i >= 0; i--) {
+    SecCertificateRef cert = reinterpret_cast<SecCertificateRef>(
+        const_cast<void*>(CFArrayGetValueAtIndex(chain, i)));
+
+    CSSM_DATA cert_data;
+    OSStatus err = SecCertificateGetData(cert, &cert_data);
+    if (err != noErr) {
+      NOTREACHED();
+      continue;
+    }
+    base::StringPiece der_bytes(reinterpret_cast<const char*>(cert_data.Data),
+                                cert_data.Length);
+    base::StringPiece spki;
+    if (!asn1::ExtractSPKIFromDERCert(der_bytes, &spki)) {
+      NOTREACHED();
+      continue;
+    }
+
+    const std::string spki_hash = crypto::SHA256HashString(spki);
+    CSSMCachedCertificate cached_cert;
+    if (cached_cert.Init(cert) != CSSM_OK) {
+      NOTREACHED();
+      continue;
+    }
+    const std::string serial = GetCertSerialNumber(cached_cert);
+
+    CRLSet::Result result = crl_set->CheckSPKI(spki_hash);
+
+    if (result != CRLSet::REVOKED && !issuer_spki_hash.empty())
+      result = crl_set->CheckSerial(serial, issuer_spki_hash);
+
+    issuer_spki_hash = spki_hash;
+
+    switch (result) {
+      case CRLSet::REVOKED:
+        return false;
+      case CRLSet::UNKNOWN:
+      case CRLSet::GOOD:
+        continue;
+      default:
+        NOTREACHED();
+        return false;
+    }
+  }
+
+  return true;
+}
+
 }  // namespace
 
 void X509Certificate::Initialize() {
-  const CSSM_X509_NAME* name;
-  OSStatus status = SecCertificateGetSubject(cert_handle_, &name);
-  if (!status)
-    subject_.Parse(name);
-
-  status = SecCertificateGetIssuer(cert_handle_, &name);
-  if (!status)
-    issuer_.Parse(name);
-
   CSSMCachedCertificate cached_cert;
   if (cached_cert.Init(cert_handle_) == CSSM_OK) {
+    GetCertDistinguishedName(cached_cert, &CSSMOID_X509V1SubjectNameStd,
+                             &subject_);
+    GetCertDistinguishedName(cached_cert, &CSSMOID_X509V1IssuerNameStd,
+                             &issuer_);
     GetCertDateForOID(cached_cert, &CSSMOID_X509V1ValidityNotBefore,
                       &valid_start_);
     GetCertDateForOID(cached_cert, &CSSMOID_X509V1ValidityNotAfter,
@@ -722,9 +785,9 @@ X509Certificate* X509Certificate::CreateSelfSigned(
   DCHECK(key);
   DCHECK(!subject.empty());
 
-  if (valid_duration.InSeconds() > UINT32_MAX) {
-     LOG(ERROR) << "valid_duration too big" << valid_duration.InSeconds();
-     valid_duration = base::TimeDelta::FromSeconds(UINT32_MAX);
+  if (valid_duration.InSeconds() > kuint32max) {
+     LOG(ERROR) << "valid_duration too big " << valid_duration.InSeconds();
+     valid_duration = base::TimeDelta::FromSeconds(kuint32max);
   }
 
   // There is a comment in
@@ -812,7 +875,7 @@ X509Certificate* X509Certificate::CreateSelfSigned(
   }
 
   CSSM_BOOL confirmRequired;
-  CSSM_TP_RESULT_SET *resultSet = NULL;
+  CSSM_TP_RESULT_SET* resultSet = NULL;
   crtn = CSSM_TP_RetrieveCredResult(tp_handle, &refId, NULL, &estTime,
                                     &confirmRequired, &resultSet);
   ScopedEncodedCertResults scopedResults(resultSet);
@@ -837,13 +900,13 @@ X509Certificate* X509Certificate::CreateSelfSigned(
 
   CSSM_ENCODED_CERT* encCert =
       reinterpret_cast<CSSM_ENCODED_CERT*>(resultSet->Results);
-  base::mac::ScopedCFTypeRef<SecCertificateRef> scoped_cert;
+  ScopedCFTypeRef<SecCertificateRef> scoped_cert;
   SecCertificateRef certificate_ref = NULL;
   OSStatus os_status =
       SecCertificateCreateFromData(&encCert->CertBlob, encCert->CertType,
                                    encCert->CertEncoding, &certificate_ref);
   if (os_status != 0) {
-    DLOG(ERROR) << "SecCertificateCreateFromData failed: " << os_status;
+    OSSTATUS_DLOG(ERROR, os_status) << "SecCertificateCreateFromData failed";
     return NULL;
   }
   scoped_cert.reset(certificate_ref);
@@ -989,6 +1052,9 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
     return NetErrorFromOSStatus(status);
   ScopedCFTypeRef<CFArrayRef> scoped_completed_chain(completed_chain);
 
+  if (crl_set && !CheckRevocationWithCRLSet(completed_chain, crl_set))
+    verify_result->cert_status |= CERT_STATUS_REVOKED;
+
   GetCertChainInfo(scoped_completed_chain.get(), chain_info, verify_result);
 
   // Evaluate the results
@@ -1080,16 +1146,25 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
               CFBundleGetFunctionPointerForName(bundle,
                   CFSTR("SecTrustCopyExtendedResult")));
       if (copy_extended_result) {
-        CFDictionaryRef ev_dict = NULL;
-        status = copy_extended_result(trust_ref, &ev_dict);
-        if (!status && ev_dict) {
-          // The returned dictionary contains the EV organization name from the
-          // server certificate, which we don't need at this point (and we
-          // have other ways to access, anyway). All we care is that
-          // SecTrustCopyExtendedResult() returned noErr and a non-NULL
-          // dictionary.
-          CFRelease(ev_dict);
-          verify_result->cert_status |= CERT_STATUS_IS_EV;
+        CFDictionaryRef ev_dict_temp = NULL;
+        status = copy_extended_result(trust_ref, &ev_dict_temp);
+        ScopedCFTypeRef<CFDictionaryRef> ev_dict(ev_dict_temp);
+        ev_dict_temp = NULL;
+        if (status == noErr && ev_dict) {
+          // In 10.7.3, SecTrustCopyExtendedResult returns noErr and populates
+          // ev_dict even for non-EV certificates, but only EV certificates
+          // will cause ev_dict to contain kSecEVOrganizationName. In previous
+          // releases, SecTrustCopyExtendedResult would only return noErr and
+          // populate ev_dict for EV certificates, but would always include
+          // kSecEVOrganizationName in that case, so checking for this key is
+          // appropriate for all known versions of SecTrustCopyExtendedResult.
+          // The actual organization name is unneeded here and can be accessed
+          // through other means. All that matters here is the OS' conception
+          // of whether or not the certificate is EV.
+          if (CFDictionaryContainsKey(ev_dict,
+                                      kSecEVOrganizationName)) {
+            verify_result->cert_status |= CERT_STATUS_IS_EV;
+          }
         }
       }
     }
@@ -1265,8 +1340,7 @@ bool X509Certificate::IsIssuedBy(
     const std::vector<CertPrincipal>& valid_issuers) {
   // Get the cert's issuer chain.
   CFArrayRef cert_chain = NULL;
-  OSStatus result;
-  result = CopyCertChain(os_cert_handle(), &cert_chain);
+  OSStatus result = CopyCertChain(os_cert_handle(), &cert_chain);
   if (result)
     return false;
   ScopedCFTypeRef<CFArrayRef> scoped_cert_chain(cert_chain);
@@ -1436,7 +1510,7 @@ bool X509Certificate::GetSSLClientCertificates(
   }
 
   if (err != errSecItemNotFound) {
-    LOG(ERROR) << "SecIdentitySearch error " << err;
+    OSSTATUS_LOG(ERROR, err) << "SecIdentitySearch error";
     return false;
   }
   return true;
@@ -1444,11 +1518,11 @@ bool X509Certificate::GetSSLClientCertificates(
 
 CFArrayRef X509Certificate::CreateClientCertificateChain() const {
   // Initialize the result array with just the IdentityRef of the receiver:
-  OSStatus result;
   SecIdentityRef identity;
-  result = SecIdentityCreateWithCertificate(NULL, cert_handle_, &identity);
+  OSStatus result =
+      SecIdentityCreateWithCertificate(NULL, cert_handle_, &identity);
   if (result) {
-    LOG(ERROR) << "SecIdentityCreateWithCertificate error " << result;
+    OSSTATUS_LOG(ERROR, result) << "SecIdentityCreateWithCertificate error";
     return NULL;
   }
   ScopedCFTypeRef<CFMutableArrayRef> chain(
@@ -1459,7 +1533,7 @@ CFArrayRef X509Certificate::CreateClientCertificateChain() const {
   result = CopyCertChain(cert_handle_, &cert_chain);
   ScopedCFTypeRef<CFArrayRef> scoped_cert_chain(cert_chain);
   if (result) {
-    LOG(ERROR) << "CreateIdentityCertificateChain error " << result;
+    OSSTATUS_LOG(ERROR, result) << "CreateIdentityCertificateChain error";
     return chain.release();
   }
 
@@ -1512,6 +1586,51 @@ bool X509Certificate::WriteOSCertHandleToPickle(OSCertHandle cert_handle,
 
   return pickle->WriteData(reinterpret_cast<char*>(cert_data.Data),
                            cert_data.Length);
+}
+
+// static
+void X509Certificate::GetPublicKeyInfo(OSCertHandle cert_handle,
+                                       size_t* size_bits,
+                                       PublicKeyType* type) {
+  // Since we might fail, set the output parameters to default values first.
+  *type = kPublicKeyTypeUnknown;
+  *size_bits = 0;
+
+  SecKeyRef key;
+  OSStatus status = SecCertificateCopyPublicKey(cert_handle, &key);
+  if (status) {
+    NOTREACHED() << "SecCertificateCopyPublicKey failed: " << status;
+    return;
+  }
+  ScopedCFTypeRef<SecKeyRef> scoped_key(key);
+
+  const CSSM_KEY* cssm_key;
+  status = SecKeyGetCSSMKey(key, &cssm_key);
+  if (status) {
+    NOTREACHED() << "SecKeyGetCSSMKey failed: " << status;
+    return;
+  }
+
+  *size_bits = cssm_key->KeyHeader.LogicalKeySizeInBits;
+
+  switch (cssm_key->KeyHeader.AlgorithmId) {
+    case CSSM_ALGID_RSA:
+      *type = kPublicKeyTypeRSA;
+      break;
+    case CSSM_ALGID_DSA:
+      *type = kPublicKeyTypeDSA;
+      break;
+    case CSSM_ALGID_ECDSA:
+      *type = kPublicKeyTypeECDSA;
+      break;
+    case CSSM_ALGID_DH:
+      *type = kPublicKeyTypeDH;
+      break;
+    default:
+      *type = kPublicKeyTypeUnknown;
+      *size_bits = 0;
+      break;
+  }
 }
 
 }  // namespace net

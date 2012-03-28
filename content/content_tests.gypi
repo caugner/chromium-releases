@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -15,13 +15,14 @@
         '../skia/skia.gyp:skia',
         '../testing/gmock.gyp:gmock',
         '../testing/gtest.gyp:gtest',
+        '../third_party/libjingle/libjingle.gyp:libjingle_peerconnection',
         '../third_party/libvpx/libvpx.gyp:libvpx',
         '../third_party/WebKit/Source/WebKit/chromium/WebKit.gyp:webkit',
+        '../third_party/webrtc/modules/modules.gyp:audio_device',
         '../third_party/webrtc/modules/modules.gyp:video_capture_module',
         '../third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
         '../third_party/webrtc/video_engine/video_engine.gyp:video_engine_core',
         '../third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine_core',
-        '../ui/gfx/compositor/compositor.gyp:test_compositor',
         '../ui/gfx/surface/surface.gyp:surface',
         '../ui/ui.gyp:ui_test_support',
         '../webkit/support/webkit_support.gyp:appcache',
@@ -37,8 +38,6 @@
         'browser/download/mock_download_manager.h',
         'browser/download/mock_download_item.cc',
         'browser/download/mock_download_item.h',
-        'browser/download/mock_download_manager_delegate.cc',
-        'browser/download/mock_download_manager_delegate.h',
         'browser/geolocation/arbitrator_dependency_factories_for_test.cc',
         'browser/geolocation/arbitrator_dependency_factories_for_test.h',
         'browser/geolocation/fake_access_token_store.cc',
@@ -67,6 +66,16 @@
         'common/test_url_constants.h',
         'gpu/gpu_idirect3d9_mock_win.cc',
         'gpu/gpu_idirect3d9_mock_win.h',
+        'renderer/media/mock_media_stream_dependency_factory.cc',
+        'renderer/media/mock_media_stream_dependency_factory.h',
+        'renderer/media/mock_media_stream_dispatcher.cc',
+        'renderer/media/mock_media_stream_dispatcher.h',
+        'renderer/media/mock_media_stream_impl.cc',
+        'renderer/media/mock_media_stream_impl.h',
+        'renderer/media/mock_peer_connection_impl.cc',
+        'renderer/media/mock_peer_connection_impl.h',
+        'renderer/media/mock_web_peer_connection_handler_client.cc',
+        'renderer/media/mock_web_peer_connection_handler_client.h',
         'renderer/mock_content_renderer_client.cc',
         'renderer/mock_content_renderer_client.h',
         'test/browser_test.h',
@@ -74,6 +83,13 @@
         'test/browser_test_base.h',
         'test/content_test_suite.cc',
         'test/content_test_suite.h',
+        'test/gpu/gpu_test_config.cc',
+        'test/gpu/gpu_test_config.h',
+        'test/gpu/gpu_test_expectations_parser.cc',
+        'test/gpu/gpu_test_expectations_parser.h',
+        'test/js_injection_ready_observer.h',
+        'test/mock_geolocation.cc',
+        'test/mock_geolocation.h',
         'test/mock_keyboard.cc',
         'test/mock_keyboard.h',
         'test/mock_keyboard_driver_win.cc',
@@ -92,12 +108,14 @@
         'test/test_browser_thread.h',
         'test/test_content_client.cc',
         'test/test_content_client.h',
+        'test/test_navigation_observer.cc',
+        'test/test_navigation_observer.h',
         'test/test_notification_tracker.cc',
         'test/test_notification_tracker.h',
-        'test/test_tab_contents_view.cc',
-        'test/test_tab_contents_view.h',
         'test/test_url_fetcher_factory.cc',
         'test/test_url_fetcher_factory.h',
+        'test/test_web_contents_view.cc',
+        'test/test_web_contents_view.h',
         'test/unittest_test_suite.cc',
         'test/unittest_test_suite.h',
         'test/webrtc_audio_device_test.cc',
@@ -119,6 +137,11 @@
         ['use_glib == 1', {
           'dependencies': [
             '../build/linux/system.gyp:glib',
+          ],
+        }],
+        ['use_aura==1', {
+          'dependencies': [
+            '../ui/gfx/compositor/compositor.gyp:compositor',
           ],
         }],
       ],
@@ -175,8 +198,12 @@
         'browser/device_orientation/provider_unittest.cc',
         'browser/download/base_file_unittest.cc',
         'browser/download/download_buffer_unittest.cc',
+        'browser/download/download_file_manager_unittest.cc',
         'browser/download/download_file_unittest.cc',
         'browser/download/download_id_unittest.cc',
+        'browser/download/download_item_impl_unittest.cc',
+        'browser/download/download_manager_impl_unittest.cc',
+        'browser/download/download_query_unittest.cc',
         'browser/download/download_status_updater_unittest.cc',
         'browser/download/save_package_unittest.cc',
         'browser/gamepad/gamepad_provider_unittest.cc',
@@ -191,7 +218,7 @@
         'browser/geolocation/win7_location_api_unittest_win.cc',
         'browser/geolocation/win7_location_provider_unittest_win.cc',
         'browser/gpu/gpu_blacklist_unittest.cc',
-        'browser/host_zoom_map_unittest.cc',
+        'browser/host_zoom_map_impl_unittest.cc',
         'browser/in_process_webkit/dom_storage_unittest.cc',
         'browser/in_process_webkit/indexed_db_quota_client_unittest.cc',
         'browser/in_process_webkit/webkit_context_unittest.cc',
@@ -209,21 +236,23 @@
         'browser/renderer_host/media/video_capture_manager_unittest.cc',
         'browser/renderer_host/render_view_host_unittest.cc',
         'browser/renderer_host/render_widget_host_unittest.cc',
+        'browser/renderer_host/render_widget_host_view_aura_unittest.cc',
         'browser/renderer_host/render_widget_host_view_mac_editcommand_helper_unittest.mm',
         'browser/renderer_host/render_widget_host_view_mac_unittest.mm',
         'browser/renderer_host/resource_dispatcher_host_unittest.cc',
         'browser/renderer_host/resource_queue_unittest.cc',
         'browser/renderer_host/text_input_client_mac_unittest.mm',
         'browser/resolve_proxy_msg_helper_unittest.cc',
-        'browser/site_instance_unittest.cc',
+        'browser/site_instance_impl_unittest.cc',
         'browser/speech/endpointer/endpointer_unittest.cc',
         'browser/speech/speech_recognition_request_unittest.cc',
         'browser/speech/speech_recognizer_unittest.cc',
         'browser/ssl/ssl_host_state_unittest.cc',
-        'browser/tab_contents/navigation_controller_unittest.cc',
-        'browser/tab_contents/navigation_entry_unittest.cc',
+        'browser/tab_contents/navigation_controller_impl_unittest.cc',
+        'browser/tab_contents/navigation_entry_impl_unittest.cc',
         'browser/tab_contents/render_view_host_manager_unittest.cc',
         'browser/tab_contents/tab_contents_delegate_unittest.cc',
+        'browser/tab_contents/tab_contents_unittest.cc',
         'browser/tab_contents/web_drag_dest_mac_unittest.mm',
         'browser/trace_subscriber_stdio_unittest.cc',
         'common/mac/attributed_string_coder_unittest.mm',
@@ -231,6 +260,7 @@
         'common/gpu/gpu_feature_flags_unittest.cc',
         'common/gpu/gpu_info_unittest.cc',
         'common/hi_res_timer_manager_unittest.cc',
+        'common/inter_process_time_ticks_converter_unittest.cc',
         'common/net/url_fetcher_impl_unittest.cc',
         'common/page_zoom_unittest.cc',
         'common/resource_dispatcher_unittest.cc',
@@ -247,6 +277,8 @@
         'renderer/media/audio_renderer_impl_unittest.cc',
         'renderer/media/capture_video_decoder_unittest.cc',
         'renderer/media/media_stream_dispatcher_unittest.cc',
+        'renderer/media/media_stream_impl_unittest.cc',
+        'renderer/media/peer_connection_handler_unittest.cc',
         'renderer/media/rtc_video_decoder_unittest.cc',
         'renderer/media/video_capture_impl_unittest.cc',
         'renderer/media/video_capture_message_filter_unittest.cc',
@@ -254,6 +286,8 @@
         'renderer/paint_aggregator_unittest.cc',
         'renderer/pepper_plugin_delegate_impl_unittest.cc',
         'renderer/v8_value_converter_impl_unittest.cc',
+        'test/gpu/gpu_test_config_unittest.cc',
+        'test/gpu/gpu_test_expectations_parser_unittest.cc',
         'test/run_all_unittests.cc',
       ],
       'conditions': [
@@ -305,6 +339,11 @@
         ['OS == "win" or (toolkit_uses_gtk == 1 and selinux == 0)', {
           'dependencies': [
             '../sandbox/sandbox.gyp:sandbox',
+          ],
+        }],
+        ['use_aura==1', {
+          'dependencies': [
+            '../ui/aura/aura.gyp:aura',
           ],
         }],
       ],
@@ -388,10 +427,33 @@
     },
   ],
   'conditions': [
-    ['target_arch=="arm"', {
+    ['target_arch=="arm" or OS=="win"', {
       'targets': [
         {
-          'target_name': 'omx_video_decode_accelerator_unittest',
+          'conditions': [
+            ['target_arch=="arm"', {
+              'target_name': 'omx_video_decode_accelerator_unittest',
+              'include_dirs': [
+                '<(DEPTH)/third_party/openmax/il',
+              ],
+            }],
+            ['OS=="win"', {
+              'target_name': 'dxva_video_decode_accelerator_unittest',
+              'dependencies': [
+                '../third_party/angle/src/build_angle.gyp:libEGL',
+                '../third_party/angle/src/build_angle.gyp:libGLESv2',
+                '../media/media.gyp:media',
+                '../ui/gfx/gl/gl.gyp:gl',
+              ],
+              'conditions': [
+                ['win_use_allocator_shim==1', {
+                  'dependencies': [
+                    '../base/allocator/allocator.gyp:allocator',
+                  ],
+                }],
+              ],
+            }],
+          ],
           'defines!': ['CONTENT_IMPLEMENTATION'],
           'type': 'executable',
           'dependencies': [
@@ -401,10 +463,9 @@
           ],
           'include_dirs': [
             '<(DEPTH)/third_party/angle/include',
-            '<(DEPTH)/third_party/openmax/il',
           ],
           'sources': [
-            'common/gpu/media/omx_video_decode_accelerator_unittest.cc',
+            'common/gpu/media/video_decode_accelerator_unittest.cc',
           ],
         }
       ],

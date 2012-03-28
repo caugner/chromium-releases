@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "base/process_util.h"
-#include "media/base/filter_host.h"
 #include "media/base/media_log.h"
 #include "net/base/data_url.h"
 #include "net/base/load_flags.h"
@@ -17,7 +16,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebKitPlatformSupport.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebURLLoaderOptions.h"
-#include "webkit/media/web_data_source_factory.h"
 
 using WebKit::WebString;
 using WebKit::WebURLLoaderOptions;
@@ -25,22 +23,6 @@ using WebKit::WebURLLoaderOptions;
 namespace webkit_media {
 
 static const char kDataScheme[] = "data";
-
-static WebDataSource* NewSimpleDataSource(MessageLoop* render_loop,
-                                          WebKit::WebFrame* frame,
-                                          media::MediaLog* media_log) {
-  return new SimpleDataSource(render_loop, frame);
-}
-
-// static
-media::DataSourceFactory* SimpleDataSource::CreateFactory(
-    MessageLoop* render_loop,
-    WebKit::WebFrame* frame,
-    media::MediaLog* media_log,
-    const WebDataSourceBuildObserverHack& build_observer) {
-  return new WebDataSourceFactory(render_loop, frame, media_log,
-                                  &NewSimpleDataSource, build_observer);
-}
 
 SimpleDataSource::SimpleDataSource(
     MessageLoop* render_loop,
@@ -59,7 +41,7 @@ SimpleDataSource::~SimpleDataSource() {
   DCHECK(state_ == UNINITIALIZED || state_ == STOPPED);
 }
 
-void SimpleDataSource::set_host(media::FilterHost* host) {
+void SimpleDataSource::set_host(media::DataSourceHost* host) {
   DataSource::set_host(host);
 
   base::AutoLock auto_lock(lock_);
@@ -80,8 +62,11 @@ void SimpleDataSource::Stop(const base::Closure& callback) {
 }
 
 void SimpleDataSource::Initialize(
-    const std::string& url,
+    const GURL& url,
     const media::PipelineStatusCB& callback) {
+  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(!callback.is_null());
+
   // Reference to prevent destruction while inside the |initialize_cb_|
   // call. This is a temporary fix to prevent crashes caused by holding the
   // lock and running the destructor.
@@ -89,32 +74,50 @@ void SimpleDataSource::Initialize(
   {
     base::AutoLock auto_lock(lock_);
     DCHECK_EQ(state_, UNINITIALIZED);
-    DCHECK(!callback.is_null());
     state_ = INITIALIZING;
     initialize_cb_ = callback;
 
     // Validate the URL.
-    url_ = GURL(url);
+    url_ = url;
     if (!url_.is_valid()) {
       DoneInitialization_Locked(false);
       return;
     }
 
-    // Post a task to the render thread to start loading the resource.
-    render_loop_->PostTask(FROM_HERE,
-        base::Bind(&SimpleDataSource::StartTask, this));
+    // If |url_| contains a data:// scheme we can decode it immediately.
+    if (url_.SchemeIs(kDataScheme)) {
+      std::string mime_type, charset;
+      bool success = net::DataURL::Parse(url_, &mime_type, &charset, &data_);
+
+      // Don't care about the mime-type just proceed if decoding was successful.
+      size_ = data_.length();
+      DoneInitialization_Locked(success);
+      return;
+    }
+
+    // For all other schemes issue a request for the full resource.
+    WebKit::WebURLRequest request(url_);
+    request.setTargetType(WebKit::WebURLRequest::TargetIsMedia);
+
+    frame_->setReferrerForRequest(request, WebKit::WebURL());
+
+    // Disable compression, compression for audio/video doesn't make sense.
+    request.setHTTPHeaderField(
+        WebString::fromUTF8(net::HttpRequestHeaders::kAcceptEncoding),
+        WebString::fromUTF8("identity;q=1, *;q=0"));
+
+    // This flag is for unittests as we don't want to reset |url_loader|
+    if (!keep_test_loader_) {
+      WebURLLoaderOptions options;
+      options.allowCredentials = true;
+      options.crossOriginRequestPolicy =
+          WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
+      url_loader_.reset(frame_->createAssociatedURLLoader(options));
+    }
+
+    // Start the resource loading.
+    url_loader_->loadAsynchronously(request, this);
   }
-}
-
-void SimpleDataSource::CancelInitialize() {
-  base::AutoLock auto_lock(lock_);
-  DCHECK(!initialize_cb_.is_null());
-  state_ = STOPPED;
-  initialize_cb_.Reset();
-
-  // Post a task to the render thread to cancel loading the resource.
-  render_loop_->PostTask(FROM_HERE,
-      base::Bind(&SimpleDataSource::CancelTask, this));
 }
 
 void SimpleDataSource::Read(int64 position,
@@ -264,64 +267,22 @@ bool SimpleDataSource::HasSingleOrigin() {
 
 void SimpleDataSource::Abort() {
   DCHECK(MessageLoop::current() == render_loop_);
+  base::AutoLock auto_lock(lock_);
+  state_ = STOPPED;
+  initialize_cb_.Reset();
+  CancelTask_Locked();
   frame_ = NULL;
-}
-
-void SimpleDataSource::StartTask() {
-  DCHECK(MessageLoop::current() == render_loop_);
-  // Reference to prevent destruction while inside the |initialize_cb_|
-  // call. This is a temporary fix to prevent crashes caused by holding the
-  // lock and running the destructor.
-  scoped_refptr<SimpleDataSource> destruction_guard(this);
-  {
-    base::AutoLock auto_lock(lock_);
-
-    // We may have stopped.
-    if (state_ == STOPPED)
-      return;
-
-    CHECK(frame_);
-
-    DCHECK_EQ(state_, INITIALIZING);
-
-    if (url_.SchemeIs(kDataScheme)) {
-      // If this using data protocol, we just need to decode it.
-      std::string mime_type, charset;
-      bool success = net::DataURL::Parse(url_, &mime_type, &charset, &data_);
-
-      // Don't care about the mime-type just proceed if decoding was successful.
-      size_ = data_.length();
-      DoneInitialization_Locked(success);
-    } else {
-      // Prepare the request.
-      WebKit::WebURLRequest request(url_);
-      request.setTargetType(WebKit::WebURLRequest::TargetIsMedia);
-
-      frame_->setReferrerForRequest(request, WebKit::WebURL());
-
-      // Disable compression, compression for audio/video doesn't make sense...
-      request.setHTTPHeaderField(
-          WebString::fromUTF8(net::HttpRequestHeaders::kAcceptEncoding),
-          WebString::fromUTF8("identity;q=1, *;q=0"));
-
-      // This flag is for unittests as we don't want to reset |url_loader|
-      if (!keep_test_loader_) {
-        WebURLLoaderOptions options;
-        options.allowCredentials = true;
-        options.crossOriginRequestPolicy =
-            WebURLLoaderOptions::CrossOriginRequestPolicyAllow;
-        url_loader_.reset(frame_->createAssociatedURLLoader(options));
-      }
-
-      // Start the resource loading.
-      url_loader_->loadAsynchronously(request, this);
-    }
-  }
 }
 
 void SimpleDataSource::CancelTask() {
   DCHECK(MessageLoop::current() == render_loop_);
   base::AutoLock auto_lock(lock_);
+  CancelTask_Locked();
+}
+
+void SimpleDataSource::CancelTask_Locked() {
+  DCHECK(MessageLoop::current() == render_loop_);
+  lock_.AssertAcquired();
   DCHECK_EQ(state_, STOPPED);
 
   // Cancel any pending requests.

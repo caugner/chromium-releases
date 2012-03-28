@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,13 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/gtk_util.h"
 #include "webkit/glue/context_menu.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -72,7 +74,7 @@ GtkWidget* GetMenuItemByID(ui::MenuModel* model,
 }  // namespace
 
 RenderViewContextMenuGtk::RenderViewContextMenuGtk(
-    TabContents* web_contents,
+    WebContents* web_contents,
     const ContextMenuParams& params,
     guint32 triggering_event_time)
     : RenderViewContextMenu(web_contents, params),
@@ -87,14 +89,14 @@ void RenderViewContextMenuGtk::PlatformInit() {
 
   if (params_.is_editable) {
     RenderWidgetHostViewGtk* rwhv = static_cast<RenderWidgetHostViewGtk*>(
-        source_tab_contents_->GetRenderWidgetHostView());
+        source_web_contents_->GetRenderWidgetHostView());
 #if !defined(TOOLKIT_VIEWS)
     if (rwhv) {
       MenuGtk* menu = menu_gtk_.get();
       gboolean show_input_method_menu = TRUE;
 
       g_object_get(
-          gtk_widget_get_settings(GTK_WIDGET(rwhv->native_view())),
+          gtk_widget_get_settings(GTK_WIDGET(rwhv->GetNativeView())),
           "gtk-show-input-method-menu", &show_input_method_menu, NULL);
       if (!show_input_method_menu)
         return;

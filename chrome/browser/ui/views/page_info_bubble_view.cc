@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,13 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/cert_store.h"
+#include "content/public/browser/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -27,6 +27,10 @@
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/widget/widget.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::SSLStatus;
 
 namespace {
 
@@ -101,12 +105,12 @@ class Section : public views::View,
 PageInfoBubbleView::PageInfoBubbleView(views::View* anchor_view,
                                        Profile* profile,
                                        const GURL& url,
-                                       const NavigationEntry::SSLStatus& ssl,
+                                       const SSLStatus& ssl,
                                        bool show_history)
     : BubbleDelegateView(anchor_view, views::BubbleBorder::TOP_LEFT),
       ALLOW_THIS_IN_INITIALIZER_LIST(model_(profile, url, ssl,
                                             show_history, this)),
-      cert_id_(ssl.cert_id()),
+      cert_id_(ssl.cert_id),
       help_center_link_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(resize_animation_(this)),
       animation_start_height_(0) {
@@ -298,17 +302,16 @@ void PageInfoBubbleView::OnPageInfoModelChanged() {
 gfx::Rect PageInfoBubbleView::GetAnchorRect() {
   // Compensate for some built-in padding in the icon.
   gfx::Rect anchor(BubbleDelegateView::GetAnchorRect());
-  if (anchor_view())
-    anchor.Offset(0, -5);
+  anchor.Inset(0, anchor_view() ? 5 : 0);
   return anchor;
 }
 
 void PageInfoBubbleView::LinkClicked(views::Link* source, int event_flags) {
-  GURL url = google_util::AppendGoogleLocaleParam(
-      GURL(chrome::kPageInfoHelpCenterURL));
   Browser* browser = BrowserList::GetLastActive();
-  browser->OpenURL(
-      url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(
+      GURL(chrome::kPageInfoHelpCenterURL), Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK, false);
+  browser->OpenURL(params);
   // NOTE: The bubble closes automatically on deactivation as the link opens.
 }
 
@@ -473,7 +476,7 @@ namespace browser {
 void ShowPageInfoBubble(views::View* anchor_view,
                         Profile* profile,
                         const GURL& url,
-                        const NavigationEntry::SSLStatus& ssl,
+                        const SSLStatus& ssl,
                         bool show_history) {
   PageInfoBubbleView* page_info_bubble =
       new PageInfoBubbleView(anchor_view, profile, url, ssl, show_history);

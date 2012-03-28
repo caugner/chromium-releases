@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,11 +30,8 @@ const int URLRequestSlowDownloadJob::kFirstDownloadSize = 1024 * 35;
 const int URLRequestSlowDownloadJob::kSecondDownloadSize = 1024 * 10;
 
 // static
-base::LazyInstance<
-    URLRequestSlowDownloadJob::SlowJobsSet,
-    base::LeakyLazyInstanceTraits<URLRequestSlowDownloadJob::SlowJobsSet> >
-        URLRequestSlowDownloadJob::pending_requests_ =
-            LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<URLRequestSlowDownloadJob::SlowJobsSet>::Leaky
+    URLRequestSlowDownloadJob::pending_requests_ = LAZY_INSTANCE_INITIALIZER;
 
 void URLRequestSlowDownloadJob::Start() {
   MessageLoop::current()->PostTask(
@@ -170,7 +167,7 @@ bool URLRequestSlowDownloadJob::ReadRawData(net::IOBuffer* buf, int buf_size,
           FROM_HERE,
           base::Bind(&URLRequestSlowDownloadJob::CheckDoneStatus,
                      weak_factory_.GetWeakPtr()),
-          100);
+          base::TimeDelta::FromMilliseconds(100));
       return false;
     case REQUEST_COMPLETE:
       *bytes_read = 0;
@@ -194,7 +191,7 @@ void URLRequestSlowDownloadJob::CheckDoneStatus() {
         FROM_HERE,
         base::Bind(&URLRequestSlowDownloadJob::CheckDoneStatus,
                    weak_factory_.GetWeakPtr()),
-        100);
+        base::TimeDelta::FromMilliseconds(100));
   }
 }
 

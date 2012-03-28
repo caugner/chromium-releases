@@ -61,6 +61,9 @@ var BrowserBridge = (function() {
     this.pollableDataHelpers_.prerenderInfo =
         new PollableDataHelper('onPrerenderInfoChanged',
                                this.sendGetPrerenderInfo.bind(this));
+    this.pollableDataHelpers_.httpPipeliningStatus =
+        new PollableDataHelper('onHttpPipeliningStatusChanged',
+                               this.sendGetHttpPipeliningStatus.bind(this));
 
     // NetLog entries are all sent to the |SourceTracker|, which both tracks
     // them and manages its own observer list.
@@ -153,6 +156,11 @@ var BrowserBridge = (function() {
       this.send('clearBrowserCache');
     },
 
+    sendClearAllCache: function() {
+      this.sendClearHostResolverCache();
+      this.sendClearBrowserCache();
+    },
+
     sendStartConnectionTests: function(url) {
       this.send('startConnectionTests', [url]);
     },
@@ -227,6 +235,10 @@ var BrowserBridge = (function() {
 
     importONCFile: function(fileContent, passcode) {
       this.send('importONCFile', [fileContent, passcode]);
+    },
+
+    sendGetHttpPipeliningStatus: function() {
+      this.send('getHttpPipeliningStatus');
     },
 
     //--------------------------------------------------------------------------
@@ -316,9 +328,9 @@ var BrowserBridge = (function() {
         this.hstsObservers_[i].onHSTSQueryResult(info);
     },
 
-    receivedONCFileParse: function(status) {
+    receivedONCFileParse: function(error) {
       for (var i = 0; i < this.crosONCFileParseObservers_.length; i++)
-        this.crosONCFileParseObservers_[i].onONCFileParse(status);
+        this.crosONCFileParseObservers_[i].onONCFileParse(error);
     },
 
     receivedHttpCacheInfo: function(info) {
@@ -336,6 +348,11 @@ var BrowserBridge = (function() {
       this.pollableDataHelpers_.prerenderInfo.update(prerenderInfo);
     },
 
+    receivedHttpPipeliningStatus: function(httpPipeliningStatus) {
+      this.pollableDataHelpers_.httpPipeliningStatus.update(
+          httpPipeliningStatus);
+    },
+
     //--------------------------------------------------------------------------
 
     /**
@@ -344,6 +361,13 @@ var BrowserBridge = (function() {
     disable: function() {
       this.disabled_ = true;
       this.setPollInterval(0);
+    },
+
+    /**
+     * Returns true if the BrowserBridge has been disabled.
+     */
+    isDisabled: function() {
+      return this.disabled_;
     },
 
     /**
@@ -498,7 +522,7 @@ var BrowserBridge = (function() {
      * Adds a listener for ONC file parse status. The observer will be called
      * back with:
      *
-     *   observer.onONCFileParse(status);
+     *   observer.onONCFileParse(error);
      */
     addCrosONCFileParseObserver: function(observer) {
       this.crosONCFileParseObservers_.push(observer);
@@ -532,6 +556,17 @@ var BrowserBridge = (function() {
      */
     addPrerenderInfoObserver: function(observer, ignoreWhenUnchanged) {
       this.pollableDataHelpers_.prerenderInfo.addObserver(
+          observer, ignoreWhenUnchanged);
+    },
+
+    /**
+     * Adds a listener of HTTP pipelining status. |observer| will be called
+     * back when data is received, through:
+     *
+     *   observer.onHttpPipelineStatusChanged(httpPipeliningStatus)
+     */
+    addHttpPipeliningStatusObserver: function(observer, ignoreWhenUnchanged) {
+      this.pollableDataHelpers_.httpPipeliningStatus.addObserver(
           observer, ignoreWhenUnchanged);
     },
 

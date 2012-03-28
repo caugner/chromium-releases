@@ -14,7 +14,6 @@
 #include "base/process.h"
 #include "base/string16.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "content/public/browser/notification_observer.h"
@@ -100,7 +99,5 @@ class OomPriorityManager : public content::NotificationObserver {
 };
 
 }  // namespace browser
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(browser::OomPriorityManager);
 
 #endif  // CHROME_BROWSER_OOM_PRIORITY_MANAGER_H_

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,10 @@
 #include "ppapi/proxy/host_dispatcher.h"
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/plugin_globals.h"
+#include "ppapi/proxy/plugin_proxy_delegate.h"
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
+#include "ppapi/shared_impl/test_globals.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace ppapi {
@@ -32,6 +34,7 @@ class ProxyTestHarnessBase {
   PP_Instance pp_instance() const { return pp_instance_; }
   IPC::TestSink& sink() { return sink_; }
 
+  virtual PpapiGlobals* GetGlobals() = 0;
   // Returns either the plugin or host dispatcher, depending on the test.
   virtual Dispatcher* GetDispatcher() = 0;
 
@@ -87,6 +90,7 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
   }
 
   // ProxyTestHarnessBase implementation.
+  virtual PpapiGlobals* GetGlobals() { return &plugin_globals_; }
   virtual Dispatcher* GetDispatcher();
   virtual void SetUpHarness();
   virtual void SetUpHarnessWithChannel(const IPC::ChannelHandle& channel_handle,
@@ -95,7 +99,8 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
                                        bool is_client);
   virtual void TearDownHarness();
 
-  class PluginDelegateMock : public PluginDispatcher::PluginDelegate {
+  class PluginDelegateMock : public PluginDispatcher::PluginDelegate,
+                             public PluginProxyDelegate {
    public:
     PluginDelegateMock() : ipc_message_loop_(NULL), shutdown_event_() {}
     virtual ~PluginDelegateMock() {}
@@ -107,17 +112,17 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
     }
 
     // ProxyChannel::Delegate implementation.
-    virtual base::MessageLoopProxy* GetIPCMessageLoop();
-    virtual base::WaitableEvent* GetShutdownEvent();
+    virtual base::MessageLoopProxy* GetIPCMessageLoop() OVERRIDE;
+    virtual base::WaitableEvent* GetShutdownEvent() OVERRIDE;
 
     // PluginDispatcher::PluginDelegate implementation.
-    virtual std::set<PP_Instance>* GetGloballySeenInstanceIDSet();
-    virtual ppapi::WebKitForwarding* GetWebKitForwarding();
-    virtual void PostToWebKitThread(const tracked_objects::Location& from_here,
-                                    const base::Closure& task);
-    virtual bool SendToBrowser(IPC::Message* msg);
-    virtual uint32 Register(PluginDispatcher* plugin_dispatcher);
-    virtual void Unregister(uint32 plugin_dispatcher_id);
+    virtual std::set<PP_Instance>* GetGloballySeenInstanceIDSet() OVERRIDE;
+    virtual uint32 Register(PluginDispatcher* plugin_dispatcher) OVERRIDE;
+    virtual void Unregister(uint32 plugin_dispatcher_id) OVERRIDE;
+
+    // PluginPepperDelegate implementation.
+    virtual bool SendToBrowser(IPC::Message* msg) OVERRIDE;
+    virtual void PreCacheFont(const void* logfontw) OVERRIDE;
 
    private:
     base::MessageLoopProxy* ipc_message_loop_;  // Weak
@@ -152,8 +157,15 @@ class HostProxyTestHarness : public ProxyTestHarnessBase {
   virtual ~HostProxyTestHarness();
 
   HostDispatcher* host_dispatcher() { return host_dispatcher_.get(); }
+  ResourceTracker& resource_tracker() {
+    return *host_globals_.GetResourceTracker();
+  }
+  VarTracker& var_tracker() {
+    return *host_globals_.GetVarTracker();
+  }
 
   // ProxyTestBase implementation.
+  virtual PpapiGlobals* GetGlobals() { return &host_globals_; }
   virtual Dispatcher* GetDispatcher();
   virtual void SetUpHarness();
   virtual void SetUpHarnessWithChannel(const IPC::ChannelHandle& channel_handle,
@@ -186,6 +198,7 @@ class HostProxyTestHarness : public ProxyTestHarnessBase {
   };
 
  private:
+  ppapi::TestGlobals host_globals_;
   scoped_ptr<HostDispatcher> host_dispatcher_;
   DelegateMock delegate_mock_;
 };

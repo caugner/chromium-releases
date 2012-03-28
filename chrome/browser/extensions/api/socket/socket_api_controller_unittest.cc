@@ -1,12 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/socket/socket_api.h"
 #include "chrome/browser/extensions/api/socket/socket_api_controller.h"
+#include "chrome/browser/extensions/api/socket/socket_event_notifier.h"
+#include "chrome/common/extensions/extension.h"
 
 namespace extensions {
 
@@ -16,36 +19,39 @@ class SocketApiControllerTest : public testing::Test {
 TEST_F(SocketApiControllerTest, TestSocketControllerLifetime) {
   // We want to make sure that killing the controller while a bunch of
   // sockets are alive doesn't crash.
-  SocketController* controller = SocketController::GetInstance();
+  scoped_ptr<SocketController> controller(new SocketController());
+  const int kPort = 38888;
+  const std::string address("127.0.0.1");
 
   // Create some sockets but don't do anything with them.
   Profile* profile = NULL;
-  const std::string extension_id("xxxxxxxxx");
+  std::string extension_id;
+  EXPECT_TRUE(Extension::GenerateId("e^(iπ)+1=0", &extension_id));
   const GURL url;
   for (int i = 0; i < 10; ++i) {
-    int socket_id = controller->CreateUdp(profile, extension_id, url);
+    SocketEventNotifier* notifier =
+        new SocketEventNotifier(NULL, profile, extension_id, -1, url);
+    int socket_id = controller->CreateUDPSocket(address, kPort, notifier);
+    ASSERT_TRUE(socket_id != 0);
+  }
+  for (int i = 0; i < 10; ++i) {
+    SocketEventNotifier* notifier =
+        new SocketEventNotifier(NULL, profile, extension_id, -1, url);
+    int socket_id = controller->CreateTCPSocket(address, kPort, notifier);
     ASSERT_TRUE(socket_id != 0);
   }
 
   // Create some more sockets and connect them. Note that because this is
   // UDP, we can happily "connect" a UDP socket without anyone listening.
-  const int kPort = 38888;
-  const std::string address("127.0.0.1");
+  // We skip TCP sockets here because we've already tested what we wanted
+  // to test.
   for (int i = 0; i < 10; ++i) {
-    int socket_id = controller->CreateUdp(profile, extension_id, url);
+    SocketEventNotifier* notifier =
+        new SocketEventNotifier(NULL, profile, extension_id, -1, url);
+    int socket_id = controller->CreateUDPSocket(address, kPort, notifier);
     ASSERT_TRUE(socket_id != 0);
-    ASSERT_TRUE(controller->ConnectUdp(socket_id, address, kPort));
+    ASSERT_EQ(0, controller->ConnectSocket(socket_id));
   }
-
-  // At this point, we're done, and we're relying on the RAE mechanism
-  // of the Singleton class to delete the controller at process exit.
-  // We'd have to jump through some icky hoops to turn off RAE and
-  // manually delete in this test method, so we'll instead take it on
-  // faith that the singleton will indeed delete itself, and that if
-  // we had any heap management problems in the controller, they'd
-  // show up later in this test process. I (miket) hereby confirm that
-  // I manually added a temporary double-free in the controller
-  // destructor and verified that the unit_tests process segfaulted.
 }
 
 }  // namespace extensions

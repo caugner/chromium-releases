@@ -1,16 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H_
 #define REMOTING_CLIENT_RECTANGLE_UPDATE_DECODER_H_
 
+#include "base/callback_forward.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
 #include "media/base/video_frame.h"
 #include "remoting/base/decoder.h"
 
-class MessageLoop;
+namespace base {
+class MessageLoopProxy;
+}  // namespace base
 
 namespace remoting {
 
@@ -27,7 +30,7 @@ class SessionConfig;
 class RectangleUpdateDecoder :
     public base::RefCountedThreadSafe<RectangleUpdateDecoder> {
  public:
-  RectangleUpdateDecoder(MessageLoop* message_loop,
+  RectangleUpdateDecoder(base::MessageLoopProxy* message_loop,
                          FrameConsumer* consumer);
 
   // Initializes decoder with the infromation from the protocol config.
@@ -39,15 +42,12 @@ class RectangleUpdateDecoder :
   // executed.
   void DecodePacket(const VideoPacket* packet, const base::Closure& done);
 
-  // Set the scale ratio for the decoded video frame. Scale ratio greater
-  // than 1.0 is not supported.
-  void SetScaleRatios(double horizontal_ratio, double vertical_ratio);
+  // Set the output dimensions to scale video output to.
+  void SetOutputSize(const SkISize& size);
 
   // Set a new clipping rectangle for the decoder. Decoder should respect
   // this clipping rectangle and only decode content in this rectangle and
   // report dirty rectangles accordingly to enhance performance.
-  //
-  // If scale ratio is not 1.0 then clipping rectangle is ignored.
   void UpdateClipRect(const SkIRect& clip_rect);
 
   // Force the decoder to output the last decoded video frame without any
@@ -62,7 +62,6 @@ class RectangleUpdateDecoder :
 
   void AllocateFrame(const VideoPacket* packet, const base::Closure& done);
   void ProcessPacketData(const VideoPacket* packet, const base::Closure& done);
-  void RefreshRects(const RectVector& rects);
 
   // Obtain updated rectangles from decoder and submit it to the consumer.
   void SubmitToConsumer();
@@ -72,24 +71,20 @@ class RectangleUpdateDecoder :
   void DoRefresh();
 
   // Callback for FrameConsumer::OnPartialFrameOutput()
-  void OnFrameConsumed(RectVector* rects);
+  void OnFrameConsumed(SkRegion* region);
 
-  // Pointers to infrastructure objects.  Not owned.
-  MessageLoop* message_loop_;
+  scoped_refptr<base::MessageLoopProxy> message_loop_;
   FrameConsumer* consumer_;
 
-  SkISize initial_screen_size_;
+  SkISize screen_size_;
   SkIRect clip_rect_;
-  RectVector refresh_rects_;
+  SkRegion refresh_region_;
 
   scoped_ptr<Decoder> decoder_;
+  bool decoder_needs_reset_;
 
   // The video frame that the decoder writes to.
   scoped_refptr<media::VideoFrame> frame_;
-  bool frame_is_new_;
-
-  // True if |consumer_| is currently using the frame.
-  bool frame_is_consuming_;
 };
 
 }  // namespace remoting

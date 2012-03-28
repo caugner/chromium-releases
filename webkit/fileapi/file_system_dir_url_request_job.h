@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,11 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
-#include "base/task.h"
 #include "net/url_request/url_request_job.h"
 
 namespace fileapi {
 class FileSystemContext;
-class FileSystemOperation;
+class FileSystemOperationInterface;
 
 // A request job that handles reading filesystem: URLs for directories.
 class FileSystemDirURLRequestJob : public net::URLRequestJob {
@@ -50,7 +49,7 @@ class FileSystemDirURLRequestJob : public net::URLRequestJob {
   void StartAsync();
   void DidReadDirectory(const std::vector<base::FileUtilProxy::Entry>& entries,
                         bool has_more);
-  FileSystemOperation* GetNewOperation();
+  FileSystemOperationInterface* GetNewOperation(const GURL& url);
 
   std::string data_;
   FileSystemContext* file_system_context_;

@@ -1,21 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/login/webui_login_display_host.h"
 
 #include "base/command_line.h"
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/chromeos/login/oobe_display.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/login/webui_login_view.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
+#include "content/public/browser/web_ui.h"
 #include "ui/views/widget/widget.h"
 
 #if defined(USE_AURA)
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
 #include "ui/aura/window.h"
-#include "ui/aura_shell/shell.h"
-#include "ui/aura_shell/shell_window_ids.h"
 #endif
 
 namespace chromeos {
@@ -35,12 +37,12 @@ WebUILoginDisplayHost::WebUILoginDisplayHost(const gfx::Rect& background_bounds)
     : BaseLoginDisplayHost(background_bounds),
       login_window_(NULL),
       login_view_(NULL),
-      webui_login_display_(NULL) {
+      webui_login_display_(NULL),
+      is_showing_login_(false) {
 }
 
 WebUILoginDisplayHost::~WebUILoginDisplayHost() {
-  if (login_window_)
-    login_window_->Close();
+  CloseWindow();
 }
 
 // LoginDisplayHost implementation ---------------------------------------------
@@ -56,7 +58,13 @@ gfx::NativeWindow WebUILoginDisplayHost::GetNativeWindow() const {
   return login_window_ ? login_window_->GetNativeWindow() : NULL;
 }
 
-void WebUILoginDisplayHost::SetOobeProgress(BackgroundView::LoginStep step) {
+views::Widget* WebUILoginDisplayHost::GetWidget() const {
+  return login_window_;
+}
+
+void WebUILoginDisplayHost::OpenProxySettings() {
+  if (login_view_)
+    login_view_->OpenProxySettings();
 }
 
 void WebUILoginDisplayHost::SetOobeProgressBarVisible(bool visible) {
@@ -76,11 +84,11 @@ void WebUILoginDisplayHost::SetStatusAreaVisible(bool visible) {
     login_view_->SetStatusAreaVisible(visible);
 }
 
-void WebUILoginDisplayHost::ShowBackground() {
-}
-
 void WebUILoginDisplayHost::StartWizard(const std::string& first_screen_name,
-                                        const GURL& start_url) {
+                                        DictionaryValue* screen_parameters) {
+  is_showing_login_ = false;
+
+  scoped_ptr<DictionaryValue> scoped_parameters(screen_parameters);
   // This is a special case for WebUI. We don't want to go through the
   // OOBE WebUI page loading. Since we already have the browser we just
   // show the corresponding page.
@@ -105,15 +113,32 @@ void WebUILoginDisplayHost::StartWizard(const std::string& first_screen_name,
   if (!login_window_)
     LoadURL(GURL(kOobeURL));
 
-  BaseLoginDisplayHost::StartWizard(first_screen_name, start_url);
+  BaseLoginDisplayHost::StartWizard(first_screen_name,
+                                    scoped_parameters.release());
 }
 
 void WebUILoginDisplayHost::StartSignInScreen() {
+  is_showing_login_ = true;
+
   if (!login_window_)
     LoadURL(GURL(kLoginURL));
 
   BaseLoginDisplayHost::StartSignInScreen();
+  CHECK(webui_login_display_);
   GetOobeUI()->ShowSigninScreen(webui_login_display_);
+}
+
+void WebUILoginDisplayHost::OnPreferencesChanged() {
+  if (is_showing_login_)
+    webui_login_display_->OnPreferencesChanged();
+}
+
+void WebUILoginDisplayHost::CloseWindow() {
+  if (login_window_) {
+    login_window_->Close();
+    login_window_ = NULL;
+    login_view_ = NULL;
+  }
 }
 
 void WebUILoginDisplayHost::LoadURL(const GURL& url) {
@@ -121,6 +146,9 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
     views::Widget::InitParams params(
         views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.bounds = background_bounds();
+#if defined(USE_AURA)
+    params.show_state = ui::SHOW_STATE_FULLSCREEN;
+#endif
 
     login_window_ = new views::Widget;
     login_window_->Init(params);
@@ -129,8 +157,8 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
     login_view_->Init(login_window_);
 
 #if defined(USE_AURA)
-    aura_shell::Shell::GetInstance()->GetContainer(
-        aura_shell::internal::kShellWindowId_LockScreenContainer)->
+    ash::Shell::GetInstance()->GetContainer(
+        ash::internal::kShellWindowId_LockScreenContainer)->
         AddChild(login_window_->GetNativeView());
 #endif
 
@@ -147,7 +175,7 @@ void WebUILoginDisplayHost::LoadURL(const GURL& url) {
 }
 
 OobeUI* WebUILoginDisplayHost::GetOobeUI() const {
-  return static_cast<OobeUI*>(login_view_->GetWebUI());
+  return static_cast<OobeUI*>(login_view_->GetWebUI()->GetController());
 }
 
 WizardController* WebUILoginDisplayHost::CreateWizardController() {

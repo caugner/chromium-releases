@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,9 +8,10 @@
 
 #include "base/values.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
+#include "chrome/browser/chromeos/login/login_display_host.h"
 #include "chrome/browser/ui/webui/web_ui_util.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/public/browser/web_ui.h"
 #include "ui/base/models/menu_model.h"
 #include "ui/gfx/font.h"
 
@@ -19,7 +20,7 @@ namespace chromeos {
 // WebUI specific implementation of the NetworkMenu class.
 class NetworkMenuWebUI : public NetworkMenu {
  public:
-  NetworkMenuWebUI(NetworkMenu::Delegate* delegate, WebUI* web_ui);
+  NetworkMenuWebUI(NetworkMenu::Delegate* delegate, content::WebUI* web_ui);
 
   // NetworkMenu override:
   virtual void UpdateMenu() OVERRIDE;
@@ -32,7 +33,7 @@ class NetworkMenuWebUI : public NetworkMenu {
   base::ListValue* ConvertMenuModel(ui::MenuModel* model);
 
   // WebUI where network menu is located.
-  WebUI* web_ui_;
+  content::WebUI* web_ui_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkMenuWebUI);
 };
@@ -40,7 +41,7 @@ class NetworkMenuWebUI : public NetworkMenu {
 // NetworkMenuWebUI ------------------------------------------------------------
 
 NetworkMenuWebUI::NetworkMenuWebUI(NetworkMenu::Delegate* delegate,
-                                   WebUI* web_ui)
+                                   content::WebUI* web_ui)
     : NetworkMenu(delegate),
       web_ui_(web_ui) {
 }
@@ -92,11 +93,9 @@ base::ListValue* NetworkMenuWebUI::ConvertMenuModel(ui::MenuModel* model) {
 
 // NetworkDropdown -------------------------------------------------------------
 
-NetworkDropdown::NetworkDropdown(WebUI* web_ui,
-                                 gfx::NativeWindow parent_window,
+NetworkDropdown::NetworkDropdown(content::WebUI* web_ui,
                                  bool oobe)
-    : parent_window_(parent_window),
-      web_ui_(web_ui),
+    : web_ui_(web_ui),
       oobe_(oobe) {
   network_menu_.reset(new NetworkMenuWebUI(this, web_ui));
   network_icon_.reset(
@@ -123,15 +122,11 @@ views::MenuButton* NetworkDropdown::GetMenuButton() {
 }
 
 gfx::NativeWindow NetworkDropdown::GetNativeWindow() const {
-  return parent_window_;
+  return BaseLoginDisplayHost::default_host()->GetNativeWindow();
 }
 
 void NetworkDropdown::OpenButtonOptions() {
-  if (proxy_settings_dialog_.get() == NULL) {
-    proxy_settings_dialog_.reset(
-        new ProxySettingsDialog(this, GetNativeWindow()));
-  }
-  proxy_settings_dialog_->Show();
+  BaseLoginDisplayHost::default_host()->OpenProxySettings();
 }
 
 bool NetworkDropdown::ShouldOpenButtonOptions() const {
@@ -145,9 +140,6 @@ void NetworkDropdown::OnNetworkManagerChanged(NetworkLibrary* cros) {
 void NetworkDropdown::Refresh() {
   SetNetworkIconAndText();
   network_menu_->UpdateMenu();
-}
-
-void NetworkDropdown::OnDialogClosed() {
 }
 
 void NetworkDropdown::NetworkMenuIconChanged() {

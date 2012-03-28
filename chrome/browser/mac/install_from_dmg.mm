@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,8 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
+#include "base/mac/mac_logging.h"
 #import "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -234,7 +236,7 @@ bool IsPathOnReadOnlyDiskImage(const char path[],
 // the disk image's device, in "diskNsM" form.
 bool IsAppRunningFromReadOnlyDiskImage(std::string* dmg_bsd_device_name) {
   return IsPathOnReadOnlyDiskImage(
-      [[[NSBundle mainBundle] bundlePath] fileSystemRepresentation],
+      [[base::mac::OuterBundle() bundlePath] fileSystemRepresentation],
       dmg_bsd_device_name);
 }
 
@@ -307,7 +309,8 @@ bool InstallFromDiskImage(AuthorizationRef authorization_arg,
         NULL,  // pipe
         &exit_status);
     if (status != errAuthorizationSuccess) {
-      LOG(ERROR) << "AuthorizationExecuteWithPrivileges install: " << status;
+      OSSTATUS_LOG(ERROR, status)
+          << "AuthorizationExecuteWithPrivileges install";
       return false;
     }
   } else {
@@ -424,7 +427,7 @@ bool MaybeInstallFromDiskImage() {
     return false;
   }
 
-  NSString* source_path = [[NSBundle mainBundle] bundlePath];
+  NSString* source_path = [base::mac::OuterBundle() bundlePath];
   NSString* application_name = [source_path lastPathComponent];
   NSString* target_path =
       [application_directory stringByAppendingPathComponent:application_name];
@@ -435,7 +438,7 @@ bool MaybeInstallFromDiskImage() {
   }
 
   NSString* installer_path =
-      [base::mac::MainAppBundle() pathForResource:@"install" ofType:@"sh"];
+      [base::mac::FrameworkBundle() pathForResource:@"install" ofType:@"sh"];
   if (!installer_path) {
     VLOG(1) << "Could not locate install.sh";
     return false;
@@ -658,7 +661,7 @@ void EjectAndTrashDiskImage(const std::string& dmg_bsd_device_name) {
                                                 &disk_image_path_in_trash_c,
                                                 kFSFileOperationDefaultOptions);
   if (status != noErr) {
-    LOG(ERROR) << "FSPathMoveObjectToTrashSync: " << status;
+    OSSTATUS_LOG(ERROR, status) << "FSPathMoveObjectToTrashSync";
     return;
   }
 
@@ -676,7 +679,7 @@ void EjectAndTrashDiskImage(const std::string& dmg_bsd_device_name) {
                           kFNDirectoryModifiedMessage,
                           kNilOptions);
   if (status != noErr) {
-    LOG(ERROR) << "FNNotifyByPath: " << status;
+    OSSTATUS_LOG(ERROR, status) << "FNNotifyByPath";
     return;
   }
 }

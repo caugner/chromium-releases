@@ -1,11 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/download/download_shelf_controller.h"
 
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
+#include "chrome/browser/download/download_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -18,11 +20,12 @@
 #import "chrome/browser/ui/cocoa/download/download_shelf_view.h"
 #import "chrome/browser/ui/cocoa/hover_button.h"
 #import "chrome/browser/ui/cocoa/presentation_mode_controller.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
-#include "content/browser/download/download_stats.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
 #import "third_party/GTM/AppKit/GTMNSAnimation+Duration.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::DownloadItem;
 
 // Download shelf autoclose behavior:
 //
@@ -88,7 +91,7 @@ const NSSize kHoverCloseButtonDefaultSize = { 16, 16 };
 - (id)initWithBrowser:(Browser*)browser
        resizeDelegate:(id<ViewResizer>)resizeDelegate {
   if ((self = [super initWithNibName:@"DownloadShelf"
-                              bundle:base::mac::MainAppBundle()])) {
+                              bundle:base::mac::FrameworkBundle()])) {
     resizeDelegate_ = resizeDelegate;
     maxShelfHeight_ = NSHeight([[self view] bounds]);
     currentShelfHeight_ = maxShelfHeight_;
@@ -251,7 +254,7 @@ const NSSize kHoverCloseButtonDefaultSize = { 16, 16 };
     if ([[downloadItemControllers_ objectAtIndex:i]download]->IsInProgress())
       ++numInProgress;
   }
-  download_stats::RecordShelfClose(
+  download_util::RecordShelfClose(
       [downloadItemControllers_ count], numInProgress, auto_closed);
   if (auto_closed)
     [self showDownloadShelf:NO];
@@ -344,6 +347,10 @@ const NSSize kHoverCloseButtonDefaultSize = { 16, 16 };
 }
 
 - (void)closed {
+  // Don't remove completed downloads if the shelf is just being auto-hidden
+  // rather than explicitly closed by the user.
+  if (bridge_->is_hidden())
+    return;
   NSUInteger i = 0;
   while (i < [downloadItemControllers_ count]) {
     DownloadItemController* itemController =

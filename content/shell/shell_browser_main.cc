@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,16 +7,18 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/message_loop.h"
+#include "base/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "content/browser/browser_process_sub_thread.h"
 #include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/save_file_manager.h"
-#include "content/browser/plugin_service.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
+#include "content/browser/plugin_service_impl.h"
+#include "content/public/common/content_switches.h"
 #include "content/shell/shell.h"
 #include "content/shell/shell_browser_context.h"
 #include "content/shell/shell_content_browser_client.h"
+#include "content/shell/shell_devtools_delegate.h"
 #include "net/base/net_module.h"
 #include "ui/base/clipboard/clipboard.h"
 
@@ -33,7 +35,8 @@ static GURL GetStartupURL() {
 
 ShellBrowserMainParts::ShellBrowserMainParts(
     const content::MainFunctionParams& parameters)
-    : BrowserMainParts() {
+    : BrowserMainParts(),
+      devtools_delegate_(NULL) {
   ShellContentBrowserClient* shell_browser_client =
       static_cast<ShellContentBrowserClient*>(
           content::GetContentClient()->browser());
@@ -43,12 +46,29 @@ ShellBrowserMainParts::ShellBrowserMainParts(
 ShellBrowserMainParts::~ShellBrowserMainParts() {
 }
 
+int ShellBrowserMainParts::PreCreateThreads() {
+  return 0;
+}
+
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
   browser_context_.reset(new ShellBrowserContext(this));
 
   Shell::PlatformInitialize();
   net::NetModule::SetResourceProvider(Shell::PlatformResourceProvider);
-  PluginService::GetInstance()->Init();
+
+  const CommandLine& command_line = *CommandLine::ForCurrentProcess();
+  if (command_line.HasSwitch(switches::kRemoteDebuggingPort)) {
+    std::string port_str =
+        command_line.GetSwitchValueASCII(switches::kRemoteDebuggingPort);
+    int port;
+    if (base::StringToInt(port_str, &port) && port > 0 && port < 65535) {
+      devtools_delegate_ = new ShellDevToolsDelegate(
+          port,
+          browser_context_->GetRequestContext());
+    } else {
+      DLOG(WARNING) << "Invalid http debugger port number " << port;
+    }
+  }
 
   Shell::CreateNewWindow(browser_context_.get(),
                          GetStartupURL(),
@@ -58,31 +78,13 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopRun() {
+  if (devtools_delegate_)
+    devtools_delegate_->Stop();
   browser_context_.reset();
-
-  resource_dispatcher_host_->download_file_manager()->Shutdown();
-  resource_dispatcher_host_->save_file_manager()->Shutdown();
-  resource_dispatcher_host_->Shutdown();
-}
-
-void ShellBrowserMainParts::PreStopThread(BrowserThread::ID id) {
-  if (id == BrowserThread::WEBKIT) {
-    resource_dispatcher_host_.reset();
-  }
 }
 
 bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code) {
   return false;
-}
-
-ResourceDispatcherHost* ShellBrowserMainParts::GetResourceDispatcherHost() {
-  if (!resource_dispatcher_host_.get()) {
-    ResourceQueue::DelegateSet resource_queue_delegates;
-    resource_dispatcher_host_.reset(
-        new ResourceDispatcherHost(resource_queue_delegates));
-    resource_dispatcher_host_->Initialize();
-  }
-  return resource_dispatcher_host_.get();
 }
 
 ui::Clipboard* ShellBrowserMainParts::GetClipboard() {

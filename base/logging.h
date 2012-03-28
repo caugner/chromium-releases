@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -438,7 +438,6 @@ const LogSeverity LOG_0 = LOG_ERROR;
 // PLOG_STREAM is used by PLOG, which is the usual error logging macro
 // for each platform.
 #define PLOG_STREAM(severity) LOG_ERRNO_STREAM(severity)
-// TODO(tschmelcher): Should we add OSStatus logging for Mac?
 #endif
 
 #define PLOG(severity)                                          \
@@ -964,7 +963,7 @@ inline std::ostream& operator<<(std::ostream& out, const std::wstring& wstr) {
 #endif
 
 #if NOTIMPLEMENTED_POLICY == 0
-#define NOTIMPLEMENTED() ;
+#define NOTIMPLEMENTED() EAT_STREAM_PARAMETERS
 #elif NOTIMPLEMENTED_POLICY == 1
 // TODO, figure out how to generate a warning
 #define NOTIMPLEMENTED() COMPILE_ASSERT(false, NOT_IMPLEMENTED)
@@ -980,14 +979,5 @@ inline std::ostream& operator<<(std::ostream& out, const std::wstring& wstr) {
   LOG_IF(ERROR, 0 == count++) << NOTIMPLEMENTED_MSG;\
 } while(0)
 #endif
-
-namespace base {
-
-class StringPiece;
-
-// Allows StringPiece to be logged.
-BASE_EXPORT std::ostream& operator<<(std::ostream& o, const StringPiece& piece);
-
-}  // namespace base
 
 #endif  // BASE_LOGGING_H_

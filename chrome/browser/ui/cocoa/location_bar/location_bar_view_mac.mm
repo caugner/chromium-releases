@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 
 #include "base/bind.h"
+#include "base/message_loop.h"
 #include "base/stl_util.h"
 #include "base/string_util.h"
 #include "base/sys_string_conversions.h"
@@ -47,9 +48,8 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "net/base/net_util.h"
@@ -57,6 +57,8 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -116,16 +118,15 @@ LocationBarViewMac::~LocationBarViewMac() {
   [[field_ cell] clearDecorations];
 }
 
-void LocationBarViewMac::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
+void LocationBarViewMac::ShowFirstRunBubble() {
   // We need the browser window to be shown before we can show the bubble, but
   // we get called before that's happened.
   MessageLoop::current()->PostTask(FROM_HERE,
       base::Bind(&LocationBarViewMac::ShowFirstRunBubbleInternal,
-          weak_ptr_factory_.GetWeakPtr(), bubble_type));
+          weak_ptr_factory_.GetWeakPtr()));
 }
 
-void LocationBarViewMac::ShowFirstRunBubbleInternal(
-    FirstRun::BubbleType bubble_type) {
+void LocationBarViewMac::ShowFirstRunBubbleInternal() {
   if (!field_ || ![field_ window])
     return;
 
@@ -203,12 +204,12 @@ void LocationBarViewMac::InvalidatePageActions() {
   }
 }
 
-void LocationBarViewMac::SaveStateToContents(TabContents* contents) {
+void LocationBarViewMac::SaveStateToContents(WebContents* contents) {
   // TODO(shess): Why SaveStateToContents vs SaveStateToTab?
   omnibox_view_->SaveStateToTab(contents);
 }
 
-void LocationBarViewMac::Update(const TabContents* contents,
+void LocationBarViewMac::Update(const WebContents* contents,
                                 bool should_restore_state) {
   bool star_enabled = IsStarEnabled();
   command_updater_->UpdateCommandEnabled(IDC_BOOKMARK_PAGE, star_enabled);
@@ -329,8 +330,8 @@ int LocationBarViewMac::PageActionVisibleCount() {
   return result;
 }
 
-TabContents* LocationBarViewMac::GetTabContents() const {
-  return browser_->GetSelectedTabContents();
+WebContents* LocationBarViewMac::GetWebContents() const {
+  return browser_->GetSelectedWebContents();
 }
 
 PageActionDecoration* LocationBarViewMac::GetPageActionDecoration(
@@ -349,7 +350,7 @@ PageActionDecoration* LocationBarViewMac::GetPageActionDecoration(
 void LocationBarViewMac::SetPreviewEnabledPageAction(
     ExtensionAction* page_action, bool preview_enabled) {
   DCHECK(page_action);
-  TabContents* contents = GetTabContents();
+  WebContents* contents = GetWebContents();
   if (!contents)
     return;
   RefreshPageActionDecorations();
@@ -484,8 +485,8 @@ void LocationBarViewMac::Observe(int type,
                                  const content::NotificationDetails& details) {
   switch (type) {
     case chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED: {
-      TabContents* contents = GetTabContents();
-      if (content::Details<TabContents>(contents) != details)
+      WebContents* contents = GetWebContents();
+      if (content::Details<WebContents>(contents) != details)
         return;
 
       [field_ updateCursorAndToolTipRects];
@@ -511,12 +512,12 @@ void LocationBarViewMac::PostNotification(NSString* notification) {
 
 bool LocationBarViewMac::RefreshContentSettingsDecorations() {
   const bool input_in_progress = toolbar_model_->input_in_progress();
-  TabContents* tab_contents =
-      input_in_progress ? NULL : browser_->GetSelectedTabContents();
+  WebContents* web_contents =
+      input_in_progress ? NULL : browser_->GetSelectedWebContents();
   bool icons_updated = false;
   for (size_t i = 0; i < content_setting_decorations_.size(); ++i) {
     icons_updated |=
-        content_setting_decorations_[i]->UpdateFromTabContents(tab_contents);
+        content_setting_decorations_[i]->UpdateFromWebContents(web_contents);
   }
   return icons_updated;
 }
@@ -540,10 +541,12 @@ void LocationBarViewMac::RefreshPageActionDecorations() {
   if (!service)
     return;
 
+  // Find all the page actions.
   std::vector<ExtensionAction*> page_actions;
-  for (size_t i = 0; i < service->extensions()->size(); ++i) {
-    if (service->extensions()->at(i)->page_action())
-      page_actions.push_back(service->extensions()->at(i)->page_action());
+  for (ExtensionSet::const_iterator it = service->extensions()->begin();
+       it != service->extensions()->end(); ++it) {
+    if ((*it)->page_action())
+      page_actions.push_back((*it)->page_action());
   }
 
   // On startup we sometimes haven't loaded any extensions. This makes sure
@@ -560,7 +563,7 @@ void LocationBarViewMac::RefreshPageActionDecorations() {
   if (page_action_decorations_.empty())
     return;
 
-  TabContents* contents = GetTabContents();
+  WebContents* contents = GetWebContents();
   if (!contents)
     return;
 

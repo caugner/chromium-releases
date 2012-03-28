@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "media/base/filters.h"
 #include "media/base/mock_callback.h"
-#include "media/base/mock_filter_host.h"
+#include "media/base/mock_data_source_host.h"
 #include "media/base/mock_filters.h"
 #include "net/base/net_errors.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
@@ -80,7 +80,7 @@ class SimpleDataSourceTest : public testing::Test {
     data_source_->set_host(&host_);
     data_source_->SetURLLoaderForTest(url_loader_);
 
-    data_source_->Initialize(url, callback);
+    data_source_->Initialize(gurl_, callback);
     MessageLoop::current()->RunAllPending();
   }
 
@@ -127,10 +127,15 @@ class SimpleDataSourceTest : public testing::Test {
     MessageLoop::current()->RunAllPending();
   }
 
-  void DestroyDataSource() {
+  void StopAndDestroyDataSource() {
     data_source_->Stop(media::NewExpectedClosure());
     MessageLoop::current()->RunAllPending();
+    data_source_ = NULL;
+  }
 
+  void AbortAndDestroyDataSource() {
+    data_source_->Abort();
+    MessageLoop::current()->RunAllPending();
     data_source_ = NULL;
   }
 
@@ -154,7 +159,7 @@ class SimpleDataSourceTest : public testing::Test {
   scoped_ptr<MessageLoop> message_loop_;
   NiceMock<MockWebURLLoader>* url_loader_;
   scoped_refptr<SimpleDataSource> data_source_;
-  StrictMock<media::MockFilterHost> host_;
+  StrictMock<media::MockDataSourceHost> host_;
 
   MockWebFrameClient client_;
   WebView* view_;
@@ -168,21 +173,21 @@ TEST_F(SimpleDataSourceTest, InitializeHTTP) {
   InitializeDataSource(kHttpUrl,
                        media::NewExpectedStatusCB(media::PIPELINE_OK));
   RequestSucceeded();
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 }
 
 TEST_F(SimpleDataSourceTest, InitializeHTTPS) {
   InitializeDataSource(kHttpsUrl,
                        media::NewExpectedStatusCB(media::PIPELINE_OK));
   RequestSucceeded();
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 }
 
 TEST_F(SimpleDataSourceTest, InitializeFile) {
   InitializeDataSource(kFileUrl,
                        media::NewExpectedStatusCB(media::PIPELINE_OK));
   RequestSucceeded();
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 }
 
 TEST_F(SimpleDataSourceTest, InitializeData) {
@@ -197,18 +202,18 @@ TEST_F(SimpleDataSourceTest, InitializeData) {
   EXPECT_CALL(host_, SetTotalBytes(sizeof(kDataUrlDecoded)));
   EXPECT_CALL(host_, SetBufferedBytes(sizeof(kDataUrlDecoded)));
 
-  data_source_->Initialize(kDataUrl,
+  data_source_->Initialize(GURL(kDataUrl),
       media::NewExpectedStatusCB(media::PIPELINE_OK));
   MessageLoop::current()->RunAllPending();
 
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 }
 
 TEST_F(SimpleDataSourceTest, RequestFailed) {
   InitializeDataSource(kHttpUrl,
       media::NewExpectedStatusCB(media::PIPELINE_ERROR_NETWORK));
   RequestFailed();
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 }
 
 static void OnStatusCB(bool* called, media::PipelineStatus status) {
@@ -222,7 +227,18 @@ TEST_F(SimpleDataSourceTest, StopWhenDownloading) {
   InitializeDataSource(kHttpUrl, base::Bind(&OnStatusCB, &was_called));
 
   EXPECT_CALL(*url_loader_, cancel());
-  DestroyDataSource();
+  StopAndDestroyDataSource();
+  EXPECT_FALSE(was_called);
+}
+
+TEST_F(SimpleDataSourceTest, AbortWhenDownloading) {
+  // The callback should be deleted, but not executed.
+  // TODO(scherkus): should this really be the behaviour?  Seems strange...
+  bool was_called = false;
+  InitializeDataSource(kHttpUrl, base::Bind(&OnStatusCB, &was_called));
+
+  EXPECT_CALL(*url_loader_, cancel());
+  AbortAndDestroyDataSource();
   EXPECT_FALSE(was_called);
 }
 
@@ -231,7 +247,7 @@ TEST_F(SimpleDataSourceTest, AsyncRead) {
                        media::NewExpectedStatusCB(media::PIPELINE_OK));
   RequestSucceeded();
   AsyncRead();
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 }
 
 // NOTE: This test will need to be reworked a little once
@@ -243,7 +259,7 @@ TEST_F(SimpleDataSourceTest, HasSingleOrigin) {
                        media::NewExpectedStatusCB(media::PIPELINE_OK));
   RequestSucceeded();
   EXPECT_TRUE(data_source_->HasSingleOrigin());
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 
   // Test redirect to the same domain.
   InitializeDataSource(kHttpUrl,
@@ -251,7 +267,7 @@ TEST_F(SimpleDataSourceTest, HasSingleOrigin) {
   Redirect(kHttpRedirectToSameDomainUrl1);
   RequestSucceeded();
   EXPECT_TRUE(data_source_->HasSingleOrigin());
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 
   // Test redirect twice to the same domain.
   InitializeDataSource(kHttpUrl,
@@ -260,7 +276,7 @@ TEST_F(SimpleDataSourceTest, HasSingleOrigin) {
   Redirect(kHttpRedirectToSameDomainUrl2);
   RequestSucceeded();
   EXPECT_TRUE(data_source_->HasSingleOrigin());
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 
   // Test redirect to a different domain.
   InitializeDataSource(kHttpUrl,
@@ -268,7 +284,7 @@ TEST_F(SimpleDataSourceTest, HasSingleOrigin) {
   Redirect(kHttpRedirectToDifferentDomainUrl1);
   RequestSucceeded();
   EXPECT_FALSE(data_source_->HasSingleOrigin());
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 
   // Test redirect to the same domain and then to a different domain.
   InitializeDataSource(kHttpUrl,
@@ -277,7 +293,7 @@ TEST_F(SimpleDataSourceTest, HasSingleOrigin) {
   Redirect(kHttpRedirectToDifferentDomainUrl1);
   RequestSucceeded();
   EXPECT_FALSE(data_source_->HasSingleOrigin());
-  DestroyDataSource();
+  StopAndDestroyDataSource();
 }
 
 }  // namespace webkit_media

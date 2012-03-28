@@ -18,8 +18,6 @@
           '<(INTERMEDIATE_DIR)',
         ],
         'defines': [
-          'NACL_BLOCK_SHIFT=5',
-          'NACL_BLOCK_SIZE=32',
           '<@(nacl_defines)',
         ],
         'sources': [
@@ -67,19 +65,21 @@
             'nacl_target': 1,
           },
           'dependencies': [
-            'chrome_resources.gyp:chrome_resources',
-            'chrome_resources.gyp:chrome_strings',
-            'common',
-            '../ppapi/native_client/native_client.gyp:nacl_irt',
-            '../webkit/support/webkit_support.gyp:glue',
+            '../base/base.gyp:base',
+            '../ipc/ipc.gyp:ipc',
             '../ppapi/native_client/src/trusted/plugin/plugin.gyp:ppGoogleNaClPluginChrome',
             '../native_client/src/trusted/service_runtime/service_runtime.gyp:sel',
             '../native_client/src/trusted/platform_qualify/platform_qualify.gyp:platform_qual_lib',
           ],
+          'conditions': [
+            ['disable_nacl_untrusted==0', {
+              'dependencies': [
+                '../ppapi/native_client/native_client.gyp:nacl_irt',
+              ],
+            }],
+          ],
           'direct_dependent_settings': {
             'defines': [
-              'NACL_BLOCK_SHIFT=5',
-              'NACL_BLOCK_SIZE=32',
               '<@(nacl_defines)',
             ],
           },
@@ -118,8 +118,6 @@
               },
               'direct_dependent_settings': {
                 'defines': [
-                  'NACL_BLOCK_SHIFT=5',
-                  'NACL_BLOCK_SIZE=32',
                   '<@(nacl_defines)',
                 ],
               },
@@ -127,27 +125,6 @@
           ],
         }],
         ['OS=="linux" and coverage==0', {
-          'conditions': [
-            ['target_arch=="x64"', {
-              'variables': {
-                # No extra reservation.
-                'nacl_reserve_top': [],
-              }
-            }],
-            ['target_arch=="ia32"', {
-              'variables': {
-                # 1G address space.
-                'nacl_reserve_top': ['--defsym', 'RESERVE_TOP=0x40000000'],
-              }
-            }],
-            ['target_arch=="arm"', {
-              'variables': {
-                # 1G address space, plus 4K guard area above because
-                # immediate offsets are 12 bits.
-                'nacl_reserve_top': ['--defsym', 'RESERVE_TOP=0x40001000'],
-              }
-            }],
-          ],
           'targets': [
             {
               'target_name': 'nacl_helper',
@@ -160,6 +137,9 @@
               ],
               'sources': [
                 'nacl/nacl_helper_linux.cc',
+                '../chrome/common/nacl_messages.cc',
+                '../content/common/child_process_sandbox_support_impl_shm_linux.cc',
+                '../content/common/unix_domain_socket_posix.cc',
               ],
               'conditions': [
                 ['toolkit_uses_gtk == 1', {

@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 {
@@ -96,18 +96,30 @@
           }],  # branding
         ],  # conditions
       }],  # OS=="mac"
+      # TODO(mcgrathr): This duplicates native_client/build/common.gypi;
+      # we should figure out a way to unify the settings.
       ['target_arch=="ia32"', {
         'nacl_defines': [
-          # TODO(gregoryd): consider getting this from NaCl's common.gypi
           'NACL_TARGET_SUBARCH=32',
+          'NACL_TARGET_ARCH=x86',
           'NACL_BUILD_SUBARCH=32',
+          'NACL_BUILD_ARCH=x86',
         ],
       }],
       ['target_arch=="x64"', {
         'nacl_defines': [
-          # TODO(gregoryd): consider getting this from NaCl's common.gypi
           'NACL_TARGET_SUBARCH=64',
+          'NACL_TARGET_ARCH=x86',
           'NACL_BUILD_SUBARCH=64',
+          'NACL_BUILD_ARCH=x86',
+        ],
+      }],
+      ['target_arch=="arm"', {
+        'nacl_defines': [
+          'NACL_BUILD_ARCH=arm',
+          'NACL_BUILD_SUBARCH=32',
+          'NACL_TARGET_ARCH=arm',
+          'NACL_TARGET_SUBARCH=32',
         ],
       }],
     ],  # conditions
@@ -250,6 +262,9 @@
       'sources': [
         'browser/sync/engine/syncapi_internal.cc',
         'browser/sync/engine/syncapi_internal.h',
+        'browser/sync/internal_api/includes/syncer_error.cc',
+        'browser/sync/internal_api/includes/syncer_error.h',
+        'browser/sync/internal_api/includes/unrecoverable_error_handler.h',
         'browser/sync/internal_api/base_node.cc',
         'browser/sync/internal_api/base_node.h',
         'browser/sync/internal_api/base_transaction.cc',
@@ -395,8 +410,6 @@
         'browser/sync/engine/syncer.h',
         'browser/sync/engine/syncer_command.cc',
         'browser/sync/engine/syncer_command.h',
-        'browser/sync/engine/syncer_end_command.cc',
-        'browser/sync/engine/syncer_end_command.h',
         'browser/sync/engine/syncer_proto_util.cc',
         'browser/sync/engine/syncer_proto_util.h',
         'browser/sync/engine/sync_scheduler.cc',
@@ -466,6 +479,7 @@
         'browser/sync/syncable/transaction_observer.h',
         'browser/sync/util/cryptographer.cc',
         'browser/sync/util/cryptographer.h',
+        'browser/sync/util/enum_set.h',
         'browser/sync/util/extensions_activity_monitor.cc',
         'browser/sync/util/extensions_activity_monitor.h',
         'browser/sync/util/get_session_name_task.cc',
@@ -478,8 +492,6 @@
         'browser/sync/util/nigori.h',
         'browser/sync/util/oauth.cc',
         'browser/sync/util/oauth.h',
-        'browser/sync/util/sqlite_utils.cc',
-        'browser/sync/util/sqlite_utils.h',
         'browser/sync/util/time.cc',
         'browser/sync/util/time.h',
         'browser/sync/util/unrecoverable_error_info.h',
@@ -768,12 +780,12 @@
             {
               # Modify the Info.plist as needed.  The script explains why this
               # is needed.  This is also done in the chrome and chrome_dll
-              # targets.  In this case, -b0, -k0, and -s0 are used because
-              # Breakpad, Keystone, and Subersion keys are never placed into
-              # the helper.
+              # targets.  In this case, --breakpad=0, -k0, and -s0 are used
+              # because Breakpad, Keystone, and Subersion keys are never
+              # placed into the helper.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
-                         '-b0',
+                         '--breakpad=0',
                          '-k0',
                          '-s0',
                          '<(branding)',
@@ -809,16 +821,35 @@
           ],
         },  # target helper_app
         {
+          # A library containing the actual code for the app mode app, shared
+          # by unit tests.
+          'target_name': 'app_mode_app_support',
+          'type': 'static_library',
+          'variables': { 'enable_wexit_time_destructors': 1, },
+          'product_name': 'app_mode_app_support',
+          'dependencies': [
+            '../base/base.gyp:base',
+          ],
+          'sources': [
+            'common/mac/app_mode_common.h',
+            'common/mac/app_mode_common.mm',
+          ],
+          'include_dirs': [
+            '..',
+          ],
+        },  # target app_mode_app_support
+        {
           # This produces the app mode loader, but not as a bundle. Chromium
           # itself is responsible for producing bundles.
           'target_name': 'app_mode_app',
           'type': 'executable',
           'variables': { 'enable_wexit_time_destructors': 1, },
           'product_name': '<(mac_product_name) App Mode Loader',
+          'dependencies': [
+            'app_mode_app_support',
+          ],
           'sources': [
             'app/app_mode_loader_mac.mm',
-            'common/mac/app_mode_common.h',
-            'common/mac/app_mode_common.mm',
           ],
           'include_dirs': [
             '..',
@@ -1301,6 +1332,19 @@
               'msvs_target_platform': 'x64',
             },
           },
+        },
+        {
+          'target_name': 'sb_sigutil',
+          'type': 'executable',
+          'dependencies': [
+            '../base/base.gyp:base',
+            'safe_browsing_proto',
+          ],
+          'sources': [
+            'browser/safe_browsing/signature_util.h',
+            'browser/safe_browsing/signature_util_win.cc',
+            'tools/safe_browsing/sb_sigutil.cc',
+          ],
         },
       ]},  # 'targets'
     ],  # OS=="win"

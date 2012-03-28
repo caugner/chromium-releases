@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,11 @@
 #include "chrome/test/base/layout_test_http_server.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/ui/ui_layout_test.h"
-#include "content/browser/worker_host/worker_service.h"
+#include "content/browser/worker_host/worker_service_impl.h"
 #include "content/public/common/url_constants.h"
 #include "net/test/test_server.h"
+
+using content::WorkerServiceImpl;
 
 namespace {
 
@@ -103,7 +105,7 @@ class WorkerTest : public UILayoutTest {
 
       // Sometimes the worker processes can take a while to shut down on the
       // bots, so use a longer timeout period to avoid spurious failures.
-      base::PlatformThread::Sleep(TestTimeouts::action_max_timeout_ms() / 100);
+      base::PlatformThread::Sleep(TestTimeouts::action_max_timeout() / 100);
     }
 
     EXPECT_EQ(number_of_processes, cur_process_count);
@@ -586,7 +588,7 @@ TEST_F(WorkerTest, FLAKY_MessagePorts) {
 #define MAYBE_LimitPerPage FLAKY_LimitPerPage
 #endif
 TEST_F(WorkerTest, MAYBE_LimitPerPage) {
-  int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
+  int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
                                        FilePath(kManyWorkersFile));
   url = GURL(url.spec() + StringPrintf("?count=%d", max_workers_per_tab + 1));
@@ -601,8 +603,8 @@ TEST_F(WorkerTest, MAYBE_LimitPerPage) {
 // Possibly causing ui_tests to hang on Mac: http://crbug.com/88958
 // Times out consistently on all platforms.
 TEST_F(WorkerTest, DISABLED_LimitTotal) {
-  int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
-  int total_workers = WorkerService::kMaxWorkersWhenSeparate;
+  int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
+  int total_workers = WorkerServiceImpl::kMaxWorkersWhenSeparate;
 
   int tab_count = (total_workers / max_workers_per_tab) + 1;
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
@@ -647,7 +649,7 @@ TEST_F(WorkerTest, FLAKY_WorkerClose) {
 TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerShutdown) {
   // Tests to make sure that queued shared workers are started up when
   // shared workers shut down.
-  int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
+  int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
       FilePath(kQuerySharedWorkerShutdownFile));
   url = GURL(url.spec() + StringPrintf("?count=%d", max_workers_per_tab));
@@ -665,7 +667,7 @@ TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerShutdown) {
 TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
   // Tests to make sure that only one instance of queued shared workers are
   // started up even when those instances are on multiple tabs.
-  int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
+  int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
                                        FilePath(kManySharedWorkersFile));
   url = GURL(url.spec() + StringPrintf("?count=%d", max_workers_per_tab+1));
@@ -699,7 +701,7 @@ TEST_F(WorkerTest, FLAKY_MultipleTabsQueuedSharedWorker) {
 TEST_F(WorkerTest, FLAKY_QueuedSharedWorkerStartedFromOtherTab) {
   // Tests to make sure that queued shared workers are started up when
   // an instance is launched from another tab.
-  int max_workers_per_tab = WorkerService::kMaxWorkersPerTabWhenSeparate;
+  int max_workers_per_tab = WorkerServiceImpl::kMaxWorkersPerTabWhenSeparate;
   GURL url = ui_test_utils::GetTestUrl(FilePath(kTestDir),
                                        FilePath(kManySharedWorkersFile));
   url = GURL(url.spec() + StringPrintf("?count=%d", max_workers_per_tab+1));

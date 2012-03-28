@@ -17,6 +17,7 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -44,14 +45,13 @@ AccountsOptionsHandler::~AccountsOptionsHandler() {
 }
 
 void AccountsOptionsHandler::RegisterMessages() {
-  DCHECK(web_ui_);
-  web_ui_->RegisterMessageCallback("whitelistUser",
+  web_ui()->RegisterMessageCallback("whitelistUser",
       base::Bind(&AccountsOptionsHandler::HandleWhitelistUser,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("unwhitelistUser",
+  web_ui()->RegisterMessageCallback("unwhitelistUser",
       base::Bind(&AccountsOptionsHandler::HandleUnwhitelistUser,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("whitelistExistingUsers",
+  web_ui()->RegisterMessageCallback("whitelistExistingUsers",
       base::Bind(&AccountsOptionsHandler::HandleWhitelistExistingUsers,
                  base::Unretained(this)));
 }

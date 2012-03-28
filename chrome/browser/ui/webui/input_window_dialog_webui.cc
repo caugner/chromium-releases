@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,15 +16,18 @@
 #include "chrome/browser/ui/dialog_style.h"
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::WebContents;
+using content::WebUIMessageHandler;
+
 namespace {
 
-const int kInputWindowDialogWidth = 300;
-const int kInputWindowDialogBaseHeight = 90;
-const int kInputWindowDialogContentsHeight = 20;
+const int kInputWindowDialogWidth = 277;
+const int kInputWindowDialogBaseHeight = 57;
+const int kInputWindowDialogRowHeight = 35;
 
 }  // namespace
 
@@ -61,8 +64,8 @@ void InputWindowDialogWebUI::Close() {
   }
 }
 
-bool InputWindowDialogWebUI::IsDialogModal() const {
-  return true;
+ui::ModalType InputWindowDialogWebUI::GetDialogModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 string16 InputWindowDialogWebUI::GetDialogTitle() const {
@@ -80,7 +83,7 @@ void InputWindowDialogWebUI::GetWebUIMessageHandlers(
 
 void InputWindowDialogWebUI::GetDialogSize(gfx::Size* size) const {
   const int height = kInputWindowDialogBaseHeight +
-      kInputWindowDialogContentsHeight * label_contents_pairs_.size();
+      kInputWindowDialogRowHeight * label_contents_pairs_.size();
   size->SetSize(kInputWindowDialogWidth, height);
 }
 
@@ -131,7 +134,7 @@ void InputWindowDialogWebUI::OnDialogClosed(const std::string& json_retval) {
   closed_ = true;
 }
 
-void InputWindowDialogWebUI::OnCloseContents(TabContents* source,
+void InputWindowDialogWebUI::OnCloseContents(WebContents* source,
                                              bool* out_close_dialog) {
 }
 
@@ -148,12 +151,11 @@ InputWindowDialogHandler::InputWindowDialogHandler(
 }
 
 void InputWindowDialogHandler::CloseDialog() {
-  DCHECK(web_ui_);
-  static_cast<HtmlDialogUI*>(web_ui_)->CloseDialog(NULL);
+  static_cast<HtmlDialogUI*>(web_ui()->GetController())->CloseDialog(NULL);
 }
 
 void InputWindowDialogHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("validate",
+  web_ui()->RegisterMessageCallback("validate",
       base::Bind(&InputWindowDialogHandler::Validate,
                  base::Unretained(this)));
 }
@@ -171,6 +173,6 @@ void InputWindowDialogHandler::Validate(const base::ListValue* args) {
   }
   const bool valid = delegate_->IsValid(texts);
   scoped_ptr<Value> result(Value::CreateBooleanValue(valid));
-  web_ui_->CallJavascriptFunction("inputWindowDialog.ackValidation",
-                                  *result);
+  web_ui()->CallJavascriptFunction("inputWindowDialog.ackValidation",
+                                   *result);
 }

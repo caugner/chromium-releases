@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -93,18 +93,16 @@ class DnsReloader : public net::NetworkChangeNotifier::DNSObserver {
   friend struct base::DefaultLazyInstanceTraits<DnsReloader>;
 
   // We use thread local storage to identify which ReloadState to interact with.
-  static base::ThreadLocalStorage::Slot tls_index_ ;
+  static base::ThreadLocalStorage::StaticSlot tls_index_;
 
   DISALLOW_COPY_AND_ASSIGN(DnsReloader);
 };
 
 // A TLS slot to the ReloadState for the current thread.
 // static
-base::ThreadLocalStorage::Slot DnsReloader::tls_index_(
-    base::LINKER_INITIALIZED);
+base::ThreadLocalStorage::StaticSlot DnsReloader::tls_index_ = TLS_INITIALIZER;
 
-base::LazyInstance<DnsReloader,
-                   base::LeakyLazyInstanceTraits<DnsReloader> >
+base::LazyInstance<DnsReloader>::Leaky
     g_dns_reloader = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace

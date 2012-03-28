@@ -7,11 +7,9 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/stl_util.h"
-#include "base/task.h"
 #include "webkit/plugins/ppapi/host_globals.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/resource_helper.h"

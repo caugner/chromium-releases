@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,9 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 
 namespace chromeos {
 
@@ -117,7 +117,7 @@ bool TabCloseableStateWatcher::CanCloseTabs(const Browser* browser,
   // This is the main purpose of this method CanCloseTabs.
   for (size_t i = 0; i < indices->size(); ++i) {
     if ((*indices)[i] == 0) {
-      if (tabstrip_model->GetTabContentsAt(0)->tab_contents()->GetURL() ==
+      if (tabstrip_model->GetTabContentsAt(0)->web_contents()->GetURL() ==
           GURL(chrome::kChromeUINewTabURL)) {  // First tab is NewTabPage.
         indices->erase(indices->begin() + i);  // Don't close it.
         return false;
@@ -243,7 +243,7 @@ void TabCloseableStateWatcher::CheckAndUpdateState(
       TabStripModel* tabstrip_model = browser_to_check->tabstrip_model();
       if (tabstrip_model->count() == 1) {
         new_can_close =
-            tabstrip_model->GetTabContentsAt(0)->tab_contents()->GetURL() !=
+            tabstrip_model->GetTabContentsAt(0)->web_contents()->GetURL() !=
                 GURL(chrome::kChromeUINewTabURL);  // Tab is not NewTabPage.
       } else {
         new_can_close = true;

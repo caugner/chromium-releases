@@ -68,9 +68,9 @@ class HttpProxyClientSocketPoolTest : public TestWithHttpParam {
                          &host_resolver_,
                          &cert_verifier_,
                          NULL /* origin_bound_cert_store */,
-                         NULL /* dnsrr_resolver */,
-                         NULL /* dns_cert_checker */,
+                         NULL /* transport_security_state */,
                          NULL /* ssl_host_info_factory */,
+                         ""   /* ssl_session_cache_shard */,
                          &socket_factory_,
                          &transport_socket_pool_,
                          NULL,
@@ -174,8 +174,9 @@ class HttpProxyClientSocketPoolTest : public TestWithHttpParam {
   void InitializeSpdySsl() {
     spdy::SpdyFramer::set_enable_compression_default(false);
     ssl_data_->next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-    ssl_data_->next_proto = "spdy/2";
+    ssl_data_->next_proto = "spdy/2.1";
     ssl_data_->was_npn_negotiated = true;
+    ssl_data_->protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   }
 
   HttpNetworkSession* CreateNetworkSession() {
@@ -215,7 +216,7 @@ class HttpProxyClientSocketPoolTest : public TestWithHttpParam {
   scoped_refptr<DeterministicSocketData> data_;
   HttpProxyClientSocketPool pool_;
   ClientSocketHandle handle_;
-  TestOldCompletionCallback callback_;
+  TestCompletionCallback callback_;
 };
 
 //-----------------------------------------------------------------------------
@@ -228,8 +229,8 @@ INSTANTIATE_TEST_CASE_P(HttpProxyClientSocketPoolTests,
 TEST_P(HttpProxyClientSocketPoolTest, NoTunnel) {
   Initialize(false, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
 
-  int rv = handle_.Init("a", GetNoTunnelParams(), LOW, NULL, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetNoTunnelParams(), LOW, CompletionCallback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(handle_.is_initialized());
   ASSERT_TRUE(handle_.socket());
@@ -270,8 +271,8 @@ TEST_P(HttpProxyClientSocketPoolTest, NeedAuth) {
              arraysize(spdy_writes));
 
   data_->StopAfter(4);
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -295,7 +296,7 @@ TEST_P(HttpProxyClientSocketPoolTest, NeedAuth) {
 }
 
 TEST_P(HttpProxyClientSocketPoolTest, HaveAuth) {
-  // It's pretty much impossible to make the SPDY case becave synchronously
+  // It's pretty much impossible to make the SPDY case behave synchronously
   // so we skip this test for SPDY
   if (GetParam() == SPDY)
     return;
@@ -314,8 +315,8 @@ TEST_P(HttpProxyClientSocketPoolTest, HaveAuth) {
              NULL, 0);
   AddAuthToCache();
 
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(OK, rv);
   EXPECT_TRUE(handle_.is_initialized());
   ASSERT_TRUE(handle_.socket());
@@ -351,8 +352,8 @@ TEST_P(HttpProxyClientSocketPoolTest, AsyncHaveAuth) {
              arraysize(spdy_writes));
   AddAuthToCache();
 
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -373,8 +374,8 @@ TEST_P(HttpProxyClientSocketPoolTest, TCPError) {
 
   socket_factory().AddSocketDataProvider(data_.get());
 
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -398,8 +399,8 @@ TEST_P(HttpProxyClientSocketPoolTest, SSLError) {
   }
   socket_factory().AddSSLSocketDataProvider(ssl_data_.get());
 
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                        BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -423,8 +424,8 @@ TEST_P(HttpProxyClientSocketPoolTest, SslClientAuth) {
   }
   socket_factory().AddSSLSocketDataProvider(ssl_data_.get());
 
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -461,8 +462,8 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelUnexpectedClose) {
              arraysize(spdy_writes));
   AddAuthToCache();
 
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());
@@ -502,8 +503,8 @@ TEST_P(HttpProxyClientSocketPoolTest, TunnelSetupError) {
              arraysize(spdy_writes));
   AddAuthToCache();
 
-  int rv = handle_.Init("a", GetTunnelParams(), LOW, &callback_, &pool_,
-                       BoundNetLog());
+  int rv = handle_.Init("a", GetTunnelParams(), LOW, callback_.callback(),
+                        &pool_, BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_FALSE(handle_.is_initialized());
   EXPECT_FALSE(handle_.socket());

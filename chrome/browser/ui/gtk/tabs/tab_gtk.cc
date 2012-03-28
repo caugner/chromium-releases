@@ -7,6 +7,7 @@
 #include <gdk/gdkkeysyms.h>
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/memory/singleton.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -22,6 +23,8 @@
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/gtk/scoped_handle_gtk.h"
 #include "ui/gfx/path.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -101,6 +104,8 @@ TabGtk::~TabGtk() {
 }
 
 void TabGtk::Raise() const {
+  UNSHIPPED_TRACE_EVENT0("ui::gtk", "TabGtk::Raise");
+
   GdkWindow* window = gtk_input_event_box_get_window(
       GTK_INPUT_EVENT_BOX(event_box_));
   gdk_window_raise(window);
@@ -154,12 +159,15 @@ gboolean TabGtk::OnButtonReleaseEvent(GtkWidget* widget,
     }
   }
 
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+
   // Middle mouse up means close the tab, but only if the mouse is over it
   // (like a button).
   if (event->button == 2 &&
       event->x >= 0 && event->y >= 0 &&
-      event->x < widget->allocation.width &&
-      event->y < widget->allocation.height) {
+      event->x < allocation.width &&
+      event->y < allocation.height) {
     // If the user is currently holding the left mouse button down but hasn't
     // moved the mouse yet, a drag hasn't started yet.  In that case, clean up
     // some state before closing the tab to avoid a crash.  Once the drag has
@@ -258,7 +266,7 @@ void TabGtk::CloseButtonClicked() {
   delegate_->CloseTab(this);
 }
 
-void TabGtk::UpdateData(TabContents* contents, bool app, bool loading_only) {
+void TabGtk::UpdateData(WebContents* contents, bool app, bool loading_only) {
   TabRendererGtk::UpdateData(contents, app, loading_only);
   // Cache the title width so we don't recalculate it every time the tab is
   // resized.

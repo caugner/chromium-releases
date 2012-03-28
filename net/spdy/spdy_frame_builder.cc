@@ -86,7 +86,7 @@ bool SpdyFrameBuilder::ReadString(void** iter, std::string* result) const {
 }
 
 bool SpdyFrameBuilder::ReadBytes(void** iter, const char** data,
-                                 uint16 length) const {
+                                 uint32 length) const {
   DCHECK(iter);
   DCHECK(data);
 
@@ -106,6 +106,19 @@ bool SpdyFrameBuilder::ReadData(void** iter, const char** data,
   DCHECK(length);
 
   if (!ReadUInt16(iter, length))
+    return false;
+
+  return ReadBytes(iter, data, *length);
+}
+
+bool SpdyFrameBuilder::ReadReadLen32PrefixedData(void** iter,
+                                                 const char** data,
+                                                 uint32* length) const {
+  DCHECK(iter);
+  DCHECK(data);
+  DCHECK(length);
+
+  if (!ReadUInt32(iter, length))
     return false;
 
   return ReadBytes(iter, data, *length);
@@ -176,18 +189,15 @@ bool SpdyFrameBuilder::WriteString(const std::string& value) {
 
 // TODO(hkhalil) Remove Resize() entirely.
 bool SpdyFrameBuilder::Resize(size_t new_capacity) {
+  DCHECK(new_capacity > 0);
   if (new_capacity <= capacity_)
     return true;
 
   char* p = new char[new_capacity];
-  if (!p)
-    return false;
   if (buffer_) {
     memcpy(p, buffer_, capacity_);
     delete[] buffer_;
   }
-  if (!p && new_capacity > 0)
-    return false;
   buffer_ = p;
   capacity_ = new_capacity;
   return true;

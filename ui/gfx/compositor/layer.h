@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,9 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebContentLayerClient.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebLayer.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebLayerClient.h"
+#include "third_party/skia/include/core/SkColor.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebContentLayerClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebLayer.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/compositor/compositor.h"
@@ -40,12 +40,18 @@ class Texture;
 // NULL, but the children are not deleted.
 class COMPOSITOR_EXPORT Layer :
     public LayerAnimationDelegate,
-    NON_EXPORTED_BASE(public WebKit::WebLayerClient),
     NON_EXPORTED_BASE(public WebKit::WebContentLayerClient) {
  public:
   enum LayerType {
-    LAYER_HAS_NO_TEXTURE = 0,
-    LAYER_HAS_TEXTURE = 1
+    // A layer that has no onscreen representation (note that its children will
+    // still be drawn, though).
+    LAYER_NOT_DRAWN = 0,
+
+    // A layer that has a texture.
+    LAYER_TEXTURED = 1,
+
+    // A layer that's drawn as a single color.
+    LAYER_SOLID_COLOR = 2,
   };
 
   Layer();
@@ -77,12 +83,21 @@ class COMPOSITOR_EXPORT Layer :
   // method will result in |child| being lowered in the stacking order.
   void StackAbove(Layer* child, Layer* other);
 
+  // Stacks |child| below all other children.
+  void StackAtBottom(Layer* child);
+
+  // Stacks |child| directly below |other|.  Both must be children of this
+  // layer.
+  void StackBelow(Layer* child, Layer* other);
+
   // Returns the child Layers.
   const std::vector<Layer*>& children() const { return children_; }
 
   // The parent.
   const Layer* parent() const { return parent_; }
   Layer* parent() { return parent_; }
+
+  LayerType type() const { return type_; }
 
   // Returns true if this Layer contains |other| somewhere in its children.
   bool Contains(const Layer* other) const;
@@ -145,25 +160,19 @@ class COMPOSITOR_EXPORT Layer :
   void SetFillsBoundsOpaquely(bool fills_bounds_opaquely);
   bool fills_bounds_opaquely() const { return fills_bounds_opaquely_; }
 
-  // Returns the invalid rectangle. That is, the region of the layer that needs
-  // to be repainted. This is exposed for testing and isn't generally useful.
-  const gfx::Rect& invalid_rect() const { return invalid_rect_; }
-
-  const gfx::Rect& hole_rect() const {  return hole_rect_; }
-
   const std::string& name() const { return name_; }
   void set_name(const std::string& name) { name_ = name; }
 
   const ui::Texture* texture() const { return texture_.get(); }
 
-  // |texture| cannot be NULL, and this function cannot be called more than
-  // once.
+  // Assigns a new external texture.  |texture| can be NULL to disable external
+  // updates.
   // TODO(beng): This can be removed from the API when we are in a
   //             single-compositor world.
   void SetExternalTexture(ui::Texture* texture);
 
-  // Resets the canvas of the texture.
-  void SetCanvas(const SkCanvas& canvas, const gfx::Point& origin);
+  // Sets the layer's fill color.  May only be called for LAYER_SOLID_COLOR.
+  void SetColor(SkColor color);
 
   // Adds |invalid_rect| to the Layer's pending invalid rect and calls
   // ScheduleDraw().
@@ -172,26 +181,14 @@ class COMPOSITOR_EXPORT Layer :
   // Schedules a redraw of the layer tree at the compositor.
   void ScheduleDraw();
 
-  // Does drawing for the layer.
-  void Draw();
-
-  // Draws a tree of Layers, by calling Draw() on each in the hierarchy starting
-  // with the receiver.
-  void DrawTree();
-
   // Sometimes the Layer is being updated by something other than SetCanvas
   // (e.g. the GPU process on UI_COMPOSITOR_IMAGE_TRANSPORT).
   bool layer_updated_externally() const { return layer_updated_externally_; }
 
-  // WebLayerClient
-  virtual void notifyNeedsComposite();
-
   // WebContentLayerClient
   virtual void paintContents(WebKit::WebCanvas*, const WebKit::WebRect& clip);
 
-#if defined(USE_WEBKIT_COMPOSITOR)
   WebKit::WebLayer web_layer() { return web_layer_; }
-#endif
 
  private:
   struct LayerProperties {
@@ -206,61 +203,15 @@ class COMPOSITOR_EXPORT Layer :
   // use the combined result, but this is only temporary.
   float GetCombinedOpacity() const;
 
-  // Called during the Draw() pass to freshen the Layer's contents from the
-  // delegate.
-  void UpdateLayerCanvas();
-
-  // Called to indicate that a layer's properties have changed and that the
-  // holes for the layers must be recomputed.
-  void SetNeedsToRecomputeHole();
-
-  // Resets |hole_rect_| to the empty rect for all layers below and
-  // including this one.
-  void ClearHoleRects();
+  // Stacks |child| above or below |other|.  Helper method for StackAbove() and
+  // StackBelow().
+  void StackRelativeTo(Layer* child, Layer* other, bool above);
 
   // Does a preorder traversal of layers starting with this layer. Omits layers
   // which cannot punch a hole in another layer such as non visible layers
   // and layers which don't fill their bounds opaquely.
   void GetLayerProperties(const ui::Transform& current_transform,
                           std::vector<LayerProperties>* traverasal);
-
-  // A hole in a layer is an area in the layer that does not get drawn
-  // because this area is covered up with another layer which is known to be
-  // opaque.
-  // This method computes the dimension of the hole (if there is one)
-  // based on whether one of its child nodes is always opaque.
-  // Note: This method should only be called from the root.
-  void RecomputeHole();
-
-  void set_hole_rect(const gfx::Rect& hole_rect) {
-    hole_rect_ = hole_rect;
-  }
-
-  // Determines the regions that don't intersect |rect| and places the
-  // result in |sides|.
-  //
-  //  rect_____________________________
-  //  |xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
-  //  |xxxxxxxxxxxxx top xxxxxxxxxxxxxx|
-  //  |________________________________|
-  //  |xxxxx|                    |xxxxx|
-  //  |xxxxx|region_to_punch_out |xxxxx|
-  //  |left |                    |right|
-  //  |_____|____________________|_____|
-  //  |xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx|
-  //  |xxxxxxxxxx bottom xxxxxxxxxxxxxx|
-  //  |________________________________|
-  static void PunchHole(const gfx::Rect& rect,
-                        const gfx::Rect& region_to_punch_out,
-                        std::vector<gfx::Rect>* sides);
-
-  // Drops texture just for this layer.
-  void DropTexture();
-
-  // Drop all textures for layers below and including this one. Called when
-  // the layer is removed from a hierarchy. Textures will be re-generated if
-  // the layer is subsequently re-attached and needs to be drawn.
-  void DropTextures();
 
   bool ConvertPointForAncestor(const Layer* ancestor, gfx::Point* point) const;
   bool ConvertPointFromAncestor(const Layer* ancestor, gfx::Point* point) const;
@@ -288,12 +239,10 @@ class COMPOSITOR_EXPORT Layer :
   virtual const Transform& GetTransformForAnimation() const OVERRIDE;
   virtual float GetOpacityForAnimation() const OVERRIDE;
 
-#if defined(USE_WEBKIT_COMPOSITOR)
   void CreateWebLayer();
   void RecomputeTransform();
   void RecomputeDrawsContentAndUVRect();
   void RecomputeDebugBorderColor();
-#endif
 
   const LayerType type_;
 
@@ -315,12 +264,6 @@ class COMPOSITOR_EXPORT Layer :
 
   bool fills_bounds_opaquely_;
 
-  gfx::Rect hole_rect_;
-
-  bool recompute_hole_;
-
-  gfx::Rect invalid_rect_;
-
   // If true the layer is always up to date.
   bool layer_updated_externally_;
 
@@ -332,11 +275,9 @@ class COMPOSITOR_EXPORT Layer :
 
   scoped_ptr<LayerAnimator> animator_;
 
-#if defined(USE_WEBKIT_COMPOSITOR)
   WebKit::WebLayer web_layer_;
   bool web_layer_is_accelerated_;
   bool show_debug_borders_;
-#endif
 
   DISALLOW_COPY_AND_ASSIGN(Layer);
 };

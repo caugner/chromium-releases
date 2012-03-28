@@ -2,13 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/command_line.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/chromeos/login/base_login_display_host.h"
 #include "chrome/browser/chromeos/login/enrollment/enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/enrollment/mock_enterprise_enrollment_screen.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
+#include "chrome/browser/chromeos/login/mock_authenticator.h"
 #include "chrome/browser/chromeos/login/mock_eula_screen.h"
+#include "chrome/browser/chromeos/login/mock_login_status_consumer.h"
 #include "chrome/browser/chromeos/login/mock_network_screen.h"
 #include "chrome/browser/chromeos/login/mock_update_screen.h"
 #include "chrome/browser/chromeos/login/network_screen.h"
@@ -16,6 +21,7 @@
 #include "chrome/browser/chromeos/login/view_screen.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/login/wizard_in_process_browser_test.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "grit/generated_resources.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -25,6 +31,13 @@
 #include "unicode/locid.h"
 
 namespace chromeos {
+
+namespace {
+const char kUsername[] = "test_user@managedchrome.com";
+const char kPassword[] = "test_password";
+}  // namespace
+
+using ::testing::_;
 
 template <class T, class H>
 class MockOutShowHide : public T {
@@ -202,10 +215,6 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest, ControlFlowErrorNetwork) {
   set_controller(NULL);
 }
 
-#if !defined(OFFICIAL_BUILD)
-// TODO(mnissler): These tests are not yet enabled for official builds. Remove
-// the guards once we enable the enrollment feature for official builds.
-
 IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
                        ControlFlowEnterpriseEnrollmentCompleted) {
   EXPECT_EQ(controller()->GetNetworkScreen(), controller()->current_screen());
@@ -214,8 +223,11 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
   EXPECT_CALL(*mock_network_screen_, Hide()).Times(1);
 
   controller()->ShowEnterpriseEnrollmentScreen();
-  EXPECT_EQ(controller()->GetEnterpriseEnrollmentScreen(),
-            controller()->current_screen());
+  EnterpriseEnrollmentScreen* screen =
+      controller()->GetEnterpriseEnrollmentScreen();
+  EXPECT_EQ(screen, controller()->current_screen());
+  std::string user;
+  EXPECT_FALSE(screen->IsAutoEnrollment(&user));
   OnExit(ScreenObserver::ENTERPRISE_ENROLLMENT_COMPLETED);
 
   EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
@@ -223,21 +235,41 @@ IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
 }
 
 IN_PROC_BROWSER_TEST_F(WizardControllerFlowTest,
-                       ControlFlowEnterpriseEnrollmentCancelled) {
+                       ControlFlowEnterpriseAutoEnrollmentCompleted) {
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kLoginScreen,
+      WizardController::kLoginScreenName);
+
   EXPECT_EQ(controller()->GetNetworkScreen(), controller()->current_screen());
   EXPECT_CALL(*mock_update_screen_, StartUpdate()).Times(0);
-  EXPECT_CALL(*mock_enterprise_enrollment_screen_, Show()).Times(1);
-  EXPECT_CALL(*mock_network_screen_, Hide()).Times(1);
 
-  controller()->ShowEnterpriseEnrollmentScreen();
-  EXPECT_EQ(controller()->GetEnterpriseEnrollmentScreen(),
-            controller()->current_screen());
-  OnExit(ScreenObserver::ENTERPRISE_ENROLLMENT_CANCELLED);
+  LoginUtils::Set(new MockLoginUtils(kUsername, kPassword));
+  MockConsumer mock_consumer;
 
+  // Must have a pending signin to resume after auto-enrollment:
+  BaseLoginDisplayHost::default_host()->StartSignInScreen();
   EXPECT_FALSE(ExistingUserController::current_controller() == NULL);
+  ExistingUserController::current_controller()->DoAutoEnrollment();
+  ExistingUserController::current_controller()->set_login_status_consumer(
+      &mock_consumer);
+  // This calls StartWizard, destroying the current controller() and its mocks;
+  // don't set expectations on those objects.
+  ExistingUserController::current_controller()->CompleteLogin(kUsername,
+                                                              kPassword);
+  EnterpriseEnrollmentScreen* screen =
+      controller()->GetEnterpriseEnrollmentScreen();
+  EXPECT_EQ(screen, controller()->current_screen());
+  std::string user;
+  EXPECT_TRUE(screen->IsAutoEnrollment(&user));
+  // This is the main expectation: after auto-enrollment, login is resumed.
+  EXPECT_CALL(mock_consumer, OnLoginSuccess(_, _, _, _, _)).Times(1);
+  OnExit(ScreenObserver::ENTERPRISE_AUTO_MAGIC_ENROLLMENT_COMPLETED);
+  // Prevent browser launch when the profile is prepared:
+  browser_shutdown::SetTryingToQuit(true);
+  // Run the tasks posted to complete the login:
+  MessageLoop::current()->RunAllPending();
   set_controller(NULL);
 }
-#endif
 
 // TODO(nkostylev): Add test for WebUI accelerators http://crosbug.com/22571
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -464,6 +464,13 @@ bool ChromeRenderViewObserver::allowScriptExtension(
       frame, extension_name.utf8(), extension_group);
 }
 
+bool ChromeRenderViewObserver::allowScriptExtension(
+    WebFrame* frame, const WebString& extension_name, int extension_group,
+    int world_id) {
+  return extension_dispatcher_->AllowScriptExtension(
+      frame, extension_name.utf8(), extension_group, world_id);
+}
+
 bool ChromeRenderViewObserver::allowStorage(WebFrame* frame, bool local) {
   return content_settings_->AllowStorage(frame, local);
 }
@@ -649,6 +656,7 @@ void ChromeRenderViewObserver::DidStartLoading() {
                                   webui_javascript_->jscript,
                                   webui_javascript_->id,
                                   webui_javascript_->notify_result);
+    webui_javascript_.reset();
   }
 }
 
@@ -657,7 +665,9 @@ void ChromeRenderViewObserver::DidStopLoading() {
       FROM_HERE,
       base::Bind(&ChromeRenderViewObserver::CapturePageInfo,
                  weak_factory_.GetWeakPtr(), render_view()->GetPageId(), false),
-      render_view()->GetContentStateImmediately() ? 0 : kDelayForCaptureMs);
+      base::TimeDelta::FromMilliseconds(
+          render_view()->GetContentStateImmediately() ?
+          0 : kDelayForCaptureMs));
 
   WebFrame* main_frame = render_view()->GetWebView()->mainFrame();
   GURL osd_url = main_frame->document().openSearchDescriptionURL();
@@ -713,7 +723,7 @@ void ChromeRenderViewObserver::DidCommitProvisionalLoad(
       FROM_HERE,
       base::Bind(&ChromeRenderViewObserver::CapturePageInfo,
                  weak_factory_.GetWeakPtr(), render_view()->GetPageId(), true),
-      kDelayForForcedCaptureMs);
+      base::TimeDelta::FromMilliseconds(kDelayForForcedCaptureMs));
 }
 
 void ChromeRenderViewObserver::DidClearWindowObject(WebFrame* frame) {
@@ -831,7 +841,8 @@ void ChromeRenderViewObserver::CapturePageInfo(int load_id,
   // Generate the thumbnail here if the in-browser thumbnailing isn't
   // enabled. TODO(satorux): Remove this and related code once
   // crbug.com/65936 is complete.
-  if (!switches::IsInBrowserThumbnailingEnabled()) {
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableInBrowserThumbnailing)) {
     CaptureThumbnail();
   }
 

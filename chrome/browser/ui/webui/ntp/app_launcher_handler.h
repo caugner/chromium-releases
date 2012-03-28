@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,16 +9,17 @@
 #include <string>
 
 #include "base/memory/scoped_ptr.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "content/browser/cancelable_request.h"
-#include "content/browser/webui/web_ui.h"
+#include "chrome/common/string_ordinal.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_ui_message_handler.h"
 
 class AppNotification;
 class ExtensionService;
@@ -26,17 +27,13 @@ class PrefChangeRegistrar;
 class Profile;
 
 // The handler for Javascript messages related to the "apps" view.
-class AppLauncherHandler : public WebUIMessageHandler,
+class AppLauncherHandler : public content::WebUIMessageHandler,
                            public ExtensionUninstallDialog::Delegate,
                            public ExtensionInstallUI::Delegate,
                            public content::NotificationObserver {
  public:
   explicit AppLauncherHandler(ExtensionService* extension_service);
   virtual ~AppLauncherHandler();
-
-  // Whether the app should be excluded from the "apps" list because
-  // it is special (such as the Web Store app).
-  static bool IsAppExcludedFromList(const Extension* extension);
 
   // Populate a dictionary with the information from an extension.
   static void CreateAppInfo(
@@ -46,7 +43,6 @@ class AppLauncherHandler : public WebUIMessageHandler,
       base::DictionaryValue* value);
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // content::NotificationObserver
@@ -114,11 +110,17 @@ class AppLauncherHandler : public WebUIMessageHandler,
 
  private:
   struct AppInstallInfo {
+    AppInstallInfo();
+    ~AppInstallInfo();
+
     bool is_bookmark_app;
     string16 title;
     GURL app_url;
-    int page_index;
+    StringOrdinal page_ordinal;
   };
+
+  // Reset some instance flags we use to track the currently uninstalling app.
+  void CleanupAfterUninstall();
 
   // Records a web store launch in the appropriate histograms. |promo_active|
   // specifies if the web store promotion was active.

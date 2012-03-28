@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -91,6 +91,9 @@ Gallery.prototype.initDom_ = function(shareActions) {
 
   this.imageContainer_ = doc.createElement('div');
   this.imageContainer_.className = 'image-container';
+  this.imageContainer_.addEventListener('click', (function() {
+    this.filenameEdit_.blur();
+  }).bind(this));
   this.container_.appendChild(this.imageContainer_);
 
   this.toolbar_ = doc.createElement('div');
@@ -101,17 +104,37 @@ Gallery.prototype.initDom_ = function(shareActions) {
   filenameSpacer.className = 'filename-spacer';
   this.toolbar_.appendChild(filenameSpacer);
 
+  this.filenameText_ = doc.createElement('div');
+  this.filenameText_.addEventListener('click',
+      this.onFilenameClick_.bind(this));
+  filenameSpacer.appendChild(this.filenameText_);
+
   this.filenameEdit_ = doc.createElement('input');
   this.filenameEdit_.setAttribute('type', 'text');
   this.filenameEdit_.addEventListener('blur',
-      this.updateFilename_.bind(this));
+      this.onFilenameEditBlur_.bind(this));
   this.filenameEdit_.addEventListener('keydown',
       this.onFilenameEditKeydown_.bind(this));
   filenameSpacer.appendChild(this.filenameEdit_);
 
+  this.buttonSpacer_ = doc.createElement('div');
+  this.buttonSpacer_.className = 'button-spacer';
+  this.toolbar_.appendChild(this.buttonSpacer_);
+
   this.ribbonSpacer_ = doc.createElement('div');
   this.ribbonSpacer_.className = 'ribbon-spacer';
   this.toolbar_.appendChild(this.ribbonSpacer_);
+
+  this.mediaSpacer_ = doc.createElement('div');
+  this.mediaSpacer_.className = 'media-spacer';
+  this.container_.appendChild(this.mediaSpacer_);
+
+  this.mediaToolbar_ = doc.createElement('div');
+  this.mediaToolbar_.className = 'media-controls tool';
+  this.mediaSpacer_.appendChild(this.mediaToolbar_);
+
+  this.mediaControls_ = new MediaControls(
+      this.mediaToolbar_, this.toggleFullscreen_.bind(this));
 
   this.arrowBox_ = this.document_.createElement('div');
   this.arrowBox_.className = 'arrow-box';
@@ -180,6 +203,16 @@ Gallery.prototype.initDom_ = function(shareActions) {
   }
 };
 
+Gallery.blobToURL_ = function(blob) {
+  // Append a file name after an anchor so that the Gallery
+  // code can find the file extension at the end of the url.
+  // A File instance contains the real file name in the 'name' property.
+  // For a Blob instance we make up a fake file name out of the mime type
+  // (image/jpeg -> image.jpg).
+  return window.webkitURL.createObjectURL(blob) +
+      '#' + (blob.name || (blob.type.replace('/', '.')));
+};
+
 Gallery.prototype.load = function(parentDirEntry, items, selectedItem) {
   this.parentDirEntry_ = parentDirEntry;
 
@@ -197,7 +230,7 @@ Gallery.prototype.load = function(parentDirEntry, items, selectedItem) {
     }
     if (item.constructor.name == 'Blob' ||
         item.constructor.name == 'File') {
-      item = window.webkitURL.createObjectURL(item);
+      item = Gallery.blobToURL_(item);
     }
     if (typeof item == 'string') {
       if (selected) selectedIndex = urls.length;
@@ -215,15 +248,24 @@ Gallery.prototype.load = function(parentDirEntry, items, selectedItem) {
 
   var self = this;
 
+  var selectedURL = urls[selectedIndex];
+
   function initRibbon() {
     self.ribbon_.load(urls, selectedIndex);
-    // Flash the ribbon briefly to let the user know it is there.
+    if (urls.length == 1 && self.isShowingVideo_()) {
+      // We only have one item and it is a video. Move the playback controls
+      // in place of thumbnails and start the playback immediately.
+      self.mediaSpacer_.removeChild(self.mediaToolbar_);
+      self.ribbonSpacer_.appendChild(self.mediaToolbar_);
+      self.mediaControls_.play();
+    }
+    // Flash the toolbar briefly to let the user know it is there.
     self.cancelFading_();
     self.initiateFading_(Gallery.FIRST_FADE_TIMEOUT);
   }
 
-  var selectedURL = urls[selectedIndex];
-  // Initialize the ribbon only after the selected image is fully loaded.
+  // Show the selected item ASAP, then complete the initialization (populating
+  // the ribbon can take especially long time).
   this.metadataProvider_.fetch(selectedURL, function (metadata) {
     self.openImage(selectedIndex, selectedURL, metadata, 0, initRibbon);
   });
@@ -249,6 +291,10 @@ Gallery.prototype.saveItem_ = function(item, callback, canvas, modified) {
 
 Gallery.prototype.saveChanges_ = function(opt_callback) {
   this.imageChanges_ = 0;
+  if (this.isShowingVideo_()) {
+    if (opt_callback) opt_callback();
+    return;
+  }
   this.editor_.requestImage(
       this.saveItem_.bind(this, this.ribbon_.getSelectedItem(), opt_callback));
 };
@@ -266,7 +312,21 @@ Gallery.prototype.updateFilename_ = function() {
 
   var fullName = item.getCopyName() ||
       ImageUtil.getFullNameFromUrl(item.getUrl());
-  this.filenameEdit_.value = ImageUtil.getFileNameFromFullName(fullName);
+  var displayName = ImageUtil.getFileNameFromFullName(fullName);
+  this.filenameEdit_.value = displayName;
+  this.filenameText_.textContent = displayName;
+};
+
+Gallery.prototype.onFilenameClick_ = function() {
+  ImageUtil.setAttribute(this.container_, 'renaming', true);
+  setTimeout(this.filenameEdit_.select.bind(this.filenameEdit_), 0);
+  this.cancelFading_();
+};
+
+Gallery.prototype.onFilenameEditBlur_ = function() {
+  ImageUtil.setAttribute(this.container_, 'renaming', false);
+  this.updateFilename_();
+  this.initiateFading_();
 };
 
 Gallery.prototype.onFilenameEditKeydown_ = function() {
@@ -333,7 +393,26 @@ Gallery.prototype.renameItem_ = function(item, name) {
       onVictimFound, doRename);
 };
 
+Gallery.prototype.isRenaming_ = function() {
+  return this.container_.hasAttribute('renaming');
+};
+
+Gallery.prototype.toggleFullscreen_ = function() {
+  if (this.document_.webkitIsFullScreen) {
+    this.document_.webkitCancelFullScreen();
+  } else {
+    this.document_.body.webkitRequestFullScreen();
+  }
+};
+
 Gallery.prototype.onClose_ = function() {
+  if (this.document_.webkitIsFullScreen) {
+    // Closing the Gallery iframe while in full screen will crash the tab.
+    this.document_.addEventListener(
+        'webkitfullscreenchange', this.onClose_.bind(this));
+    this.document_.webkitCancelFullScreen();
+    return;
+  }
   // TODO: handle write errors gracefully (suggest retry or saving elsewhere).
   this.saveChanges_(this.closeCallback_);
 };
@@ -350,37 +429,59 @@ Gallery.prototype.openImage = function(id, content, metadata, slide, callback) {
   if (item) {
     this.updateFilename_();
   } else {
-    this.filenameEdit_.value = ImageUtil.getFileNameFromUrl(content);
+    var displayName = ImageUtil.getFileNameFromUrl(content);
+    this.filenameEdit_.value = displayName;
+    this.filenameText_.textContent = displayName;
   }
 
   var self = this;
-  function loadDone() {
-    ImageUtil.metrics.recordUserAction(ImageUtil.getMetricName('View'));
+  function loadDone(loadType) {
+    var video = self.isShowingVideo_();
+    ImageUtil.setAttribute(self.container_, 'video', video);
 
-    function toMillions(number) { return Math.round(number / (1000 * 1000)) }
+    if (video) {
+      if (self.isEditing_()) {
+        // The editor toolbar does not make sense for video, hide it.
+        self.onEdit_();
+      }
+      self.mediaControls_.attachMedia(self.imageView_.getVideo());
+      //TODO(kaznacheev): Add metrics for video playback.
+    } else {
+      ImageUtil.metrics.recordUserAction(ImageUtil.getMetricName('View'));
 
-    ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MB'),
-        toMillions(metadata.fileSize));
+      function toMillions(number) { return Math.round(number / (1000 * 1000)) }
 
-    var canvas = self.imageView_.getCanvas();
-    ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MPix'),
-        toMillions(canvas.width * canvas.height));
+      ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MB'),
+          toMillions(metadata.fileSize));
 
-    var url = item ? item.getUrl() : content;
-    var extIndex = url.lastIndexOf('.');
-    var ext = extIndex < 0 ? '' : url.substr(extIndex + 1).toLowerCase();
-    if (ext == 'jpeg') ext = 'jpg';
-    ImageUtil.metrics.recordEnum(
-        ImageUtil.getMetricName('FileType'), ext, ImageUtil.FILE_TYPES);
+      var canvas = self.imageView_.getCanvas();
+      ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MPix'),
+          toMillions(canvas.width * canvas.height));
 
-    callback(arguments);
+      var url = item ? item.getUrl() : content;
+      var extIndex = url.lastIndexOf('.');
+      var ext = extIndex < 0 ? '' : url.substr(extIndex + 1).toLowerCase();
+      if (ext == 'jpeg') ext = 'jpg';
+      ImageUtil.metrics.recordEnum(
+          ImageUtil.getMetricName('FileType'), ext, ImageUtil.FILE_TYPES);
+    }
+
+    callback(loadType);
   }
 
   this.editor_.openSession(id, content, metadata, slide, loadDone);
 };
 
 Gallery.prototype.closeImage = function(item) {
+  if (this.isShowingVideo_()) {
+    this.mediaControls_.pause();
+    this.mediaControls_.detachMedia();
+  }
   this.editor_.closeSession(this.saveItem_.bind(this, item, null));
+};
+
+Gallery.prototype.isShowingVideo_ = function() {
+  return !!this.imageView_.getVideo();
 };
 
 Gallery.prototype.isEditing_ = function() {
@@ -399,8 +500,10 @@ Gallery.prototype.onEdit_ = function() {
   if (this.isEditing_()) {
     this.cancelFading_();
   } else {
-    var item = this.ribbon_.getSelectedItem();
-    this.editor_.requestImage(item.updateThumbnail.bind(item));
+    if (!this.isShowingVideo_()) {
+      var item = this.ribbon_.getSelectedItem();
+      this.editor_.requestImage(item.updateThumbnail.bind(item));
+    }
     this.initiateFading_();
   }
 
@@ -436,7 +539,15 @@ Gallery.prototype.onKeyDown_ = function(event) {
       break;
 
     case 'U+0045':  // 'e' toggles the editor
-      this.onEdit_();
+      if (!this.isShowingVideo_()) {
+        this.onEdit_();
+      }
+      break;
+
+    case 'U+0020':  // Space toggles the video playback.
+      if (this.isShowingVideo_()) {
+        this.mediaControls_.togglePlayState();
+      }
       break;
 
     case 'Home':
@@ -483,12 +594,13 @@ Gallery.prototype.onMouseMove_ = function(e) {
 
 Gallery.prototype.onFadeTimeout_ = function() {
   this.fadeTimeoutId_ = null;
-  if (this.isEditing_() || this.isSharing_()) return;
+  if (this.isEditing_() || this.isSharing_() || this.isRenaming_()) return;
   this.container_.removeAttribute('tools');
 };
 
 Gallery.prototype.initiateFading_ = function(opt_timeout) {
-  if (this.mouseOverTool_ || this.isEditing_() || this.isSharing_())
+  if (this.mouseOverTool_ || this.isEditing_() || this.isSharing_() ||
+      this.isRenaming_())
     return;
 
   if (!this.fadeTimeoutId_)
@@ -623,6 +735,7 @@ Ribbon.prototype.select = function(index, opt_forceStep, opt_callback) {
          function(loadType) {
            if (!selectedItem.isSelected()) return;
            if (Math.abs(step) != 1) return;
+           if (loadType == ImageView.LOAD_TYPE_TOTAL) return;
            if ((loadType == ImageView.LOAD_TYPE_CACHED_FULL) ||
                (self.sequenceLength_ >= 3)) {
              // We can always afford to prefetch if the previous load was
@@ -652,6 +765,10 @@ Ribbon.prototype.requestPrefetch = function(direction) {
 Ribbon.ITEMS_COUNT = 5;
 
 Ribbon.prototype.redraw = function() {
+  // Never show a single thumbnail.
+  if (this.items_.length == 1)
+    return;
+
   // TODO(dgozman): use margin instead of 2 here.
   var itemWidth = this.bar_.clientHeight - 2;
   var fullItems = Ribbon.ITEMS_COUNT;
@@ -839,8 +956,7 @@ Ribbon.Item.prototype.save = function(
 
   if (!dirEntry) {  // Happens only in gallery_demo.js
     self.onSaveSuccess(
-        window.webkitURL.createObjectURL(
-            ImageEncoder.getBlob(canvas, metadataEncoder)));
+        Gallery.blobToURL_(ImageEncoder.getBlob(canvas, metadataEncoder)));
     if (opt_callback) opt_callback();
     return;
   }
@@ -884,7 +1000,13 @@ Ribbon.Item.prototype.save = function(
 };
 
 // TODO: Localize?
-Ribbon.Item.COPY_SIGNATURE = 'Copy of ';
+Ribbon.Item.COPY_SIGNATURE = 'Edited - ';
+
+Ribbon.Item.REGEXP_COPY_N =
+    new RegExp('^' + Ribbon.Item.COPY_SIGNATURE + '(.+) \\((\\d+)\\)$');
+
+Ribbon.Item.REGEXP_COPY_0 =
+    new RegExp('^' + Ribbon.Item.COPY_SIGNATURE + '(.+)$');
 
 Ribbon.Item.prototype.createCopyName_ = function () {
   // When saving a modified image we never overwrite the original file (the one
@@ -905,25 +1027,25 @@ Ribbon.Item.prototype.createCopyName_ = function () {
     name = name.substr(0, index);
   }
 
-  if (name.indexOf(Ribbon.Item.COPY_SIGNATURE) == 0) {
-    // TODO(dgozman): add a number to form 'Copy (X) of File.jpg'.
-    name = name.substr(Ribbon.Item.COPY_SIGNATURE.length);
+  // If the file name contains the copy signature add/advance the sequential
+  // number.
+  // TODO(kaznacheev): Check if the name is already taken.
+  var match = Ribbon.Item.REGEXP_COPY_N.exec(name);
+  if (match && match[1] && match[2]) {
+    var copyNumber = parseInt(match[2], 10) + 1;
+    name = match[1] + ' (' + copyNumber + ')';
+  } else {
+    match = Ribbon.Item.REGEXP_COPY_0.exec(name);
+    if (match && match[1]) {
+      name = match[1] + ' (1)';
+    }
   }
 
   var mimeType = this.metadata_.mimeType.toLowerCase();
   if (mimeType != 'image/jpeg') {
     // Chrome can natively encode only two formats: JPEG and PNG.
     // All non-JPEG images are saved in PNG, hence forcing the file extension.
-    if (mimeType == 'image/png') {
-      ext = '.png';
-    } else {
-      // All non-JPEG images get 'image/png' mimeType (see
-      // ImageEncoder.MetadataEncoder constructor).
-      // This code can be reached only if someone has added a metadata parser
-      // for a format other than JPEG or PNG. The message below is to remind
-      // that one must also come up with the way to encode the image data.
-      console.error('Image encoding for ' + mimeType + ' is not supported');
-    }
+    ext = '.png';
   }
 
   return Ribbon.Item.COPY_SIGNATURE + name + ext;
@@ -980,32 +1102,23 @@ Ribbon.Item.prototype.onSaveError = function(error) {
   ImageUtil.metrics.recordEnum(ImageUtil.getMetricName('SaveResult'), 0, 2);
 };
 
-Ribbon.MAX_THUMBNAIL_PIXEL_COUNT = 1 << 21; // 2 MPix
-Ribbon.MAX_THUMBNAIL_FILE_SIZE = 1 << 20; // 1 Mb
-
-Ribbon.Item.canUseImageForThumbnail = function(metadata) {
-  return (metadata.fileSize &&
-      metadata.fileSize <= Ribbon.MAX_THUMBNAIL_FILE_SIZE)  ||
-      (metadata.width && metadata.height &&
-      (metadata.width * metadata.height <= Ribbon.MAX_THUMBNAIL_PIXEL_COUNT));
-};
-
-Ribbon.PLACEHOLDER_ICON_URL = '../../images/filetype_large_image.png';
-
 Ribbon.Item.prototype.setMetadata = function(metadata) {
   this.metadata_ = metadata;
 
   var url;
   var transform;
 
+  var mediaType = FileType.getMediaType(this.url_);
+
   if (metadata.thumbnailURL) {
     url = metadata.thumbnailURL;
     transform = metadata.thumbnailTransform;
-  } else if (Ribbon.Item.canUseImageForThumbnail(metadata)){
+  } else if (mediaType == 'image' &&
+      FileType.canUseImageUrlForPreview(metadata)) {
     url = this.url_;
     transform = metadata.imageTransform;
   } else {
-    url = Ribbon.PLACEHOLDER_ICON_URL;
+    url = '../../' + FileType.getPreviewArt(mediaType);
   }
 
   function percent(ratio) { return Math.round(ratio * 100) + '%' }

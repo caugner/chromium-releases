@@ -82,7 +82,7 @@ class AutorepeatButton : public ImageButton {
 #endif
     views::MouseEvent event(ui::ET_MOUSE_RELEASED,
                             cursor_point.x(), cursor_point.y(),
-                            ui::EF_LEFT_BUTTON_DOWN);
+                            ui::EF_LEFT_MOUSE_BUTTON);
     Button::NotifyClick(event);
   }
 
@@ -282,7 +282,7 @@ void BitmapScrollBar::Layout() {
   if ((IsHorizontal() && (track_bounds.width() < thumb_prefsize.width()) ||
       (!IsHorizontal() && (track_bounds.height() < thumb_prefsize.height())))) {
     thumb->SetVisible(false);
-  } else if (!thumb->IsVisible()) {
+  } else if (!thumb->visible()) {
     thumb->SetVisible(true);
   }
 }

@@ -1,8 +1,6 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
-#include "examples/pong/view.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -15,6 +13,8 @@
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/point.h"
 #include "ppapi/cpp/var.h"
+
+#include "view.h"
 
 // Input event key codes.  PPAPI uses Windows Virtual key codes.
 const uint32_t kSpaceBar = 0x20;

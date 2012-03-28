@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,6 +14,9 @@
       'target_name': 'ui',
       'type': '<(component)',
       'variables': { 'enable_wexit_time_destructors': 1, },
+      'includes': [
+        'base/ime/ime.gypi',
+      ],
       'dependencies': [
         '../base/base.gyp:base',
         '../base/base.gyp:base_i18n',
@@ -79,10 +82,13 @@
         'base/clipboard/clipboard_win.cc',
         'base/clipboard/custom_data_helper.cc',
         'base/clipboard/custom_data_helper.h',
+        'base/clipboard/custom_data_helper_mac.mm',
+        'base/clipboard/custom_data_helper_x.cc',
         'base/clipboard/scoped_clipboard_writer.cc',
         'base/clipboard/scoped_clipboard_writer.h',
         'base/cocoa/base_view.h',
         'base/cocoa/base_view.mm',
+        'base/cocoa/events_mac.mm',
         'base/dragdrop/cocoa_dnd_util.h',
         'base/dragdrop/cocoa_dnd_util.mm',
         'base/dragdrop/drag_drop_types_gtk.cc',
@@ -128,22 +134,7 @@
         'base/gtk/tooltip_window_gtk.cc',
         'base/gtk/tooltip_window_gtk.h',
         'base/hit_test.h',
-        'base/ime/character_composer.cc',
-        'base/ime/character_composer.h',
-        'base/ime/composition_text.cc',
-        'base/ime/composition_text.h',
-        'base/ime/composition_underline.h',
-        'base/ime/input_method.h',
-        'base/ime/input_method_base.cc',
-        'base/ime/input_method_base.h',
-        'base/ime/input_method_delegate.h',
-        'base/ime/input_method_ibus.cc',
-        'base/ime/input_method_ibus.h',
-        'base/ime/mock_input_method.cc',
-        'base/ime/mock_input_method.h',
-        'base/ime/text_input_client.cc',
-        'base/ime/text_input_client.h',
-        'base/ime/text_input_type.h',
+        'base/javascript_message_type.h',
         'base/keycodes/keyboard_code_conversion.cc',
         'base/keycodes/keyboard_code_conversion.h',
         'base/keycodes/keyboard_code_conversion_gtk.cc',
@@ -165,12 +156,13 @@
         'base/l10n/l10n_util_posix.cc',
         'base/l10n/l10n_util_win.cc',
         'base/l10n/l10n_util_win.h',
-        'base/message_box_flags.h',
         'base/message_box_win.cc',
         'base/message_box_win.h',
         'base/models/button_menu_item_model.cc',
         'base/models/button_menu_item_model.h',
         'base/models/combobox_model.h',
+        'base/models/list_model.h',
+        'base/models/list_model_observer.h',
         'base/models/menu_model.cc',
         'base/models/menu_model.h',
         'base/models/menu_model_delegate.h',
@@ -251,6 +243,7 @@
         'gfx/canvas_skia_linux.cc',
         'gfx/canvas_skia_mac.mm',
         'gfx/canvas_skia_paint.h',
+        'gfx/canvas_skia_skia.cc',
         'gfx/canvas_skia_win.cc',
         'gfx/codec/jpeg_codec.cc',
         'gfx/codec/jpeg_codec.h',
@@ -264,6 +257,8 @@
         'gfx/favicon_size.h',
         'gfx/font.h',
         'gfx/font.cc',
+        'gfx/font_list.h',
+        'gfx/font_list.cc',
         'gfx/gfx_paths.cc',
         'gfx/gfx_paths.h',
         'gfx/image/image.cc',
@@ -342,6 +337,20 @@
         'gfx/transform.cc',
       ],
       'conditions': [
+        # TODO(asvitkine): Switch all platforms to use_canvas_skia_skia.cc.
+        #                  http://crbug.com/105550
+        ['use_canvas_skia_skia==1', {
+          'sources!': [
+            'gfx/canvas_skia_android.cc',
+            'gfx/canvas_skia_linux.cc',
+            'gfx/canvas_skia_mac.mm',
+            'gfx/canvas_skia_win.cc',
+          ],
+        }, {  # use_canvas_skia_skia!=1
+          'sources!': [
+            'gfx/canvas_skia_skia.cc',
+          ],
+        }],
         ['use_aura==1', {
           'sources/': [
             ['exclude', 'gfx/gtk_'],
@@ -366,10 +375,6 @@
            ],
         }, {  # use_aura!=1
           'sources!': [
-            'base/ime/input_method_ibus.cc',
-            'base/ime/input_method_ibus.h',
-            'base/ime/mock_input_method.cc',
-            'base/ime/mock_input_method.h',
             'gfx/native_theme_aura.cc',
             'gfx/native_theme_aura.h',
           ]
@@ -387,17 +392,7 @@
           'dependencies': [
             '../build/linux/system.gyp:ibus',
           ],
-          'sources/': [
-            ['exclude', 'base/ime/mock_input_method.cc'],
-            ['exclude', 'base/ime/mock_input_method.h'],
-          ],
-        }, { # else: use_ibus != 1
-          'sources/': [
-            ['exclude', 'base/ime/input_method_ibus.cc'],
-            ['exclude', 'base/ime/input_method_ibus.h'],
-          ],
         }],
-
         ['use_glib == 1', {
           'dependencies': [
             # font_gtk.cc uses fontconfig.
@@ -474,12 +469,6 @@
             ['include', 'gfx/platform_font_pango.h'],
             ['include', 'gfx/linux_util.cc'],
             ['include', 'gfx/linux_util.h'],
-          ],
-        }],
-        ['use_ibus != 1', {
-          'sources/': [
-            ['exclude', 'base/ime/character_composer.cc'],
-            ['exclude', 'base/ime/character_composer.h'],
           ],
         }],
         ['OS=="win"', {
@@ -597,13 +586,17 @@
         }],
         ['toolkit_views==0', {
           'sources!': [
+            'base/x/events_x.cc',
+          ],
+        }],
+        ['toolkit_views==0 and use_canvas_skia_skia==0', {
+          'sources!': [
             'gfx/render_text.cc',
             'gfx/render_text.h',
             'gfx/render_text_linux.cc',
             'gfx/render_text_linux.h',
             'gfx/render_text_win.cc',
             'gfx/render_text_win.h',
-            'base/x/events_x.cc',
           ],
         }],
         ['OS=="android"', {

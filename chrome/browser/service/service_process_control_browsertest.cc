@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,18 +75,20 @@ class ServiceProcessControlBrowserTest
     EXPECT_NE(static_cast<base::ProcessId>(0), service_pid);
     EXPECT_TRUE(base::OpenProcessHandleWithAccess(
         service_pid,
-        base::kProcessAccessWaitForTermination,
+        base::kProcessAccessWaitForTermination |
+        // we need query permission to get exit code
+        base::kProcessAccessQueryInformation,
         &service_process_handle_));
     // Quit the current message. Post a QuitTask instead of just calling Quit()
     // because this can get invoked in the context of a Launch() call and we
     // may not be in Run() yet.
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
   void ProcessControlLaunchFailed() {
     ADD_FAILURE();
     // Quit the current message.
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
  private:
@@ -130,7 +132,7 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, LaunchTwice) {
 static void DecrementUntilZero(int* count) {
   (*count)--;
   if (!(*count))
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 // Invoke multiple Launch calls in succession and ensure that all the tasks
@@ -203,5 +205,3 @@ IN_PROC_BROWSER_TEST_F(ServiceProcessControlBrowserTest, CheckPid) {
   // Disconnect from service process.
   ServiceProcessControl::GetInstance()->Disconnect();
 }
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ServiceProcessControlBrowserTest);

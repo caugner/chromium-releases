@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_PANELS_BASE_PANEL_BROWSER_TEST_H_
 #pragma once
 
-#include "base/task.h"
 #include "base/values.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/panels/auto_hiding_desktop_bar.h"
@@ -42,13 +41,15 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
     gfx::Rect bounds;
     ActiveState show_flag;
     GURL url;
+    bool wait_for_fully_created;
 
     CreatePanelParams(const std::string& name,
                       const gfx::Rect& bounds,
                       ActiveState show_flag)
         : name(name),
           bounds(bounds),
-          show_flag(show_flag) {
+          show_flag(show_flag),
+          wait_for_fully_created(true) {
     }
   };
 
@@ -70,6 +71,10 @@ class BasePanelBrowserTest : public InProcessBrowserTest {
   scoped_refptr<Extension> CreateExtension(const FilePath::StringType& path,
                                            Extension::Location location,
                                            const DictionaryValue& extra_value);
+
+  static void MoveMouse(const gfx::Point& position);
+  static void CloseWindowAndWait(Browser* browser);
+  static std::string MakePanelName(int index);
 
   gfx::Rect testing_work_area() const { return testing_work_area_; }
   void set_testing_work_area(const gfx::Rect& work_area) {

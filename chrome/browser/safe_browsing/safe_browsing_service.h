@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -15,12 +15,13 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/hash_tables.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/message_loop_helpers.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/safe_browsing_util.h"
 #include "content/public/browser/browser_thread.h"
@@ -69,6 +70,10 @@ class SafeBrowsingService
     CLIENT_SIDE_PHISHING_URL,
   };
 
+  // Passed a boolean indicating whether or not it is OK to proceed with
+  // loading an URL.
+  typedef base::Callback<void(bool /*proceed*/)> UrlCheckCallback;
+
   // Structure used to pass parameters between the IO and UI thread when
   // interacting with the blocking page.
   struct UnsafeResource {
@@ -80,7 +85,7 @@ class SafeBrowsingService
     std::vector<GURL> redirect_urls;
     bool is_subresource;
     UrlCheckResult threat_type;
-    Client* client;
+    UrlCheckCallback callback;
     int render_process_host_id;
     int render_view_id;
   };
@@ -135,10 +140,6 @@ class SafeBrowsingService
     virtual ~Client() {}
 
     void OnSafeBrowsingResult(const SafeBrowsingCheck& check);
-
-    // Called when the user has made a decision about how to handle the
-    // SafeBrowsing interstitial page.
-    virtual void OnBlockingPageComplete(bool proceed) {}
 
    protected:
     // Called when the result of checking a browse URL is known.
@@ -228,7 +229,7 @@ class SafeBrowsingService
                            const std::vector<GURL>& redirect_urls,
                            bool is_subresource,
                            UrlCheckResult result,
-                           Client* client,
+                           const UrlCheckCallback& callback,
                            int render_process_host_id,
                            int render_view_id);
 
@@ -338,7 +339,7 @@ class SafeBrowsingService
 
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
-  friend class DeleteTask<SafeBrowsingService>;
+  friend class base::DeleteHelper<SafeBrowsingService>;
   friend class SafeBrowsingServiceTest;
 
   // Called to initialize objects that are used on the io_thread.
@@ -553,7 +554,7 @@ class SafeBrowsingService
   ObserverList<Observer> observer_list_;
 
   // Used to track purge memory notifications. Lives on the IO thread.
-  content::NotificationRegistrar registrar_;
+  scoped_ptr<content::NotificationRegistrar> registrar_;
 
   // Tracks existing PrefServices, and the safe browsing preference on each.
   // This is used to determine if any profile is currently using the safe

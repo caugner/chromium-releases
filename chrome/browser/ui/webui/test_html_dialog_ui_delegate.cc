@@ -1,10 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/webui/test_html_dialog_ui_delegate.h"
 
 #include "base/utf_string_conversions.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace test {
 
@@ -16,8 +19,8 @@ TestHtmlDialogUIDelegate::TestHtmlDialogUIDelegate(const GURL& url)
 TestHtmlDialogUIDelegate::~TestHtmlDialogUIDelegate() {
 }
 
-bool TestHtmlDialogUIDelegate::IsDialogModal() const {
-  return true;
+ui::ModalType TestHtmlDialogUIDelegate::GetDialogModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 string16 TestHtmlDialogUIDelegate::GetDialogTitle() const {
@@ -43,7 +46,7 @@ std::string TestHtmlDialogUIDelegate::GetDialogArgs() const {
 void TestHtmlDialogUIDelegate::OnDialogClosed(const std::string& json_retval) {
 }
 
-void TestHtmlDialogUIDelegate::OnCloseContents(TabContents* source,
+void TestHtmlDialogUIDelegate::OnCloseContents(WebContents* source,
     bool* out_close_dialog) {
   if (out_close_dialog)
     *out_close_dialog = true;

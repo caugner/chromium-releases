@@ -8,7 +8,7 @@
 
 #include <string>
 
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "net/base/auth.h"
 #include "net/base/completion_callback.h"
 #include "net/ftp/ftp_request_info.h"
@@ -63,9 +63,6 @@ class URLRequestFtpJob : public URLRequestJob {
   FtpRequestInfo request_info_;
   scoped_ptr<FtpTransaction> transaction_;
 
-  OldCompletionCallbackImpl<URLRequestFtpJob> start_callback_;
-  OldCompletionCallbackImpl<URLRequestFtpJob> read_callback_;
-
   bool read_in_progress_;
 
   scoped_refptr<AuthData> server_auth_;
@@ -74,7 +71,7 @@ class URLRequestFtpJob : public URLRequestJob {
   // before us.
   scoped_refptr<const URLRequestContext> context_;
 
-  ScopedRunnableMethodFactory<URLRequestFtpJob> method_factory_;
+  base::WeakPtrFactory<URLRequestFtpJob> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequestFtpJob);
 };

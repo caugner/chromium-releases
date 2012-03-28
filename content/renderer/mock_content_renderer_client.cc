@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -40,6 +40,20 @@ bool MockContentRendererClient::OverrideCreatePlugin(
 bool MockContentRendererClient::HasErrorPage(int http_status_code,
                                              std::string* error_domain) {
   return false;
+}
+
+webkit_media::WebMediaPlayerImpl*
+MockContentRendererClient::OverrideCreateWebMediaPlayer(
+    RenderView* render_view,
+    WebKit::WebFrame* frame,
+    WebKit::WebMediaPlayerClient* client,
+    base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
+    media::FilterCollection* collection,
+    WebKit::WebAudioSourceProvider* audio_source_provider,
+    media::MessageLoopFactory* message_loop_factory,
+    webkit_media::MediaStreamClient* media_stream_client,
+    media::MediaLog* media_log) {
+  return NULL;
 }
 
 void MockContentRendererClient::GetNavigationErrorStrings(
@@ -120,10 +134,6 @@ bool MockContentRendererClient::HandleSetCookieRequest(
 
 void MockContentRendererClient::RegisterPPAPIInterfaceFactories(
     webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) {
-}
-
-bool MockContentRendererClient::AllowSocketAPI(const GURL& url) {
-  return false;
 }
 
 }  // namespace content

@@ -12,15 +12,7 @@
 #include "base/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/app_modal_dialogs/app_modal_dialog.h"
-#include "content/browser/javascript_dialogs.h"
-
-namespace content {
-class JavaScriptDialogDelegate;
-}
-
-namespace IPC {
-class Message;
-}
+#include "content/public/browser/javascript_dialogs.h"
 
 // Extra data for JavaScript dialogs to add Chrome-only features.
 class ChromeJavaScriptDialogExtraData {
@@ -38,22 +30,22 @@ class ChromeJavaScriptDialogExtraData {
 // onbeforeunload dialog boxes.
 class JavaScriptAppModalDialog : public AppModalDialog {
  public:
-  JavaScriptAppModalDialog(content::JavaScriptDialogDelegate* delegate,
-                           ChromeJavaScriptDialogExtraData* extra_data,
-                           const string16& title,
-                           int dialog_flags,
-                           const string16& message_text,
-                           const string16& default_prompt_text,
-                           bool display_suppress_checkbox,
-                           bool is_before_unload_dialog,
-                           IPC::Message* reply_msg);
+  JavaScriptAppModalDialog(
+      content::WebContents* web_contents,
+      ChromeJavaScriptDialogExtraData* extra_data,
+      const string16& title,
+      ui::JavascriptMessageType javascript_message_type,
+      const string16& message_text,
+      const string16& default_prompt_text,
+      bool display_suppress_checkbox,
+      bool is_before_unload_dialog,
+      const content::JavaScriptDialogCreator::DialogClosedCallback& callback);
   virtual ~JavaScriptAppModalDialog();
 
   // Overridden from AppModalDialog:
   virtual NativeAppModalDialog* CreateNativeDialog() OVERRIDE;
   virtual bool IsJavaScriptModalDialog() OVERRIDE;
   virtual void Invalidate() OVERRIDE;
-  virtual content::JavaScriptDialogDelegate* delegate() const OVERRIDE;
 
   // Callbacks from NativeDialog when the user accepts or cancels the dialog.
   void OnCancel(bool suppress_js_messages);
@@ -68,7 +60,9 @@ class JavaScriptAppModalDialog : public AppModalDialog {
   void SetOverridePromptText(const string16& prompt_text);
 
   // Accessors
-  int dialog_flags() const { return dialog_flags_; }
+  ui::JavascriptMessageType javascript_message_type() const {
+    return javascript_message_type_;
+  }
   string16 message_text() const { return message_text_; }
   string16 default_prompt_text() const { return default_prompt_text_; }
   bool display_suppress_checkbox() const { return display_suppress_checkbox_; }
@@ -83,12 +77,13 @@ class JavaScriptAppModalDialog : public AppModalDialog {
   ChromeJavaScriptDialogExtraData* extra_data_;
 
   // Information about the message box is held in the following variables.
-  int dialog_flags_;
+  const ui::JavascriptMessageType javascript_message_type_;
   string16 message_text_;
   string16 default_prompt_text_;
   bool display_suppress_checkbox_;
   bool is_before_unload_dialog_;
-  IPC::Message* reply_msg_;
+
+  content::JavaScriptDialogCreator::DialogClosedCallback callback_;
 
   // Used only for testing. Specifies alternative prompt text that should be
   // used when notifying the delegate, if |use_override_prompt_text_| is true.

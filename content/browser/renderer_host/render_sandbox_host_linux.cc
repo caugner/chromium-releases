@@ -58,12 +58,6 @@ class SandboxIPCProcess  {
       : lifeline_fd_(lifeline_fd),
         browser_socket_(browser_socket),
         font_config_(new FontConfigDirect()) {
-    base::InjectiveMultimap multimap;
-    multimap.push_back(base::InjectionArc(0, lifeline_fd, false));
-    multimap.push_back(base::InjectionArc(0, browser_socket, false));
-
-    base::CloseSuperfluousFds(multimap);
-
     if (!sandbox_cmd.empty()) {
       sandbox_cmd_.push_back(sandbox_cmd);
       sandbox_cmd_.push_back(base::kFindInodeSwitch);
@@ -649,7 +643,7 @@ class SandboxIPCProcess  {
 
   const int lifeline_fd_;
   const int browser_socket_;
-  FontConfigDirect* const font_config_;
+  scoped_ptr<FontConfigDirect> font_config_;
   std::vector<std::string> sandbox_cmd_;
   scoped_ptr<content::WebKitPlatformSupportImpl> webkit_platform_support_;
 };
@@ -711,6 +705,11 @@ void RenderSandboxHostLinux::Init(const std::string& sandbox_path) {
 
   pid_ = fork();
   if (pid_ == 0) {
+    if (HANDLE_EINTR(close(fds[0])) < 0)
+      DPLOG(ERROR) << "close";
+    if (HANDLE_EINTR(close(pipefds[1])) < 0)
+      DPLOG(ERROR) << "close";
+
     SandboxIPCProcess handler(child_lifeline_fd, browser_socket, sandbox_path);
     handler.Run();
     _exit(0);

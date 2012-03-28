@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,8 +21,6 @@ class DictionaryValue;
 // listeners.  Will not send if the profile's pause level is nonzero
 // (using profile->PauseAccessibilityEvents).
 void SendAccessibilityNotification(int type, AccessibilityEventInfo* info);
-
-void SendAccessibilityVolumeNotification(double volume, bool is_muted);
 
 // Abstract parent class for accessibility event information passed to event
 // listeners.
@@ -59,11 +57,20 @@ class AccessibilityControlInfo : public AccessibilityEventInfo {
 
   const std::string& name() const { return name_; }
 
+  const std::string& context() const { return context_; }
+
  protected:
-  AccessibilityControlInfo(Profile* profile, const std::string& control_name);
+  AccessibilityControlInfo(Profile* profile,
+                           const std::string& name);
+
+  void set_context(const std::string& context) { context_ = context; }
 
   // The name of the control, like "OK" or "Password".
   std::string name_;
+
+  // A string describing the context of the control, such as the name of
+  // the group or toolbar it's contained in.
+  std::string context_;
 };
 
 // Accessibility information about a window passed to onWindowOpened
@@ -79,7 +86,9 @@ class AccessibilityWindowInfo : public AccessibilityControlInfo {
 // and onControlAction event listeners.
 class AccessibilityButtonInfo : public AccessibilityControlInfo {
  public:
-  AccessibilityButtonInfo(Profile* profile, const std::string& button_name);
+  AccessibilityButtonInfo(Profile* profile,
+                          const std::string& button_name,
+                          const std::string& context);
 
   virtual const char* type() const OVERRIDE;
 };
@@ -88,7 +97,9 @@ class AccessibilityButtonInfo : public AccessibilityControlInfo {
 // and onControlAction event listeners.
 class AccessibilityLinkInfo : public AccessibilityControlInfo {
  public:
-  AccessibilityLinkInfo(Profile* profile, const std::string& link_name);
+  AccessibilityLinkInfo(Profile* profile,
+                        const std::string& link_name,
+                        const std::string& context);
 
   virtual const char* type() const OVERRIDE;
 };
@@ -99,6 +110,7 @@ class AccessibilityRadioButtonInfo : public AccessibilityControlInfo {
  public:
   AccessibilityRadioButtonInfo(Profile* profile,
                                const std::string& name,
+                               const std::string& context,
                                bool checked,
                                int item_index,
                                int item_count);
@@ -126,6 +138,7 @@ class AccessibilityCheckboxInfo : public AccessibilityControlInfo {
  public:
   AccessibilityCheckboxInfo(Profile* profile,
                             const std::string& name,
+                            const std::string& context,
                             bool checked);
 
   virtual const char* type() const OVERRIDE;
@@ -146,6 +159,7 @@ class AccessibilityTabInfo : public AccessibilityControlInfo {
  public:
   AccessibilityTabInfo(Profile* profile,
                        const std::string& tab_name,
+                       const std::string& context,
                        int tab_index,
                        int tab_count);
 
@@ -173,6 +187,7 @@ class AccessibilityComboBoxInfo : public AccessibilityControlInfo {
  public:
   AccessibilityComboBoxInfo(Profile* profile,
                             const std::string& name,
+                            const std::string& context,
                             const std::string& value,
                             int item_index,
                             int item_count);
@@ -205,6 +220,7 @@ class AccessibilityTextBoxInfo : public AccessibilityControlInfo {
  public:
   AccessibilityTextBoxInfo(Profile* profile,
                            const std::string& name,
+                           const std::string& context,
                            bool password);
 
   virtual const char* type() const OVERRIDE;
@@ -236,6 +252,7 @@ class AccessibilityListBoxInfo : public AccessibilityControlInfo {
  public:
   AccessibilityListBoxInfo(Profile* profile,
                            const std::string& name,
+                           const std::string& context,
                            const std::string& value,
                            int item_index,
                            int item_count);
@@ -271,40 +288,13 @@ class AccessibilityMenuInfo : public AccessibilityControlInfo {
   virtual const char* type() const OVERRIDE;
 };
 
-// Accessibility information about a volume; this class is used by
-// onVolumeUp, onVolumeDown, and onVolumeMute event listeners.
-class AccessibilityVolumeInfo : public AccessibilityEventInfo {
- public:
-  // |volume| must range between 0 to 100.
-  AccessibilityVolumeInfo(Profile* profile, double volume, bool is_muted);
-
-  virtual void SerializeToDict(base::DictionaryValue* dict) const OVERRIDE;
-
- private:
-  double volume_;
-  bool is_muted_;
-};
-
-// Screen unlock event information; this class is used by onScreenUnlocked.
-class ScreenUnlockedEventInfo : public AccessibilityEventInfo {
- public:
-  explicit ScreenUnlockedEventInfo(Profile* profile);
-  virtual void SerializeToDict(base::DictionaryValue* dict) const OVERRIDE;
-};
-
-// Wake up event information; this class is used by onWokeUp.
-class WokeUpEventInfo : public AccessibilityEventInfo {
- public:
-  explicit WokeUpEventInfo(Profile* profile);
-  virtual void SerializeToDict(base::DictionaryValue* dict) const OVERRIDE;
-};
-
 // Accessibility information about a menu item; this class is used by
 // onControlFocused event listeners.
 class AccessibilityMenuItemInfo : public AccessibilityControlInfo {
  public:
   AccessibilityMenuItemInfo(Profile* profile,
                             const std::string& name,
+                            const std::string& context,
                             bool has_submenu,
                             int item_index,
                             int item_count);

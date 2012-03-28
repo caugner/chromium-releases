@@ -15,9 +15,9 @@
 #include "chrome/browser/geolocation/geolocation_settings_state.h"
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_types.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class CannedBrowsingDataAppCacheHelper;
 class CannedBrowsingDataCookieHelper;
@@ -26,7 +26,6 @@ class CannedBrowsingDataFileSystemHelper;
 class CannedBrowsingDataIndexedDBHelper;
 class CannedBrowsingDataLocalStorageHelper;
 class CookiesTreeModel;
-class TabContents;
 class Profile;
 
 namespace net {
@@ -34,10 +33,10 @@ class CookieList;
 class CookieOptions;
 }
 
-class TabSpecificContentSettings : public TabContentsObserver,
+class TabSpecificContentSettings : public content::WebContentsObserver,
                                    public content::NotificationObserver {
  public:
-  explicit TabSpecificContentSettings(TabContents* tab);
+  explicit TabSpecificContentSettings(content::WebContents* tab);
 
   virtual ~TabSpecificContentSettings();
 
@@ -157,7 +156,7 @@ class TabSpecificContentSettings : public TabContentsObserver,
     load_plugins_link_enabled_ = enabled;
   }
 
-  // TabContentsObserver overrides.
+  // content::WebContentsObserver overrides.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,7 +34,6 @@ class GpuVideoDecodeAccelerator
   virtual void DismissPictureBuffer(int32 picture_buffer_id) OVERRIDE;
   virtual void PictureReady(const media::Picture& picture) OVERRIDE;
   virtual void NotifyInitializeDone() OVERRIDE;
-  virtual void NotifyEndOfStream() OVERRIDE;
   virtual void NotifyError(media::VideoDecodeAccelerator::Error error) OVERRIDE;
   virtual void NotifyEndOfBitstreamBuffer(int32 bitstream_buffer_id) OVERRIDE;
   virtual void NotifyFlushDone() OVERRIDE;
@@ -45,8 +44,11 @@ class GpuVideoDecodeAccelerator
 
   // Initialize the accelerator with the given profile and send the
   // |init_done_msg| when done.
+  // The renderer process handle is valid as long as we have a channel between
+  // GPU process and the renderer.
   void Initialize(const media::VideoDecodeAccelerator::Profile profile,
-                  IPC::Message* init_done_msg);
+                  IPC::Message* init_done_msg,
+                  base::ProcessHandle renderer_process);
 
  private:
 

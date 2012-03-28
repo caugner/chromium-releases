@@ -4,6 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bubble_controller.h"
 
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -12,12 +13,14 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_cell_single_line.h"
 #import "chrome/browser/ui/cocoa/browser_window_controller.h"
 #import "chrome/browser/ui/cocoa/info_bubble_view.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+
+using content::UserMetricsAction;
 
 
 // Simple class to watch for tab creation/destruction and close the bubble.
@@ -41,7 +44,7 @@ BookmarkBubbleNotificationBridge::BookmarkBubbleNotificationBridge(
     : controller_(controller), selector_(selector) {
   // registrar_ will automatically RemoveAll() when destroyed so we
   // don't need to do so explicitly.
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
                  content::NotificationService::AllSources());
   registrar_.Add(this, content::NOTIFICATION_TAB_CLOSED,
                  content::NotificationService::AllSources());
@@ -89,8 +92,8 @@ void BookmarkBubbleNotificationBridge::Observe(
                       node:(const BookmarkNode*)node
      alreadyBookmarked:(BOOL)alreadyBookmarked {
   NSString* nibPath =
-      [base::mac::MainAppBundle() pathForResource:@"BookmarkBubble"
-                                          ofType:@"nib"];
+      [base::mac::FrameworkBundle() pathForResource:@"BookmarkBubble"
+                                             ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibPath owner:self])) {
     parentWindow_ = parentWindow;
     model_ = model;
@@ -264,7 +267,7 @@ void BookmarkBubbleNotificationBridge::Observe(
 }
 
 - (IBAction)edit:(id)sender {
-  UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Edit"));
+  content::RecordAction(UserMetricsAction("BookmarkBubble_Edit"));
   [self showEditor];
 }
 
@@ -289,7 +292,7 @@ void BookmarkBubbleNotificationBridge::Observe(
 - (IBAction)remove:(id)sender {
   [self stopPulsingBookmarkButton];
   bookmark_utils::RemoveAllBookmarks(model_, node_->url());
-  UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_Unstar"));
+  content::RecordAction(UserMetricsAction("BookmarkBubble_Unstar"));
   node_ = NULL;  // no longer valid
   [self ok:sender];
 }
@@ -306,7 +309,7 @@ void BookmarkBubbleNotificationBridge::Observe(
   NSMenuItem* selected = [folderPopUpButton_ selectedItem];
   ChooseAnotherFolder* chooseItem = [[self class] chooseAnotherFolderObject];
   if ([[selected representedObject] isEqual:chooseItem]) {
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("BookmarkBubble_EditFromCombobox"));
     [self showEditor];
   }
@@ -335,7 +338,7 @@ void BookmarkBubbleNotificationBridge::Observe(
   NSString* newTitle = [nameTextField_ stringValue];
   if (![oldTitle isEqual:newTitle]) {
     model_->SetTitle(node_, base::SysNSStringToUTF16(newTitle));
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("BookmarkBubble_ChangeTitleInBubble"));
   }
   // Then the parent folder.
@@ -352,7 +355,7 @@ void BookmarkBubbleNotificationBridge::Observe(
   if (oldParent != newParent) {
     int index = newParent->child_count();
     model_->Move(node_, newParent, index);
-    UserMetrics::RecordAction(UserMetricsAction("BookmarkBubble_ChangeParent"));
+    content::RecordAction(UserMetricsAction("BookmarkBubble_ChangeParent"));
   }
 }
 

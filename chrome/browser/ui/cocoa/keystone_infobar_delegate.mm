@@ -23,7 +23,7 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/navigation_details.h"
+#include "content/public/browser/navigation_details.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -144,7 +144,7 @@ bool KeystonePromotionInfoBarDelegate::Cancel() {
   // nagged about the update check.  (Automated testers, I'm thinking of
   // you...)
   CommandLine* commandLine = CommandLine::ForCurrentProcess();
-  if (FirstRun::IsChromeFirstRun() ||
+  if (first_run::IsChromeFirstRun() ||
       !profile->GetPrefs()->GetBoolean(prefs::kShowUpdatePromotionInfoBar) ||
       commandLine->HasSwitch(switches::kNoDefaultBrowserCheck)) {
     return;

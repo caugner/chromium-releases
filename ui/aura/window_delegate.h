@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@ class Size;
 namespace aura {
 
 class Event;
+class GestureEvent;
 class KeyEvent;
 class MouseEvent;
 class TouchEvent;
@@ -52,20 +53,10 @@ class AURA_EXPORT WindowDelegate {
 
   virtual ui::TouchStatus OnTouchEvent(TouchEvent* event) = 0;
 
+  virtual ui::GestureStatus OnGestureEvent(GestureEvent* event) = 0;
+
   // Returns true of the window can be focused.
   virtual bool CanFocus() = 0;
-
-  // Returns true if the window should be activated. |event| is either the mouse
-  // event supplied if the activation is the result of a mouse, or the touch
-  // event if the activation is the result of a touch, or NULL if activation is
-  // attempted for another reason.
-  virtual bool ShouldActivate(Event* event) = 0;
-
-  // Sent when the window is activated.
-  virtual void OnActivated() = 0;
-
-  // Sent when the window loses active status.
-  virtual void OnLostActive() = 0;
 
   // Invoked when mouse capture is lost on the window.
   virtual void OnCaptureLost() = 0;
@@ -74,12 +65,13 @@ class AURA_EXPORT WindowDelegate {
   virtual void OnPaint(gfx::Canvas* canvas) = 0;
 
   // Called from Window's destructor before OnWindowDestroyed and before the
-  // children have been destroyed.
+  // children have been destroyed and the window has been removed from its
+  // parent.
   virtual void OnWindowDestroying() = 0;
 
   // Called when the Window has been destroyed (i.e. from its destructor). This
   // is called after OnWindowDestroying and after the children have been
-  // deleted.
+  // deleted and the window has been removed from its parent.
   // The delegate can use this as an opportunity to delete itself if necessary.
   virtual void OnWindowDestroyed() = 0;
 

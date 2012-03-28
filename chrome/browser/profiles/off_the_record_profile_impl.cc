@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,13 +19,14 @@
 #include "chrome/browser/content_settings/host_content_settings_map.h"
 #include "chrome/browser/download/download_service.h"
 #include "chrome/browser/download/download_service_factory.h"
+#include "chrome/browser/extensions/api/webrequest/webrequest_api.h"
 #include "chrome/browser/extensions/extension_info_map.h"
 #include "chrome/browser/extensions/extension_message_service.h"
 #include "chrome/browser/extensions/extension_pref_store.h"
 #include "chrome/browser/extensions/extension_process_manager.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_special_storage_policy.h"
-#include "chrome/browser/extensions/extension_webrequest_api.h"
+#include "chrome/browser/io_thread.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/plugin_prefs.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
@@ -34,9 +35,8 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/transport_security_persister.h"
-#include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
@@ -48,12 +48,12 @@
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/chrome_blob_storage_context.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
-#include "content/browser/host_zoom_map.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
 #include "content/browser/ssl/ssl_host_state.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/transport_security_state.h"
 #include "net/http/http_server_properties.h"
 #include "webkit/database/database_tracker.h"
@@ -65,6 +65,8 @@
 #endif
 
 using content::BrowserThread;
+using content::DownloadManager;
+using content::HostZoomMap;
 
 namespace {
 
@@ -112,7 +114,7 @@ void OffTheRecordProfileImpl::Init() {
   GetChromeURLDataManager()->AddDataSource(icon_source);
 
   ChromePluginServiceFilter::GetInstance()->RegisterResourceContext(
-      PluginPrefs::GetForProfile(this), &GetResourceContext());
+      PluginPrefs::GetForProfile(this), &io_data_.GetResourceContextNoInit());
 
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
@@ -125,7 +127,7 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
     content::NotificationService::NoDetails());
 
   ChromePluginServiceFilter::GetInstance()->UnregisterResourceContext(
-    &GetResourceContext());
+    &io_data_.GetResourceContextNoInit());
 
   ProfileDependencyManager::GetInstance()->DestroyProfileServices(this);
 
@@ -154,6 +156,10 @@ OffTheRecordProfileImpl::~OffTheRecordProfileImpl() {
     ExtensionPrefs* extension_prefs = extension_service->extension_prefs();
     extension_prefs->ClearIncognitoSessionOnlyContentSettings();
   }
+
+  // Clears any data the network stack contains that may be related to the
+  // OTR session.
+  g_browser_process->io_thread()->ChangedToOnTheRecord();
 }
 
 std::string OffTheRecordProfileImpl::GetProfileName() {
@@ -386,16 +392,17 @@ HostContentSettingsMap* OffTheRecordProfileImpl::GetHostContentSettingsMap() {
 HostZoomMap* OffTheRecordProfileImpl::GetHostZoomMap() {
   // Create new host zoom map and copy zoom levels from parent.
   if (!host_zoom_map_) {
-    host_zoom_map_ = new HostZoomMap(profile_->GetHostZoomMap());
-     // Observe parent's HZM change for propagating change of parent's
-     // change to this HZM.
-     registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
-                    content::Source<HostZoomMap>(profile_->GetHostZoomMap()));
+    host_zoom_map_ = HostZoomMap::Create();
+    host_zoom_map_->CopyFrom(profile_->GetHostZoomMap());
+    // Observe parent's HZM change for propagating change of parent's
+    // change to this HZM.
+    registrar_.Add(this, content::NOTIFICATION_ZOOM_LEVEL_CHANGED,
+                   content::Source<HostZoomMap>(profile_->GetHostZoomMap()));
   }
   return host_zoom_map_.get();
 }
 
-GeolocationPermissionContext*
+content::GeolocationPermissionContext*
     OffTheRecordProfileImpl::GetGeolocationPermissionContext() {
   return profile_->GetGeolocationPermissionContext();
 }
@@ -408,13 +415,7 @@ UserStyleSheetWatcher* OffTheRecordProfileImpl::GetUserStyleSheetWatcher() {
   return profile_->GetUserStyleSheetWatcher();
 }
 
-FindBarState* OffTheRecordProfileImpl::GetFindBarState() {
-  if (!find_bar_state_.get())
-    find_bar_state_.reset(new FindBarState());
-  return find_bar_state_.get();
-}
-
-bool OffTheRecordProfileImpl::HasProfileSyncService() const {
+bool OffTheRecordProfileImpl::HasProfileSyncService() {
   // We never have a profile sync service.
   return false;
 }
@@ -439,25 +440,12 @@ ProfileSyncService* OffTheRecordProfileImpl::GetProfileSyncService() {
   return NULL;
 }
 
-ProfileSyncService* OffTheRecordProfileImpl::GetProfileSyncService(
-    const std::string& cros_user) {
-  return NULL;
-}
-
 bool OffTheRecordProfileImpl::IsSameProfile(Profile* profile) {
   return (profile == this) || (profile == profile_);
 }
 
 Time OffTheRecordProfileImpl::GetStartTime() const {
   return start_time_;
-}
-
-SpellCheckHost* OffTheRecordProfileImpl::GetSpellCheckHost() {
-  return profile_->GetSpellCheckHost();
-}
-
-void OffTheRecordProfileImpl::ReinitializeSpellCheckHost(bool force) {
-  profile_->ReinitializeSpellCheckHost(force);
 }
 
 WebKitContext* OffTheRecordProfileImpl::GetWebKitContext() {
@@ -575,10 +563,6 @@ GURL OffTheRecordProfileImpl::GetHomePage() {
   return profile_->GetHomePage();
 }
 
-NetworkActionPredictor* OffTheRecordProfileImpl::GetNetworkActionPredictor() {
-  return NULL;
-}
-
 void OffTheRecordProfileImpl::Observe(int type,
                      const content::NotificationSource& source,
                      const content::NotificationDetails& details) {
@@ -624,7 +608,8 @@ void OffTheRecordProfileImpl::CreateQuotaManagerAndClients() {
   webkit_context_ = new WebKitContext(
       IsOffTheRecord(), GetPath(), GetExtensionSpecialStoragePolicy(),
       false, quota_manager_->proxy(),
-      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::WEBKIT));
+      BrowserThread::GetMessageLoopProxyForThread(
+          BrowserThread::WEBKIT_DEPRECATED));
   appcache_service_ = new ChromeAppCacheService(quota_manager_->proxy());
   BrowserThread::PostTask(
     BrowserThread::IO, FROM_HERE,
@@ -632,7 +617,7 @@ void OffTheRecordProfileImpl::CreateQuotaManagerAndClients() {
                appcache_service_.get(),
                IsOffTheRecord()
                    ? FilePath() : GetPath().Append(chrome::kAppCacheDirname),
-               &GetResourceContext(),
+               &io_data_.GetResourceContextNoInit(),
                make_scoped_refptr(GetExtensionSpecialStoragePolicy())));
 }
 

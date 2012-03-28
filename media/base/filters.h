@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,24 +46,11 @@ class FilterHost;
 
 struct PipelineStatistics;
 
-// Used to specify video preload states. They are "hints" to the browser about
-// how aggressively the browser should load and buffer data.
-// Please see the HTML5 spec for the descriptions of these values:
-// http://www.w3.org/TR/html5/video.html#attr-media-preload
-//
-// Enum values must match the values in WebCore::MediaPlayer::Preload and
-// there will be assertions at compile time if they do not match.
-enum Preload {
-  NONE,
-  METADATA,
-  AUTO,
-};
-
 // Used for completing asynchronous methods.
 typedef base::Callback<void(PipelineStatus)> FilterStatusCB;
 
-// This function copies |*cb|, calls Reset() on |*cb|, and then calls Run()
-// on the copy. This is used in the common case where you need to clear
+// These functions copy |*cb|, call Reset() on |*cb|, and then call Run()
+// on the copy.  This is used in the common case where you need to clear
 // a callback member variable before running the callback.
 MEDIA_EXPORT void ResetAndRunCB(FilterStatusCB* cb, PipelineStatus status);
 MEDIA_EXPORT void ResetAndRunCB(base::Closure* cb);
@@ -80,6 +67,10 @@ class MEDIA_EXPORT Filter : public base::RefCountedThreadSafe<Filter> {
   // reference to the filter.  The reference held by the host is guaranteed
   // to be released before the host object is destroyed by the pipeline.
   virtual void set_host(FilterHost* host);
+
+  // Clear |host_| to signal abandonment.  Must be called after set_host() and
+  // before any state-changing method below.
+  virtual void clear_host();
 
   virtual FilterHost* host();
 
@@ -129,44 +120,13 @@ class MEDIA_EXPORT Filter : public base::RefCountedThreadSafe<Filter> {
   DISALLOW_COPY_AND_ASSIGN(Filter);
 };
 
-class MEDIA_EXPORT DataSource : public Filter {
- public:
-  typedef base::Callback<void(size_t)> ReadCallback;
-  static const size_t kReadError;
-
-  // Reads |size| bytes from |position| into |data|. And when the read is done
-  // or failed, |read_callback| is called with the number of bytes read or
-  // kReadError in case of error.
-  // TODO(hclam): should change |size| to int! It makes the code so messy
-  // with size_t and int all over the place..
-  virtual void Read(int64 position, size_t size,
-                    uint8* data,
-                    const DataSource::ReadCallback& read_callback) = 0;
-
-  // Returns true and the file size, false if the file size could not be
-  // retrieved.
-  virtual bool GetSize(int64* size_out) = 0;
-
-  // Returns true if we are performing streaming. In this case seeking is
-  // not possible.
-  virtual bool IsStreaming() = 0;
-
-  // Alert the DataSource that the video preload value has been changed.
-  virtual void SetPreload(Preload preload) = 0;
-
-  // Notify the DataSource of the bitrate of the media.
-  // Values of |bitrate| <= 0 are invalid and should be ignored.
-  virtual void SetBitrate(int bitrate) = 0;
-};
-
 class MEDIA_EXPORT VideoDecoder : public Filter {
  public:
   // Initialize a VideoDecoder with the given DemuxerStream, executing the
   // callback upon completion.
   // stats_callback is used to update global pipeline statistics.
-  //
-  // TODO(scherkus): switch to PipelineStatus callback.
-  virtual void Initialize(DemuxerStream* stream, const base::Closure& callback,
+  virtual void Initialize(DemuxerStream* stream,
+                          const PipelineStatusCB& callback,
                           const StatisticsCallback& stats_callback) = 0;
 
   // Request a frame to be decoded and returned via the provided callback.
@@ -175,7 +135,9 @@ class MEDIA_EXPORT VideoDecoder : public Filter {
   // Implementations guarantee that the callback will not be called from within
   // this method.
   //
-  // Frames will be non-NULL yet may be end of stream frames.
+  // Non-NULL frames contain decoded video data or may indicate the  end of
+  // the stream. NULL video frames indicate an aborted read. This can happen if
+  // the DemuxerStream gets flushed and doesn't have any more data to return.
   typedef base::Callback<void(scoped_refptr<VideoFrame>)> ReadCB;
   virtual void Read(const ReadCB& callback) = 0;
 
@@ -187,6 +149,19 @@ class MEDIA_EXPORT VideoDecoder : public Filter {
   // TODO(scherkus): why not rely on prerolling and decoding a single frame to
   // get dimensions?
   virtual const gfx::Size& natural_size() = 0;
+
+  // Returns true if the output format has an alpha channel. Most formats do not
+  // have alpha so the default is false. Override and return true for decoders
+  // that return formats with an alpha channel.
+  virtual bool HasAlpha() const;
+
+  // Prepare decoder for shutdown.  This is a HACK needed because
+  // PipelineImpl::Stop() goes through a Pause/Flush/Stop dance to all its
+  // filters, waiting for each state transition to complete before starting the
+  // next, but WebMediaPlayerImpl::Destroy() holds the renderer loop hostage for
+  // the duration.  Default implementation does nothing; derived decoders may
+  // override as needed.  http://crbug.com/110228 tracks removing this.
+  virtual void PrepareForShutdownHack();
 
  protected:
   VideoDecoder();
@@ -204,18 +179,18 @@ class MEDIA_EXPORT AudioDecoder : public Filter {
   virtual void Initialize(DemuxerStream* stream, const base::Closure& callback,
                           const StatisticsCallback& stats_callback) = 0;
 
-  // Renderer provides an output buffer for Decoder to write to. These buffers
-  // will be recycled to renderer via the permanent callback.
+  // Request samples to be decoded and returned via the provided callback.
+  // Only one read may be in flight at any given time.
   //
-  // We could also pass empty pointer here to let decoder provide buffers pool.
-  virtual void ProduceAudioSamples(scoped_refptr<Buffer> buffer) = 0;
-
-  // Installs a permanent callback for passing decoded audio output.
-  typedef base::Callback<void(scoped_refptr<Buffer>)> ConsumeAudioSamplesCB;
-  void set_consume_audio_samples_callback(
-      const ConsumeAudioSamplesCB& callback) {
-    consume_audio_samples_callback_ = callback;
-  }
+  // Implementations guarantee that the callback will not be called from within
+  // this method.
+  //
+  // Non-NULL sample buffer pointers will contain decoded audio data or may
+  // indicate the end of the stream. A NULL buffer pointer indicates an aborted
+  // Read(). This can happen if the DemuxerStream gets flushed and doesn't have
+  // any more data to return.
+  typedef base::Callback<void(scoped_refptr<Buffer>)> ReadCB;
+  virtual void Read(const ReadCB& callback) = 0;
 
   // Returns various information about the decoded audio format.
   virtual int bits_per_channel() = 0;
@@ -225,12 +200,6 @@ class MEDIA_EXPORT AudioDecoder : public Filter {
  protected:
   AudioDecoder();
   virtual ~AudioDecoder();
-
-  // Executes the permanent callback to pass off decoded audio.
-  void ConsumeAudioSamples(scoped_refptr<Buffer> buffer);
-
- private:
-  ConsumeAudioSamplesCB consume_audio_samples_callback_;
 };
 
 

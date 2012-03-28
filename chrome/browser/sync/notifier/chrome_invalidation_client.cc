@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,9 @@
 #include "chrome/browser/sync/notifier/invalidation_util.h"
 #include "chrome/browser/sync/notifier/registration_manager.h"
 #include "chrome/browser/sync/syncable/model_type.h"
-#include "google/cacheinvalidation/v2/invalidation-client-impl.h"
+#include "google/cacheinvalidation/v2/invalidation-client.h"
+#include "google/cacheinvalidation/v2/invalidation-client-factory.h"
+#include "google/cacheinvalidation/v2/types.pb.h"
 
 namespace {
 
@@ -28,7 +30,6 @@ ChromeInvalidationClient::Listener::~Listener() {}
 
 ChromeInvalidationClient::ChromeInvalidationClient()
     : chrome_system_resources_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
-      scoped_callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)),
       listener_(NULL),
       state_writer_(NULL),
       ticl_ready_(false) {
@@ -85,12 +86,9 @@ void ChromeInvalidationClient::Start(
   state_writer_ = state_writer;
 
   int client_type = ipc::invalidation::ClientType::CHROME_SYNC;
-  // TODO(akalin): Use InvalidationClient::Create() once it supports
-  // taking a ClientConfig.
-  invalidation::InvalidationClientImpl::Config client_config;
   invalidation_client_.reset(
-      new invalidation::InvalidationClientImpl(
-          &chrome_system_resources_, client_type, client_id, client_config,
+      invalidation::CreateInvalidationClient(
+          &chrome_system_resources_, client_type, client_id,
           kApplicationName, this));
   ChangeBaseTask(base_task);
   invalidation_client_->Start();
@@ -129,8 +127,7 @@ void ChromeInvalidationClient::Stop() {
   max_invalidation_versions_.clear();
 }
 
-void ChromeInvalidationClient::RegisterTypes(
-    const syncable::ModelTypeSet& types) {
+void ChromeInvalidationClient::RegisterTypes(syncable::ModelTypeSet types) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   registered_types_ = types;
   if (ticl_ready_ && registration_manager_.get()) {
@@ -190,9 +187,7 @@ void ChromeInvalidationClient::Invalidate(
   if (invalidation.has_payload())
     payload = invalidation.payload();
 
-  syncable::ModelTypeSet types;
-  types.insert(model_type);
-  EmitInvalidation(types, payload);
+  EmitInvalidation(syncable::ModelTypeSet(model_type), payload);
   // TODO(akalin): We should really acknowledge only after we get the
   // updates from the sync server. (see http://crbug.com/78462).
   client->Acknowledge(ack_handle);
@@ -214,9 +209,7 @@ void ChromeInvalidationClient::InvalidateUnknownVersion(
     return;
   }
 
-  syncable::ModelTypeSet types;
-  types.insert(model_type);
-  EmitInvalidation(types, "");
+  EmitInvalidation(syncable::ModelTypeSet(model_type), "");
   // TODO(akalin): We should really acknowledge only after we get the
   // updates from the sync server. (see http://crbug.com/78462).
   client->Acknowledge(ack_handle);
@@ -236,13 +229,10 @@ void ChromeInvalidationClient::InvalidateAll(
 }
 
 void ChromeInvalidationClient::EmitInvalidation(
-    const syncable::ModelTypeSet& types, const std::string& payload) {
+    syncable::ModelTypeSet types, const std::string& payload) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
-  // TODO(akalin): Move all uses of ModelTypeBitSet for invalidations
-  // to ModelTypeSet.
   syncable::ModelTypePayloadMap type_payloads =
-      syncable::ModelTypePayloadMapFromBitSet(
-          syncable::ModelTypeBitSetFromSet(types), payload);
+      syncable::ModelTypePayloadMapFromEnumSet(types, payload);
   listener_->OnInvalidate(type_payloads);
 }
 

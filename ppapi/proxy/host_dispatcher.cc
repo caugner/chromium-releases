@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "ppapi/proxy/interface_list.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
+#include "ppapi/shared_impl/ppapi_globals.h"
 
 namespace ppapi {
 namespace proxy {
@@ -71,9 +72,7 @@ HostDispatcher::HostDispatcher(base::ProcessHandle remote_process_handle,
     g_module_to_dispatcher = new ModuleToDispatcherMap;
   (*g_module_to_dispatcher)[pp_module_] = this;
 
-  const PPB_Var* var_interface =
-      static_cast<const PPB_Var*>(local_get_interface(PPB_VAR_INTERFACE));
-  SetSerializationRules(new HostVarSerializationRules(var_interface, module));
+  SetSerializationRules(new HostVarSerializationRules(module));
 
   ppb_proxy_ = reinterpret_cast<const PPB_Proxy_Private*>(
       local_get_interface(PPB_PROXY_PRIVATE_INTERFACE));
@@ -176,6 +175,14 @@ bool HostDispatcher::OnMessageReceived(const IPC::Message& msg) {
   BoolRestorer restorer(&allow_plugin_reentrancy_);
   allow_plugin_reentrancy_ = false;
 
+  bool handled = true;
+  IPC_BEGIN_MESSAGE_MAP(HostDispatcher, msg)
+    IPC_MESSAGE_HANDLER(PpapiHostMsg_LogWithSource, OnHostMsgLogWithSource)
+    IPC_MESSAGE_UNHANDLED(handled = false)
+  IPC_END_MESSAGE_MAP()
+
+  if (handled)
+    return true;
   return Dispatcher::OnMessageReceived(msg);
 }
 
@@ -215,6 +222,19 @@ const void* HostDispatcher::GetProxiedInterface(const std::string& iface_name) {
 void HostDispatcher::OnInvalidMessageReceived() {
   // TODO(brettw) bug 95345 kill the plugin when an invalid message is
   // received.
+}
+
+void HostDispatcher::OnHostMsgLogWithSource(PP_Instance instance,
+                                            int int_log_level,
+                                            const std::string& source,
+                                            const std::string& value) {
+  PP_LogLevel_Dev level = static_cast<PP_LogLevel_Dev>(int_log_level);
+  if (instance) {
+    PpapiGlobals::Get()->LogWithSource(instance, level, source, value);
+  } else {
+    PpapiGlobals::Get()->BroadcastLogWithSource(pp_module_, level,
+                                                source, value);
+  }
 }
 
 // ScopedModuleReference -------------------------------------------------------

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -37,7 +37,7 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
+#include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/quota/mock_special_storage_policy.h"
 
@@ -83,14 +83,12 @@ class FileSystemURLRequestJobTest : public testing::Test {
             base::MessageLoopProxy::current(),
             base::MessageLoopProxy::current(),
             special_storage_policy_, NULL,
-            FilePath(), false /* is_incognito */, true /* allow_file_access */,
-            new FileSystemPathManager(
-                base::MessageLoopProxy::current(),
-                temp_dir_.path(), NULL, false, false));
+            temp_dir_.path(),
+            CreateDisallowFileAccessOptions());
 
-    file_system_context_->path_manager()->ValidateFileSystemRootAndGetURL(
+    file_system_context_->sandbox_provider()->ValidateFileSystemRoot(
         GURL("http://remote/"), kFileSystemTypeTemporary, true,  // create
-        base::Bind(&FileSystemURLRequestJobTest::OnGetRootPath,
+        base::Bind(&FileSystemURLRequestJobTest::OnValidateFileSystem,
                    weak_factory_.GetWeakPtr()));
     MessageLoop::current()->RunAllPending();
 
@@ -102,10 +100,8 @@ class FileSystemURLRequestJobTest : public testing::Test {
     net::URLRequest::Deprecated::RegisterProtocolFactory("filesystem", NULL);
   }
 
-  void OnGetRootPath(bool success, const FilePath& root_path,
-                     const std::string& name) {
-    ASSERT_TRUE(success);
-    origin_root_path_ = root_path;
+  void OnValidateFileSystem(base::PlatformFileError result) {
+    ASSERT_EQ(base::PLATFORM_FILE_OK, result);
   }
 
   void TestRequestHelper(const GURL& url,
@@ -144,7 +140,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
 
   void CreateDirectory(const base::StringPiece& dir_name) {
     FilePath path = FilePath().AppendASCII(dir_name);
-    FileSystemFileUtil* file_util = file_system_context_->path_manager()->
+    FileSystemFileUtil* file_util = file_system_context_->
         sandbox_provider()->GetFileUtil();
     FileSystemOperationContext context(file_system_context_, file_util);
     context.set_src_origin_url(GURL("http://remote"));
@@ -161,7 +157,7 @@ class FileSystemURLRequestJobTest : public testing::Test {
   void WriteFile(const base::StringPiece& file_name,
                  const char* buf, int buf_size) {
     FilePath path = FilePath().AppendASCII(file_name);
-    FileSystemFileUtil* file_util = file_system_context_->path_manager()->
+    FileSystemFileUtil* file_util = file_system_context_->
         sandbox_provider()->GetFileUtil();
     FileSystemOperationContext context(file_system_context_, file_util);
     context.set_src_origin_url(GURL("http://remote"));
@@ -200,7 +196,6 @@ class FileSystemURLRequestJobTest : public testing::Test {
   MessageLoop message_loop_;
 
   ScopedTempDir temp_dir_;
-  FilePath origin_root_path_;
   scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy_;
   scoped_refptr<FileSystemContext> file_system_context_;
   base::WeakPtrFactory<FileSystemURLRequestJobTest> weak_factory_;
@@ -335,22 +330,12 @@ TEST_F(FileSystemURLRequestJobTest, NoSuchFile) {
   EXPECT_EQ(net::ERR_FILE_NOT_FOUND, request_->status().error());
 }
 
-class QuitNowTask : public Task {
- public:
-  virtual void Run() {
-    MessageLoop::current()->QuitNow();
-  }
-};
-
 TEST_F(FileSystemURLRequestJobTest, Cancel) {
   WriteFile("file1.dat", kTestFileData, arraysize(kTestFileData) - 1);
   TestRequestNoRun(CreateFileSystemURL("file1.dat"));
 
   // Run StartAsync() and only StartAsync().
-  MessageLoop::current()->PostTask(FROM_HERE, new QuitNowTask);
-  MessageLoop::current()->Run();
-
-  request_.reset();
+  MessageLoop::current()->DeleteSoon(FROM_HERE, request_.release());
   MessageLoop::current()->RunAllPending();
   // If we get here, success! we didn't crash!
 }

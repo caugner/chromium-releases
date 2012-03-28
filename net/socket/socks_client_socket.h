@@ -45,10 +45,10 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
   // On destruction Disconnect() is called.
   virtual ~SOCKSClientSocket();
 
-  // StreamSocket methods:
+  // StreamSocket implementation.
 
   // Does the SOCKS handshake and completes the protocol.
-  virtual int Connect(OldCompletionCallback* callback) OVERRIDE;
+  virtual int Connect(const CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
@@ -60,13 +60,13 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
   virtual int64 NumBytesRead() const OVERRIDE;
   virtual base::TimeDelta GetConnectTimeMicros() const OVERRIDE;
 
-  // Socket methods:
+  // Socket implementation.
   virtual int Read(IOBuffer* buf,
                    int buf_len,
-                   OldCompletionCallback* callback) OVERRIDE;
+                   const CompletionCallback& callback) OVERRIDE;
   virtual int Write(IOBuffer* buf,
                     int buf_len,
-                    OldCompletionCallback* callback) OVERRIDE;
+                    const CompletionCallback& callback) OVERRIDE;
 
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
@@ -102,15 +102,13 @@ class NET_EXPORT_PRIVATE SOCKSClientSocket : public StreamSocket {
 
   const std::string BuildHandshakeWriteBuffer() const;
 
-  OldCompletionCallbackImpl<SOCKSClientSocket> io_callback_;
-
   // Stores the underlying socket.
   scoped_ptr<ClientSocketHandle> transport_;
 
   State next_state_;
 
   // Stores the callback to the layer above, called on completing Connect().
-  OldCompletionCallback* user_callback_;
+  CompletionCallback user_callback_;
 
   // This IOBuffer is used by the class to read and write
   // SOCKS handshake data. The length contains the expected size to

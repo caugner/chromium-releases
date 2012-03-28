@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_host_metrics.h"
+#include "chrome/browser/spellchecker/spellcheck_platform_mac.h"
 #include "chrome/browser/spellchecker/spellcheck_profile_provider.h"
-#include "chrome/browser/spellchecker/spellchecker_platform_engine.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
@@ -29,12 +30,10 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/load_flags.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/hunspell/google/bdict.h"
 #include "ui/base/l10n/l10n_util.h"
-#if defined(OS_MACOSX)
-#include "base/metrics/histogram.h"
-#endif
 
 using content::BrowserThread;
 
@@ -47,32 +46,6 @@ FilePath GetFirstChoiceFilePath(const std::string& language) {
   PathService::Get(chrome::DIR_APP_DICTIONARIES, &dict_dir);
   return SpellCheckCommon::GetVersionedFileName(language, dict_dir);
 }
-
-#if defined(OS_MACOSX)
-// Collect metrics on how often Hunspell is used on OS X vs the native
-// spellchecker.
-void RecordSpellCheckStats(bool native_spellchecker_used,
-                           const std::string& language) {
-  CR_DEFINE_STATIC_LOCAL(std::set<std::string>, languages_seen, ());
-
-  // Only count a language code once for each session..
-  if (languages_seen.find(language) != languages_seen.end()) {
-    return;
-  }
-  languages_seen.insert(language);
-
-  enum {
-    SPELLCHECK_OSX_NATIVE_SPELLCHECKER_USED = 0,
-    SPELLCHECK_HUNSPELL_USED = 1
-  };
-
-  bool engine_used = native_spellchecker_used ?
-                         SPELLCHECK_OSX_NATIVE_SPELLCHECKER_USED :
-                         SPELLCHECK_HUNSPELL_USED;
-
-  UMA_HISTOGRAM_COUNTS("SpellCheck.OSXEngineUsed", engine_used);
-}
-#endif
 
 #if defined(OS_WIN)
 FilePath GetFallbackFilePath(const FilePath& first_choice) {
@@ -130,22 +103,17 @@ SpellCheckHostImpl::~SpellCheckHostImpl() {
 void SpellCheckHostImpl::Initialize() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (SpellCheckerPlatform::SpellCheckerAvailable() &&
-      SpellCheckerPlatform::PlatformSupportsLanguage(language_)) {
 #if defined(OS_MACOSX)
-    RecordSpellCheckStats(true, language_);
-#endif
+  if (spellcheck_mac::SpellCheckerAvailable() &&
+      spellcheck_mac::PlatformSupportsLanguage(language_)) {
     use_platform_spellchecker_ = true;
-    SpellCheckerPlatform::SetLanguage(language_);
+    spellcheck_mac::SetLanguage(language_);
     MessageLoop::current()->PostTask(FROM_HERE,
         base::Bind(&SpellCheckHostImpl::InformProfileOfInitialization,
                    weak_ptr_factory_.GetWeakPtr()));
     return;
   }
-
-#if defined(OS_MACOSX)
-  RecordSpellCheckStats(false, language_);
-#endif
+#endif  // OS_MACOSX
 
   BrowserThread::PostTaskAndReply(BrowserThread::FILE, FROM_HERE,
       base::Bind(&SpellCheckHostImpl::InitializeDictionaryLocation,
@@ -169,7 +137,7 @@ void SpellCheckHostImpl::InitForRenderer(content::RenderProcessHost* process) {
   // Bug 103693: SpellCheckHostImpl and SpellCheckProfile should not
   // depend on Profile interface.
   Profile* profile = Profile::FromBrowserContext(process->GetBrowserContext());
-  if (profile->GetSpellCheckHost() != this)
+  if (SpellCheckFactory::GetHostForProfile(profile) != this)
     return;
 
   PrefService* prefs = profile->GetPrefs();
@@ -317,6 +285,7 @@ void SpellCheckHostImpl::DownloadDictionary() {
   fetcher_.reset(content::URLFetcher::Create(url, content::URLFetcher::GET,
                                 weak_ptr_factory_.GetWeakPtr()));
   fetcher_->SetRequestContext(request_context_getter_);
+  fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   tried_to_download_ = true;
   fetcher_->Start();
   request_context_getter_ = NULL;

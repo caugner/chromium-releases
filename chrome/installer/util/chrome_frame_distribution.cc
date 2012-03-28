@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -90,8 +90,7 @@ std::wstring ChromeFrameDistribution::GetStatsServerURL() {
 }
 
 std::string ChromeFrameDistribution::GetNetworkStatsServer() const {
-  // TODO(rtenneti): Return the network stats server name.
-  return "";
+  return "chrome.googleechotest.com";
 }
 
 std::wstring ChromeFrameDistribution::GetUninstallLinkName() {
@@ -111,6 +110,10 @@ std::wstring ChromeFrameDistribution::GetVersionKey() {
 }
 
 bool ChromeFrameDistribution::CanSetAsDefault() {
+  return false;
+}
+
+bool ChromeFrameDistribution::CanCreateDesktopShortcuts() {
   return false;
 }
 

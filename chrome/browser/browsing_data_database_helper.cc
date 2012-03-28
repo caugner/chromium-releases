@@ -11,6 +11,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCString.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
@@ -145,7 +146,8 @@ void BrowsingDataDatabaseHelper::DeleteDatabaseOnFileThread(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (!tracker_.get())
     return;
-  tracker_->DeleteDatabase(UTF8ToUTF16(origin), UTF8ToUTF16(name), NULL);
+  tracker_->DeleteDatabase(UTF8ToUTF16(origin), UTF8ToUTF16(name),
+                           net::CompletionCallback());
 }
 
 CannedBrowsingDataDatabaseHelper::PendingDatabaseInfo::PendingDatabaseInfo() {}
@@ -207,7 +209,7 @@ void CannedBrowsingDataDatabaseHelper::StartFetching(
   is_fetching_ = true;
   completion_callback_ = callback;
   BrowserThread::PostTask(
-      BrowserThread::WEBKIT, FROM_HERE,
+      BrowserThread::WEBKIT_DEPRECATED, FROM_HERE,
       base::Bind(&CannedBrowsingDataDatabaseHelper::ConvertInfoInWebKitThread,
                  this));
 }

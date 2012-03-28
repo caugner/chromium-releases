@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -176,6 +176,8 @@ std::string FormFlagsString(const AppCacheResourceInfo& info) {
     str.append("Manifest, ");
   if (info.is_master)
     str.append("Master, ");
+  if (info.is_intercept)
+    str.append("Intercept, ");
   if (info.is_fallback)
     str.append("Fallback, ");
   if (info.is_explicit)
@@ -431,7 +433,7 @@ class ViewAppCacheJob : public BaseInternalsJob,
  public:
   ViewAppCacheJob(
       net::URLRequest* request, AppCacheService* service,
-      const GURL manifest_url)
+      const GURL& manifest_url)
       : BaseInternalsJob(request, service),
         manifest_url_(manifest_url) {}
 
@@ -503,9 +505,8 @@ class ViewEntryJob : public BaseInternalsJob,
       int64 response_id, int64 group_id)
       : BaseInternalsJob(request, service),
         manifest_url_(manifest_url), entry_url_(entry_url),
-        response_id_(response_id), group_id_(group_id), amount_read_(0),
-        ALLOW_THIS_IN_INITIALIZER_LIST(read_callback_(
-            this, &ViewEntryJob::OnReadComplete)) {}
+        response_id_(response_id), group_id_(group_id), amount_read_(0) {
+  }
 
   virtual void Start() {
     DCHECK(request_);
@@ -564,7 +565,8 @@ class ViewEntryJob : public BaseInternalsJob,
     reader_.reset(appcache_service_->storage()->CreateResponseReader(
         manifest_url_, group_id_, response_id_));
     reader_->ReadData(
-        response_data_, amount_to_read, &read_callback_);
+        response_data_, amount_to_read,
+        base::Bind(&ViewEntryJob::OnReadComplete, base::Unretained(this)));
   }
 
   void OnReadComplete(int result) {
@@ -583,7 +585,6 @@ class ViewEntryJob : public BaseInternalsJob,
   scoped_refptr<net::IOBuffer> response_data_;
   int amount_read_;
   scoped_ptr<AppCacheResponseReader> reader_;
-  net::OldCompletionCallbackImpl<ViewEntryJob> read_callback_;
 };
 
 }  // namespace

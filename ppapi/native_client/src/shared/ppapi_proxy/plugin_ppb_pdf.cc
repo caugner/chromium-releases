@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,11 +35,11 @@ PP_Var GetLocalizedString(
     PP_Instance instance,
     PP_ResourceString string_id) {
   DebugPrintf("PPB_PDF::GetLocalizedString: "
-              "instance=%"NACL_PRIu32"\n", instance);
+              "instance=%"NACL_PRId32"\n", instance);
 
   NaClSrpcChannel* channel = GetMainSrpcChannel();
-  nacl_abi_size_t string_size = kMaxVarSize;
-  nacl::scoped_array<char> string_bytes(new char[kMaxVarSize]);
+  nacl_abi_size_t string_size = kMaxReturnVarSize;
+  nacl::scoped_array<char> string_bytes(new char[string_size]);
   NaClSrpcError srpc_result =
       PpbPdfRpcClient::PPB_PDF_GetLocalizedString(
           channel,
@@ -49,8 +49,7 @@ PP_Var GetLocalizedString(
 
   PP_Var string = PP_MakeUndefined();
   if (srpc_result == NACL_SRPC_RESULT_OK) {
-    (void) DeserializeTo(
-        channel, string_bytes.get(), string_size, 1, &string);
+    (void) DeserializeTo(string_bytes.get(), string_size, 1, &string);
   }
 
   DebugPrintf("PPB_PDF::GetLocalizedString: %s\n",
@@ -61,7 +60,7 @@ PP_Var GetLocalizedString(
 PP_Resource GetResourceImage(PP_Instance instance,
                              PP_ResourceImage image_id) {
   DebugPrintf("PPB_PDF::GetResourceImage: "
-              "instance=%"NACL_PRIu32"\n", instance);
+              "instance=%"NACL_PRId32"\n", instance);
 
   PP_Resource image = kInvalidResourceId;
   NaClSrpcError srpc_result =
@@ -113,7 +112,7 @@ void SearchString(PP_Instance instance,
                   bool case_sensitive,
                   struct PP_PrivateFindResult** results,
                   int* count) {
-  DebugPrintf("PPB_PDF::SearchString: instance=%"NACL_PRIu32"\n", instance);
+  DebugPrintf("PPB_PDF::SearchString: instance=%"NACL_PRId32"\n", instance);
 
   CHECK(string != NULL);
   CHECK(term != NULL);
@@ -146,7 +145,7 @@ void SearchString(PP_Instance instance,
 }
 
 void DidStartLoading(PP_Instance instance) {
-  DebugPrintf("PPB_PDF::DidStartLoading: instance=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_PDF::DidStartLoading: instance=%"NACL_PRId32"\n",
               instance);
 
   NaClSrpcError srpc_result =
@@ -158,7 +157,7 @@ void DidStartLoading(PP_Instance instance) {
 }
 
 void DidStopLoading(PP_Instance instance) {
-  DebugPrintf("PPB_PDF::DidStopLoading: instance=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_PDF::DidStopLoading: instance=%"NACL_PRId32"\n",
               instance);
 
   NaClSrpcError srpc_result =
@@ -171,7 +170,7 @@ void DidStopLoading(PP_Instance instance) {
 
 void SetContentRestriction(PP_Instance instance,
                            int restrictions) {
-  DebugPrintf("PPB_PDF::SetContentRestriction: instance=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_PDF::SetContentRestriction: instance=%"NACL_PRId32"\n",
               instance);
 
   NaClSrpcError srpc_result =
@@ -197,7 +196,7 @@ void HistogramPDFPageCount(int count) {
 void UserMetricsRecordAction(struct PP_Var action) {
   DebugPrintf("PPB_PDF::UserMetricsRecordAction\n");
 
-  nacl_abi_size_t action_size = kMaxVarSize;
+  nacl_abi_size_t action_size = 0;
   nacl::scoped_array<char> action_bytes(
       Serialize(&action, 1, &action_size));
   NaClSrpcError srpc_result =
@@ -210,7 +209,7 @@ void UserMetricsRecordAction(struct PP_Var action) {
 }
 
 void HasUnsupportedFeature(PP_Instance instance) {
-  DebugPrintf("PPB_PDF::HasUnsupportedFeature: instance=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_PDF::HasUnsupportedFeature: instance=%"NACL_PRId32"\n",
               instance);
 
   NaClSrpcError srpc_result =
@@ -222,7 +221,7 @@ void HasUnsupportedFeature(PP_Instance instance) {
 }
 
 void SaveAs(PP_Instance instance) {
-  DebugPrintf("PPB_PDF::SaveAs: instance=%"NACL_PRIu32"\n", instance);
+  DebugPrintf("PPB_PDF::SaveAs: instance=%"NACL_PRId32"\n", instance);
 
   NaClSrpcError srpc_result =
       PpbPdfRpcClient::PPB_PDF_SaveAs(GetMainSrpcChannel(),
@@ -252,4 +251,3 @@ const PPB_PDF* PluginPDF::GetInterface() {
 }
 
 }  // namespace ppapi_proxy
-

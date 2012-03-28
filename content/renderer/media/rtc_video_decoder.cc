@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "media/base/demuxer.h"
 #include "media/base/filter_host.h"
 #include "media/base/filters.h"
@@ -22,7 +21,6 @@ using media::CopyYPlane;
 using media::DemuxerStream;
 using media::FilterStatusCB;
 using media::kNoTimestamp;
-using media::Limits;
 using media::PIPELINE_OK;
 using media::StatisticsCallback;
 using media::VideoDecoder;
@@ -39,7 +37,7 @@ RTCVideoDecoder::RTCVideoDecoder(MessageLoop* message_loop,
 RTCVideoDecoder::~RTCVideoDecoder() {}
 
 void RTCVideoDecoder::Initialize(DemuxerStream* demuxer_stream,
-                                 const base::Closure& filter_callback,
+                                 const media::PipelineStatusCB& filter_callback,
                                  const StatisticsCallback& stat_callback) {
   if (MessageLoop::current() != message_loop_) {
     message_loop_->PostTask(
@@ -52,7 +50,7 @@ void RTCVideoDecoder::Initialize(DemuxerStream* demuxer_stream,
 
   DCHECK_EQ(MessageLoop::current(), message_loop_);
   state_ = kNormal;
-  filter_callback.Run();
+  filter_callback.Run(PIPELINE_OK);
 
   // TODO(acolwell): Implement stats.
 }

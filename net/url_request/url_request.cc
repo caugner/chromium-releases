@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -57,8 +57,7 @@ void StripPostSpecificHeaders(HttpRequestHeaders* headers) {
 uint64 g_next_url_request_identifier = 1;
 
 // This lock protects g_next_url_request_identifier.
-base::LazyInstance<base::Lock,
-                   base::LeakyLazyInstanceTraits<base::Lock> >
+base::LazyInstance<base::Lock>::Leaky
     g_next_url_request_identifier_lock = LAZY_INSTANCE_INITIALIZER;
 
 // Returns an prior unused identifier for URL requests.
@@ -152,7 +151,8 @@ URLRequest::URLRequest(const GURL& url, Delegate* delegate)
       ALLOW_THIS_IN_INITIALIZER_LIST(before_request_callback_(
           base::Bind(&URLRequest::BeforeRequestComplete,
                      base::Unretained(this)))),
-      has_notified_completion_(false) {
+      has_notified_completion_(false),
+      creation_time_(base::TimeTicks::Now()) {
   SIMPLE_STATS_COUNTER("URLRequestCount");
 
   // Sanity check out environment.
@@ -200,18 +200,6 @@ void URLRequest::AppendBytesToUpload(const char* bytes, int bytes_len) {
   if (!upload_)
     upload_ = new UploadData();
   upload_->AppendBytes(bytes, bytes_len);
-}
-
-void URLRequest::AppendFileRangeToUpload(
-    const FilePath& file_path,
-    uint64 offset,
-    uint64 length,
-    const base::Time& expected_modification_time) {
-  DCHECK(file_path.value().length() > 0 && length > 0);
-  if (!upload_)
-    upload_ = new UploadData();
-  upload_->AppendFileRange(file_path, offset, length,
-                           expected_modification_time);
 }
 
 void URLRequest::EnableChunkedUpload() {
@@ -441,7 +429,11 @@ void URLRequest::BeforeRequestComplete(int error) {
   DCHECK(!job_);
   DCHECK_NE(ERR_IO_PENDING, error);
 
+  // Check that there are no callbacks to already canceled requests.
+  DCHECK_NE(URLRequestStatus::CANCELED, status_.status());
+
   SetUnblockedOnDelegate();
+
   if (error != OK) {
     net_log_.AddEvent(NetLog::TYPE_CANCELLED,
         make_scoped_refptr(new NetLogStringParameter("source", "delegate")));
@@ -526,11 +518,8 @@ void URLRequest::DoCancel(int error, const SSLInfo& ssl_info) {
     response_info_.ssl_info = ssl_info;
   }
 
-  // There's nothing to do if we are not waiting on a Job.
-  if (!is_pending_ || !job_)
-    return;
-
-  job_->Kill();
+  if (is_pending_ && job_)
+    job_->Kill();
 
   // We need to notify about the end of this job here synchronously. The
   // Job sends an asynchronous notification but by the time this is processed,
@@ -808,6 +797,9 @@ void URLRequest::NotifyAuthRequiredComplete(
     NetworkDelegate::AuthRequiredResponse result) {
   SetUnblockedOnDelegate();
 
+  // Check that there are no callbacks to already canceled requests.
+  DCHECK_NE(URLRequestStatus::CANCELED, status_.status());
+
   // NotifyAuthRequired may be called multiple times, such as
   // when an authentication attempt fails. Clear out the data
   // so it can be reset on another round.
@@ -845,9 +837,9 @@ void URLRequest::NotifyCertificateRequested(
 }
 
 void URLRequest::NotifySSLCertificateError(const SSLInfo& ssl_info,
-                                           bool is_hsts_host) {
+                                           bool fatal) {
   if (delegate_)
-    delegate_->OnSSLCertificateError(this, ssl_info, is_hsts_host);
+    delegate_->OnSSLCertificateError(this, ssl_info, fatal);
 }
 
 bool URLRequest::CanGetCookies(const CookieList& cookie_list) const {
@@ -884,7 +876,7 @@ void URLRequest::NotifyRequestCompleted() {
   is_pending_ = false;
   has_notified_completion_ = true;
   if (context_ && context_->network_delegate())
-    context_->network_delegate()->NotifyCompleted(this);
+    context_->network_delegate()->NotifyCompleted(this, job_ != NULL);
 }
 
 void URLRequest::SetBlockedOnDelegate() {

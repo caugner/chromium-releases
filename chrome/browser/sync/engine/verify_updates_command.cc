@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,11 +27,6 @@ using syncable::SYNCER;
 VerifyUpdatesCommand::VerifyUpdatesCommand() {}
 VerifyUpdatesCommand::~VerifyUpdatesCommand() {}
 
-bool VerifyUpdatesCommand::HasCustomGroupsToChange() const {
-  // TODO(akalin): Set to true.
-  return false;
-}
-
 std::set<ModelSafeGroup> VerifyUpdatesCommand::GetGroupsToChange(
     const sessions::SyncSession& session) const {
   std::set<ModelSafeGroup> groups_with_updates;
@@ -47,14 +42,14 @@ std::set<ModelSafeGroup> VerifyUpdatesCommand::GetGroupsToChange(
   return groups_with_updates;
 }
 
-void VerifyUpdatesCommand::ModelChangingExecuteImpl(
+SyncerError VerifyUpdatesCommand::ModelChangingExecuteImpl(
     sessions::SyncSession* session) {
   DVLOG(1) << "Beginning Update Verification";
   ScopedDirLookup dir(session->context()->directory_manager(),
                       session->context()->account_name());
   if (!dir.good()) {
     LOG(ERROR) << "Scoped dir lookup failed!";
-    return;
+    return DIRECTORY_LOOKUP_FAILED;
   }
   WriteTransaction trans(FROM_HERE, SYNCER, dir);
   sessions::StatusController* status = session->mutable_status_controller();
@@ -77,6 +72,8 @@ void VerifyUpdatesCommand::ModelChangingExecuteImpl(
     if (update.deleted())
       status->increment_num_tombstone_updates_downloaded_by(1);
   }
+
+  return SYNCER_OK;
 }
 
 namespace {

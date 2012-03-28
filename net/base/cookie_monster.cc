@@ -828,7 +828,7 @@ class CookieMonster::GetCookiesWithOptionsTask
     : public CookieMonster::CookieMonsterTask {
  public:
   GetCookiesWithOptionsTask(CookieMonster* cookie_monster,
-                            GURL url,
+                            const GURL& url,
                             const CookieOptions& options,
                             const CookieMonster::GetCookiesCallback& callback)
       : CookieMonsterTask(cookie_monster),
@@ -895,7 +895,7 @@ class CookieMonster::DeleteCookieTask
     : public CookieMonster::CookieMonsterTask {
  public:
   DeleteCookieTask(CookieMonster* cookie_monster,
-                   GURL url,
+                   const GURL& url,
                    const std::string& cookie_name,
                    const base::Closure& callback)
       : CookieMonsterTask(cookie_monster),
@@ -1297,12 +1297,12 @@ void CookieMonster::EnableFileScheme() {
   enable_file_scheme_ = true;
 }
 
-void CookieMonster::FlushStore(Task* completion_task) {
+void CookieMonster::FlushStore(const base::Closure& callback) {
   base::AutoLock autolock(lock_);
   if (initialized_ && store_)
-    store_->Flush(completion_task);
-  else if (completion_task)
-    MessageLoop::current()->PostTask(FROM_HERE, completion_task);
+    store_->Flush(callback);
+  else if (!callback.is_null())
+    MessageLoop::current()->PostTask(FROM_HERE, callback);
 }
 
 bool CookieMonster::SetCookieWithOptions(const GURL& url,

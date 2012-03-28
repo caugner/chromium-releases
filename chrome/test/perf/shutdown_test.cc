@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "chrome/common/env_vars.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
 #include "net/base/net_util.h"
 
@@ -67,7 +68,13 @@ class ShutdownTest : public UIPerfTest {
   void RunShutdownTest(const char* graph, const char* trace,
                        bool important, TestSize test_size,
                        ProxyLauncher::ShutdownType shutdown_type) {
+#if defined(NDEBUG)
     const int kNumCyclesMax = 20;
+#else
+    // Debug builds are too slow and we can't run that many cycles in a
+    // reasonable amount of time.
+    const int kNumCyclesMax = 10;
+#endif
     int numCycles = kNumCyclesMax;
     scoped_ptr<base::Environment> env(base::Environment::Create());
     std::string numCyclesEnv;
@@ -107,7 +114,7 @@ class ShutdownTest : public UIPerfTest {
     std::string times;
     for (int i = 0; i < numCycles; ++i)
       base::StringAppendF(&times, "%.2f,", timings[i].InMillisecondsF());
-    PrintResultList(graph, "", trace, times, "ms", important);
+    perf_test::PrintResultList(graph, "", trace, times, "ms", important);
   }
 };
 
@@ -126,7 +133,14 @@ TEST_F(ShutdownTest, SimpleSessionEnding) {
                   true, /* important */ SIMPLE, ProxyLauncher::SESSION_ENDING);
 }
 
-TEST_F(ShutdownTest, TwentyTabsWindowClose) {
+// http://crbug.com/110471
+#if defined(OS_WIN) && !defined(NDEBUG)
+#define MAYBE_TwentyTabsWindowClose DISABLED_TwentyTabsWindowClose
+#else
+#define MAYBE_TwentyTabsWindowClose TwentyTabsWindowClose
+#endif
+
+TEST_F(ShutdownTest, MAYBE_TwentyTabsWindowClose) {
   RunShutdownTest("shutdown", "twentytabs-window-close",
                   true, /* important */ TWENTY_TABS,
                   ProxyLauncher::WINDOW_CLOSE);

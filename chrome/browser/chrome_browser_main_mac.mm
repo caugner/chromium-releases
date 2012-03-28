@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
 #include "base/file_path.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/path_service.h"
@@ -71,7 +72,7 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   // CFRunLoop.
 
   // Initialize NSApplication using the custom subclass.
-  [BrowserCrApplication sharedApplication];
+  chrome_browser_application_mac::RegisterBrowserCrApp();
 
   // If ui_task is not NULL, the app is actually a browser_test, so startup is
   // handled outside of BrowserMain (which is what called this).
@@ -85,7 +86,7 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
     // TODO(markusheintz): Read preference pref::kApplicationLocale in order
     // to enforce the application locale.
     const std::string loaded_locale =
-        ResourceBundle::InitSharedInstance(std::string());
+        ResourceBundle::InitSharedInstanceWithLocale(std::string());
     CHECK(!loaded_locale.empty()) << "Default locale could not be found";
 
     FilePath resources_pack_path;
@@ -96,7 +97,7 @@ void ChromeBrowserMainPartsMac::PreMainMessageLoopStart() {
   // Now load the nib (from the right bundle).
   scoped_nsobject<NSNib>
       nib([[NSNib alloc] initWithNibNamed:@"MainMenu"
-                                   bundle:base::mac::MainAppBundle()]);
+                                   bundle:base::mac::FrameworkBundle()]);
   // TODO(viettrungluu): crbug.com/20504 - This currently leaks, so if you
   // change this, you'll probably need to change the Valgrind suppression.
   [nib instantiateNibWithOwner:NSApp topLevelObjects:nil];

@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -154,7 +154,8 @@
         ['OS=="win"', {
           'link_settings': {
             'libraries': [
-              '-lshdocvw.lib', '-loleacc.lib',
+              '-lshdocvw.lib',
+              '-loleacc.lib',
             ],
           },
           'msvs_settings': {
@@ -379,6 +380,7 @@
         '../chrome/chrome.gyp:renderer',
         '../chrome/chrome.gyp:syncapi_core',
         '../chrome/chrome_resources.gyp:chrome_resources',
+        '../content/content.gyp:content_app',
         '../content/content.gyp:content_gpu',
         '../content/content.gyp:test_support_content',
         '../net/net.gyp:net',
@@ -764,6 +766,9 @@
             # Crash Reporting
             'crash_reporting/crash_reporting.gyp:crash_report',
           ],
+          'link_settings': {
+            'libraries': ['-lurlmon.lib'],
+          },
         },],
       ],
       'rules': [
@@ -811,6 +816,7 @@
         'chrome_frame_plugin.h',
         'chrome_launcher_utils.cc',
         'chrome_launcher_utils.h',
+        'custom_sync_call_context.cc',
         'custom_sync_call_context.h',
         'external_tab.h',
         'external_tab.cc',

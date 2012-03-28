@@ -17,22 +17,25 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/collected_cookies_infobar_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
-#include "chrome/common/content_settings.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/content_settings.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
 #include "ui/base/l10n/l10n_util.h"
 
+using content::UserMetricsAction;
+using content::WebContents;
 using content_settings::SettingInfo;
 using content_settings::SettingSource;
 using content_settings::SETTING_SOURCE_USER;
+using content_settings::SETTING_SOURCE_NONE;
 
 namespace {
 struct ContentSettingsTypeIdEntry {
@@ -208,7 +211,7 @@ class ContentSettingSingleRadioGroup
   // Initialize the radio group by setting the appropriate labels for the
   // content type and setting the default value based on the content setting.
   void SetRadioGroup() {
-    GURL url = tab_contents()->tab_contents()->GetURL();
+    GURL url = tab_contents()->web_contents()->GetURL();
     string16 display_host_utf16;
     net::AppendFormattedHost(url,
         profile()->GetPrefs()->GetString(prefs::kAcceptLanguages),
@@ -260,7 +263,7 @@ class ContentSettingSingleRadioGroup
     HostContentSettingsMap* map = profile()->GetHostContentSettingsMap();
     CookieSettings* cookie_settings = CookieSettings::GetForProfile(profile());
     ContentSetting most_restrictive_setting;
-    SettingSource most_restrictive_setting_source;
+    SettingSource most_restrictive_setting_source = SETTING_SOURCE_NONE;
 
     if (resources.empty()) {
       if (content_type() == CONTENT_SETTINGS_TYPE_COOKIES) {
@@ -377,9 +380,9 @@ class ContentSettingPluginBubbleModel : public ContentSettingSingleRadioGroup {
 
  private:
   virtual void OnCustomLinkClicked() OVERRIDE {
-    UserMetrics::RecordAction(UserMetricsAction("ClickToPlay_LoadAll_Bubble"));
+    content::RecordAction(UserMetricsAction("ClickToPlay_LoadAll_Bubble"));
     DCHECK(tab_contents());
-    RenderViewHost* host = tab_contents()->render_view_host();
+    RenderViewHost* host = tab_contents()->web_contents()->GetRenderViewHost();
     host->Send(new ChromeViewMsg_LoadBlockedPlugins(host->routing_id()));
     set_custom_link_enabled(false);
     tab_contents()->content_settings()->set_load_plugins_link_enabled(false);
@@ -406,7 +409,7 @@ class ContentSettingPopupBubbleModel : public ContentSettingSingleRadioGroup {
         GetBlockedContents(&blocked_contents);
     for (std::vector<TabContentsWrapper*>::const_iterator
          i = blocked_contents.begin(); i != blocked_contents.end(); ++i) {
-      std::string title(UTF16ToUTF8((*i)->tab_contents()->GetTitle()));
+      std::string title(UTF16ToUTF8((*i)->web_contents()->GetTitle()));
       // The popup may not have committed a load yet, in which case it won't
       // have a URL or title.
       if (title.empty())
@@ -483,7 +486,7 @@ class ContentSettingDomainListBubbleModel
       return;
     // Reset this embedder's entry to default for each of the requesting
     // origins currently on the page.
-    const GURL& embedder_url = tab_contents()->tab_contents()->GetURL();
+    const GURL& embedder_url = tab_contents()->web_contents()->GetURL();
     TabSpecificContentSettings* content_settings =
         tab_contents()->content_settings();
     const GeolocationSettingsState::StateMap& state_map =
@@ -537,8 +540,8 @@ ContentSettingBubbleModel::ContentSettingBubbleModel(
     : tab_contents_(tab_contents),
       profile_(profile),
       content_type_(content_type) {
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                 content::Source<TabContents>(tab_contents->tab_contents()));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                 content::Source<WebContents>(tab_contents->web_contents()));
   registrar_.Add(this, chrome::NOTIFICATION_PROFILE_DESTROYED,
                  content::Source<Profile>(profile_));
 }
@@ -555,7 +558,8 @@ ContentSettingBubbleModel::DomainList::DomainList() {}
 ContentSettingBubbleModel::DomainList::~DomainList() {}
 
 ContentSettingBubbleModel::BubbleContent::BubbleContent()
-    : custom_link_enabled(false) {
+    : radio_group_enabled(false),
+      custom_link_enabled(false) {
 }
 
 ContentSettingBubbleModel::BubbleContent::~BubbleContent() {}
@@ -571,9 +575,9 @@ void ContentSettingBubbleModel::Observe(
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   switch (type) {
-    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
       DCHECK(source ==
-             content::Source<TabContents>(tab_contents_->tab_contents()));
+             content::Source<WebContents>(tab_contents_->web_contents()));
       tab_contents_ = NULL;
       break;
     case chrome::NOTIFICATION_PROFILE_DESTROYED:

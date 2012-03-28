@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,8 @@
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util_proxy.h"
+#include "webkit/fileapi/file_system_mount_point_provider.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_quota_util.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_util.h"
@@ -57,18 +57,6 @@ FileSystemOperation::ScopedQuotaUtilHelper::~ScopedQuotaUtilHelper() {
   }
 }
 
-FileSystemOperation::FileSystemOperation(
-    FileSystemCallbackDispatcher* dispatcher,
-    scoped_refptr<base::MessageLoopProxy> proxy,
-    FileSystemContext* file_system_context)
-    : proxy_(proxy),
-      dispatcher_(dispatcher),
-      operation_context_(file_system_context, NULL) {
-#ifndef NDEBUG
-  pending_operation_ = kOperationNone;
-#endif
-}
-
 FileSystemOperation::~FileSystemOperation() {
   if (file_writer_delegate_.get()) {
     FileSystemOperationContext* c =
@@ -81,29 +69,6 @@ FileSystemOperation::~FileSystemOperation() {
         file_writer_delegate_->file(),
         base::FileUtilProxy::StatusCallback());
   }
-}
-
-void FileSystemOperation::OpenFileSystem(
-    const GURL& origin_url, fileapi::FileSystemType type, bool create) {
-#ifndef NDEBUG
-  DCHECK(kOperationNone == pending_operation_);
-  pending_operation_ = static_cast<FileSystemOperation::OperationType>(
-      kOperationOpenFileSystem);
-#endif
-
-  DCHECK(file_system_context());
-  operation_context_.set_src_origin_url(origin_url);
-  operation_context_.set_src_type(type);
-  // TODO(ericu): We don't really need to make this call if !create.
-  // Also, in the future we won't need it either way, as long as we do all
-  // permission+quota checks beforehand.  We only need it now because we have to
-  // create an unpredictable directory name.  Without that, we could lazily
-  // create the root later on the first filesystem write operation, and just
-  // return GetFileSystemRootURI() here.
-  file_system_context()->path_manager()->ValidateFileSystemRootAndGetURL(
-      origin_url, type, create,
-      base::Bind(&FileSystemOperation::DidGetRootPath,
-                 base::Owned(this)));
 }
 
 void FileSystemOperation::CreateFile(const GURL& path,
@@ -346,7 +311,7 @@ void FileSystemOperation::Remove(const GURL& path, bool recursive) {
 }
 
 void FileSystemOperation::Write(
-    scoped_refptr<net::URLRequestContext> url_request_context,
+    const net::URLRequestContext* url_request_context,
     const GURL& path,
     const GURL& blob_url,
     int64 offset) {
@@ -509,6 +474,44 @@ void FileSystemOperation::DelayedOpenFileForQuota(int file_flags,
       base::Bind(&FileSystemOperation::DidOpenFile, base::Owned(this)));
 }
 
+// We can only get here on a write or truncate that's not yet completed.
+// We don't support cancelling any other operation at this time.
+void FileSystemOperation::Cancel(
+    scoped_ptr<FileSystemCallbackDispatcher> cancel_dispatcher) {
+  if (file_writer_delegate_.get()) {
+#ifndef NDEBUG
+    DCHECK(kOperationWrite == pending_operation_);
+#endif
+    // Writes are done without proxying through FileUtilProxy after the initial
+    // opening of the PlatformFile.  All state changes are done on this thread,
+    // so we're guaranteed to be able to shut down atomically.  We do need to
+    // check that the file has been opened [which means the blob_request_ has
+    // been created], so we know how much we need to do.
+    if (blob_request_.get())
+      // This halts any calls to file_writer_delegate_ from blob_request_.
+      blob_request_->Cancel();
+
+    if (dispatcher_.get())
+      dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_ABORT);
+    cancel_dispatcher->DidSucceed();
+    dispatcher_.reset();
+  } else {
+#ifndef NDEBUG
+    DCHECK(kOperationTruncate == pending_operation_);
+#endif
+    // We're cancelling a truncate operation, but we can't actually stop it
+    // since it's been proxied to another thread.  We need to save the
+    // cancel_dispatcher so that when the truncate returns, it can see that it's
+    // been cancelled, report it, and report that the cancel has succeeded.
+    DCHECK(!cancel_dispatcher_.get());
+    cancel_dispatcher_ = cancel_dispatcher.Pass();
+  }
+}
+
+FileSystemOperation* FileSystemOperation::AsFileSystemOperation() {
+  return this;
+}
+
 void FileSystemOperation::SyncGetPlatformPath(const GURL& path,
                                               FilePath* platform_path) {
 #ifndef NDEBUG
@@ -526,38 +529,17 @@ void FileSystemOperation::SyncGetPlatformPath(const GURL& path,
   delete this;
 }
 
-// We can only get here on a write or truncate that's not yet completed.
-// We don't support cancelling any other operation at this time.
-void FileSystemOperation::Cancel(FileSystemOperation* cancel_operation_ptr) {
-  scoped_ptr<FileSystemOperation> cancel_operation(cancel_operation_ptr);
-  if (file_writer_delegate_.get()) {
+FileSystemOperation::FileSystemOperation(
+    scoped_ptr<FileSystemCallbackDispatcher> dispatcher,
+    scoped_refptr<base::MessageLoopProxy> proxy,
+    FileSystemContext* file_system_context)
+    : proxy_(proxy),
+      dispatcher_(dispatcher.Pass()),
+      operation_context_(file_system_context, NULL),
+      peer_handle_(base::kNullProcessHandle) {
 #ifndef NDEBUG
-    DCHECK(kOperationWrite == pending_operation_);
+  pending_operation_ = kOperationNone;
 #endif
-    // Writes are done without proxying through FileUtilProxy after the initial
-    // opening of the PlatformFile.  All state changes are done on this thread,
-    // so we're guaranteed to be able to shut down atomically.  We do need to
-    // check that the file has been opened [which means the blob_request_ has
-    // been created], so we know how much we need to do.
-    if (blob_request_.get())
-      // This halts any calls to file_writer_delegate_ from blob_request_.
-      blob_request_->Cancel();
-
-    if (dispatcher_.get())
-      dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_ABORT);
-    cancel_operation->dispatcher_->DidSucceed();
-    dispatcher_.reset();
-  } else {
-#ifndef NDEBUG
-    DCHECK(kOperationTruncate == pending_operation_);
-#endif
-    // We're cancelling a truncate operation, but we can't actually stop it
-    // since it's been proxied to another thread.  We need to save the
-    // cancel_operation so that when the truncate returns, it can see that it's
-    // been cancelled, report it, and report that the cancel has succeeded.
-    DCHECK(!cancel_operation_.get());
-    cancel_operation_.swap(cancel_operation);
-  }
 }
 
 void FileSystemOperation::GetUsageAndQuotaThenCallback(
@@ -582,25 +564,6 @@ void FileSystemOperation::GetUsageAndQuotaThenCallback(
       callback);
 }
 
-void FileSystemOperation::DidGetRootPath(
-    bool success,
-    const FilePath& path, const std::string& name) {
-  if (!dispatcher_.get())
-    return;
-  DCHECK(success || path.empty());
-  GURL result;
-  if (!dispatcher_.get())
-    return;
-  // We ignore the path, and return a URL instead.  The point was just to verify
-  // that we could create/find the path.
-  if (success) {
-    result = GetFileSystemRootURI(
-        operation_context_.src_origin_url(),
-        operation_context_.src_type());
-  }
-  dispatcher_->DidOpenFileSystem(name, result);
-}
-
 void FileSystemOperation::DidEnsureFileExistsExclusive(
     base::PlatformFileError rv, bool created) {
   if (rv == base::PLATFORM_FILE_OK && !created) {
@@ -618,14 +581,14 @@ void FileSystemOperation::DidEnsureFileExistsNonExclusive(
 
 void FileSystemOperation::DidFinishFileOperation(
     base::PlatformFileError rv) {
-  if (cancel_operation_.get()) {
+  if (cancel_dispatcher_.get()) {
 #ifndef NDEBUG
     DCHECK(kOperationTruncate == pending_operation_);
 #endif
 
     if (dispatcher_.get())
       dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_ABORT);
-    cancel_operation_->dispatcher_->DidSucceed();
+    cancel_dispatcher_->DidSucceed();
   } else if (dispatcher_.get()) {
     if (rv == base::PLATFORM_FILE_OK)
       dispatcher_->DidSucceed();
@@ -721,10 +684,12 @@ void FileSystemOperation::DidOpenFile(
     bool unused) {
   if (!dispatcher_.get())
     return;
-  if (rv == base::PLATFORM_FILE_OK)
+  if (rv == base::PLATFORM_FILE_OK) {
+    CHECK_NE(base::kNullProcessHandle, peer_handle_);
     dispatcher_->DidOpenFile(file.ReleaseValue(), peer_handle_);
-  else
+  } else {
     dispatcher_->DidFail(rv);
+  }
 }
 
 void FileSystemOperation::OnFileOpenedForWrite(
@@ -773,8 +738,9 @@ bool FileSystemOperation::VerifyFileSystemPathForWrite(
     dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
     return false;
   }
-  if (create && file_system_context()->path_manager()->IsRestrictedFileName(
-          *type, virtual_path->BaseName())) {
+  if (create &&
+      file_system_context()->GetMountPointProvider(*type)->IsRestrictedFileName(
+          virtual_path->BaseName())) {
     dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
     return false;
   }
@@ -791,13 +757,13 @@ bool FileSystemOperation::VerifyFileSystemPath(
     dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_INVALID_URL);
     return false;
   }
-  if (!file_system_context()->path_manager()->IsAccessAllowed(
+  if (!file_system_context()->GetMountPointProvider(*type)->IsAccessAllowed(
       *origin_url, *type, *virtual_path)) {
     dispatcher_->DidFail(base::PLATFORM_FILE_ERROR_SECURITY);
     return false;
   }
   DCHECK(file_util);
-  *file_util = file_system_context()->path_manager()->GetFileUtil(*type);
+  *file_util = file_system_context()->GetFileUtil(*type);
   DCHECK(*file_util);
 
   return true;

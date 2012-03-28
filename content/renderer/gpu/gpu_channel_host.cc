@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "content/common/child_process.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "content/renderer/gpu/command_buffer_proxy.h"
-#include "content/renderer/gpu/transport_texture_service.h"
 #include "content/renderer/render_process.h"
 #include "content/renderer/render_thread_impl.h"
 #include "googleurl/src/gurl.h"
@@ -19,26 +18,10 @@
 using base::AutoLock;
 using base::MessageLoopProxy;
 
-GpuChannelHost::Listener::Listener(
-    base::WeakPtr<IPC::Channel::Listener> listener,
-    scoped_refptr<base::MessageLoopProxy> loop)
-    : listener_(listener),
-      loop_(loop) {
-
+GpuListenerInfo::GpuListenerInfo() {
 }
 
-GpuChannelHost::Listener::~Listener() {
-
-}
-
-void GpuChannelHost::Listener::DispatchMessage(const IPC::Message& msg) {
-  if (listener_.get())
-    listener_->OnMessageReceived(msg);
-}
-
-void GpuChannelHost::Listener::DispatchError() {
-  if (listener_.get())
-    listener_->OnChannelError();
+GpuListenerInfo::~GpuListenerInfo() {
 }
 
 GpuChannelHost::MessageFilter::MessageFilter(GpuChannelHost* parent)
@@ -55,7 +38,10 @@ void GpuChannelHost::MessageFilter::AddRoute(
     scoped_refptr<MessageLoopProxy> loop) {
   DCHECK(MessageLoop::current() == ChildProcess::current()->io_message_loop());
   DCHECK(listeners_.find(route_id) == listeners_.end());
-  listeners_[route_id] = new GpuChannelHost::Listener(listener, loop);
+  GpuListenerInfo info;
+  info.listener = listener;
+  info.loop = loop;
+  listeners_[route_id] = info;
 }
 
 void GpuChannelHost::MessageFilter::RemoveRoute(int route_id) {
@@ -77,11 +63,13 @@ bool GpuChannelHost::MessageFilter::OnMessageReceived(
   ListenerMap::iterator it = listeners_.find(message.routing_id());
 
   if (it != listeners_.end()) {
-    const scoped_refptr<GpuChannelHost::Listener>& listener = it->second;
-    listener->loop()->PostTask(
+    const GpuListenerInfo& info = it->second;
+    info.loop->PostTask(
         FROM_HERE,
-        base::Bind(&GpuChannelHost::Listener::DispatchMessage, listener.get(),
-                   message));
+        base::Bind(
+            base::IgnoreResult(&IPC::Channel::Listener::OnMessageReceived),
+            info.listener,
+            message));
   }
 
   return true;
@@ -94,10 +82,10 @@ void GpuChannelHost::MessageFilter::OnChannelError() {
   for (ListenerMap::iterator it = listeners_.begin();
        it != listeners_.end();
        it++) {
-    const scoped_refptr<GpuChannelHost::Listener>& listener = it->second;
-    listener->loop()->PostTask(
+    const GpuListenerInfo& info = it->second;
+    info.loop->PostTask(
         FROM_HERE,
-        base::Bind(&GpuChannelHost::Listener::DispatchError, listener.get()));
+        base::Bind(&IPC::Channel::Listener::OnChannelError, info.listener));
   }
 
   listeners_.clear();
@@ -109,8 +97,7 @@ void GpuChannelHost::MessageFilter::OnChannelError() {
 }
 
 GpuChannelHost::GpuChannelHost()
-    : state_(kUnconnected),
-      transport_texture_service_(new TransportTextureService()) {
+    : state_(kUnconnected) {
 }
 
 GpuChannelHost::~GpuChannelHost() {
@@ -131,8 +118,6 @@ void GpuChannelHost::Connect(
       ChildProcess::current()->GetShutDownEvent());
 
   channel_->AddFilter(sync_filter_.get());
-
-  channel_->AddFilter(transport_texture_service_.get());
 
   channel_filter_ = new MessageFilter(this);
 
@@ -197,7 +182,7 @@ bool GpuChannelHost::Send(IPC::Message* message) {
 }
 
 CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
-    int render_view_id,
+    int32 surface_id,
     CommandBufferProxy* share_group,
     const std::string& allowed_extensions,
     const std::vector<int32>& attribs,
@@ -220,7 +205,7 @@ CommandBufferProxy* GpuChannelHost::CreateViewCommandBuffer(
   int32 route_id;
   if (!ChildThread::current()->Send(
       new GpuHostMsg_CreateViewCommandBuffer(
-          render_view_id,
+          surface_id,
           init_params,
           &route_id))) {
     return NULL;

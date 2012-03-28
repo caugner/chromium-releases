@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include "base/i18n/rtl.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/page_info_model.h"
 #include "chrome/browser/page_info_model_observer.h"
 #include "chrome/browser/ui/browser_list.h"
@@ -21,13 +20,16 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/gtk/location_bar_view_gtk.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/ssl_status.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
-class Profile;
+using content::OpenURLParams;
+
+using content::SSLStatus;
 
 namespace {
 
@@ -37,7 +39,7 @@ class PageInfoBubbleGtk : public PageInfoModelObserver,
   PageInfoBubbleGtk(gfx::NativeWindow parent,
                     Profile* profile,
                     const GURL& url,
-                    const NavigationEntry::SSLStatus& ssl,
+                    const SSLStatus& ssl,
                     bool show_history);
   virtual ~PageInfoBubbleGtk();
 
@@ -89,12 +91,12 @@ class PageInfoBubbleGtk : public PageInfoModelObserver,
 PageInfoBubbleGtk::PageInfoBubbleGtk(gfx::NativeWindow parent,
                                      Profile* profile,
                                      const GURL& url,
-                                     const NavigationEntry::SSLStatus& ssl,
+                                     const SSLStatus& ssl,
                                      bool show_history)
     : ALLOW_THIS_IN_INITIALIZER_LIST(model_(profile, url, ssl,
                                             show_history, this)),
       url_(url),
-      cert_id_(ssl.cert_id()),
+      cert_id_(ssl.cert_id),
       parent_(parent),
       contents_(NULL),
       theme_service_(GtkThemeService::GetFrom(profile)),
@@ -225,12 +227,10 @@ void PageInfoBubbleGtk::OnViewCertLinkClicked(GtkWidget* widget) {
 }
 
 void PageInfoBubbleGtk::OnHelpLinkClicked(GtkWidget* widget) {
-  GURL url = google_util::AppendGoogleLocaleParam(
-      GURL(chrome::kPageInfoHelpCenterURL));
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
   browser->OpenURL(OpenURLParams(
-      url, content::Referrer(), NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK, false));
+      GURL(chrome::kPageInfoHelpCenterURL), content::Referrer(),
+      NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK, false));
   bubble_->Close();
 }
 
@@ -241,7 +241,7 @@ namespace browser {
 void ShowPageInfoBubble(gfx::NativeWindow parent,
                         Profile* profile,
                         const GURL& url,
-                        const NavigationEntry::SSLStatus& ssl,
+                        const SSLStatus& ssl,
                         bool show_history) {
   new PageInfoBubbleGtk(parent, profile, url, ssl, show_history);
 }

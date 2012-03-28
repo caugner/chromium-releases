@@ -9,13 +9,14 @@
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
 #include "content/browser/ssl/ssl_cert_error_handler.h"
-#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/tab_contents/navigation_controller_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
 
 using content::BrowserThread;
+using content::WebContents;
 
 SSLErrorHandler::SSLErrorHandler(ResourceDispatcherHost* rdh,
                                  net::URLRequest* request,
@@ -63,13 +64,13 @@ SSLCertErrorHandler* SSLErrorHandler::AsSSLCertErrorHandler() {
 void SSLErrorHandler::Dispatch() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  TabContents* tab_contents = NULL;
+  WebContents* web_contents = NULL;
   RenderViewHost* render_view_host =
       RenderViewHost::FromID(render_process_host_id_, tab_contents_id_);
   if (render_view_host)
-    tab_contents = render_view_host->delegate()->GetAsTabContents();
+    web_contents = render_view_host->delegate()->GetAsWebContents();
 
-  if (!tab_contents) {
+  if (!web_contents) {
     // We arrived on the UI thread, but the tab we're looking for is no longer
     // here.
     OnDispatchFailed();
@@ -77,7 +78,7 @@ void SSLErrorHandler::Dispatch() {
   }
 
   // Hand ourselves off to the SSLManager.
-  manager_ = tab_contents->controller().ssl_manager();
+  manager_ = web_contents->GetController().GetSSLManager();
   OnDispatched();
 }
 

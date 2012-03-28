@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/message_loop.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -27,11 +28,14 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::SiteInstance;
+using content::WebContents;
 
 namespace {
 
@@ -237,7 +241,7 @@ void BackgroundContentsService::Observe(
       if (extension_service) {
         const Extension* extension =
             extension_service->GetExtensionById(UTF16ToUTF8(appid), false);
-        if (extension && extension->background_url().is_valid())
+        if (extension && extension->has_background_page())
           break;
       }
       RegisterBackgroundContents(bgcontents);
@@ -248,7 +252,7 @@ void BackgroundContentsService::Observe(
           content::Details<const Extension>(details).ptr();
       Profile* profile = content::Source<Profile>(source).ptr();
       if (extension->is_hosted_app() &&
-          extension->background_url().is_valid()) {
+          extension->has_background_page()) {
         // If there is a background page specified in the manifest for a hosted
         // app, then blow away registered urls in the pref.
         ShutdownAssociatedBackgroundContents(ASCIIToUTF16(extension->id()));
@@ -258,7 +262,7 @@ void BackgroundContentsService::Observe(
           // Now load the manifest-specified background page. If service isn't
           // ready, then the background page will be loaded from the
           // EXTENSIONS_READY callback.
-          LoadBackgroundContents(profile, extension->background_url(),
+          LoadBackgroundContents(profile, extension->GetBackgroundURL(),
               ASCIIToUTF16("background"), UTF8ToUTF16(extension->id()));
         }
       }
@@ -312,7 +316,7 @@ void BackgroundContentsService::Observe(
           // BackgroundContents in place.
           const Extension* extension =
               content::Details<UnloadedExtensionInfo>(details)->extension;
-          if (extension->background_url().is_valid())
+          if (extension->has_background_page())
             ShutdownAssociatedBackgroundContents(ASCIIToUTF16(extension->id()));
           break;
         }
@@ -376,9 +380,9 @@ void BackgroundContentsService::LoadBackgroundContentsForExtension(
   const Extension* extension =
       profile->GetExtensionService()->GetExtensionById(extension_id, false);
   DCHECK(!extension || extension->is_hosted_app());
-  if (extension && extension->background_url().is_valid()) {
+  if (extension && extension->has_background_page()) {
     LoadBackgroundContents(profile,
-                           extension->background_url(),
+                           extension->GetBackgroundURL(),
                            ASCIIToUTF16("background"),
                            UTF8ToUTF16(extension->id()));
     return;
@@ -418,15 +422,14 @@ void BackgroundContentsService::LoadBackgroundContentsFromDictionary(
 
 void BackgroundContentsService::LoadBackgroundContentsFromManifests(
     Profile* profile) {
-  const ExtensionList* extensions =
+  const ExtensionSet* extensions =
       profile->GetExtensionService()->extensions();
-  ExtensionList::const_iterator iter = extensions->begin();
+  ExtensionSet::const_iterator iter = extensions->begin();
   for (; iter != extensions->end(); ++iter) {
     const Extension* extension = *iter;
-    if (extension->is_hosted_app() &&
-        extension->background_url().is_valid()) {
+    if (extension->is_hosted_app() && extension->has_background_page()) {
       LoadBackgroundContents(profile,
-                             extension->background_url(),
+                             extension->GetBackgroundURL(),
                              ASCIIToUTF16("background"),
                              UTF8ToUTF16(extension->id()));
     }
@@ -447,7 +450,7 @@ void BackgroundContentsService::LoadBackgroundContents(
   DVLOG(1) << "Loading background content url: " << url;
 
   BackgroundContents* contents = CreateBackgroundContents(
-      SiteInstance::CreateSiteInstanceForURL(profile, url),
+      SiteInstance::CreateForURL(profile, url),
       MSG_ROUTING_NONE,
       profile,
       frame_name,
@@ -455,7 +458,7 @@ void BackgroundContentsService::LoadBackgroundContents(
 
   // TODO(atwilson): Create RenderViews asynchronously to avoid increasing
   // startup latency (http://crbug.com/47236).
-  contents->tab_contents()->controller().LoadURL(
+  contents->web_contents()->GetController().LoadURL(
       url, content::Referrer(), content::PAGE_TRANSITION_LINK, std::string());
 }
 
@@ -502,7 +505,6 @@ void BackgroundContentsService::RegisterBackgroundContents(
   dict->SetString(kUrlKey, background_contents->GetURL().spec());
   dict->SetString(kFrameNameKey, contents_map_[appid].frame_name);
   pref->SetWithoutPathExpansion(UTF16ToUTF8(appid), dict);
-  prefs_->ScheduleSavePersistentPrefs();
 }
 
 void BackgroundContentsService::UnregisterBackgroundContents(
@@ -513,7 +515,6 @@ void BackgroundContentsService::UnregisterBackgroundContents(
   const string16 appid = GetParentApplicationId(background_contents);
   DictionaryPrefUpdate update(prefs_, prefs::kRegisteredBackgroundContents);
   update.Get()->RemoveWithoutPathExpansion(UTF16ToUTF8(appid), NULL);
-  prefs_->ScheduleSavePersistentPrefs();
 }
 
 void BackgroundContentsService::ShutdownAssociatedBackgroundContents(
@@ -568,14 +569,14 @@ const string16& BackgroundContentsService::GetParentApplicationId(
   return EmptyString16();
 }
 
-void BackgroundContentsService::AddTabContents(
-    TabContents* new_contents,
+void BackgroundContentsService::AddWebContents(
+    WebContents* new_contents,
     WindowOpenDisposition disposition,
     const gfx::Rect& initial_pos,
     bool user_gesture) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(
-      Profile::FromBrowserContext(new_contents->browser_context()));
+      Profile::FromBrowserContext(new_contents->GetBrowserContext()));
   if (!browser)
     return;
-  browser->AddTabContents(new_contents, disposition, initial_pos, user_gesture);
+  browser->AddWebContents(new_contents, disposition, initial_pos, user_gesture);
 }

@@ -27,12 +27,12 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/thumbnail_score.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -42,6 +42,7 @@
 #include "ui/gfx/image/image_util.h"
 
 using content::BrowserThread;
+using content::NavigationController;
 
 namespace history {
 
@@ -848,13 +849,13 @@ void TopSites::Observe(int type,
     NavigationController* controller =
         content::Source<NavigationController>(source).ptr();
     Profile* profile = Profile::FromBrowserContext(
-        controller->tab_contents()->browser_context());
+        controller->GetWebContents()->GetBrowserContext());
     if (profile == profile_ && !IsFull()) {
       content::LoadCommittedDetails* load_details =
           content::Details<content::LoadCommittedDetails>(details).ptr();
       if (!load_details)
         return;
-      const GURL& url = load_details->entry->url();
+      const GURL& url = load_details->entry->GetURL();
       if (!cache_->IsKnownURL(url) && HistoryService::CanAddURL(url)) {
         // To avoid slamming history we throttle requests when the url updates.
         // To do otherwise negatively impacts perf tests.

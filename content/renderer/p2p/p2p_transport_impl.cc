@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,9 +24,7 @@ P2PTransportImpl::P2PTransportImpl(
       event_handler_(NULL),
       state_(STATE_NONE),
       network_manager_(network_manager),
-      socket_factory_(socket_factory),
-      ALLOW_THIS_IN_INITIALIZER_LIST(connect_callback_(
-          this, &P2PTransportImpl::OnTcpConnected)) {
+      socket_factory_(socket_factory) {
 }
 
 P2PTransportImpl::P2PTransportImpl(P2PSocketDispatcher* socket_dispatcher)
@@ -34,13 +32,19 @@ P2PTransportImpl::P2PTransportImpl(P2PSocketDispatcher* socket_dispatcher)
       event_handler_(NULL),
       state_(STATE_NONE),
       network_manager_(new IpcNetworkManager(socket_dispatcher)),
-      socket_factory_(new IpcPacketSocketFactory(socket_dispatcher)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(connect_callback_(
-          this, &P2PTransportImpl::OnTcpConnected)) {
+      socket_factory_(new IpcPacketSocketFactory(socket_dispatcher)) {
   DCHECK(socket_dispatcher);
 }
 
 P2PTransportImpl::~P2PTransportImpl() {
+  MessageLoop* message_loop = MessageLoop::current();
+
+  // Because libjingle's sigslot doesn't handle deletion from a signal
+  // handler we have to postpone deletion of libjingle objects.
+  message_loop->DeleteSoon(FROM_HERE, channel_.release());
+  message_loop->DeleteSoon(FROM_HERE, allocator_.release());
+  message_loop->DeleteSoon(FROM_HERE, socket_factory_.release());
+  message_loop->DeleteSoon(FROM_HERE, network_manager_.release());
 }
 
 bool P2PTransportImpl::Init(WebKit::WebFrame* web_frame,
@@ -78,7 +82,7 @@ bool P2PTransportImpl::Init(WebKit::WebFrame* web_frame,
       this, &P2PTransportImpl::OnCandidateReady);
 
   if (protocol == PROTOCOL_UDP) {
-    channel_->SignalWritableState.connect(
+    channel_->SignalReadableState.connect(
         this, &P2PTransportImpl::OnReadableState);
     channel_->SignalWritableState.connect(
         this, &P2PTransportImpl::OnWriteableState);
@@ -101,7 +105,8 @@ bool P2PTransportImpl::Init(WebKit::WebFrame* web_frame,
     if (config.tcp_ack_delay_ms > 0)
       pseudo_tcp_adapter_->SetAckDelay(config.tcp_ack_delay_ms);
 
-    int result = pseudo_tcp_adapter_->Connect(&connect_callback_);
+    int result = pseudo_tcp_adapter_->Connect(
+        base::Bind(&P2PTransportImpl::OnTcpConnected, base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
       OnTcpConnected(result);
   }

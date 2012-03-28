@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,11 +27,14 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 
 using base::Time;
+using content::NavigationController;
+using content::NavigationEntry;
+using content::WebContents;
 
 // TimeFactory-----------------------------------------------------------------
 
@@ -198,9 +201,6 @@ TabRestoreService::TabRestoreService(Profile* profile,
 }
 
 TabRestoreService::~TabRestoreService() {
-  if (backend())
-    Save();
-
   FOR_EACH_OBSERVER(TabRestoreServiceObserver, observer_list_,
                     TabRestoreServiceDestroyed(this));
   STLDeleteElements(&entries_);
@@ -250,7 +250,7 @@ void TabRestoreService::BrowserClosing(TabRestoreServiceDelegate* delegate) {
     PopulateTab(&(window->tabs[entry_index]),
                 tab_index,
                 delegate,
-                &delegate->GetTabContentsAt(tab_index)->controller());
+                &delegate->GetWebContentsAt(tab_index)->GetController());
     if (window->tabs[entry_index].navigations.empty()) {
       window->tabs.erase(window->tabs.begin() + entry_index);
     } else {
@@ -352,7 +352,7 @@ void TabRestoreService::RestoreEntryById(TabRestoreServiceDelegate* delegate,
       delegate = TabRestoreServiceDelegate::Create(profile());
       for (size_t tab_i = 0; tab_i < window->tabs.size(); ++tab_i) {
         const Tab& tab = window->tabs[tab_i];
-        TabContents* restored_tab =
+        WebContents* restored_tab =
             delegate->AddRestoredTab(tab.navigations, delegate->GetTabCount(),
                                      tab.current_navigation_index,
                                      tab.extension_app_id,
@@ -361,7 +361,7 @@ void TabRestoreService::RestoreEntryById(TabRestoreServiceDelegate* delegate,
                                      tab.pinned, tab.from_last_session,
                                      tab.session_storage_namespace);
         if (restored_tab) {
-          restored_tab->controller().LoadIfNecessary();
+          restored_tab->GetController().LoadIfNecessary();
           RecordAppLaunch(profile(), tab);
         }
       }
@@ -402,7 +402,7 @@ void TabRestoreService::RestoreEntryById(TabRestoreServiceDelegate* delegate,
     delegate->ShowBrowserWindow();
 
     if (disposition == CURRENT_TAB && current_delegate &&
-        current_delegate->GetSelectedTabContents()) {
+        current_delegate->GetSelectedWebContents()) {
       current_delegate->CloseTab();
     }
   } else {
@@ -448,6 +448,11 @@ void TabRestoreService::LoadTabsFromLastSession() {
       &load_consumer_);
 }
 
+void TabRestoreService::Shutdown() {
+  if (backend())
+    Save();
+}
+
 void TabRestoreService::Save() {
   int to_write_count = std::min(entries_to_write_,
                                 static_cast<int>(entries_.size()));
@@ -485,14 +490,14 @@ void TabRestoreService::PopulateTab(Tab* tab,
                                     int index,
                                     TabRestoreServiceDelegate* delegate,
                                     NavigationController* controller) {
-  const int pending_index = controller->pending_entry_index();
-  int entry_count = controller->entry_count();
+  const int pending_index = controller->GetPendingEntryIndex();
+  int entry_count = controller->GetEntryCount();
   if (entry_count == 0 && pending_index == 0)
     entry_count++;
   tab->navigations.resize(static_cast<int>(entry_count));
   for (int i = 0; i < entry_count; ++i) {
     NavigationEntry* entry = (i == pending_index) ?
-        controller->pending_entry() : controller->GetEntryAtIndex(i);
+        controller->GetPendingEntry() : controller->GetEntryAtIndex(i);
     tab->navigations[i].SetFromNavigationEntry(*entry);
   }
   tab->timestamp = TimeNow();
@@ -503,7 +508,7 @@ void TabRestoreService::PopulateTab(Tab* tab,
 
   TabContentsWrapper* wrapper =
       TabContentsWrapper::GetCurrentWrapperForContents(
-          controller->tab_contents());
+          controller->GetWebContents());
   // wrapper is NULL in some browser tests.
   if (wrapper) {
     const Extension* extension =
@@ -512,7 +517,7 @@ void TabRestoreService::PopulateTab(Tab* tab,
       tab->extension_app_id = extension->id();
   }
 
-  tab->session_storage_namespace = controller->session_storage_namespace();
+  tab->session_storage_namespace = controller->GetSessionStorageNamespace();
 
   // Delegate may be NULL during unit tests.
   if (delegate) {

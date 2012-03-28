@@ -1,9 +1,9 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From ppb_graphics_2d.idl modified Wed Aug 24 20:51:38 2011. */
+/* From ppb_graphics_2d.idl modified Thu Jan 12 16:11:14 2012. */
 
 #ifndef PPAPI_C_PPB_GRAPHICS_2D_H_
 #define PPAPI_C_PPB_GRAPHICS_2D_H_
@@ -35,7 +35,7 @@
 /**
  * <code>PPB_Graphics2D</code> defines the interface for a 2D graphics context.
  */
-struct PPB_Graphics2D {
+struct PPB_Graphics2D_1_0 {
   /**
    * Create() creates a 2D graphics context. The returned graphics context will
    * not be bound to the module instance on creation (call BindGraphics() on
@@ -238,10 +238,10 @@ struct PPB_Graphics2D {
    * the image has been painted on the screen.
    *
    * @return Returns <code>PP_OK</code> on success or
-   * <code>PP_Error_BadResource</code> if the graphics context is invalid,
-   * <code>PP_Error_BadArgument</code> if the callback is null and flush is
+   * <code>PP_ERROR_BADRESOURCE</code> if the graphics context is invalid,
+   * <code>PP_ERROR_BADARGUMENT</code> if the callback is null and flush is
    * being called from the main thread of the module, or
-   * <code>PP_Error_InProgress</code> if a flush is already pending that has
+   * <code>PP_ERROR_INPROGRESS</code> if a flush is already pending that has
    * not issued its callback yet.  In the failure case, nothing will be updated
    * and no callback will be scheduled.
    */
@@ -256,6 +256,8 @@ struct PPB_Graphics2D {
   int32_t (*Flush)(PP_Resource graphics_2d,
                    struct PP_CompletionCallback callback);
 };
+
+typedef struct PPB_Graphics2D_1_0 PPB_Graphics2D;
 /**
  * @}
  */

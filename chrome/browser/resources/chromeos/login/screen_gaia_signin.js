@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,8 @@
  */
 
 cr.define('login', function() {
+  // Maximum Gaia loading time in seconds.
+  const MAX_GAIA_LOADING_TIME_SEC = 60;
 
   /**
    * Creates a new sign in screen div.
@@ -38,23 +40,32 @@ cr.define('login', function() {
     // Whether extension should be loaded silently.
     silentLoad_: false,
 
-    // Whether there is focused element.
-    hasFocused_: false,
-
     // Number of times that we reload extension frame.
     retryCount_: 0,
 
     // Timer id of pending retry.
     retryTimer_: undefined,
 
+    // Whether local version of Gaia page is used.
+    // @type {boolean}
+    isLocal: false,
+
+    // Whether offline login is allowed.
+    // @type {boolean}
+    isOfflineAllowed: false,
+
+    // Email of the user, which is logging in using offline mode.
+    // @type {string}
+    email: "",
+
+    // Timer id of pending load.
+    loadingTimer_: undefined,
+
     /** @inheritDoc */
     decorate: function() {
       this.frame_ = $('signin-frame');
 
       this.updateLocalizedContent();
-
-      document.addEventListener(
-          'focusin', this.selfBind_(this.onFocusIn_.bind(this)));
     },
 
     /**
@@ -77,6 +88,38 @@ cr.define('login', function() {
       // Sign-in right panel is hidden if all its items are hidden.
       $('signin-right').hidden = show ||
           ($('createAccount').hidden && $('guestSignin').hidden);
+    },
+
+    /**
+     * Handler for Gaia loading timeout.
+     * @private
+     */
+    onLoadingTimeOut_: function() {
+      this.loadingTimer_ = undefined;
+      this.clearRetry_();
+      $('error-message').showLoadingTimeoutError();
+    },
+
+    /**
+     * Clears loading timer.
+     * @private
+     */
+    clearLoadingTimer_: function() {
+      if (this.loadingTimer_) {
+        window.clearTimeout(this.loadingTimer_);
+        this.loadingTimer_ = undefined;
+      }
+    },
+
+    /**
+     * Sets up loading timer.
+     * @private
+     */
+    startLoadingTimer_: function() {
+      this.clearLoadingTimer_();
+      this.loadingTimer_ = window.setTimeout(
+          this.onLoadingTimeOut_.bind(this),
+          MAX_GAIA_LOADING_TIME_SEC * 1000);
     },
 
     /**
@@ -109,49 +152,33 @@ cr.define('login', function() {
     },
 
     /**
-     * Returns function which gets an event and passes it and self to listener.
-     * @param {!Object} listener Listener to be wrapped.
+     * Loads the authentication extension into the iframe.
+     * @param {Object} data Extension parameters bag.
+     * @private
      */
-    selfBind_: function(listener) {
-      var selfBound = function(e) {
-        listener(e, selfBound);
-      };
-      return selfBound;
-    },
-
-    /**
-     * Tracks first focus in event.
-     * @param {!Object} e Focus in event.
-     * @param {!Object} listener Listener which shold be removed from event
-     *   listeners list.
-     */
-    onFocusIn_: function(e, listener) {
-      this.hasFocused_ = true;
-      document.removeEventListener('focusin', listener);
-    },
-
-    /**
-     * Restore focus back to the focused element.
-     * @param {!Object} e Focus out event.
-     * @param {!Object} listener Listener which shold be removed from event
-     *   listeners list.
-     */
-    onFocusOut_: function(e, listener) {
-      window.setTimeout(e.target.focus.bind(e.target), 0);
-      document.removeEventListener('focusout', listener);
-    },
-
     loadAuthExtension_: function(data) {
       this.silentLoad_ = data.silentLoad;
+      this.isLocal = data.isLocal;
+      this.email = "";
 
-      $('createAccount').hidden = !data.createAccount;
-      $('guestSignin').hidden = !data.guestSignin;
+      // Offline sign-in is only allowed for the case when users aren't shown
+      // because there is no other way for an user to enter when device is
+      // offline.
+      this.isOfflineAllowed = !data.isShowUsers;
+
+      this.updateAuthExtension_(data);
 
       var params = [];
       if (data.gaiaOrigin)
         params.push('gaiaOrigin=' + encodeURIComponent(data.gaiaOrigin));
       if (data.hl)
         params.push('hl=' + encodeURIComponent(data.hl));
+      if (data.localizedStrings) {
+        var strings = data.localizedStrings;
+        for (var name in strings) {
+          params.push(name + '=' + encodeURIComponent(strings[name]));
+        }
+      }
       if (data.email)
         params.push('email=' + encodeURIComponent(data.email));
       if (data.test_email)
@@ -173,6 +200,7 @@ cr.define('login', function() {
 
         this.loading = true;
         this.clearRetry_();
+        this.startLoadingTimer_();
       } else if (this.loading) {
         if (this.error_) {
           // An error has occurred, so trying to reload.
@@ -181,18 +209,32 @@ cr.define('login', function() {
           console.log('Gaia is still loading.');
           // Nothing to do here. Just wait until the extension loads.
         }
-      } else {
-        // TODO(altimofeev): GAIA extension is reloaded to make focus be set
-        // correctly. When fix on the GAIA side is ready, this reloading should
-        // be deleted.
-        this.doReload();
       }
+    },
+
+    /**
+     * Updates the authentication extension with new parameters, if needed.
+     * @param {Object} data New extension parameters bag.
+     * @private
+     */
+    updateAuthExtension_: function(data) {
+      var reasonLabel = $('gaia-signin-reason');
+      if (data.passwordChanged) {
+        reasonLabel.textContent =
+            localStrings.getString('signinScreenPasswordChanged');
+        reasonLabel.hidden = false;
+      } else {
+        reasonLabel.hidden = true;
+      }
+
+      $('createAccount').hidden = !data.createAccount;
+      $('guestSignin').hidden = !data.guestSignin;
     },
 
     /**
      * Checks if message comes from the loaded authentication extension.
      * @param e {object} Payload of the received HTML5 message.
-     * @type {bool}
+     * @type {boolean}
      */
     isAuthExtMessage_: function(e) {
       return this.extensionUrl_ != null &&
@@ -212,28 +254,40 @@ cr.define('login', function() {
         // Now that we're in logged in state header should be hidden.
         Oobe.getInstance().headerHidden = true;
       } else if (msg.method == 'loginUILoaded' && this.isAuthExtMessage_(e)) {
-        // TODO(altimofeev): there is no guarantee that next 'focusout' event
-        // will be caused by the extension, so better approach is direct asking
-        // the extension (and gaia consequently) to not grab the focus.
-        if (this.silentLoad_ && this.hasFocused_) {
-          document.addEventListener(
-              'focusout', this.selfBind_(this.onFocusOut_.bind(this)));
-        }
-        $('error-message').update();
         this.loading = false;
+        $('error-message').update();
+        this.clearLoadingTimer_();
         this.clearRetry_();
         chrome.send('loginWebuiReady');
+      } else if (msg.method =='offlineLogin' && this.isAuthExtMessage_(e)) {
+        this.email = msg.email;
+        chrome.send('authenticateUser', [msg.email, msg.password]);
+        this.loading = true;
+        Oobe.getInstance().headerHidden = true;
       }
     },
 
     /**
      * Clears input fields and switches to input mode.
      * @param {boolean} takeFocus True to take focus.
+     * @param {boolean} forceOnline Whether online sign-in should be forced.
+     * If |forceOnline| is false previously used sign-in type will be used.
      */
-    reset: function(takeFocus) {
+    reset: function(takeFocus, forceOnline) {
       // Reload and show the sign-in UI if needed.
-      if (takeFocus)
-        Oobe.showSigninUI();
+      if (takeFocus) {
+        if (!forceOnline && this.isLocal) {
+          // Show 'Cancel' button to allow user to return to the main screen
+          // (e.g. this makes sense when connection is back).
+          Oobe.getInstance().headerHidden = false;
+          $('add-user-header-bar-item').hidden = false;
+          $('add-user-button').hidden = true;
+          $('cancel-add-user-button').hidden = false;
+          // Do nothing, since offline version is reloaded after an error comes.
+        } else {
+          Oobe.showSigninUI();
+        }
+      }
     },
 
     /**
@@ -257,6 +311,7 @@ cr.define('login', function() {
       this.frame_.src = this.extensionUrl_;
       this.retryTimer_ = undefined;
       this.loading = true;
+      this.startLoadingTimer_();
     },
 
     /**
@@ -306,8 +361,20 @@ cr.define('login', function() {
     }
   };
 
+  /**
+   * Loads the authentication extension into the iframe.
+   * @param {Object} data Extension parameters bag.
+   */
   GaiaSigninScreen.loadAuthExtension = function(data) {
     $('gaia-signin').loadAuthExtension_(data);
+  };
+
+  /**
+   * Updates the authentication extension with new parameters, if needed.
+   * @param {Object} data New extension parameters bag.
+   */
+  GaiaSigninScreen.updateAuthExtension = function(data) {
+    $('gaia-signin').updateAuthExtension_(data);
   };
 
   return {

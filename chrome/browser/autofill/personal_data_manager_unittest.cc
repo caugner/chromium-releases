@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,10 @@
 #include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "webkit/glue/form_data.h"
+#include "webkit/forms/form_data.h"
 
 using content::BrowserThread;
-using webkit_glue::FormData;
+using webkit::forms::FormData;
 
 ACTION(QuitUIMessageLoop) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -66,7 +66,7 @@ class PersonalDataManagerTest : public testing::Test {
     profile_.reset(NULL);
 
     db_thread_.Stop();
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
   }
 
@@ -107,7 +107,7 @@ TEST_F(PersonalDataManagerTest, AddProfile) {
   // Verify the addition.
   const std::vector<AutofillProfile*>& results1 = personal_data_->profiles();
   ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, profile0.CompareMulti(*results1[0]));
+  EXPECT_EQ(0, profile0.Compare(*results1[0]));
 
   // Add profile with identical values.  Duplicates should not get saved.
   AutofillProfile profile0a = profile0;
@@ -120,7 +120,7 @@ TEST_F(PersonalDataManagerTest, AddProfile) {
   // Verify the non-addition.
   const std::vector<AutofillProfile*>& results2 = personal_data_->profiles();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, profile0.CompareMulti(*results2[0]));
+  EXPECT_EQ(0, profile0.Compare(*results2[0]));
 
   // New profile with different email.
   AutofillProfile profile1 = profile0;
@@ -138,8 +138,8 @@ TEST_F(PersonalDataManagerTest, AddProfile) {
   // Verify the addition.
   const std::vector<AutofillProfile*>& results3 = personal_data_->profiles();
   ASSERT_EQ(2U, results3.size());
-  EXPECT_EQ(0, profile0.CompareMulti(*results3[0]));
-  EXPECT_EQ(0, profile1.CompareMulti(*results3[1]));
+  EXPECT_EQ(0, profile0.Compare(*results3[0]));
+  EXPECT_EQ(0, profile1.Compare(*results3[1]));
 }
 
 TEST_F(PersonalDataManagerTest, AddUpdateRemoveProfiles) {
@@ -480,7 +480,7 @@ TEST_F(PersonalDataManagerTest, Refresh) {
 
 TEST_F(PersonalDataManagerTest, ImportFormData) {
   FormData form;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -525,7 +525,7 @@ TEST_F(PersonalDataManagerTest, ImportFormData) {
 
 TEST_F(PersonalDataManagerTest, ImportFormDataBadEmail) {
   FormData form;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -560,7 +560,7 @@ TEST_F(PersonalDataManagerTest, ImportFormDataBadEmail) {
 
 TEST_F(PersonalDataManagerTest, ImportFormDataNotEnoughFilledFields) {
   FormData form;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -585,7 +585,7 @@ TEST_F(PersonalDataManagerTest, ImportFormDataNotEnoughFilledFields) {
 
 TEST_F(PersonalDataManagerTest, ImportPhoneNumberSplitAcrossMultipleFields) {
   FormData form;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form.fields.push_back(field);
@@ -676,7 +676,7 @@ TEST_F(PersonalDataManagerTest, SetUniqueCreditCardLabels) {
 
 TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
   FormData form1;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -767,7 +767,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentProfiles) {
 
 TEST_F(PersonalDataManagerTest, AggregateTwoProfilesWithMultiValue) {
   FormData form1;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -857,12 +857,12 @@ TEST_F(PersonalDataManagerTest, AggregateTwoProfilesWithMultiValue) {
   expected.SetMultiInfo(EMAIL_ADDRESS, values);
 
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.CompareMulti(*results2[0]));
+  EXPECT_EQ(0, expected.Compare(*results2[0]));
 }
 
 TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   FormData form1;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -967,12 +967,12 @@ TEST_F(PersonalDataManagerTest, AggregateSameProfileWithConflict) {
   expected.SetMultiInfo(PHONE_HOME_WHOLE_NUMBER, values);
   expected.SetInfo(ADDRESS_HOME_COUNTRY, ASCIIToUTF16("United States"));
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.CompareMulti(*results2[0]));
+  EXPECT_EQ(0, expected.Compare(*results2[0]));
 }
 
 TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInOld) {
   FormData form1;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -1059,7 +1059,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInOld) {
 
 TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInNew) {
   FormData form1;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -1150,7 +1150,7 @@ TEST_F(PersonalDataManagerTest, AggregateProfileWithMissingInfoInNew) {
 
 TEST_F(PersonalDataManagerTest, AggregateProfileWithInsufficientAddress) {
   FormData form1;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -1200,7 +1200,7 @@ TEST_F(PersonalDataManagerTest, AggregateExistingAuxiliaryProfile) {
   // Simulate a form submission with a subset of the info.
   // Note that the phone number format is different from the saved format.
   FormData form;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "Tester", "text", &field);
   form.fields.push_back(field);
@@ -1247,7 +1247,7 @@ TEST_F(PersonalDataManagerTest, AggregateTwoDifferentCreditCards) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1323,7 +1323,7 @@ TEST_F(PersonalDataManagerTest, AggregateInvalidCreditCard) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1390,7 +1390,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithConflict) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1466,7 +1466,7 @@ TEST_F(PersonalDataManagerTest, AggregateEmptyCreditCardWithConflict) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1534,7 +1534,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInNew) {
   FormData form1;
 
   // Start with a single valid credit card form.
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form1.fields.push_back(field);
@@ -1650,7 +1650,7 @@ TEST_F(PersonalDataManagerTest, AggregateCreditCardWithMissingInfoInOld) {
   // Add a second different valid credit card where the year is different but
   // the credit card number matches.
   FormData form;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form.fields.push_back(field);
@@ -1707,7 +1707,7 @@ TEST_F(PersonalDataManagerTest, AggregateSameCreditCardWithSeparators) {
 
   // Import the same card info, but with different separators in the number.
   FormData form;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "Name on card:", "name_on_card", "Biggie Smalls", "text", &field);
   form.fields.push_back(field);
@@ -1861,7 +1861,7 @@ TEST_F(PersonalDataManagerTest, GetNonEmptyTypes) {
 
 TEST_F(PersonalDataManagerTest, CaseInsensitiveMultiValueAggregation) {
   FormData form1;
-  webkit_glue::FormField field;
+  webkit::forms::FormField field;
   autofill_test::CreateTestFormField(
       "First name:", "first_name", "George", "text", &field);
   form1.fields.push_back(field);
@@ -1954,5 +1954,5 @@ TEST_F(PersonalDataManagerTest, CaseInsensitiveMultiValueAggregation) {
   expected.SetMultiInfo(PHONE_HOME_CITY_AND_NUMBER, values);
 
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.CompareMulti(*results2[0]));
+  EXPECT_EQ(0, expected.Compare(*results2[0]));
 }

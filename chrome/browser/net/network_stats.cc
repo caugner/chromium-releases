@@ -1,20 +1,19 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/net/network_stats.h"
 
 #include "base/bind.h"
-#include "base/callback_old.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/stringprintf.h"
-#include "base/task.h"
 #include "base/threading/platform_thread.h"
 #include "base/time.h"
 #include "base/tuple.h"
+#include "chrome/common/chrome_version_info.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/net_errors.h"
 #include "net/base/net_util.h"
@@ -82,11 +81,6 @@ NetworkStats::NetworkStats()
       bytes_to_read_(0),
       bytes_to_send_(0),
       encoded_message_(""),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          read_callback_(this, &NetworkStats::OnReadComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          write_callback_(this, &NetworkStats::OnWriteComplete)),
-      finished_callback_(NULL),
       start_time_(base::TimeTicks::Now()),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
 }
@@ -98,7 +92,7 @@ NetworkStats::~NetworkStats() {
 bool NetworkStats::Start(net::HostResolver* host_resolver,
                          const net::HostPortPair& server_host_port_pair,
                          uint32 bytes_to_send,
-                         net::OldCompletionCallback* finished_callback) {
+                         const net::CompletionCallback& finished_callback) {
   DCHECK(bytes_to_send);   // We should have data to send.
 
   Initialize(bytes_to_send, finished_callback);
@@ -114,8 +108,8 @@ bool NetworkStats::Start(net::HostResolver* host_resolver,
   return DoConnect(rv);
 }
 
-void NetworkStats::Initialize(uint32 bytes_to_send,
-                              net::OldCompletionCallback* finished_callback) {
+void NetworkStats::Initialize(
+    uint32 bytes_to_send, const net::CompletionCallback& finished_callback) {
   DCHECK(bytes_to_send);   // We should have data to send.
 
   load_size_ = bytes_to_send;
@@ -156,10 +150,10 @@ bool NetworkStats::ConnectComplete(int result) {
 }
 
 void NetworkStats::DoFinishCallback(int result) {
-  if (finished_callback_ != NULL) {
-    net::OldCompletionCallback* callback = finished_callback_;
-    finished_callback_ = NULL;
-    callback->Run(result);
+  if (!finished_callback_.is_null()) {
+    net::CompletionCallback callback = finished_callback_;
+    finished_callback_.Reset();
+    callback.Run(result);
   }
 }
 
@@ -203,11 +197,10 @@ void NetworkStats::OnReadComplete(int result) {
     // of 1ms so that the time-out will fire before we have time to really hog
     // the CPU too extensively (waiting for the time-out) in case of an infinite
     // loop.
-    const int kReadDataDelayMs = 1;
     MessageLoop::current()->PostDelayedTask(
         FROM_HERE,
         base::Bind(&NetworkStats::ReadData, weak_factory_.GetWeakPtr()),
-        kReadDataDelayMs);
+        base::TimeDelta::FromMilliseconds(1));
   }
 }
 
@@ -246,7 +239,9 @@ void NetworkStats::ReadData() {
     // We release the read_buffer_ in the destructor if there is an error.
     read_buffer_ = new net::IOBuffer(kMaxMessage);
 
-    rv = socket_->Read(read_buffer_, kMaxMessage, &read_callback_);
+    rv = socket_->Read(read_buffer_, kMaxMessage,
+                       base::Bind(&NetworkStats::OnReadComplete,
+                                  base::Unretained(this)));
     if (rv == net::ERR_IO_PENDING)
       return;
     // If we have read all the data then return.
@@ -268,7 +263,8 @@ int NetworkStats::SendData() {
       return net::ERR_UNEXPECTED;
     int rv = socket_->Write(write_buffer_,
                             write_buffer_->BytesRemaining(),
-                            &write_callback_);
+                            base::Bind(&NetworkStats::OnWriteComplete,
+                                       base::Unretained(this)));
     if (rv < 0)
       return rv;
     write_buffer_->DidConsume(rv);
@@ -283,7 +279,7 @@ void NetworkStats::StartReadDataTimer(int milliseconds) {
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE,
       base::Bind(&NetworkStats::OnReadDataTimeout, weak_factory_.GetWeakPtr()),
-      milliseconds);
+      base::TimeDelta::FromMilliseconds(milliseconds));
 }
 
 void NetworkStats::OnReadDataTimeout() {
@@ -443,10 +439,7 @@ void UDPStatsClient::Finish(Status status, int result) {
 }
 
 // TCPStatsClient methods and members.
-TCPStatsClient::TCPStatsClient()
-    : NetworkStats(),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          connect_callback_(this, &TCPStatsClient::OnConnectComplete)) {
+TCPStatsClient::TCPStatsClient() {
 }
 
 TCPStatsClient::~TCPStatsClient() {
@@ -466,7 +459,8 @@ bool TCPStatsClient::DoConnect(int result) {
   }
   set_socket(tcp_socket);
 
-  int rv = tcp_socket->Connect(&connect_callback_);
+  int rv = tcp_socket->Connect(base::Bind(&TCPStatsClient::OnConnectComplete,
+                                          base::Unretained(this)));
   if (rv == net::ERR_IO_PENDING)
     return true;
 
@@ -545,19 +539,23 @@ void CollectNetworkStats(const std::string& network_stats_server,
 
   if (!trial.get()) {
     // Set up a field trial to collect network stats for UDP and TCP.
-    base::FieldTrial::Probability kDivisor = 1000;
+    const base::FieldTrial::Probability kDivisor = 1000;
 
     // Enable the connectivity testing for 0.5% of the users.
-    base::FieldTrial::Probability kProbabilityPerGroup = 5;
+    base::FieldTrial::Probability probability_per_group = 5;
 
-    // After October 30, 2011 builds, it will always be in default group
+    chrome::VersionInfo::Channel channel = chrome::VersionInfo::GetChannel();
+    if (channel == chrome::VersionInfo::CHANNEL_CANARY)
+      probability_per_group = kDivisor;
+
+    // After October 30, 2012 builds, it will always be in default group
     // (disable_network_stats).
     trial = new base::FieldTrial("NetworkConnectivity", kDivisor,
-                                 "disable_network_stats", 2011, 10, 30);
+                                 "disable_network_stats", 2012, 10, 30);
 
     // Add option to collect_stats for NetworkConnectivity.
     int collect_stats_group = trial->AppendGroup("collect_stats",
-                                                 kProbabilityPerGroup);
+                                                 probability_per_group);
     if (trial->group() == collect_stats_group)
       collect_stats = true;
   }
@@ -573,11 +571,10 @@ void CollectNetworkStats(const std::string& network_stats_server,
 
   ++number_of_tests_done;
 
-  // Use SPDY's UDP port per http://www.iana.org/assignments/port-numbers.
   // |network_stats_server| echo TCP and UDP servers listen on the following
   // ports.
-  uint32 kTCPTestingPort = 8081;
-  uint32 kUDPTestingPort = 6121;
+  uint32 kTCPTestingPort = 80;
+  uint32 kUDPTestingPort = 53;
 
   net::HostResolver* host_resolver = io_thread->globals()->host_resolver.get();
   DCHECK(host_resolver);
@@ -586,21 +583,25 @@ void CollectNetworkStats(const std::string& network_stats_server,
 
   UDPStatsClient* small_udp_stats = new UDPStatsClient();
   small_udp_stats->Start(
-      host_resolver, udp_server_address, kSmallTestBytesToSend, NULL);
+      host_resolver, udp_server_address, kSmallTestBytesToSend,
+      net::CompletionCallback());
 
   UDPStatsClient* large_udp_stats = new UDPStatsClient();
   large_udp_stats->Start(
-      host_resolver, udp_server_address, kLargeTestBytesToSend, NULL);
+      host_resolver, udp_server_address, kLargeTestBytesToSend,
+      net::CompletionCallback());
 
   net::HostPortPair tcp_server_address(network_stats_server, kTCPTestingPort);
 
   TCPStatsClient* small_tcp_client = new TCPStatsClient();
   small_tcp_client->Start(
-      host_resolver, tcp_server_address, kSmallTestBytesToSend, NULL);
+      host_resolver, tcp_server_address, kSmallTestBytesToSend,
+      net::CompletionCallback());
 
   TCPStatsClient* large_tcp_client = new TCPStatsClient();
   large_tcp_client->Start(
-      host_resolver, tcp_server_address, kLargeTestBytesToSend, NULL);
+      host_resolver, tcp_server_address, kLargeTestBytesToSend,
+      net::CompletionCallback());
 }
 
 }  // namespace chrome_browser_net

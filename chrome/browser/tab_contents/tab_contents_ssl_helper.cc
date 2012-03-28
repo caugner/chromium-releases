@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,9 +27,12 @@
 #include "content/browser/ssl/ssl_client_auth_handler.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "net/base/net_errors.h"
+#include "net/base/x509_certificate.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -97,7 +100,8 @@ string16 SSLCertAddedInfoBarDelegate::GetButtonLabel(
 }
 
 bool SSLCertAddedInfoBarDelegate::Accept() {
-  ShowCertificateViewer(owner()->tab_contents()->GetDialogRootWindow(), cert_);
+  ShowCertificateViewer(
+      owner()->web_contents()->GetView()->GetTopLevelNativeWindow(), cert_);
   return false;  // Hiding the infobar just as the dialog opens looks weird.
 }
 

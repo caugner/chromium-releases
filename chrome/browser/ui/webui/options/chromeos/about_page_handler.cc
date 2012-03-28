@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,14 +16,18 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
+#include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "chrome/browser/chromeos/dbus/update_engine_client.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/google/google_util.h"
+#include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
@@ -50,11 +54,37 @@ const char kEndLinkOss[] = "END_LINK_OSS";
 const char kBeginLinkCrosOss[] = "BEGIN_LINK_CROS_OSS";
 const char kEndLinkCrosOss[] = "END_LINK_CROS_OSS";
 
+const char kDomainChangable[] = "domain";
+
 // Returns a substring [start, end) from |text|.
 std::string StringSubRange(const std::string& text, size_t start,
                            size_t end) {
   DCHECK(end > start);
   return text.substr(start, end - start);
+}
+
+bool CanChangeReleaseChannel() {
+  // On non managed machines we have local owner who is the only one to change
+  // anything.
+  if (chromeos::UserManager::Get()->current_user_is_owner())
+    return true;
+  // On a managed machine we delegate this setting to the users of the same
+  // domain only if the policy value is "domain".
+  if (g_browser_process->browser_policy_connector()->IsEnterpriseManaged()) {
+    std::string value;
+    chromeos::CrosSettings::Get()->GetString(chromeos::kReleaseChannel, &value);
+    if (value != kDomainChangable)
+      return false;
+    // Get the currently logged in user and strip the domain part only.
+    std::string domain = "";
+    std::string user = chromeos::UserManager::Get()->logged_in_user().email();
+    size_t at_pos = user.find('@');
+    if (at_pos != std::string::npos && at_pos + 1 < user.length())
+      domain = user.substr(user.find('@') + 1);
+    return domain == g_browser_process->browser_policy_connector()->
+        GetEnterpriseDomain();
+  }
+  return false;
 }
 
 }  // namespace
@@ -234,14 +264,14 @@ void AboutPageHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
 }
 
 void AboutPageHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("PageReady",
+  web_ui()->RegisterMessageCallback("PageReady",
       base::Bind(&AboutPageHandler::PageReady, base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SetReleaseTrack",
+  web_ui()->RegisterMessageCallback("SetReleaseTrack",
       base::Bind(&AboutPageHandler::SetReleaseTrack, base::Unretained(this)));
 
-  web_ui_->RegisterMessageCallback("CheckNow",
+  web_ui()->RegisterMessageCallback("CheckNow",
       base::Bind(&AboutPageHandler::CheckNow, base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("RestartNow",
+  web_ui()->RegisterMessageCallback("RestartNow",
       base::Bind(&AboutPageHandler::RestartNow, base::Unretained(this)));
 }
 
@@ -254,6 +284,12 @@ void AboutPageHandler::PageReady(const ListValue* args) {
   loader_.GetFirmware(&consumer_,
                       base::Bind(&AboutPageHandler::OnOSFirmware,
                                  base::Unretained(this)));
+
+  scoped_ptr<base::Value> can_change_channel_value(
+      base::Value::CreateBooleanValue(CanChangeReleaseChannel()));
+  web_ui()->CallJavascriptFunction(
+      "AboutPage.updateEnableReleaseChannelCallback",
+      *can_change_channel_value);
 
   UpdateEngineClient* update_engine_client =
       DBusThreadManager::Get()->GetUpdateEngineClient();
@@ -277,12 +313,15 @@ void AboutPageHandler::PageReady(const ListValue* args) {
 }
 
 void AboutPageHandler::SetReleaseTrack(const ListValue* args) {
-  if (!UserManager::Get()->current_user_is_owner()) {
+  if (!CanChangeReleaseChannel()) {
     LOG(WARNING) << "Non-owner tried to change release track.";
     return;
   }
   const std::string channel = UTF16ToUTF8(ExtractStringValue(args));
   DBusThreadManager::Get()->GetUpdateEngineClient()->SetReleaseTrack(channel);
+  // For local owner set the field in the policy blob too.
+  if (UserManager::Get()->current_user_is_owner())
+    CrosSettings::Get()->SetString(kReleaseChannel, channel);
 }
 
 void AboutPageHandler::CheckNow(const ListValue* args) {
@@ -307,8 +346,7 @@ void AboutPageHandler::UpdateStatus(
   switch (status.status) {
     case UpdateEngineClient::UPDATE_STATUS_IDLE:
       if (!sticky_) {
-        message = l10n_util::GetStringFUTF16(IDS_UPGRADE_ALREADY_UP_TO_DATE,
-            l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME));
+        message = l10n_util::GetStringUTF16(IDS_UPGRADE_ALREADY_UP_TO_DATE);
         enabled = true;
       }
       break;
@@ -366,20 +404,20 @@ void AboutPageHandler::UpdateStatus(
     scoped_ptr<Value> insert_delay(Value::CreateBooleanValue(
         status.status ==
         UpdateEngineClient::UPDATE_STATUS_CHECKING_FOR_UPDATE));
-    web_ui_->CallJavascriptFunction("AboutPage.updateStatusCallback",
-                                    *update_message, *insert_delay);
+    web_ui()->CallJavascriptFunction("AboutPage.updateStatusCallback",
+                                     *update_message, *insert_delay);
 
     scoped_ptr<Value> enabled_value(Value::CreateBooleanValue(enabled));
-    web_ui_->CallJavascriptFunction("AboutPage.updateEnableCallback",
-                                    *enabled_value);
+    web_ui()->CallJavascriptFunction("AboutPage.updateEnableCallback",
+                                     *enabled_value);
 
     scoped_ptr<Value> image_string(Value::CreateStringValue(image));
-    web_ui_->CallJavascriptFunction("AboutPage.setUpdateImage",
-                                    *image_string);
+    web_ui()->CallJavascriptFunction("AboutPage.setUpdateImage",
+                                     *image_string);
   }
   // We'll change the "Check For Update" button to "Restart" button.
   if (status.status == UpdateEngineClient::UPDATE_STATUS_UPDATED_NEED_REBOOT) {
-    web_ui_->CallJavascriptFunction("AboutPage.changeToRestartButton");
+    web_ui()->CallJavascriptFunction("AboutPage.changeToRestartButton");
   }
 }
 
@@ -387,8 +425,8 @@ void AboutPageHandler::OnOSVersion(VersionLoader::Handle handle,
                                    std::string version) {
   if (version.size()) {
     scoped_ptr<Value> version_string(Value::CreateStringValue(version));
-    web_ui_->CallJavascriptFunction("AboutPage.updateOSVersionCallback",
-                                    *version_string);
+    web_ui()->CallJavascriptFunction("AboutPage.updateOSVersionCallback",
+                                     *version_string);
   }
 }
 
@@ -396,8 +434,8 @@ void AboutPageHandler::OnOSFirmware(VersionLoader::Handle handle,
                                     std::string firmware) {
   if (firmware.size()) {
     scoped_ptr<Value> firmware_string(Value::CreateStringValue(firmware));
-    web_ui_->CallJavascriptFunction("AboutPage.updateOSFirmwareCallback",
-                                    *firmware_string);
+    web_ui()->CallJavascriptFunction("AboutPage.updateOSFirmwareCallback",
+                                     *firmware_string);
   }
 }
 
@@ -411,7 +449,7 @@ void AboutPageHandler::UpdateSelectedChannel(UpdateObserver* observer,
     // is valid.
     AboutPageHandler* handler = observer->page_handler();
     scoped_ptr<Value> channel_string(Value::CreateStringValue(channel));
-    handler->web_ui_->CallJavascriptFunction(
+    handler->web_ui()->CallJavascriptFunction(
         "AboutPage.updateSelectedOptionCallback", *channel_string);
   }
 }

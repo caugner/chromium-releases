@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -150,6 +150,11 @@ void GLES2DecoderTestBase::InitDecoder(
   EXPECT_CALL(*gl_, GetIntegerv(GL_STENCIL_BITS, _))
        .WillOnce(SetArgumentPointee<1>(has_stencil ? 8 : 0))
        .RetiresOnSaturation();
+
+  EXPECT_CALL(*gl_, Clear(
+      GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT))
+      .Times(1)
+      .RetiresOnSaturation();
 
   EXPECT_CALL(*gl_, Enable(GL_VERTEX_PROGRAM_POINT_SIZE))
       .Times(1)
@@ -1044,6 +1049,17 @@ void GLES2DecoderTestBase::SetupVertexBuffer() {
   DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
   GLfloat f = 0;
   DoBufferData(GL_ARRAY_BUFFER, kNumVertices * 2 * sizeof(f));
+}
+
+void GLES2DecoderTestBase::SetupAllNeededVertexBuffers() {
+  DoBindBuffer(GL_ARRAY_BUFFER, client_buffer_id_, kServiceBufferId);
+  DoBufferData(GL_ARRAY_BUFFER, kNumVertices * 16 * sizeof(float));
+  DoEnableVertexAttribArray(0);
+  DoEnableVertexAttribArray(1);
+  DoEnableVertexAttribArray(2);
+  DoVertexAttribPointer(0, 2, GL_FLOAT, 0, 0);
+  DoVertexAttribPointer(1, 2, GL_FLOAT, 0, 0);
+  DoVertexAttribPointer(2, 2, GL_FLOAT, 0, 0);
 }
 
 void GLES2DecoderTestBase::SetupIndexBuffer() {

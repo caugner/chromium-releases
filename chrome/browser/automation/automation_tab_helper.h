@@ -12,14 +12,9 @@
 #include "base/basictypes.h"
 #include "base/observer_list.h"
 #include "base/memory/weak_ptr.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 
-class TabContents;
 class AutomationTabHelper;
-
-namespace IPC {
-class Message;
-}
 
 // An observer API implemented by classes which are interested in various
 // tab events from AutomationTabHelper(s).
@@ -40,13 +35,13 @@ class TabEventObserver {
 
   // Called when the tab that had no pending loads now has a new pending
   // load. |tab_contents| will always be valid.
-  virtual void OnFirstPendingLoad(TabContents* tab_contents) { }
+  virtual void OnFirstPendingLoad(content::WebContents* web_contents) { }
 
   // Called when the tab that had one or more pending loads now has no
   // pending loads. |tab_contents| will always be valid.
   //
   // This method will always be called if |OnFirstPendingLoad| was called.
-  virtual void OnNoMorePendingLoads(TabContents* tab_contents) { }
+  virtual void OnNoMorePendingLoads(content::WebContents* web_contents) { }
 
   // Called as a result of a tab being snapshotted.
   virtual void OnSnapshotEntirePageACK(
@@ -81,10 +76,10 @@ class TabEventObserver {
 // Per-tab automation support class. Receives automation/testing messages
 // from the renderer. Broadcasts tab events to |TabEventObserver|s.
 class AutomationTabHelper
-    : public TabContentsObserver,
+    : public content::WebContentsObserver,
       public base::SupportsWeakPtr<AutomationTabHelper> {
  public:
-  explicit AutomationTabHelper(TabContents* tab_contents);
+  explicit AutomationTabHelper(content::WebContents* web_contents);
   virtual ~AutomationTabHelper();
 
   void AddObserver(TabEventObserver* observer);
@@ -105,16 +100,17 @@ class AutomationTabHelper
       const std::vector<unsigned char>& png_data,
       const std::string& error_msg);
 
-  // TabContentsObserver implementation.
+  // content::WebContentsObserver implementation.
   virtual void DidStartLoading() OVERRIDE;
   virtual void DidStopLoading() OVERRIDE;
   virtual void RenderViewGone(base::TerminationStatus status) OVERRIDE;
-  virtual void TabContentsDestroyed(TabContents* tab_contents) OVERRIDE;
+  virtual void WebContentsDestroyed(
+      content::WebContents* web_contents) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void OnWillPerformClientRedirect(int64 frame_id, double delay_seconds);
   void OnDidCompleteOrCancelClientRedirect(int64 frame_id);
-  void OnTabOrRenderViewDestroyed(TabContents* tab_contents);
+  void OnTabOrRenderViewDestroyed(content::WebContents* web_contents);
 
   // True if the tab is currently loading. If a navigation is scheduled but not
   // yet loading, this will be false.

@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/glue/autofill_profile_data_type_controller.h"
 
+#include "base/bind.h"
 #include "base/metrics/histogram.h"
-#include "base/task.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -25,8 +25,11 @@ namespace browser_sync {
 
 AutofillProfileDataTypeController::AutofillProfileDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
-    Profile* profile)
-    : NewNonFrontendDataTypeController(profile_sync_factory, profile),
+    Profile* profile,
+    ProfileSyncService* sync_service)
+    : NewNonFrontendDataTypeController(profile_sync_factory,
+                                       profile,
+                                       sync_service),
       personal_data_(NULL) {
 }
 

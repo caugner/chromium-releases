@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/process_util.h"
 #include "base/property_bag.h"
 #include "base/string16.h"
@@ -25,7 +26,6 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebTextDirection.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/native_widget_types.h"
-#include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "ui/gfx/surface/transport_dib.h"
 
@@ -159,6 +159,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
 
   content::RenderProcessHost* process() const { return process_; }
   int routing_id() const { return routing_id_; }
+  int surface_id() const { return surface_id_; }
   bool renderer_accessible() { return renderer_accessible_; }
 
   bool empty() const { return current_size_.IsEmpty(); }
@@ -193,6 +194,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
 
   // Called to notify the RenderWidget that it has been resized.
   void WasResized();
+
+  // Called to notify the RenderWidget that the resize rect has changed without
+  // the size of the RenderWidget itself changing.
+  void ResizeRectChanged(const gfx::Rect& new_rect);
 
   // Called to notify the RenderWidget that its associated native window got
   // focused.
@@ -283,9 +288,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   void ForwardWheelEvent(const WebKit::WebMouseWheelEvent& wheel_event);
   void ForwardGestureEvent(const WebKit::WebGestureEvent& gesture_event);
   virtual void ForwardKeyboardEvent(const NativeWebKeyboardEvent& key_event);
-  virtual void ForwardNextKeyboardEvent();
   virtual void ForwardTouchEvent(const WebKit::WebTouchEvent& touch_event);
-
 
   // Update the text direction of the focused input element and notify it to a
   // renderer process.
@@ -372,6 +375,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // Cancels an ongoing composition.
   void ImeCancelComposition();
 
+  // This is for derived classes to give us access to the resizer rect.
+  // And to also expose it to the RenderWidgetHostView.
+  virtual gfx::Rect GetRootWindowResizerRect() const;
+
   // Makes an IPC call to tell webkit to replace the currently selected word
   // or a word around the cursor.
   void Replace(const string16& word);
@@ -414,9 +421,18 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // Relay a request from assistive technology to set focus to a given node.
   void AccessibilitySetFocus(int object_id);
 
-  // Relay a request from assistive technology to scroll.
-  void AccessibilityChangeScrollPosition(
-      int acc_obj_id, int scroll_x, int scroll_y);
+  // Relay a request from assistive technology to make a given object
+  // visible by scrolling as many scrollable containers as necessary.
+  // In addition, if it's not possible to make the entire object visible,
+  // scroll so that the |subfocus| rect is visible at least. The subfocus
+  // rect is in local coordinates of the object itself.
+  void AccessibilityScrollToMakeVisible(
+      int acc_obj_id, gfx::Rect subfocus);
+
+  // Relay a request from assistive technology to move a given object
+  // to a specific location, in the tab content area coordinate space, i.e.
+  // (0, 0) is the top-left corner of the tab contents.
+  void AccessibilityScrollToPoint(int acc_obj_id, gfx::Point point);
 
   // Relay a request from assistive technology to set text selection.
   void AccessibilitySetTextSelection(
@@ -450,16 +466,14 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // locked.
   bool GotResponseToLockMouseRequest(bool allowed);
 
-#if defined(OS_MACOSX) || defined(UI_COMPOSITOR_IMAGE_TRANSPORT)
   // Called by the view in response to AcceleratedSurfaceBuffersSwapped.
   static void AcknowledgeSwapBuffers(int32 route_id, int gpu_host_id);
   static void AcknowledgePostSubBuffer(int32 route_id, int gpu_host_id);
-#endif
 
  protected:
   // Internal implementation of the public Forward*Event() methods.
   void ForwardInputEvent(const WebKit::WebInputEvent& input_event,
-                         int event_size);
+                         int event_size, bool is_keyboard_shortcut);
 
   // Called when we receive a notification indicating that the renderer
   // process has gone. This will reset our state so that our state will be
@@ -531,6 +545,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // initialization.
   bool renderer_initialized_;
 
+  // This value indicates how long to wait before we consider a renderer hung.
+  int hung_renderer_delay_ms_;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostTest, Resize);
   FRIEND_TEST_ALL_PREFIXES(RenderWidgetHostTest, ResizeThenCrash);
@@ -558,6 +575,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
                            WebKit::WebTextDirection text_direction_hint);
   void OnMsgPaintAtSizeAck(int tag, const gfx::Size& size);
   void OnMsgUpdateRect(const ViewHostMsg_UpdateRect_Params& params);
+  void OnMsgUpdateIsDelayed();
   void OnMsgInputEventAck(WebKit::WebInputEvent::Type event_type,
                           bool processed);
   virtual void OnMsgFocus();
@@ -633,6 +651,11 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // input messages to be coalesced.
   void ProcessWheelAck(bool processed);
 
+  // Called on OnMsgInputEventAck() to process a touch event ack message.
+  // This can result in a gesture event being generated and sent back to the
+  // renderer.
+  void ProcessTouchAck(bool processed);
+
   // True if renderer accessibility is enabled. This should only be set when a
   // screenreader is detected as it can potentially slow down Chrome.
   bool renderer_accessible_;
@@ -655,6 +678,9 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // The ID of the corresponding object in the Renderer Instance.
   int routing_id_;
 
+  // The ID of the surface corresponding to this render widget.
+  int surface_id_;
+
   // Indicates whether a page is loading or not.
   bool is_loading_;
 
@@ -673,21 +699,12 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // The current size of the RenderWidget.
   gfx::Size current_size_;
 
-  // The current reserved area of the RenderWidget where contents should not be
-  // rendered to draw the resize corner, sidebar mini tabs etc.
-  gfx::Rect current_reserved_rect_;
-
   // The size we last sent as requested size to the renderer. |current_size_|
   // is only updated once the resize message has been ack'd. This on the other
   // hand is updated when the resize message is sent. This is very similar to
   // |resize_ack_pending_|, but the latter is not set if the new size has width
   // or height zero, which is why we need this too.
   gfx::Size in_flight_size_;
-
-  // The reserved area we last sent to the renderer. |current_reserved_rect_|
-  // is only updated once the resize message has been ack'd. This on the other
-  // hand is updated when the resize message is sent.
-  gfx::Rect in_flight_reserved_rect_;
 
   // True if the render widget host should track the render widget's size as
   // opposed to visa versa.
@@ -717,19 +734,6 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // would be queued) results in very slow scrolling.
   WheelEventQueue coalesced_mouse_wheel_events_;
 
-  // True if a touch move event was sent to the renderer view and we are waiting
-  // for a corresponding ACK message.
-  bool touch_move_pending_;
-
-  // If a touch move event comes in while we are waiting for an ACK for a
-  // previously sent touch move event, it will be stored here. A touch event
-  // stores the location of the moved point, instead of the amount that it
-  // moved. So it is not necessary to coalesce the move events (as is done for
-  // mouse wheel events). Storing the most recent event for dispatch is
-  // sufficient.
-  WebKit::WebTouchEvent queued_touch_event_;
-  bool touch_event_is_queued_;
-
   // The time when an input event was sent to the RenderWidget.
   base::TimeTicks input_event_start_time_;
 
@@ -746,6 +750,10 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   // the renderer hung if it does not generate an appropriate response message.
   base::Time time_when_considered_hung_;
 
+  // This value denotes the number of input events yet to be acknowledged
+  // by the renderer.
+  int in_flight_event_count_;
+
   // This timer runs to check if time_when_considered_hung_ has past.
   base::OneShotTimer<RenderWidgetHost> hung_renderer_timer_;
 
@@ -760,14 +768,7 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   base::TimeTicks repaint_start_time_;
 
   // Queue of keyboard events that we need to track.
-  struct Key {
-    Key(const NativeWebKeyboardEvent& event, bool is_shortcut)
-        : event(event), is_shortcut(is_shortcut) {
-    }
-    NativeWebKeyboardEvent event;
-    bool is_shortcut;
-  };
-  typedef std::deque<Key> KeyQueue;
+  typedef std::deque<NativeWebKeyboardEvent> KeyQueue;
 
   // A queue of keyboard events. We can't trust data from the renderer so we
   // stuff key events into a queue and pop them out on ACK, feeding our copy
@@ -787,27 +788,19 @@ class CONTENT_EXPORT RenderWidgetHost : public IPC::Channel::Listener,
   bool text_direction_canceled_;
 
   // Indicates if the next sequence of Char events should be suppressed or not.
-  //
-  // The system may translate a RawKeyDown event into zero or more Char events,
+  // System may translate a RawKeyDown event into zero or more Char events,
   // usually we send them to the renderer directly in sequence. However, If a
-  // RawKeyDown event was not handled by the renderer but was handled by our
-  // UnhandledKeyboardEvent() method, e.g. as an accelerator key, then we shall
-  // not send the following sequence of Char events, which was generated by
-  // this RawKeyDown event, to the renderer. Otherwise the renderer may handle
-  // the Char events and cause unexpected behavior.  For example, pressing
-  // alt-2 may let the browser switch to the second tab, but the Char event
-  // generated by alt-2 may also activate a HTML element if its accesskey
-  // happens to be "2", then the user may get confused when switching back to
-  // the original tab, because the content may already be changed.
-  //
-  // If true, suppress_incoming_char_events_ prevents Char events from being
-  // added to key_queue_.
-  //
-  // If true, suppress_outgoing_char_events_ prevents Char events from being
-  // removed from key_queue_ and forwarded to the renderer.
-  //
-  bool suppress_incoming_char_events_;
-  bool suppress_outgoing_char_events_;
+  // RawKeyDown event was not handled by the renderer but was handled by
+  // our UnhandledKeyboardEvent() method, e.g. as an accelerator key, then we
+  // shall not send the following sequence of Char events, which was generated
+  // by this RawKeyDown event, to the renderer. Otherwise the renderer may
+  // handle the Char events and cause unexpected behavior.
+  // For example, pressing alt-2 may let the browser switch to the second tab,
+  // but the Char event generated by alt-2 may also activate a HTML element
+  // if its accesskey happens to be "2", then the user may get confused when
+  // switching back to the original tab, because the content may already be
+  // changed.
+  bool suppress_next_char_events_;
 
   std::vector<gfx::PluginWindowHandle> deferred_plugin_handles_;
 

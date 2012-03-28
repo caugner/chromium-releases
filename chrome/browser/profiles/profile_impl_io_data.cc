@@ -114,9 +114,16 @@ void ProfileImplIOData::Handle::Init(
   io_data_->app_path_ = app_path;
 
   io_data_->predictor_.reset(predictor);
+
+  if (!main_request_context_getter_) {
+    main_request_context_getter_ =
+        ChromeURLRequestContextGetter::CreateOriginal(
+            profile_, io_data_);
+  }
   io_data_->predictor_->InitNetworkPredictor(profile_->GetPrefs(),
                                              local_state,
-                                             io_thread);
+                                             io_thread,
+                                             main_request_context_getter_);
 }
 
 base::Callback<ChromeURLDataManagerBackend*(void)>
@@ -129,6 +136,13 @@ ProfileImplIOData::Handle::GetChromeURLDataManagerBackendGetter() const {
 
 const content::ResourceContext&
 ProfileImplIOData::Handle::GetResourceContext() const {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  LazyInitialize();
+  return GetResourceContextNoInit();
+}
+
+const content::ResourceContext&
+ProfileImplIOData::Handle::GetResourceContextNoInit() const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   // Don't call LazyInitialize here, since the resource context is created at
   // the beginning of initalization and is used by some members while they're
@@ -285,19 +299,13 @@ void ProfileImplIOData::LazyInitializeInternal(
       io_thread_globals->cert_verifier.get());
   media_request_context_->set_cert_verifier(
       io_thread_globals->cert_verifier.get());
-  main_context->set_dnsrr_resolver(
-      io_thread_globals->dnsrr_resolver.get());
-  media_request_context_->set_dnsrr_resolver(
-      io_thread_globals->dnsrr_resolver.get());
   main_context->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
   media_request_context_->set_http_auth_handler_factory(
       io_thread_globals->http_auth_handler_factory.get());
 
-  main_context->set_dns_cert_checker(dns_cert_checker());
   main_context->set_fraudulent_certificate_reporter(
       fraudulent_certificate_reporter());
-  media_request_context_->set_dns_cert_checker(dns_cert_checker());
   media_request_context_->set_fraudulent_certificate_reporter(
       fraudulent_certificate_reporter());
 
@@ -373,9 +381,10 @@ void ProfileImplIOData::LazyInitializeInternal(
       main_context->host_resolver(),
       main_context->cert_verifier(),
       main_context->origin_bound_cert_service(),
-      main_context->dnsrr_resolver(),
-      main_context->dns_cert_checker(),
+      main_context->transport_security_state(),
       main_context->proxy_service(),
+      "", // pass empty ssl_session_cache_shard to share the SSL session cache
+          // with everything that doesn't explicitly want a different one.
       main_context->ssl_config_service(),
       main_context->http_auth_handler_factory(),
       main_context->network_delegate(),

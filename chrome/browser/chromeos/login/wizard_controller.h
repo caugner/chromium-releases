@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,11 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/time.h"
 #include "base/timer.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/chromeos/login/wizard_screen.h"
 #include "googleurl/src/gurl.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "ui/gfx/rect.h"
 
 class PrefService;
@@ -73,9 +73,9 @@ class WizardController : public ScreenObserver {
   static void SetInitialLocale(const std::string& locale);
 
   // Shows the first screen defined by |first_screen_name| or by default
-  // if the parameter is empty. |screen_bounds| are used to calculate position
-  // of the wizard screen.
-  void Init(const std::string& first_screen_name);
+  // if the parameter is empty. Takes ownership of |screen_parameters|.
+  void Init(const std::string& first_screen_name,
+            DictionaryValue* screen_parameters);
 
   // Skips OOBE update screen if it's currently shown.
   void CancelOOBEUpdate();
@@ -105,12 +105,12 @@ class WizardController : public ScreenObserver {
   // Shows images login screen.
   void ShowLoginScreen();
 
+  // Resumes a pending login screen.
+  void ResumeLoginScreen();
+
   // Returns a pointer to the current screen or NULL if there's no such
   // screen.
   WizardScreen* current_screen() const { return current_screen_; }
-
-  // Set URL to open on browser launch.
-  void set_start_url(const GURL& start_url) { start_url_ = start_url; }
 
   // If being at register screen proceeds to the next one.
   void SkipRegistration();
@@ -143,6 +143,7 @@ class WizardController : public ScreenObserver {
   void OnRegistrationSuccess();
   void OnRegistrationSkipped();
   void OnEnterpriseEnrollmentDone();
+  void OnEnterpriseAutoEnrollmentDone();
   void OnOOBECompleted();
 
   // Shows update screen and starts update process.
@@ -203,8 +204,8 @@ class WizardController : public ScreenObserver {
   // Default WizardController.
   static WizardController* default_controller_;
 
-  // URL to open on browser launch.
-  GURL start_url_;
+  // Parameters for the first screen. May be NULL.
+  scoped_ptr<DictionaryValue> screen_parameters_;
 
   base::OneShotTimer<WizardController> smooth_show_timer_;
 
@@ -213,6 +214,10 @@ class WizardController : public ScreenObserver {
   // State of Usage stat/error reporting checkbox on EULA screen
   // during wizard lifetime.
   bool usage_statistics_reporting_;
+
+  // Time when the EULA was accepted. Used to measure the duration from the EULA
+  // acceptance until the Sign-In screen is displayed.
+  base::Time time_eula_accepted_;
 
   FRIEND_TEST_ALL_PREFIXES(EnterpriseEnrollmentScreenTest, TestCancel);
   FRIEND_TEST_ALL_PREFIXES(WizardControllerFlowTest, Accelerators);

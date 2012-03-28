@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,9 +9,9 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/timer.h"
-#include "chrome/browser/tab_contents/render_view_host_delegate_helper.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/browser/tab_contents/tab_contents_view_helper.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/views/widget/widget.h"
 
 class ConstrainedWindowGtk;
@@ -27,15 +27,15 @@ namespace views {
 class Widget;
 }
 
-// Views-specific implementation of the TabContentsView.
+// Views-specific implementation of the WebContentsView.
 class TabContentsViewViews : public views::Widget,
-                             public TabContentsView,
+                             public content::WebContentsView,
                              public internal::NativeTabContentsViewDelegate {
  public:
-  // The corresponding TabContents is passed in the constructor, and manages our
+  // The corresponding WebContents is passed in the constructor, and manages our
   // lifetime. This doesn't need to be the case, but is this way currently
   // because that's what was easiest when they were split.
-  explicit TabContentsViewViews(TabContents* tab_contents);
+  explicit TabContentsViewViews(content::WebContents* web_contents);
   virtual ~TabContentsViewViews();
 
   // Intermediate code to pass comiplation. This will be removed as a
@@ -51,7 +51,7 @@ class TabContentsViewViews : public views::Widget,
     return native_tab_contents_view_;
   }
 
-  // Overridden from TabContentsView:
+  // Overridden from WebContentsView:
   virtual void CreateView(const gfx::Size& initial_size) OVERRIDE;
   virtual RenderWidgetHostView* CreateViewForWidget(
       RenderWidgetHost* render_widget_host) OVERRIDE;
@@ -107,7 +107,7 @@ class TabContentsViewViews : public views::Widget,
 
  private:
   // Overridden from internal::NativeTabContentsViewDelegate:
-  virtual TabContents* GetTabContents() OVERRIDE;
+  virtual content::WebContents* GetWebContents() OVERRIDE;
   virtual bool IsShowingSadTab() const OVERRIDE;
   virtual void OnNativeTabContentsViewShown() OVERRIDE;
   virtual void OnNativeTabContentsViewHidden() OVERRIDE;
@@ -144,11 +144,11 @@ class TabContentsViewViews : public views::Widget,
 
   // ---------------------------------------------------------------------------
 
-  // The TabContents whose contents we display.
-  TabContents* tab_contents_;
+  // The WebContents whose contents we display.
+  content::WebContents* web_contents_;
 
-  // Common implementations of some RenderViewHostDelegate::View methods.
-  RenderViewHostDelegateViewHelper delegate_view_helper_;
+  // Common implementations of some WebContentsView methods.
+  TabContentsViewHelper tab_contents_view_helper_;
 
   NativeTabContentsView* native_tab_contents_view_;
 

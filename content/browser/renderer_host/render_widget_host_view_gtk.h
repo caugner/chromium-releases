@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,13 +46,10 @@ typedef struct _GtkSelectionData GtkSelectionData;
 // -----------------------------------------------------------------------------
 class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView {
  public:
-  explicit RenderWidgetHostViewGtk(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewGtk();
 
-  // Initialize this object for use as a drawing area.
-  void InitAsChild();
-
   // RenderWidgetHostView implementation.
+  virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) OVERRIDE;
   virtual void InitAsFullscreen(
@@ -64,6 +61,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView {
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
@@ -105,6 +103,7 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView {
   virtual void DestroyPluginContainer(gfx::PluginWindowHandle id) OVERRIDE;
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+  virtual void ProcessTouchAck(bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -114,8 +113,6 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView {
   virtual gfx::PluginWindowHandle GetCompositingSurface() OVERRIDE;
   virtual bool LockMouse() OVERRIDE;
   virtual void UnlockMouse() OVERRIDE;
-
-  gfx::NativeView native_view() const { return view_.get(); }
 
   // If the widget is aligned with an edge of the monitor its on and the user
   // attempts to drag past that edge we track the number of times it has
@@ -138,6 +135,8 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // RenderWidgetHost::ForwardEditCommandsForNextKeyEvent().
   void ForwardKeyboardEvent(const NativeWebKeyboardEvent& event);
 
+  bool RetrieveSurrounding(std::string* text, size_t* cursor_index);
+
   GdkEventButton* last_mouse_down() const {
     return last_mouse_down_;
   }
@@ -146,6 +145,12 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // Builds a submenu containing all the gtk input method commands.
   GtkWidget* BuildInputMethodsGtkMenu();
 #endif
+
+ protected:
+  friend class RenderWidgetHostView;
+
+  // Should construct only via RenderWidgetHostView::CreateViewForWidget.
+  explicit RenderWidgetHostViewGtk(RenderWidgetHost* widget);
 
  private:
   friend class RenderWidgetHostViewGtkWidget;
@@ -286,10 +291,6 @@ class CONTENT_EXPORT RenderWidgetHostViewGtk : public RenderWidgetHostView {
   // The event for the last mouse down we handled. We need this for context
   // menus and drags.
   GdkEventButton* last_mouse_down_;
-
-  string16 selection_text_;
-  size_t selection_text_offset_;
-  ui::Range selection_range_;
 
 #if defined(OS_CHROMEOS)
   // Custimized tooltip window.

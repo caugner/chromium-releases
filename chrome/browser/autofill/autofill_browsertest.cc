@@ -13,6 +13,7 @@
 #include "chrome/browser/autofill/autofill_profile.h"
 #include "chrome/browser/autofill/personal_data_manager.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
+#include "chrome/browser/autofill/personal_data_manager_observer.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/translate_infobar_delegate.h"
@@ -27,11 +28,14 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "content/test/test_url_fetcher_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+
+using content::WebContents;
 
 static const char* kDataURIPrefix = "data:text/html;charset=utf-8,";
 static const char* kTestFormString =
@@ -65,6 +69,34 @@ static const char* kTestFormString =
     " <input type=\"text\" id=\"phone\"><br>"
     "</form>";
 
+class WindowedPersonalDataManagerObserver : public PersonalDataManagerObserver {
+ public:
+  WindowedPersonalDataManagerObserver() :
+      personal_data_changed_(false),
+      has_run_message_loop_(false) {
+  }
+
+  void Wait() {
+    if (!personal_data_changed_) {
+      has_run_message_loop_ = true;
+      ui_test_utils::RunMessageLoop();
+    }
+  }
+
+  void OnPersonalDataChanged() OVERRIDE {
+    if (has_run_message_loop_) {
+      MessageLoopForUI::current()->Quit();
+      has_run_message_loop_ = false;
+    }
+
+    personal_data_changed_ = true;
+  }
+
+ private:
+  bool personal_data_changed_;
+  bool has_run_message_loop_;
+};
+
 class AutofillTest : public InProcessBrowserTest {
  protected:
   AutofillTest() {
@@ -85,21 +117,29 @@ class AutofillTest : public InProcessBrowserTest {
         PersonalDataManagerFactory::GetForProfile(browser()->profile());
     ASSERT_TRUE(personal_data_manager);
 
+    WindowedPersonalDataManagerObserver observer;
+    personal_data_manager->SetObserver(&observer);
+
     personal_data_manager->AddProfile(profile);
+
+    // AddProfile is asynchronous. Wait for it to finish before continuing the
+    // tests.
+    observer.Wait();
+    personal_data_manager->RemoveObserver(&observer);
   }
 
   void ExpectFieldValue(const std::wstring& field_name,
                         const std::string& expected_value) {
     std::string value;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-        browser()->GetSelectedTabContents()->render_view_host(), L"",
+        browser()->GetSelectedWebContents()->GetRenderViewHost(), L"",
         L"window.domAutomationController.send("
         L"document.getElementById('" + field_name + L"').value);", &value));
     EXPECT_EQ(expected_value, value);
   }
 
   RenderViewHost* render_view_host() {
-    return browser()->GetSelectedTabContents()->render_view_host();
+    return browser()->GetSelectedWebContents()->GetRenderViewHost();
   }
 
   void SimulateURLFetch(bool success) {
@@ -596,9 +636,9 @@ IN_PROC_BROWSER_TEST_F(AutofillTest, MAYBE_AutofillAfterReload) {
 
   // Reload the page.
   LOG(WARNING) << "Reloading the page.";
-  TabContents* tab =
-      browser()->GetSelectedTabContentsWrapper()->tab_contents();
-  tab->controller().Reload(false);
+  WebContents* tab =
+      browser()->GetSelectedTabContentsWrapper()->web_contents();
+  tab->GetController().Reload(false);
   ui_test_utils::WaitForLoadStop(tab);
 
   // Invoke Autofill.

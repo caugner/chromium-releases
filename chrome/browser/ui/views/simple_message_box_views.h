@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,14 +56,19 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
   virtual bool ShouldShowWindowTitle() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void DeleteDelegate() OVERRIDE;
-  virtual bool IsModal() const OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
 
  private:
+  enum DialogType {
+    DIALOG_ERROR,
+    DIALOG_YES_NO,
+  };
+
   SimpleMessageBoxViews(gfx::NativeWindow parent_window,
-                        int dialog_flags,
+                        DialogType type,
                         const string16& title,
                         const string16& message);
   virtual ~SimpleMessageBoxViews();
@@ -80,7 +85,7 @@ class SimpleMessageBoxViews : public views::DialogDelegate,
   virtual bool Dispatch(GdkEvent* event) OVERRIDE;
 #endif
 
-  int dialog_flags_;
+  const DialogType type_;
   string16 message_box_title_;
   views::MessageBoxView* message_box_view_;
   DispositionType disposition_;

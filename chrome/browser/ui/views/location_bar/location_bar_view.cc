@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,6 +44,7 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -57,7 +58,6 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/textfield/native_textfield_views.h"
 #include "ui/views/drag_utils.h"
 
 #if !defined(OS_CHROMEOS)
@@ -68,13 +68,20 @@
 #include "chrome/browser/ui/views/location_bar/suggested_text_view.h"
 #endif
 
+using content::WebContents;
 using views::View;
 
 namespace {
 
-TabContents* GetTabContentsFromDelegate(LocationBarView::Delegate* delegate) {
+WebContents* GetWebContentsFromDelegate(LocationBarView::Delegate* delegate) {
   const TabContentsWrapper* wrapper = delegate->GetTabContentsWrapper();
-  return wrapper ? wrapper->tab_contents() : NULL;
+  return wrapper ? wrapper->web_contents() : NULL;
+}
+
+// A utility function to cast OmniboxView to OmniboxViewViews.
+OmniboxViewViews* AsViews(OmniboxView* view) {
+  DCHECK(views::Widget::IsPureViews());
+  return static_cast<OmniboxViewViews*>(view);
 }
 
 }  // namespace
@@ -130,11 +137,9 @@ LocationBarView::LocationBarView(Browser* browser,
       star_view_(NULL),
       mode_(mode),
       show_focus_rect_(false),
-      bubble_type_(FirstRun::MINIMAL_BUBBLE),
       template_url_service_(NULL),
       animation_offset_(0) {
   set_id(VIEW_ID_LOCATION_BAR);
-  set_focusable(true);
 
   if (mode_ == NORMAL) {
     painter_.reset(
@@ -193,6 +198,7 @@ void LocationBarView::Init() {
       browser_->command_updater(),
       mode_ == POPUP,
       this));
+  SetLocationEntryFocusable(true);
 
   location_entry_view_ = location_entry_->AddToView(this);
   location_entry_view_->set_id(VIEW_ID_AUTOCOMPLETE);
@@ -293,7 +299,7 @@ void LocationBarView::SetAnimationOffset(int offset) {
   animation_offset_ = offset;
 }
 
-void LocationBarView::Update(const TabContents* tab_for_state_restoring) {
+void LocationBarView::Update(const WebContents* tab_for_state_restoring) {
   bool star_enabled = star_view_ && !model_->input_in_progress() &&
                       edit_bookmarks_enabled_.GetValue();
   browser_->command_updater()->UpdateCommandEnabled(
@@ -342,7 +348,10 @@ void LocationBarView::InvalidatePageActions() {
 }
 
 void LocationBarView::OnFocus() {
-  // Focus the view widget first which implements accessibility for Chrome OS.
+  // Focus the view widget first which implements accessibility for
+  // Chrome OS.  It is noop on Win. This should be removed once
+  // Chrome OS migrates to aura, which uses Views' textfield that receives
+  // focus. See crbug.com/106428.
   GetWidget()->NotifyAccessibilityEvent(
       this, ui::AccessibilityTypes::EVENT_FOCUS, false);
 
@@ -357,7 +366,7 @@ void LocationBarView::SetPreviewEnabledPageAction(ExtensionAction* page_action,
     return;
 
   DCHECK(page_action);
-  TabContents* contents = GetTabContentsFromDelegate(delegate_);
+  WebContents* contents = GetWebContentsFromDelegate(delegate_);
 
   RefreshPageActionViews();
   PageActionWithBadgeView* page_action_view =
@@ -367,8 +376,7 @@ void LocationBarView::SetPreviewEnabledPageAction(ExtensionAction* page_action,
     return;
 
   page_action_view->image_view()->set_preview_enabled(preview_enabled);
-  page_action_view->UpdateVisibility(contents,
-      GURL(model_->GetText()));
+  page_action_view->UpdateVisibility(contents, GURL(model_->GetText()));
   Layout();
   SchedulePaint();
 }
@@ -441,6 +449,19 @@ string16 LocationBarView::GetInstantSuggestion() const {
 }
 #endif
 
+void LocationBarView::SetLocationEntryFocusable(bool focusable) {
+  if (views::Widget::IsPureViews())
+    AsViews(location_entry_.get())->SetLocationEntryFocusable(focusable);
+  else
+    set_focusable(focusable);
+}
+
+bool LocationBarView::IsLocationEntryFocusableInRootView() const {
+  return views::Widget::IsPureViews() ?
+      AsViews(location_entry_.get())->IsLocationEntryFocusableInRootView() :
+      views::View::IsFocusable();
+}
+
 gfx::Size LocationBarView::GetPreferredSize() {
   return gfx::Size(0, GetThemeProvider()->GetBitmapNamed(mode_ == POPUP ?
       IDR_LOCATIONBG_POPUPMODE_CENTER : IDR_LOCATIONBG_C)->height());
@@ -503,16 +524,16 @@ void LocationBarView::Layout() {
         kItemEditPadding);
   }
 
-  if (star_view_ && star_view_->IsVisible())
+  if (star_view_ && star_view_->visible())
     entry_width -= star_view_->GetPreferredSize().width() + kItemPadding;
   for (PageActionViews::const_iterator i(page_action_views_.begin());
        i != page_action_views_.end(); ++i) {
-    if ((*i)->IsVisible())
+    if ((*i)->visible())
       entry_width -= ((*i)->GetPreferredSize().width() + kItemPadding);
   }
   for (ContentSettingViews::const_iterator i(content_setting_views_.begin());
        i != content_setting_views_.end(); ++i) {
-    if ((*i)->IsVisible())
+    if ((*i)->visible())
       entry_width -= ((*i)->GetPreferredSize().width() + kItemPadding);
   }
   // The gap between the edit and whatever is to its right is shortened.
@@ -565,7 +586,7 @@ void LocationBarView::Layout() {
 
   // Lay out items to the right of the edit field.
   int offset = width() - kEdgeThickness - kEdgeItemPadding;
-  if (star_view_ && star_view_->IsVisible()) {
+  if (star_view_ && star_view_->visible()) {
     int star_width = star_view_->GetPreferredSize().width();
     offset -= star_width;
     star_view_->SetBounds(offset, location_y, star_width, location_height);
@@ -574,7 +595,7 @@ void LocationBarView::Layout() {
 
   for (PageActionViews::const_iterator i(page_action_views_.begin());
        i != page_action_views_.end(); ++i) {
-    if ((*i)->IsVisible()) {
+    if ((*i)->visible()) {
       int page_action_width = (*i)->GetPreferredSize().width();
       offset -= page_action_width;
       (*i)->SetBounds(offset, location_y, page_action_width, location_height);
@@ -586,7 +607,7 @@ void LocationBarView::Layout() {
   for (ContentSettingViews::const_reverse_iterator
        i(content_setting_views_.rbegin()); i != content_setting_views_.rend();
        ++i) {
-    if ((*i)->IsVisible()) {
+    if ((*i)->visible()) {
       int content_blocked_width = (*i)->GetPreferredSize().width();
       offset -= content_blocked_width;
       (*i)->SetBounds(offset, location_y, content_blocked_width,
@@ -596,11 +617,11 @@ void LocationBarView::Layout() {
   }
 
   // Now lay out items to the left of the edit field.
-  if (location_icon_view_->IsVisible()) {
+  if (location_icon_view_->visible()) {
     location_icon_view_->SetBounds(kEdgeThickness + kEdgeItemPadding,
         location_y, location_icon_width, location_height);
     offset = location_icon_view_->bounds().right() + kItemEditPadding;
-  } else if (ev_bubble_view_->IsVisible()) {
+  } else if (ev_bubble_view_->visible()) {
     ev_bubble_view_->SetBounds(kEdgeThickness + kBubbleHorizontalPadding,
         location_y + kBubbleVerticalPadding, ev_bubble_width,
         ev_bubble_view_->GetPreferredSize().height());
@@ -618,7 +639,7 @@ void LocationBarView::Layout() {
         0, selected_keyword_view_->GetPreferredSize().height());
     LayoutView(selected_keyword_view_, kItemEditPadding, available_width,
                true, &location_bounds);
-    location_bounds.set_x(selected_keyword_view_->IsVisible() ?
+    location_bounds.set_x(selected_keyword_view_->visible() ?
         (offset + selected_keyword_view_->width() + kItemEditPadding) :
         (kEdgeThickness + kEdgeEditPadding));
   } else if (show_keyword_hint) {
@@ -630,7 +651,7 @@ void LocationBarView::Layout() {
     location_bounds.Inset(0, 0, kEditInternalSpace, 0);
     LayoutView(keyword_hint_view_, kItemEditPadding, available_width, false,
                &location_bounds);
-    if (!keyword_hint_view_->IsVisible()) {
+    if (!keyword_hint_view_->visible()) {
       // Put back the enlargement that we undid above.
       location_bounds.Inset(0, 0, -kEditInternalSpace, 0);
     }
@@ -860,7 +881,7 @@ SkBitmap LocationBarView::GetFavicon() const {
 }
 
 string16 LocationBarView::GetTitle() const {
-  return GetTabContentsFromDelegate(delegate_)->GetTitle();
+  return GetWebContentsFromDelegate(delegate_)->GetTitle();
 }
 
 InstantController* LocationBarView::GetInstant() {
@@ -886,7 +907,7 @@ void LocationBarView::LayoutView(views::View* view,
     view_size = view->GetMinimumSize();
   int desired_width = view_size.width() + padding;
   view->SetVisible(desired_width < bounds->width());
-  if (view->IsVisible()) {
+  if (view->visible()) {
     view->SetBounds(
         leading ? bounds->x() : (bounds->right() - view_size.width()),
         view->y(), view_size.width(), view->height());
@@ -897,8 +918,8 @@ void LocationBarView::LayoutView(views::View* view,
 void LocationBarView::RefreshContentSettingViews() {
   for (ContentSettingViews::const_iterator i(content_setting_views_.begin());
        i != content_setting_views_.end(); ++i) {
-    (*i)->UpdateFromTabContents(model_->input_in_progress() ? NULL :
-                                GetTabContentsFromDelegate(delegate_));
+    (*i)->UpdateFromWebContents(model_->input_in_progress() ? NULL :
+                                GetWebContentsFromDelegate(delegate_));
   }
 }
 
@@ -920,14 +941,15 @@ void LocationBarView::RefreshPageActionViews() {
   std::map<ExtensionAction*, bool> old_visibility;
   for (PageActionViews::const_iterator i(page_action_views_.begin());
        i != page_action_views_.end(); ++i)
-    old_visibility[(*i)->image_view()->page_action()] = (*i)->IsVisible();
+    old_visibility[(*i)->image_view()->page_action()] = (*i)->visible();
 
   // Remember the previous visibility of the page actions so that we can
   // notify when this changes.
   std::vector<ExtensionAction*> page_actions;
-  for (size_t i = 0; i < service->extensions()->size(); ++i) {
-    if (service->extensions()->at(i)->page_action())
-      page_actions.push_back(service->extensions()->at(i)->page_action());
+  for (ExtensionSet::const_iterator it = service->extensions()->begin();
+       it != service->extensions()->end(); ++it) {
+    if ((*it)->page_action())
+      page_actions.push_back((*it)->page_action());
   }
 
   // On startup we sometimes haven't loaded any extensions. This makes sure
@@ -947,7 +969,7 @@ void LocationBarView::RefreshPageActionViews() {
     }
   }
 
-  TabContents* contents = GetTabContentsFromDelegate(delegate_);
+  WebContents* contents = GetWebContentsFromDelegate(delegate_);
   if (!page_action_views_.empty() && contents) {
     GURL url = GURL(model_->GetText());
 
@@ -959,11 +981,11 @@ void LocationBarView::RefreshPageActionViews() {
       // Check if the visibility of the action changed and notify if it did.
       ExtensionAction* action = (*i)->image_view()->page_action();
       if (old_visibility.find(action) == old_visibility.end() ||
-          old_visibility[action] != (*i)->IsVisible()) {
+          old_visibility[action] != (*i)->visible()) {
         content::NotificationService::current()->Notify(
             chrome::NOTIFICATION_EXTENSION_PAGE_ACTION_VISIBILITY_CHANGED,
             content::Source<ExtensionAction>(action),
-            content::Details<TabContents>(contents));
+            content::Details<WebContents>(contents));
       }
     }
   }
@@ -981,14 +1003,10 @@ void LocationBarView::OnMouseEvent(const views::MouseEvent& event, UINT msg) {
 }
 #endif
 
-void LocationBarView::ShowFirstRunBubbleInternal(
-    FirstRun::BubbleType bubble_type) {
+void LocationBarView::ShowFirstRunBubbleInternal() {
 #if !defined(OS_CHROMEOS)
   // First run bubble doesn't make sense for Chrome OS.
-  FirstRunBubble::ShowBubble(browser_->profile(),
-                             location_icon_view_,
-                             views::BubbleBorder::TOP_LEFT,
-                             bubble_type);
+  FirstRunBubble::ShowBubble(browser_->profile(), location_icon_view_);
 #endif
 }
 
@@ -1005,7 +1023,7 @@ bool LocationBarView::SkipDefaultKeyEventProcessing(
       // Return true so that the edit sees the tab and commits the suggestion.
       return true;
     }
-    if (keyword_hint_view_->IsVisible() && !event.IsShiftDown()) {
+    if (keyword_hint_view_->visible() && !event.IsShiftDown()) {
       // Return true so the edit gets the tab event and enters keyword mode.
       return true;
     }
@@ -1057,8 +1075,8 @@ void LocationBarView::WriteDragDataForView(views::View* sender,
   TabContentsWrapper* tab_contents = delegate_->GetTabContentsWrapper();
   DCHECK(tab_contents);
   drag_utils::SetURLAndDragImage(
-      tab_contents->tab_contents()->GetURL(),
-      tab_contents->tab_contents()->GetTitle(),
+      tab_contents->web_contents()->GetURL(),
+      tab_contents->web_contents()->GetTitle(),
       tab_contents->favicon_tab_helper()->GetFavicon(),
       data);
 }
@@ -1066,8 +1084,8 @@ void LocationBarView::WriteDragDataForView(views::View* sender,
 int LocationBarView::GetDragOperationsForView(views::View* sender,
                                               const gfx::Point& p) {
   DCHECK((sender == location_icon_view_) || (sender == ev_bubble_view_));
-  TabContents* tab_contents = GetTabContentsFromDelegate(delegate_);
-  return (tab_contents && tab_contents->GetURL().is_valid() &&
+  WebContents* web_contents = GetWebContentsFromDelegate(delegate_);
+  return (web_contents && web_contents->GetURL().is_valid() &&
           !location_entry()->IsEditingOrEmpty()) ?
       (ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_LINK) :
       ui::DragDropTypes::DRAG_NONE;
@@ -1082,18 +1100,17 @@ bool LocationBarView::CanStartDragForView(View* sender,
 ////////////////////////////////////////////////////////////////////////////////
 // LocationBarView, LocationBar implementation:
 
-void LocationBarView::ShowFirstRunBubble(FirstRun::BubbleType bubble_type) {
+void LocationBarView::ShowFirstRunBubble() {
   // Wait until search engines have loaded to show the first run bubble.
   TemplateURLService* url_service =
       TemplateURLServiceFactory::GetForProfile(browser_->profile());
   if (!url_service->loaded()) {
-    bubble_type_ = bubble_type;
     template_url_service_ = url_service;
     template_url_service_->AddObserver(this);
     template_url_service_->Load();
     return;
   }
-  ShowFirstRunBubbleInternal(bubble_type);
+  ShowFirstRunBubbleInternal();
 }
 
 void LocationBarView::SetSuggestedText(const string16& text,
@@ -1128,7 +1145,7 @@ void LocationBarView::FocusSearch() {
   location_entry_->SetForcedQuery();
 }
 
-void LocationBarView::SaveStateToContents(TabContents* contents) {
+void LocationBarView::SaveStateToContents(WebContents* contents) {
   location_entry_->SaveStateToTab(contents);
 }
 
@@ -1155,7 +1172,7 @@ int LocationBarView::PageActionCount() {
 int LocationBarView::PageActionVisibleCount() {
   int result = 0;
   for (size_t i = 0; i < page_action_views_.size(); i++) {
-    if (page_action_views_[i]->IsVisible())
+    if (page_action_views_[i]->visible())
       ++result;
   }
   return result;
@@ -1172,7 +1189,7 @@ ExtensionAction* LocationBarView::GetPageAction(size_t index) {
 ExtensionAction* LocationBarView::GetVisiblePageAction(size_t index) {
   size_t current = 0;
   for (size_t i = 0; i < page_action_views_.size(); ++i) {
-    if (page_action_views_[i]->IsVisible()) {
+    if (page_action_views_[i]->visible()) {
       if (current == index)
         return page_action_views_[i]->image_view()->page_action();
 
@@ -1187,7 +1204,7 @@ ExtensionAction* LocationBarView::GetVisiblePageAction(size_t index) {
 void LocationBarView::TestPageActionPressed(size_t index) {
   size_t current = 0;
   for (size_t i = 0; i < page_action_views_.size(); ++i) {
-    if (page_action_views_[i]->IsVisible()) {
+    if (page_action_views_[i]->visible()) {
       if (current == index) {
         const int kLeftMouseButton = 1;
         page_action_views_[i]->image_view()->ExecuteAction(kLeftMouseButton,
@@ -1207,7 +1224,7 @@ void LocationBarView::OnTemplateURLServiceChanged() {
   // If the browser is no longer active, let's not show the info bubble, as this
   // would make the browser the active window again.
   if (location_entry_view_ && location_entry_view_->GetWidget()->IsActive())
-    ShowFirstRunBubble(bubble_type_);
+    ShowFirstRunBubble();
 }
 
 void LocationBarView::Observe(int type,

@@ -1,12 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/plugins/ppapi/mock_plugin_delegate.h"
 
+#include "base/logging.h"
 #include "base/message_loop_proxy.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/shared_impl/ppapi_preferences.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGamepads.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 
 namespace webkit {
@@ -346,11 +348,15 @@ base::SharedMemory* MockPluginDelegate::CreateAnonymousSharedMemory(
   return ::ppapi::Preferences();
 }
 
-void MockPluginDelegate::LockMouse(PluginInstance* instance) {
-  instance->OnLockMouseACK(PP_ERROR_FAILED);
+bool MockPluginDelegate::LockMouse(PluginInstance* instance) {
+  return false;
 }
 
 void MockPluginDelegate::UnlockMouse(PluginInstance* instance) {
+}
+
+bool MockPluginDelegate::IsMouseLocked(PluginInstance* instance) {
+  return false;
 }
 
 void MockPluginDelegate::DidChangeCursor(PluginInstance* instance,
@@ -360,8 +366,16 @@ void MockPluginDelegate::DidChangeCursor(PluginInstance* instance,
 void MockPluginDelegate::DidReceiveMouseEvent(PluginInstance* instance) {
 }
 
+void MockPluginDelegate::SampleGamepads(WebKit::WebGamepads* data) {
+  data->length = 0;
+}
+
 bool MockPluginDelegate::IsInFullscreenMode() {
   return false;
+}
+
+bool MockPluginDelegate::IsPageVisible() const {
+  return true;
 }
 
 }  // namespace ppapi

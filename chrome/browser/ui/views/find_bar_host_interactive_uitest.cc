@@ -15,14 +15,16 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "net/test/test_server.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/view.h"
 #include "ui/views/views_delegate.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -38,7 +40,13 @@ void Checkpoint(const char* message, const base::TimeTicks& start_time) {
 
 class FindInPageTest : public InProcessBrowserTest {
  public:
-  FindInPageTest() {
+  FindInPageTest() :
+#if defined(USE_AURA)
+      location_bar_focus_view_id_(VIEW_ID_OMNIBOX)
+#else
+      location_bar_focus_view_id_(VIEW_ID_LOCATION_BAR)
+#endif
+  {
     set_show_window(true);
     FindBarHost::disable_animations_during_testing_ = true;
   }
@@ -54,11 +62,17 @@ class FindInPageTest : public InProcessBrowserTest {
         browser()->GetFindBarController()->find_bar()->GetFindBarTesting();
     return find_bar->GetFindSelectedText();
   }
+
+  ViewID location_bar_focus_view_id_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(FindInPageTest);
 };
 
 }  // namespace
 
-#if defined(TOOLKIT_USES_GTK)
+// Flaky, see crbug.com/109906.
+#if defined(TOOLKIT_USES_GTK) || defined(USE_AURA)
 #define MAYBE_CrashEscHandlers FLAKY_CrashEscHandlers
 #else
 #define MAYBE_CrashEscHandlers CrashEscHandlers
@@ -84,15 +98,14 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_CrashEscHandlers) {
   browser()->ActivateTabAt(0, true);
 
   // Close tab B.
-  browser()->CloseTabContents(browser()->GetTabContentsAt(1));
+  browser()->CloseTabContents(browser()->GetWebContentsAt(1));
 
   // Click on the location bar so that Find box loses focus.
   ASSERT_NO_FATAL_FAILURE(ui_test_utils::ClickOnView(browser(),
                                                      VIEW_ID_LOCATION_BAR));
-#if defined(TOOLKIT_VIEWS) || defined(OS_WIN)
   // Check the location bar is focused.
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_LOCATION_BAR));
-#endif
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                           location_bar_focus_view_id_));
 
   // This used to crash until bug 1303709 was fixed.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
@@ -108,14 +121,16 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   // Focus the location bar, open and close the find-in-page, focus should
   // return to the location bar.
   browser()->FocusLocationBar();
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_LOCATION_BAR));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                           location_bar_focus_view_id_));
   // Ensure the creation of the find bar controller.
   browser()->GetFindBarController()->Show();
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
                                            VIEW_ID_FIND_IN_PAGE_TEXT_FIELD));
   browser()->GetFindBarController()->EndFindSession(
       FindBarController::kKeepSelection);
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_LOCATION_BAR));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                           location_bar_focus_view_id_));
 
   // Focus the location bar, find something on the page, close the find box,
   // focus should go to the page.
@@ -134,13 +149,15 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestore) {
   // the location bar (same as before, just checking that http://crbug.com/23599
   // is fixed).
   browser()->FocusLocationBar();
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_LOCATION_BAR));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                           location_bar_focus_view_id_));
   browser()->GetFindBarController()->Show();
   EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
                                            VIEW_ID_FIND_IN_PAGE_TEXT_FIELD));
   browser()->GetFindBarController()->EndFindSession(
       FindBarController::kKeepSelection);
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_LOCATION_BAR));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                           location_bar_focus_view_id_));
 }
 
 IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
@@ -181,7 +198,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
 
   // Set focus away from the Find bar (to the Location bar).
   browser()->FocusLocationBar();
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_LOCATION_BAR));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                           location_bar_focus_view_id_));
 
   // Select tab A. Find bar should get focus.
   browser()->ActivateTabAt(0, true);
@@ -191,7 +209,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, FocusRestoreOnTabSwitch) {
 
   // Select tab B. Location bar should get focus.
   browser()->ActivateTabAt(1, true);
-  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_LOCATION_BAR));
+  EXPECT_TRUE(ui_test_utils::IsViewFocused(browser(),
+                                           location_bar_focus_view_id_));
 }
 
 // This tests that whenever you clear values from the Find box and close it that
@@ -334,8 +353,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageTest, MAYBE_PasteWithoutTextChange) {
 
   // Press Ctrl-V to paste the content back, it should start finding even if the
   // content is not changed.
-  content::Source<TabContents> notification_source(
-      browser()->GetSelectedTabContents());
+  content::Source<WebContents> notification_source(
+      browser()->GetSelectedWebContents());
   ui_test_utils::WindowedNotificationObserverWithDetails
       <FindNotificationDetails> observer(
           chrome::NOTIFICATION_FIND_RESULT_AVAILABLE, notification_source);

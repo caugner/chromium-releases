@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,16 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "chrome/browser/policy/cloud_policy_cache_base.h"
+#include "chrome/browser/policy/cloud_policy_constants.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/delayed_work_scheduler.h"
 #include "chrome/browser/policy/device_management_service.h"
 #include "chrome/browser/policy/device_token_fetcher.h"
 #include "chrome/browser/policy/enterprise_metrics.h"
 #include "chrome/browser/policy/policy_notifier.h"
-#include "chrome/browser/policy/proto/device_management_constants.h"
 #include "chrome/common/guid.h"
+
+namespace policy {
 
 namespace {
 
@@ -64,9 +66,46 @@ bool CanBeInManagedDomain(const std::string& username) {
   return true;
 }
 
-}  // namespace
+// Records the UMA metric corresponding to |status|, if it represents an error.
+// Also records that a fetch response was received.
+void SampleErrorStatus(DeviceManagementStatus status) {
+  UMA_HISTOGRAM_ENUMERATION(kMetricPolicy,
+                            kMetricPolicyFetchResponseReceived,
+                            kMetricPolicySize);
+  int sample = -1;
+  switch (status) {
+    case DM_STATUS_SUCCESS:
+      return;
+    case DM_STATUS_SERVICE_POLICY_NOT_FOUND:
+      sample = kMetricPolicyFetchNotFound;
+      break;
+    case DM_STATUS_SERVICE_DEVICE_NOT_FOUND:
+      sample = kMetricPolicyFetchInvalidToken;
+      break;
+    case DM_STATUS_RESPONSE_DECODING_ERROR:
+      sample = kMetricPolicyFetchBadResponse;
+      break;
+    case DM_STATUS_REQUEST_FAILED:
+    case DM_STATUS_REQUEST_INVALID:
+    case DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID:
+      sample = kMetricPolicyFetchRequestFailed;
+      break;
+    case DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED:
+    case DM_STATUS_SERVICE_DEVICE_ID_CONFLICT:
+    case DM_STATUS_SERVICE_INVALID_SERIAL_NUMBER:
+    case DM_STATUS_TEMPORARY_UNAVAILABLE:
+    case DM_STATUS_SERVICE_ACTIVATION_PENDING:
+    case DM_STATUS_HTTP_STATUS_ERROR:
+      sample = kMetricPolicyFetchServerFailed;
+      break;
+  }
+  if (sample != -1)
+    UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, sample, kMetricPolicySize);
+  else
+    NOTREACHED();
+}
 
-namespace policy {
+}  // namespace
 
 namespace em = enterprise_management;
 
@@ -106,71 +145,95 @@ void CloudPolicyController::Reset() {
   SetState(STATE_TOKEN_UNAVAILABLE);
 }
 
-void CloudPolicyController::HandlePolicyResponse(
-    const em::DevicePolicyResponse& response) {
-  if (response.response_size() > 0) {
-    if (response.response_size() > 1) {
-      LOG(WARNING) << "More than one policy in the response of the device "
-                   << "management server, discarding.";
-    }
-    if (!response.response(0).has_error_code() ||
-        response.response(0).error_code() ==
-            DeviceManagementBackend::kPolicyFetchSuccess) {
-      cache_->SetPolicy(response.response(0));
-      SetState(STATE_POLICY_VALID);
+void CloudPolicyController::RefreshPolicies() {
+  // This call must eventually trigger a notification to the cache.
+  if (data_store_->device_token().empty()) {
+    // The DMToken has to be fetched.
+    if (ReadyToFetchToken()) {
+      SetState(STATE_TOKEN_UNAVAILABLE);
     } else {
-      UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchBadResponse,
-                                kMetricPolicySize);
-      SetState(STATE_POLICY_UNAVAILABLE);
+      // The controller doesn't have enough material to start a token fetch,
+      // but observers of the cache are waiting for the refresh.
+      SetState(STATE_TOKEN_UNMANAGED);
     }
   } else {
-    UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchBadResponse,
-                              kMetricPolicySize);
-    SetState(STATE_POLICY_UNAVAILABLE);
+    // The token is valid, so the next step is to fetch policy.
+    SetState(STATE_TOKEN_VALID);
   }
 }
 
-void CloudPolicyController::OnError(DeviceManagementBackend::ErrorCode code) {
-  switch (code) {
-    case DeviceManagementBackend::kErrorServiceDeviceNotFound:
-    case DeviceManagementBackend::kErrorServiceDeviceIdConflict:
-    case DeviceManagementBackend::kErrorServiceManagementTokenInvalid: {
+void CloudPolicyController::OnPolicyFetchCompleted(
+    DeviceManagementStatus status,
+    const em::DeviceManagementResponse& response) {
+  if (status == DM_STATUS_SUCCESS && !response.has_policy_response()) {
+    // Handled below.
+    status = DM_STATUS_RESPONSE_DECODING_ERROR;
+  }
+
+  SampleErrorStatus(status);
+
+  switch (status) {
+    case DM_STATUS_SUCCESS: {
+      const em::DevicePolicyResponse& policy_response(
+          response.policy_response());
+      if (policy_response.response_size() > 0) {
+        if (policy_response.response_size() > 1) {
+          LOG(WARNING) << "More than one policy in the response of the device "
+                       << "management server, discarding.";
+        }
+        const em::PolicyFetchResponse& fetch_response(
+            policy_response.response(0));
+        if (!fetch_response.has_error_code() ||
+            fetch_response.error_code() == dm_protocol::POLICY_FETCH_SUCCESS) {
+          cache_->SetPolicy(fetch_response);
+          SetState(STATE_POLICY_VALID);
+        } else {
+          UMA_HISTOGRAM_ENUMERATION(kMetricPolicy,
+                                    kMetricPolicyFetchBadResponse,
+                                    kMetricPolicySize);
+          SetState(STATE_POLICY_UNAVAILABLE);
+        }
+      } else {
+        UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchBadResponse,
+                                  kMetricPolicySize);
+        SetState(STATE_POLICY_UNAVAILABLE);
+      }
+      return;
+    }
+    case DM_STATUS_SERVICE_DEVICE_NOT_FOUND:
+    case DM_STATUS_SERVICE_DEVICE_ID_CONFLICT:
+    case DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID:
       LOG(WARNING) << "The device token was either invalid or unknown to the "
                    << "device manager, re-registering device.";
       // Will retry fetching a token but gracefully backing off.
       SetState(STATE_TOKEN_ERROR);
       return;
-    }
-    case DeviceManagementBackend::kErrorServiceInvalidSerialNumber: {
+    case DM_STATUS_SERVICE_INVALID_SERIAL_NUMBER:
       VLOG(1) << "The device is no longer enlisted for the domain.";
       token_fetcher_->SetSerialNumberInvalidState();
       SetState(STATE_TOKEN_ERROR);
       return;
-    }
-    case DeviceManagementBackend::kErrorServiceManagementNotSupported: {
+    case DM_STATUS_SERVICE_MANAGEMENT_NOT_SUPPORTED:
       VLOG(1) << "The device is no longer managed.";
       token_fetcher_->SetUnmanagedState();
       SetState(STATE_TOKEN_UNMANAGED);
       return;
-    }
-    case DeviceManagementBackend::kErrorServicePolicyNotFound:
-    case DeviceManagementBackend::kErrorRequestInvalid:
-    case DeviceManagementBackend::kErrorServiceActivationPending:
-    case DeviceManagementBackend::kErrorResponseDecoding:
-    case DeviceManagementBackend::kErrorHttpStatus: {
+    case DM_STATUS_SERVICE_POLICY_NOT_FOUND:
+    case DM_STATUS_REQUEST_INVALID:
+    case DM_STATUS_SERVICE_ACTIVATION_PENDING:
+    case DM_STATUS_RESPONSE_DECODING_ERROR:
+    case DM_STATUS_HTTP_STATUS_ERROR:
       VLOG(1) << "An error in the communication with the policy server occurred"
               << ", will retry in a few hours.";
       SetState(STATE_POLICY_UNAVAILABLE);
       return;
-    }
-    case DeviceManagementBackend::kErrorRequestFailed:
-    case DeviceManagementBackend::kErrorTemporaryUnavailable: {
+    case DM_STATUS_REQUEST_FAILED:
+    case DM_STATUS_TEMPORARY_UNAVAILABLE:
       VLOG(1) << "A temporary error in the communication with the policy server"
               << " occurred.";
       // Will retry last operation but gracefully backing off.
       SetState(STATE_POLICY_ERROR);
       return;
-    }
   }
 
   NOTREACHED();
@@ -240,10 +303,14 @@ void CloudPolicyController::Initialize(
     SetState(STATE_TOKEN_UNAVAILABLE);
 }
 
+bool CloudPolicyController::ReadyToFetchToken() {
+  return data_store_->token_cache_loaded() &&
+         !data_store_->user_name().empty() &&
+         data_store_->has_auth_token();
+}
+
 void CloudPolicyController::FetchToken() {
-  if (data_store_->token_cache_loaded() &&
-      !data_store_->user_name().empty() &&
-      data_store_->has_auth_token()) {
+  if (ReadyToFetchToken()) {
     if (CanBeInManagedDomain(data_store_->user_name())) {
       // Generate a new random device id. (It'll only be kept if registration
       // succeeds.)
@@ -258,12 +325,21 @@ void CloudPolicyController::FetchToken() {
 }
 
 void CloudPolicyController::SendPolicyRequest() {
-  backend_.reset(service_->CreateBackend());
   DCHECK(!data_store_->device_token().empty());
-  em::DevicePolicyRequest policy_request;
-  em::PolicyFetchRequest* fetch_request = policy_request.add_request();
+  request_job_.reset(
+      service_->CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH));
+  request_job_->SetDMToken(data_store_->device_token());
+  request_job_->SetClientID(data_store_->device_id());
+  request_job_->SetUserAffiliation(data_store_->user_affiliation());
+
+  em::DeviceManagementRequest* request = request_job_->GetRequest();
+  em::PolicyFetchRequest* fetch_request =
+      request->mutable_policy_request()->add_request();
+  em::DeviceStatusReportRequest device_status;
   fetch_request->set_signature_type(em::PolicyFetchRequest::SHA1_RSA);
   fetch_request->set_policy_type(data_store_->policy_type());
+  if (cache_->machine_id_missing() && !data_store_->machine_id().empty())
+    fetch_request->set_machine_id(data_store_->machine_id());
   if (!cache_->is_unmanaged() &&
       !cache_->last_policy_refresh_time().is_null()) {
     base::TimeDelta timestamp =
@@ -274,10 +350,17 @@ void CloudPolicyController::SendPolicyRequest() {
   if (cache_->GetPublicKeyVersion(&key_version))
     fetch_request->set_public_key_version(key_version);
 
-  backend_->ProcessPolicyRequest(data_store_->device_token(),
-                                 data_store_->device_id(),
-                                 data_store_->user_affiliation(),
-                                 policy_request, this);
+#if defined(OS_CHROMEOS)
+  if (data_store_->device_status_collector()) {
+    data_store_->device_status_collector()->GetStatus(
+        request->mutable_device_status_report_request());
+  }
+#endif
+
+  request_job_->Start(base::Bind(&CloudPolicyController::OnPolicyFetchCompleted,
+                                 base::Unretained(this)));
+  UMA_HISTOGRAM_ENUMERATION(kMetricPolicy, kMetricPolicyFetchRequested,
+                            kMetricPolicySize);
 }
 
 void CloudPolicyController::DoWork() {
@@ -303,7 +386,7 @@ void CloudPolicyController::SetState(
     CloudPolicyController::ControllerState new_state) {
   state_ = new_state;
 
-  backend_.reset();  // Stop any pending requests.
+  request_job_.reset();  // Stop any pending requests.
 
   base::Time now(base::Time::NowFromSystemTime());
   base::Time refresh_at;

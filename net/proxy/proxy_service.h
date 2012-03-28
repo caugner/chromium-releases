@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,10 @@ namespace net {
 
 class DhcpProxyScriptFetcher;
 class HostResolver;
-class InitProxyResolver;
 class NetworkDelegate;
 class ProxyResolver;
+class ProxyResolverScriptData;
+class ProxyScriptDecider;
 class ProxyScriptFetcher;
 
 // This class can be used to resolve the proxy server to use when loading a
@@ -42,6 +43,47 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
                                 public ProxyConfigService::Observer,
                                 NON_EXPORTED_BASE(public base::NonThreadSafe) {
  public:
+  // This interface defines the set of policies for when to poll the PAC
+  // script for changes.
+  //
+  // The polling policy decides what the next poll delay should be in
+  // milliseconds. It also decides how to wait for this delay -- either
+  // by starting a timer to do the poll at exactly |next_delay_ms|
+  // (MODE_USE_TIMER) or by waiting for the first network request issued after
+  // |next_delay_ms| (MODE_START_AFTER_ACTIVITY).
+  //
+  // The timer method is more precise and guarantees that polling happens when
+  // it was requested. However it has the disadvantage of causing spurious CPU
+  // and network activity. It is a reasonable choice to use for short poll
+  // intervals which only happen a couple times.
+  //
+  // However for repeated timers this will prevent the browser from going
+  // idle. MODE_START_AFTER_ACTIVITY solves this problem by only polling in
+  // direct response to network activity. The drawback to
+  // MODE_START_AFTER_ACTIVITY is since the poll is initiated only after the
+  // request is received, the first couple requests initiated after a long
+  // period of inactivity will likely see a stale version of the PAC script
+  // until the background polling gets a chance to update things.
+  class NET_EXPORT_PRIVATE PacPollPolicy {
+   public:
+    enum Mode {
+      MODE_USE_TIMER,
+      MODE_START_AFTER_ACTIVITY,
+    };
+
+    virtual ~PacPollPolicy() {}
+
+    // Decides the next poll delay. |current_delay| is the delay used
+    // by the preceding poll, or a negative TimeDelta value if determining
+    // the delay for the initial poll. |initial_error| is the network error
+    // code that the last PAC fetch (or WPAD initialization) failed with,
+    // or OK if it completed successfully. Implementations must set
+    // |next_delay| to a non-negative value.
+    virtual Mode GetNextDelay(int initial_error,
+                              base::TimeDelta current_delay,
+                              base::TimeDelta* next_delay) const = 0;
+  };
+
   // The instance takes ownership of |config_service| and |resolver|.
   // |net_log| is a possibly NULL destination to send log events to. It must
   // remain alive for the lifetime of this ProxyService.
@@ -67,7 +109,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // the caller will not need to cancel the request.
   //
   // We use the three possible proxy access types in the following order,
-  // doing fallback if one doesn't work.  See "init_proxy_resolver.h"
+  // doing fallback if one doesn't work.  See "pac_script_decider.h"
   // for the specifics.
   //   1.  WPAD auto-detection
   //   2.  PAC URL
@@ -76,7 +118,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // Profiling information for the request is saved to |net_log| if non-NULL.
   int ResolveProxy(const GURL& url,
                    ProxyInfo* results,
-                   OldCompletionCallback* callback,
+                   const net::CompletionCallback& callback,
                    PacRequest** pac_request,
                    const BoundNetLog& net_log);
 
@@ -94,7 +136,7 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // Profiling information for the request is saved to |net_log| if non-NULL.
   int ReconsiderProxyAfterError(const GURL& url,
                                 ProxyInfo* results,
-                                OldCompletionCallback* callback,
+                                const CompletionCallback& callback,
                                 PacRequest** pac_request,
                                 const BoundNetLog& net_log);
 
@@ -236,10 +278,21 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
     stall_proxy_auto_config_delay_ = delay;
   }
 
+  // This method should only be used by unit tests. Returns the previously
+  // active policy.
+  static const PacPollPolicy* set_pac_script_poll_policy(
+      const PacPollPolicy* policy);
+
+  // This method should only be used by unit tests. Creates an instance
+  // of the default internal PacPollPolicy used by ProxyService.
+  static scoped_ptr<PacPollPolicy> CreateDefaultPacPollPolicy();
+
  private:
   FRIEND_TEST_ALL_PREFIXES(ProxyServiceTest, UpdateConfigAfterFailedAutodetect);
   FRIEND_TEST_ALL_PREFIXES(ProxyServiceTest, UpdateConfigFromPACToDirect);
   friend class PacRequest;
+  class InitProxyResolver;
+  class ProxyScriptDeciderPoller;
 
   // TODO(eroman): change this to a std::set. Note that this requires updating
   // some tests in proxy_service_unittest.cc such as:
@@ -299,6 +352,12 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // Start initialization using |fetched_config_|.
   void InitializeUsingLastFetchedConfig();
 
+  // Start the initialization skipping past the "decision" phase.
+  void InitializeUsingDecidedConfig(
+      int decider_result,
+      ProxyResolverScriptData* script_data,
+      const ProxyConfig& effective_config);
+
   // NetworkChangeNotifier::IPAddressObserver
   // When this is called, we re-fetch PAC scripts and re-run WPAD.
   virtual void OnIPAddressChanged() OVERRIDE;
@@ -341,14 +400,14 @@ class NET_EXPORT ProxyService : public NetworkChangeNotifier::IPAddressObserver,
   // no need for DHCP PAC script fetching.
   scoped_ptr<DhcpProxyScriptFetcher> dhcp_proxy_script_fetcher_;
 
-  // Callback for when |init_proxy_resolver_| is done.
-  OldCompletionCallbackImpl<ProxyService> init_proxy_resolver_callback_;
-
   // Helper to download the PAC script (wpad + custom) and apply fallback rules.
   //
   // Note that the declaration is important here: |proxy_script_fetcher_| and
   // |proxy_resolver_| must outlive |init_proxy_resolver_|.
   scoped_ptr<InitProxyResolver> init_proxy_resolver_;
+
+  // Helper to poll the PAC script for changes.
+  scoped_ptr<ProxyScriptDeciderPoller> script_poller_;
 
   State current_state_;
 
@@ -398,7 +457,7 @@ class NET_EXPORT SyncProxyServiceHelper
   ProxyService* proxy_service_;
 
   base::WaitableEvent event_;
-  OldCompletionCallbackImpl<SyncProxyServiceHelper> callback_;
+  CompletionCallback callback_;
   ProxyInfo proxy_info_;
   int result_;
 };

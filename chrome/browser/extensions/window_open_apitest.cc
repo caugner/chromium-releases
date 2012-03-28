@@ -15,6 +15,9 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "net/base/mock_host_resolver.h"
 
+using content::OpenURLParams;
+using content::Referrer;
+
 // Disabled, http://crbug.com/64899.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, DISABLED_WindowOpen) {
   CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -160,10 +163,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, PopupBlockingHostedApp) {
       test_server()->GetURL(popup_app_contents_path + "open_popup.html")
           .ReplaceComponents(replace_host);
 
-  browser()->OpenURL(open_tab, GURL(), NEW_FOREGROUND_TAB,
-                     content::PAGE_TRANSITION_TYPED);
-  browser()->OpenURL(open_popup, GURL(), NEW_FOREGROUND_TAB,
-                     content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      open_tab, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_TYPED,
+      false));
+  browser()->OpenURL(OpenURLParams(
+      open_popup, Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_TYPED, false));
 
   WaitForTabsAndPopups(browser(), 3, 1, 0);
 }
@@ -185,18 +190,25 @@ IN_PROC_BROWSER_TEST_F(WindowOpenPanelDisabledTest,
   ASSERT_TRUE(RunExtensionTest("window_open/panel_not_enabled")) << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenPanel) {
+class WindowOpenPanelTest : public ExtensionApiTest {
+  virtual void SetUpCommandLine(CommandLine* command_line) {
+    ExtensionApiTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitch(switches::kEnablePanels);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenPanel) {
   ASSERT_TRUE(RunExtensionTest("window_open/panel")) << message_;
 }
 
 #if defined(OS_MACOSX) || defined(OS_WIN)
 // Focus test fails if there is no window manager on Linux.
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WindowOpenFocus) {
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest, WindowOpenFocus) {
   ASSERT_TRUE(RunExtensionTest("window_open/focus")) << message_;
 }
 #endif
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
+IN_PROC_BROWSER_TEST_F(WindowOpenPanelTest,
                        CloseNonExtensionPanelsOnUninstall) {
   ASSERT_TRUE(StartTestServer());
 

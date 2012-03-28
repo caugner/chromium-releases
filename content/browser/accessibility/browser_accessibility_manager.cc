@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -206,11 +206,17 @@ void BrowserAccessibilityManager::DoDefaultAction(
     delegate_->AccessibilityDoDefaultAction(node.renderer_id());
 }
 
-void BrowserAccessibilityManager::ChangeScrollPosition(
-    const BrowserAccessibility& node, int scroll_x, int scroll_y) {
+void BrowserAccessibilityManager::ScrollToMakeVisible(
+    const BrowserAccessibility& node, gfx::Rect subfocus) {
   if (delegate_) {
-    delegate_->AccessibilityChangeScrollPosition(
-        node.renderer_id(), scroll_x, scroll_y);
+    delegate_->AccessibilityScrollToMakeVisible(node.renderer_id(), subfocus);
+  }
+}
+
+void BrowserAccessibilityManager::ScrollToPoint(
+    const BrowserAccessibility& node, gfx::Point point) {
+  if (delegate_) {
+    delegate_->AccessibilityScrollToPoint(node.renderer_id(), point);
   }
 }
 
@@ -256,13 +262,13 @@ void BrowserAccessibilityManager::UpdateNode(
   // modify |current| directly and return - no tree changes are needed.
   if (!include_children) {
     DCHECK_EQ(0U, src.children.size());
-    current->Initialize(
+    current->PreInitialize(
         this,
         current->parent(),
         current->child_id(),
         current->index_in_parent(),
         src);
-    current->SendNodeUpdateEvents();
+    current->PostInitialize();
     return;
   }
 
@@ -337,20 +343,21 @@ BrowserAccessibility* BrowserAccessibilityManager::CreateAccessibilityTree(
     children_can_send_show_events = false;
   }
 
-  instance->Initialize(this, parent, child_id, index_in_parent, src);
+  instance->PreInitialize(this, parent, child_id, index_in_parent, src);
   child_id_map_[child_id] = instance;
   renderer_id_to_child_id_map_[src.id] = child_id;
 
-  if (src.role == WebAccessibility::ROLE_ROOT_WEB_AREA)
-    root_ = instance;
-
   if ((src.state >> WebAccessibility::STATE_FOCUSED) & 1)
     SetFocus(instance, false);
+
   for (int i = 0; i < static_cast<int>(src.children.size()); ++i) {
     BrowserAccessibility* child = CreateAccessibilityTree(
         instance, src.children[i], i, children_can_send_show_events);
     instance->AddChild(child);
   }
+
+  if (src.role == WebAccessibility::ROLE_ROOT_WEB_AREA)
+    root_ = instance;
 
   // Note: the purpose of send_show_events and children_can_send_show_events
   // is so that we send a single OBJECT_SHOW event for the root of a subtree
@@ -359,7 +366,7 @@ BrowserAccessibility* BrowserAccessibilityManager::CreateAccessibilityTree(
   if (send_show_events)
     NotifyAccessibilityEvent(ViewHostMsg_AccEvent::OBJECT_SHOW, instance);
 
-  instance->SendNodeUpdateEvents();
+  instance->PostInitialize();
 
   return instance;
 }

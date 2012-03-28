@@ -1,7 +1,7 @@
 /*
- * Copyright 2011 The Chromium Authors. All rights reserved.
- * Use of this source code is governed by a BSD-style license that can
- * be found in the LICENSE file.
+ * Copyright (c) 2012 The Chromium Authors. All rights reserved.
+ * Use of this source code is governed by a BSD-style license that can be
+ * found in the LICENSE file.
  */
 
 #ifndef NATIVE_CLIENT_SRC_SHARED_PPAPI_PROXY_OBJECT_SERIALIZE_H_
@@ -13,7 +13,8 @@ struct NaClSrpcChannel;
 
 namespace ppapi_proxy {
 
-const uint32_t kMaxVarSize = 64 * 1024;
+// The maximum size of a pre-allocated return parameter passed to SRPC.
+const uint32_t kMaxReturnVarSize = 64 * 1024;
 
 // Serialize one PP_Var to the location given in "bytes", using no more
 // than "*length" bytes .  If successful, "*length" reflects the number of
@@ -28,8 +29,7 @@ char* Serialize(const PP_Var* vars, uint32_t argc, uint32_t* length);
 // Deserialize a vector "bytes" of "length" bytes containing "argc" PP_Vars
 // into the vector of PP_Vars pointed to by "vars".  Returns true if
 // successful, or false otherwise.
-bool DeserializeTo(NaClSrpcChannel* channel,
-                   char* bytes,
+bool DeserializeTo(char* bytes,
                    uint32_t length,
                    uint32_t argc,
                    PP_Var* vars);

@@ -20,22 +20,13 @@ using media::AudioDeviceNames;
 class AudioInputDeviceTest
     : public ::testing::Test {
  protected:
+  AudioInputDeviceTest() : com_init_(ScopedCOMInitializer::kMTA) {
+    audio_manager_ = AudioManager::Create();
+  }
+
 #if defined(OS_WIN)
-  // Store current device-enumeration type to ensure that it can be restored
-  // after last test in this test suite.
-  static void SetUpTestCase() {
-    enumeration_type_ = static_cast<AudioManagerWin*>(
-        AudioManager::GetAudioManager())->enumeration_type();
-  }
-
-  // Restore pre-test state of device-enumeration type.
-  static void TearDownTestCase() {
-    static_cast<AudioManagerWin*>(
-      AudioManager::GetAudioManager())->SetEnumerationType(enumeration_type_);
-  }
-
-  bool SetMMDeviceEnumeration(AudioManager* audio_manager) {
-    AudioManagerWin* amw = static_cast<AudioManagerWin*>(audio_manager);
+  bool SetMMDeviceEnumeration() {
+    AudioManagerWin* amw = static_cast<AudioManagerWin*>(audio_manager_.get());
     // Windows Wave is used as default if Windows XP was detected =>
     // return false since MMDevice is not supported on XP.
     if (amw->enumeration_type() == AudioManagerWin::kWaveEnumeration)
@@ -45,66 +36,53 @@ class AudioInputDeviceTest
     return true;
   }
 
-  void SetWaveEnumeration(AudioManager* audio_manager) {
-    AudioManagerWin* amw = static_cast<AudioManagerWin*>(audio_manager);
+  void SetWaveEnumeration() {
+    AudioManagerWin* amw = static_cast<AudioManagerWin*>(audio_manager_.get());
     amw->SetEnumerationType(AudioManagerWin::kWaveEnumeration);
   }
-
-  // Stores the pre-test state representing the device-enumeration type.
-  static AudioManagerWin::EnumerationType enumeration_type_;
-#endif
-};
-
-#if defined(OS_WIN)
-AudioManagerWin::EnumerationType AudioInputDeviceTest::enumeration_type_ =
-    AudioManagerWin::kUninitializedEnumeration;
 #endif
 
-// Convenience method which ensures that we are not running on the build
-// bots which lacks audio device support.
-static bool CanRunAudioTests() {
-  scoped_ptr<base::Environment> env(base::Environment::Create());
-  if (env->HasVar("CHROME_HEADLESS"))
-    return false;
-  return true;
-}
+  // Helper method which verifies that the device list starts with a valid
+  // default record followed by non-default device names.
+  static void CheckDeviceNames(const AudioDeviceNames& device_names) {
+    if (!device_names.empty()) {
+      AudioDeviceNames::const_iterator it = device_names.begin();
 
-// Helper method which verifies that the device list starts with a valid
-// default record followed by non-default device names.
-static void CheckDeviceNames(const AudioDeviceNames& device_names) {
-  if (!device_names.empty()) {
-    AudioDeviceNames::const_iterator it = device_names.begin();
-
-    // The first device in the list should always be the default device.
-    EXPECT_EQ(std::string(AudioManagerBase::kDefaultDeviceName),
-      it->device_name);
-    EXPECT_EQ(std::string(AudioManagerBase::kDefaultDeviceId), it->unique_id);
-    ++it;
-
-    // Other devices should have non-empty name and id and should not contain
-    // default name or id.
-    while (it != device_names.end()) {
-      EXPECT_FALSE(it->device_name.empty());
-      EXPECT_FALSE(it->unique_id.empty());
-      EXPECT_NE(std::string(AudioManagerBase::kDefaultDeviceName),
+      // The first device in the list should always be the default device.
+      EXPECT_EQ(std::string(AudioManagerBase::kDefaultDeviceName),
                 it->device_name);
-      EXPECT_NE(std::string(AudioManagerBase::kDefaultDeviceId),
-                it->unique_id);
+      EXPECT_EQ(std::string(AudioManagerBase::kDefaultDeviceId), it->unique_id);
       ++it;
+
+      // Other devices should have non-empty name and id and should not contain
+      // default name or id.
+      while (it != device_names.end()) {
+        EXPECT_FALSE(it->device_name.empty());
+        EXPECT_FALSE(it->unique_id.empty());
+        EXPECT_NE(std::string(AudioManagerBase::kDefaultDeviceName),
+                  it->device_name);
+        EXPECT_NE(std::string(AudioManagerBase::kDefaultDeviceId),
+                  it->unique_id);
+        ++it;
+      }
+    } else {
+      // Log a warning so we can see the status on the build bots.  No need to
+      // break the test though since this does successfully test the code and
+      // some failure cases.
+      LOG(WARNING) << "No input devices detected";
     }
   }
-}
+
+  scoped_refptr<AudioManager> audio_manager_;
+
+  // The MMDevice API requires COM to be initialized on the current thread.
+  ScopedCOMInitializer com_init_;
+};
 
 // Test that devices can be enumerated.
 TEST_F(AudioInputDeviceTest, EnumerateDevices) {
-  if (!CanRunAudioTests())
-    return;
-  // The MMDevice API requires a correct COM environment.
-  ScopedCOMInitializer com_init(ScopedCOMInitializer::kMTA);
   AudioDeviceNames device_names;
-  AudioManager* audio_man = AudioManager::GetAudioManager();
-  EXPECT_TRUE(audio_man != NULL);
-  audio_man->GetAudioInputDeviceNames(&device_names);
+  audio_manager_->GetAudioInputDeviceNames(&device_names);
   CheckDeviceNames(device_names);
 }
 
@@ -116,30 +94,22 @@ TEST_F(AudioInputDeviceTest, EnumerateDevices) {
 // Override default enumeration API and force usage of Windows MMDevice.
 // This test will only run on Windows Vista and higher.
 TEST_F(AudioInputDeviceTest, EnumerateDevicesWinMMDevice) {
-  if (!CanRunAudioTests())
-    return;
-  // The MMDevice API requires a correct COM environment.
-  ScopedCOMInitializer com_init(ScopedCOMInitializer::kMTA);
   AudioDeviceNames device_names;
-  AudioManager* audio_man = AudioManager::GetAudioManager();
-  if (!SetMMDeviceEnumeration(audio_man)) {
+  if (!SetMMDeviceEnumeration()) {
     // Usage of MMDevice will fail on XP and lower.
+    LOG(WARNING) << "MM device enumeration is not supported.";
     return;
   }
-  audio_man->GetAudioInputDeviceNames(&device_names);
+  audio_manager_->GetAudioInputDeviceNames(&device_names);
   CheckDeviceNames(device_names);
 }
 
 // Override default enumeration API and force usage of Windows Wave.
 // This test will run on Windows XP, Windows Vista and Windows 7.
 TEST_F(AudioInputDeviceTest, EnumerateDevicesWinWave) {
-  if (!CanRunAudioTests())
-    return;
   AudioDeviceNames device_names;
-  AudioManager* audio_man = AudioManager::GetAudioManager();
-  EXPECT_TRUE(audio_man != NULL);
-  SetWaveEnumeration(audio_man);
-  audio_man->GetAudioInputDeviceNames(&device_names);
+  SetWaveEnumeration();
+  audio_manager_->GetAudioInputDeviceNames(&device_names);
   CheckDeviceNames(device_names);
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 #include "base/file_path.h"
 #include "base/gtest_prod_util.h"
+#include "base/hash_tables.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -26,11 +27,9 @@
 #include "chrome/common/extensions/url_pattern_set.h"
 #include "googleurl/src/gurl.h"
 #include "ui/gfx/size.h"
-#include "webkit/glue/web_intent_service_data.h"
 
 class ExtensionAction;
 class ExtensionResource;
-class ExtensionSidebarDefaults;
 class FileBrowserHandler;
 class SkBitmap;
 class Version;
@@ -38,6 +37,10 @@ class Version;
 namespace base {
 class DictionaryValue;
 class ListValue;
+}
+
+namespace webkit_glue {
+struct WebIntentServiceData;
 }
 
 // Represents a Chrome extension.
@@ -228,7 +231,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Max size (both dimensions) for browser and page actions.
   static const int kPageActionIconMaxSize;
   static const int kBrowserActionIconMaxSize;
-  static const int kSidebarIconMaxSize;
 
   // Valid schemes for web extent URLPatterns.
   static const int kValidWebExtentSchemes;
@@ -319,6 +321,12 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     return GetResourceURL(url(), relative_path);
   }
 
+  // Returns true if the specified resource is web accessible.
+  bool IsResourceWebAccessible(const std::string& relative_path) const;
+
+  // Returns true when 'web_accessible_resources' are defined for the extension.
+  bool HasWebAccessibleResources() const;
+
   // Returns an extension resource object. |relative_path| should be UTF8
   // encoded.
   ExtensionResource GetResource(const std::string& relative_path) const;
@@ -378,7 +386,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool ParsePermissions(const extensions::Manifest* source,
                         const char* key,
                         int flags,
-                        std::string* error,
+                        string16* error,
                         ExtensionAPIPermissionSet* api_permissions,
                         URLPatternSet* host_permissions);
 
@@ -388,10 +396,12 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const URLPatternSet& GetEffectiveHostPermissions() const;
 
   // Returns true if the extension can silently increase its permission level.
-  // Extensions that can silently increase permissions are installed through
-  // mechanisms that are implicitly trusted.
+  // Users must approve permissions for unpacked and packed extensions in the
+  // following situations:
+  //  - when installing or upgrading packed extensions
+  //  - when installing unpacked extensions that have NPAPI plugins
+  //  - when either type of extension requests optional permissions
   bool CanSilentlyIncreasePermissions() const;
-
 
   // Whether the extension has access to the given URL.
   bool HasHostPermission(const GURL& url) const;
@@ -490,6 +500,12 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Returns the sync bucket to use for this extension.
   SyncType GetSyncType() const;
 
+  // Returns true if the extension should be synced.
+  bool IsSyncable() const;
+
+  // Returns true if the extension should be displayed in the launcher.
+  bool ShouldDisplayInLauncher() const;
+
   // Accessors:
 
   const FilePath& path() const { return path_; }
@@ -508,9 +524,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const UserScriptList& content_scripts() const { return content_scripts_; }
   ExtensionAction* page_action() const { return page_action_.get(); }
   ExtensionAction* browser_action() const { return browser_action_.get(); }
-  ExtensionSidebarDefaults* sidebar_defaults() const {
-    return sidebar_defaults_.get();
-  }
   const FileBrowserHandlerList* file_browser_handlers() const {
     return file_browser_handlers_.get();
   }
@@ -521,7 +534,13 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   const std::vector<InputComponentInfo>& input_components() const {
     return input_components_;
   }
-  const GURL& background_url() const { return background_url_; }
+  bool has_background_page() const {
+    return background_url_.is_valid() || !background_scripts_.empty();
+  }
+  const std::vector<std::string>& background_scripts() const {
+    return background_scripts_;
+  }
+  bool background_page_persists() const { return background_page_persists_; }
   const GURL& options_url() const { return options_url_; }
   const GURL& devtools_url() const { return devtools_url_; }
   const ExtensionPermissionSet* optional_permission_set() const {
@@ -583,6 +602,8 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
     return theme_display_properties_.get();
   }
 
+  GURL GetBackgroundURL() const;
+
  private:
   friend class base::RefCountedThreadSafe<Extension>;
 
@@ -619,7 +640,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Initialize the extension from a parsed manifest.
   // Takes ownership of the manifest |value|.
   bool InitFromValue(extensions::Manifest* value, int flags,
-                     std::string* error);
+                     string16* error);
 
   // Helper function for implementing HasCachedImage/GetCachedImage. A return
   // value of NULL means there is no matching image cached (we allow caching an
@@ -632,7 +653,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool LoadUserScriptHelper(const base::DictionaryValue* content_script,
                             int definition_index,
                             int flags,
-                            std::string* error,
+                            string16* error,
                             UserScript* result);
 
   // Helper method that loads either the include_globs or exclude_globs list
@@ -640,7 +661,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   bool LoadGlobsHelper(const base::DictionaryValue* content_script,
                        int content_script_index,
                        const char* globs_property_name,
-                       std::string* error,
+                       string16* error,
                        void(UserScript::*add_method)(const std::string& glob),
                        UserScript *instance);
 
@@ -650,33 +671,36 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
                   URLPatternSet* extent,
                   const char* list_error,
                   const char* value_error,
-                  URLPattern::ParseOption parse_strictness,
-                  std::string* error);
+                  string16* error);
   bool LoadLaunchContainer(const extensions::Manifest* manifest,
-                           std::string* error);
+                           string16* error);
   bool LoadLaunchURL(const extensions::Manifest* manifest,
-                     std::string* error);
+                     string16* error);
   bool LoadAppIsolation(const extensions::Manifest* manifest,
-                        std::string* error);
+                        string16* error);
   bool LoadWebIntentServices(const extensions::Manifest* manifest,
-                             std::string* error);
+                             string16* error);
+  bool LoadBackgroundScripts(const extensions::Manifest* manifest,
+                             string16* error);
+  bool LoadBackgroundPage(const extensions::Manifest* manifest,
+                          const ExtensionAPIPermissionSet& api_permissions,
+                          string16* error);
+  bool LoadBackgroundPersistent(
+      const extensions::Manifest* manifest,
+      const ExtensionAPIPermissionSet& api_permissions,
+      string16* error);
 
   // Helper method to load an ExtensionAction from the page_action or
   // browser_action entries in the manifest.
   ExtensionAction* LoadExtensionActionHelper(
-      const base::DictionaryValue* extension_action, std::string* error);
+      const base::DictionaryValue* extension_action, string16* error);
 
   // Helper method to load an FileBrowserHandlerList from the manifest.
   FileBrowserHandlerList* LoadFileBrowserHandlers(
-      const base::ListValue* extension_actions, std::string* error);
+      const base::ListValue* extension_actions, string16* error);
   // Helper method to load an FileBrowserHandler from manifest.
   FileBrowserHandler* LoadFileBrowserHandler(
-      const base::DictionaryValue* file_browser_handlers, std::string* error);
-
-  // Helper method to load an ExtensionSidebarDefaults from the sidebar manifest
-  // entry.
-  ExtensionSidebarDefaults* LoadExtensionSidebarDefaults(
-      const base::DictionaryValue* sidebar, std::string* error);
+      const base::DictionaryValue* file_browser_handlers, string16* error);
 
   // Returns true if the extension has more than one "UI surface". For example,
   // an extension that has a browser action and a page action.
@@ -688,7 +712,7 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
 
   // Returns true if this extension can specify |api|.
   bool CanSpecifyAPIPermission(const ExtensionAPIPermission* api,
-                               std::string* error) const;
+                               string16* error) const;
   bool CanSpecifyComponentOnlyPermission() const;
   bool CanSpecifyExperimentalPermission() const;
 
@@ -778,9 +802,6 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // The extension's file browser actions, if any.
   scoped_ptr<FileBrowserHandlerList> file_browser_handlers_;
 
-  // The extension's sidebar, if any.
-  scoped_ptr<ExtensionSidebarDefaults> sidebar_defaults_;
-
   // Optional list of NPAPI plugins and associated properties.
   std::vector<PluginInfo> plugins_;
 
@@ -790,9 +811,20 @@ class Extension : public base::RefCountedThreadSafe<Extension> {
   // Optional list of input components and associated properties.
   std::vector<InputComponentInfo> input_components_;
 
+  // Optional list of web accessible extension resources.
+  base::hash_set<std::string> web_accessible_resources_;
+
   // Optional URL to a master page of which a single instance should be always
   // loaded in the background.
   GURL background_url_;
+
+  // Optional list of scripts to use to generate a background page. If this is
+  // present, background_url_ will be empty and generated by GetBackgroundURL().
+  std::vector<std::string> background_scripts_;
+
+  // True if the background page should stay loaded forever; false if it should
+  // load on-demand (when it needs to handle an event). Defaults to true.
+  bool background_page_persists_;
 
   // Optional URL to a page for setting options/preferences.
   GURL options_url_;

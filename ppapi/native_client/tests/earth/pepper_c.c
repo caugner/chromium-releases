@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 The Chromium Authors. All rights reserved.
+ * Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -25,6 +25,7 @@
 #include "ppapi/c/ppb_graphics_2d.h"
 #include "ppapi/c/ppb_image_data.h"
 #include "ppapi/c/ppb_instance.h"
+#include "ppapi/c/ppb_view.h"
 #include "ppapi/c/ppp.h"
 #include "ppapi/c/ppp_instance.h"
 
@@ -42,10 +43,11 @@ PPB_GetInterface g_get_browser_interface = NULL;
  * Native Client.
  */
 struct PepperState {
-  const struct PPB_Core* core_interface;
-  const struct PPB_Graphics2D* graphics_2d_interface;
-  const struct PPB_ImageData* image_data_interface;
-  const struct PPB_Instance* instance_interface;
+  const PPB_Core* core_interface;
+  const PPB_Graphics2D* graphics_2d_interface;
+  const PPB_ImageData* image_data_interface;
+  const PPB_Instance* instance_interface;
+  const PPB_View* view_interface;
   PP_Resource device_context;
   int32_t which_image;
   PP_Resource image[NUMBER_OF_IMAGES];
@@ -129,16 +131,15 @@ static PP_Resource MakeAndBindDeviceContext(PP_Instance instance,
 }
 
 static void Instance_DidChangeView(PP_Instance pp_instance,
-                                   const struct PP_Rect* position,
-                                   const struct PP_Rect* clip) {
+                                   PP_Resource pp_view) {
   DebugPrintf("DidChangeView(%x)\n", pp_instance);
   assert(g_MyStateIsValid == true);
   assert(g_MyState.instance == pp_instance);
 
-  g_MyState.position = *position;
+  g_MyState.view_interface->GetRect(pp_view, &g_MyState.position);
   if (g_MyState.ready == false) {
     g_MyState.device_context =
-      MakeAndBindDeviceContext(pp_instance, &position->size);
+      MakeAndBindDeviceContext(pp_instance, &g_MyState.position.size);
     /* create device context */
     if (!g_MyState.device_context) {
       DebugPrintf("device_context is null!\n");
@@ -154,7 +155,7 @@ static void Instance_DidChangeView(PP_Instance pp_instance,
     for (int i = 0; i < NUMBER_OF_IMAGES; ++i) {
       g_MyState.image[i] =
         g_MyState.image_data_interface->Create(pp_instance,
-          PP_IMAGEDATAFORMAT_BGRA_PREMUL, &position->size, PP_TRUE);
+          PP_IMAGEDATAFORMAT_BGRA_PREMUL, &g_MyState.position.size, PP_TRUE);
       if (!g_MyState.image[i]) {
         DebugPrintf("image resource is invalid!\n");
         return;
@@ -165,8 +166,8 @@ static void Instance_DidChangeView(PP_Instance pp_instance,
         DebugPrintf("could not allocate image_data\n");
         return;
       }
-      size_t size_in_bytes = position->size.width * position->size.height *
-                             sizeof(uint32_t);
+      size_t size_in_bytes = g_MyState.position.size.width *
+                             g_MyState.position.size.height * sizeof(uint32_t);
       memset(g_MyState.image_data[i], 0, size_in_bytes);
     }
     g_MyState.ready = true;
@@ -183,7 +184,7 @@ static PP_Bool Instance_HandleDocumentLoad(PP_Instance pp_instance,
   return PP_FALSE;
 }
 
-static struct PPP_Instance instance_interface = {
+static PPP_Instance instance_interface = {
   &Instance_DidCreate,
   &Instance_DidDestroy,
   &Instance_DidChangeView,
@@ -198,18 +199,21 @@ PP_EXPORT int32_t PPP_InitializeModule(PP_Module module,
                                        PPB_GetInterface get_browser_interface) {
   g_get_browser_interface = get_browser_interface;
 
-  g_MyState.core_interface = (const struct PPB_Core*)
+  g_MyState.core_interface = (const PPB_Core*)
     get_browser_interface(PPB_CORE_INTERFACE);
-  g_MyState.instance_interface = (const struct PPB_Instance*)
+  g_MyState.instance_interface = (const PPB_Instance*)
     get_browser_interface(PPB_INSTANCE_INTERFACE);
-  g_MyState.image_data_interface = (const struct PPB_ImageData*)
+  g_MyState.image_data_interface = (const PPB_ImageData*)
     get_browser_interface(PPB_IMAGEDATA_INTERFACE);
-  g_MyState.graphics_2d_interface = (const struct PPB_Graphics2D*)
+  g_MyState.graphics_2d_interface = (const PPB_Graphics2D*)
     get_browser_interface(PPB_GRAPHICS_2D_INTERFACE);
+  g_MyState.view_interface = (const PPB_View*)
+    get_browser_interface(PPB_VIEW_INTERFACE);
   if (!g_MyState.core_interface ||
       !g_MyState.instance_interface ||
       !g_MyState.image_data_interface ||
-      !g_MyState.graphics_2d_interface)
+      !g_MyState.graphics_2d_interface ||
+      !g_MyState.view_interface)
     return -1;
 
   return PP_OK;

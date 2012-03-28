@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,7 +74,7 @@ const int kExpectedStillRunningExitCode = 0;
 void WaitToDie(const char* filename) {
   FILE *fp;
   do {
-    base::PlatformThread::Sleep(10);
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(10));
     fp = fopen(filename, "r");
   } while (!fp);
   fclose(fp);
@@ -95,14 +95,14 @@ base::TerminationStatus WaitForChildTermination(base::ProcessHandle handle,
                                                 int* exit_code) {
   // Now we wait until the result is something other than STILL_RUNNING.
   base::TerminationStatus status = base::TERMINATION_STATUS_STILL_RUNNING;
-  const int kIntervalMs = 20;
-  int waited = 0;
+  const base::TimeDelta kInterval = base::TimeDelta::FromMilliseconds(20);
+  base::TimeDelta waited;
   do {
     status = base::GetTerminationStatus(handle, exit_code);
-    base::PlatformThread::Sleep(kIntervalMs);
-    waited += kIntervalMs;
+    base::PlatformThread::Sleep(kInterval);
+    waited += kInterval;
   } while (status == base::TERMINATION_STATUS_STILL_RUNNING &&
-           waited < TestTimeouts::action_max_timeout_ms());
+           waited.InMilliseconds() < TestTimeouts::action_max_timeout_ms());
 
   return status;
 }
@@ -171,6 +171,20 @@ TEST_F(ProcessUtilTest, MAYBE_GetTerminationStatusExit) {
   base::CloseProcessHandle(handle);
   remove(kSignalFileSlow);
 }
+
+#if defined(OS_WIN)
+// TODO(cpu): figure out how to test this in other platforms.
+TEST_F(ProcessUtilTest, GetProcId) {
+  base::ProcessId id1 = base::GetProcId(GetCurrentProcess());
+  EXPECT_NE(0ul, id1);
+  base::ProcessHandle handle = this->SpawnChild("SimpleChildProcess", false);
+  ASSERT_NE(base::kNullProcessHandle, handle);
+  base::ProcessId id2 = base::GetProcId(handle);
+  EXPECT_NE(0ul, id2);
+  EXPECT_NE(id1, id2);
+  base::CloseProcessHandle(handle);
+}
+#endif
 
 #if !defined(OS_MACOSX)
 // This test is disabled on Mac, since it's flaky due to ReportCrash
@@ -880,8 +894,15 @@ MULTIPROCESS_TEST_MAIN(process_util_test_die_immediately) {
 
 #endif  // defined(OS_POSIX)
 
+// Android doesn't implement set_new_handler, so we can't use the
+// OutOfMemoryTest cases.
+// OpenBSD does not support these tests either.
+// AddressSanitizer defines the malloc()/free()/etc. functions so that they
+// don't crash if the program is out of memory, so the OOM tests aren't supposed
+// to work.
 // TODO(vandebo) make this work on Windows too.
-#if !defined(OS_WIN)
+#if !defined(OS_ANDROID) && !defined(OS_OPENBSD) && \
+    !defined(OS_WIN) && !defined(ADDRESS_SANITIZER)
 
 #if defined(USE_TCMALLOC)
 extern "C" {
@@ -889,10 +910,6 @@ int tc_set_new_mode(int mode);
 }
 #endif  // defined(USE_TCMALLOC)
 
-// Android doesn't implement set_new_handler, so we can't use the
-// OutOfMemoryTest cases.
-// OpenBSD does not support these tests either.
-#if !defined(OS_ANDROID) && !defined(OS_OPENBSD)
 class OutOfMemoryDeathTest : public testing::Test {
  public:
   OutOfMemoryDeathTest()
@@ -1125,6 +1142,5 @@ TEST_F(OutOfMemoryDeathTest, PsychoticallyBigObjCObject) {
 #endif  // !ARCH_CPU_64_BITS
 #endif  // OS_MACOSX
 
-#endif  // !defined(OS_ANDROID)
-
-#endif  // !defined(OS_WIN)
+#endif  // !defined(OS_ANDROID) && !defined(OS_OPENBSD) &&
+        // !defined(OS_WIN) && !defined(ADDRESS_SANITIZER)

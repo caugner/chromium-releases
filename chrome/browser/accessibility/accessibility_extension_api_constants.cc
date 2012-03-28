@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@ namespace extension_accessibility_api_constants {
 // String keys for AccessibilityObject properties.
 const char kTypeKey[] = "type";
 const char kNameKey[] = "name";
+const char kContextKey[] = "context";
 const char kDetailsKey[] = "details";
 const char kValueKey[] = "details.value";
 const char kPasswordKey[] = "details.isPassword";
@@ -18,8 +19,7 @@ const char kSelectionStartKey[] = "details.selectionStart";
 const char kSelectionEndKey[] = "details.selectionEnd";
 const char kCheckedKey[] = "details.isChecked";
 const char kHasSubmenuKey[] = "details.hasSubmenu";
-const char kVolumeKey[] = "volume";
-const char kIsVolumeMutedKey[] = "isVolumeMuted";
+const char kMessageKey[] = "message";
 
 // Events.
 const char kOnWindowOpened[] = "experimental.accessibility.onWindowOpened";
@@ -29,9 +29,6 @@ const char kOnControlAction[] = "experimental.accessibility.onControlAction";
 const char kOnTextChanged[] = "experimental.accessibility.onTextChanged";
 const char kOnMenuOpened[] = "experimental.accessibility.onMenuOpened";
 const char kOnMenuClosed[] = "experimental.accessibility.onMenuClosed";
-const char kOnVolumeChanged[] = "experimental.accessibility.onVolumeChanged";
-const char kOnScreenUnlocked[] = "experimental.accessibility.onScreenUnlocked";
-const char kOnWokeUp[] = "experimental.accessibility.onWokeUp";
 
 // Types of controls that can receive accessibility events.
 const char kTypeButton[] = "button";

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -128,21 +128,21 @@ class ThemeService : public base::NonThreadSafe,
   };
 
   // A bitfield mask for alignments.
-  typedef enum {
-    ALIGN_CENTER = 0x0,
-    ALIGN_LEFT = 0x1,
-    ALIGN_TOP = 0x2,
-    ALIGN_RIGHT = 0x4,
-    ALIGN_BOTTOM = 0x8,
-  } AlignmentMasks;
+  enum Alignment {
+    ALIGN_CENTER = 0,
+    ALIGN_LEFT   = 1 << 0,
+    ALIGN_TOP    = 1 << 1,
+    ALIGN_RIGHT  = 1 << 2,
+    ALIGN_BOTTOM = 1 << 3,
+  };
 
   // Background tiling choices.
-  typedef enum {
+  enum Tiling {
     NO_REPEAT = 0,
     REPEAT_X = 1,
     REPEAT_Y = 2,
     REPEAT = 3
-  } Tiling;
+  };
 
   // Returns a cross platform image for an id.
   //
@@ -170,12 +170,10 @@ class ThemeService : public base::NonThreadSafe,
   // overrides ui::ThemeProvider is http://crbug.com/105040 .
   // GdkPixbufs returned by GetPixbufNamed and GetRTLEnabledPixbufNamed are
   // shared instances owned by the theme provider and should not be freed.
-  virtual GdkPixbuf* GetPixbufNamed(int id) const OVERRIDE;
   virtual GdkPixbuf* GetRTLEnabledPixbufNamed(int id) const OVERRIDE;
 #elif defined(TOOLKIT_USES_GTK)
   // GdkPixbufs returned by GetPixbufNamed and GetRTLEnabledPixbufNamed are
   // shared instances owned by the theme provider and should not be freed.
-  virtual GdkPixbuf* GetPixbufNamed(int id) const;
   virtual GdkPixbuf* GetRTLEnabledPixbufNamed(int id) const;
 #endif
 
@@ -210,11 +208,11 @@ class ThemeService : public base::NonThreadSafe,
   void OnInfobarDestroyed();
 
   // Convert a bitfield alignment into a string like "top left". Public so that
-  // it can be used to generate CSS values. Takes a bitfield of AlignmentMasks.
+  // it can be used to generate CSS values. Takes a bitmask of Alignment.
   static std::string AlignmentToString(int alignment);
 
-  // Parse alignments from something like "top left" into a bitfield of
-  // AlignmentMasks
+  // Parse alignments from something like "top left" into a bitmask of
+  // Alignment.
   static int StringToAlignment(const std::string& alignment);
 
   // Convert a tiling value into a string like "no-repeat". Public

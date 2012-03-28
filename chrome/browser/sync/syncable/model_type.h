@@ -10,12 +10,12 @@
 #define CHROME_BROWSER_SYNC_SYNCABLE_MODEL_TYPE_H_
 #pragma once
 
-#include <bitset>
 #include <set>
 #include <string>
 
 #include "base/logging.h"
 #include "base/time.h"
+#include "chrome/browser/sync/util/enum_set.h"
 
 namespace base {
 class ListValue;
@@ -80,12 +80,20 @@ enum ModelType {
   EXTENSION_SETTINGS,
   // App notifications.
   APP_NOTIFICATIONS,
+  LAST_REAL_MODEL_TYPE = APP_NOTIFICATIONS,
+
+  // If you are adding a new sync datatype that is exposed to the user via the
+  // sync preferences UI, be sure to update the list in
+  // chrome/browser/sync/user_selectable_sync_type.h so that the UMA histograms
+  // for sync include your new type.
 
   MODEL_TYPE_COUNT,
 };
 
-typedef std::bitset<MODEL_TYPE_COUNT> ModelTypeBitSet;
-typedef std::set<ModelType> ModelTypeSet;
+typedef browser_sync::EnumSet<
+  ModelType, FIRST_REAL_MODEL_TYPE, LAST_REAL_MODEL_TYPE> ModelTypeSet;
+typedef browser_sync::EnumSet<
+  ModelType, UNSPECIFIED, LAST_REAL_MODEL_TYPE> FullModelTypeSet;
 
 inline ModelType ModelTypeFromInt(int i) {
   DCHECK_GE(i, 0);
@@ -133,26 +141,13 @@ base::StringValue* ModelTypeToValue(ModelType model_type);
 // Converts a Value into a ModelType - complement to ModelTypeToValue().
 ModelType ModelTypeFromValue(const base::Value& value);
 
-std::string ModelTypeSetToString(const ModelTypeSet& model_types);
-
 // Returns the ModelType corresponding to the name |model_type_string|.
 ModelType ModelTypeFromString(const std::string& model_type_string);
 
-std::string ModelTypeBitSetToString(const ModelTypeBitSet& model_types);
-
-// Convert a ModelTypeSet to a ModelTypeBitSet.
-ModelTypeBitSet ModelTypeBitSetFromSet(const ModelTypeSet& set);
-
-// Convert a ModelTypeBitSet to a ModelTypeSet.
-ModelTypeSet ModelTypeBitSetToSet(const ModelTypeBitSet& bit_set);
+std::string ModelTypeSetToString(ModelTypeSet model_types);
 
 // Caller takes ownership of returned list.
-base::ListValue* ModelTypeBitSetToValue(const ModelTypeBitSet& model_types);
-
-ModelTypeBitSet ModelTypeBitSetFromValue(const base::ListValue& value);
-
-// Caller takes ownership of returned list.
-base::ListValue* ModelTypeSetToValue(const ModelTypeSet& model_types);
+base::ListValue* ModelTypeSetToValue(ModelTypeSet model_types);
 
 ModelTypeSet ModelTypeSetFromValue(const base::ListValue& value);
 
@@ -175,9 +170,6 @@ bool RealModelTypeToNotificationType(ModelType model_type,
 // type and |model_type| was filled in.
 bool NotificationTypeToRealModelType(const std::string& notification_type,
                                      ModelType* model_type);
-
-// Returns a ModelTypeSet with all real model types.
-ModelTypeSet GetAllRealModelTypes();
 
 // Returns true if |model_type| is a real datatype
 bool IsRealDataType(ModelType model_type);

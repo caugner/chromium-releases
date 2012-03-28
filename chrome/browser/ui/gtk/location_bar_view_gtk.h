@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/extensions/image_loading_tracker.h"
-#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/ui/gtk/bubble/bubble_gtk.h"
 #include "chrome/browser/ui/gtk/menu_gtk.h"
@@ -43,8 +42,11 @@ class ContentSettingBubbleGtk;
 class ExtensionAction;
 class GtkThemeService;
 class SkBitmap;
-class TabContents;
 class ToolbarModel;
+
+namespace content {
+class WebContents;
+}
 
 class LocationBarViewGtk : public AutocompleteEditController,
                            public LocationBar,
@@ -67,8 +69,8 @@ class LocationBarViewGtk : public AutocompleteEditController,
 
   Browser* browser() const { return browser_; }
 
-  // Returns the current TabContents.
-  TabContents* GetTabContents() const;
+  // Returns the current WebContents.
+  content::WebContents* GetWebContents() const;
 
   // Sets |preview_enabled| for the PageActionViewGtk associated with this
   // |page_action|. If |preview_enabled| is true, the view will display the
@@ -85,7 +87,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // Updates the location bar.  We also reset the bar's permanent text and
   // security style, and, if |tab_for_state_restoring| is non-NULL, also
   // restore saved state that the tab holds.
-  void Update(const TabContents* tab_for_state_restoring);
+  void Update(const content::WebContents* tab_for_state_restoring);
 
   // Show the bookmark bubble.
   void ShowStarBubble(const GURL& url, bool newly_boomkarked);
@@ -109,7 +111,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual TabContentsWrapper* GetTabContentsWrapper() const OVERRIDE;
 
   // Implement the LocationBar interface.
-  virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type) OVERRIDE;
+  virtual void ShowFirstRunBubble() OVERRIDE;
   virtual void SetSuggestedText(const string16& text,
                                 InstantCompleteBehavior behavior) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
@@ -121,7 +123,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   virtual void UpdateContentSettingsIcons() OVERRIDE;
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
-  virtual void SaveStateToContents(TabContents* contents) OVERRIDE;
+  virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
   virtual const OmniboxView* location_entry() const OVERRIDE;
   virtual OmniboxView* location_entry() OVERRIDE;
@@ -153,7 +155,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
     GtkWidget* widget() { return alignment_.get(); }
 
     bool IsVisible();
-    void UpdateFromTabContents(TabContents* tab_contents);
+    void UpdateFromWebContents(content::WebContents* web_contents);
 
     // Overridden from ui::AnimationDelegate:
     virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
@@ -223,7 +225,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
     // Called to notify the PageAction that it should determine whether to be
     // visible or hidden. |contents| is the TabContents that is active, |url|
     // is the current page URL.
-    void UpdateVisibility(TabContents* contents, const GURL& url);
+    void UpdateVisibility(content::WebContents* contents, const GURL& url);
 
     // A callback from ImageLoadingTracker for when the image has loaded.
     virtual void OnImageLoaded(
@@ -333,7 +335,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   // Set the keyword text for the "Press tab to search BLAH" hint box.
   void SetKeywordHintLabel(const string16& keyword);
 
-  void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
+  void ShowFirstRunBubbleInternal();
 
   // Show or hide |tab_to_search_box_| and |tab_to_search_hint_| according to
   // the value of |show_selected_keyword_|, |show_keyword_hint_|, and the
@@ -413,7 +415,7 @@ class LocationBarViewGtk : public AutocompleteEditController,
   content::PageTransition transition_;
 
   // Used to schedule a task for the first run bubble.
-  base::WeakPtrFactory<LocationBarViewGtk> first_run_bubble_;
+  base::WeakPtrFactory<LocationBarViewGtk> weak_ptr_factory_;
 
   // When true, the location bar view is read only and also is has a slightly
   // different presentation (font size / color). This is used for popups.

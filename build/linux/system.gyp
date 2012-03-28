@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -103,7 +103,7 @@
             }],
             ['use_openssl==0 and use_system_ssl==0', {
               'dependencies': [
-                '../../net/third_party/nss/ssl.gyp:ssl',
+                '../../net/third_party/nss/ssl.gyp:libssl',
                 '../../third_party/zlib/zlib.gyp:zlib',
               ],
               'direct_dependent_settings': {
@@ -620,6 +620,28 @@
             ],
             'libraries': [
               '<!@(<(pkg-config) --libs-only-l wayland-client wayland-egl xkbcommon)',
+            ],
+          },
+        }],
+      ],
+    },
+    {
+      'target_name': 'udev',
+      'type': 'none',
+      'conditions': [
+        # libudev is not available on *BSD
+        ['_toolset=="target" and os_bsd!=1', {
+          'direct_dependent_settings': {
+            'cflags': [
+              '<!@(<(pkg-config) --cflags libudev)'
+            ],
+          },
+          'link_settings': {
+            'ldflags': [
+              '<!@(<(pkg-config) --libs-only-L --libs-only-other libudev)',
+            ],
+            'libraries': [
+              '<!@(<(pkg-config) --libs-only-l libudev)',
             ],
           },
         }],

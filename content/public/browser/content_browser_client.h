@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,11 +10,10 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "content/public/common/window_container_type.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/window_container_type.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebNotificationPresenter.h"
 
-class AccessTokenStore;
 class BrowserURLHandler;
 class CommandLine;
 class FilePath;
@@ -23,23 +22,22 @@ class MHTMLGenerationManager;
 class PluginProcessHost;
 class QuotaPermissionContext;
 class RenderViewHost;
-class RenderWidgetHost;
-class RenderWidgetHostView;
 class ResourceDispatcherHost;
-class SiteInstance;
 class SSLCertErrorHandler;
 class SSLClientAuthHandler;
 class SkBitmap;
-class TabContents;
-class TabContentsView;
 class WorkerProcessHost;
 struct WebPreferences;
 
 namespace content {
+class AccessTokenStore;
 class BrowserMainParts;
+class RenderProcessHost;
+class SiteInstance;
+class WebContents;
+class WebContentsView;
 struct MainFunctionParams;
 struct ShowDesktopNotificationHostMsgParams;
-class RenderProcessHost;
 }
 
 namespace crypto {
@@ -67,7 +65,7 @@ namespace content {
 
 class BrowserContext;
 class ResourceContext;
-class WebUIFactory;
+class WebUIControllerFactory;
 
 // Embedder API (or SPI) for participating in browser logic, to be implemented
 // by the client of the content browser. See ChromeContentBrowserClient for the
@@ -87,20 +85,7 @@ class ContentBrowserClient {
   virtual BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) = 0;
 
-  // Platform-specific creator. Use this to construct new RenderWidgetHostViews
-  // rather than using RenderWidgetHostViewWin & friends.
-  //
-  // This function must NOT size it, because the RenderView in the renderer
-  // wouldn't have been created yet. The widget would set its "waiting for
-  // resize ack" flag, and the ack would never come becasue no RenderView
-  // received it.
-  //
-  // The RenderWidgetHost must already be created (because we can't know if it's
-  // going to be a regular RenderWidgetHost or a RenderViewHost (a subclass).
-  virtual RenderWidgetHostView* CreateViewForWidget(
-      RenderWidgetHost* widget) = 0;
-
-  virtual TabContentsView* CreateTabContentsView(TabContents* tab_contents) = 0;
+  virtual WebContentsView* CreateWebContentsView(WebContents* web_contents) = 0;
 
   // Notifies that a new RenderHostView has been created.
   virtual void RenderViewHostCreated(RenderViewHost* render_view_host) = 0;
@@ -111,13 +96,9 @@ class ContentBrowserClient {
   virtual void RenderProcessHostCreated(
       content::RenderProcessHost* host) = 0;
 
-  // Notifies that a PluginProcessHost has been created. This is called
-  // before the content layer adds its own message filters, so that the
-  // embedder's IPC filters have priority.
-  virtual void PluginProcessHostCreated(PluginProcessHost* host) = 0;
-
-  // Gets the WebUIFactory which will be responsible for generating WebUIs.
-  virtual WebUIFactory* GetWebUIFactory() = 0;
+  // Gets the WebUIControllerFactory which will be responsible for generating
+  // WebUIs. Can return NULL if the embedder doesn't need WebUI support.
+  virtual WebUIControllerFactory* GetWebUIControllerFactory() = 0;
 
   // Get the effective URL for the given actual URL, to allow an embedder to
   // group different url schemes in the same SiteInstance.
@@ -133,16 +114,21 @@ class ContentBrowserClient {
   // SiteInstance.
   virtual bool IsURLSameAsAnySiteInstance(const GURL& url) = 0;
 
+  // Returns whether a specified URL is handled by the embedder's internal
+  // protocol handlers.
+  virtual bool IsHandledURL(const GURL& url) = 0;
+
   // Returns whether a new view for a given |site_url| can be launched in a
   // given |process_host|.
   virtual bool IsSuitableHost(content::RenderProcessHost* process_host,
                               const GURL& site_url) = 0;
 
   // Called when a site instance is first associated with a process.
-  virtual void SiteInstanceGotProcess(SiteInstance* site_instance) = 0;
+  virtual void SiteInstanceGotProcess(
+      content::SiteInstance* site_instance) = 0;
 
   // Called from a site instance's destructor.
-  virtual void SiteInstanceDeleting(SiteInstance* site_instance) = 0;
+  virtual void SiteInstanceDeleting(content::SiteInstance* site_instance) = 0;
 
   // Returns true if for the navigation from |current_url| to |new_url|,
   // processes should be swapped (even if we are in a process model that
@@ -249,9 +235,10 @@ class ContentBrowserClient {
       int render_view_id,
       SSLClientAuthHandler* handler) = 0;
 
-  // Adds a newly-generated client cert. The embedder should ensure that there's
+  // Adds a downloaded client cert. The embedder should ensure that there's
   // a private key for the cert, displays the cert to the user, and adds it upon
-  // user approval.
+  // user approval. If the downloaded data could not be interpreted as a valid
+  // certificate, |cert| will be NULL.
   virtual void AddNewCertificate(
       net::URLRequest* request,
       net::X509Certificate* cert,
@@ -302,8 +289,11 @@ class ContentBrowserClient {
   virtual std::string GetWorkerProcessTitle(
       const GURL& url, const content::ResourceContext& context) = 0;
 
+  // Notifies the embedder that the ResourceDispatcherHost has been created.
+  // This is when it can optionally add a delegate or ResourceQueueDelegates.
+  virtual void ResourceDispatcherHostCreated() = 0;
+
   // Getters for common objects.
-  virtual ResourceDispatcherHost* GetResourceDispatcherHost() = 0;
   virtual ui::Clipboard* GetClipboard() = 0;
   virtual MHTMLGenerationManager* GetMHTMLGenerationManager() = 0;
   virtual net::NetLog* GetNetLog() = 0;
@@ -343,6 +333,9 @@ class ContentBrowserClient {
   // Returns the default filename used in downloads when we have no idea what
   // else we should do with the file.
   virtual std::string GetDefaultDownloadName() = 0;
+
+  // Returns true if given origin can use TCP/UDP sockets.
+  virtual bool AllowSocketAPI(const GURL& url) = 0;
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   // Can return an optional fd for crash handling, otherwise returns -1. The

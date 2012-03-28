@@ -24,13 +24,17 @@
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/bindings_policy.h"
 #include "net/base/file_stream.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -67,7 +71,7 @@ class ExtensionWebUIImageLoadingTracker : public ImageLoadingTracker::Observer {
     // disabled in incognito mode.
     ExtensionService* service = profile->GetExtensionService();
     if (service)
-      extension_ = service->GetExtensionByURL(page_url);
+      extension_ = service->extensions()->GetByID(page_url.host());
   }
 
   void Init() {
@@ -124,48 +128,52 @@ class ExtensionWebUIImageLoadingTracker : public ImageLoadingTracker::Observer {
 const char ExtensionWebUI::kExtensionURLOverrides[] =
     "extensions.chrome_url_overrides";
 
-ExtensionWebUI::ExtensionWebUI(TabContents* tab_contents, const GURL& url)
-    : ChromeWebUI(tab_contents),
+ExtensionWebUI::ExtensionWebUI(content::WebUI* web_ui, const GURL& url)
+    : WebUIController(web_ui),
       url_(url) {
-  Profile* profile =
-      Profile::FromBrowserContext(tab_contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   ExtensionService* service = profile->GetExtensionService();
-  const Extension* extension = service->GetExtensionByURL(url);
-  if (!extension)
-    extension = service->GetExtensionByWebExtent(url);
+  const Extension* extension =
+      service->extensions()->GetExtensionOrAppByURL(ExtensionURLInfo(url));
   DCHECK(extension);
   // Only hide the url for internal pages (e.g. chrome-extension or packaged
   // component apps like bookmark manager.
-  should_hide_url_ = !extension->is_hosted_app();
+  bool should_hide_url = !extension->is_hosted_app();
 
-  // The base class defaults to enabling web ui bindings, but we don't need
-  // those.
-  bindings_ = 0;
+  // The base class defaults to enabling WebUI bindings, but we don't need
+  // those (this is also reflected in ChromeWebUIControllerFactory::
+  // UseWebUIBindingsForURL).
+  int bindings = 0;
 
   // Bind externalHost to Extension WebUI loaded in Chrome Frame.
   const CommandLine& browser_command_line = *CommandLine::ForCurrentProcess();
   if (browser_command_line.HasSwitch(switches::kChromeFrame))
-    bindings_ |= content::BINDINGS_POLICY_EXTERNAL_HOST;
+    bindings |= content::BINDINGS_POLICY_EXTERNAL_HOST;
   // For chrome:// overrides, some of the defaults are a little different.
-  GURL effective_url = tab_contents->GetURL();
+  GURL effective_url = web_ui->GetWebContents()->GetURL();
   if (effective_url.SchemeIs(chrome::kChromeUIScheme)) {
     if (effective_url.host() == chrome::kChromeUINewTabHost) {
-      focus_location_bar_by_default_ = true;
+      web_ui->FocusLocationBarByDefault();
     } else {
       // Current behavior of other chrome:// pages is to display the URL.
-      should_hide_url_ = false;
+      should_hide_url = false;
     }
   }
 
+  if (should_hide_url)
+    web_ui->HideURL();
+
+  web_ui->SetBindings(bindings);
+
   // Hack: A few things we specialize just for the bookmark manager.
   if (extension->id() == extension_misc::kBookmarkManagerId) {
-    TabContentsWrapper* tab =
-        TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
+    TabContentsWrapper* tab = TabContentsWrapper::GetCurrentWrapperForContents(
+        web_ui->GetWebContents());
     DCHECK(tab);
     bookmark_manager_extension_event_router_.reset(
         new BookmarkManagerExtensionEventRouter(profile, tab));
 
-    link_transition_type_ = content::PAGE_TRANSITION_AUTO_BOOKMARK;
+    web_ui->SetLinkTransitionType(content::PAGE_TRANSITION_AUTO_BOOKMARK);
   }
 }
 
@@ -224,7 +232,8 @@ bool ExtensionWebUI::HandleChromeURLOverride(
     }
 
     // Verify that the extension that's being referred to actually exists.
-    const Extension* extension = service->GetExtensionByURL(extension_url);
+    const Extension* extension =
+        service->extensions()->GetByID(extension_url.host());
     if (!extension) {
       // This can currently happen if you use --load-extension one run, and
       // then don't use it the next.  It could also happen if an extension
@@ -339,9 +348,9 @@ void ExtensionWebUI::UnregisterAndReplaceOverride(const std::string& page,
     // This is the active override, so we need to find all existing
     // tabs for this override and get them to reload the original URL.
     for (TabContentsIterator iterator; !iterator.done(); ++iterator) {
-      TabContents* tab = (*iterator)->tab_contents();
+      WebContents* tab = (*iterator)->web_contents();
       Profile* tab_profile =
-          Profile::FromBrowserContext(tab->browser_context());
+          Profile::FromBrowserContext(tab->GetBrowserContext());
       if (tab_profile != profile)
         continue;
 
@@ -351,7 +360,7 @@ void ExtensionWebUI::UnregisterAndReplaceOverride(const std::string& page,
 
       // Don't use Reload() since |url| isn't the same as the internal URL
       // that NavigationController has.
-      tab->controller().LoadURL(
+      tab->GetController().LoadURL(
           url, content::Referrer(url, WebKit::WebReferrerPolicyDefault),
           content::PAGE_TRANSITION_RELOAD, std::string());
     }

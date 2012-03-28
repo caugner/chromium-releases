@@ -12,7 +12,7 @@
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/tab_contents/tab_contents_view_mac.h"
+#include "chrome/browser/tab_contents/moving_to_content/tab_contents_view_mac.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bar_controller.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/gfx/mac/nsimage_cache.h"
@@ -67,14 +67,14 @@ void ConvertPlistToElements(NSArray* input,
     if (is_folder) {
       new_node->set_type(BookmarkNode::FOLDER);
       NSString* title = [pboardBookmark objectForKey:@"Title"];
-      new_node->set_title(base::SysNSStringToUTF16(title));
+      new_node->SetTitle(base::SysNSStringToUTF16(title));
     } else {
       new_node->set_type(BookmarkNode::URL);
       NSDictionary* uriDictionary =
           [pboardBookmark objectForKey:@"URIDictionary"];
       NSString* title = [uriDictionary objectForKey:@"title"];
       NSString* urlString = [pboardBookmark objectForKey:@"URLString"];
-      new_node->set_title(base::SysNSStringToUTF16(title));
+      new_node->SetTitle(base::SysNSStringToUTF16(title));
       new_node->set_url(GURL(base::SysNSStringToUTF8(urlString)));
     }
     BookmarkNodeData::Element e = BookmarkNodeData::Element(new_node.get());

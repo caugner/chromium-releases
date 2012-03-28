@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -106,7 +106,7 @@ class VisitedLinkTest : public testing::Test {
       master_.reset(NULL);
 
     if (history_service_.get()) {
-      history_service_->SetOnBackendDestroyTask(new MessageLoop::QuitTask);
+      history_service_->SetOnBackendDestroyTask(MessageLoop::QuitClosure());
       history_service_->Cleanup();
       history_service_ = NULL;
 
@@ -116,6 +116,9 @@ class VisitedLinkTest : public testing::Test {
       // our destroy task.
       MessageLoop::current()->Run();
     }
+
+    // Wait for all pending file I/O to be completed.
+    BrowserThread::GetBlockingPool()->FlushForTesting();
   }
 
   // Loads the database from disk and makes sure that the same URLs are present
@@ -402,7 +405,7 @@ TEST_F(VisitedLinkTest, Rebuild) {
   // complete before we set the task because the rebuild completion message
   // is posted to the message loop; until we Run() it, rebuild can not
   // complete.
-  master_->set_rebuild_complete_task(new MessageLoop::QuitTask);
+  master_->set_rebuild_complete_task(MessageLoop::QuitClosure());
   MessageLoop::current()->Run();
 
   // Test that all URLs were written to the database properly.
@@ -423,7 +426,7 @@ TEST_F(VisitedLinkTest, BigImport) {
     master_->AddURL(TestURL(i));
 
   // Wait for the rebuild to complete.
-  master_->set_rebuild_complete_task(new MessageLoop::QuitTask);
+  master_->set_rebuild_complete_task(MessageLoop::QuitClosure());
   MessageLoop::current()->Run();
 
   // Ensure that the right number of URLs are present
@@ -590,8 +593,10 @@ class VisitedLinkEventsTest : public ChromeRenderViewHostTestHarness {
 
   void WaitForCoalescense() {
     // Let the timer fire.
-    MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                            new MessageLoop::QuitTask(), 110);
+    MessageLoop::current()->PostDelayedTask(
+        FROM_HERE,
+        MessageLoop::QuitClosure(),
+        base::TimeDelta::FromMilliseconds(110));
     MessageLoop::current()->Run();
   }
 
@@ -660,7 +665,7 @@ TEST_F(VisitedLinkEventsTest, Coalescense) {
 
 TEST_F(VisitedLinkEventsTest, Basics) {
   VisitedLinkMaster* master = profile()->GetVisitedLinkMaster();
-  rvh()->CreateRenderView(string16());
+  rvh()->CreateRenderView(string16(), -1);
 
   // Add a few URLs.
   master->AddURL(GURL("http://acidtests.org/"));
@@ -684,7 +689,7 @@ TEST_F(VisitedLinkEventsTest, Basics) {
 
 TEST_F(VisitedLinkEventsTest, TabVisibility) {
   VisitedLinkMaster* master = profile()->GetVisitedLinkMaster();
-  rvh()->CreateRenderView(string16());
+  rvh()->CreateRenderView(string16(), -1);
 
   // Simulate tab becoming inactive.
   rvh()->WasHidden();

@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop_proxy.h"
-#include "base/task.h"
+#include "remoting/jingle_glue/mock_objects.h"
 #include "remoting/host/capturer_fake.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
@@ -45,7 +45,7 @@ namespace remoting {
 namespace {
 
 void PostQuitTask(MessageLoop* message_loop) {
-  message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 // Run the task and delete it afterwards. This action is used to deal with
@@ -93,8 +93,9 @@ class ChromotingHostTest : public testing::Test {
     desktop_environment_.reset(
         new DesktopEnvironment(&context_, capturer, event_executor_));
 
-    host_ = ChromotingHost::Create(
-        &context_, config_,desktop_environment_.get(), false);
+    host_ = new ChromotingHost(
+        &context_, &signal_strategy_, desktop_environment_.get(),
+        protocol::NetworkSettings());
 
     disconnect_window_ = new MockDisconnectWindow();
     continue_window_ = new MockContinueWindow();
@@ -102,8 +103,7 @@ class ChromotingHostTest : public testing::Test {
     it2me_host_user_interface_.reset(new It2MeHostUserInterface(host_,
                                                                 &context_));
     it2me_host_user_interface_->InitFrom(disconnect_window_, continue_window_,
-                              local_input_monitor_);
-    host_->AddStatusObserver(it2me_host_user_interface_.get());
+                                         local_input_monitor_);
 
     session_ = new MockSession();
     session2_ = new MockSession();
@@ -219,6 +219,7 @@ class ChromotingHostTest : public testing::Test {
   MessageLoop message_loop_;
   scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
   MockConnectionToClientEventHandler handler_;
+  MockSignalStrategy signal_strategy_;
   scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface_;
   scoped_refptr<ChromotingHost> host_;

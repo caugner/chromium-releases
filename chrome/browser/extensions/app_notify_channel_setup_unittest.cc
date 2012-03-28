@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include "base/message_loop.h"
 #include "chrome/browser/extensions/app_notify_channel_setup.h"
 #include "chrome/browser/extensions/app_notify_channel_ui.h"
-#include "chrome/browser/net/gaia/token_service.h"
-#include "chrome/browser/net/gaia/token_service_unittest.h"
+#include "chrome/browser/signin/token_service.h"
+#include "chrome/browser/signin/token_service_unittest.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
 #include "chrome/common/pref_names.h"
@@ -182,13 +182,13 @@ class AppNotifyChannelSetupTest : public testing::Test {
                                      delegate_.AsWeakPtr());
   }
 
-  virtual void SetupLogin(bool should_succeed) {
+  virtual void SetupLogin(bool should_prompt, bool should_succeed) {
     if (should_succeed) {
       SetLoggedInUser("user@gmail.com");
       profile_.SetTokenServiceHasTokenResult(true);
-    } else {
-      ui_->SetSyncSetupResult(false);
     }
+    if (should_prompt)
+      ui_->SetSyncSetupResult(should_succeed);
   }
 
   virtual void SetupFetchAccessToken(bool should_succeed) {
@@ -230,14 +230,16 @@ class AppNotifyChannelSetupTest : public testing::Test {
 };
 
 TEST_F(AppNotifyChannelSetupTest, LoginFailure) {
-  SetupLogin(false);
+  SetupLogin(true, false);
 
   scoped_refptr<AppNotifyChannelSetup> setup = CreateInstance();
   RunServerTest(setup, "", "canceled_by_user");
 }
 
-TEST_F(AppNotifyChannelSetupTest, FetchAccessTokenFailure) {
-  SetupLogin(true);
+TEST_F(AppNotifyChannelSetupTest, DoubleFetchAccessTokenFailure) {
+  SetupLogin(false, true);
+  SetupFetchAccessToken(false);
+  SetupLogin(true, true);
   SetupFetchAccessToken(false);
 
   scoped_refptr<AppNotifyChannelSetup> setup = CreateInstance();
@@ -245,7 +247,7 @@ TEST_F(AppNotifyChannelSetupTest, FetchAccessTokenFailure) {
 }
 
 TEST_F(AppNotifyChannelSetupTest, RecordGrantFailure) {
-  SetupLogin(true);
+  SetupLogin(false, true);
   SetupFetchAccessToken(true);
   SetupRecordGrant(false);
 
@@ -254,7 +256,7 @@ TEST_F(AppNotifyChannelSetupTest, RecordGrantFailure) {
 }
 
 TEST_F(AppNotifyChannelSetupTest, GetChannelIdFailure) {
-  SetupLogin(true);
+  SetupLogin(false, true);
   SetupFetchAccessToken(true);
   SetupRecordGrant(true);
   SetupGetChannelId(false);
@@ -263,8 +265,20 @@ TEST_F(AppNotifyChannelSetupTest, GetChannelIdFailure) {
   RunServerTest(setup, "", "internal_error");
 }
 
-TEST_F(AppNotifyChannelSetupTest, ServerSuccess) {
-  SetupLogin(true);
+TEST_F(AppNotifyChannelSetupTest, FirstFetchAccessTokenSuccess) {
+  SetupLogin(false, true);
+  SetupFetchAccessToken(true);
+  SetupRecordGrant(true);
+  SetupGetChannelId(true);
+
+  scoped_refptr<AppNotifyChannelSetup> setup = CreateInstance();
+  RunServerTest(setup, "dummy_do_not_use", "");
+}
+
+TEST_F(AppNotifyChannelSetupTest, SecondFetchAccessTokenSuccess) {
+  SetupLogin(false, true);
+  SetupFetchAccessToken(false);
+  SetupLogin(true, true);
   SetupFetchAccessToken(true);
   SetupRecordGrant(true);
   SetupGetChannelId(true);

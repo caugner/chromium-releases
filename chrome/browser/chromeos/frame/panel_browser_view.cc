@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,15 +88,19 @@ void PanelBrowserView::Close() {
     panel_controller_->Close();
 }
 
-void PanelBrowserView::FlashFrame() {
+void PanelBrowserView::FlashFrame(bool flash) {
   if (panel_controller_.get())
-    panel_controller_->SetUrgent(true);
+    panel_controller_->SetUrgent(flash);
 }
 
 void PanelBrowserView::UpdateTitleBar() {
   ::BrowserView::UpdateTitleBar();
   if (panel_controller_.get())
     panel_controller_->UpdateTitleBar();
+}
+
+bool PanelBrowserView::IsPanel() const {
+  return true;
 }
 
 void PanelBrowserView::SetCreatorView(PanelBrowserView* creator) {
@@ -107,7 +111,10 @@ void PanelBrowserView::SetCreatorView(PanelBrowserView* creator) {
 
 WindowOpenDisposition PanelBrowserView::GetDispositionForPopupBounds(
     const gfx::Rect& bounds) {
-  return chromeos::BrowserView::DispositionForPopupBounds(bounds);
+  GdkScreen* screen = gdk_screen_get_default();
+  int width = gdk_screen_get_width(screen);
+  int height = gdk_screen_get_height(screen);
+  return browser::DispositionForPopupBounds(bounds, width, height);
 }
 
 bool PanelBrowserView::GetSavedWindowPlacement(

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,11 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "base/win/windows_version.h"
 #include "chrome/common/child_process_logging.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/render_messages.h"
-#include "chrome/default_plugin/plugin_main.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "grit/common_resources.h"
 #include "remoting/client/plugin/pepper_entrypoints.h"
@@ -30,6 +28,8 @@
 #include "webkit/plugins/plugin_constants.h"
 
 #if defined(OS_WIN)
+#include "base/win/registry.h"
+#include "base/win/windows_version.h"
 #include "sandbox/src/sandbox.h"
 #elif defined(OS_MACOSX)
 #include "chrome/common/chrome_sandbox_type_mac.h"
@@ -50,6 +50,16 @@ const char kNaClPluginExtension[] = "nexe";
 const char kNaClPluginDescription[] = "Native Client Executable";
 
 const char kNaClOldPluginName[] = "Chrome NaCl";
+
+const char kO3DPluginName[] = "Google Talk Plugin Video Accelerator";
+const char kO3DPluginMimeType[] ="application/vnd.o3d.auto";
+const char kO3DPluginExtension[] = "";
+const char kO3DPluginDescription[] = "O3D MIME";
+
+const char kGTalkPluginName[] = "Google Talk Plugin";
+const char kGTalkPluginMimeType[] ="application/googletalk";
+const char kGTalkPluginExtension[] = ".googletalk";
+const char kGTalkPluginDescription[] = "Google Talk Plugin";
 
 #if defined(ENABLE_REMOTING)
 const char kRemotingViewerPluginName[] = "Remoting Viewer";
@@ -114,6 +124,42 @@ void ComputeBuiltInPlugins(std::vector<content::PepperPluginInfo>* plugins) {
       plugins->push_back(nacl);
 
       skip_nacl_file_check = true;
+    }
+  }
+
+  static bool skip_o3d_file_check = false;
+  if (PathService::Get(chrome::FILE_O3D_PLUGIN, &path)) {
+    if (skip_o3d_file_check || file_util::PathExists(path)) {
+      content::PepperPluginInfo o3d;
+      o3d.path = path;
+      o3d.name = kO3DPluginName;
+      o3d.is_out_of_process = true;
+      o3d.is_sandboxed = false;
+      webkit::WebPluginMimeType o3d_mime_type(kO3DPluginMimeType,
+                                              kO3DPluginExtension,
+                                              kO3DPluginDescription);
+      o3d.mime_types.push_back(o3d_mime_type);
+      plugins->push_back(o3d);
+
+      skip_o3d_file_check = true;
+    }
+  }
+
+  static bool skip_gtalk_file_check = false;
+  if (PathService::Get(chrome::FILE_GTALK_PLUGIN, &path)) {
+    if (skip_gtalk_file_check || file_util::PathExists(path)) {
+      content::PepperPluginInfo gtalk;
+      gtalk.path = path;
+      gtalk.name = kGTalkPluginName;
+      gtalk.is_out_of_process = true;
+      gtalk.is_sandboxed = false;
+      webkit::WebPluginMimeType gtalk_mime_type(kGTalkPluginMimeType,
+                                                kGTalkPluginExtension,
+                                                kGTalkPluginDescription);
+      gtalk.mime_types.push_back(gtalk_mime_type);
+      plugins->push_back(gtalk);
+
+      skip_gtalk_file_check = true;
     }
   }
 
@@ -270,33 +316,6 @@ void ChromeContentClient::AddPepperPlugins(
 
 void ChromeContentClient::AddNPAPIPlugins(
     webkit::npapi::PluginList* plugin_list) {
-#if defined(OS_WIN) && !defined(USE_AURA)
-  // TODO(bauerb): On Windows the default plug-in can download and install
-  // missing plug-ins, which we don't support in the browser yet, so keep
-  // using the default plug-in on Windows until we do.
-  // Aura isn't going to support NPAPI plugins.
-  const webkit::npapi::PluginEntryPoints entry_points = {
-    default_plugin::NP_GetEntryPoints,
-    default_plugin::NP_Initialize,
-    default_plugin::NP_Shutdown
-  };
-
-  webkit::WebPluginInfo info;
-  info.path = FilePath(webkit::npapi::kDefaultPluginLibraryName);
-  info.name = ASCIIToUTF16("Default Plug-in");
-  info.version = ASCIIToUTF16("1");
-  info.desc = ASCIIToUTF16("Provides functionality for installing third-party "
-                           "plug-ins");
-
-  webkit::WebPluginMimeType mimeType;
-  mimeType.mime_type = "*";
-  info.mime_types.push_back(mimeType);
-
-  webkit::npapi::PluginList::Singleton()->RegisterInternalPlugin(
-      info,
-      entry_points,
-      false);
-#endif
 }
 
 bool ChromeContentClient::CanSendWhileSwappedOut(const IPC::Message* msg) {
@@ -358,7 +377,7 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
     return false;
 
   FilePath plugin_path(plugin_dll);
-  if (plugin_path != builtin_flash)
+  if (plugin_path.BaseName() != builtin_flash.BaseName())
     return false;
 
   if (base::win::GetVersion() <= base::win::VERSION_XP ||
@@ -368,13 +387,33 @@ bool ChromeContentClient::SandboxPlugin(CommandLine* command_line,
   }
 
   // Add the policy for the pipes.
-  sandbox::ResultCode result = sandbox::SBOX_ALL_OK;
-  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
-                           sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
-                           L"\\\\.\\pipe\\chrome.*");
-  if (result != sandbox::SBOX_ALL_OK) {
+  if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
+                      sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
+                      L"\\\\.\\pipe\\chrome.*") != sandbox::SBOX_ALL_OK) {
     NOTREACHED();
     return false;
+  }
+
+  // Allow Talk's camera control.
+  base::win::RegKey talk_key(HKEY_CURRENT_USER,
+                             L"Software\\Google\\Google Talk Plugin",
+                             KEY_READ);
+  if (talk_key.Valid()) {
+    string16 install_dir;
+    if (talk_key.ReadValue(L"install_dir", &install_dir) == ERROR_SUCCESS) {
+      if (install_dir[install_dir.size() - 1] != '\\')
+        install_dir.append(L"\\*");
+      else
+        install_dir.append(L"*");
+      // This is not a hard failure because a reparse point in the path can
+      // cause the rule to fail, but we should not abort sandboxing.
+      if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                          sandbox::TargetPolicy::FILES_ALLOW_READONLY,
+                          install_dir.c_str()) != sandbox::SBOX_ALL_OK) {
+        DVLOG(ERROR) << "Failed adding sandbox rule for Talk plugin";
+      }
+    }
+    talk_key.Close();
   }
 
   // Spawn the flash broker and apply sandbox policy.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/helper.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "ui/base/hit_test.h"
@@ -42,11 +42,9 @@ const int kTitleFontSizeDelta = 1;
 
 namespace chromeos {
 
-BubbleFrameView::BubbleFrameView(views::Widget* frame,
-                                 views::WidgetDelegate* widget_delegate,
+BubbleFrameView::BubbleFrameView(views::WidgetDelegate* widget_delegate,
                                  DialogStyle style)
-    : frame_(frame),
-      style_(style),
+    : style_(style),
       title_(NULL),
       close_button_(NULL),
       throbber_(NULL) {
@@ -90,7 +88,7 @@ void BubbleFrameView::StopThrobber() {
   DCHECK(throbber_ != NULL);
   throbber_->Stop();
   if (title_)
-    title_->SetText(frame_->widget_delegate()->GetWindowTitle());
+    title_->SetText(GetWidget()->widget_delegate()->GetWindowTitle());
 }
 
 gfx::Rect BubbleFrameView::GetBoundsForClientView() const {
@@ -149,9 +147,9 @@ gfx::Insets BubbleFrameView::GetInsets() const {
 }
 
 gfx::Size BubbleFrameView::GetPreferredSize() {
-  gfx::Size pref = frame_->client_view()->GetPreferredSize();
+  gfx::Size pref = GetWidget()->client_view()->GetPreferredSize();
   gfx::Rect bounds(0, 0, pref.width(), pref.height());
-  return frame_->non_client_view()->GetWindowBoundsForClientBounds(
+  return GetWidget()->non_client_view()->GetWindowBoundsForClientBounds(
       bounds).size();
 }
 
@@ -239,7 +237,7 @@ void BubbleFrameView::OnPaint(gfx::Canvas* canvas) {
 void BubbleFrameView::ButtonPressed(views::Button* sender,
                                     const views::Event& event) {
   if (close_button_ != NULL && sender == close_button_)
-    frame_->Close();
+    GetWidget()->Close();
 }
 
 }  // namespace chromeos

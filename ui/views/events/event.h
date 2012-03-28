@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,7 +39,6 @@ typedef base::NativeEvent NativeEvent;
 class View;
 
 namespace internal {
-class NativeWidgetView;
 class RootView;
 }
 
@@ -63,6 +62,10 @@ class VIEWS_EXPORT Event {
 #endif
   ui::EventType type() const { return type_; }
   const base::Time& time_stamp() const { return time_stamp_; }
+
+  // Required for Gesture testing purposes.
+  void set_time_stamp(base::Time time_stamp) { time_stamp_ = time_stamp; }
+
   int flags() const { return flags_; }
   void set_flags(int flags) { flags_ = flags; }
 
@@ -194,30 +197,30 @@ class VIEWS_EXPORT MouseEvent : public LocatedEvent {
 
   // Conveniences to quickly test what button is down
   bool IsOnlyLeftMouseButton() const {
-    return (flags() & ui::EF_LEFT_BUTTON_DOWN) &&
-      !(flags() & (ui::EF_MIDDLE_BUTTON_DOWN | ui::EF_RIGHT_BUTTON_DOWN));
+    return (flags() & ui::EF_LEFT_MOUSE_BUTTON) &&
+      !(flags() & (ui::EF_MIDDLE_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON));
   }
 
   bool IsLeftMouseButton() const {
-    return (flags() & ui::EF_LEFT_BUTTON_DOWN) != 0;
+    return (flags() & ui::EF_LEFT_MOUSE_BUTTON) != 0;
   }
 
   bool IsOnlyMiddleMouseButton() const {
-    return (flags() & ui::EF_MIDDLE_BUTTON_DOWN) &&
-      !(flags() & (ui::EF_LEFT_BUTTON_DOWN | ui::EF_RIGHT_BUTTON_DOWN));
+    return (flags() & ui::EF_MIDDLE_MOUSE_BUTTON) &&
+      !(flags() & (ui::EF_LEFT_MOUSE_BUTTON | ui::EF_RIGHT_MOUSE_BUTTON));
   }
 
   bool IsMiddleMouseButton() const {
-    return (flags() & ui::EF_MIDDLE_BUTTON_DOWN) != 0;
+    return (flags() & ui::EF_MIDDLE_MOUSE_BUTTON) != 0;
   }
 
   bool IsOnlyRightMouseButton() const {
-    return (flags() & ui::EF_RIGHT_BUTTON_DOWN) &&
-      !(flags() & (ui::EF_LEFT_BUTTON_DOWN | ui::EF_MIDDLE_BUTTON_DOWN));
+    return (flags() & ui::EF_RIGHT_MOUSE_BUTTON) &&
+      !(flags() & (ui::EF_LEFT_MOUSE_BUTTON | ui::EF_MIDDLE_MOUSE_BUTTON));
   }
 
   bool IsRightMouseButton() const {
-    return (flags() & ui::EF_RIGHT_BUTTON_DOWN) != 0;
+    return (flags() & ui::EF_RIGHT_MOUSE_BUTTON) != 0;
   }
 
  protected:
@@ -226,7 +229,6 @@ class VIEWS_EXPORT MouseEvent : public LocatedEvent {
   }
 
  private:
-  friend class internal::NativeWidgetView;
   friend class internal::RootView;
 
   DISALLOW_COPY_AND_ASSIGN(MouseEvent);
@@ -269,7 +271,6 @@ class VIEWS_EXPORT TouchEvent : public LocatedEvent {
   float force() const { return force_; }
 
  private:
-  friend class internal::NativeWidgetView;
   friend class internal::RootView;
 
   TouchEvent(const TouchEvent& model, View* root);
@@ -365,7 +366,6 @@ class VIEWS_EXPORT MouseWheelEvent : public MouseEvent {
 
  private:
   friend class internal::RootView;
-  friend class internal::NativeWidgetView;
 
   MouseWheelEvent(const MouseWheelEvent& model, View* root)
       : MouseEvent(model, root),
@@ -408,6 +408,57 @@ class VIEWS_EXPORT DropTargetEvent : public LocatedEvent {
   int source_operations_;
 
   DISALLOW_COPY_AND_ASSIGN(DropTargetEvent);
+};
+
+class VIEWS_EXPORT ScrollEvent : public MouseEvent {
+ public:
+  explicit ScrollEvent(const NativeEvent& native_event);
+  float x_offset() const { return x_offset_; }
+  float y_offset() const { return y_offset_; }
+
+ private:
+  float x_offset_;
+  float y_offset_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScrollEvent);
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// GestureEvent class
+//
+////////////////////////////////////////////////////////////////////////////////
+class VIEWS_EXPORT GestureEvent : public LocatedEvent {
+ public:
+  explicit GestureEvent(const NativeEvent& native_event);
+
+  // Create a new GestureEvent which is identical to the provided model.
+  // If source / target views are provided, the model location will be converted
+  // from |source| coordinate system to |target| coordinate system.
+  GestureEvent(const GestureEvent& model, View* source, View* target);
+
+  float delta_x() const { return delta_x_; }
+  float delta_y() const { return delta_y_; }
+
+ protected:
+  GestureEvent(ui::EventType type, int x, int y, int flags);
+
+ private:
+  friend class internal::RootView;
+
+  GestureEvent(const GestureEvent& model, View* root);
+
+  float delta_x_;
+  float delta_y_;
+
+  DISALLOW_COPY_AND_ASSIGN(GestureEvent);
+};
+
+class VIEWS_EXPORT GestureEventForTest : public GestureEvent {
+ public:
+  GestureEventForTest(ui::EventType type, int x, int y, int flags);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GestureEventForTest);
 };
 
 }  // namespace views

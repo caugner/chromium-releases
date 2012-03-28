@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,8 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/observer_list.h"
+#include "base/threading/non_thread_safe.h"
 #include "third_party/libjingle/source/talk/base/sigslot.h"
 #include "third_party/libjingle/source/talk/xmpp/xmppclient.h"
 
@@ -22,7 +24,8 @@ namespace remoting {
 
 class JingleThread;
 
-class XmppSignalStrategy : public SignalStrategy,
+class XmppSignalStrategy : public base::NonThreadSafe,
+                           public SignalStrategy,
                            public buzz::XmppStanzaHandler,
                            public sigslot::has_slots<> {
  public:
@@ -33,8 +36,10 @@ class XmppSignalStrategy : public SignalStrategy,
   virtual ~XmppSignalStrategy();
 
   // SignalStrategy interface.
-  virtual void Init(StatusObserver* observer) OVERRIDE;
-  virtual void Close() OVERRIDE;
+  virtual void Connect() OVERRIDE;
+  virtual void Disconnect() OVERRIDE;
+  virtual State GetState() const OVERRIDE;
+  virtual std::string GetLocalJid() const OVERRIDE;
   virtual void AddListener(Listener* listener) OVERRIDE;
   virtual void RemoveListener(Listener* listener) OVERRIDE;
   virtual bool SendStanza(buzz::XmlElement* stanza) OVERRIDE;
@@ -43,21 +48,35 @@ class XmppSignalStrategy : public SignalStrategy,
   // buzz::XmppStanzaHandler interface.
   virtual bool HandleStanza(const buzz::XmlElement* stanza) OVERRIDE;
 
+  // This method is used to update the auth info (for example when the OAuth
+  // access token is renewed). It is OK to call this even when we are in the
+  // CONNECTED state. It will be used on the next Connect() call.
+  void SetAuthInfo(const std::string& username,
+                   const std::string& auth_token,
+                   const std::string& auth_token_service);
+
+  // Use this method to override the default resource name used (optional).
+  // This will be used on the next Connect() call.
+  void SetResourceName(const std::string& resource_name);
+
  private:
-  void OnConnectionStateChanged(buzz::XmppEngine::State state);
   static buzz::PreXmppAuth* CreatePreXmppAuth(
       const buzz::XmppClientSettings& settings);
+
+  void OnConnectionStateChanged(buzz::XmppEngine::State state);
+  void SetState(State new_state);
 
   JingleThread* thread_;
 
   std::string username_;
   std::string auth_token_;
   std::string auth_token_service_;
+  std::string resource_name_;
   buzz::XmppClient* xmpp_client_;
 
-  StatusObserver* observer_;
-  std::vector<Listener*> listeners_;
+  State state_;
 
+  ObserverList<Listener> listeners_;
 
   DISALLOW_COPY_AND_ASSIGN(XmppSignalStrategy);
 };

@@ -11,16 +11,12 @@
 
 #include "base/basictypes.h"
 #include "base/memory/ref_counted.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/safe_browsing/browser_feature_extractor.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "googleurl/src/gurl.h"
-
-class TabContents;
 
 namespace safe_browsing {
 class ClientPhishingRequest;
@@ -31,20 +27,20 @@ class ClientSideDetectionService;
 // class relays this information to the client-side detection service
 // class which sends a ping to a server to validate the verdict.
 // TODO(noelutz): move all client-side detection IPCs to this class.
-class ClientSideDetectionHost : public TabContentsObserver,
+class ClientSideDetectionHost : public content::WebContentsObserver,
                                 public content::NotificationObserver,
                                 public SafeBrowsingService::Observer {
  public:
   // The caller keeps ownership of the tab object and is responsible for
-  // ensuring that it stays valid until TabContentsDestroyed is called.
-  static ClientSideDetectionHost* Create(TabContents* tab);
+  // ensuring that it stays valid until WebContentsDestroyed is called.
+  static ClientSideDetectionHost* Create(content::WebContents* tab);
   virtual ~ClientSideDetectionHost();
 
-  // From TabContentsObserver.
+  // From content::WebContentsObserver.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
-  // From TabContentsObserver.  If we navigate away we cancel all pending
-  // callbacks that could show an interstitial, and check to see whether
+  // From content::WebContentsObserver.  If we navigate away we cancel all
+  // pending callbacks that could show an interstitial, and check to see whether
   // we should classify the new URL.
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
@@ -56,15 +52,15 @@ class ClientSideDetectionHost : public TabContentsObserver,
       const SafeBrowsingService::UnsafeResource& resource) OVERRIDE;
 
  protected:
-  // From TabContentsObserver.  Called when the TabContents is being destroyed.
-  virtual void TabContentsDestroyed(TabContents* tab) OVERRIDE;
+  // From content::WebContentsObserver.
+  virtual void WebContentsDestroyed(content::WebContents* tab) OVERRIDE;
 
  private:
   friend class ClientSideDetectionHostTest;
   class ShouldClassifyUrlRequest;
   friend class ShouldClassifyUrlRequest;
 
-  explicit ClientSideDetectionHost(TabContents* tab);
+  explicit ClientSideDetectionHost(content::WebContents* tab);
 
   // Verdict is an encoded ClientPhishingRequest protocol message.
   void OnPhishingDetectionDone(const std::string& verdict);

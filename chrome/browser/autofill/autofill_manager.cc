@@ -19,8 +19,8 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/autocomplete_history_manager.h"
 #include "chrome/browser/autofill/autofill_cc_infobar_delegate.h"
-#include "chrome/browser/autofill/autofill_feedback_infobar_delegate.h"
 #include "chrome/browser/autofill/autofill_external_delegate.h"
+#include "chrome/browser/autofill/autofill_feedback_infobar_delegate.h"
 #include "chrome/browser/autofill/autofill_field.h"
 #include "chrome/browser/autofill/autofill_metrics.h"
 #include "chrome/browser/autofill/autofill_profile.h"
@@ -48,21 +48,22 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "ipc/ipc_message_macros.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
-#include "webkit/glue/form_data.h"
-#include "webkit/glue/form_data_predictions.h"
-#include "webkit/glue/form_field.h"
+#include "webkit/forms/form_data.h"
+#include "webkit/forms/form_data_predictions.h"
+#include "webkit/forms/form_field.h"
 
 using base::TimeTicks;
 using content::BrowserThread;
 using switches::kEnableAutofillFeedback;
-using webkit_glue::FormData;
-using webkit_glue::FormDataPredictions;
-using webkit_glue::FormField;
+using webkit::forms::FormData;
+using webkit::forms::FormDataPredictions;
+using webkit::forms::FormField;
 
 namespace {
 
@@ -114,7 +115,7 @@ void RemoveDuplicateSuggestions(std::vector<string16>* values,
 // logical form.  Returns true if any field in the given |section| within |form|
 // is auto-filled.
 bool SectionIsAutofilled(const FormStructure& form_structure,
-                         const webkit_glue::FormData& form,
+                         const FormData& form,
                          const string16& section) {
   DCHECK_EQ(form_structure.field_count(), form.fields.size());
   for (size_t i = 0; i < form_structure.field_count(); ++i) {
@@ -244,7 +245,7 @@ void CheckForPopularForms(const std::vector<FormStructure*>& forms,
 }  // namespace
 
 AutofillManager::AutofillManager(TabContentsWrapper* tab_contents)
-    : TabContentsObserver(tab_contents->tab_contents()),
+    : content::WebContentsObserver(tab_contents->web_contents()),
       tab_contents_wrapper_(tab_contents),
       personal_data_(NULL),
       download_manager_(tab_contents->profile(), this),
@@ -330,7 +331,7 @@ bool AutofillManager::OnFormSubmitted(const FormData& form,
   if (!IsAutofillEnabled())
     return false;
 
-  if (tab_contents()->browser_context()->IsOffTheRecord())
+  if (web_contents()->GetBrowserContext()->IsOffTheRecord())
     return false;
 
   // Don't save data that was submitted through JavaScript.
@@ -639,7 +640,7 @@ void AutofillManager::OnFillAutofillFormData(int query_id,
 
 void AutofillManager::OnShowAutofillDialog() {
   Browser* browser = BrowserList::GetLastActiveWithProfile(
-      Profile::FromBrowserContext(tab_contents()->browser_context()));
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext()));
   if (browser)
     browser->ShowOptionsTab(chrome::kAutofillSubPage);
 }
@@ -647,7 +648,7 @@ void AutofillManager::OnShowAutofillDialog() {
 void AutofillManager::OnDidPreviewAutofillFormData() {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA,
-      content::Source<RenderViewHost>(tab_contents()->render_view_host()),
+      content::Source<RenderViewHost>(web_contents()->GetRenderViewHost()),
       content::NotificationService::NoDetails());
 }
 
@@ -655,7 +656,7 @@ void AutofillManager::OnDidPreviewAutofillFormData() {
 void AutofillManager::OnDidFillAutofillFormData(const TimeTicks& timestamp) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_AUTOFILL_DID_FILL_FORM_DATA,
-      content::Source<RenderViewHost>(tab_contents()->render_view_host()),
+      content::Source<RenderViewHost>(web_contents()->GetRenderViewHost()),
       content::NotificationService::NoDetails());
 
   metric_logger_->LogUserHappinessMetric(AutofillMetrics::USER_DID_AUTOFILL);
@@ -671,7 +672,7 @@ void AutofillManager::OnDidFillAutofillFormData(const TimeTicks& timestamp) {
 void AutofillManager::OnDidShowAutofillSuggestions(bool is_new_popup) {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_AUTOFILL_DID_SHOW_SUGGESTIONS,
-      content::Source<RenderViewHost>(tab_contents()->render_view_host()),
+      content::Source<RenderViewHost>(web_contents()->GetRenderViewHost()),
       content::NotificationService::NoDetails());
 
   if (is_new_popup) {
@@ -708,7 +709,7 @@ void AutofillManager::OnDidEndTextFieldEditing() {
 
 bool AutofillManager::IsAutofillEnabled() const {
   Profile* profile = Profile::FromBrowserContext(
-      const_cast<AutofillManager*>(this)->tab_contents()->browser_context());
+      const_cast<AutofillManager*>(this)->web_contents()->GetBrowserContext());
   return profile->GetPrefs()->GetBoolean(prefs::kAutofillEnabled);
 }
 
@@ -718,7 +719,7 @@ void AutofillManager::SendAutofillTypePredictions(
            switches::kShowAutofillTypePredictions))
     return;
 
-  RenderViewHost* host = tab_contents()->render_view_host();
+  RenderViewHost* host = web_contents()->GetRenderViewHost();
   if (!host)
     return;
 
@@ -736,7 +737,7 @@ void AutofillManager::ImportFormData(const FormStructure& submitted_form) {
   // If credit card information was submitted, show an infobar to offer to save
   // it.
   scoped_ptr<const CreditCard> scoped_credit_card(imported_credit_card);
-  if (imported_credit_card && tab_contents()) {
+  if (imported_credit_card && web_contents()) {
     InfoBarTabHelper* infobar_helper =
         tab_contents_wrapper_->infobar_tab_helper();
     infobar_helper->AddInfoBar(
@@ -801,7 +802,7 @@ void AutofillManager::Reset() {
 
 AutofillManager::AutofillManager(TabContentsWrapper* tab_contents,
                                  PersonalDataManager* personal_data)
-    : TabContentsObserver(tab_contents->tab_contents()),
+    : content::WebContentsObserver(tab_contents->web_contents()),
       tab_contents_wrapper_(tab_contents),
       personal_data_(personal_data),
       download_manager_(tab_contents->profile(), this),
@@ -831,7 +832,7 @@ bool AutofillManager::GetHost(const std::vector<AutofillProfile*>& profiles,
   if (profiles.empty() && credit_cards.empty())
     return false;
 
-  *host = tab_contents()->render_view_host();
+  *host = web_contents()->GetRenderViewHost();
   if (!*host)
     return false;
 
@@ -1129,7 +1130,7 @@ void AutofillManager::GetCreditCardSuggestions(
 
 void AutofillManager::FillCreditCardFormField(const CreditCard& credit_card,
                                               AutofillFieldType type,
-                                              webkit_glue::FormField* field) {
+                                              FormField* field) {
   DCHECK_EQ(AutofillType::CREDIT_CARD, AutofillType(type).group());
   DCHECK(field);
 
@@ -1153,7 +1154,7 @@ void AutofillManager::FillCreditCardFormField(const CreditCard& credit_card,
 void AutofillManager::FillFormField(const AutofillProfile& profile,
                                     const AutofillField& cached_field,
                                     size_t variant,
-                                    webkit_glue::FormField* field) {
+                                    FormField* field) {
   AutofillFieldType type = cached_field.type();
   DCHECK_NE(AutofillType::CREDIT_CARD, AutofillType(type).group());
   DCHECK(field);
@@ -1180,7 +1181,7 @@ void AutofillManager::FillFormField(const AutofillProfile& profile,
 void AutofillManager::FillPhoneNumberField(const AutofillProfile& profile,
                                            const AutofillField& cached_field,
                                            size_t variant,
-                                           webkit_glue::FormField* field) {
+                                           FormField* field) {
   std::vector<string16> values;
   profile.GetCanonicalizedMultiInfo(cached_field.type(), &values);
   DCHECK(variant < values.size());

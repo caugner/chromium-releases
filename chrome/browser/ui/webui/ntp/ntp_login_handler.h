@@ -7,22 +7,20 @@
 #pragma once
 
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/browser/webui/web_ui.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_ui_message_handler.h"
 
 class Profile;
 
 // The NTP login handler currently simply displays the current logged in
 // username at the top of the NTP (and update itself when that changes).
 // In the future it may expand to allow users to login from the NTP.
-class NTPLoginHandler : public WebUIMessageHandler,
+class NTPLoginHandler : public content::WebUIMessageHandler,
                         public content::NotificationObserver {
  public:
   NTPLoginHandler();
   virtual ~NTPLoginHandler();
-
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
 
   // WebUIMessageHandler interface
   virtual void RegisterMessages() OVERRIDE;

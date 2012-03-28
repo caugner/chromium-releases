@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -82,7 +82,7 @@ enum NotificationType {
   // Other load-related (not from NavigationController) ----------------------
 
   // Corresponds to ViewHostMsg_DocumentOnLoadCompletedInMainFrame. The source
-  // is the TabContents and the details the page_id.
+  // is the WebContents and the details the page_id.
   NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
 
   // A content load is starting.  The source will be a
@@ -109,29 +109,15 @@ enum NotificationType {
   NOTIFICATION_FAIL_PROVISIONAL_LOAD_WITH_ERROR,
 
   // A response has been received for a resource request.  The source will be
-  // a Source<RenderViewHostDelegate> corresponding to the tab in which the
-  // request was issued.  Details in the form of a ResourceRequestDetails
-  // object are provided.
+  // a Source<WebContents> corresponding to the tab in which the request was
+  // issued.  Details in the form of a ResourceRequestDetails object are
+  // provided.
   NOTIFICATION_RESOURCE_RESPONSE_STARTED,
 
   // A redirect was received while requesting a resource.  The source will be
-  // a Source<RenderViewHostDelegate> corresponding to the tab in which the
-  // request was issued.  Details in the form of a ResourceRedirectDetails
-  // are provided.
+  // a Source<WebContents> corresponding to the tab in which the request was
+  // issued.  Details in the form of a ResourceRedirectDetails are provided.
   NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
-
-  // A new tab is created from an existing tab to serve as a target of a
-  // navigation that is about to happen. The source will be a
-  // Source<BrowserContext> corresponding to the browser context in which the
-  // new tab will live. Details in the form of a RetargetingDetails object are
-  // provided.
-  NOTIFICATION_RETARGETING,
-
-  // A new window was requested but was not created. The source will be a
-  // Source<TabContents> corresponding to the tab the request originated from.
-  // Details are the ViewHostMsg_CreateWindow_Params object that were used in
-  // the request.
-  NOTIFICATION_CREATING_NEW_WINDOW_CANCELLED,
 
   // SSL ---------------------------------------------------------------------
 
@@ -211,8 +197,8 @@ enum NotificationType {
 
   // Tabs --------------------------------------------------------------------
 
-  // Sent when a tab is added to a TabContentsDelegate. The source is the
-  // TabContentsDelegate and the details is the added TabContents.
+  // Sent when a tab is added to a WebContentsDelegate. The source is the
+  // WebContentsDelegate and the details is the added content::WebContents.
   NOTIFICATION_TAB_ADDED,
 
   // This notification is sent after a tab has been appended to the tab_strip.
@@ -232,47 +218,51 @@ enum NotificationType {
   NOTIFICATION_TAB_CLOSED,
 
   // This notification is sent when a render view host has connected to a
-  // renderer process. The source is a Source<TabContents> with a pointer to
-  // the TabContents.  A TAB_CONTENTS_DISCONNECTED notification is
+  // renderer process. The source is a Source<WebContents> with a pointer to
+  // the WebContents.  A WEB_CONTENTS_DISCONNECTED notification is
   // guaranteed before the source pointer becomes junk.  No details are
   // expected.
-  NOTIFICATION_TAB_CONTENTS_CONNECTED,
+  NOTIFICATION_WEB_CONTENTS_CONNECTED,
 
   // This notification is sent when a TabContents swaps its render view host
   // with another one, possibly changing processes. The source is a
-  // Source<TabContents> with a pointer to the TabContents.  A
+  // Source<WebContents> with a pointer to the WebContents.  A
   // TAB_CONTENTS_DISCONNECTED notification is guaranteed before the
   // source pointer becomes junk.  No details are expected.
-  NOTIFICATION_TAB_CONTENTS_SWAPPED,
+  NOTIFICATION_WEB_CONTENTS_SWAPPED,
 
-  // This message is sent after a TabContents is disconnected from the
-  // renderer process.  The source is a Source<TabContents> with a pointer to
-  // the TabContents (the pointer is usable).  No details are expected.
-  NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
+  // This message is sent after a WebContents is disconnected from the
+  // renderer process.  The source is a Source<WebContents> with a pointer to
+  // the WebContents (the pointer is usable).  No details are expected.
+  NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
 
   // This notification is sent after TabContents' title is updated. The source
-  // is a Source<TabContents> with a pointer to the TabContents. The details
+  // is a Source<WebContents> with a pointer to the WebContents. The details
   // is a Details<TitleUpdatedDetails> that contains more information.
-  NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED,
+  NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
 
-  // This notification is sent when a TabContents is being hidden, e.g. due
-  // to switching away from this tab.  The source is a Source<TabContents>.
-  NOTIFICATION_TAB_CONTENTS_HIDDEN,
+  // This notification is sent when a WebContents is being hidden, e.g. due
+  // to switching away from this tab.  The source is a Source<WebContents>.
+  NOTIFICATION_WEB_CONTENTS_HIDDEN,
 
-  // This notification is sent when a TabContents is being destroyed. Any
-  // object holding a reference to a TabContents can listen to that
+  // This notification is sent when a WebContents is being destroyed. Any
+  // object holding a reference to a WebContents can listen to that
   // notification to properly reset the reference. The source is a
-  // Source<TabContents>.
-  NOTIFICATION_TAB_CONTENTS_DESTROYED,
+  // Source<WebContents>.
+  NOTIFICATION_WEB_CONTENTS_DESTROYED,
 
-  // A RenderViewHost was created for a TabContents. The source is the
-  // associated TabContents, and the details is the RenderViewHost
+  // A RenderViewHost was created for a WebContents. The source is the
+  // associated WebContents, and the details is the RenderViewHost
   // pointer.
   NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
 
   // Notification than an interstitial has become associated with a tab. The
-  // source is the TabContents, the details not used.
+  // source is the WebContents, the details not used.
   NOTIFICATION_INTERSTITIAL_ATTACHED,
+
+  // Notification than an interstitial has become detached from a tab. The
+  // source is the WebContents, the details not used.
+  NOTIFICATION_INTERSTITIAL_DETACHED,
 
   // Indicates that a RenderProcessHost was created and its handle is now
   // available. The source will be the RenderProcessHost that corresponds to
@@ -300,9 +290,9 @@ enum NotificationType {
   NOTIFICATION_RENDERER_PROCESS_HANG,
 
   // This is sent to notify that the RenderViewHost displayed in a
-  // TabContents has changed.  Source is the TabContents for which the change
-  // happened, details is the previous RenderViewHost (can be NULL when the
-  // first RenderViewHost is set).
+  // TabContents has changed.  Source is the NavigationController for which the
+  // change happened, details is a
+  // std::pair::<old RenderViewHost, new RenderViewHost>).
   NOTIFICATION_RENDER_VIEW_HOST_CHANGED,
 
   // Indicates that the render view host has received an accessibility tree

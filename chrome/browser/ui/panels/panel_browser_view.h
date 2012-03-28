@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,28 +12,12 @@
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "ui/base/animation/animation_delegate.h"
-#include "ui/base/animation/slide_animation.h"
 
 class Browser;
-class Panel;
 class NativePanelTestingWin;
+class Panel;
+class PanelBoundsAnimation;
 class PanelBrowserFrameView;
-
-class PanelSlideAnimation : public ui::SlideAnimation {
- public:
-  PanelSlideAnimation(ui::AnimationDelegate* target,
-                       bool for_minimize,
-                       double animation_stop_to_show_titlebar)
-    : ui::SlideAnimation(target),
-      for_minimize_(for_minimize),
-      animation_stop_to_show_titlebar_(animation_stop_to_show_titlebar) { }
-  virtual ~PanelSlideAnimation() { }
-  virtual double GetCurrentValue() const OVERRIDE;
-
- private:
-  bool for_minimize_;
-  double animation_stop_to_show_titlebar_;
-};
 
 // A browser view that implements Panel specific behavior.
 class PanelBrowserView : public BrowserView,
@@ -68,12 +52,15 @@ class PanelBrowserView : public BrowserView,
 
   // Overridden from BrowserView:
   virtual void Init() OVERRIDE;
+  virtual void Show() OVERRIDE;
+  virtual void ShowInactive() OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void Deactivate() OVERRIDE;
   virtual bool CanResize() const OVERRIDE;
   virtual bool CanMaximize() const OVERRIDE;
   virtual void SetBounds(const gfx::Rect& bounds) OVERRIDE;
   virtual void UpdateTitleBar() OVERRIDE;
+  virtual bool IsPanel() const OVERRIDE;
   virtual bool GetSavedWindowPlacement(
       gfx::Rect* bounds,
       ui::WindowShowState* show_state) const OVERRIDE;
@@ -104,11 +91,11 @@ class PanelBrowserView : public BrowserView,
   virtual void ShowTaskManagerForPanel() OVERRIDE;
   virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
-  virtual void PanelTabContentsFocused(TabContents* tab_contents) OVERRIDE;
+  virtual void PanelWebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void PanelCut() OVERRIDE;
   virtual void PanelCopy() OVERRIDE;
   virtual void PanelPaste() OVERRIDE;
-  virtual void DrawAttention() OVERRIDE;
+  virtual void DrawAttention(bool draw_attention) OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
   virtual bool PreHandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event,
@@ -125,14 +112,13 @@ class PanelBrowserView : public BrowserView,
   virtual void DestroyPanelBrowser() OVERRIDE;
   virtual gfx::Size IconOnlySize() const OVERRIDE;
   virtual void EnsurePanelFullyVisible() OVERRIDE;
+  virtual void SetPanelAppIconVisibility(bool visible) OVERRIDE;
 
   // Overridden from AnimationDelegate:
   virtual void AnimationEnded(const ui::Animation* animation) OVERRIDE;
   virtual void AnimationProgressed(const ui::Animation* animation) OVERRIDE;
 
   bool EndDragging(bool cancelled);
-
-  void StopDrawingAttention();
 
   void SetBoundsInternal(const gfx::Rect& bounds, bool animate);
 
@@ -162,7 +148,7 @@ class PanelBrowserView : public BrowserView,
   MouseDraggingState mouse_dragging_state_;
 
   // Used to animate the bounds change.
-  scoped_ptr<PanelSlideAnimation> bounds_animator_;
+  scoped_ptr<PanelBoundsAnimation> bounds_animator_;
   gfx::Rect animation_start_bounds_;
 
   // Is the panel in highlighted state to draw people's attention?

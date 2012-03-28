@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,8 +38,35 @@
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 #endif
 
-static base::LazyInstance<std::string,
-                          base::LeakyLazyInstanceTraits<std::string > >
+namespace {
+
+// Returns the date at which the current metrics client ID was created as
+// a string containing milliseconds since the epoch, or "0" if none was found.
+std::string GetInstallDate() {
+  PrefService* pref = g_browser_process->local_state();
+  if (pref) {
+    return pref->GetString(prefs::kMetricsClientIDTimestamp);
+  } else {
+    NOTREACHED();
+    return "0";
+  }
+}
+
+// Returns the plugin preferences corresponding for this user, if available.
+// If multiple user profiles are loaded, returns the preferences corresponding
+// to an arbitrary one of the profiles.
+PluginPrefs* GetPluginPrefs() {
+  ProfileManager* profile_manager = g_browser_process->profile_manager();
+  std::vector<Profile*> profiles = profile_manager->GetLoadedProfiles();
+  if (profiles.empty())
+    return NULL;
+
+  return PluginPrefs::GetForProfile(profiles.front());
+}
+
+}  // namespace
+
+static base::LazyInstance<std::string>::Leaky
   g_version_extension = LAZY_INSTANCE_INITIALIZER;
 
 MetricsLog::MetricsLog(const std::string& client_id, int session_id)
@@ -52,6 +79,7 @@ void MetricsLog::RegisterPrefs(PrefService* local_state) {
   local_state->RegisterListPref(prefs::kStabilityPluginStats);
 }
 
+// static
 int64 MetricsLog::GetIncrementalUptime(PrefService* pref) {
   base::TimeTicks now = base::TimeTicks::Now();
   static base::TimeTicks last_updated_time(now);
@@ -65,16 +93,6 @@ int64 MetricsLog::GetIncrementalUptime(PrefService* pref) {
   }
 
   return incremental_time;
-}
-
-std::string MetricsLog::GetInstallDate() const {
-  PrefService* pref = g_browser_process->local_state();
-  if (pref) {
-    return pref->GetString(prefs::kMetricsClientIDTimestamp);
-  } else {
-    NOTREACHED();
-    return "0";
-  }
 }
 
 // static
@@ -91,10 +109,6 @@ std::string MetricsLog::GetVersionString() {
   if (!version_info.IsOfficialBuild())
     version.append("-devel");
   return version;
-}
-
-MetricsLog* MetricsLog::AsMetricsLog() {
-  return this;
 }
 
 // static
@@ -168,39 +182,40 @@ void MetricsLog::WritePluginStabilityElements(PrefService* pref) {
   // Now log plugin stability info.
   const ListValue* plugin_stats_list = pref->GetList(
       prefs::kStabilityPluginStats);
-  if (plugin_stats_list) {
-    OPEN_ELEMENT_FOR_SCOPE("plugins");
-    for (ListValue::const_iterator iter = plugin_stats_list->begin();
-         iter != plugin_stats_list->end(); ++iter) {
-      if (!(*iter)->IsType(Value::TYPE_DICTIONARY)) {
-        NOTREACHED();
-        continue;
-      }
-      DictionaryValue* plugin_dict = static_cast<DictionaryValue*>(*iter);
+  if (!plugin_stats_list)
+    return;
 
-      std::string plugin_name;
-      plugin_dict->GetString(prefs::kStabilityPluginName, &plugin_name);
-
-      OPEN_ELEMENT_FOR_SCOPE("pluginstability");
-      // Use "filename" instead of "name", otherwise we need to update the
-      // UMA servers.
-      WriteAttribute("filename", CreateBase64Hash(plugin_name));
-
-      int launches = 0;
-      plugin_dict->GetInteger(prefs::kStabilityPluginLaunches, &launches);
-      WriteIntAttribute("launchcount", launches);
-
-      int instances = 0;
-      plugin_dict->GetInteger(prefs::kStabilityPluginInstances, &instances);
-      WriteIntAttribute("instancecount", instances);
-
-      int crashes = 0;
-      plugin_dict->GetInteger(prefs::kStabilityPluginCrashes, &crashes);
-      WriteIntAttribute("crashcount", crashes);
+  OPEN_ELEMENT_FOR_SCOPE("plugins");
+  for (ListValue::const_iterator iter = plugin_stats_list->begin();
+       iter != plugin_stats_list->end(); ++iter) {
+    if (!(*iter)->IsType(Value::TYPE_DICTIONARY)) {
+      NOTREACHED();
+      continue;
     }
+    DictionaryValue* plugin_dict = static_cast<DictionaryValue*>(*iter);
 
-    pref->ClearPref(prefs::kStabilityPluginStats);
+    std::string plugin_name;
+    plugin_dict->GetString(prefs::kStabilityPluginName, &plugin_name);
+
+    OPEN_ELEMENT_FOR_SCOPE("pluginstability");
+    // Use "filename" instead of "name", otherwise we need to update the
+    // UMA servers.
+    WriteAttribute("filename", CreateBase64Hash(plugin_name));
+
+    int launches = 0;
+    plugin_dict->GetInteger(prefs::kStabilityPluginLaunches, &launches);
+    WriteIntAttribute("launchcount", launches);
+
+    int instances = 0;
+    plugin_dict->GetInteger(prefs::kStabilityPluginInstances, &instances);
+    WriteIntAttribute("instancecount", instances);
+
+    int crashes = 0;
+    plugin_dict->GetInteger(prefs::kStabilityPluginCrashes, &crashes);
+    WriteIntAttribute("crashcount", crashes);
   }
+
+  pref->ClearPref(prefs::kStabilityPluginStats);
 }
 
 void MetricsLog::WriteRequiredStabilityAttributes(PrefService* pref) {
@@ -290,11 +305,7 @@ void MetricsLog::WritePluginList(
     const std::vector<webkit::WebPluginInfo>& plugin_list) {
   DCHECK(!locked_);
 
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  std::vector<Profile*> profiles = profile_manager->GetLoadedProfiles();
-  PluginPrefs* plugin_prefs = NULL;
-  if (!profiles.empty())
-    plugin_prefs = PluginPrefs::GetForProfile(profiles.front());
+  PluginPrefs* plugin_prefs = GetPluginPrefs();
 
   OPEN_ELEMENT_FOR_SCOPE("plugins");
 
@@ -486,15 +497,28 @@ void MetricsLog::RecordOmniboxOpenedURL(const AutocompleteLog& log) {
   WriteAttribute("targetidhash", "");
   // TODO(kochi): Properly track windows.
   WriteIntAttribute("window", 0);
+  if (log.tab_id != -1) {
+    // If we know what tab the autocomplete URL was opened in, log it.
+    WriteIntAttribute("tab", static_cast<int>(log.tab_id));
+  }
   WriteCommonEventAttributes();
 
   {
     OPEN_ELEMENT_FOR_SCOPE("autocomplete");
 
     WriteIntAttribute("typedlength", static_cast<int>(log.text.length()));
+    std::vector<string16> terms;
+    WriteIntAttribute("numterms",
+        static_cast<int>(Tokenize(log.text, kWhitespaceUTF16, &terms)));
     WriteIntAttribute("selectedindex", static_cast<int>(log.selected_index));
     WriteIntAttribute("completedlength",
                       static_cast<int>(log.inline_autocompleted_length));
+    if (log.elapsed_time_since_user_first_modified_omnibox !=
+        base::TimeDelta::FromMilliseconds(-1)) {
+      // Only upload the typing duration if it is set/valid.
+      WriteInt64Attribute("typingduration",
+          log.elapsed_time_since_user_first_modified_omnibox.InMilliseconds());
+    }
     const std::string input_type(
         AutocompleteInput::TypeToString(log.input_type));
     if (!input_type.empty())

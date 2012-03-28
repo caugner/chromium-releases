@@ -9,6 +9,7 @@
 #include "base/format_macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop_helpers.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
@@ -19,8 +20,8 @@
 #include "chrome/browser/safe_browsing/signature_util.h"
 #include "chrome/common/net/http_return.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
-#include "content/browser/download/download_item.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_item.h"
 #include "content/public/common/url_fetcher.h"
 #include "content/public/common/url_fetcher_delegate.h"
 #include "net/base/load_flags.h"
@@ -150,7 +151,7 @@ std::string DownloadProtectionService::DownloadInfo::DebugString() const {
 // static
 DownloadProtectionService::DownloadInfo
 DownloadProtectionService::DownloadInfo::FromDownloadItem(
-    const DownloadItem& item) {
+    const content::DownloadItem& item) {
   DownloadInfo download_info;
   download_info.target_file = item.GetTargetFilePath();
   download_info.sha256_hash = item.GetHash();
@@ -456,7 +457,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
  private:
   friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
-  friend class DeleteTask<CheckClientDownloadRequest>;
+  friend class base::DeleteHelper<CheckClientDownloadRequest>;
 
   virtual ~CheckClientDownloadRequest() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));

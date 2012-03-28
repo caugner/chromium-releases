@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -35,10 +35,9 @@
 #include "chrome/common/jstemplate_builder.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/download/download_manager.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_manager.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -53,6 +52,7 @@
 #endif
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 static const char* kMediaPlayerAppName = "mediaplayer";
 static const int kPopupLeft = 0;
@@ -73,10 +73,6 @@ int MediaPlayer::GetPlaylistPosition() const {
 // Mediaplayer
 //
 ////////////////////////////////////////////////////////////////////////////////
-
-// Allows InvokeLater without adding refcounting. This class is a Singleton and
-// won't be deleted until it's last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(MediaPlayer);
 
 MediaPlayer::~MediaPlayer() {
 }

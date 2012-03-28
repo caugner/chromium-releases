@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -18,6 +18,7 @@
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_find.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_font.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_fullscreen.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_gamepad.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_graphics_2d.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_graphics_3d.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_image_data.h"
@@ -26,6 +27,7 @@
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_memory.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_messaging.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_mouse_lock.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_net_address_private.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_pdf.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_scrollbar.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_tcp_socket_private.h"
@@ -35,6 +37,8 @@
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_url_request_info.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_url_response_info.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_var.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_view.h"
+#include "native_client/src/shared/ppapi_proxy/plugin_ppb_websocket.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_widget.h"
 #include "native_client/src/shared/ppapi_proxy/plugin_ppb_zoom.h"
 #include "native_client/src/shared/ppapi_proxy/untrusted/srpcgen/ppb_rpc.h"
@@ -63,6 +67,7 @@ InterfaceMapElement interface_map[] = {
   { PPB_FIND_DEV_INTERFACE, PluginFind::GetInterface(), true },
   { PPB_FONT_DEV_INTERFACE, PluginFont::GetInterface(), true },
   { PPB_FULLSCREEN_INTERFACE, PluginFullscreen::GetInterface(), true },
+  { PPB_GAMEPAD_DEV_INTERFACE, PluginGamepad::GetInterface(), true },
   { PPB_GRAPHICS_2D_INTERFACE, PluginGraphics2D::GetInterface(), true },
   { PPB_GRAPHICS_3D_INTERFACE, PluginGraphics3D::GetInterface(), true },
   { PPB_IMAGEDATA_INTERFACE, PluginImageData::GetInterface(), true },
@@ -77,21 +82,29 @@ InterfaceMapElement interface_map[] = {
   { PPB_MOUSE_INPUT_EVENT_INTERFACE_1_1,
     PluginInputEvent::GetMouseInterface1_1(), true },
   { PPB_MOUSELOCK_INTERFACE, PluginMouseLock::GetInterface(), true },
+  { PPB_NETADDRESS_PRIVATE_INTERFACE, PluginNetAddressPrivate::GetInterface(),
+    true },
   { PPB_OPENGLES2_INTERFACE, PluginGraphics3D::GetOpenGLESInterface(),
     true },
   { PPB_PDF_INTERFACE, PluginPDF::GetInterface(), true },
   { PPB_SCROLLBAR_DEV_INTERFACE, PluginScrollbar::GetInterface(), true },
   { PPB_TCPSOCKET_PRIVATE_INTERFACE, PluginTCPSocketPrivate::GetInterface(),
     true },
-  { PPB_TESTING_DEV_INTERFACE_0_7, PluginTesting::GetInterface(), true },
-  { PPB_TESTING_DEV_INTERFACE_0_8, PluginTesting::GetInterface(), true },
+  { PPB_TESTING_DEV_INTERFACE_0_9, PluginTesting::GetInterface(), true },
+  { PPB_TESTING_DEV_INTERFACE, PluginTesting::GetInterface(), true },
   { PPB_UDPSOCKET_PRIVATE_INTERFACE, PluginUDPSocketPrivate::GetInterface(),
     true },
   { PPB_URLLOADER_INTERFACE, PluginURLLoader::GetInterface(), true },
   { PPB_URLREQUESTINFO_INTERFACE, PluginURLRequestInfo::GetInterface(), true },
   { PPB_URLRESPONSEINFO_INTERFACE, PluginURLResponseInfo::GetInterface(),
     true },
+  { PPB_VAR_ARRAY_BUFFER_INTERFACE, PluginVar::GetArrayBufferInterface(),
+    true },
   { PPB_VAR_INTERFACE, PluginVar::GetInterface(), true },
+  { PPB_VAR_INTERFACE_1_0, PluginVar::GetInterface1_0(), true },
+  { PPB_VIEW_INTERFACE, PluginView::GetInterface(), true },
+  { PPB_WEBSOCKET_INTERFACE, PluginWebSocket::GetInterface(),
+    true },
   { PPB_WHEEL_INPUT_EVENT_INTERFACE, PluginInputEvent::GetWheelInterface(),
     true },
   { PPB_WIDGET_DEV_INTERFACE, PluginWidget::GetInterface(), true },

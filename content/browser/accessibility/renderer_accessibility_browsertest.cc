@@ -12,9 +12,9 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 
 #if defined(OS_WIN)
 #include <atlbase.h>
@@ -22,6 +22,8 @@
 #include "ui/base/win/atl_module.h"
 #endif
 
+using content::OpenURLParams;
+using content::Referrer;
 using webkit_glue::WebAccessibility;
 
 namespace {
@@ -37,7 +39,7 @@ class RendererAccessibilityBrowserTest : public InProcessBrowserTest {
         content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
         content::NotificationService::AllSources());
     RenderWidgetHostView* host_view =
-        browser()->GetSelectedTabContents()->GetRenderWidgetHostView();
+        browser()->GetSelectedWebContents()->GetRenderWidgetHostView();
     RenderWidgetHost* host = host_view->GetRenderWidgetHost();
     RenderViewHost* view_host = static_cast<RenderViewHost*>(host);
     view_host->set_save_accessibility_tree_for_testing(true);
@@ -131,7 +133,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<body><input type='button' value='push' /><input type='checkbox' />"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
   const WebAccessibility& tree = GetWebAccessibilityTree();
 
   // Check properties of the root element of the tree.
@@ -193,7 +196,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<input value=\"Hello, world.\"/>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -222,7 +226,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<input value=\"Hello, world.\"/>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -249,7 +254,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<!doctype html>"
       "<table border=1><tr><td>1</td><td>2</td></tr></table>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -273,8 +279,9 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
   EXPECT_EQ(cell2.id, column2.indirect_child_ids[0]);
 }
 
-IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
-                       CrossPlatformMultipleInheritanceAccessibility2) {
+IN_PROC_BROWSER_TEST_F(
+    RendererAccessibilityBrowserTest,
+    CrossPlatformMultipleInheritanceAccessibility2) {
   // Here's another html snippet where WebKit puts the same node as a child
   // of two different parents. Instead of checking the exact output, just
   // make sure that no id is reused in the resulting tree.
@@ -288,7 +295,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "  }, 1);\n"
       "</script>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   base::hash_set<int> ids;
@@ -308,7 +316,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<button>Button 3</button>"
       "</body></html>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   ASSERT_EQ(1U, tree.children.size());
@@ -354,7 +363,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       "<!doctype html>"
       "<em><code ><h4 ></em>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   base::hash_set<int> ids;
@@ -381,7 +391,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       " </tr>"
       "</table>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
 
   const WebAccessibility& tree = GetWebAccessibilityTree();
   const WebAccessibility& table = tree.children[0];
@@ -439,7 +450,8 @@ IN_PROC_BROWSER_TEST_F(RendererAccessibilityBrowserTest,
       " Some text"
       "</div>";
   GURL url(url_str);
-  browser()->OpenURL(url, GURL(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      url, Referrer(), CURRENT_TAB, content::PAGE_TRANSITION_TYPED, false));
   const WebAccessibility& tree = GetWebAccessibilityTree();
 
   ASSERT_EQ(1U, tree.children.size());

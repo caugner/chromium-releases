@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/platform_file.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/quota/special_storage_policy.h"
 
@@ -23,7 +24,13 @@ class QuotaManagerProxy;
 
 namespace fileapi {
 
+class ExternalFileSystemMountPointProvider;
+class FileSystemCallbackDispatcher;
 class FileSystemContext;
+class FileSystemFileUtil;
+class FileSystemMountPointProvider;
+class FileSystemOperationInterface;
+class FileSystemOptions;
 class FileSystemPathManager;
 class FileSystemQuotaUtil;
 class SandboxMountPointProvider;
@@ -31,6 +38,7 @@ class SandboxMountPointProvider;
 struct DefaultContextDeleter;
 
 // This class keeps and provides a file system context for FileSystem API.
+// An instance of this class is created and owned by profile.
 class FileSystemContext
     : public base::RefCountedThreadSafe<FileSystemContext,
                                         DefaultContextDeleter> {
@@ -41,9 +49,7 @@ class FileSystemContext
       scoped_refptr<quota::SpecialStoragePolicy> special_storage_policy,
       quota::QuotaManagerProxy* quota_manager_proxy,
       const FilePath& profile_path,
-      bool is_incognito,
-      bool allow_file_access_from_files,
-      FileSystemPathManager* path_manager);
+      const FileSystemOptions& options);
   ~FileSystemContext();
 
   // This method can be called on any thread.
@@ -51,7 +57,6 @@ class FileSystemContext
   bool DeleteDataForOriginAndTypeOnFileThread(const GURL& origin_url,
                                               FileSystemType type);
 
-  FileSystemPathManager* path_manager() const { return path_manager_.get(); }
   quota::QuotaManagerProxy* quota_manager_proxy() const {
     return quota_manager_proxy_.get();
   }
@@ -61,17 +66,61 @@ class FileSystemContext
   // it is not a quota-managed storage.
   FileSystemQuotaUtil* GetQuotaUtil(FileSystemType type) const;
 
+  // Returns the appropriate FileUtil instance for the given |type|.
+  // This may return NULL if it is given an invalid or unsupported filesystem
+  // type.
+  FileSystemFileUtil* GetFileUtil(FileSystemType type) const;
+
+  // Returns the mount point provider instance for the given |type|.
+  // This may return NULL if it is given an invalid or unsupported filesystem
+  // type.
+  FileSystemMountPointProvider* GetMountPointProvider(
+      FileSystemType type) const;
+
+  // Returns a FileSystemMountPointProvider instance for sandboxed filesystem
+  // types (e.g. TEMPORARY or PERSISTENT).  This is equivalent to calling
+  // GetMountPointProvider(kFileSystemType{Temporary, Persistent}).
+  SandboxMountPointProvider* sandbox_provider() const;
+
+  // Returns a FileSystemMountPointProvider instance for external filesystem
+  // type, which is used only by chromeos for now.  This is equivalent to
+  // calling GetMountPointProvider(kFileSystemTypeExternal).
+  ExternalFileSystemMountPointProvider* external_provider() const;
+
+  // Opens the filesystem for the given |origin_url| and |type|, and dispatches
+  // the DidOpenFileSystem callback of the given |dispatcher|.
+  // If |create| is true this may actually set up a filesystem instance
+  // (e.g. by creating the root directory or initializing the database
+  // entry etc).
+  // TODO(kinuko): replace the dispatcher with a regular callback.
+  void OpenFileSystem(
+      const GURL& origin_url,
+      FileSystemType type,
+      bool create,
+      scoped_ptr<FileSystemCallbackDispatcher> dispatcher);
+
+  // Creates a new FileSystemOperation instance by cracking
+  // the given filesystem URL |url| to get an appropriate MountPointProvider
+  // and calling the provider's corresponding CreateFileSystemOperation method.
+  // The resolved MountPointProvider could perform further specialization
+  // depending on the filesystem type pointed by the |url|.
+  FileSystemOperationInterface* CreateFileSystemOperation(
+      const GURL& url,
+      scoped_ptr<FileSystemCallbackDispatcher> dispatcher,
+      base::MessageLoopProxy* file_proxy);
+
  private:
   friend struct DefaultContextDeleter;
   void DeleteOnCorrectThread() const;
-  SandboxMountPointProvider* sandbox_provider() const;
 
   scoped_refptr<base::MessageLoopProxy> file_message_loop_;
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;
 
   scoped_refptr<quota::QuotaManagerProxy> quota_manager_proxy_;
 
-  scoped_ptr<FileSystemPathManager> path_manager_;
+  // Mount point providers.
+  scoped_ptr<SandboxMountPointProvider> sandbox_provider_;
+  scoped_ptr<ExternalFileSystemMountPointProvider> external_provider_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FileSystemContext);
 };

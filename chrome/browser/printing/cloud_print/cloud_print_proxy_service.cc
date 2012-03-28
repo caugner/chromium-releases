@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,9 +30,6 @@
 
 using content::BrowserThread;
 
-// TODO(sanjeevr): Localize the product name?
-const char kCloudPrintProductName[] = "Google Cloud Print";
-
 class CloudPrintProxyService::TokenExpiredNotificationDelegate
     : public NotificationDelegate {
  public:
@@ -60,7 +57,8 @@ class CloudPrintProxyService::TokenExpiredNotificationDelegate
 CloudPrintProxyService::CloudPrintProxyService(Profile* profile)
     : profile_(profile),
       token_expired_delegate_(NULL),
-      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      enforcing_connector_policy_(false) {
 }
 
 CloudPrintProxyService::~CloudPrintProxyService() {
@@ -85,6 +83,14 @@ void CloudPrintProxyService::RefreshStatusFromService() {
   InvokeServiceTask(
       base::Bind(&CloudPrintProxyService::RefreshCloudPrintProxyStatus,
                  weak_factory_.GetWeakPtr()));
+}
+
+bool CloudPrintProxyService::EnforceCloudPrintConnectorPolicyAndQuit() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  enforcing_connector_policy_ = true;
+  if (ApplyCloudPrintConnectorPolicy())
+    return true;
+  return false;
 }
 
 void CloudPrintProxyService::EnableForUser(const std::string& lsid,
@@ -122,9 +128,9 @@ bool CloudPrintProxyService::ShowTokenExpiredNotification() {
   // TODO(sanjeevr): Get icon for this notification.
   GURL icon_url;
 
-  string16 title = UTF8ToUTF16(kCloudPrintProductName);
+  string16 title = l10n_util::GetStringUTF16(IDS_GOOGLE_CLOUD_PRINT);
   string16 message =
-      l10n_util::GetStringUTF16(IDS_CLOUD_PRINT_TOKEN_EXPIRED_MESSAGE);
+      l10n_util::GetStringFUTF16(IDS_CLOUD_PRINT_TOKEN_EXPIRED_MESSAGE, title);
   string16 content_url = DesktopNotificationService::CreateDataUrl(
       icon_url, title, message, WebKit::WebTextDirectionDefault);
   token_expired_delegate_ = new TokenExpiredNotificationDelegate(this);
@@ -164,15 +170,25 @@ void CloudPrintProxyService::TokenExpiredNotificationDone(bool keep_alive) {
   }
 }
 
-void CloudPrintProxyService::ApplyCloudPrintConnectorPolicy() {
+bool CloudPrintProxyService::ApplyCloudPrintConnectorPolicy() {
   if (!profile_->GetPrefs()->GetBoolean(prefs::kCloudPrintProxyEnabled)) {
     std::string email =
         profile_->GetPrefs()->GetString(prefs::kCloudPrintEmail);
     if (!email.empty()) {
       DisableForUser();
       profile_->GetPrefs()->SetString(prefs::kCloudPrintEmail, std::string());
+      if (enforcing_connector_policy_) {
+        MessageLoop::current()->PostTask(
+            FROM_HERE,
+            base::Bind(&CloudPrintProxyService::RefreshCloudPrintProxyStatus,
+                       weak_factory_.GetWeakPtr()));
+      }
+      return false;
+    } else if (enforcing_connector_policy_) {
+      MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     }
   }
+  return true;
 }
 
 void CloudPrintProxyService::OnCloudPrintSetupClosed() {

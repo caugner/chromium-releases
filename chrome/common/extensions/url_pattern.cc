@@ -16,8 +16,7 @@ const char URLPattern::kAllUrlsPattern[] = "<all_urls>";
 
 namespace {
 
-// TODO(aa): Consider adding chrome-extension? What about more obscure ones
-// like data: and javascript: ?
+// TODO(aa): What about more obscure schemes like data: and javascript: ?
 // Note: keep this array in sync with kValidSchemeMasks.
 const char* kValidSchemes[] = {
   chrome::kHttpScheme,
@@ -25,6 +24,7 @@ const char* kValidSchemes[] = {
   chrome::kFileScheme,
   chrome::kFtpScheme,
   chrome::kChromeUIScheme,
+  chrome::kExtensionScheme,
   chrome::kFileSystemScheme,
 };
 
@@ -34,6 +34,7 @@ const int kValidSchemeMasks[] = {
   URLPattern::SCHEME_FILE,
   URLPattern::SCHEME_FTP,
   URLPattern::SCHEME_CHROMEUI,
+  URLPattern::SCHEME_EXTENSION,
   URLPattern::SCHEME_FILESYSTEM,
 };
 
@@ -47,10 +48,7 @@ const char kParseErrorWrongSchemeType[] = "Wrong scheme type.";
 const char kParseErrorEmptyHost[] = "Host can not be empty.";
 const char kParseErrorInvalidHostWildcard[] = "Invalid host wildcard.";
 const char kParseErrorEmptyPath[] = "Empty path.";
-const char kParseErrorHasColon[] =
-    "Ports are not supported in URL patterns. ':' may not be used in a host.";
-const char kParseErrorInvalidPort[] =
-    "Invalid port.";
+const char kParseErrorInvalidPort[] = "Invalid port.";
 
 // Message explaining each URLPattern::ParseResult.
 const char* const kParseResultMessages[] = {
@@ -61,7 +59,6 @@ const char* const kParseResultMessages[] = {
   kParseErrorEmptyHost,
   kParseErrorInvalidHostWildcard,
   kParseErrorEmptyPath,
-  kParseErrorHasColon,
   kParseErrorInvalidPort,
 };
 
@@ -110,14 +107,13 @@ URLPattern::URLPattern(int valid_schemes)
       port_("*") {}
 
 URLPattern::URLPattern(int valid_schemes, const std::string& pattern)
+    // Strict error checking is used, because this constructor is only
+    // appropriate when we know |pattern| is valid.
     : valid_schemes_(valid_schemes),
       match_all_urls_(false),
       match_subdomains_(false),
       port_("*") {
-
-  // Strict error checking is used, because this constructor is only
-  // appropriate when we know |pattern| is valid.
-  if (PARSE_SUCCESS != Parse(pattern, ERROR_ON_PORTS))
+  if (PARSE_SUCCESS != Parse(pattern))
     NOTREACHED() << "URLPattern is invalid: " << pattern;
 }
 
@@ -132,8 +128,7 @@ bool URLPattern::operator==(const URLPattern& other) const {
   return GetAsString() == other.GetAsString();
 }
 
-URLPattern::ParseResult URLPattern::Parse(const std::string& pattern,
-                                          ParseOption strictness) {
+URLPattern::ParseResult URLPattern::Parse(const std::string& pattern) {
   spec_.clear();
 
   // Special case pattern to match every valid URL.
@@ -215,20 +210,9 @@ URLPattern::ParseResult URLPattern::Parse(const std::string& pattern,
 
   size_t port_pos = host_.find(':');
   if (port_pos != std::string::npos) {
-    switch (strictness) {
-      case USE_PORTS: {
-        if (!SetPort(host_.substr(port_pos + 1)))
-          return PARSE_ERROR_INVALID_PORT;
-        host_ = host_.substr(0, port_pos);
-        break;
-      }
-      case ERROR_ON_PORTS: {
-        return PARSE_ERROR_HAS_COLON;
-      }
-      case IGNORE_PORTS: {
-        // Do nothing, i.e. leave the colon in the host.
-      }
-    }
+    if (!SetPort(host_.substr(port_pos + 1)))
+      return PARSE_ERROR_INVALID_PORT;
+    host_ = host_.substr(0, port_pos);
   }
 
   // No other '*' can occur in the host, though. This isn't necessary, but is

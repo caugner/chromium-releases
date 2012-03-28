@@ -12,6 +12,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "net/base/net_log.h"
 #include "net/http/http_stream.h"
+#include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
@@ -41,21 +42,21 @@ class HttpPipelinedStream : public HttpStream {
   // HttpStream methods:
   virtual int InitializeStream(const HttpRequestInfo* request_info,
                                const BoundNetLog& net_log,
-                               OldCompletionCallback* callback) OVERRIDE;
+                               const CompletionCallback& callback) OVERRIDE;
 
   virtual int SendRequest(const HttpRequestHeaders& headers,
                           UploadDataStream* request_body,
                           HttpResponseInfo* response,
-                          OldCompletionCallback* callback) OVERRIDE;
+                          const CompletionCallback& callback) OVERRIDE;
 
   virtual uint64 GetUploadProgress() const OVERRIDE;
 
-  virtual int ReadResponseHeaders(OldCompletionCallback* callback) OVERRIDE;
+  virtual int ReadResponseHeaders(const CompletionCallback& callback) OVERRIDE;
 
   virtual const HttpResponseInfo* GetResponseInfo() const OVERRIDE;
 
   virtual int ReadResponseBody(IOBuffer* buf, int buf_len,
-                               OldCompletionCallback* callback) OVERRIDE;
+                               const CompletionCallback& callback) OVERRIDE;
 
   virtual void Close(bool not_reusable) OVERRIDE;
 
@@ -90,11 +91,14 @@ class HttpPipelinedStream : public HttpStream {
   // The ProxyInfo used to establish this this stream's pipeline.
   const ProxyInfo& used_proxy_info() const;
 
-  // The source of this stream's pipelined connection.
-  const NetLog::Source& source() const;
+  // The BoundNetLog of this stream's pipelined connection.
+  const BoundNetLog& net_log() const;
 
   // True if this stream's pipeline was NPN negotiated.
   bool was_npn_negotiated() const;
+
+  // Protocol negotiated with the server.
+  SSLClientSocket::NextProto protocol_negotiated() const;
 
  private:
   HttpPipelinedConnectionImpl* pipeline_;

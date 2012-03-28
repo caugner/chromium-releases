@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include <vector>
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/perftimer.h"
 #include "base/rand_util.h"
@@ -49,8 +51,6 @@ class RealFetchTester {
       : context_((new TestURLRequestContext())),
         fetcher_(new DhcpProxyScriptFetcherWin(context_.get())),
         finished_(false),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            completion_callback_(this, &RealFetchTester::OnCompletion)),
         on_completion_is_error_(false) {
     // Make sure the test ends.
     timeout_.Start(FROM_HERE,
@@ -58,7 +58,9 @@ class RealFetchTester {
   }
 
   void RunTest() {
-    int result = fetcher_->Fetch(&pac_text_, &completion_callback_);
+    int result = fetcher_->Fetch(
+        &pac_text_,
+        base::Bind(&RealFetchTester::OnCompletion, base::Unretained(this)));
     if (result != ERR_IO_PENDING)
       finished_ = true;
   }
@@ -109,14 +111,13 @@ class RealFetchTester {
   // do something a bit more clever to track worker threads even when the
   // DhcpProxyScriptFetcherWin state machine has finished.
   void FinishTestAllowCleanup() {
-    base::PlatformThread::Sleep(30);
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(30));
   }
 
   scoped_refptr<URLRequestContext> context_;
   scoped_ptr<DhcpProxyScriptFetcherWin> fetcher_;
   bool finished_;
   string16 pac_text_;
-  OldCompletionCallbackImpl<RealFetchTester> completion_callback_;
   base::OneShotTimer<RealFetchTester> timeout_;
   base::OneShotTimer<RealFetchTester> cancel_timer_;
   bool on_completion_is_error_;
@@ -168,7 +169,7 @@ class DelayingDhcpProxyScriptAdapterFetcher
 
     std::string ImplGetPacURLFromDhcp(
         const std::string& adapter_name) OVERRIDE {
-      base::PlatformThread::Sleep(20);
+      base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(20));
       return DhcpQuery::ImplGetPacURLFromDhcp(adapter_name);
     }
   };
@@ -216,13 +217,12 @@ class DummyDhcpProxyScriptAdapterFetcher
         did_finish_(false),
         result_(OK),
         pac_script_(L"bingo"),
-        fetch_delay_ms_(1),
-        client_callback_(NULL) {
+        fetch_delay_ms_(1) {
   }
 
   void Fetch(const std::string& adapter_name,
-             OldCompletionCallback* callback) OVERRIDE {
-    client_callback_ = callback;
+             const CompletionCallback& callback) OVERRIDE {
+    callback_ = callback;
     timer_.Start(FROM_HERE, base::TimeDelta::FromMilliseconds(fetch_delay_ms_),
                  this, &DummyDhcpProxyScriptAdapterFetcher::OnTimer);
   }
@@ -244,7 +244,7 @@ class DummyDhcpProxyScriptAdapterFetcher
   }
 
   void OnTimer() {
-    client_callback_->Run(result_);
+    callback_.Run(result_);
   }
 
   void Configure(
@@ -260,7 +260,7 @@ class DummyDhcpProxyScriptAdapterFetcher
   int result_;
   string16 pac_script_;
   int fetch_delay_ms_;
-  OldCompletionCallback* client_callback_;
+  CompletionCallback callback_;
   base::OneShotTimer<DummyDhcpProxyScriptAdapterFetcher> timer_;
 };
 
@@ -372,13 +372,13 @@ class FetcherClient {
 public:
   FetcherClient()
       : finished_(false),
-        result_(ERR_UNEXPECTED),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            completion_callback_(this, &FetcherClient::OnCompletion)) {
+        result_(ERR_UNEXPECTED) {
   }
 
   void RunTest() {
-    int result = fetcher_.Fetch(&pac_text_, &completion_callback_);
+    int result = fetcher_.Fetch(
+        &pac_text_,
+        base::Bind(&FetcherClient::OnCompletion, base::Unretained(this)));
     ASSERT_EQ(ERR_IO_PENDING, result);
   }
 
@@ -413,7 +413,6 @@ public:
   bool finished_;
   int result_;
   string16 pac_text_;
-  OldCompletionCallbackImpl<FetcherClient> completion_callback_;
 };
 
 // We separate out each test's logic so that we can easily implement

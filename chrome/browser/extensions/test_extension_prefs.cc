@@ -73,7 +73,7 @@ void TestExtensionPrefs::RecreateExtensionPrefs() {
     // need to wait for any pending I/O to complete before creating a new
     // PrefService.
     base::WaitableEvent io_finished(false, false);
-    pref_service_->SavePersistentPrefs();
+    pref_service_-> CommitPendingWrite();
     EXPECT_TRUE(BrowserThread::PostTask(
         BrowserThread::FILE,
         FROM_HERE,
@@ -143,7 +143,8 @@ scoped_refptr<Extension> TestExtensionPrefs::AddExtensionWithManifestAndFlags(
 
   EXPECT_TRUE(Extension::IdIsValid(extension->id()));
   prefs_->OnExtensionInstalled(extension, Extension::ENABLED,
-                               extra_flags & Extension::FROM_WEBSTORE, 0);
+                               extra_flags & Extension::FROM_WEBSTORE,
+                               StringOrdinal::CreateInitialOrdinal());
   return extension;
 }
 

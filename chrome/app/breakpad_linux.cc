@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,6 +38,10 @@
 #include "chrome/common/env_vars.h"
 #include "content/common/chrome_descriptors.h"
 #include "seccompsandbox/linux_syscall_support.h"
+
+#ifndef PR_SET_PTRACER
+#define PR_SET_PTRACER 0x59616d61
+#endif
 
 // Some versions of gcc are prone to warn about unused return values. In cases
 // where we either a) know the call cannot fail, or b) there is nothing we
@@ -412,6 +416,11 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   //   BOUNDARY \r\n
   //
   //   zero or one:
+  //   Content-Disposition: form-data; name="channel" \r\n \r\n
+  //   beta \r\n
+  //   BOUNDARY \r\n
+  //
+  //   zero or one:
   //   Content-Disposition: form-data; name="num-views" \r\n \r\n
   //   3 \r\n
   //   BOUNDARY \r\n
@@ -449,16 +458,13 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
     static const char chrome_product_msg[] = "Chrome_Linux";
 #endif
     static const char version_msg[] = PRODUCT_VERSION;
-    static const char prod_msg[] = "prod";
-    static const char ver_msg[] = "ver";
-    static const char guid_msg[] = "guid";
 
     writer.AddBoundary();
-    writer.AddPairString(prod_msg, chrome_product_msg);
+    writer.AddPairString("prod", chrome_product_msg);
     writer.AddBoundary();
-    writer.AddPairString(ver_msg, version_msg);
+    writer.AddPairString("ver", version_msg);
     writer.AddBoundary();
-    writer.AddPairString(guid_msg, info.guid);
+    writer.AddPairString("guid", info.guid);
     writer.AddBoundary();
     writer.Flush();
   }
@@ -483,8 +489,7 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
   }
 
   if (info.process_type_length) {
-    static const char process_type_msg[] = "ptype";
-    writer.AddPairString(process_type_msg, info.process_type);
+    writer.AddPairString("ptype", info.process_type);
     writer.AddBoundary();
     writer.Flush();
   }
@@ -527,19 +532,20 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
         MimeWriter::kMaxCrashChunkSize, false /* Don't strip whitespaces. */);
   }
 
-  unsigned num_views_len = my_strlen(child_process_logging::g_num_views);
-  if (num_views_len) {
-    static const char num_views_msg[] = "num-views";
-    writer.AddPairString(num_views_msg, child_process_logging::g_num_views);
+  if (my_strlen(child_process_logging::g_channel)) {
+    writer.AddPairString("channel", child_process_logging::g_channel);
     writer.AddBoundary();
     writer.Flush();
   }
 
-  unsigned num_extensions_len =
-      my_strlen(child_process_logging::g_num_extensions);
-  if (num_extensions_len) {
-    static const char num_extensions_msg[] = "num-extensions";
-    writer.AddPairString(num_extensions_msg,
+  if (my_strlen(child_process_logging::g_num_views)) {
+    writer.AddPairString("num-views", child_process_logging::g_num_views);
+    writer.AddBoundary();
+    writer.Flush();
+  }
+
+  if (my_strlen(child_process_logging::g_num_extensions)) {
+    writer.AddPairString("num-extensions",
                          child_process_logging::g_num_extensions);
     writer.AddBoundary();
     writer.Flush();
@@ -558,11 +564,8 @@ pid_t HandleCrashDump(const BreakpadInfo& info) {
         false /* Don't strip whitespace. */);
   }
 
-  unsigned num_switches_len =
-      my_strlen(child_process_logging::g_num_switches);
-  if (num_switches_len) {
-    static const char num_switches_msg[] = "num-switches";
-    writer.AddPairString(num_switches_msg,
+  if (my_strlen(child_process_logging::g_num_switches)) {
+    writer.AddPairString("num-switches",
                          child_process_logging::g_num_switches);
     writer.AddBoundary();
     writer.Flush();
@@ -721,7 +724,7 @@ static bool CrashDone(const char* dump_path,
   google_breakpad::PageAllocator allocator;
   const unsigned dump_path_len = my_strlen(dump_path);
   const unsigned minidump_id_len = my_strlen(minidump_id);
-  char *const path = reinterpret_cast<char*>(allocator.Alloc(
+  char* const path = reinterpret_cast<char*>(allocator.Alloc(
       dump_path_len + 1 /* '/' */ + minidump_id_len +
       4 /* ".dmp" */ + 1 /* NUL */));
   memcpy(path, dump_path, dump_path_len);
@@ -790,9 +793,9 @@ void EnableCrashDumping(const bool unattended) {
 }
 
 // Non-Browser = Extension, Gpu, Plugins, Ppapi and Renderer
-static bool
-NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
-                       void* context) {
+static bool NonBrowserCrashHandler(const void* crash_context,
+                                   size_t crash_context_size,
+                                   void* context) {
   const int fd = reinterpret_cast<intptr_t>(context);
   int fds[2] = { -1, -1 };
   if (sys_socketpair(AF_UNIX, SOCK_STREAM, 0, fds) < 0) {
@@ -800,6 +803,19 @@ NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
     sys_write(2, msg, sizeof(msg)-1);
     return false;
   }
+
+  // On kernels with ptrace protection, e.g. Ubuntu 10.10+, the browser cannot
+  // ptrace this crashing process and crash dumping will fail. When using the
+  // SUID sandbox, this crashing process is likely to be in its own PID
+  // namespace, and thus there is no way to permit only the browser process to
+  // ptrace it.
+  // The workaround is to allow all processes to ptrace this process if we
+  // reach this point, by passing -1 as the allowed PID. However, support for
+  // passing -1 as the PID won't reach kernels until around the Ubuntu 12.04
+  // timeframe.
+  sys_prctl(PR_SET_PTRACER, -1);
+
+  // Start constructing the message to send to the browser.
   char guid[kGuidSize + 1] = {0};
   char crash_url[kMaxActiveURLSize + 1] = {0};
   char distro[kDistroSize + 1] = {0};
@@ -820,7 +836,9 @@ NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
                             // browser to convert namespace tids.
 
   // The length of the control message:
-  static const unsigned kControlMsgSize = CMSG_SPACE(2*sizeof(int));
+  static const unsigned kControlMsgSize = sizeof(fds);
+  static const unsigned kControlMsgSpaceSize = CMSG_SPACE(kControlMsgSize);
+  static const unsigned kControlMsgLenSize = CMSG_LEN(kControlMsgSize);
 
   const size_t kIovSize = 7;
   struct kernel_msghdr msg;
@@ -843,15 +861,15 @@ NonBrowserCrashHandler(const void* crash_context, size_t crash_context_size,
 
   msg.msg_iov = iov;
   msg.msg_iovlen = kIovSize;
-  char cmsg[kControlMsgSize];
-  my_memset(cmsg, 0, kControlMsgSize);
+  char cmsg[kControlMsgSpaceSize];
+  my_memset(cmsg, 0, kControlMsgSpaceSize);
   msg.msg_control = cmsg;
   msg.msg_controllen = sizeof(cmsg);
 
   struct cmsghdr *hdr = CMSG_FIRSTHDR(&msg);
   hdr->cmsg_level = SOL_SOCKET;
   hdr->cmsg_type = SCM_RIGHTS;
-  hdr->cmsg_len = CMSG_LEN(2*sizeof(int));
+  hdr->cmsg_len = kControlMsgLenSize;
   ((int*) CMSG_DATA(hdr))[0] = fds[0];
   ((int*) CMSG_DATA(hdr))[1] = fds[1];
 
@@ -877,7 +895,7 @@ void EnableNonBrowserCrashDumping() {
   // We deliberately leak this object.
   google_breakpad::ExceptionHandler* handler =
       new google_breakpad::ExceptionHandler("" /* unused */, NULL, NULL,
-                                            (void*) fd, true);
+                                            reinterpret_cast<void*>(fd), true);
   handler->set_crash_handler(NonBrowserCrashHandler);
 }
 

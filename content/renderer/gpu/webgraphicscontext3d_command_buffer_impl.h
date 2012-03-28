@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -461,6 +461,10 @@ class WebGraphicsContext3DCommandBufferImpl
       WGC3Denum target, WGC3Dint width, WGC3Dint height,
       WGC3Duint ioSurfaceId, WGC3Duint plane);
 
+  virtual void texStorage2DEXT(
+      WGC3Denum target, WGC3Dint levels, WGC3Duint internalformat,
+      WGC3Dint width, WGC3Dint height);
+
  protected:
 #if WEBKIT_USING_SKIA
   virtual GrGLInterface* onCreateGrGLInterface();
@@ -487,10 +491,12 @@ class WebGraphicsContext3DCommandBufferImpl
   // State needed by MaybeInitializeGL.
   GpuChannelHost* host_;
   GURL active_url_;
-  int32 render_view_routing_id_;
+  int32 surface_id_;
 
   bool render_directly_to_web_view_;
+
   // If rendering directly to WebView, weak pointer to it.
+  // This is only set when the context is bound to the main thread.
   WebKit::WebView* web_view_;
 
 #if defined(OS_MACOSX)
@@ -516,7 +522,7 @@ class WebGraphicsContext3DCommandBufferImpl
   base::WeakPtrFactory<WebGraphicsContext3DCommandBufferImpl> weak_ptr_factory_;
 
 #ifdef FLIP_FRAMEBUFFER_VERTICALLY
-  scoped_array<uint8> scanline_;
+  std::vector<uint8> scanline_;
   void FlipVertically(uint8* framebuffer,
                       unsigned int width,
                       unsigned int height);

@@ -1,11 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef WEBKIT_PLUGINS_PPAPI_PPAPI_PLUGIN_INSTANCE_H_
 #define WEBKIT_PLUGINS_PPAPI_PPAPI_PLUGIN_INSTANCE_H_
 
-#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -17,42 +16,42 @@
 #include "base/string16.h"
 #include "googleurl/src/gurl.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
+#include "ppapi/c/dev/ppb_gamepad_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
+#include "ppapi/c/dev/ppp_find_dev.h"
+#include "ppapi/c/dev/ppp_selection_dev.h"
+#include "ppapi/c/dev/ppp_zoom_dev.h"
 #include "ppapi/c/pp_completion_callback.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_input_event.h"
 #include "ppapi/c/ppp_graphics_3d.h"
-#include "ppapi/c/ppp_instance.h"
+#include "ppapi/c/ppp_input_event.h"
+#include "ppapi/c/ppp_messaging.h"
+#include "ppapi/c/ppp_mouse_lock.h"
+#include "ppapi/c/private/ppp_instance_private.h"
 #include "ppapi/shared_impl/function_group_base.h"
-#include "ppapi/shared_impl/instance_impl.h"
-#include "ppapi/shared_impl/ppp_instance_combined.h"
-#include "ppapi/thunk/ppb_instance_api.h"
-#include "third_party/skia/include/core/SkBitmap.h"
+#include "ppapi/shared_impl/ppb_instance_shared.h"
+#include "ppapi/shared_impl/ppb_view_shared.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebCanvas.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebString.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
 #include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/rect.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
+#include "webkit/plugins/ppapi/ppp_pdf.h"
 #include "webkit/plugins/webkit_plugins_export.h"
 
-struct PP_Var;
-struct PPP_Find_Dev;
-struct PPP_InputEvent;
-struct PPP_Instance_Private;
-struct PPP_Messaging;
-struct PPP_MouseLock;
-struct PPP_Pdf;
-struct PPP_Selection_Dev;
-struct PPP_Zoom_Dev;
+struct PP_Point;
 
 class SkBitmap;
 class TransportDIB;
 
 namespace WebKit {
 class WebInputEvent;
+class WebMouseEvent;
 class WebPluginContainer;
 struct WebCompositionUnderline;
 struct WebCursorInfo;
@@ -85,14 +84,16 @@ class PPB_URLRequestInfo_Impl;
 class WEBKIT_PLUGINS_EXPORT PluginInstance :
     public base::RefCounted<PluginInstance>,
     public ::ppapi::FunctionGroupBase,
-    NON_EXPORTED_BASE(public ::ppapi::thunk::PPB_Instance_FunctionAPI),
-    public ::ppapi::InstanceImpl {
+    public ::ppapi::PPB_Instance_Shared {
  public:
   // Create and return a PluginInstance object which supports the
-  // PPP_Instance_1_0 interface.
+  // given version.
   static PluginInstance* Create1_0(PluginDelegate* delegate,
                                    PluginModule* module,
                                    const void* ppp_instance_if_1_0);
+  static PluginInstance* Create1_1(PluginDelegate* delegate,
+                                   PluginModule* module,
+                                   const void* ppp_instance_if_1_1);
 
   // Delete should be called by the WebPlugin before this destructor.
   virtual ~PluginInstance();
@@ -102,9 +103,6 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   MessageChannel& message_channel() { return *message_channel_; }
 
   WebKit::WebPluginContainer* container() const { return container_; }
-
-  const gfx::Rect& position() const { return position_; }
-  const gfx::Rect& clip() const { return clip_; }
 
   void set_always_on_top(bool on_top) { always_on_top_ = on_top; }
 
@@ -148,6 +146,7 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // PPB_Instance and PPB_Instance_Private implementation.
   const GURL& plugin_url() const { return plugin_url_; }
   bool full_frame() const { return full_frame_; }
+  const ::ppapi::ViewData& view_data() const { return view_data_; }
   // If |type| is not PP_CURSORTYPE_CUSTOM, |custom_image| and |hot_spot| are
   // ignored.
   bool SetCursor(PP_CursorType_Dev type,
@@ -190,9 +189,13 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   void SetWebKitFocus(bool has_focus);
   void SetContentAreaFocus(bool has_focus);
 
-  // Notifications that the view has rendered the page and that it has been
-  // flushed to the screen. These messages are used to send Flush callbacks to
-  // the plugin for DeviceContext2D.
+  // Notification about page visibility. The default is "visible".
+  void PageVisibilityChanged(bool is_visible);
+
+  // Notifications that the view is about to paint, has started painting, and
+  // has flushed the painted content to the screen. These messages are used to
+  // send Flush callbacks to the plugin for DeviceContext2D/3D.
+  void ViewWillInitiatePaint();
   void ViewInitiatedPaint();
   void ViewFlushedPaint();
 
@@ -224,6 +227,9 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   int PrintBegin(const gfx::Rect& printable_area, int printer_dpi);
   bool PrintPage(int page_number, WebKit::WebCanvas* canvas);
   void PrintEnd();
+
+  bool CanRotateView();
+  void RotateView(WebKit::WebPlugin::RotationType type);
 
   void Graphics3DContextLost();
 
@@ -286,6 +292,10 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
                    const char* target,
                    bool from_user_action);
 
+  // Implementation of PPB_Gamepad.
+  void SampleGamepads(PP_Instance instance, PP_GamepadsData_Dev* data)
+      OVERRIDE;
+
   // Implementation of PPP_Messaging.
   void HandleMessage(PP_Var message);
 
@@ -295,8 +305,12 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // or embedded in a page).
   bool IsFullPagePlugin() const;
 
-  void OnLockMouseACK(int32_t result);
+  // A mouse lock request was pending and this reports success or failure.
+  void OnLockMouseACK(bool succeeded);
+  // A mouse lock was in place, but has been lost.
   void OnMouseLockLost();
+  // A mouse lock is enabled and mouse events are being delievered.
+  void HandleMouseLockedInputEvent(const WebKit::WebMouseEvent& event);
 
   // Simulates an input event to the plugin by passing it down to WebKit,
   // which sends it back up to the plugin as if it came from the user.
@@ -310,19 +324,13 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   virtual PP_Bool BindGraphics(PP_Instance instance,
                                PP_Resource device) OVERRIDE;
   virtual PP_Bool IsFullFrame(PP_Instance instance) OVERRIDE;
+  virtual const ::ppapi::ViewData* GetViewData(PP_Instance instance) OVERRIDE;
   virtual PP_Var GetWindowObject(PP_Instance instance) OVERRIDE;
   virtual PP_Var GetOwnerElementObject(PP_Instance instance) OVERRIDE;
   virtual PP_Var ExecuteScript(PP_Instance instance,
                                PP_Var script,
                                PP_Var* exception) OVERRIDE;
   virtual PP_Var GetDefaultCharSet(PP_Instance instance) OVERRIDE;
-  virtual void Log(PP_Instance instance,
-                   int log_level,
-                   PP_Var value) OVERRIDE;
-  virtual void LogWithSource(PP_Instance instance,
-                             int log_level,
-                             PP_Var source,
-                             PP_Var value) OVERRIDE;
   virtual void NumberOfFindResultsChanged(PP_Instance instance,
                                           int32_t total,
                                           PP_Bool final_result) OVERRIDE;
@@ -333,7 +341,6 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
                                      PP_Bool fullscreen) OVERRIDE;
   virtual PP_Bool FlashGetScreenSize(PP_Instance instance,
                                      PP_Size* size) OVERRIDE;
-  virtual PP_Bool IsFullscreen(PP_Instance instance) OVERRIDE;
   virtual PP_Bool SetFullscreen(PP_Instance instance,
                                      PP_Bool fullscreen) OVERRIDE;
   virtual PP_Bool GetScreenSize(PP_Instance instance, PP_Size* size)
@@ -387,6 +394,10 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // Determines if we think the plugin has focus, both content area and webkit
   // (see has_webkit_focus_ below).
   bool PluginHasFocus() const;
+
+  void ScheduleAsyncDidChangeView(const ::ppapi::ViewData& previous_view);
+  void SendAsyncDidChangeView(const ::ppapi::ViewData& previous_view);
+  void SendDidChangeView(const ::ppapi::ViewData& previous_view);
 
   // Reports the current plugin geometry to the plugin by calling
   // DidChangeView.
@@ -448,9 +459,6 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // compositing path.
   bool IsViewAccelerated();
 
-  // Remember view parameters that were sent to the plugin.
-  void SetSentDidChangeView(const gfx::Rect& position, const gfx::Rect& clip);
-
   // Track, set and reset size attributes to control the size of the plugin
   // in and out of fullscreen mode.
   void KeepSizeAttributesBeforeFullscreen();
@@ -473,20 +481,19 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // an entire document rather than an embed tag.
   bool full_frame_;
 
+  // Stores the current state of the plugin view.
+  ::ppapi::ViewData view_data_;
+
   // Indicates if we've ever sent a didChangeView to the plugin. This ensure we
   // always send an initial notification, even if the position and clip are the
   // same as the default values.
-  bool sent_did_change_view_;
+  bool sent_initial_did_change_view_;
 
-  // Position in the viewport (which moves as the page is scrolled) of this
-  // plugin. This will be a 0-sized rectangle if the plugin has not yet been
-  // laid out.
-  gfx::Rect position_;
-
-  // Current clip rect. This will be empty if the plugin is not currently
-  // visible. This is in the plugin's coordinate system, so fully visible will
-  // be (0, 0, w, h) regardless of scroll position.
-  gfx::Rect clip_;
+  // Set to true when we've scheduled an asynchronous DidChangeView update for
+  // the purposes of consolidating updates. When this is set, code should
+  // update the view_data_ but not send updates. It will be cleared once the
+  // asynchronous update has been sent out.
+  bool suppress_did_change_view_;
 
   // The current device context for painting in 2D or 3D.
   scoped_refptr< ::ppapi::Resource> bound_graphics_;
@@ -560,8 +567,9 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // flash_fullscreen_ is false (see above).
   FullscreenContainer* fullscreen_container_;
 
-  // True if we are in fullscreen mode. False if we are in normal mode or
-  // in transition to fullscreen.
+  // True if we are in "flash" fullscreen mode. False if we are in normal mode
+  // or in transition to fullscreen. Normal fullscreen mode is indicated in
+  // the ViewData.
   bool flash_fullscreen_;
 
   // Implementation of PPB_Fullscreen.
@@ -571,10 +579,6 @@ class WEBKIT_PLUGINS_EXPORT PluginInstance :
   // request. The plugin will receive a DidChangeView event when it goes
   // fullscreen.
   bool desired_fullscreen_state_;
-
-  // True if we are in fullscreen mode. False if we are in normal mode.
-  // It reflects the previous state when in transition.
-  bool fullscreen_;
 
   // WebKit does not resize the plugin when going into fullscreen mode, so we do
   // this here by modifying the various plugin attributes and then restoring

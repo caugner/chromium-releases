@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "native_client/src/include/portability.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/c/ppb_var.h"
+#include "ppapi/c/ppb_var_array_buffer.h"
 
 namespace ppapi_proxy {
 
@@ -21,9 +22,14 @@ class PluginVar {
  public:
   // Returns an interface pointer suitable to the PPAPI client.
   static const PPB_Var* GetInterface();
+  // Returns the 1.0 interface to support backwards-compatibility.
+  static const PPB_Var_1_0* GetInterface1_0();
+
+  // Returns an interface pointer for the PPB_VarArrayBuffer interface.
+  static const PPB_VarArrayBuffer* GetArrayBufferInterface();
 
   // String helpers.
-  static PP_Var StringToPPVar(PP_Module module_id, const std::string& str);
+  static PP_Var StringToPPVar(const std::string& str);
   static std::string PPVarToString(const PP_Var& var);
 
   // Printing and debugging.

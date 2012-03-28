@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/values.h"
-#include "chrome/browser/ui/webui/print_preview_handler.h"
+#include "chrome/browser/ui/webui/print_preview/print_preview_handler.h"
 #include "printing/backend/print_backend.h"
 #include "printing/print_job_constants.h"
 #include "printing/print_settings.h"
@@ -397,6 +397,7 @@ void PrintSystemTaskProxy::SetupPrinterList(ListValue* printers) {
 }
 
 #if defined(USE_CUPS)
+// static
 bool PrintSystemTaskProxy::GetPrinterCapabilitiesCUPS(
     const printing::PrinterCapsAndDefaults& printer_info,
     const std::string& printer_name,

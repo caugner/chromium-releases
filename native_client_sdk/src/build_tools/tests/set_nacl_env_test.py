@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Native Client Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -93,6 +93,9 @@ class TestSetNaclEnv(unittest.TestCase):
     src_dir = os.path.join(SCRIPT_DIR, 'set_nacl_env_test_archive')
     for file in glob.iglob(os.path.join(src_dir, '*')):
       shutil.copy2(file, self._temp_dir)
+    shutil.copy2(os.path.join(SDK_ROOT_DIR, 'examples', 'hello_world_c',
+                              'hello_world_c.c'),
+                 self._temp_dir)
 
     script = os.path.join(SDK_ROOT_DIR, 'build_tools', 'sdk_tools',
                           'set_nacl_env.py')

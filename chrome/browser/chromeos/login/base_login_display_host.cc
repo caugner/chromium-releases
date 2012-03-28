@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/login/base_login_display_host.h"
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
 #include "base/logging.h"
@@ -26,6 +27,7 @@
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/system/timezone_settings.h"
+#include "chrome/browser/policy/auto_enrollment_client.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/common/pref_names.h"
@@ -34,13 +36,41 @@
 #include "googleurl/src/gurl.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/gfx/rect.h"
 #include "unicode/timezone.h"
 
 #if defined(TOOLKIT_USES_GTK)
 #include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 
+#if defined(USE_AURA)
+#include "ash/shell.h"
+#include "ash/shell_window_ids.h"
+#include "ui/aura/window.h"
+#include "ui/gfx/compositor/layer.h"
+#include "ui/gfx/compositor/layer_animation_element.h"
+#include "ui/gfx/compositor/layer_animation_sequence.h"
+#include "ui/gfx/compositor/layer_animator.h"
+#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
+#include "ui/gfx/transform.h"
+#include "ui/views/widget/widget.h"
+#endif
+
 namespace {
+
+// Whether sign in transitions are enabled.
+const bool kEnableBackgroundAnimation = false;
+const bool kEnableBrowserWindowsOpacityAnimation = true;
+
+// Sign in transition timings.
+static const int kBackgroundTransitionPauseMs = 100;
+static const int kBackgroundTransitionDurationMs = 400;
+static const int kBrowserTransitionPauseMs = 750;
+static const int kBrowserTransitionDurationMs = 300;
+
+// Parameters for background transform transition.
+const float kBackgroundScale = 1.05f;
+const int kBackgroundTranslate = -50;
 
 // The delay of triggering initialization of the device policy subsystem
 // after the login screen is initialized. This makes sure that device policy
@@ -79,9 +109,15 @@ void DetermineAndSaveHardwareKeyboard(const std::string& locale,
     // The latest values of Local State reside in memory so we can safely
     // get the value of kHardwareKeyboardLayout even if the data is not
     // yet saved to disk.
-    prefs->SavePersistentPrefs();
+    prefs->CommitPendingWrite();
   }
 }
+
+#if defined(USE_AURA)
+ui::Layer* GetLayer(views::Widget* widget) {
+  return widget->GetNativeView()->layer();
+}
+#endif
 
 }  // namespace
 
@@ -90,7 +126,8 @@ namespace chromeos {
 // static
 LoginDisplayHost* BaseLoginDisplayHost::default_host_ = NULL;
 
-// BaseLoginDisplayHost --------------------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
+// BaseLoginDisplayHost, public
 
 BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
     : background_bounds_(background_bounds) {
@@ -98,10 +135,9 @@ BaseLoginDisplayHost::BaseLoginDisplayHost(const gfx::Rect& background_bounds)
   // APP_TERMINATING will never be fired as long as this keeps ref-count.
   // APP_EXITING is safe here because there will be no browser instance that
   // will block the shutdown.
-  registrar_.Add(
-      this,
-      content::NOTIFICATION_APP_EXITING,
-      content::NotificationService::AllSources());
+  registrar_.Add(this,
+                 content::NOTIFICATION_APP_EXITING,
+                 content::NotificationService::AllSources());
   DCHECK(default_host_ == NULL);
   default_host_ = this;
 
@@ -120,16 +156,29 @@ BaseLoginDisplayHost::~BaseLoginDisplayHost() {
   default_host_ = NULL;
 }
 
-// LoginDisplayHost implementation ---------------------------------------------
+////////////////////////////////////////////////////////////////////////////////
+// BaseLoginDisplayHost, LoginDisplayHost implementation:
 
 void BaseLoginDisplayHost::OnSessionStart() {
-  registrar_.RemoveAll();
-  MessageLoop::current()->DeleteSoon(FROM_HERE, this);
+  DVLOG(1) << "Session starting";
+  // Display host is deleted once animation is completed
+  // since sign in screen widget has to stay alive.
+#if defined(USE_AURA)
+  StartAnimation();
+#endif
+  ShutdownDisplayHost(false);
+}
+
+void BaseLoginDisplayHost::OnCompleteLogin() {
+  // Cancelling the |auto_enrollment_client_| now allows it to determine whether
+  // its protocol finished before login was complete.
+  if (auto_enrollment_client_.get())
+    auto_enrollment_client_.release()->CancelAndDeleteSoon();
 }
 
 void BaseLoginDisplayHost::StartWizard(
     const std::string& first_screen_name,
-    const GURL& start_url) {
+    DictionaryValue* screen_parameters) {
   DVLOG(1) << "Starting wizard, first_screen_name: " << first_screen_name;
   // Create and show the wizard.
   // Note, dtor of the old WizardController should be called before ctor of the
@@ -138,11 +187,9 @@ void BaseLoginDisplayHost::StartWizard(
   wizard_controller_.reset();
   wizard_controller_.reset(CreateWizardController());
 
-  wizard_controller_->set_start_url(start_url);
-  ShowBackground();
   if (!WizardController::IsDeviceRegistered())
     SetOobeProgressBarVisible(true);
-  wizard_controller_->Init(first_screen_name);
+  wizard_controller_->Init(first_screen_name, screen_parameters);
 }
 
 void BaseLoginDisplayHost::StartSignInScreen() {
@@ -160,13 +207,16 @@ void BaseLoginDisplayHost::StartSignInScreen() {
 
   sign_in_controller_.reset();  // Only one controller in a time.
   sign_in_controller_.reset(new chromeos::ExistingUserController(this));
-  ShowBackground();
   if (!WizardController::IsDeviceRegistered()) {
     SetOobeProgressBarVisible(true);
-    SetOobeProgress(chromeos::BackgroundView::SIGNIN);
   }
   SetShutdownButtonEnabled(true);
   sign_in_controller_->Init(users);
+
+  // We might be here after a reboot that was triggered after OOBE was complete,
+  // so check for auto-enrollment again. This might catch a cached decision from
+  // a previous oobe flow, or might start a new check with the server.
+  CheckForAutoEnrollment();
 
   // Initiate services customization manifest fetching.
   ServicesCustomizationDocument::GetInstance()->StartFetching();
@@ -179,22 +229,176 @@ void BaseLoginDisplayHost::StartSignInScreen() {
       kPolicyServiceInitializationDelayMilliseconds);
 }
 
-// BaseLoginDisplayHost --------------------------------------------------------
+void BaseLoginDisplayHost::ResumeSignInScreen() {
+  // We only get here after a previous call the StartSignInScreen. That sign-in
+  // was successful but was interrupted by an auto-enrollment execution; once
+  // auto-enrollment is complete we resume the normal login flow from here.
+  DVLOG(1) << "Resuming sign in screen";
+  CHECK(sign_in_controller_.get());
+  SetOobeProgressBarVisible(true);
+  SetShutdownButtonEnabled(true);
+  sign_in_controller_->ResumeLogin();
+}
+
+void BaseLoginDisplayHost::CheckForAutoEnrollment() {
+  // This method is called when the controller determines that the
+  // auto-enrollment check can start. This happens either after the EULA is
+  // accepted, or right after a reboot if the EULA has already been accepted.
+
+  if (policy::AutoEnrollmentClient::IsDisabled()) {
+    VLOG(1) << "CheckForAutoEnrollment: auto-enrollment disabled";
+    return;
+  }
+
+  // Start by checking if the device has already been owned.
+  ownership_status_checker_.reset(new OwnershipStatusChecker);
+  ownership_status_checker_->Check(base::Bind(
+      &BaseLoginDisplayHost::OnOwnershipStatusCheckDone,
+      base::Unretained(this)));
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// BaseLoginDisplayHost, content:NotificationObserver implementation:
 
 void BaseLoginDisplayHost::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
   CHECK(type == content::NOTIFICATION_APP_EXITING);
+  ShutdownDisplayHost(true);
+}
 
+void BaseLoginDisplayHost::ShutdownDisplayHost(bool post_quit_task) {
   registrar_.RemoveAll();
   MessageLoop::current()->DeleteSoon(FROM_HERE, this);
-  MessageLoop::current()->Quit();
+  if (post_quit_task)
+    MessageLoop::current()->Quit();
+}
+
+void BaseLoginDisplayHost::StartAnimation() {
+#if defined(USE_AURA)
+  if (ash::Shell::GetInstance()->GetContainer(
+          ash::internal::kShellWindowId_DesktopBackgroundContainer)->
+          children().empty()) {
+    // If there is no background window, don't perform any animation on the
+    // default and background layer because there is nothing behind it.
+    return;
+  }
+
+  // Background animation.
+  if (kEnableBackgroundAnimation) {
+    ui::Transform background_transform;
+    background_transform.SetScale(kBackgroundScale, kBackgroundScale);
+    background_transform.SetTranslateX(kBackgroundTranslate);
+    background_transform.SetTranslateY(kBackgroundTranslate);
+    scoped_ptr<ui::LayerAnimationElement>
+        background_transform_animation_initial(
+            ui::LayerAnimationElement::CreateTransformElement(
+                background_transform,
+                base::TimeDelta()));
+    ui::LayerAnimationElement::AnimatableProperties background_pause_properties;
+    background_pause_properties.insert(ui::LayerAnimationElement::TRANSFORM);
+    scoped_ptr<ui::LayerAnimationElement> background_pause(
+        ui::LayerAnimationElement::CreatePauseElement(
+            background_pause_properties,
+            base::TimeDelta::FromMilliseconds(kBackgroundTransitionPauseMs)));
+    scoped_ptr<ui::LayerAnimationElement> background_transform_animation(
+        ui::LayerAnimationElement::CreateTransformElement(
+            ui::Transform(),
+            base::TimeDelta::FromMilliseconds(
+                kBackgroundTransitionDurationMs)));
+    scoped_ptr<ui::LayerAnimationSequence> background_transition(
+        new ui::LayerAnimationSequence(
+            background_transform_animation_initial.release()));
+    background_transition->AddElement(background_pause.release());
+    background_transition->AddElement(background_transform_animation.release());
+    ui::Layer* background_layer =
+        ash::Shell::GetInstance()->GetContainer(
+            ash::internal::kShellWindowId_DesktopBackgroundContainer)->
+            layer();
+    background_layer->GetAnimator()->StartAnimation(
+        background_transition.release());
+  }
+
+  // Browser windows layer opacity animation.
+  if (kEnableBrowserWindowsOpacityAnimation) {
+    scoped_ptr<ui::LayerAnimationElement> browser_opacity_animation_initial(
+        ui::LayerAnimationElement::CreateOpacityElement(
+            0.0f,
+            base::TimeDelta()));
+    ui::LayerAnimationElement::AnimatableProperties browser_pause_properties;
+    browser_pause_properties.insert(ui::LayerAnimationElement::OPACITY);
+    scoped_ptr<ui::LayerAnimationElement> browser_pause_animation(
+        ui::LayerAnimationElement::CreatePauseElement(
+            browser_pause_properties,
+            base::TimeDelta::FromMilliseconds(kBrowserTransitionPauseMs)));
+    scoped_ptr<ui::LayerAnimationElement> browser_opacity_animation(
+        ui::LayerAnimationElement::CreateOpacityElement(
+            1.0f,
+            base::TimeDelta::FromMilliseconds(kBrowserTransitionDurationMs)));
+    scoped_ptr<ui::LayerAnimationSequence> browser_transition(
+        new ui::LayerAnimationSequence(
+            browser_opacity_animation_initial.release()));
+    browser_transition->AddElement(browser_pause_animation.release());
+    browser_transition->AddElement(browser_opacity_animation.release());
+    ui::Layer* default_container_layer =
+        ash::Shell::GetInstance()->GetContainer(
+            ash::internal::kShellWindowId_DefaultContainer)->layer();
+    default_container_layer->GetAnimator()->StartAnimation(
+        browser_transition.release());
+  }
+#endif
+}
+
+void BaseLoginDisplayHost::OnOwnershipStatusCheckDone(
+    OwnershipService::Status status,
+    bool current_user_is_owner) {
+  if (status != OwnershipService::OWNERSHIP_NONE) {
+    // The device is already owned. No need for auto-enrollment checks.
+    VLOG(1) << "CheckForAutoEnrollment: device already owned";
+    return;
+  }
+
+  // Kick off the auto-enrollment client.
+  if (auto_enrollment_client_.get()) {
+    // They client might have been started after the EULA screen, but we made
+    // it to the login screen before it finished. In that case let the current
+    // client proceed.
+    //
+    // CheckForAutoEnrollment() is also called when we reach the sign-in screen,
+    // because that's what happens after an auto-update.
+    VLOG(1) << "CheckForAutoEnrollment: client already started";
+
+    // If the client already started and already finished too, pass the decision
+    // to the |sign_in_controller_| now.
+    if (auto_enrollment_client_->should_auto_enroll())
+      ForceAutoEnrollment();
+  } else {
+    VLOG(1) << "CheckForAutoEnrollment: starting auto-enrollment client";
+    auto_enrollment_client_.reset(policy::AutoEnrollmentClient::Create(
+        base::Bind(&BaseLoginDisplayHost::OnAutoEnrollmentClientDone,
+                   base::Unretained(this))));
+    auto_enrollment_client_->Start();
+  }
+}
+
+void BaseLoginDisplayHost::OnAutoEnrollmentClientDone() {
+  bool auto_enroll = auto_enrollment_client_->should_auto_enroll();
+  VLOG(1) << "OnAutoEnrollmentClientDone, decision is " << auto_enroll;
+
+  if (auto_enroll)
+    ForceAutoEnrollment();
+}
+
+void BaseLoginDisplayHost::ForceAutoEnrollment() {
+  if (sign_in_controller_.get())
+    sign_in_controller_->DoAutoEnrollment();
 }
 
 }  // namespace chromeos
 
-// browser::ShowLoginWizard implementation -------------------------------------
+////////////////////////////////////////////////////////////////////////////////
+// browser::ShowLoginWizard implementation:
 
 namespace browser {
 
@@ -262,7 +466,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
           manager->GetInputMethodUtil()->GetHardwareInputMethodId());
       base::ThreadRestrictions::ScopedAllowIO allow_io;
       const std::string loaded_locale =
-          ResourceBundle::ReloadSharedInstance(locale);
+          ResourceBundle::GetSharedInstance().ReloadLocaleResources(locale);
       g_browser_process->SetApplicationLocale(loaded_locale);
     }
     display_host->StartSignInScreen();
@@ -306,7 +510,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
       // Temporarily allow it until we fix http://crosbug.com/11102
       base::ThreadRestrictions::ScopedAllowIO allow_io;
       const std::string loaded_locale =
-          ResourceBundle::ReloadSharedInstance(locale);
+          ResourceBundle::GetSharedInstance().ReloadLocaleResources(locale);
       CHECK(!loaded_locale.empty()) << "Locale could not be found for "
                                     << locale;
       // Set the application locale here so that the language switch
@@ -315,7 +519,7 @@ void ShowLoginWizard(const std::string& first_screen_name,
     }
   }
 
-  display_host->StartWizard(first_screen_name, GURL());
+  display_host->StartWizard(first_screen_name, NULL);
 
   chromeos::LoginUtils::Get()->PrewarmAuthentication();
   chromeos::DBusThreadManager::Get()->GetSessionManagerClient()

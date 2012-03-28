@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "chrome/browser/sync/engine/model_safe_worker.h"
+#include "chrome/browser/sync/internal_api/includes/unrecoverable_error_handler_mock.h"
+#include "chrome/browser/sync/protocol/encryption.pb.h"
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/sync_prefs.h"
 #include "chrome/browser/sync/syncable/model_type.h"
@@ -37,15 +39,18 @@ class MockSyncFrontend : public SyncFrontend {
   MOCK_METHOD0(OnStopSyncingPermanently, void());
   MOCK_METHOD0(OnClearServerDataSucceeded, void());
   MOCK_METHOD0(OnClearServerDataFailed, void());
-  MOCK_METHOD1(OnPassphraseRequired, void(sync_api::PassphraseRequiredReason));
+  MOCK_METHOD2(OnPassphraseRequired,
+               void(sync_api::PassphraseRequiredReason,
+                    const sync_pb::EncryptedData&));
   MOCK_METHOD0(OnPassphraseAccepted, void());
   MOCK_METHOD2(OnEncryptedTypesChanged,
-               void(const syncable::ModelTypeSet&, bool));
+               void(syncable::ModelTypeSet, bool));
   MOCK_METHOD0(OnEncryptionComplete, void());
-  MOCK_METHOD1(OnMigrationNeededForTypes, void(const syncable::ModelTypeSet&));
-  MOCK_METHOD1(OnDataTypesChanged, void(const syncable::ModelTypeSet&));
+  MOCK_METHOD1(OnMigrationNeededForTypes, void(syncable::ModelTypeSet));
+  MOCK_METHOD1(OnDataTypesChanged, void(syncable::ModelTypeSet));
   MOCK_METHOD1(OnActionableError,
       void(const browser_sync::SyncProtocolError& sync_error));
+  MOCK_METHOD0(OnSyncConfigureRetry, void());
 };
 
 }  // namespace
@@ -94,12 +99,14 @@ TEST_F(SyncBackendHostTest, InitShutdown) {
   sync_api::SyncCredentials credentials;
   credentials.email = "user@example.com";
   credentials.sync_token = "sync_token";
+  browser_sync::MockUnrecoverableErrorHandler handler_mock;
   backend.Initialize(&mock_frontend,
                      WeakHandle<JsEventHandler>(),
                      GURL(k_mock_url),
                      syncable::ModelTypeSet(),
                      credentials,
-                     true);
+                     true,
+                     &handler_mock);
   backend.StopSyncingForShutdown();
   backend.Shutdown(false);
 }

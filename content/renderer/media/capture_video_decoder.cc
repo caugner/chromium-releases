@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,7 @@ CaptureVideoDecoder::CaptureVideoDecoder(
       capability_(capability),
       natural_size_(capability.width, capability.height),
       state_(kUnInitialized),
+      got_first_frame_(false),
       video_stream_id_(video_stream_id),
       capture_engine_(NULL) {
   DCHECK(vc_manager);
@@ -33,7 +34,7 @@ CaptureVideoDecoder::~CaptureVideoDecoder() {}
 
 void CaptureVideoDecoder::Initialize(
     media::DemuxerStream* demuxer_stream,
-    const base::Closure& filter_callback,
+    const media::PipelineStatusCB& filter_callback,
     const media::StatisticsCallback& stat_callback) {
   message_loop_proxy_->PostTask(
       FROM_HERE,
@@ -134,7 +135,7 @@ void CaptureVideoDecoder::OnDeviceInfoReceived(
 
 void CaptureVideoDecoder::InitializeOnDecoderThread(
     media::DemuxerStream* demuxer_stream,
-    const base::Closure& filter_callback,
+    const media::PipelineStatusCB& filter_callback,
     const media::StatisticsCallback& stat_callback) {
   DVLOG(1) << "InitializeOnDecoderThread";
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
@@ -142,7 +143,7 @@ void CaptureVideoDecoder::InitializeOnDecoderThread(
   capture_engine_ = vc_manager_->AddDevice(video_stream_id_, this);
 
   statistics_callback_ = stat_callback;
-  filter_callback.Run();
+  filter_callback.Run(media::PIPELINE_OK);
   state_ = kNormal;
 }
 
@@ -221,6 +222,11 @@ void CaptureVideoDecoder::OnBufferReadyOnDecoderThread(
   DCHECK(message_loop_proxy_->BelongsToCurrentThread());
 
   if (read_cb_.is_null() || kNormal != state_) {
+    // TODO(wjia): revisit TS adjustment when crbug.com/111672 is resolved.
+    if (got_first_frame_) {
+      start_time_ += buf->timestamp - last_frame_timestamp_;
+    }
+    last_frame_timestamp_ = buf->timestamp;
     capture->FeedBuffer(buf);
     return;
   }
@@ -234,6 +240,12 @@ void CaptureVideoDecoder::OnBufferReadyOnDecoderThread(
     host()->SetNaturalVideoSize(natural_size_);
   }
 
+  // Need to rebase timestamp with zero as starting point.
+  if (!got_first_frame_) {
+    start_time_ = buf->timestamp;
+    got_first_frame_ = true;
+  }
+
   // Always allocate a new frame.
   //
   // TODO(scherkus): migrate this to proper buffer recycling.
@@ -242,8 +254,9 @@ void CaptureVideoDecoder::OnBufferReadyOnDecoderThread(
                                      natural_size_.width(),
                                      natural_size_.height(),
                                      buf->timestamp - start_time_,
-                                     base::TimeDelta::FromMilliseconds(33));
+                                     base::TimeDelta::FromMilliseconds(0));
 
+  last_frame_timestamp_ = buf->timestamp;
   uint8* buffer = buf->memory_pointer;
 
   // Assume YV12 format. Note that camera gives YUV and media pipeline video

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "chrome/browser/policy/file_based_policy_provider.h"
+#include "chrome/browser/policy/policy_map.h"
 
 class MacPreferences;
 
@@ -20,11 +21,12 @@ class MacPreferencesPolicyProviderDelegate
   // Takes ownership of |preferences|.
   MacPreferencesPolicyProviderDelegate(
       MacPreferences* preferences,
-      const PolicyDefinitionList* policy_list);
+      const PolicyDefinitionList* policy_list,
+      PolicyLevel level);
   virtual ~MacPreferencesPolicyProviderDelegate();
 
   // FileBasedPolicyLoader::Delegate implementation.
-  virtual DictionaryValue* Load() OVERRIDE;
+  virtual PolicyMap* Load() OVERRIDE;
   virtual base::Time GetLastModification() OVERRIDE;
 
  private:
@@ -37,6 +39,12 @@ class MacPreferencesPolicyProviderDelegate
 
   scoped_ptr<MacPreferences> preferences_;
 
+  // Determines the level of policies that this provider should load. This is
+  // a temporary restriction, until the policy system is ready to have providers
+  // loading policy at different levels.
+  // TODO(joaodasilva): remove this.
+  PolicyLevel level_;
+
   DISALLOW_COPY_AND_ASSIGN(MacPreferencesPolicyProviderDelegate);
 };
 
@@ -44,10 +52,12 @@ class MacPreferencesPolicyProviderDelegate
 // provided by Mac OS X's managed preferences.
 class ConfigurationPolicyProviderMac : public FileBasedPolicyProvider {
  public:
-  explicit ConfigurationPolicyProviderMac(
-      const PolicyDefinitionList* policy_list);
+  ConfigurationPolicyProviderMac(const PolicyDefinitionList* policy_list,
+                                 PolicyLevel level);
+
   // For testing; takes ownership of |preferences|.
   ConfigurationPolicyProviderMac(const PolicyDefinitionList* policy_list,
+                                 PolicyLevel level,
                                  MacPreferences* preferences);
 
   DISALLOW_COPY_AND_ASSIGN(ConfigurationPolicyProviderMac);

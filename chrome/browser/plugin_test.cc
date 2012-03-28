@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,11 +27,10 @@
 
 #include <string>
 
-#include "base/file_path.h"
 #include "base/file_util.h"
-#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
+#include "chrome/browser/plugin_download_helper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/automation/automation_proxy.h"
@@ -40,8 +39,6 @@
 #include "chrome/test/ui/ui_test.h"
 #include "content/browser/net/url_request_mock_http_job.h"
 #include "net/base/net_util.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_test_util.h"
 #include "third_party/npapi/bindings/npapi.h"
 #include "webkit/plugins/npapi/plugin_constants_win.h"
 #include "webkit/plugins/npapi/plugin_list.h"
@@ -49,7 +46,6 @@
 
 #if defined(OS_WIN)
 #include "base/win/registry.h"
-#include "chrome/browser/plugin_download_helper.h"
 #endif
 
 class PluginTest : public UITest {
@@ -104,8 +100,6 @@ class PluginTest : public UITest {
 
     launch_arguments_.AppendSwitch(switches::kAllowOutdatedPlugins);
     launch_arguments_.AppendSwitch(switches::kAlwaysAuthorizePlugins);
-    // TODO(rsesek): Remove after done debugging.
-    launch_arguments_.AppendSwitch(switches::kDebugPluginLoading);
 
     UITest::SetUp();
   }
@@ -250,96 +244,5 @@ TEST_F(PluginTest, DISABLED_Java) {
 TEST_F(PluginTest, Silverlight) {
   TestPlugin("silverlight.html", "",
              TestTimeouts::action_max_timeout_ms(), false);
-}
-
-namespace {
-
-class TestURLRequestContextGetter : public net::URLRequestContextGetter {
- public:
-  explicit TestURLRequestContextGetter() {
-    io_message_loop_proxy_ = base::MessageLoopProxy::current();
-  }
-  virtual net::URLRequestContext* GetURLRequestContext() {
-    if (!context_)
-      context_ = new TestURLRequestContext();
-    return context_;
-  }
-  virtual scoped_refptr<base::MessageLoopProxy> GetIOMessageLoopProxy() const {
-    return io_message_loop_proxy_;
-  }
-
- protected:
-  scoped_refptr<base::MessageLoopProxy> io_message_loop_proxy_;
-
- private:
-  virtual ~TestURLRequestContextGetter() {}
-
-  scoped_refptr<net::URLRequestContext> context_;
-};
-
-}  // namespace
-// This class provides functionality to test the plugin installer download
-// file functionality.
-class PluginInstallerDownloadTest
-    : public PluginDownloadUrlHelper::DownloadDelegate,
-      public testing::Test {
- public:
-  PluginInstallerDownloadTest()
-      : success_(false),
-        download_helper_(NULL) {}
-  ~PluginInstallerDownloadTest() {}
-
-  void Start() {
-    initial_download_path_ = PluginTest::GetTestUrl("flash.html", "", false);
-    download_helper_ = new PluginDownloadUrlHelper(
-        initial_download_path_.spec(), NULL,
-        static_cast<PluginDownloadUrlHelper::DownloadDelegate*>(this));
-    TestURLRequestContextGetter* context_getter =
-        new TestURLRequestContextGetter;
-    download_helper_->InitiateDownload(context_getter,
-                                       context_getter->GetIOMessageLoopProxy());
-
-    MessageLoop::current()->PostDelayedTask(
-        FROM_HERE, new MessageLoop::QuitTask,
-        TestTimeouts::action_max_timeout_ms());
-  }
-
-  virtual void OnDownloadCompleted(const FilePath& download_path,
-                                   bool success) {
-    success_ = success;
-    final_download_path_ = download_path;
-    MessageLoop::current()->Quit();
-    download_helper_ = NULL;
-  }
-
-  FilePath final_download_path() const {
-    return final_download_path_;
-  }
-
-  FilePath initial_download_path() const {
-    return final_download_path_;
-  }
-
-  bool success() const {
-    return success_;
-  }
-
- private:
-  FilePath final_download_path_;
-  PluginDownloadUrlHelper* download_helper_;
-  bool success_;
-  GURL initial_download_path_;
-};
-
-// This test validates that the plugin downloader downloads the specified file
-// to a temporary path with the same file name.
-TEST_F(PluginInstallerDownloadTest, PluginInstallerDownloadPathTest) {
-  MessageLoop loop(MessageLoop::TYPE_IO);
-  Start();
-  loop.Run();
-
-  EXPECT_TRUE(success());
-  EXPECT_TRUE(initial_download_path().BaseName().value() ==
-              final_download_path().BaseName().value());
 }
 #endif  // defined(OS_WIN)

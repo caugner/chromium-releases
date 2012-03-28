@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -208,6 +208,21 @@ class BaseNode {
   void SetUnencryptedSpecifics(const sync_pb::EntitySpecifics& specifics);
 
  private:
+  // Have to friend the test class as well to allow member functions to access
+  // protected/private BaseNode methods.
+  friend class SyncManagerTest;
+  FRIEND_TEST_ALL_PREFIXES(SyncApiTest, GenerateSyncableHash);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, UpdateEntryWithEncryption);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest,
+                           UpdatePasswordSetEntitySpecificsNoChange);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, UpdatePasswordSetPasswordSpecifics);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, UpdatePasswordNewPassphrase);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, UpdatePasswordReencryptEverything);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetBookmarkTitle);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetBookmarkTitleWithEncryption);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetNonBookmarkTitle);
+  FRIEND_TEST_ALL_PREFIXES(SyncManagerTest, SetNonBookmarkTitleWithEncryption);
+
   void* operator new(size_t size);  // Node is meant for stack use only.
 
   // A holder for the unencrypted data stored in an encrypted node.
@@ -215,9 +230,6 @@ class BaseNode {
 
   // Same as |unencrypted_data_|, but for legacy password encryption.
   scoped_ptr<sync_pb::PasswordSpecificsData> password_data_;
-
-  friend class SyncApiTest;
-  FRIEND_TEST_ALL_PREFIXES(SyncApiTest, GenerateSyncableHash);
 
   DISALLOW_COPY_AND_ASSIGN(BaseNode);
 };

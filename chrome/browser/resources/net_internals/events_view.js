@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,11 +67,6 @@ var EventsView = (function() {
         g_browser.sourceTracker.deleteAllSourceEntries.bind(
             g_browser.sourceTracker);
 
-    $(EventsView.CLEAR_CACHE_ID).onclick = this.clearCache_.bind(this);
-
-    $(EventsView.FLUSH_SOCKETS_ID).onclick =
-        g_browser.sendFlushSocketPools.bind(g_browser);
-
     $(EventsView.SELECT_ALL_ID).addEventListener(
         'click', this.selectAll_.bind(this), true);
 
@@ -99,8 +94,6 @@ var EventsView = (function() {
   EventsView.FILTER_COUNT_ID = 'events-view-filter-count';
   EventsView.DELETE_SELECTED_ID = 'events-view-delete-selected';
   EventsView.DELETE_ALL_ID = 'events-view-delete-all';
-  EventsView.CLEAR_CACHE_ID = 'events-view-clear-cache';
-  EventsView.FLUSH_SOCKETS_ID = 'events-view-flush-sockets';
   EventsView.SELECT_ALL_ID = 'events-view-select-all';
   EventsView.SORT_BY_ID_ID = 'events-view-sort-by-id';
   EventsView.SORT_BY_SOURCE_TYPE_ID = 'events-view-sort-by-source';
@@ -468,12 +461,6 @@ var EventsView = (function() {
       return true;
     },
 
-    // Clear the browser and host caches.
-    clearCache_: function() {
-      g_browser.sendClearHostResolverCache();
-      g_browser.sendClearBrowserCache();
-    },
-
     incrementPrefilterCount: function(offset) {
       this.numPrefilter_ += offset;
       this.invalidateFilterCounter_();
@@ -528,13 +515,29 @@ var EventsView = (function() {
 
     /**
      * If |params| includes a query, replaces the current filter and unselects.
-     * all items.
+     * all items.  If it includes a selection, tries to select the relevant
+     * item.
      */
     setParameters: function(params) {
       if (params.q) {
         this.unselectAll_();
         this.setFilterText_(params.q);
       }
+
+      if (params.s) {
+        var sourceRow = this.sourceIdToRowMap_[params.s];
+        if (sourceRow) {
+          sourceRow.setSelected(true);
+          this.scrollToSourceId(params.s);
+        }
+      }
+    },
+
+    /**
+     * Scrolls to the source indicated by |sourceId|, if displayed.
+     */
+    scrollToSourceId: function(sourceId) {
+      this.detailsView_.scrollToSourceId(sourceId);
     },
 
     /**
@@ -566,7 +569,16 @@ var EventsView = (function() {
       this.toggleSortMethod_('desc');
     },
 
-    modifySelectionArray: function(sourceRow, addToSelection) {
+    /**
+     * Modifies the map of selected rows to include/exclude the one with
+     * |sourceId|, if present.  Does not modify checkboxes or the LogView.
+     * Should only be called by a SourceRow in response to its selection
+     * state changing.
+     */
+    modifySelectionArray: function(sourceId, addToSelection) {
+      var sourceRow = this.sourceIdToRowMap_[sourceId];
+      if (!sourceRow)
+        return;
       // Find the index for |sourceEntry| in the current selection list.
       var index = -1;
       for (var i = 0; i < this.currentSelectedRows_.length; ++i) {
@@ -588,8 +600,8 @@ var EventsView = (function() {
 
     getSelectedSourceEntries_: function() {
       var sourceEntries = [];
-      for (var id in this.currentSelectedRows_) {
-        sourceEntries.push(this.currentSelectedRows_[id].getSourceEntry());
+      for (var i = 0; i < this.currentSelectedRows_.length; ++i) {
+        sourceEntries.push(this.currentSelectedRows_[i].getSourceEntry());
       }
       return sourceEntries;
     },

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -49,8 +49,7 @@ class GpuCommandBufferStub
       const std::vector<int32>& attribs,
       gfx::GpuPreference gpu_preference,
       int32 route_id,
-      int32 renderer_id,
-      int32 render_view_id,
+      int32 surface_id,
       GpuWatchdog* watchdog,
       bool software);
 
@@ -65,23 +64,26 @@ class GpuCommandBufferStub
   // Whether this command buffer can currently handle IPC messages.
   bool IsScheduled();
 
+  // Whether this command buffer needs to be polled again in the future.
+  bool HasMoreWork();
+
   // Set the swap interval according to the command line.
   void SetSwapInterval();
 
   gpu::gles2::GLES2Decoder* decoder() const { return decoder_.get(); }
   gpu::GpuScheduler* scheduler() const { return scheduler_.get(); }
 
-  // Identifies the renderer process.
-  int32 renderer_id() const { return renderer_id_; }
-
-  // Identifies a particular renderer belonging to the same renderer process.
-  int32 render_view_id() const { return render_view_id_; }
+  // Identifies the target surface.
+  int32 surface_id() const { return surface_id_; }
 
   // Identifies the various GpuCommandBufferStubs in the GPU process belonging
   // to the same renderer process.
   int32 route_id() const { return route_id_; }
 
   gfx::GpuPreference gpu_preference() { return gpu_preference_; }
+
+  // Sends a message to the console.
+  void SendConsoleMessage(int32 id, const std::string& message);
 
  private:
   void Destroy();
@@ -90,9 +92,8 @@ class GpuCommandBufferStub
   void OnInitializeFailed(IPC::Message* reply_message);
 
   // Message handlers:
-  void OnInitialize(base::SharedMemoryHandle ring_buffer,
-                    int32 size,
-                    IPC::Message* reply_message);
+  void OnInitialize(IPC::Message* reply_message);
+  void OnSetGetBuffer(int32 shm_id, IPC::Message* reply_message);
   void OnSetParent(int32 parent_route_id,
                    uint32 parent_texture_id,
                    IPC::Message* reply_message);
@@ -141,10 +142,8 @@ class GpuCommandBufferStub
   bool software_;
   uint32 last_flush_count_;
 
-  // The following two fields are used on Mac OS X to identify the window
-  // for the rendering results on the browser side.
-  int32 renderer_id_;
-  int32 render_view_id_;
+  // Identifies the window for the rendering results on the browser side.
+  int32 surface_id_;
 
   scoped_ptr<gpu::CommandBufferService> command_buffer_;
   scoped_ptr<gpu::gles2::GLES2Decoder> decoder_;

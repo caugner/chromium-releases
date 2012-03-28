@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -47,10 +47,12 @@ static std::string GetStringStringType(uint32 value);
 static std::string GetStringTextureBindTarget(uint32 value);
 static std::string GetStringTextureFormat(uint32 value);
 static std::string GetStringTextureInternalFormat(uint32 value);
+static std::string GetStringTextureInternalFormatStorage(uint32 value);
 static std::string GetStringTextureMagFilterMode(uint32 value);
 static std::string GetStringTextureMinFilterMode(uint32 value);
 static std::string GetStringTextureParameter(uint32 value);
 static std::string GetStringTextureTarget(uint32 value);
+static std::string GetStringTextureUsage(uint32 value);
 static std::string GetStringTextureWrapMode(uint32 value);
 static std::string GetStringVertexAttribType(uint32 value);
 static std::string GetStringVertexAttribute(uint32 value);

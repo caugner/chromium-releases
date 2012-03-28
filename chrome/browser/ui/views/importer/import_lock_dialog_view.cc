@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/importer/importer_host.h"
 #include "chrome/browser/importer/importer_lock_dialog.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -17,6 +17,8 @@
 #include "ui/views/controls/label.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+
+using content::UserMetricsAction;
 
 // Default size of the dialog window.
 static const int kDefaultWindowWidth = 320;
@@ -27,7 +29,7 @@ namespace importer {
 void ShowImportLockDialog(gfx::NativeWindow parent,
                           ImporterHost* importer_host) {
   ImportLockDialogView::Show(parent, importer_host);
-  UserMetrics::RecordAction(UserMetricsAction("ImportLockDialogView_Shown"));
+  content::RecordAction(UserMetricsAction("ImportLockDialogView_Shown"));
 }
 
 }  // namespace importer
@@ -72,10 +74,6 @@ string16 ImportLockDialogView::GetDialogButtonLabel(
   else if (button == ui::DIALOG_BUTTON_CANCEL)
     return l10n_util::GetStringUTF16(IDS_IMPORTER_LOCK_CANCEL);
   return string16();
-}
-
-bool ImportLockDialogView::IsModal() const {
-  return false;
 }
 
 string16 ImportLockDialogView::GetWindowTitle() const {

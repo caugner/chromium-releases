@@ -1,21 +1,56 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/tab_contents/tab_contents_view_win.h"
 
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_widget_host_view_win.h"
 #include "content/browser/tab_contents/interstitial_page.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents_view_win_delegate.h"
+#include "content/public/browser/web_contents_delegate.h"
 
-TabContentsViewWin::TabContentsViewWin(TabContents* tab_contents,
-                                       TabContentsViewWinDelegate* delegate)
+using content::WebContents;
+
+namespace {
+
+// We need to have a parent window for the compositing code to work correctly.
+//
+// A tab will not have a parent HWND whenever it is not active in its
+// host window - for example at creation time and when it's in the
+// background, so we provide a default widget to host them.
+//
+// It may be tempting to use GetDesktopWindow() instead, but this is
+// problematic as the shell sends messages to children of the desktop
+// window that interact poorly with us.
+//
+// See: http://crbug.com/16476
+class TempParent : public ui::WindowImpl {
+ public:
+  static TempParent* Get() {
+    static TempParent* g_temp_parent;
+    if (!g_temp_parent) {
+      g_temp_parent = new TempParent();
+
+      g_temp_parent->set_window_style(WS_POPUP);
+      g_temp_parent->set_window_ex_style(WS_EX_TOOLWINDOW);
+      g_temp_parent->Init(GetDesktopWindow(), gfx::Rect());
+      EnableWindow(g_temp_parent->hwnd(), FALSE);
+    }
+    return g_temp_parent;
+  }
+
+ private:
+  BEGIN_MSG_MAP_EX(TabContentsViewWin)
+  END_MSG_MAP()
+};
+
+}  // namespace namespace
+
+TabContentsViewWin::TabContentsViewWin(WebContents* web_contents)
     : parent_(NULL),
-      tab_contents_(tab_contents),
-      delegate_(delegate),
+      tab_contents_(static_cast<TabContents*>(web_contents)),
       view_(NULL) {
 }
 
@@ -26,21 +61,31 @@ void TabContentsViewWin::SetParent(HWND parent) {
   DCHECK(!parent_);
   parent_ = parent;
 
-  set_window_style(WS_VISIBLE | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
-
-  Init(parent_, gfx::Rect(initial_size_));
+  ::SetParent(hwnd(), parent_);
 }
 
 void TabContentsViewWin::CreateView(const gfx::Size& initial_size) {
   initial_size_ = initial_size;
+
+  set_window_style(WS_VISIBLE | WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+
+  Init(TempParent::Get()->hwnd(), gfx::Rect(initial_size_));
 }
 
 RenderWidgetHostView* TabContentsViewWin::CreateViewForWidget(
     RenderWidgetHost* render_widget_host)  {
-  if (view_)
-    delete view_;  // TODO(jam): need to do anything else?
+  if (render_widget_host->view()) {
+    // During testing, the view will already be set up in most cases to the
+    // test view, so we don't want to clobber it with a real one. To verify that
+    // this actually is happening (and somebody isn't accidentally creating the
+    // view twice), we check for the RVH Factory, which will be set when we're
+    // making special ones (which go along with the special views).
+    DCHECK(RenderViewHostFactory::has_factory());
+    return render_widget_host->view();
+  }
 
-  view_ = new RenderWidgetHostViewWin(render_widget_host);
+  view_ = static_cast<RenderWidgetHostViewWin*>(
+      RenderWidgetHostView::CreateViewForWidget(render_widget_host));
   view_->CreateWnd(GetNativeView());
   view_->ShowWindow(SW_SHOW);
   view_->SetSize(initial_size_);
@@ -88,8 +133,8 @@ void TabContentsViewWin::SizeContents(const gfx::Size& size) {
   } else {
     // Our size matches what we want but the renderers size may not match.
     // Pretend we were resized so that the renderers size is updated too.
-    if (tab_contents_->interstitial_page())
-      tab_contents_->interstitial_page()->SetSize(size);
+    if (tab_contents_->GetInterstitialPage())
+      tab_contents_->GetInterstitialPage()->SetSize(size);
     RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
     if (rwhv)
       rwhv->SetSize(size);
@@ -100,8 +145,8 @@ void TabContentsViewWin::RenderViewCreated(RenderViewHost* host) {
 }
 
 void TabContentsViewWin::Focus() {
-  if (tab_contents_->interstitial_page()) {
-    tab_contents_->interstitial_page()->Focus();
+  if (tab_contents_->GetInterstitialPage()) {
+    tab_contents_->GetInterstitialPage()->Focus();
     return;
   }
 
@@ -121,7 +166,7 @@ void TabContentsViewWin::SetInitialFocus() {
 }
 
 void TabContentsViewWin::StoreFocus() {
-  // TODO(jam): why is this on TabContentsView?
+  // TODO(jam): why is this on WebContentsView?
   NOTREACHED();
 }
 
@@ -160,45 +205,45 @@ void TabContentsViewWin::RemoveOverlayView() {
 void TabContentsViewWin::CreateNewWindow(
     int route_id,
     const ViewHostMsg_CreateWindow_Params& params) {
-  TabContents* tab = delegate_->CreateNewWindow(this, route_id, params);
-
-  // Copy logic from RenderViewHostDelegateViewHelper.
-  TabContentsView* new_view = tab->view();
-  new_view->CreateViewForWidget(tab->render_view_host());
-  pending_contents_[route_id] = tab->render_view_host();
+  tab_contents_view_helper_.CreateNewWindow(tab_contents_, route_id, params);
 }
 
 void TabContentsViewWin::CreateNewWidget(int route_id,
                                          WebKit::WebPopupType popup_type) {
-  NOTIMPLEMENTED();
+  tab_contents_view_helper_.CreateNewWidget(tab_contents_,
+                                            route_id,
+                                            false,
+                                            popup_type);
 }
 
 void TabContentsViewWin::CreateNewFullscreenWidget(int route_id) {
-  NOTIMPLEMENTED();
+  tab_contents_view_helper_.CreateNewWidget(tab_contents_,
+                                            route_id,
+                                            true,
+                                            WebKit::WebPopupTypeNone);
 }
 
 void TabContentsViewWin::ShowCreatedWindow(int route_id,
                                            WindowOpenDisposition disposition,
                                            const gfx::Rect& initial_pos,
                                            bool user_gesture) {
-  PendingContents::iterator iter = pending_contents_.find(route_id);
-  if (iter == pending_contents_.end())
-    return;
-
-  RenderViewHost* new_rvh = iter->second;
-  pending_contents_.erase(route_id);
-  if (!new_rvh->process()->HasConnection() || !new_rvh->view())
-    return;
-  new_rvh->Init();
+  tab_contents_view_helper_.ShowCreatedWindow(
+      tab_contents_, route_id, disposition, initial_pos, user_gesture);
 }
 
 void TabContentsViewWin::ShowCreatedWidget(int route_id,
                                            const gfx::Rect& initial_pos) {
-  NOTIMPLEMENTED();
+  tab_contents_view_helper_.ShowCreatedWidget(tab_contents_,
+                                              route_id,
+                                              false,
+                                              initial_pos);
 }
 
 void TabContentsViewWin::ShowCreatedFullscreenWidget(int route_id) {
-  NOTIMPLEMENTED();
+  tab_contents_view_helper_.ShowCreatedWidget(tab_contents_,
+                                              route_id,
+                                              true,
+                                              gfx::Rect());
 }
 
 void TabContentsViewWin::ShowContextMenu(const ContextMenuParams& params) {
@@ -226,13 +271,13 @@ void TabContentsViewWin::UpdateDragCursor(WebKit::WebDragOperation operation) {
 }
 
 void TabContentsViewWin::GotFocus() {
-  if (tab_contents_->delegate())
-    tab_contents_->delegate()->TabContentsFocused(tab_contents_);
+  if (tab_contents_->GetDelegate())
+    tab_contents_->GetDelegate()->WebContentsFocused(tab_contents_);
 }
 
 void TabContentsViewWin::TakeFocus(bool reverse) {
-  if (tab_contents_->delegate())
-    tab_contents_->delegate()->TakeFocus(reverse);
+  if (tab_contents_->GetDelegate())
+    tab_contents_->GetDelegate()->TakeFocus(reverse);
 }
 
 LRESULT TabContentsViewWin::OnWindowPosChanged(
@@ -242,8 +287,8 @@ LRESULT TabContentsViewWin::OnWindowPosChanged(
     return 0;
 
   gfx::Size size(window_pos->cx, window_pos->cy);
-  if (tab_contents_->interstitial_page())
-    tab_contents_->interstitial_page()->SetSize(size);
+  if (tab_contents_->GetInterstitialPage())
+    tab_contents_->GetInterstitialPage()->SetSize(size);
   RenderWidgetHostView* rwhv = tab_contents_->GetRenderWidgetHostView();
   if (rwhv)
     rwhv->SetSize(size);

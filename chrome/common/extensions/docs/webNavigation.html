@@ -17,10 +17,26 @@
     <script type="text/javascript" src="js/bootstrap.js"></script>
     <script type="text/javascript" src="js/sidebar.js"></script>
   <meta name="description" content="Documentation for the chrome.webNavigation module, which is part of the Google Chrome  extension APIs."><title>WebNavigation API - Google Chrome Extensions - Google Code</title></head>
-  <body>  <div id="gc-container" class="labs">
-      <div id="devModeWarning">
-        You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
-      </div>
+  <body>  <div id="devModeWarning" class="displayModeWarning">
+    You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
+  </div>
+  <div id="branchWarning" class="displayModeWarning">
+    <span>WARNING: This is the <span id="branchName">BETA</span> documentation.
+    It may not work with the stable release of Chrome.</span>
+    <select id="branchChooser">
+      <option>Choose a different version...
+      </option><option value="">Stable
+      </option><option value="beta">Beta
+      </option><option value="dev">Dev
+      </option><option value="trunk">Trunk
+    </option></select>
+  </div>
+  <div id="unofficialWarning" class="displayModeWarning">
+    <span>WARNING: This is unofficial documentation. It may not work with the
+    current release of Chrome.</span>
+    <button id="goToOfficialDocs">Go to the official docs</button>
+  </div>
+  <div id="gc-container" class="labs">
       <!-- SUBTEMPLATES: DO NOT MOVE FROM THIS LOCATION -->
       <!-- In particular, sub-templates that recurse, must be used by allowing
            jstemplate to make a copy of the template in this section which
@@ -229,6 +245,7 @@
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
                   <li><a href="cookies.html">Cookies</a></li>
+                  <li><a href="devtools.html">Developer Tools</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="management.html">Management</a></li>
@@ -764,12 +781,12 @@ unexpected results.
                   </p>
 
                   <!-- Note: intentionally longer 80 columns -->
-                  <pre>function(<span>array of object undefined</span>) <span class="subdued">{...}</span>;</pre>
+                  <pre>function(<span>array of object details</span>) <span class="subdued">{...}</span>;</pre>
                   <dl>
                     <div>
                       <div>
           <dt>
-            <var style="display: none; ">paramName</var>
+            <var>details</var>
               <em>
 
                 <!-- TYPE -->
@@ -2338,7 +2355,18 @@ unexpected results.
                       </span>
                       <span>
                         <span>
-                          array of <span style="display: none; "><span></span></span>
+                          array of <span><span>
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span>["client_redirect", "server_redirect", "forward_back", "from_address_bar"]</span>
+                      </span>
+                    </span></span>
                         </span>
                         <span style="display: none; ">paramType</span>
                         <span style="display: none; "></span>
@@ -4523,7 +4551,18 @@ unexpected results.
                       </span>
                       <span>
                         <span>
-                          array of <span style="display: none; "><span></span></span>
+                          array of <span><span>
+                      <span style="display: none; ">
+                        <a> Type</a>
+                      </span>
+                      <span>
+                        <span style="display: none; ">
+                          array of <span><span></span></span>
+                        </span>
+                        <span>string</span>
+                        <span>["client_redirect", "server_redirect", "forward_back", "from_address_bar"]</span>
+                      </span>
+                    </span></span>
                         </span>
                         <span style="display: none; ">paramType</span>
                         <span style="display: none; "></span>

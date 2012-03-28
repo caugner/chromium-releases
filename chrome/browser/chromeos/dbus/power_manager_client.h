@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,9 +10,12 @@
 #include "base/basictypes.h"
 #include "base/callback.h"
 
+namespace base {
+class TimeTicks;
+}
 namespace dbus {
 class Bus;
-}  // namespace
+}
 
 namespace chromeos {
 
@@ -43,6 +46,8 @@ class PowerManagerClient {
   // Interface for observing changes from the power manager.
   class Observer {
    public:
+    virtual ~Observer() {}
+
     // Called when the brightness is changed.
     // |level| is of the range [0, 100].
     // |user_initiated| is true if the action is initiated by the user.
@@ -54,11 +59,29 @@ class PowerManagerClient {
 
     // Called when the system resumes from suspend.
     virtual void SystemResumed() {}
+
+    // Called when the power button is pressed or released.
+    virtual void PowerButtonStateChanged(bool down,
+                                         const base::TimeTicks& timestamp) {}
+
+    // Called when the lock button is pressed or released.
+    virtual void LockButtonStateChanged(bool down,
+                                        const base::TimeTicks& timestamp) {}
+
+    // Called when the screen is locked.
+    virtual void LockScreen() {}
+
+    // Called when the screen is unlocked.
+    virtual void UnlockScreen() {}
+
+    // Called when the screen fails to unlock.
+    virtual void UnlockScreenFailed() {}
   };
 
   // Adds and removes the observer.
   virtual void AddObserver(Observer* observer) = 0;
   virtual void RemoveObserver(Observer* observer) = 0;
+  virtual bool HasObserver(Observer* observer) = 0;
 
   // Decreases the screen brightness. |allow_off| controls whether or not
   // it's allowed to turn off the back light.
@@ -80,6 +103,18 @@ class PowerManagerClient {
   // replied.  It passes the idle time in seconds to |callback|.  If it
   // encounters some error, it passes -1 to |callback|.
   virtual void CalculateIdleTime(const CalculateIdleTimeCallback& callback) = 0;
+
+  // Notifies PowerManager that a user requested to lock the screen.
+  virtual void NotifyScreenLockRequested() = 0;
+
+  // Notifies PowerManager that screen lock has been completed.
+  virtual void NotifyScreenLockCompleted() = 0;
+
+  // Notifies PowerManager that a user unlocked the screen.
+  virtual void NotifyScreenUnlockRequested() = 0;
+
+  // Notifies PowerManager that screen is unlocked.
+  virtual void NotifyScreenUnlockCompleted() = 0;
 
   // Creates the instance.
   static PowerManagerClient* Create(dbus::Bus* bus);

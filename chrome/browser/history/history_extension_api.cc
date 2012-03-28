@@ -10,7 +10,6 @@
 #include "base/json/json_writer.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
-#include "base/task.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/extension_event_router.h"
 #include "chrome/browser/history/history.h"
@@ -221,9 +220,7 @@ bool HistoryFunctionWithCallback::RunImpl() {
 void HistoryFunctionWithCallback::SendAsyncResponse() {
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      NewRunnableMethod(
-          this,
-          &HistoryFunctionWithCallback::SendResponseToCallback));
+      base::Bind(&HistoryFunctionWithCallback::SendResponseToCallback, this));
 }
 
 void HistoryFunctionWithCallback::SendResponseToCallback() {

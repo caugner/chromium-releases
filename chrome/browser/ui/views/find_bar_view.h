@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -125,7 +125,7 @@ class FindBarView : public DropdownBarView,
   };
 
   // Returns the OS-specific view for the find bar that acts as an intermediary
-  // between us and the TabContentsView.
+  // between us and the WebContentsView.
   FindBarHost* find_bar_host() const;
 
   // The controls in the window.
@@ -136,12 +136,15 @@ class FindBarView : public DropdownBarView,
   views::ImageButton* find_next_button_;
   views::ImageButton* close_button_;
 
+  // The preferred height of the find bar.
+  int preferred_height_;
+
   // The background image for the Find text box, which we draw behind the Find
   // box to provide the Chrome look to the edge of the text box.
-  const SkBitmap* background_;
+  const SkBitmap* text_box_background_;
 
   // The rounded edge on the left side of the Find text box.
-  const SkBitmap* background_left_;
+  const SkBitmap* text_box_background_left_;
 
   DISALLOW_COPY_AND_ASSIGN(FindBarView);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,24 +6,13 @@
 
 #include <string>
 
-#include "base/logging.h"
 #include "base/file_path.h"
-#include "content/browser/webui/empty_web_ui_factory.h"
-#include "content/test/test_tab_contents_view.h"
+#include "base/logging.h"
+#include "content/test/test_web_contents_view.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "webkit/glue/webpreferences.h"
-
-#if defined(USE_AURA)
-#include "content/browser/renderer_host/render_widget_host_view_aura.h"
-#elif defined(OS_WIN)
-#include "content/browser/renderer_host/render_widget_host_view_win.h"
-#elif defined(TOOLKIT_USES_GTK)
-#include "content/browser/renderer_host/render_widget_host_view_gtk.h"
-#elif defined(OS_MACOSX)
-#include "content/browser/renderer_host/render_widget_host_view_mac.h"
-#endif
 
 namespace content {
 
@@ -38,24 +27,9 @@ BrowserMainParts* MockContentBrowserClient::CreateBrowserMainParts(
   return NULL;
 }
 
-RenderWidgetHostView* MockContentBrowserClient::CreateViewForWidget(
-    RenderWidgetHost* widget) {
-#if defined(USE_AURA)
-  return new RenderWidgetHostViewAura(widget);
-#elif defined(OS_WIN)
-  return new RenderWidgetHostViewWin(widget);
-#elif defined(TOOLKIT_USES_GTK)
-  return new RenderWidgetHostViewGtk(widget);
-#elif defined(OS_MACOSX)
-  return render_widget_host_view_mac::CreateRenderWidgetHostView(widget);
-#else
-#error Need to create your platform ViewForWidget here.
-#endif
-}
-
-TabContentsView* MockContentBrowserClient::CreateTabContentsView(
-    TabContents* tab_contents) {
-  return new TestTabContentsView;
+WebContentsView* MockContentBrowserClient::CreateWebContentsView(
+    WebContents* web_contents) {
+  return new TestWebContentsView;
 }
 
 void MockContentBrowserClient::RenderViewHostCreated(
@@ -66,13 +40,8 @@ void MockContentBrowserClient::RenderProcessHostCreated(
     RenderProcessHost* host) {
 }
 
-void MockContentBrowserClient::PluginProcessHostCreated(
-    PluginProcessHost* host) {
-}
-
-WebUIFactory* MockContentBrowserClient::GetWebUIFactory() {
-  // Return an empty factory so callsites don't have to check for NULL.
-  return EmptyWebUIFactory::GetInstance();
+WebUIControllerFactory* MockContentBrowserClient::GetWebUIControllerFactory() {
+  return NULL;
 }
 
 GURL MockContentBrowserClient::GetEffectiveURL(
@@ -86,6 +55,10 @@ bool MockContentBrowserClient::ShouldUseProcessPerSite(
 }
 
 bool MockContentBrowserClient::IsURLSameAsAnySiteInstance(const GURL& url) {
+  return false;
+}
+
+bool MockContentBrowserClient::IsHandledURL(const GURL& url) {
   return false;
 }
 
@@ -257,8 +230,7 @@ std::string MockContentBrowserClient::GetWorkerProcessTitle(
   return std::string();
 }
 
-ResourceDispatcherHost* MockContentBrowserClient::GetResourceDispatcherHost() {
-  return NULL;
+void MockContentBrowserClient::ResourceDispatcherHostCreated() {
 }
 
 ui::Clipboard* MockContentBrowserClient::GetClipboard() {
@@ -318,6 +290,10 @@ FilePath MockContentBrowserClient::GetDefaultDownloadDirectory() {
 
 std::string MockContentBrowserClient::GetDefaultDownloadName() {
   return std::string();
+}
+
+bool MockContentBrowserClient::AllowSocketAPI(const GURL& url) {
+  return false;
 }
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)

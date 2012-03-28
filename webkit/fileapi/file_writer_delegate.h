@@ -10,7 +10,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "net/base/file_stream.h"
 #include "net/base/io_buffer.h"
@@ -46,7 +45,7 @@ class FileWriterDelegate : public net::URLRequest::Delegate {
       net::SSLCertRequestInfo* cert_request_info) OVERRIDE;
   virtual void OnSSLCertificateError(net::URLRequest* request,
                                      const net::SSLInfo& ssl_info,
-                                     bool is_hsts_host) OVERRIDE;
+                                     bool fatal) OVERRIDE;
   virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
   virtual void OnReadCompleted(net::URLRequest* request,
                                int bytes_read) OVERRIDE;

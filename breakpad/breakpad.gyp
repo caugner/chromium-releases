@@ -282,6 +282,8 @@
                 'src/common/linux/elf_symbols_to_module.h',
                 'src/common/linux/file_id.cc',
                 'src/common/linux/file_id.h',
+                'src/common/linux/memory_mapped_file.cc',
+                'src/common/linux/memory_mapped_file.h',
                 'src/common/linux/guid_creator.h',
                 'src/common/module.cc',
                 'src/common/module.h',
@@ -318,8 +320,12 @@
             'src/client/linux/handler/exception_handler.cc',
             'src/client/linux/minidump_writer/directory_reader.h',
             'src/client/linux/minidump_writer/line_reader.h',
+            'src/client/linux/minidump_writer/linux_core_dumper.cc',
+            'src/client/linux/minidump_writer/linux_core_dumper.h',
             'src/client/linux/minidump_writer/linux_dumper.cc',
             'src/client/linux/minidump_writer/linux_dumper.h',
+            'src/client/linux/minidump_writer/linux_ptrace_dumper.cc',
+            'src/client/linux/minidump_writer/linux_ptrace_dumper.h',
             'src/client/linux/minidump_writer/minidump_writer.cc',
             'src/client/linux/minidump_writer/minidump_writer.h',
             'src/client/minidump_file_writer-inl.h',
@@ -327,6 +333,8 @@
             'src/client/minidump_file_writer.h',
             'src/common/convert_UTF.c',
             'src/common/convert_UTF.h',
+            'src/common/linux/elf_core_dump.cc',
+            'src/common/linux/elf_core_dump.h',
             'src/common/linux/file_id.cc',
             'src/common/linux/file_id.h',
             'src/common/linux/google_crashdump_uploader.cc',
@@ -336,6 +344,10 @@
             'src/common/linux/libcurl_wrapper.cc',
             'src/common/linux/libcurl_wrapper.h',
             'src/common/linux/linux_libc_support.h',
+            'src/common/linux/memory_mapped_file.cc',
+            'src/common/linux/memory_mapped_file.h',
+            'src/common/linux/safe_readlink.cc',
+            'src/common/linux/safe_readlink.h',
             'src/common/memory.h',
             'src/common/string_conversion.cc',
             'src/common/string_conversion.h',
@@ -393,6 +405,7 @@
             '../testing/gmock.gyp:gmock',
             'breakpad_client',
             'breakpad_processor_support',
+            'linux_dumper_unittest_helper',
           ],
 
           'sources': [
@@ -400,13 +413,22 @@
             'src/client/linux/handler/exception_handler_unittest.cc',
             'src/client/linux/minidump_writer/directory_reader_unittest.cc',
             'src/client/linux/minidump_writer/line_reader_unittest.cc',
-            'src/client/linux/minidump_writer/linux_dumper_unittest.cc',
+            'src/client/linux/minidump_writer/linux_core_dumper_unittest.cc',
+            'src/client/linux/minidump_writer/linux_ptrace_dumper_unittest.cc',
             'src/client/linux/minidump_writer/minidump_writer_unittest.cc',
+            'src/common/linux/elf_core_dump_unittest.cc',
             'src/common/linux/file_id_unittest.cc',
             'src/common/linux/linux_libc_support_unittest.cc',
             'src/common/linux/synth_elf.cc',
+            'src/common/linux/tests/crash_generator.cc',
+            'src/common/linux/tests/crash_generator.h',
+            'src/common/memory_range.h',
             'src/common/memory_unittest.cc',
             'src/common/test_assembler.cc',
+            'src/common/tests/file_utils.cc',
+            'src/common/tests/file_utils.h',
+            'src/tools/linux/md2core/minidump_memory_range.h',
+            'src/tools/linux/md2core/minidump_memory_range_unittest.cc',
           ],
 
           'include_dirs': [
@@ -414,6 +436,19 @@
             'src',
             '..',
             '.',
+          ],
+        },
+        {
+          'target_name': 'linux_dumper_unittest_helper',
+          'type': 'executable',
+          'dependencies': [
+          ],
+          'sources': [
+            'src/client/linux/minidump_writer/linux_dumper_unittest_helper.cc',
+          ],
+
+          'include_dirs': [
+            '..',
           ],
         },
         {
@@ -439,6 +474,27 @@
 
           'sources': [
             'src/tools/linux/md2core/minidump-2-core.cc'
+          ],
+
+          'dependencies': [
+            'breakpad_client',
+          ],
+
+          'include_dirs': [
+            '..',
+            'src',
+          ],
+        },
+        {
+          'target_name': 'core-2-minidump',
+          'type': 'executable',
+
+          'sources': [
+            'src/tools/linux/core2md/core2md.cc'
+          ],
+
+          'dependencies': [
+            'breakpad_client',
           ],
 
           'include_dirs': [

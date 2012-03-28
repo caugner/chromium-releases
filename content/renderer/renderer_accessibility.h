@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "base/hash_tables.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "content/public/renderer/render_view_observer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebAccessibilityNotification.h"
 
@@ -62,7 +62,7 @@ class RendererAccessibility : public content::RenderViewObserver {
   // representation of the browser tree - just IDs and parent/child
   // relationships.
   struct BrowserTreeNode {
-    BrowserTreeNode() {}
+    BrowserTreeNode() : id(0) {}
     ~BrowserTreeNode() {}
     int32 id;
     std::vector<BrowserTreeNode*> children;
@@ -83,6 +83,8 @@ class RendererAccessibility : public content::RenderViewObserver {
   void OnAccessibilityDoDefaultAction(int acc_obj_id);
   void OnAccessibilityNotificationsAck();
   void OnChangeScrollPosition(int acc_obj_id, int scroll_x, int scroll_y);
+  void OnScrollToMakeVisible(int acc_obj_id, gfx::Rect subfocus);
+  void OnScrollToPoint(int acc_obj_id, gfx::Point point);
   void OnEnableAccessibility();
   void OnSetAccessibilityFocus(int acc_obj_id);
 
@@ -97,7 +99,7 @@ class RendererAccessibility : public content::RenderViewObserver {
   WebKit::WebDocument GetMainDocument();
 
   // So we can queue up tasks to be executed later.
-  ScopedRunnableMethodFactory<RendererAccessibility> method_factory_;
+  base::WeakPtrFactory<RendererAccessibility> weak_factory_;
 
   // Notifications from WebKit are collected until they are ready to be
   // sent to the browser.
@@ -119,9 +121,6 @@ class RendererAccessibility : public content::RenderViewObserver {
 
   // True if verbose logging of accessibility events is on.
   bool logging_;
-
-  // True if we've sent a load complete notification for this page already.
-  bool sent_load_complete_;
 
   DISALLOW_COPY_AND_ASSIGN(RendererAccessibility);
 };

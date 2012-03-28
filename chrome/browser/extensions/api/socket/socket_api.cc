@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,9 @@
 #include "base/bind.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/socket/socket_api_controller.h"
-#include "content/public/browser/browser_thread.h"
+#include "chrome/browser/extensions/api/socket/socket_event_notifier.h"
+#include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -15,193 +17,163 @@ using content::BrowserThread;
 namespace extensions {
 
 const char kBytesWrittenKey[] = "bytesWritten";
+const char kMessageKey[] = "message";
 const char kSocketIdKey[] = "socketId";
-const char kUDPSocketType[] = "udp";
+const char kTCPOption[] = "tcp";
+const char kUDPOption[] = "udp";
 
-SocketCreateFunction::SocketCreateFunction() {
+SocketController* SocketApiFunction::controller() {
+  return profile()->GetExtensionService()->socket_controller();
 }
 
-SocketCreateFunction::~SocketCreateFunction() {
-}
-
-bool SocketCreateFunction::RunImpl() {
-  std::string socket_type;
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &socket_type));
-
-  // TODO(miket): this constitutes a second form of truth as to the enum
-  // validity. But our unit-test framework skips the enum validation. So in
-  // order to get an invalid-enum test to pass, we need duplicative
-  // value-checking. Too bad. Fix this if/when the argument validation code is
-  // moved to C++ rather than its current JavaScript form.
-  if (socket_type != kUDPSocketType) {
+bool SocketApiFunction::RunImpl() {
+  if (!Prepare()) {
     return false;
   }
-
   bool rv = BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&SocketCreateFunction::WorkOnIOThread, this));
+      base::Bind(&SocketApiFunction::WorkOnIOThread, this));
   DCHECK(rv);
   return true;
 }
 
-void SocketCreateFunction::WorkOnIOThread() {
+void SocketApiFunction::WorkOnIOThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  DictionaryValue* result = new DictionaryValue();
-  SocketController* controller = SocketController::GetInstance();
-
-  int socket_id = controller->CreateUdp(profile(), extension_id(),
-                                       source_url());
-  result->SetInteger(kSocketIdKey, socket_id);
-  result_.reset(result);
-
+  Work();
   bool rv = BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      base::Bind(&SocketCreateFunction::RespondOnUIThread, this));
+      base::Bind(&SocketApiFunction::RespondOnUIThread, this));
   DCHECK(rv);
 }
 
-void SocketCreateFunction::RespondOnUIThread() {
+void SocketApiFunction::RespondOnUIThread() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  SendResponse(true);
+  SendResponse(Respond());
 }
 
-SocketDestroyFunction::SocketDestroyFunction() {
+SocketCreateFunction::SocketCreateFunction()
+    : src_id_(-1) {
 }
 
-SocketDestroyFunction::~SocketDestroyFunction() {
-}
-
-bool SocketDestroyFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
-
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&SocketDestroyFunction::WorkOnIOThread, this));
-  DCHECK(rv);
-  return true;
-}
-
-void SocketDestroyFunction::WorkOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  SocketController* controller = SocketController::GetInstance();
-  controller->DestroyUdp(socket_id_);
-
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&SocketDestroyFunction::RespondOnUIThread, this));
-  DCHECK(rv);
-}
-
-void SocketDestroyFunction::RespondOnUIThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  SendResponse(true);
-}
-
-SocketConnectFunction::SocketConnectFunction() {
-}
-
-SocketConnectFunction::~SocketConnectFunction() {
-}
-
-bool SocketConnectFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
+bool SocketCreateFunction::Prepare() {
+  std::string socket_type_string;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(0, &socket_type_string));
   EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &address_));
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(2, &port_));
 
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&SocketConnectFunction::WorkOnIOThread, this));
-  DCHECK(rv);
+  scoped_ptr<DictionaryValue> options(new DictionaryValue());
+  if (args_->GetSize() > 3) {
+    DictionaryValue* temp_options = NULL;
+    if (args_->GetDictionary(3, &temp_options))
+      options.reset(temp_options->DeepCopy());
+  }
+
+  // If we tacked on a srcId to the options object, pull it out here to provide
+  // to the Socket.
+  if (options->HasKey(kSrcIdKey)) {
+    EXTENSION_FUNCTION_VALIDATE(options->GetInteger(kSrcIdKey, &src_id_));
+  }
+
+  if (socket_type_string == kTCPOption)
+    socket_type_ = kSocketTypeTCP;
+  else if (socket_type_string == kUDPOption)
+    socket_type_ = kSocketTypeUDP;
+  else
+    return false;
   return true;
 }
 
-void SocketConnectFunction::WorkOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+void SocketCreateFunction::Work() {
+  SocketEventNotifier* event_notifier(new SocketEventNotifier(
+      profile()->GetExtensionEventRouter(), profile(), extension_id(),
+      src_id_, source_url()));
+  int socket_id = socket_type_ == kSocketTypeTCP ?
+      controller()->CreateTCPSocket(address_, port_, event_notifier) :
+      controller()->CreateUDPSocket(address_, port_, event_notifier);
+  DictionaryValue* result = new DictionaryValue();
 
-  SocketController* controller = SocketController::GetInstance();
-  bool result = controller->ConnectUdp(socket_id_, address_, port_);
-  result_.reset(Value::CreateBooleanValue(result));
-
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&SocketConnectFunction::RespondOnUIThread, this));
-  DCHECK(rv);
+  result->SetInteger(kSocketIdKey, socket_id);
+  result_.reset(result);
 }
 
-void SocketConnectFunction::RespondOnUIThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  SendResponse(true);
+bool SocketCreateFunction::Respond() {
+  return true;
 }
 
-SocketCloseFunction::SocketCloseFunction() {
-}
-
-SocketCloseFunction::~SocketCloseFunction() {
-}
-
-bool SocketCloseFunction::RunImpl() {
+bool SocketDestroyFunction::Prepare() {
   EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
-
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&SocketCloseFunction::WorkOnIOThread, this));
-  DCHECK(rv);
   return true;
 }
 
-void SocketCloseFunction::WorkOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+void SocketDestroyFunction::Work() {
+  controller()->DestroySocket(socket_id_);
+}
 
-  SocketController* controller = SocketController::GetInstance();
-  controller->CloseUdp(socket_id_);
+bool SocketDestroyFunction::Respond() {
+  return true;
+}
+
+bool SocketConnectFunction::Prepare() {
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
+  return true;
+}
+
+void SocketConnectFunction::Work() {
+  int result = controller()->ConnectSocket(socket_id_);
+  result_.reset(Value::CreateIntegerValue(result));
+}
+
+bool SocketConnectFunction::Respond() {
+  return true;
+}
+
+bool SocketDisconnectFunction::Prepare() {
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
+  return true;
+}
+
+void SocketDisconnectFunction::Work() {
+  controller()->DisconnectSocket(socket_id_);
   result_.reset(Value::CreateNullValue());
-
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&SocketCloseFunction::RespondOnUIThread, this));
-  DCHECK(rv);
 }
 
-void SocketCloseFunction::RespondOnUIThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  SendResponse(true);
-}
-
-SocketWriteFunction::SocketWriteFunction() {
-}
-
-SocketWriteFunction::~SocketWriteFunction() {
-}
-
-bool SocketWriteFunction::RunImpl() {
-  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
-  EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &message_));
-
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&SocketWriteFunction::WorkOnIOThread, this));
-  DCHECK(rv);
+bool SocketDisconnectFunction::Respond() {
   return true;
 }
 
-void SocketWriteFunction::WorkOnIOThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+bool SocketReadFunction::Prepare() {
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
+  return true;
+}
 
-  SocketController* controller = SocketController::GetInstance();
-  int bytesWritten = controller->WriteUdp(socket_id_, message_);
+void SocketReadFunction::Work() {
+  std::string message = controller()->ReadSocket(socket_id_);
 
   DictionaryValue* result = new DictionaryValue();
-  result->SetInteger(kBytesWrittenKey, bytesWritten);
+  result->SetString(kMessageKey, message);
   result_.reset(result);
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
-      base::Bind(&SocketWriteFunction::RespondOnUIThread, this));
-  DCHECK(rv);
 }
 
-void SocketWriteFunction::RespondOnUIThread() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  SendResponse(true);
+bool SocketReadFunction::Respond() {
+  return true;
+}
+
+bool SocketWriteFunction::Prepare() {
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &socket_id_));
+  EXTENSION_FUNCTION_VALIDATE(args_->GetString(1, &message_));
+  return true;
+}
+
+void SocketWriteFunction::Work() {
+  int bytes_written = controller()->WriteSocket(socket_id_, message_);
+
+  DictionaryValue* result = new DictionaryValue();
+  result->SetInteger(kBytesWrittenKey, bytes_written);
+  result_.reset(result);
+}
+
+bool SocketWriteFunction::Respond() {
+  return true;
 }
 
 }  // namespace extensions

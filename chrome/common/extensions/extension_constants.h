@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,10 @@ namespace extension_manifest_keys {
   extern const char kAltKey[];
   extern const char kApp[];
   extern const char kBackground[];
+  extern const char kBackgroundPage[];
+  extern const char kBackgroundPageLegacy[];
+  extern const char kBackgroundScripts[];
+  extern const char kBackgroundPersistent[];
   extern const char kBrowserAction[];
   extern const char kBrowseURLs[];
   extern const char kChromeURLOverrides[];
@@ -74,7 +78,6 @@ namespace extension_manifest_keys {
   extern const char kPageActionIcons[];
   extern const char kPageActionId[];
   extern const char kPageActionPopup[];
-  extern const char kPageActionPopupHeight[];
   extern const char kPageActionPopupPath[];
   extern const char kPageActions[];
   extern const char kPermissions[];
@@ -87,10 +90,6 @@ namespace extension_manifest_keys {
   extern const char kRunAt[];
   extern const char kShiftKey[];
   extern const char kShortcutKey[];
-  extern const char kSidebar[];
-  extern const char kSidebarDefaultIcon[];
-  extern const char kSidebarDefaultPage[];
-  extern const char kSidebarDefaultTitle[];
   extern const char kSignature[];
   extern const char kTheme[];
   extern const char kThemeColors[];
@@ -114,6 +113,7 @@ namespace extension_manifest_keys {
   extern const char kType[];
   extern const char kUpdateURL[];
   extern const char kVersion[];
+  extern const char kWebAccessibleResources[];
   extern const char kWebURLs[];
 }  // namespace extension_manifest_keys
 
@@ -153,7 +153,12 @@ namespace extension_manifest_errors {
   extern const char kFeatureNotAllowed[];
   extern const char kInvalidAllFrames[];
   extern const char kInvalidBackground[];
+  extern const char kInvalidBackgroundCombination[];
+  extern const char kInvalidBackgroundScript[];
+  extern const char kInvalidBackgroundScripts[];
   extern const char kInvalidBackgroundInHostedApp[];
+  extern const char kInvalidBackgroundPersistent[];
+  extern const char kInvalidBackgroundPersistentNoPage[];
   extern const char kInvalidBrowserAction[];
   extern const char kInvalidBrowseURL[];
   extern const char kInvalidBrowseURLs[];
@@ -188,8 +193,10 @@ namespace extension_manifest_errors {
   extern const char kInvalidIntent[];
   extern const char kInvalidIntentDisposition[];
   extern const char kInvalidIntentPath[];
+  extern const char kInvalidIntentPageInHostedApp[];
   extern const char kInvalidIntents[];
   extern const char kInvalidIntentType[];
+  extern const char kInvalidIntentTypeElement[];
   extern const char kInvalidIntentTitle[];
   extern const char kInvalidIsolation[];
   extern const char kInvalidIsolationValue[];
@@ -241,10 +248,6 @@ namespace extension_manifest_errors {
   extern const char kInvalidRequirement[];
   extern const char kInvalidRequirements[];
   extern const char kInvalidRunAt[];
-  extern const char kInvalidSidebar[];
-  extern const char kInvalidSidebarDefaultIconPath[];
-  extern const char kInvalidSidebarDefaultPage[];
-  extern const char kInvalidSidebarDefaultTitle[];
   extern const char kInvalidSignature[];
   extern const char kInvalidTheme[];
   extern const char kInvalidThemeColors[];
@@ -260,6 +263,8 @@ namespace extension_manifest_errors {
   extern const char kInvalidUpdateURL[];
   extern const char kInvalidURLPatternError[];
   extern const char kInvalidVersion[];
+  extern const char kInvalidWebAccessibleResourcesList[];
+  extern const char kInvalidWebAccessibleResource[];
   extern const char kInvalidWebURL[];
   extern const char kInvalidWebURLs[];
   extern const char kInvalidZipHash[];
@@ -279,7 +284,6 @@ namespace extension_manifest_errors {
   extern const char kPermissionNotAllowed[];
   extern const char kOneUISurfaceOnly[];
   extern const char kReservedMessageFound[];
-  extern const char kSidebarExperimental[];
   extern const char kWebContentMustBeEnabled[];
 #if defined(OS_CHROMEOS)
   extern const char kIllegalPlugins[];
@@ -308,6 +312,12 @@ namespace extension_urls {
   // --apps-gallery-update-url.
   GURL GetWebstoreUpdateUrl(bool secure);
 
+  // Returns whether the URL is the webstore update URL (secure or not).
+  bool IsWebstoreUpdateUrl(const GURL& update_url);
+
+  // Returns true if the URL points to an extension blacklist.
+  bool IsBlacklistUpdateUrl(const GURL& url);
+
   // The greatest common prefixes of the main extensions gallery's browse and
   // download URLs.
   extern const char kGalleryBrowsePrefix[];
@@ -324,10 +334,18 @@ namespace extension_filenames {
   // The file to write our decoded message catalogs to, relative to the
   // extension_path.
   extern const char kDecodedMessageCatalogsFilename[];
+
+  // The filename to use for a background page generated from
+  // background.scripts.
+  extern const char kGeneratedBackgroundPageFilename[];
 }
 
 namespace extension_misc {
+  // Matches chrome.windows.WINDOW_ID_NONE.
   const int kUnknownWindowId = -1;
+
+  // Matches chrome.windows.WINDOW_ID_CURRENT.
+  const int kCurrentWindowId = -2;
 
   // The extension id of the bookmark manager.
   extern const char kBookmarkManagerId[];
@@ -428,6 +446,9 @@ namespace extension_misc {
     // correspond to an installed app. These launches are left over from a
     // feature that let you make desktop shortcuts from the file menu.
     APP_LAUNCH_CMD_LINE_APP_LEGACY,
+
+    // User clicked web store link on the NTP footer.
+    APP_LAUNCH_NTP_WEBSTORE_FOOTER,
 
     APP_LAUNCH_BUCKET_BOUNDARY,
     APP_LAUNCH_BUCKET_INVALID

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,13 +73,12 @@ void ConvertResponseToUTF16(const std::string& charset,
 
 ProxyScriptFetcherImpl::ProxyScriptFetcherImpl(
     URLRequestContext* url_request_context)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(task_factory_(this)),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       url_request_context_(url_request_context),
       buf_(new IOBuffer(kBufSize)),
       next_id_(0),
       cur_request_(NULL),
       cur_request_id_(0),
-      callback_(NULL),
       result_code_(OK),
       result_text_(NULL),
       max_response_bytes_(kDefaultMaxResponseBytes),
@@ -116,13 +115,11 @@ void ProxyScriptFetcherImpl::OnResponseCompleted(URLRequest* request) {
   FetchCompleted();
 }
 
-int ProxyScriptFetcherImpl::Fetch(const GURL& url,
-                                  string16* text,
-                                  OldCompletionCallback* callback) {
+int ProxyScriptFetcherImpl::Fetch(
+    const GURL& url, string16* text, const CompletionCallback& callback) {
   // It is invalid to call Fetch() while a request is already in progress.
   DCHECK(!cur_request_.get());
-
-  DCHECK(callback);
+  DCHECK(!callback.is_null());
   DCHECK(text);
 
   // Handle base-64 encoded data-urls that contain custom PAC scripts.
@@ -161,10 +158,11 @@ int ProxyScriptFetcherImpl::Fetch(const GURL& url,
 
   // Post a task to timeout this request if it takes too long.
   cur_request_id_ = ++next_id_;
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      task_factory_.NewRunnableMethod(&ProxyScriptFetcherImpl::OnTimeout,
-                                      cur_request_id_),
-      static_cast<int>(max_duration_.InMilliseconds()));
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&ProxyScriptFetcherImpl::OnTimeout, weak_factory_.GetWeakPtr(),
+                 cur_request_id_),
+      max_duration_);
 
   // Start the request.
   cur_request_->Start();
@@ -192,7 +190,7 @@ void ProxyScriptFetcherImpl::OnAuthRequired(URLRequest* request,
 
 void ProxyScriptFetcherImpl::OnSSLCertificateError(URLRequest* request,
                                                    const SSLInfo& ssl_info,
-                                                   bool is_hsts_host) {
+                                                   bool fatal) {
   DCHECK_EQ(request, cur_request_.get());
   // Revocation check failures are not fatal.
   if (IsCertStatusMinorError(ssl_info.cert_status)) {
@@ -295,20 +293,20 @@ void ProxyScriptFetcherImpl::FetchCompleted() {
   }
 
   int result_code = result_code_;
-  OldCompletionCallback* callback = callback_;
+  CompletionCallback callback = callback_;
 
   // Hold a reference to the URLRequestContext to prevent re-entrancy from
   // ~URLRequestContext.
   scoped_refptr<const URLRequestContext> context(cur_request_->context());
   ResetCurRequestState();
 
-  callback->Run(result_code);
+  callback.Run(result_code);
 }
 
 void ProxyScriptFetcherImpl::ResetCurRequestState() {
   cur_request_.reset();
   cur_request_id_ = 0;
-  callback_ = NULL;
+  callback_.Reset();
   result_code_ = OK;
   result_text_ = NULL;
 }

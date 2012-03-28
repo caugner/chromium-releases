@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,6 +39,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/about_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_version_info.h"
@@ -47,12 +48,13 @@
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
-#include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/sensors/sensors_provider.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/process_type.h"
 #include "crypto/nss_util.h"
@@ -92,6 +94,8 @@
 using base::Time;
 using base::TimeDelta;
 using content::BrowserThread;
+using content::PluginService;
+using content::WebContents;
 
 namespace {
 
@@ -195,7 +199,7 @@ class ChromeOSTermsHandler
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
     BrowserThread::PostTask(
         BrowserThread::FILE, FROM_HERE,
-        NewRunnableMethod(this, &ChromeOSTermsHandler::LoadFileOnFileThread));
+        base::Bind(&ChromeOSTermsHandler::LoadFileOnFileThread, this));
   }
 
   void LoadFileOnFileThread() {
@@ -227,7 +231,7 @@ class ChromeOSTermsHandler
     }
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &ChromeOSTermsHandler::ResponseOnUIThread));
+        base::Bind(&ChromeOSTermsHandler::ResponseOnUIThread, this));
   }
 
   void ResponseOnUIThread() {
@@ -637,7 +641,7 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
         source_->profile()->GetNetworkPredictor();
     BrowserThread::PostTask(
         BrowserThread::IO, FROM_HERE,
-        NewRunnableMethod(this, &AboutDnsHandler::StartOnIOThread, predictor));
+        base::Bind(&AboutDnsHandler::StartOnIOThread, this, predictor));
   }
 
   void StartOnIOThread(chrome_browser_net::Predictor* predictor) {
@@ -651,7 +655,7 @@ class AboutDnsHandler : public base::RefCountedThreadSafe<AboutDnsHandler> {
 
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &AboutDnsHandler::FinishOnUIThread, data));
+        base::Bind(&AboutDnsHandler::FinishOnUIThread, this, data));
   }
 
   void FinishOnUIThread(const std::string& data) {
@@ -1002,13 +1006,18 @@ std::string AboutVersionStaticContent(const std::string& query) {
 
 std::string AboutVersionStrings(DictionaryValue* localized_strings,
                                 Profile* profile) {
+  DCHECK(profile);
   localized_strings->SetString("title",
       l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_TITLE));
   chrome::VersionInfo version_info;
 
   localized_strings->SetString("name",
       l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+#if defined(USE_AURA)
+  localized_strings->SetString("version", version_info.Version() + " Aura");
+#else
   localized_strings->SetString("version", version_info.Version());
+#endif
   // Bug 79458: Need to evaluate the use of getting the version string on
   // this thread.
   base::ThreadRestrictions::ScopedAllowIO allow_io;
@@ -1031,10 +1040,12 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
   string16 flash_version =
       l10n_util::GetStringUTF16(IDS_PLUGINS_DISABLED_PLUGIN);
   PluginPrefs* plugin_prefs = PluginPrefs::GetForProfile(profile);
-  for (size_t i = 0; i < info_array.size(); ++i) {
-    if (plugin_prefs->IsPluginEnabled(info_array[i])) {
-      flash_version = info_array[i].version;
-      break;
+  if (plugin_prefs) {
+    for (size_t i = 0; i < info_array.size(); ++i) {
+      if (plugin_prefs->IsPluginEnabled(info_array[i])) {
+        flash_version = info_array[i].version;
+        break;
+      }
     }
   }
   localized_strings->SetString("flash_plugin", "Flash");
@@ -1094,6 +1105,7 @@ std::string AboutVersionStrings(DictionaryValue* localized_strings,
     localized_strings->SetString("profile_path",
         l10n_util::GetStringUTF16(IDS_ABOUT_VERSION_PATH_NOTFOUND));
   }
+  ChromeWebUIDataSource::SetFontAndTextDirection(localized_strings);
 
   std::string data;
   jstemplate_builder::AppendJsonJS(localized_strings, &data);
@@ -1373,9 +1385,9 @@ std::string AboutUIHTMLSource::GetMimeType(const std::string& path) const {
   return "text/html";
 }
 
-AboutUI::AboutUI(TabContents* contents, const std::string& name)
-    : ChromeWebUI(contents) {
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+AboutUI::AboutUI(content::WebUI* web_ui, const std::string& name)
+    : WebUIController(web_ui) {
+  Profile* profile = Profile::FromWebUI(web_ui);
   ChromeURLDataManager::DataSource* source =
       new AboutUIHTMLSource(name, profile);
   if (source)

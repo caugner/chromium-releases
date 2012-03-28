@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ BrowserRootView::BrowserRootView(BrowserView* browser_view,
 bool BrowserRootView::GetDropFormats(
       int* formats,
       std::set<ui::OSExchangeData::CustomFormat>* custom_formats) {
-  if (tabstrip() && tabstrip()->IsVisible()) {
+  if (tabstrip() && tabstrip()->visible()) {
     *formats = ui::OSExchangeData::URL | ui::OSExchangeData::STRING;
     return true;
   }
@@ -45,7 +45,7 @@ bool BrowserRootView::AreDropTypesRequired() {
 }
 
 bool BrowserRootView::CanDrop(const ui::OSExchangeData& data) {
-  if (!tabstrip() || !tabstrip()->IsVisible())
+  if (!tabstrip() || !tabstrip()->visible())
     return false;
 
   // If there is a URL, we'll allow the drop.
@@ -125,7 +125,7 @@ std::string BrowserRootView::GetClassName() const {
 
 bool BrowserRootView::ShouldForwardToTabStrip(
     const views::DropTargetEvent& event) {
-  if (!tabstrip()->IsVisible())
+  if (!tabstrip()->visible())
     return false;
 
   // Allow the drop as long as the mouse is over the tabstrip or vertically
@@ -157,6 +157,7 @@ bool BrowserRootView::GetPasteAndGoURL(const ui::OSExchangeData& data,
   string16 text;
   if (!data.GetString(&text) || text.empty())
     return false;
+  text = AutocompleteMatch::SanitizeString(text);
 
   AutocompleteMatch match;
   browser_view_->browser()->profile()->GetAutocompleteClassifier()->Classify(

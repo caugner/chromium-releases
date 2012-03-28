@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,9 +19,9 @@ extern const char kAboutVersionURL[];
 
 // chrome: URLs (including schemes). Should be kept in sync with the
 // components below.
+extern const char kChromeUIAboutPageFrameURL[];
 extern const char kChromeUIAboutURL[];
 extern const char kChromeUIBookmarksURL[];
-extern const char kChromeUIBugReportURL[];
 extern const char kChromeUICertificateViewerURL[];
 extern const char kChromeUIChromeURLsURL[];
 extern const char kChromeUICloudPrintResourcesURL[];
@@ -34,8 +34,10 @@ extern const char kChromeUIDevToolsURL[];
 extern const char kChromeUIDownloadsURL[];
 extern const char kChromeUIEditSearchEngineDialogURL[];
 extern const char kChromeUIExtensionIconURL[];
+extern const char kChromeUIExtensionsFrameURL[];
 extern const char kChromeUIExtensionsURL[];
 extern const char kChromeUIFaviconURL[];
+extern const char kChromeUIFeedbackURL[];
 extern const char kChromeUIFlagsURL[];
 extern const char kChromeUIFlashURL[];
 extern const char kChromeUIGpuCleanURL[];
@@ -54,17 +56,21 @@ extern const char kChromeUINetInternalsURL[];
 extern const char kChromeUINetworkViewCacheURL[];
 extern const char kChromeUINewProfile[];
 extern const char kChromeUINewTabURL[];
+extern const char kChromeUIOmniboxURL[];
 extern const char kChromeUIPluginsURL[];
 extern const char kChromeUIPolicyURL[];
 extern const char kChromeUIPrintURL[];
 extern const char kChromeUISessionsURL[];
 extern const char kChromeUISettingsURL[];
+extern const char kChromeUISettingsFrameURL[];
 extern const char kChromeUIShorthangURL[];
 extern const char kChromeUISSLClientCertificateSelectorURL[];
 extern const char kChromeUISyncPromoURL[];
 extern const char kChromeUITaskManagerURL[];
 extern const char kChromeUITermsURL[];
 extern const char kChromeUIThumbnailURL[];
+extern const char kChromeUIUberURL[];
+extern const char kChromeUIUberFrameURL[];
 extern const char kChromeUIVersionURL[];
 extern const char kChromeUIWorkersURL[];
 
@@ -96,21 +102,17 @@ extern const char kChromeUIFileManagerURL[];
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
 extern const char kChromeUICollectedCookiesURL[];
 extern const char kChromeUIHttpAuthURL[];
-extern const char kChromeUIRepostFormWarningURL[];
-#endif
-
-#if defined(USE_AURA)
-extern const char kChromeUIAppListURL[];
+extern const char kChromeUITabModalConfirmDialogURL[];
 #endif
 
 // chrome components of URLs. Should be kept in sync with the full URLs above.
 extern const char kChromeUIAboutHost[];
+extern const char kChromeUIAboutPageFrameHost[];
 extern const char kChromeUIAppCacheInternalsHost[];
 extern const char kChromeUIBlankHost[];
 extern const char kChromeUIBlobInternalsHost[];
 extern const char kChromeUIBookmarksHost[];
 extern const char kChromeUIBrowserCrashHost[];
-extern const char kChromeUIBugReportHost[];
 extern const char kChromeUICacheHost[];
 extern const char kChromeUICertificateViewerHost[];
 extern const char kChromeUIChromeURLsHost[];
@@ -128,8 +130,10 @@ extern const char kChromeUIDNSHost[];
 extern const char kChromeUIDownloadsHost[];
 extern const char kChromeUIEditSearchEngineDialogHost[];
 extern const char kChromeUIExtensionIconHost[];
+extern const char kChromeUIExtensionsFrameHost[];
 extern const char kChromeUIExtensionsHost[];
 extern const char kChromeUIFaviconHost[];
+extern const char kChromeUIFeedbackHost[];
 extern const char kChromeUIFlagsHost[];
 extern const char kChromeUIFlashHost[];
 extern const char kChromeUIGpuCleanHost[];
@@ -149,8 +153,10 @@ extern const char kChromeUIMediaInternalsHost[];
 extern const char kChromeUIMemoryHost[];
 extern const char kChromeUIMemoryRedirectHost[];
 extern const char kChromeUINetInternalsHost[];
+extern const char kChromeUINetworkActionPredictorHost[];
 extern const char kChromeUINetworkViewCacheHost[];
 extern const char kChromeUINewTabHost[];
+extern const char kChromeUIOmniboxHost[];
 extern const char kChromeUIPluginsHost[];
 extern const char kChromeUIPolicyHost[];
 extern const char kChromeUIPrintHost[];
@@ -159,6 +165,7 @@ extern const char kChromeUIQuotaInternalsHost[];
 extern const char kChromeUIResourcesHost[];
 extern const char kChromeUISessionsHost[];
 extern const char kChromeUISettingsHost[];
+extern const char kChromeUISettingsFrameHost[];
 extern const char kChromeUIShorthangHost[];
 extern const char kChromeUISSLClientCertificateSelectorHost[];
 extern const char kChromeUIStatsHost[];
@@ -172,6 +179,8 @@ extern const char kChromeUITermsHost[];
 extern const char kChromeUIThumbnailHost[];
 extern const char kChromeUITouchIconHost[];
 extern const char kChromeUITracingHost[];
+extern const char kChromeUIUberFrameHost[];
+extern const char kChromeUIUberHost[];
 extern const char kChromeUIVersionHost[];
 extern const char kChromeUIWorkersHost[];
 
@@ -222,11 +231,7 @@ extern const char kChromeUIFileManagerHost[];
 #if (defined(OS_LINUX) && defined(TOOLKIT_VIEWS)) || defined(USE_AURA)
 extern const char kChromeUICollectedCookiesHost[];
 extern const char kChromeUIHttpAuthHost[];
-extern const char kChromeUIRepostFormWarningHost[];
-#endif
-
-#if defined(USE_AURA)
-extern const char kChromeUIAppListHost[];
+extern const char kChromeUITabModalConfirmDialogHost[];
 #endif
 
 // Options sub-pages.
@@ -258,6 +263,18 @@ extern const char kPasswordManagerLearnMoreURL[];
 
 // General help link for Chrome.
 extern const char kChromeHelpURL[];
+
+// Help URL for the settings page's search feature.
+extern const char kSettingsSearchHelpURL[];
+
+// "About" URL for the translate bar's options menu.
+extern const char kAboutGoogleTranslateURL[];
+
+// Help URL for the Autofill dialog.
+extern const char kAutofillHelpURL[];
+
+// "Learn more" URL for the Instant feature.
+extern const char kInstantLearnMoreURL[];
 
 // "What do these mean?" URL for the Page Info bubble.
 extern const char kPageInfoHelpCenterURL[];
@@ -309,6 +326,9 @@ extern const char kCanNotAccessAccountURL[];
 
 // The URL for the "Learn more" page on sync encryption.
 extern const char kSyncEncryptionHelpURL[];
+
+// The URL for the "Learn more" link when there is a sync error.
+extern const char kSyncErrorsHelpURL[];
 
 // The URL to create a new Google account via sync.
 extern const char kSyncCreateNewAccountURL[];

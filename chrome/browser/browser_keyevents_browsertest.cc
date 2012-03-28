@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,14 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "net/test/test_server.h"
 #include "ui/base/keycodes/keyboard_codes.h"
+
+using content::NavigationController;
 
 namespace {
 
@@ -143,7 +145,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     ASSERT_LT(tab_index, browser()->tab_count());
     bool actual;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-        browser()->GetTabContentsAt(tab_index)->render_view_host(),
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
         L"",
         base::StringPrintf(kSuppressEventJS, type, GetBoolString(!suppress)),
         &actual));
@@ -169,7 +171,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
   void GetResultLength(int tab_index, int* length) {
     ASSERT_LT(tab_index, browser()->tab_count());
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractInt(
-        browser()->GetTabContentsAt(tab_index)->render_view_host(),
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
         L"", kGetResultLengthJS, length));
   }
 
@@ -181,7 +183,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     for (int i = 0; i < actual_length; ++i) {
       std::string actual;
       ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-          browser()->GetTabContentsAt(tab_index)->render_view_host(),
+          browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
           L"", base::StringPrintf(kGetResultJS, i), &actual));
 
       // If more events were received than expected, then the additional events
@@ -197,7 +199,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     ASSERT_LT(tab_index, browser()->tab_count());
     std::string actual;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-        browser()->GetTabContentsAt(tab_index)->render_view_host(),
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
         L"", kGetFocusedElementJS, &actual));
     ASSERT_EQ(WideToUTF8(focused), actual);
   }
@@ -206,7 +208,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     ASSERT_LT(tab_index, browser()->tab_count());
     bool actual;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-        browser()->GetTabContentsAt(tab_index)->render_view_host(),
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
         L"",
         base::StringPrintf(kSetFocusedElementJS, focused),
         &actual));
@@ -218,7 +220,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     ASSERT_LT(tab_index, browser()->tab_count());
     std::string actual;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-        browser()->GetTabContentsAt(tab_index)->render_view_host(),
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
         L"",
         base::StringPrintf(kGetTextBoxValueJS, id),
         &actual));
@@ -230,7 +232,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     ASSERT_LT(tab_index, browser()->tab_count());
     std::string actual;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-        browser()->GetTabContentsAt(tab_index)->render_view_host(),
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
         L"",
         base::StringPrintf(kSetTextBoxValueJS, id, value),
         &actual));
@@ -241,7 +243,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     ASSERT_LT(tab_index, browser()->tab_count());
     bool actual;
     ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-        browser()->GetTabContentsAt(tab_index)->render_view_host(),
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost(),
         L"", base::StringPrintf(kStartTestJS, result_length), &actual));
     ASSERT_TRUE(actual);
   }
@@ -261,7 +263,7 @@ class BrowserKeyEventsTest : public InProcessBrowserTest {
     // because the test finished message might be arrived before returning
     // from the SendKeyPressSync() method.
     TestFinishObserver finish_observer(
-        browser()->GetTabContentsAt(tab_index)->render_view_host());
+        browser()->GetWebContentsAt(tab_index)->GetRenderViewHost());
 
     ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
         browser(), test.key, test.ctrl, test.shift, test.alt, test.command));
@@ -509,8 +511,8 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, FLAKY_CommandKeyEvents) {
 }
 #endif
 
-// http://crbug.com/81451
 #if defined(OS_MACOSX)
+// http://crbug.com/81451 for mac
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, DISABLED_AccessKeys) {
 #else
 IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
@@ -614,8 +616,11 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, AccessKeys) {
   // TODO(isherman): This is an experimental change to help diagnose
   // http://crbug.com/55713
   ui_test_utils::RunAllPendingInMessageLoop();
-
+#if defined(USE_AURA)
+  EXPECT_TRUE(IsViewFocused(VIEW_ID_OMNIBOX));
+#else
   EXPECT_TRUE(IsViewFocused(VIEW_ID_LOCATION_BAR));
+#endif
   // No element should be focused, as Alt+D was handled by the browser.
   EXPECT_NO_FATAL_FAILURE(CheckFocusedElement(tab_index, L""));
 
@@ -707,8 +712,9 @@ IN_PROC_BROWSER_TEST_F(BrowserKeyEventsTest, MAYBE_ReservedAccelerators) {
   ASSERT_NO_FATAL_FAILURE(SuppressAllEvents(1, true));
 
   ui_test_utils::WindowedNotificationObserver wait_for_tab_closed(
-      content::NOTIFICATION_TAB_CLOSED, content::Source<NavigationController>(
-          &browser()->GetTabContentsAt(1)->controller()));
+      content::NOTIFICATION_TAB_CLOSED,
+      content::Source<NavigationController>(
+          &browser()->GetWebContentsAt(1)->GetController()));
 
   // Press Ctrl/Cmd+W, which will close the tab.
 #if defined(OS_MACOSX)

@@ -5,8 +5,8 @@
 #include "content/renderer/p2p/ipc_network_manager.h"
 
 #include "base/bind.h"
+#include "base/sys_byteorder.h"
 #include "net/base/net_util.h"
-#include "net/base/sys_byteorder.h"
 
 namespace content {
 
@@ -53,7 +53,8 @@ void IpcNetworkManager::OnNetworkListChanged(
     memcpy(&address, &it->address[0], sizeof(uint32));
     address = ntohl(address);
     networks.push_back(
-        new talk_base::Network(it->name, it->name, address));
+        new talk_base::Network(
+            it->name, it->name, talk_base::IPAddress(address)));
   }
 
   MergeNetworkList(networks, !first_update_sent_);

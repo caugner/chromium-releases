@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,21 +48,23 @@ class PepperSessionManager : public SessionManager,
   virtual ~PepperSessionManager();
 
   // SessionManager interface.
-  virtual void Init(const std::string& local_jid,
-                    SignalStrategy* signal_strategy,
+  virtual void Init(SignalStrategy* signal_strategy,
                     SessionManager::Listener* listener,
-                    bool allow_nat_traversal) OVERRIDE;
-  virtual Session* Connect(
+                    const NetworkSettings& network_settings) OVERRIDE;
+  virtual scoped_ptr<Session> Connect(
       const std::string& host_jid,
-      Authenticator* authenticator,
-      CandidateSessionConfig* config,
+      scoped_ptr<Authenticator> authenticator,
+      scoped_ptr<CandidateSessionConfig> config,
       const Session::StateChangeCallback& state_change_callback) OVERRIDE;
   virtual void Close() OVERRIDE;
   virtual void set_authenticator_factory(
-      AuthenticatorFactory* authenticator_factory) OVERRIDE;
+      scoped_ptr<AuthenticatorFactory> authenticator_factory) OVERRIDE;
 
   // SignalStrategy::Listener interface.
-  virtual bool OnIncomingStanza(const buzz::XmlElement* stanza) OVERRIDE;
+  virtual void OnSignalStrategyStateChange(
+      SignalStrategy::State state) OVERRIDE;
+  virtual bool OnSignalStrategyIncomingStanza(
+      const buzz::XmlElement* stanza) OVERRIDE;
 
  private:
   friend class PepperSession;
@@ -83,12 +85,12 @@ class PepperSessionManager : public SessionManager,
 
   pp::Instance* pp_instance_;
 
-  std::string local_jid_;
   SignalStrategy* signal_strategy_;
   scoped_ptr<AuthenticatorFactory> authenticator_factory_;
   scoped_ptr<IqSender> iq_sender_;
   SessionManager::Listener* listener_;
-  bool allow_nat_traversal_;
+
+  bool ready_;
 
   TransportConfig transport_config_;
 

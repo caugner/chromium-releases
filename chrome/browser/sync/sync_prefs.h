@@ -81,7 +81,7 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   // |registered_types|.  Returns |registered_types| directly if
   // HasKeepEverythingSynced() is true.
   syncable::ModelTypeSet GetPreferredDataTypes(
-      const syncable::ModelTypeSet& registered_types) const;
+      syncable::ModelTypeSet registered_types) const;
   // |preferred_types| should be a subset of |registered_types|.  All
   // types in |preferred_types| are marked preferred, and all types in
   // |registered_types| \ |preferred_types| are marked not preferred.
@@ -89,8 +89,8 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
   // HasKeepEverythingSynced() is true, but won't be visible until
   // SetKeepEverythingSynced(false) is called.
   void SetPreferredDataTypes(
-    const syncable::ModelTypeSet& registered_types,
-    const syncable::ModelTypeSet& preferred_types);
+    syncable::ModelTypeSet registered_types,
+    syncable::ModelTypeSet preferred_types);
 
   // This pref is set outside of sync.
   bool IsManaged() const;
@@ -105,7 +105,7 @@ class SyncPrefs : public base::SupportsWeakPtr<SyncPrefs>,
                              int64 max_version) OVERRIDE;
 
   // Merges the given set of types with the set of acknowledged types.
-  void AcknowledgeSyncedTypes(const syncable::ModelTypeSet& types);
+  void AcknowledgeSyncedTypes(syncable::ModelTypeSet types);
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,

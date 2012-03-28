@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,15 +26,23 @@
   DISABLED_FocusWindowDoesNotExitFullscreen
 #define MAYBE_UpdateWindowSizeExitsFullscreen \
   DISABLED_UpdateWindowSizeExitsFullscreen
-#define MAYBE_UpdateWindowShowState \
-  DISABLED_UpdateWindowShowState
+#define MAYBE_UpdateWindowResize DISABLED_UpdateWindowResize
+#define MAYBE_UpdateWindowShowState DISABLED_UpdateWindowShowState
 #else
 #define MAYBE_FocusWindowDoesNotExitFullscreen FocusWindowDoesNotExitFullscreen
 #define MAYBE_UpdateWindowSizeExitsFullscreen UpdateWindowSizeExitsFullscreen
+#define MAYBE_UpdateWindowResize UpdateWindowResize
 #define MAYBE_UpdateWindowShowState UpdateWindowShowState
 #endif
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, Tabs) {
+// See crbug.com/108492.
+#if defined(USE_AURA) && defined(OS_CHROMEOS)
+#define MAYBE_Tabs DISABLED_Tabs
+#else
+#define MAYBE_Tabs Tabs
+#endif
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, MAYBE_Tabs) {
   // The test creates a tab and checks that the URL of the new tab
   // is that of the new tab page.  Make sure the pref that controls
   // this is set.
@@ -79,6 +87,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabHighlight) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabCrashBrowser) {
   ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "crash.html")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabOpener) {
+  ASSERT_TRUE(RunExtensionSubtest("tabs/basics", "opener.html")) << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabCurrentWindow) {
+  ASSERT_TRUE(RunExtensionTest("tabs/current_window")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, TabGetCurrent) {
@@ -169,6 +185,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
       GURL(), FEB_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION);
   ASSERT_TRUE(RunExtensionTest("window_update/sizing")) << message_;
   ASSERT_FALSE(browser()->window()->IsFullscreen());
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest,
+                       MAYBE_UpdateWindowResize) {
+  ASSERT_TRUE(RunExtensionTest("window_update/resize")) << message_;
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)

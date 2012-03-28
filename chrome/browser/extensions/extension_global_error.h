@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,7 @@
 #pragma once
 
 #include "base/basictypes.h"
-#include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/global_error.h"
 #include "chrome/common/extensions/extension.h"
 
@@ -20,26 +18,8 @@ class ExtensionService;
 // occur related to installed extensions.
 class ExtensionGlobalError : public GlobalError {
  public:
-  explicit ExtensionGlobalError(
-      base::WeakPtr<ExtensionService> extension_service);
+  explicit ExtensionGlobalError(ExtensionService* extension_service);
   virtual ~ExtensionGlobalError();
-
-  // Indicate whether this instance should manage its own lifetime. Because
-  // the GlobalError class can be used in several different ways, it's
-  // important to understand who has responsibility for memory management.
-  //
-  // Briefly: if the GlobalError has a menu item, or if it's added to the
-  // GlobalErrorService queue, then it's externally managed. If your code
-  // calls ShowBubbleView(), then you manage it.
-  //
-  // The default value is true; in case the default is wrong, we prefer to
-  // crash during development than to leak in production (fail fast).
-  //
-  // TODO(sail): This could be handled automatically with a few changes to the
-  // GlobalError interface.
-  void set_should_delete_self_on_close(bool value) {
-    should_delete_self_on_close_ = value;
-  }
 
   // Inform us that a given extension is of a certain type that the user
   // hasn't yet acknowledged.
@@ -61,19 +41,6 @@ class ExtensionGlobalError : public GlobalError {
     return orphaned_extension_ids_.get();
   }
 
-  typedef base::Callback<void(const ExtensionGlobalError&, Browser* browser)>
-      ExtensionGlobalErrorCallback;
-
-  // Called when the user presses the "Accept" button on the alert.
-  void set_accept_callback(ExtensionGlobalErrorCallback callback);
-
-  // Called when the user presses the "Cancel" button on the alert.
-  void set_cancel_callback(ExtensionGlobalErrorCallback callback);
-
-  // Called when the alert is dismissed with no direct user action
-  // (e.g., the browser exits).
-  void set_closed_callback(ExtensionGlobalErrorCallback callback);
-
   // GlobalError methods.
   virtual bool HasBadge() OVERRIDE;
   virtual bool HasMenuItem() OVERRIDE;
@@ -81,25 +48,20 @@ class ExtensionGlobalError : public GlobalError {
   virtual string16 MenuItemLabel() OVERRIDE;
   virtual void ExecuteMenuItem(Browser* browser) OVERRIDE;
   virtual bool HasBubbleView() OVERRIDE;
-  virtual void ShowBubbleView(Browser* browser) OVERRIDE;
   virtual string16 GetBubbleViewTitle() OVERRIDE;
   virtual string16 GetBubbleViewMessage() OVERRIDE;
   virtual string16 GetBubbleViewAcceptButtonLabel() OVERRIDE;
   virtual string16 GetBubbleViewCancelButtonLabel() OVERRIDE;
-  virtual void BubbleViewDidClose() OVERRIDE;
-  virtual void BubbleViewAcceptButtonPressed() OVERRIDE;
-  virtual void BubbleViewCancelButtonPressed() OVERRIDE;
+  virtual void OnBubbleViewDidClose(Browser* browser) OVERRIDE;
+  virtual void BubbleViewAcceptButtonPressed(Browser* browser) OVERRIDE;
+  virtual void BubbleViewCancelButtonPressed(Browser* browser) OVERRIDE;
 
  private:
-  Browser* current_browser_;  // The browser passed to ShowBubbleView().
   bool should_delete_self_on_close_;
-  base::WeakPtr<ExtensionService> extension_service_;
+  ExtensionService* extension_service_;
   scoped_ptr<ExtensionIdSet> external_extension_ids_;
   scoped_ptr<ExtensionIdSet> blacklisted_extension_ids_;
   scoped_ptr<ExtensionIdSet> orphaned_extension_ids_;
-  ExtensionGlobalErrorCallback accept_callback_;
-  ExtensionGlobalErrorCallback cancel_callback_;
-  ExtensionGlobalErrorCallback closed_callback_;
   string16 message_;  // Displayed in the body of the alert.
 
   // For a given set of extension IDs, generates appropriate text

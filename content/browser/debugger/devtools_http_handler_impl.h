@@ -18,8 +18,6 @@
 #include "net/server/http_server.h"
 #include "net/url_request/url_request.h"
 
-class TabContents;
-
 namespace net {
 class URLRequestContext;
 }
@@ -70,7 +68,7 @@ class DevToolsHttpHandlerImpl
                                int bytes_read) OVERRIDE;
 
   void Init();
-  void Teardown();
+  void TeardownAndRelease();
   void Bind(net::URLRequest* request, int connection_id);
   void RequestCompleted(net::URLRequest* request);
 
@@ -100,7 +98,6 @@ class DevToolsHttpHandlerImpl
       ConnectionToClientHostMap;
   ConnectionToClientHostMap connection_to_client_host_ui_;
   scoped_ptr<DevToolsHttpHandlerDelegate> delegate_;
-  scoped_refptr<DevToolsHttpHandlerImpl> protect_ptr_;
   DISALLOW_COPY_AND_ASSIGN(DevToolsHttpHandlerImpl);
 };
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/task.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/completion_callback.h"
 #include "net/http/http_response_headers.h"
@@ -41,7 +40,6 @@ class APPCACHE_EXPORT AppCacheUpdateJob : public AppCacheStorage::Delegate,
   void StartUpdate(AppCacheHost* host, const GURL& new_master_resource);
 
  private:
-  friend class ScopedRunnableMethodFactory<AppCacheUpdateJob>;
   friend class AppCacheUpdateJobTest;
   class URLFetcher;
 
@@ -144,7 +142,6 @@ class APPCACHE_EXPORT AppCacheUpdateJob : public AppCacheStorage::Delegate,
     scoped_refptr<net::HttpResponseHeaders> existing_response_headers_;
     std::string manifest_data_;
     scoped_ptr<AppCacheResponseWriter> response_writer_;
-    net::OldCompletionCallbackImpl<URLFetcher> write_callback_;
   };  // class URLFetcher
 
   AppCacheResponseWriter* CreateResponseWriter();
@@ -238,9 +235,6 @@ class APPCACHE_EXPORT AppCacheUpdateJob : public AppCacheStorage::Delegate,
   bool IsTerminating() { return internal_state_ >= REFETCH_MANIFEST ||
                                 stored_state_ != UNSTORED; }
 
-  // This factory will be used to schedule invocations of various methods.
-  ScopedRunnableMethodFactory<AppCacheUpdateJob> method_factory_;
-
   GURL manifest_url_;  // here for easier access
   AppCacheService* service_;
 
@@ -304,10 +298,6 @@ class APPCACHE_EXPORT AppCacheUpdateJob : public AppCacheStorage::Delegate,
 
   // Whether we've stored the resulting group/cache yet.
   StoredState stored_state_;
-
-  net::OldCompletionCallbackImpl<AppCacheUpdateJob> manifest_info_write_callback_;
-  net::OldCompletionCallbackImpl<AppCacheUpdateJob> manifest_data_write_callback_;
-  net::OldCompletionCallbackImpl<AppCacheUpdateJob> manifest_data_read_callback_;
 
   FRIEND_TEST_ALL_PREFIXES(AppCacheGroupTest, QueueUpdate);
 

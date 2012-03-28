@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,8 +7,9 @@
 
 #include <GLES2/gl2.h>
 #include <vector>
-#include "examples/tumbler/opengl_context.h"
-#include "examples/tumbler/opengl_context_ptrs.h"
+
+#include "opengl_context.h"
+#include "opengl_context_ptrs.h"
 
 namespace tumbler {
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tabs/tab_strip_model_delegate.h"
 #include "chrome/browser/tabs/tab_strip_model_order_controller.h"
+#include "chrome/browser/tabs/test_tab_strip_model_delegate.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
@@ -29,18 +30,21 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "content/test/notification_observer_mock.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::SiteInstance;
+using content::WebContents;
 using testing::_;
 
 namespace {
@@ -54,8 +58,8 @@ class DeleteTabContentsOnDestroyedObserver
       : source_(source),
         tab_to_delete_(tab_to_delete) {
     registrar_.Add(this,
-                   content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                   content::Source<TabContents>(source->tab_contents()));
+                   content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                   content::Source<WebContents>(source->web_contents()));
   }
 
   virtual void Observe(int type,
@@ -76,62 +80,38 @@ class DeleteTabContentsOnDestroyedObserver
 
 }  // namespace
 
-class TabStripDummyDelegate : public TabStripModelDelegate {
+class TabStripDummyDelegate : public TestTabStripModelDelegate {
  public:
   explicit TabStripDummyDelegate(TabContentsWrapper* dummy)
-      : dummy_contents_(dummy), can_close_(true), run_unload_(false) {}
+      : dummy_contents_(dummy),
+        can_close_(true),
+        run_unload_(false) {}
   virtual ~TabStripDummyDelegate() {}
 
   void set_can_close(bool value) { can_close_ = value; }
   void set_run_unload_listener(bool value) { run_unload_ = value; }
 
   // Overridden from TabStripModelDelegate:
-  virtual TabContentsWrapper* AddBlankTab(bool foreground) {
-    return NULL;
-  }
-  virtual TabContentsWrapper* AddBlankTabAt(int index, bool foreground) {
-    return NULL;
-  }
-  virtual Browser* CreateNewStripWithContents(TabContentsWrapper* contents,
-                                              const gfx::Rect& window_bounds,
-                                              const DockInfo& dock_info,
-                                              bool maximize) {
-    return NULL;
-  }
-  virtual void ContinueDraggingDetachedTab(TabContentsWrapper* contents,
-                                           const gfx::Rect& window_bounds,
-                                           const gfx::Rect& tab_bounds) {
-  }
-  virtual int GetDragActions() const { return 0; }
   virtual TabContentsWrapper* CreateTabContentsForURL(
       const GURL& url,
       const content::Referrer& referrer,
       Profile* profile,
       content::PageTransition transition,
       bool defer_load,
-      SiteInstance* instance) const {
+      SiteInstance* instance) const OVERRIDE {
     if (url == GURL(chrome::kChromeUINewTabURL))
       return dummy_contents_;
     return NULL;
   }
-  virtual bool CanDuplicateContentsAt(int index) { return false; }
-  virtual void DuplicateContentsAt(int index) {}
-  virtual void CloseFrameAfterDragSession() {}
-  virtual void CreateHistoricalTab(TabContentsWrapper* contents) {}
-  virtual bool RunUnloadListenerBeforeClosing(TabContentsWrapper* contents) {
+  virtual bool RunUnloadListenerBeforeClosing(
+      TabContentsWrapper* contents) OVERRIDE {
     return run_unload_;
   }
-  virtual bool CanRestoreTab() { return false; }
-  virtual void RestoreTab() {}
-  virtual bool CanCloseContents(std::vector<int>* indices) {
+  virtual bool CanCloseContents(std::vector<int>* indices) OVERRIDE {
     if (!can_close_)
       indices->clear();
     return can_close_;
   }
-  virtual bool CanBookmarkAllTabs() const { return false; }
-  virtual void BookmarkAllTabs() {}
-  virtual bool CanCloseTab() const { return true; }
-  virtual bool LargeIconsPermitted() const { return true; }
 
  private:
   // A dummy TabContents we give to callers that expect us to actually build a
@@ -153,46 +133,47 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
   }
 
   TabContentsWrapper* CreateTabContents() {
-    return Browser::TabContentsFactory(profile(), NULL, 0, NULL, NULL);
+    return Browser::TabContentsFactory(
+        profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
   }
 
   TabContentsWrapper* CreateTabContentsWithSharedRPH(
-      TabContents* tab_contents) {
+      WebContents* web_contents) {
     TabContentsWrapper* retval = Browser::TabContentsFactory(profile(),
-        tab_contents->render_view_host()->site_instance(), MSG_ROUTING_NONE,
+        web_contents->GetRenderViewHost()->site_instance(), MSG_ROUTING_NONE,
         NULL, NULL);
-    EXPECT_EQ(retval->tab_contents()->GetRenderProcessHost(),
-              tab_contents->GetRenderProcessHost());
+    EXPECT_EQ(retval->web_contents()->GetRenderProcessHost(),
+              web_contents->GetRenderProcessHost());
     return retval;
   }
 
   // Forwards a URL "load" request through to our dummy TabContents
   // implementation.
-  void LoadURL(TabContents* con, const std::wstring& url) {
+  void LoadURL(WebContents* con, const std::wstring& url) {
     controller().LoadURL(GURL(WideToUTF16(url)), content::Referrer(),
                          content::PAGE_TRANSITION_LINK, std::string());
   }
 
-  void GoBack(TabContents* contents) {
+  void GoBack(WebContents* contents) {
     controller().GoBack();
   }
 
-  void GoForward(TabContents* contents) {
+  void GoForward(WebContents* contents) {
     controller().GoForward();
   }
 
-  void SwitchTabTo(TabContents* contents) {
+  void SwitchTabTo(WebContents* contents) {
     // contents()->DidBecomeSelected();
   }
 
   // Sets the id of the specified contents.
-  void SetID(TabContents* contents, int id) {
-    GetIDAccessor()->SetProperty(contents->property_bag(), id);
+  void SetID(WebContents* contents, int id) {
+    GetIDAccessor()->SetProperty(contents->GetPropertyBag(), id);
   }
 
   // Returns the id of the specified contents.
-  int GetID(TabContents* contents) {
-    return *GetIDAccessor()->GetProperty(contents->property_bag());
+  int GetID(WebContents* contents) {
+    return *GetIDAccessor()->GetProperty(contents->GetPropertyBag());
   }
 
   // Returns the state of the given tab strip as a string. The state consists
@@ -206,7 +187,7 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
         actual += " ";
 
       actual +=
-          base::IntToString(GetID(model.GetTabContentsAt(i)->tab_contents()));
+          base::IntToString(GetID(model.GetTabContentsAt(i)->web_contents()));
 
       if (model.IsAppTab(i))
         actual += "a";
@@ -237,7 +218,7 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
                                        const std::string& selected_tabs) {
     for (int i = 0; i < tab_count; ++i) {
       TabContentsWrapper* contents = CreateTabContents();
-      SetID(contents->tab_contents(), i);
+      SetID(contents->web_contents(), i);
       model->AppendTabContents(contents, true);
     }
     for (int i = 0; i < pinned_count; ++i)
@@ -265,7 +246,6 @@ class TabStripModelTest : public ChromeRenderViewHostTestHarness {
 
   std::wstring test_dir_;
   std::wstring profile_path_;
-  std::map<TabContents*, int> foo_;
 };
 
 class MockTabStripModelObserver : public TabStripModelObserver {
@@ -583,8 +563,10 @@ TEST_F(TabStripModelTest, TestBasicAPI) {
     EXPECT_EQ(contents1, tabstrip.GetTabContentsAt(1));
     EXPECT_EQ(0, tabstrip.GetIndexOfTabContents(contents2));
     EXPECT_EQ(1, tabstrip.GetIndexOfTabContents(contents1));
-    EXPECT_EQ(0, tabstrip.GetIndexOfController(&contents2->controller()));
-    EXPECT_EQ(1, tabstrip.GetIndexOfController(&contents1->controller()));
+    EXPECT_EQ(0, tabstrip.GetIndexOfController(
+                     &contents2->web_contents()->GetController()));
+    EXPECT_EQ(1, tabstrip.GetIndexOfController(
+                     &contents1->web_contents()->GetController()));
   }
 
   // Test UpdateTabContentsStateAt
@@ -637,7 +619,8 @@ TEST_F(TabStripModelTest, TestBasicOpenerAPI) {
   // background with opener_contents set as their opener.
 
   TabContentsWrapper* opener_contents = CreateTabContents();
-  NavigationController* opener = &opener_contents->controller();
+  NavigationController* opener =
+      &opener_contents->web_contents()->GetController();
   tabstrip.AppendTabContents(opener_contents, true);
   TabContentsWrapper* contents1 = CreateTabContents();
   TabContentsWrapper* contents2 = CreateTabContents();
@@ -675,7 +658,7 @@ TEST_F(TabStripModelTest, TestBasicOpenerAPI) {
 
   // For a tab that has opened no other tabs, the return value should always be
   // -1...
-  NavigationController* o1 = &contents1->controller();
+  NavigationController* o1 = &contents1->web_contents()->GetController();
   EXPECT_EQ(-1, tabstrip.GetIndexOfNextTabContentsOpenedBy(o1, 3, false));
   EXPECT_EQ(-1, tabstrip.GetIndexOfLastTabContentsOpenedBy(o1, 3));
 
@@ -684,6 +667,21 @@ TEST_F(TabStripModelTest, TestBasicOpenerAPI) {
   EXPECT_EQ(-1, tabstrip.GetIndexOfNextTabContentsOpenedBy(opener, 1, false));
   EXPECT_EQ(-1, tabstrip.GetIndexOfNextTabContentsOpenedBy(opener, 5, false));
   EXPECT_EQ(-1, tabstrip.GetIndexOfLastTabContentsOpenedBy(opener, 1));
+
+  // Specify the last tab as the opener of the others.
+  NavigationController* o5 = &contents5->web_contents()->GetController();
+  for (int i = 0; i < tabstrip.count() - 1; ++i)
+    tabstrip.SetOpenerOfTabContentsAt(i, o5);
+
+  for (int i = 0; i < tabstrip.count() - 1; ++i)
+    EXPECT_EQ(o5, tabstrip.GetOpenerOfTabContentsAt(i));
+
+  // If there is a next adjacent item, then the index should be of that item.
+  EXPECT_EQ(2, tabstrip.GetIndexOfNextTabContentsOpenedBy(o5, 1, false));
+
+  // If the last tab in the group is closed, the preceding tab in the same
+  // group should be selected.
+  EXPECT_EQ(3, tabstrip.GetIndexOfNextTabContentsOpenedBy(o5, 4, false));
 
   tabstrip.CloseAllTabs();
   EXPECT_TRUE(tabstrip.empty());
@@ -788,7 +786,8 @@ TEST_F(TabStripModelTest, TestInsertionIndexDetermination) {
   EXPECT_TRUE(tabstrip.empty());
 
   TabContentsWrapper* opener_contents = CreateTabContents();
-  NavigationController* opener = &opener_contents->controller();
+  NavigationController* opener =
+      &opener_contents->web_contents()->GetController();
   tabstrip.AppendTabContents(opener_contents, true);
 
   // Open some other random unrelated tab in the background to monkey with our
@@ -1448,8 +1447,8 @@ TEST_F(TabStripModelTest, AddTabContents_ForgetOpeners) {
 
 // Added for http://b/issue?id=958960
 TEST_F(TabStripModelTest, AppendContentsReselectionTest) {
-  TabContents* fake_destinations_tab =
-      new TabContents(profile(), NULL, 0, NULL, NULL);
+  WebContents* fake_destinations_tab =
+      WebContents::Create(profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
   TabContentsWrapper wrapper(fake_destinations_tab);
   TabStripDummyDelegate delegate(&wrapper);
   TabStripModel tabstrip(&delegate, profile());
@@ -1731,10 +1730,10 @@ TEST_F(TabStripModelTest, FastShutdown) {
   {
     TabContentsWrapper* contents1 = CreateTabContents();
     TabContentsWrapper* contents2 =
-        CreateTabContentsWithSharedRPH(contents1->tab_contents());
+        CreateTabContentsWithSharedRPH(contents1->web_contents());
 
-    SetID(contents1->tab_contents(), 1);
-    SetID(contents2->tab_contents(), 2);
+    SetID(contents1->web_contents(), 1);
+    SetID(contents2->web_contents(), 2);
 
     tabstrip.AppendTabContents(contents1, true);
     tabstrip.AppendTabContents(contents2, true);
@@ -1746,7 +1745,7 @@ TEST_F(TabStripModelTest, FastShutdown) {
     tabstrip.CloseAllTabs();
     // On a mock RPH this checks whether we *attempted* fast shutdown.
     // A real RPH would reject our attempt since there is an unload handler.
-    EXPECT_TRUE(contents1->tab_contents()->
+    EXPECT_TRUE(contents1->web_contents()->
       GetRenderProcessHost()->FastShutdownStarted());
     EXPECT_EQ(2, tabstrip.count());
 
@@ -1760,16 +1759,16 @@ TEST_F(TabStripModelTest, FastShutdown) {
   {
     TabContentsWrapper* contents1 = CreateTabContents();
     TabContentsWrapper* contents2 =
-        CreateTabContentsWithSharedRPH(contents1->tab_contents());
+        CreateTabContentsWithSharedRPH(contents1->web_contents());
 
-    SetID(contents1->tab_contents(), 1);
-    SetID(contents2->tab_contents(), 2);
+    SetID(contents1->web_contents(), 1);
+    SetID(contents2->web_contents(), 2);
 
     tabstrip.AppendTabContents(contents1, true);
     tabstrip.AppendTabContents(contents2, true);
 
     tabstrip.CloseTabContentsAt(1, TabStripModel::CLOSE_NONE);
-    EXPECT_FALSE(contents1->tab_contents()->
+    EXPECT_FALSE(contents1->web_contents()->
         GetRenderProcessHost()->FastShutdownStarted());
     EXPECT_EQ(1, tabstrip.count());
 
@@ -1803,9 +1802,9 @@ TEST_F(TabStripModelTest, Apps) {
   contents2->extension_tab_helper()->SetExtensionApp(extension_app);
   TabContentsWrapper* contents3 = CreateTabContents();
 
-  SetID(contents1->tab_contents(), 1);
-  SetID(contents2->tab_contents(), 2);
-  SetID(contents3->tab_contents(), 3);
+  SetID(contents1->web_contents(), 1);
+  SetID(contents2->web_contents(), 2);
+  SetID(contents3->web_contents(), 3);
 
   // Note! The ordering of these tests is important, each subsequent test
   // builds on the state established in the previous. This is important if you
@@ -1919,9 +1918,9 @@ TEST_F(TabStripModelTest, Pinning) {
   TabContentsWrapper* contents2 = CreateTabContents();
   TabContentsWrapper* contents3 = CreateTabContents();
 
-  SetID(contents1->tab_contents(), 1);
-  SetID(contents2->tab_contents(), 2);
-  SetID(contents3->tab_contents(), 3);
+  SetID(contents1->web_contents(), 1);
+  SetID(contents2->web_contents(), 2);
+  SetID(contents3->web_contents(), 3);
 
   // Note! The ordering of these tests is important, each subsequent test
   // builds on the state established in the previous. This is important if you
@@ -2051,7 +2050,7 @@ TEST_F(TabStripModelTest, Pinning) {
   }
 
   TabContentsWrapper* contents4 = CreateTabContents();
-  SetID(contents4->tab_contents(), 4);
+  SetID(contents4->web_contents(), 4);
 
   // Insert "4" between "1" and "3". As "1" and "4" are pinned, "4" should end
   // up after them.

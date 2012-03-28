@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,9 +13,9 @@
 #include "base/string_split.h"
 #include "base/string_util.h"
 #include "base/stringprintf.h"
-#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_downloader_delegate.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
 #include "chrome/common/net/gaia/gaia_urls.h"
@@ -28,6 +28,7 @@
 #include "content/public/browser/notification_types.h"
 #include "content/public/common/url_fetcher.h"
 #include "googleurl/src/gurl.h"
+#include "net/base/load_flags.h"
 #include "skia/ext/image_operations.h"
 
 using content::BrowserThread;
@@ -244,6 +245,7 @@ void ProfileDownloader::StartFetchingImage() {
       GURL(kUserEntryURL), content::URLFetcher::GET, this));
   user_entry_fetcher_->SetRequestContext(
       delegate_->GetBrowserProfile()->GetRequestContext());
+  user_entry_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
   if (!auth_token_.empty()) {
     user_entry_fetcher_->SetExtraRequestHeaders(
         base::StringPrintf(kAuthorizationHeader, auth_token_.c_str()));
@@ -273,9 +275,9 @@ void ProfileDownloader::OnURLFetchComplete(const content::URLFetcher* source) {
   std::string data;
   source->GetResponseAsString(&data);
   if (source->GetResponseCode() != 200) {
-    LOG(ERROR) << "Response code is " << source->GetResponseCode();
-    LOG(ERROR) << "Url is " << source->GetURL().spec();
-    LOG(ERROR) << "Data is " << data;
+    DVLOG(1) << "Response code is " << source->GetResponseCode();
+    DVLOG(1) << "Url is " << source->GetURL().spec();
+    DVLOG(1) << "Data is " << data;
     delegate_->OnDownloadComplete(this, false);
     return;
   }
@@ -305,6 +307,7 @@ void ProfileDownloader::OnURLFetchComplete(const content::URLFetcher* source) {
         GURL(image_url), content::URLFetcher::GET, this));
     profile_image_fetcher_->SetRequestContext(
         delegate_->GetBrowserProfile()->GetRequestContext());
+    profile_image_fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SAVE_COOKIES);
     if (!auth_token_.empty()) {
       profile_image_fetcher_->SetExtraRequestHeaders(
           base::StringPrintf(kAuthorizationHeader, auth_token_.c_str()));

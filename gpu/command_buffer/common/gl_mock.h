@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -150,6 +150,9 @@ class MockGLInterface : public GLInterface {
       GLenum mode, GLsizei count, GLenum type, const void* indices));
 
   MOCK_METHOD2(EGLImageTargetTexture2DOES, void(
+      GLenum target, GLeglImageOES image));
+
+  MOCK_METHOD2(EGLImageTargetRenderbufferStorageOES, void(
       GLenum target, GLeglImageOES image));
 
   MOCK_METHOD1(Enable, void(GLenum cap));
@@ -364,6 +367,10 @@ class MockGLInterface : public GLInterface {
   MOCK_METHOD3(TexParameteriv, void(
       GLenum target, GLenum pname, const GLint* params));
 
+  MOCK_METHOD5(TexStorage2DEXT, void(
+      GLenum target, GLsizei levels, GLenum internalformat,
+      GLsizei width, GLsizei height));
+
   MOCK_METHOD9(TexSubImage2D, void(
       GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
       GLsizei height, GLenum format, GLenum type, const void* pixels));
@@ -467,6 +474,14 @@ class MockGLInterface : public GLInterface {
   MOCK_METHOD1(IsFenceNV, GLboolean(GLuint fence));
 
   MOCK_METHOD3(GetFenceivNV, void(GLuint fence, GLenum pname, GLint *params));
+
+  MOCK_METHOD2(FenceSync, GLsync(GLenum condition, GLbitfield flags));
+
+  MOCK_METHOD1(DeleteSync, void(GLsync sync));
+
+  MOCK_METHOD5(GetSynciv, void(
+      GLsync sync, GLenum pname, GLsizei bufSize,
+      GLsizei* length, GLint* values));
 
   MOCK_METHOD1(SetSurfaceCHROMIUM, void(GLuint));
 

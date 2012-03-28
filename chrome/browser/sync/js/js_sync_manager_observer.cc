@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -60,7 +60,8 @@ void JsSyncManagerObserver::OnUpdatedToken(const std::string& token) {
 }
 
 void JsSyncManagerObserver::OnPassphraseRequired(
-    sync_api::PassphraseRequiredReason reason) {
+    sync_api::PassphraseRequiredReason reason,
+    const sync_pb::EncryptedData& pending_keys) {
   if (!event_handler_.IsInitialized()) {
     return;
   }
@@ -70,18 +71,26 @@ void JsSyncManagerObserver::OnPassphraseRequired(
   HandleJsEvent(FROM_HERE, "onPassphraseRequired", JsEventDetails(&details));
 }
 
-void JsSyncManagerObserver::OnPassphraseAccepted(
-    const std::string& bootstrap_token) {
+void JsSyncManagerObserver::OnPassphraseAccepted() {
+  if (!event_handler_.IsInitialized()) {
+    return;
+  }
+  DictionaryValue details;
+  HandleJsEvent(FROM_HERE, "onPassphraseAccepted", JsEventDetails(&details));
+}
+
+void JsSyncManagerObserver::OnBootstrapTokenUpdated(
+    const std::string& boostrap_token) {
   if (!event_handler_.IsInitialized()) {
     return;
   }
   DictionaryValue details;
   details.SetString("bootstrapToken", "<redacted>");
-  HandleJsEvent(FROM_HERE, "onPassphraseAccepted", JsEventDetails(&details));
+  HandleJsEvent(FROM_HERE, "OnBootstrapTokenUpdated", JsEventDetails(&details));
 }
 
 void JsSyncManagerObserver::OnEncryptedTypesChanged(
-    const syncable::ModelTypeSet& encrypted_types,
+    syncable::ModelTypeSet encrypted_types,
     bool encrypt_everything) {
   if (!event_handler_.IsInitialized()) {
     return;

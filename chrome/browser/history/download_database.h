@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,7 +58,7 @@ class DownloadDatabase {
   // (inclusive) and before |remove_end|. You may use null Time values
   // to do an unbounded delete in either direction. This function ignores
   // all downloads that are in progress or are waiting to be cancelled.
-  void RemoveDownloadsBetween(base::Time remove_begin, base::Time remove_end);
+  bool RemoveDownloadsBetween(base::Time remove_begin, base::Time remove_end);
 
  protected:
   // Returns the database for the functions in this interface.
@@ -72,14 +72,16 @@ class DownloadDatabase {
   bool DropDownloadTable();
 
  private:
+  // TODO(rdsmith): Remove after http://crbug.com/96627 has been resolved.
+  void CheckThread();
+
   bool EnsureColumnExists(const std::string& name, const std::string& type);
 
-  // TODO(rdsmith): Remove after http://crbug.com/96627 has been resolved.
-  std::set<int64> returned_ids_;
   bool owning_thread_set_;
   base::PlatformThreadId owning_thread_;
 
   int next_id_;
+  int next_db_handle_;
   sql::MetaTable meta_table_;
 
   DISALLOW_COPY_AND_ASSIGN(DownloadDatabase);

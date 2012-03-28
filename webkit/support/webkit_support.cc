@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,7 +50,8 @@
 #include "webkit/glue/webkit_constants.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webkitplatformsupport_impl.h"
-#include "webkit/media/video_renderer_impl.h"
+#include "webkit/gpu/webgraphicscontext3d_in_process_impl.h"
+#include "webkit/gpu/webgraphicscontext3d_in_process_command_buffer_impl.h"
 #include "webkit/media/webmediaplayer_impl.h"
 #include "webkit/plugins/npapi/plugin_list.h"
 #include "webkit/plugins/npapi/webplugin_impl.h"
@@ -302,26 +303,36 @@ WebPlugin* CreateWebPlugin(WebFrame* frame,
       frame, new_params, plugins.front().path);
 }
 
-WebKit::WebMediaPlayer* CreateMediaPlayer(WebFrame* frame,
-                                          WebMediaPlayerClient* client) {
+WebKit::WebMediaPlayer* CreateMediaPlayer(
+    WebFrame* frame,
+    WebMediaPlayerClient* client,
+    webkit_media::MediaStreamClient* media_stream_client) {
+#if defined(OS_ANDROID)
+  // TODO: Implement the WebMediaPlayer that will be used for Android.
+  return NULL;
+#else
   scoped_ptr<media::MessageLoopFactory> message_loop_factory(
       new media::MessageLoopFactoryImpl());
 
   scoped_ptr<media::FilterCollection> collection(
       new media::FilterCollection());
 
-  scoped_ptr<webkit_media::WebMediaPlayerImpl> result(
-      new webkit_media::WebMediaPlayerImpl(
-          client,
-          base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
-          collection.release(),
-          message_loop_factory.release(),
-          NULL,
-          new media::MediaLog()));
-  if (!result->Initialize(frame, false)) {
-    return NULL;
-  }
-  return result.release();
+  return new webkit_media::WebMediaPlayerImpl(
+      frame,
+      client,
+      base::WeakPtr<webkit_media::WebMediaPlayerDelegate>(),
+      collection.release(),
+      NULL,
+      message_loop_factory.release(),
+      media_stream_client,
+      new media::MediaLog());
+#endif
+}
+
+WebKit::WebMediaPlayer* CreateMediaPlayer(
+    WebFrame* frame,
+    WebMediaPlayerClient* client) {
+  return CreateMediaPlayer(frame, client, NULL);
 }
 
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
@@ -337,7 +348,7 @@ WebKit::WebString GetWebKitRootDir() {
 }
 
 void SetUpGLBindings(GLBindingPreferences bindingPref) {
-  switch(bindingPref) {
+  switch (bindingPref) {
     case GL_BINDING_DEFAULT:
       gfx::GLSurface::InitializeOneOff();
       break;
@@ -355,6 +366,26 @@ void SetGraphicsContext3DImplementation(GraphicsContext3DImplementation impl) {
 
 GraphicsContext3DImplementation GetGraphicsContext3DImplementation() {
   return g_graphics_context_3d_implementation;
+}
+
+WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
+    const WebKit::WebGraphicsContext3D::Attributes& attributes,
+    WebKit::WebView* web_view,
+    bool direct) {
+  scoped_ptr<WebKit::WebGraphicsContext3D> context;
+  switch (webkit_support::GetGraphicsContext3DImplementation()) {
+    case webkit_support::IN_PROCESS:
+      context.reset(new webkit::gpu::WebGraphicsContext3DInProcessImpl(
+          gfx::kNullPluginWindow, NULL));
+      break;
+    case webkit_support::IN_PROCESS_COMMAND_BUFFER:
+      context.reset(
+          new webkit::gpu::WebGraphicsContext3DInProcessCommandBufferImpl());
+      break;
+  }
+  if (!context->initialize(attributes, web_view, direct))
+    return NULL;
+  return context.release();
 }
 
 void RegisterMockedURL(const WebKit::WebURL& url,
@@ -420,12 +451,16 @@ WebDevToolsAgentClient::WebKitClientMessageLoop* CreateDevToolsMessageLoop() {
 
 void PostDelayedTask(void (*func)(void*), void* context, int64 delay_ms) {
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::Bind(func, context), delay_ms);
+      FROM_HERE,
+      base::Bind(func, context),
+      base::TimeDelta::FromMilliseconds(delay_ms));
 }
 
 void PostDelayedTask(TaskAdaptor* task, int64 delay_ms) {
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::Bind(&TaskAdaptor::Run, base::Owned(task)), delay_ms);
+      FROM_HERE,
+      base::Bind(&TaskAdaptor::Run, base::Owned(task)),
+      base::TimeDelta::FromMilliseconds(delay_ms));
 }
 
 // Wrappers for FilePath and file_util
@@ -507,16 +542,16 @@ WebURL LocalFileToDataURL(const WebURL& fileUrl) {
 // by webkit layout tests.
 class ScopedTempDirectoryInternal : public ScopedTempDirectory {
  public:
-   virtual bool CreateUniqueTempDir() {
-     return tempDirectory_.CreateUniqueTempDir();
-   }
+  virtual bool CreateUniqueTempDir() {
+    return tempDirectory_.CreateUniqueTempDir();
+  }
 
-   virtual std::string path() const {
-     return tempDirectory_.path().MaybeAsASCII();
-   }
+  virtual std::string path() const {
+    return tempDirectory_.path().MaybeAsASCII();
+  }
 
  private:
-   ScopedTempDir tempDirectory_;
+  ScopedTempDir tempDirectory_;
 };
 
 ScopedTempDirectory* CreateScopedTempDirectory() {
@@ -554,8 +589,9 @@ std::string MakeURLErrorDescription(const WebKit::WebURLError& error) {
       code = -1004;  // NSURLErrorCannotConnectToHost
       break;
     }
-  } else
+  } else {
     DLOG(WARNING) << "Unknown error domain";
+  }
 
   return base::StringPrintf("<NSError domain %s, code %d, failing URL \"%s\">",
       domain.c_str(), code, error.unreachableURL.spec().data());

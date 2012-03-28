@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,12 +21,13 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_type.h"
+#include "content/public/common/security_style.h"
 #include "net/base/cert_status_flags.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 
 #if defined(OS_CHROMEOS)
-// TODO(sque): move to a ChromeOS-specific class.  See crosbug.com/22081.
-#include "chrome/browser/chromeos/dbus/power_manager_client.h"
+// TODO(sque): move to a ChromeOS-specific class. See crosbug.com/22081.
+class PowerManagerClientObserverForTesting;
 #endif  // defined(OS_CHROMEOS)
 
 class AutofillProfile;
@@ -45,9 +46,6 @@ struct WebPluginInfo;
 class TestingAutomationProvider : public AutomationProvider,
                                   public BrowserList::Observer,
                                   public importer::ImporterListObserver,
-#if defined(OS_CHROMEOS)
-                                  public chromeos::PowerManagerClient::Observer,
-#endif  // defined(OS_CHROMEOS)
                                   public content::NotificationObserver {
  public:
   explicit TestingAutomationProvider(Profile* profile);
@@ -89,6 +87,9 @@ class TestingAutomationProvider : public AutomationProvider,
   void CloseBrowserAsync(int browser_handle);
   void ActivateTab(int handle, int at_index, int* status);
   void AppendTab(int handle, const GURL& url, IPC::Message* reply_message);
+  void AppendBackgroundTab(int handle, const GURL& url,
+                           IPC::Message* reply_message);
+  void GetMachPortCount(int* port_count);
   void GetActiveTabIndex(int handle, int* active_tab_index);
   void CloseTab(int tab_handle, bool wait_until_closed,
                 IPC::Message* reply_message);
@@ -390,11 +391,11 @@ class TestingAutomationProvider : public AutomationProvider,
                            base::DictionaryValue* args,
                            IPC::Message* reply_message);
 
-  // Get info about infobars in the given TabContents object.
+  // Get info about infobars in the given WebContents object.
   // This includes info about the type of infobars, the message text,
   // buttons, etc.
   // Caller owns the returned object.
-  ListValue* GetInfobarsInfo(TabContents* tc);
+  ListValue* GetInfobarsInfo(content::WebContents* tc);
 
   // Perform actions on an infobar like dismiss, accept, cancel.
   // Uses the JSON interface for input/output.
@@ -489,6 +490,18 @@ class TestingAutomationProvider : public AutomationProvider,
                                    base::DictionaryValue* args,
                                    IPC::Message* reply_message);
 
+  // Get ProtectorService state.
+  // Uses the JSON interface for input/output.
+  void GetProtectorState(Browser* browser,
+                         base::DictionaryValue* args,
+                         IPC::Message* reply_message);
+
+  // Perform a given action on the ProtectorService.
+  // Uses the JSON interface for input/output.
+  void PerformProtectorAction(Browser* browser,
+                              base::DictionaryValue* args,
+                              IPC::Message* reply_message);
+
   // Get info about preferences stored in Local State.
   // Uses the JSON interface for input/output.
   void GetLocalStatePrefsInfo(base::DictionaryValue* args,
@@ -501,14 +514,12 @@ class TestingAutomationProvider : public AutomationProvider,
 
   // Get info about preferences.
   // Uses the JSON interface for input/output.
-  void GetPrefsInfo(Browser* browser,
-                    base::DictionaryValue* args,
+  void GetPrefsInfo(base::DictionaryValue* args,
                     IPC::Message* reply_message);
 
   // Set prefs.
   // Uses the JSON interface for input/output.
-  void SetPrefs(Browser* browser,
-                base::DictionaryValue* args,
+  void SetPrefs(base::DictionaryValue* args,
                 IPC::Message* reply_message);
 
   // Return load times of initial tabs.
@@ -859,7 +870,7 @@ class TestingAutomationProvider : public AutomationProvider,
   // A key press is a combination of a "key down" event and a "key up" event.
   // This function does not wait before returning.
   void SendWebKeyPressEventAsync(int key_code,
-                                 TabContents* tab_contents);
+                                 content::WebContents* web_contents);
 
   // Launches the specified app from the currently-selected tab.
   void LaunchApp(Browser* browser,
@@ -1085,6 +1096,21 @@ class TestingAutomationProvider : public AutomationProvider,
   //   output: none
   void CloseTabJSON(base::DictionaryValue* args, IPC::Message* reply_message);
 
+  // Sets the specified web view bounds.
+  // The single |auto_id| must be given to specify the view.
+  // This method currently is only supported for tabs.
+  // Example:
+  //   input: { "auto_id": { "type": 0, "id": "awoein" },
+  //            "bounds": {
+  //              "x": 100,
+  //              "y": 200,
+  //              "width": 500,
+  //              "height": 800
+  //            }
+  //          }
+  //   output: none
+  void SetViewBounds(base::DictionaryValue* args, IPC::Message* reply_message);
+
   // Sends the WebKit events for a mouse click at a given coordinate.
   // The pair |windex| and |tab_index| or the single |auto_id| must be given
   // to specify the render view.
@@ -1223,6 +1249,24 @@ class TestingAutomationProvider : public AutomationProvider,
   //   output: none
   void SendOSLevelKeyEventToTab(base::DictionaryValue* args,
                                 IPC::Message* message);
+
+  // Processes the WebKit mouse event with the specified properties.
+  // The pair |windex| and |tab_index| or the single |auto_id| must be given
+  // to specify the render view.
+  // Example:
+  //   input: { "windex": 1,
+  //            "tab_index": 1,
+  //            "auto_id": { "type": 0, "id": "awoein" },
+  //            "type": automation::kMouseDown,
+  //            "button": automation::kLeftButton,
+  //            "x": 100,
+  //            "y": 200,
+  //            "click_count": 1,
+  //            "modifiers": automation::kShiftKeyMask,
+  //          }
+  //   output: none
+  void ProcessWebMouseEvent(base::DictionaryValue* args,
+                            IPC::Message* message);
 
   // Method used as a Task that sends a success AutomationJSONReply.
   void SendSuccessReply(IPC::Message* reply_message);
@@ -1427,9 +1471,8 @@ class TestingAutomationProvider : public AutomationProvider,
                            DictionaryValue* args,
                            IPC::Message* reply_message);
 
-  // chromeos::PowerManagerClient::Observer overrides.
-  virtual void PowerChanged(const chromeos::PowerSupplyStatus& status) OVERRIDE;
-
+  void AddChromeosObservers();
+  void RemoveChromeosObservers();
 #endif  // defined(OS_CHROMEOS)
 
   void WaitForTabCountToBecome(int browser_handle,
@@ -1480,6 +1523,12 @@ class TestingAutomationProvider : public AutomationProvider,
   // A temporary object that receives a notification when a popup menu opens.
   PopupMenuWaiter* popup_menu_waiter_;
 #endif  // defined(TOOLKIT_VIEWS)
+
+#if defined(OS_CHROMEOS)
+  // Avoid scoped ptr here to avoid having to define it completely in the
+  // non-ChromeOS code.
+  PowerManagerClientObserverForTesting* power_manager_observer_;
+#endif  // defined(OS_CHROMEOS)
 
   // Used to wait on various browser sync events.
   scoped_ptr<ProfileSyncServiceHarness> sync_waiter_;

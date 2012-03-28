@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -14,7 +14,10 @@
     {
       'target_name': 'base_i18n',
       'type': '<(component)',
-      'variables': { 'enable_wexit_time_destructors': 1, },
+      'variables': {
+        'enable_wexit_time_destructors': 1,
+        'optimize': 'max',
+      },
       'dependencies': [
         'base',
         'third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
@@ -69,7 +72,10 @@
       # base depends on base_static.
       'target_name': 'base_static',
       'type': 'static_library',
-      'variables': { 'enable_wexit_time_destructors': 1, },
+      'variables': {
+        'enable_wexit_time_destructors': 1,
+        'optimize': 'max',
+      },
       'toolsets': ['host', 'target'],
       'sources': [
         'base_switches.cc',
@@ -121,7 +127,7 @@
         'at_exit_unittest.cc',
         'atomicops_unittest.cc',
         'base64_unittest.cc',
-        'win/dllmain.cc',
+        'bind_helpers_unittest.cc',
         'bind_unittest.cc',
         'bind_unittest.nc',
         'bits_unittest.cc',
@@ -153,6 +159,7 @@
         'i18n/string_search_unittest.cc',
         'i18n/time_formatting_unittest.cc',
         'json/json_reader_unittest.cc',
+        'json/json_value_converter_unittest.cc',
         'json/json_value_serializer_unittest.cc',
         'json/json_writer_unittest.cc',
         'json/string_escape_unittest.cc',
@@ -169,6 +176,7 @@
         'memory/ref_counted_memory_unittest.cc',
         'memory/ref_counted_unittest.cc',
         'memory/scoped_ptr_unittest.cc',
+        'memory/scoped_ptr_unittest.nc',
         'memory/scoped_vector_unittest.cc',
         'memory/singleton_unittest.cc',
         'memory/weak_ptr_unittest.cc',
@@ -213,11 +221,11 @@
         'sys_string_conversions_mac_unittest.mm',
         'sys_string_conversions_unittest.cc',
         'system_monitor/system_monitor_unittest.cc',
-        'task_unittest.cc',
         'template_util_unittest.cc',
         'test/trace_event_analyzer_unittest.cc',
         'threading/non_thread_safe_unittest.cc',
         'threading/platform_thread_unittest.cc',
+        'threading/sequenced_worker_pool_unittest.cc',
         'threading/simple_thread_unittest.cc',
         'threading/thread_checker_unittest.cc',
         'threading/thread_collision_warner_unittest.cc',
@@ -238,6 +246,7 @@
         'values_unittest.cc',
         'version_unittest.cc',
         'vlog_unittest.cc',
+        'win/dllmain.cc',
         'win/enum_variant_unittest.cc',
         'win/event_trace_consumer_unittest.cc',
         'win/event_trace_controller_unittest.cc',
@@ -247,6 +256,7 @@
         'win/object_watcher_unittest.cc',
         'win/pe_image_unittest.cc',
         'win/registry_unittest.cc',
+        'win/sampling_profiler_unittest.cc',
         'win/scoped_bstr_unittest.cc',
         'win/scoped_comptr_unittest.cc',
         'win/scoped_variant_unittest.cc',
@@ -278,6 +288,7 @@
             'synchronization/cancellation_flag_unittest.cc',
             # TODO(michaelbai): The below files are excluded because of the
             # missing JNI and should be added back once JNI is ready.
+            'android/jni_android_unittest.cc',
             'android/scoped_java_ref_unittest.cc',
             'debug/stack_trace_unittest.cc',
           ],
@@ -293,13 +304,6 @@
                 ],
               },
             ],
-            ['gcc_version==44', {
-              # Avoid gcc 4.4 strict aliasing issues in stl_tree.h when
-              # building mru_cache_unittest.cc.
-              'cflags': [
-                '-fno-strict-aliasing',
-              ],
-            }],
             [ 'toolkit_uses_gtk==1', {
               'sources': [
                 'nix/xdg_util_unittest.cc',

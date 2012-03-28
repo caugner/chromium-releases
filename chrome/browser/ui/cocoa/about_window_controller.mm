@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/about_window_controller.h"
 
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
@@ -26,6 +27,9 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
+
+using content::OpenURLParams;
+using content::Referrer;
 
 namespace {
 
@@ -102,8 +106,8 @@ void AttributedStringAppendHyperlink(NSMutableAttributedString* attr_str,
 @implementation AboutWindowController
 
 - (id)initWithProfile:(Profile*)profile {
-  NSString* nibPath = [base::mac::MainAppBundle() pathForResource:@"About"
-                                                          ofType:@"nib"];
+  NSString* nibPath = [base::mac::FrameworkBundle() pathForResource:@"About"
+                                                             ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibPath owner:self])) {
     profile_ = profile;
     NSNotificationCenter* center = [NSNotificationCenter defaultCenter];
@@ -458,15 +462,13 @@ static BOOL recentShownUserActionFailedStatus = NO;
       imageID = IDR_UPDATE_UPTODATE;
       message = l10n_util::GetNSStringFWithFixup(
           IDS_UPGRADE_ALREADY_UP_TO_DATE,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
           base::SysNSStringToUTF16(version));
 
       break;
 
     case kAutoupdateAvailable:
       imageID = IDR_UPDATE_AVAILABLE;
-      message = l10n_util::GetNSStringFWithFixup(
-          IDS_UPGRADE_AVAILABLE, l10n_util::GetStringUTF16(IDS_PRODUCT_NAME));
+      message = l10n_util::GetNSStringWithFixup(IDS_UPGRADE_AVAILABLE);
       enableUpdateButton = true;
 
       break;
@@ -481,15 +483,13 @@ static BOOL recentShownUserActionFailedStatus = NO;
     case kAutoupdateInstalled:
       {
         imageID = IDR_UPDATE_UPTODATE;
-        string16 productName = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
         if (version) {
           message = l10n_util::GetNSStringFWithFixup(
               IDS_UPGRADE_SUCCESSFUL,
-              productName,
               base::SysNSStringToUTF16(version));
         } else {
-          message = l10n_util::GetNSStringFWithFixup(
-              IDS_UPGRADE_SUCCESSFUL_NOVERSION, productName);
+          message = l10n_util::GetNSStringWithFixup(
+              IDS_UPGRADE_SUCCESSFUL_NOVERSION);
         }
 
         // TODO(mark): Turn the button in the dialog into a restart button
@@ -619,8 +619,10 @@ static BOOL recentShownUserActionFailedStatus = NO;
   // We always create a new window, so there's no need to try to re-use
   // an existing one just to pass in the NEW_WINDOW disposition.
   Browser* browser = Browser::Create(profile_);
-  browser->OpenURL(GURL([link UTF8String]), GURL(), NEW_FOREGROUND_TAB,
-                   content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(
+      GURL([link UTF8String]), Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK, false);
+  browser->OpenURL(params);
   browser->window()->Show();
   return YES;
 }

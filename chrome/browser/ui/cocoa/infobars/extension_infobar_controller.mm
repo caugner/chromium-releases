@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_icon_set.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/theme_resources.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -103,8 +103,8 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
     const int image_size = Extension::EXTENSION_ICON_BITTY;
     scoped_ptr<gfx::CanvasSkia> canvas(
         new gfx::CanvasSkia(
-            image_size + kDropArrowLeftMarginPx + drop_image->width(),
-            image_size, false));
+            gfx::Size(image_size + kDropArrowLeftMarginPx + drop_image->width(),
+                      image_size), false));
     canvas->DrawBitmapInt(*icon,
                           0, 0, icon->width(), icon->height(),
                           0, 0, image_size, image_size,
@@ -174,7 +174,7 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
   extensionView_ = delegate_->AsExtensionInfoBarDelegate()->extension_host()->
       view()->native_view();
 
-  // Add the extension's RenderWidgetHostViewMac to the view hierarchy of the
+  // Add the extension's RenderWidgetHostView to the view hierarchy of the
   // InfoBar and make sure to place it below the Close button.
   [infoBarView_ addSubview:extensionView_
                 positioned:NSWindowBelow
@@ -269,7 +269,7 @@ class InfobarBridge : public ExtensionInfoBarDelegate::DelegateObserver,
 
 InfoBar* ExtensionInfoBarDelegate::CreateInfoBar(InfoBarTabHelper* owner) {
   NSWindow* window =
-      [(NSView*)owner->tab_contents()->GetContentNativeView() window];
+      [(NSView*)owner->web_contents()->GetContentNativeView() window];
   ExtensionInfoBarController* controller =
       [[ExtensionInfoBarController alloc] initWithDelegate:this
                                                      owner:owner

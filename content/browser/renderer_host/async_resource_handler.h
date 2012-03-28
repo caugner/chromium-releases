@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,8 +9,8 @@
 #include <string>
 
 #include "content/browser/renderer_host/resource_handler.h"
+#include "googleurl/src/gurl.h"
 
-class HostZoomMap;
 class ResourceDispatcherHost;
 class ResourceMessageFilter;
 class SharedIOBuffer;
@@ -56,9 +56,8 @@ class AsyncResourceHandler : public ResourceHandler {
   virtual ~AsyncResourceHandler();
 
   scoped_refptr<SharedIOBuffer> read_buffer_;
-  ResourceMessageFilter* filter_;
+  scoped_refptr<ResourceMessageFilter> filter_;
   int routing_id_;
-  HostZoomMap* host_zoom_map_;
   ResourceDispatcherHost* rdh_;
 
   // |next_buffer_size_| is the size of the buffer to be allocated on the next
@@ -67,6 +66,10 @@ class AsyncResourceHandler : public ResourceHandler {
   // allocate a buffer of 32k and double it in OnReadCompleted() if the buffer
   // was filled, up to a maximum size of 512k.
   int next_buffer_size_;
+
+  // TODO(battre): Remove url. This is only for debugging
+  // http://crbug.com/107692.
+  GURL url_;
 
   DISALLOW_COPY_AND_ASSIGN(AsyncResourceHandler);
 };

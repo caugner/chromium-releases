@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,6 +48,7 @@ class ExtensionPermissionMessage {
     kTtsEngine,
     kContentSettings,
     kAllPageContent,
+    kPrivacy,
     kEnumBoundary
   };
 
@@ -110,6 +111,7 @@ class ExtensionAPIPermission {
     kGeolocation,
     kHistory,
     kIdle,
+    kInput,
     kInputMethodPrivate,
     kManagement,
     kMediaPlayerPrivate,
@@ -117,9 +119,12 @@ class ExtensionAPIPermission {
     kNotification,
     kPageCapture,
     kPlugin,
+    kPrivacy,
     kProxy,
     kSocket,
+    kSystemPrivate,
     kTab,
+    kTerminalPrivate,
     kTts,
     kTtsEngine,
     kUnlimitedStorage,
@@ -143,8 +148,8 @@ class ExtensionAPIPermission {
     // Indicates that the permission is private to COMPONENT extensions.
     kFlagComponentOnly = 1 << 2,
 
-    // Indicates that the permission supports the optional permissions API.
-    kFlagSupportsOptional = 1 << 3,
+    // Indicates that extensions cannot specify the permission as optional.
+    kFlagCannotBeOptional = 1 << 3,
   };
 
   // Flags for specifying what extension types can use the permission.
@@ -230,7 +235,7 @@ class ExtensionAPIPermission {
   // Returns true if this permission can be added and removed via the
   // optional permissions extension API.
   bool supports_optional() const {
-    return (flags_ & kFlagSupportsOptional) != 0;
+    return (flags_ & kFlagCannotBeOptional) == 0;
   }
 
   // Returns true if this permissions supports the specified |type|.
@@ -367,6 +372,12 @@ class ExtensionPermissionSet
 
   // Gets the API permissions in this set as a set of strings.
   std::set<std::string> GetAPIsAsStrings() const;
+
+  // Returns whether this namespace has any functions which the extension has
+  // permission to use.  For example, even though the extension may not have
+  // the "tabs" permission, "tabs.create" requires no permissions so
+  // HasAnyAPIPermission("tabs") will return true.
+  bool HasAnyAccessToAPI(const std::string& api_name) const;
 
   // Gets a list of the distinct hosts for displaying to the user.
   // NOTE: do not use this for comparing permissions, since this disgards some

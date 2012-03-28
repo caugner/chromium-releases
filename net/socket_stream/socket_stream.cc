@@ -69,12 +69,6 @@ SocketStream::SocketStream(const GURL& url, Delegate* delegate)
       ALLOW_THIS_IN_INITIALIZER_LIST(
           io_callback_(base::Bind(&SocketStream::OnIOCompleted,
                                   base::Unretained(this)))),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          io_callback_old_(this, &SocketStream::OnIOCompleted)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          read_callback_old_(this, &SocketStream::OnReadCompleted)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          write_callback_old_(this, &SocketStream::OnWriteCompleted)),
       read_buf_(NULL),
       write_buf_(NULL),
       current_write_buf_(NULL),
@@ -555,7 +549,7 @@ int SocketStream::DoResolveProxy() {
   // Alternate-Protocol header here for ws:// or TLS NPN extension for wss:// .
 
   return proxy_service()->ResolveProxy(
-      proxy_url_, &proxy_info_, &io_callback_old_, &pac_request_, net_log_);
+      proxy_url_, &proxy_info_, io_callback_, &pac_request_, net_log_);
 }
 
 int SocketStream::DoResolveProxyComplete(int result) {
@@ -668,7 +662,7 @@ int SocketStream::DoTcpConnect(int result) {
                                                       net_log_.net_log(),
                                                       net_log_.source()));
   metrics_->OnStartConnection();
-  return socket_->Connect(&io_callback_old_);
+  return socket_->Connect(io_callback_);
 }
 
 int SocketStream::DoTcpConnectComplete(int result) {
@@ -736,7 +730,7 @@ int SocketStream::DoWriteTunnelHeaders() {
       int rv = auth_handler_->GenerateAuthToken(
           &auth_identity_.credentials,
           &request_info,
-          NULL,
+          CompletionCallback(),
           &auth_token);
       // TODO(cbentzel): Support async auth handlers.
       DCHECK_NE(ERR_IO_PENDING, rv);
@@ -761,7 +755,7 @@ int SocketStream::DoWriteTunnelHeaders() {
   int buf_len = static_cast<int>(tunnel_request_headers_->headers_.size() -
                                  tunnel_request_headers_bytes_sent_);
   DCHECK_GT(buf_len, 0);
-  return socket_->Write(tunnel_request_headers_, buf_len, &io_callback_old_);
+  return socket_->Write(tunnel_request_headers_, buf_len, io_callback_);
 }
 
 int SocketStream::DoWriteTunnelHeadersComplete(int result) {
@@ -798,7 +792,7 @@ int SocketStream::DoReadTunnelHeaders() {
   tunnel_response_headers_->SetDataOffset(tunnel_response_headers_len_);
   CHECK(tunnel_response_headers_->data());
 
-  return socket_->Read(tunnel_response_headers_, buf_len, &io_callback_old_);
+  return socket_->Read(tunnel_response_headers_, buf_len, io_callback_);
 }
 
 int SocketStream::DoReadTunnelHeadersComplete(int result) {
@@ -895,7 +889,7 @@ int SocketStream::DoSOCKSConnect() {
     s = new SOCKSClientSocket(s, req_info, host_resolver_);
   socket_.reset(s);
   metrics_->OnCountConnectionType(SocketStreamMetrics::SOCKS_CONNECTION);
-  return socket_->Connect(&io_callback_old_);
+  return socket_->Connect(io_callback_);
 }
 
 int SocketStream::DoSOCKSConnectComplete(int result) {
@@ -926,7 +920,7 @@ int SocketStream::DoSecureProxyConnect() {
       ssl_context));
   next_state_ = STATE_SECURE_PROXY_CONNECT_COMPLETE;
   metrics_->OnCountConnectionType(SocketStreamMetrics::SECURE_PROXY_CONNECTION);
-  return socket_->Connect(&io_callback_old_);
+  return socket_->Connect(io_callback_);
 }
 
 int SocketStream::DoSecureProxyConnectComplete(int result) {
@@ -956,7 +950,7 @@ int SocketStream::DoSSLConnect() {
                                                 ssl_context));
   next_state_ = STATE_SSL_CONNECT_COMPLETE;
   metrics_->OnCountConnectionType(SocketStreamMetrics::SSL_CONNECTION);
-  return socket_->Connect(&io_callback_old_);
+  return socket_->Connect(io_callback_);
 }
 
 int SocketStream::DoSSLConnectComplete(int result) {
@@ -1001,7 +995,9 @@ int SocketStream::DoReadWrite(int result) {
     if (!read_buf_) {
       // No read pending and server didn't close the socket.
       read_buf_ = new IOBuffer(kReadBufferSize);
-      result = socket_->Read(read_buf_, kReadBufferSize, &read_callback_old_);
+      result = socket_->Read(read_buf_, kReadBufferSize,
+                             base::Bind(&SocketStream::OnReadCompleted,
+                                        base::Unretained(this)));
       if (result > 0) {
         return DidReceiveData(result);
       } else if (result == 0) {
@@ -1029,7 +1025,8 @@ int SocketStream::DoReadWrite(int result) {
     current_write_buf_->SetOffset(write_buf_offset_);
     result = socket_->Write(current_write_buf_,
                             current_write_buf_->BytesRemaining(),
-                            &write_callback_old_);
+                            base::Bind(&SocketStream::OnWriteCompleted,
+                                       base::Unretained(this)));
     if (result > 0) {
       return DidSendData(result);
     }

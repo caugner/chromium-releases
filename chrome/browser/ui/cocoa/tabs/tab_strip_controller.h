@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 
 #include "base/memory/scoped_nsobject.h"
 #include "base/memory/scoped_ptr.h"
-#import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_controller_target.h"
 #import "chrome/browser/ui/cocoa/url_drop_target.h"
 #include "chrome/browser/ui/tabs/hover_tab_selector.h"
@@ -27,7 +26,6 @@ class Browser;
 class ConstrainedWindowMac;
 class TabStripModelObserverBridge;
 class TabStripModel;
-class TabContents;
 
 // The interface for the tab strip controller's delegate.
 // Delegating TabStripModelObserverBridge's events (in lieu of directly
@@ -37,17 +35,17 @@ class TabContents;
 @protocol TabStripControllerDelegate
 
 // Stripped down version of TabStripModelObserverBridge:selectTabWithContents.
-- (void)onActivateTabWithContents:(TabContents*)contents;
+- (void)onActivateTabWithContents:(content::WebContents*)contents;
 
 // Stripped down version of TabStripModelObserverBridge:tabReplacedWithContents.
-- (void)onReplaceTabWithContents:(TabContents*)contents;
+- (void)onReplaceTabWithContents:(content::WebContents*)contents;
 
 // Stripped down version of TabStripModelObserverBridge:tabChangedWithContents.
 - (void)onTabChanged:(TabStripModelObserver::TabChangeType)change
-        withContents:(TabContents*)contents;
+        withContents:(content::WebContents*)contents;
 
 // Stripped down version of TabStripModelObserverBridge:tabDetachedWithContents.
-- (void)onTabDetachedWithContents:(TabContents*)contents;
+- (void)onTabDetachedWithContents:(content::WebContents*)contents;
 
 @end
 
@@ -61,8 +59,7 @@ class TabContents;
 @interface TabStripController :
   NSObject<TabControllerTarget,
            URLDropTargetController,
-           GTMWindowSheetControllerDelegate,
-           TabContentsControllerDelegate> {
+           GTMWindowSheetControllerDelegate> {
  @private
   scoped_nsobject<TabStripView> tabStripView_;
   NSView* switchView_;  // weak
@@ -104,7 +101,6 @@ class TabContents;
   // These values are only used during a drag, and override tab positioning.
   TabView* placeholderTab_;  // weak. Tab being dragged
   NSRect placeholderFrame_;  // Frame to use
-  CGFloat placeholderStretchiness_; // Vertical force shown by streching tab.
   NSRect droppedTabFrame_;  // Initial frame of a dropped tab, for animation.
   // Frame targets for all the current views.
   // target frames are used because repeated requests to [NSView animator].
@@ -202,11 +198,9 @@ class TabContents;
 // count, but no longer in the model.
 - (NSUInteger)viewsCount;
 
-// Set the placeholder for a dragged tab, allowing the |frame| and |strechiness|
-// to be specified. This causes this tab to be rendered in an arbitrary position
-- (void)insertPlaceholderForTab:(TabView*)tab
-                          frame:(NSRect)frame
-                  yStretchiness:(CGFloat)yStretchiness;
+// Set the placeholder for a dragged tab, allowing the |frame| to be specified.
+// This causes this tab to be rendered in an arbitrary position.
+- (void)insertPlaceholderForTab:(TabView*)tab frame:(NSRect)frame;
 
 // Returns whether a tab is being dragged within the tab strip.
 - (BOOL)isDragSessionActive;

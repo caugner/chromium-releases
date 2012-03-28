@@ -13,6 +13,7 @@
 #include "ipc/ipc_sync_channel.h"
 #include "base/debug/trace_event.h"
 #include "ppapi/c/pp_errors.h"
+#include "ppapi/c/ppp_instance.h"
 #include "ppapi/proxy/interface_list.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/plugin_message_filter.h"
@@ -39,13 +40,14 @@ namespace {
 typedef std::map<PP_Instance, PluginDispatcher*> InstanceToDispatcherMap;
 InstanceToDispatcherMap* g_instance_to_dispatcher = NULL;
 
+typedef std::set<PluginDispatcher*> DispatcherSet;
+DispatcherSet* g_live_dispatchers = NULL;
+
 }  // namespace
 
 InstanceData::InstanceData()
-    : fullscreen(PP_FALSE),
-      flash_fullscreen(PP_FALSE),
+    : flash_fullscreen(PP_FALSE),
       mouse_lock_callback(PP_BlockUntilComplete()) {
-  memset(&position, 0, sizeof(position));
 }
 
 InstanceData::~InstanceData() {
@@ -61,11 +63,21 @@ PluginDispatcher::PluginDispatcher(base::ProcessHandle remote_process_handle,
       received_preferences_(false),
       plugin_dispatcher_id_(0) {
   SetSerializationRules(new PluginVarSerializationRules);
+
+  if (!g_live_dispatchers)
+    g_live_dispatchers = new DispatcherSet;
+  g_live_dispatchers->insert(this);
 }
 
 PluginDispatcher::~PluginDispatcher() {
   if (plugin_delegate_)
     plugin_delegate_->Unregister(plugin_dispatcher_id_);
+
+  g_live_dispatchers->erase(this);
+  if (g_live_dispatchers->empty()) {
+    delete g_live_dispatchers;
+    g_live_dispatchers = NULL;
+  }
 }
 
 // static
@@ -87,6 +99,33 @@ PluginDispatcher* PluginDispatcher::GetForResource(const Resource* resource) {
 // static
 const void* PluginDispatcher::GetBrowserInterface(const char* interface_name) {
   return InterfaceList::GetInstance()->GetInterfaceForPPB(interface_name);
+}
+
+// static
+void PluginDispatcher::LogWithSource(PP_Instance instance,
+                                     PP_LogLevel_Dev level,
+                                     const std::string& source,
+                                     const std::string& value) {
+  if (!g_live_dispatchers || !g_instance_to_dispatcher)
+    return;
+
+  if (instance) {
+    InstanceToDispatcherMap::iterator found =
+        g_instance_to_dispatcher->find(instance);
+    if (found != g_instance_to_dispatcher->end()) {
+      // Send just to this specific dispatcher.
+      found->second->Send(new PpapiHostMsg_LogWithSource(
+          instance, static_cast<int>(level), source, value));
+      return;
+    }
+  }
+
+  // Instance 0 or invalid, send to all dispatchers.
+  for (DispatcherSet::iterator i = g_live_dispatchers->begin();
+       i != g_live_dispatchers->end(); ++i) {
+    (*i)->Send(new PpapiHostMsg_LogWithSource(
+        instance, static_cast<int>(level), source, value));
+  }
 }
 
 const void* PluginDispatcher::GetPluginInterface(
@@ -193,20 +232,6 @@ InstanceData* PluginDispatcher::GetInstanceData(PP_Instance instance) {
   return (it == instance_map_.end()) ? NULL : &it->second;
 }
 
-void PluginDispatcher::PostToWebKitThread(
-    const tracked_objects::Location& from_here,
-    const base::Closure& task) {
-  return plugin_delegate_->PostToWebKitThread(from_here, task);
-}
-
-bool PluginDispatcher::SendToBrowser(IPC::Message* msg) {
-  return plugin_delegate_->SendToBrowser(msg);
-}
-
-WebKitForwarding* PluginDispatcher::GetWebKitForwarding() {
-  return plugin_delegate_->GetWebKitForwarding();
-}
-
 FunctionGroupBase* PluginDispatcher::GetFunctionAPI(ApiID id) {
   return GetInterfaceProxy(id);
 }
@@ -233,6 +258,14 @@ void PluginDispatcher::OnMsgSupportsInterface(
     const std::string& interface_name,
     bool* result) {
   *result = !!GetPluginInterface(interface_name);
+
+  // Do fallback for PPP_Instance. This is a hack here and if we have more
+  // cases like this it should be generalized. The PPP_Instance proxy always
+  // proxies the 1.1 interface, and then does fallback to 1.0 inside the
+  // plugin process (see PPP_Instance_Proxy). So here we return true for
+  // supporting the 1.1 interface if either 1.1 or 1.0 is supported.
+  if (!*result && interface_name == PPP_INSTANCE_INTERFACE)
+    *result = !!GetPluginInterface(PPP_INSTANCE_INTERFACE_1_0);
 }
 
 void PluginDispatcher::OnMsgSetPreferences(const Preferences& prefs) {

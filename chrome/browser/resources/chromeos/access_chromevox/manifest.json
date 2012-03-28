@@ -3,12 +3,15 @@
   "name": "ChromeVox",
   "version": "1.0",
   "description": "ChromeVox - Giving Voice to Chrome.",
-  "background_page": "chromevox/background/background.html",
+  "background": {
+    "page": "chromevox/background/background.html"
+  },
   "permissions": [
     "bookmarks",
     "tabs",
     "experimental",
     "tts",
+    "systemPrivate",
     "<all_urls>"
   ],
   "content_scripts": [

@@ -44,6 +44,9 @@
 #include "ui/views/widget/native_widget_win.h"
 #endif
 #endif
+#if defined(USE_AURA)
+#include "ash/wm/window_animations.h"
+#endif
 
 namespace {
 
@@ -178,9 +181,9 @@ class AutocompletePopupContentsView::InstantOptInView
                                  kOptInBackgroundVInset));
     bg_painter_->Paint(width() - kOptInBackgroundHInset * 2,
                        height() - kOptInBackgroundVInset * 2, canvas);
-    canvas->DrawRectInt(ResourceBundle::toolbar_separator_color, 0, 0,
-                        width() - kOptInBackgroundHInset * 2,
-                        height() - kOptInBackgroundVInset * 2);
+    canvas->DrawRect(gfx::Rect(0, 0, width() - kOptInBackgroundHInset * 2,
+                               height() - kOptInBackgroundVInset * 2),
+                     ResourceBundle::toolbar_separator_color);
     canvas->Restore();
   }
 
@@ -261,7 +264,7 @@ void AutocompletePopupContentsView::LayoutChildren() {
   int top = contents_rect.y();
   for (int i = 0; i < child_count(); ++i) {
     View* v = child_at(i);
-    if (v->IsVisible()) {
+    if (v->visible()) {
       v->SetBounds(contents_rect.x(), top, contents_rect.width(),
                    v->GetPreferredSize().height());
       top = v->bounds().bottom();
@@ -346,6 +349,12 @@ void AutocompletePopupContentsView::UpdatePopupAppearance() {
     params.parent_widget = location_bar_->GetWidget();
     params.bounds = GetPopupBounds();
     popup_->Init(params);
+#if defined(USE_AURA)
+    // TODO(beng): This should be if defined(USE_ASH)
+    ash::SetWindowVisibilityAnimationType(
+        popup_->GetNativeView(),
+        ash::WINDOW_VISIBILITY_ANIMATION_TYPE_VERTICAL);
+#endif
     popup_->SetContentsView(this);
     popup_->StackAbove(omnibox_view_->GetRelativeWindowForPopup());
     if (!popup_.get()) {
@@ -534,7 +543,7 @@ void AutocompletePopupContentsView::OnPaint(gfx::Canvas* canvas) {
   // Instead, we paint all our children into a second canvas and use that as a
   // shader to fill a path representing the round-rect clipping region. This
   // yields a nice anti-aliased edge.
-  gfx::CanvasSkia contents_canvas(width(), height(), true);
+  gfx::CanvasSkia contents_canvas(size(), true);
   PaintResultViews(&contents_canvas);
 
   // We want the contents background to be slightly transparent so we can see

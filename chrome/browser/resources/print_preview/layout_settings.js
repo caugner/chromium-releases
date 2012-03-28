@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,7 +100,7 @@ cr.define('print_preview', function() {
      * @private
      */
     onPDFLoaded_: function() {
-      this.fadeInOut_(!previewModifiable);
+      this.fadeInOut_(!previewModifiable || hasPageSizeStyle);
     },
 
     /**
@@ -115,6 +115,6 @@ cr.define('print_preview', function() {
   };
 
   return {
-    LayoutSettings: LayoutSettings,
+    LayoutSettings: LayoutSettings
   };
 });

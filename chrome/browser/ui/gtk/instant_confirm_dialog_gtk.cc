@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/gtk/gtk_chrome_link_button.h"
+#include "chrome/common/url_constants.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -37,7 +38,7 @@ InstantConfirmDialogGtk::InstantConfirmDialogGtk(
       NULL);
   g_signal_connect(dialog_, "response", G_CALLBACK(OnResponseThunk), this);
 
-  GtkBox* vbox = GTK_BOX(GTK_DIALOG(dialog_)->vbox);
+  GtkBox* vbox = GTK_BOX(gtk_dialog_get_content_area(GTK_DIALOG(dialog_)));
   gtk_box_set_spacing(vbox, ui::kControlSpacing);
 
   GtkWidget* label = gtk_label_new(
@@ -50,7 +51,7 @@ InstantConfirmDialogGtk::InstantConfirmDialogGtk(
   g_signal_connect(link_button, "clicked",
                    G_CALLBACK(OnLinkButtonClickedThunk), this);
 
-  GtkWidget* action_area = GTK_DIALOG(dialog_)->action_area;
+  GtkWidget* action_area = gtk_dialog_get_action_area(GTK_DIALOG(dialog_));
   gtk_container_add(GTK_CONTAINER(action_area), link_button);
   gtk_button_box_set_child_secondary(GTK_BUTTON_BOX(action_area),
                                      link_button,
@@ -75,7 +76,7 @@ void InstantConfirmDialogGtk::OnLinkButtonClicked(GtkWidget* button) {
   // We open a new browser window so the Options dialog doesn't get lost behind
   // other windows.
   Browser* browser = Browser::Create(profile_);
-  browser->AddSelectedTabWithURL(browser::InstantLearnMoreURL(),
+  browser->AddSelectedTabWithURL(GURL(chrome::kInstantLearnMoreURL),
                                  content::PAGE_TRANSITION_LINK);
   browser->window()->Show();
 }

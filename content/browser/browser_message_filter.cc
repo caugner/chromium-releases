@@ -9,11 +9,12 @@
 #include "base/logging.h"
 #include "base/process.h"
 #include "base/process_util.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/result_codes.h"
 #include "ipc/ipc_sync_message.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 BrowserMessageFilter::BrowserMessageFilter()
     : channel_(NULL), peer_handle_(base::kNullProcessHandle) {
@@ -51,8 +52,8 @@ bool BrowserMessageFilter::Send(IPC::Message* message) {
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        base::IgnoreReturn<bool>(
-            base::Bind(&BrowserMessageFilter::Send, this, message)));
+        base::Bind(base::IgnoreResult(&BrowserMessageFilter::Send), this,
+                   message));
     return true;
   }
 
@@ -78,8 +79,8 @@ bool BrowserMessageFilter::OnMessageReceived(const IPC::Message& message) {
 
   BrowserThread::PostTask(
       thread, FROM_HERE,
-      base::IgnoreReturn<bool>(
-          base::Bind(&BrowserMessageFilter::DispatchMessage, this, message)));
+      base::Bind(base::IgnoreResult(&BrowserMessageFilter::DispatchMessage),
+                 this, message));
   return true;
 }
 
@@ -89,7 +90,7 @@ bool BrowserMessageFilter::DispatchMessage(const IPC::Message& message) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO) || rv) <<
       "Must handle messages that were dispatched to another thread!";
   if (!message_was_ok) {
-    UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_BMF"));
+    content::RecordAction(UserMetricsAction("BadMessageTerminate_BMF"));
     BadMessageReceived();
   }
 

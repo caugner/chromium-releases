@@ -1,14 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/threading/worker_pool.h"
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/pending_task.h"
-#include "base/task.h"
 #include "base/tracked_objects.h"
 
 namespace base {
@@ -22,7 +22,7 @@ DWORD CALLBACK WorkItemCallback(void* param) {
                          "src_func", pending_task->posted_from.function_name());
 
   tracked_objects::TrackedTime start_time =
-      tracked_objects::ThreadData::NowForStartOfRun();
+      tracked_objects::ThreadData::NowForStartOfRun(pending_task->birth_tally);
 
   pending_task->task.Run();
 
@@ -51,15 +51,6 @@ bool PostTaskInternal(PendingTask* pending_task, bool task_is_slow) {
 }
 
 }  // namespace
-
-bool WorkerPool::PostTask(const tracked_objects::Location& from_here,
-                          Task* task, bool task_is_slow) {
-  PendingTask* pending_task =
-      new PendingTask(from_here,
-                      base::Bind(&subtle::TaskClosureAdapter::Run,
-                                 new subtle::TaskClosureAdapter(task)));
-  return PostTaskInternal(pending_task, task_is_slow);
-}
 
 bool WorkerPool::PostTask(const tracked_objects::Location& from_here,
                           const base::Closure& task, bool task_is_slow) {

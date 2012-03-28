@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
+#include "base/callback_forward.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace net {
@@ -58,6 +58,11 @@ class DelayedCookieMonster : public CookieStore {
                                  const std::string& cookie_name,
                                  const base::Closure& callback) OVERRIDE;
 
+  virtual void DeleteAllCreatedBetweenAsync(
+      const base::Time& delete_begin,
+      const base::Time& delete_end,
+      const DeleteCallback& callback) OVERRIDE;
+
   virtual CookieMonster* GetCookieMonster() OVERRIDE;
 
  private:
@@ -70,7 +75,7 @@ class DelayedCookieMonster : public CookieStore {
 
   void SetCookiesInternalCallback(bool result);
 
-  void GetCookiesWithOptionsInternalCallback(std::string cookie);
+  void GetCookiesWithOptionsInternalCallback(const std::string& cookie);
 
   // Invoke the original callbacks.
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,12 +54,17 @@ struct Restrictions {
     map[keys::kOptionalPermissions] = all_but_themes;
     map[keys::kOptionsPage] = all_but_themes;
     map[keys::kBackground] = all_but_themes;
+    map[keys::kBackgroundPageLegacy] = all_but_themes;
     map[keys::kOfflineEnabled] = all_but_themes;
     map[keys::kMinimumChromeVersion] = all_but_themes;
     map[keys::kRequirements] = all_but_themes;
     map[keys::kConvertedFromUserScript] = all_but_themes;
     map[keys::kNaClModules] = all_but_themes;
-    map[keys::kPlugins] = all_but_themes;
+    map[keys::kWebAccessibleResources] = all_but_themes;
+    map[keys::kIntents] = all_but_themes;
+
+    // Everything except themes and platform apps.
+    map[keys::kPlugins] = all_but_themes - Manifest::kTypePlatformApp;
 
     // Extensions and packaged apps.
     int ext_and_packaged =
@@ -67,18 +72,16 @@ struct Restrictions {
     map[keys::kContentScripts] = ext_and_packaged;
     map[keys::kOmnibox] = ext_and_packaged;
     map[keys::kDevToolsPage] = ext_and_packaged;
-    map[keys::kSidebar] = ext_and_packaged;
     map[keys::kHomepageURL] = ext_and_packaged;
     map[keys::kChromeURLOverrides] = ext_and_packaged;
+    map[keys::kInputComponents] = ext_and_packaged;
+    map[keys::kTtsEngine] = ext_and_packaged;
+    map[keys::kFileBrowserHandlers] = ext_and_packaged;
 
     // Extensions, packaged apps and platform apps.
     int local_apps_and_ext = ext_and_packaged | Manifest::kTypePlatformApp;
     map[keys::kContentSecurityPolicy] = local_apps_and_ext;
-    map[keys::kFileBrowserHandlers] = local_apps_and_ext;
     map[keys::kIncognito] = local_apps_and_ext;
-    map[keys::kInputComponents] = local_apps_and_ext;
-    map[keys::kTtsEngine] = local_apps_and_ext;
-    map[keys::kIntents] = local_apps_and_ext;
   }
 
   // Returns true if the |key| is recognized.
@@ -94,9 +97,12 @@ struct Restrictions {
   }
 
   RestrictionMap map;
+
+  DISALLOW_COPY_AND_ASSIGN(Restrictions);
 };
 
-base::LazyInstance<Restrictions> g_restrictions;
+static base::LazyInstance<Restrictions> g_restrictions =
+    LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
 
@@ -112,8 +118,8 @@ std::set<std::string> Manifest::GetAllKnownKeys() {
 Manifest::Manifest(DictionaryValue* value) : value_(value) {}
 Manifest::~Manifest() {}
 
-bool Manifest::ValidateManifest(std::string* error) const {
-  Restrictions restrictions = g_restrictions.Get();
+bool Manifest::ValidateManifest(string16* error) const {
+  const Restrictions& restrictions = g_restrictions.Get();
   Type type = GetType();
 
   for (DictionaryValue::key_iterator key = value_->begin_keys();
@@ -127,7 +133,7 @@ bool Manifest::ValidateManifest(std::string* error) const {
     }
 
     if (!restrictions.CanAccessKey(*key, type)) {
-      *error = ExtensionErrorUtils::FormatErrorMessage(
+      *error = ExtensionErrorUtils::FormatErrorMessageUTF16(
           errors::kFeatureNotAllowed, *key);
       return false;
     }
@@ -137,7 +143,7 @@ bool Manifest::ValidateManifest(std::string* error) const {
 }
 
 bool Manifest::HasKey(const std::string& key) const {
-  Restrictions restrictions = g_restrictions.Get();
+  const Restrictions& restrictions = g_restrictions.Get();
   return restrictions.CanAccessKey(key, GetType()) && value_->HasKey(key);
 }
 
@@ -222,7 +228,7 @@ bool Manifest::CanAccessPath(const std::string& path) const {
   std::vector<std::string> components;
   base::SplitString(path, '.', &components);
 
-  Restrictions restrictions = g_restrictions.Get();
+  const Restrictions& restrictions = g_restrictions.Get();
   return restrictions.CanAccessKey(components[0], GetType());
 }
 

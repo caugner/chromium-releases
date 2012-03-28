@@ -10,10 +10,12 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_button.h"
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_menu.h"
 #import "chrome/browser/ui/cocoa/image_utils.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/mac/nsimage_cache.h"
+
+using content::UserMetricsAction;
 
 
 @interface BookmarkButtonCell(Private)
@@ -118,12 +120,19 @@
                                            withString:@" "];
   title = [title stringByReplacingOccurrencesOfString:@"\r"
                                            withString:@" "];
-  // If there is no title, squeeze things tight by displaying only the image; by
-  // default, Cocoa leaves extra space in an attempt to display an empty title.
+
   if ([title length]) {
     [self setImagePosition:NSImageLeft];
     [self setTitle:title];
+  } else if ([self isFolderButtonCell]) {
+    // Left-align icons for bookmarks within folders, regardless of whether
+    // there is a title.
+    [self setImagePosition:NSImageLeft];
   } else {
+    // For bookmarks without a title that aren't visible directly in the
+    // bookmarks bar, squeeze things tighter by displaying only the image.
+    // By default, Cocoa leaves extra space in an attempt to display an
+    // empty title.
     [self setImagePosition:NSImageOnly];
   }
 
@@ -151,9 +160,9 @@
       static_cast<const BookmarkNode*>([[self representedObject] pointerValue]);
 
   if (node->parent() && node->parent()->type() == BookmarkNode::FOLDER) {
-    UserMetrics::RecordAction(UserMetricsAction("BookmarkBarFolder_CtxMenu"));
+    content::RecordAction(UserMetricsAction("BookmarkBarFolder_CtxMenu"));
   } else {
-    UserMetrics::RecordAction(UserMetricsAction("BookmarkBar_CtxMenu"));
+    content::RecordAction(UserMetricsAction("BookmarkBar_CtxMenu"));
   }
 
   [menu setRepresentedObject:[NSNumber numberWithLongLong:node->id()]];
@@ -250,6 +259,10 @@
                     fraction:[self isEnabled] ? 1.0 : 0.5
                 neverFlipped:YES];
   }
+}
+
+- (int)verticalTextOffset {
+  return 0;
 }
 
 @end

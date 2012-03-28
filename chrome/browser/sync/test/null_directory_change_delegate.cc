@@ -16,14 +16,14 @@ void NullDirectoryChangeDelegate::HandleCalculateChangesChangeEventFromSyncer(
     const ImmutableWriteTransactionInfo& write_transaction_info,
     BaseTransaction* trans) {}
 
-ModelTypeBitSet
+ModelTypeSet
     NullDirectoryChangeDelegate::HandleTransactionEndingChangeEvent(
         const ImmutableWriteTransactionInfo& write_transaction_info,
         BaseTransaction* trans) {
-  return ModelTypeBitSet();
+  return ModelTypeSet();
 }
 
 void NullDirectoryChangeDelegate::HandleTransactionCompleteChangeEvent(
-    const ModelTypeBitSet& models_with_changes) {}
+    ModelTypeSet models_with_changes) {}
 
 }  // namespace syncable

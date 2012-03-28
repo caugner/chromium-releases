@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "net/base/cert_status_flags.h"
 #include "net/base/cert_test_util.h"
 #include "net/base/cert_verify_result.h"
+#include "net/base/crl_set.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_certificate_data.h"
 #include "net/base/test_root_certs.h"
@@ -22,6 +23,12 @@
 
 #if defined(USE_NSS)
 #include <cert.h>
+#endif
+
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#elif defined(OS_MACOSX)
+#include "base/mac/mac_util.h"
 #endif
 
 // Unit tests aren't allowed to access external resources. Unfortunately, to
@@ -541,7 +548,9 @@ TEST(X509CertificateTest, CAFingerprints) {
 }
 
 // A regression test for http://crbug.com/31497.
-// This certificate will expire on 2012-04-08.
+// This certificate will expire on 2012-04-08. The test will still
+// pass if error == ERR_CERT_DATE_INVALID.  TODO(wtc): generate test
+// certificates for this unit test. http://crbug.com/111742
 TEST(X509CertificateTest, IntermediateCARequireExplicitPolicy) {
   FilePath certs_dir = GetTestCertsDirectory();
 
@@ -569,8 +578,12 @@ TEST(X509CertificateTest, IntermediateCARequireExplicitPolicy) {
   CertVerifyResult verify_result;
   int error = cert_chain->Verify("www.us.army.mil", flags, NULL,
                                  &verify_result);
-  EXPECT_EQ(OK, error);
-  EXPECT_EQ(0U, verify_result.cert_status);
+  if (error == OK) {
+    EXPECT_EQ(0U, verify_result.cert_status);
+  } else {
+    EXPECT_EQ(ERR_CERT_DATE_INVALID, error);
+    EXPECT_EQ(CERT_STATUS_DATE_INVALID, verify_result.cert_status);
+  }
   root_certs->Clear();
 }
 
@@ -609,6 +622,127 @@ TEST(X509CertificateTest, DISABLED_GlobalSignR3EVTest) {
     EXPECT_TRUE(verify_result.cert_status & CERT_STATUS_IS_EV);
   else
     EXPECT_EQ(ERR_CERT_DATE_INVALID, error);
+}
+
+// Currently, only RSA and DSA keys are checked for weakness, and our example
+// weak size is 768. These could change in the future.
+//
+// Note that this means there may be false negatives: keys for other
+// algorithms and which are weak will pass this test.
+static bool IsWeakKeyType(const std::string& key_type) {
+  size_t pos = key_type.find("-");
+  std::string size = key_type.substr(0, pos);
+  std::string type = key_type.substr(pos + 1);
+
+  if (type == "rsa" || type == "dsa")
+    return size == "768";
+
+  return false;
+}
+
+TEST(X509CertificateTest, RejectWeakKeys) {
+  FilePath certs_dir = GetTestCertsDirectory();
+  typedef std::vector<std::string> Strings;
+  Strings key_types;
+
+  // generate-weak-test-chains.sh currently has:
+  //     key_types="768-rsa 1024-rsa 2048-rsa prime256v1-ecdsa"
+  // We must use the same key types here. The filenames generated look like:
+  //     2048-rsa-ee-by-768-rsa-intermediate.pem
+  key_types.push_back("768-rsa");
+  key_types.push_back("1024-rsa");
+  key_types.push_back("2048-rsa");
+
+  bool use_ecdsa = true;
+#if defined(OS_WIN)
+  use_ecdsa = base::win::GetVersion() > base::win::VERSION_XP;
+#elif defined(OS_MACOSX)
+  use_ecdsa = base::mac::IsOSSnowLeopardOrLater();
+#endif
+
+  if (use_ecdsa)
+    key_types.push_back("prime256v1-ecdsa");
+
+  // Add the root that signed the intermediates for this test.
+  scoped_refptr<X509Certificate> root_cert =
+      ImportCertFromFile(certs_dir, "2048-rsa-root.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), root_cert);
+  TestRootCerts::GetInstance()->Add(root_cert.get());
+
+  // Now test each chain.
+  for (Strings::const_iterator ee_type = key_types.begin();
+       ee_type != key_types.end(); ++ee_type) {
+    for (Strings::const_iterator signer_type = key_types.begin();
+         signer_type != key_types.end(); ++signer_type) {
+      std::string basename = *ee_type + "-ee-by-" + *signer_type +
+          "-intermediate.pem";
+      scoped_refptr<X509Certificate> ee_cert =
+          ImportCertFromFile(certs_dir, basename);
+      ASSERT_NE(static_cast<X509Certificate*>(NULL), ee_cert);
+
+      basename = *signer_type + "-intermediate.pem";
+      scoped_refptr<X509Certificate> intermediate =
+          ImportCertFromFile(certs_dir, basename);
+      ASSERT_NE(static_cast<X509Certificate*>(NULL), intermediate);
+
+      X509Certificate::OSCertHandles intermediates;
+      intermediates.push_back(intermediate->os_cert_handle());
+      scoped_refptr<X509Certificate> cert_chain =
+          X509Certificate::CreateFromHandle(ee_cert->os_cert_handle(),
+                                            intermediates);
+
+      CertVerifyResult verify_result;
+      int error = cert_chain->Verify("127.0.0.1", 0, NULL, &verify_result);
+
+      if (IsWeakKeyType(*ee_type) || IsWeakKeyType(*signer_type)) {
+        EXPECT_NE(OK, error);
+        EXPECT_EQ(CERT_STATUS_WEAK_KEY,
+                  verify_result.cert_status & CERT_STATUS_WEAK_KEY);
+      } else {
+        EXPECT_EQ(OK, error);
+        EXPECT_EQ(0U, verify_result.cert_status & CERT_STATUS_WEAK_KEY);
+      }
+    }
+  }
+
+  TestRootCerts::GetInstance()->Clear();
+}
+
+// Test for bug 108514.
+// The certificate will expire on 2012-07-20. The test will still
+// pass if error == ERR_CERT_DATE_INVALID.  TODO(rsleevi): generate test
+// certificates for this unit test.  http://crbug.com/111730
+TEST(X509CertificateTest, ExtraneousMD5RootCert) {
+  FilePath certs_dir = GetTestCertsDirectory();
+
+  scoped_refptr<X509Certificate> server_cert =
+      ImportCertFromFile(certs_dir, "images_etrade_wallst_com.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), server_cert);
+
+  scoped_refptr<X509Certificate> intermediate_cert =
+      ImportCertFromFile(certs_dir, "globalsign_orgv1_ca.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), intermediate_cert);
+
+  scoped_refptr<X509Certificate> md5_root_cert =
+      ImportCertFromFile(certs_dir, "globalsign_root_ca_md5.pem");
+  ASSERT_NE(static_cast<X509Certificate*>(NULL), md5_root_cert);
+
+  X509Certificate::OSCertHandles intermediates;
+  intermediates.push_back(intermediate_cert->os_cert_handle());
+  intermediates.push_back(md5_root_cert->os_cert_handle());
+  scoped_refptr<X509Certificate> cert_chain =
+      X509Certificate::CreateFromHandle(server_cert->os_cert_handle(),
+                                        intermediates);
+
+  CertVerifyResult verify_result;
+  int flags = 0;
+  int error = cert_chain->Verify("images.etrade.wallst.com", flags, NULL,
+                                 &verify_result);
+  if (error != OK)
+    EXPECT_EQ(ERR_CERT_DATE_INVALID, error);
+
+  EXPECT_FALSE(verify_result.has_md5);
+  EXPECT_FALSE(verify_result.has_md5_ca);
 }
 
 // Test for bug 94673.
@@ -677,7 +811,8 @@ TEST(X509CertificateTest, DigiNotarCerts) {
   }
 }
 
-TEST(X509CertificateTest, TestKnownRoot) {
+// Bug 111893: This test needs a new certificate.
+TEST(X509CertificateTest, DISABLED_TestKnownRoot) {
   FilePath certs_dir = GetTestCertsDirectory();
   scoped_refptr<X509Certificate> cert =
       ImportCertFromFile(certs_dir, "nist.der");
@@ -727,7 +862,7 @@ TEST(X509CertificateTest, ExtractSPKIFromDERCert) {
   base::SHA1HashBytes(reinterpret_cast<const uint8*>(spkiBytes.data()),
                       spkiBytes.size(), hash);
 
-  EXPECT_TRUE(0 == memcmp(hash, nistSPKIHash, sizeof(hash)));
+  EXPECT_EQ(0, memcmp(hash, nistSPKIHash, sizeof(hash)));
 }
 
 TEST(X509CertificateTest, ExtractCRLURLsFromDERCert) {
@@ -750,7 +885,8 @@ TEST(X509CertificateTest, ExtractCRLURLsFromDERCert) {
   }
 }
 
-TEST(X509CertificateTest, PublicKeyHashes) {
+// Bug 111893: This test needs a new certificate.
+TEST(X509CertificateTest, DISABLED_PublicKeyHashes) {
   FilePath certs_dir = GetTestCertsDirectory();
   // This is going to blow up in Feb 2012. Sorry! Disable and file a bug
   // against agl. Also see TestKnownRoot in this file.
@@ -1293,6 +1429,110 @@ TEST(X509CertificateTest, GetDEREncoded) {
 }
 #endif
 
+#if defined(USE_NSS) || defined(OS_WIN) || defined(OS_MACOSX)
+static const uint8 kCRLSetThawteSPKIBlocked[] = {
+  0x8e, 0x00, 0x7b, 0x22, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x3a,
+  0x30, 0x2c, 0x22, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x54, 0x79, 0x70,
+  0x65, 0x22, 0x3a, 0x22, 0x43, 0x52, 0x4c, 0x53, 0x65, 0x74, 0x22, 0x2c, 0x22,
+  0x53, 0x65, 0x71, 0x75, 0x65, 0x6e, 0x63, 0x65, 0x22, 0x3a, 0x30, 0x2c, 0x22,
+  0x44, 0x65, 0x6c, 0x74, 0x61, 0x46, 0x72, 0x6f, 0x6d, 0x22, 0x3a, 0x30, 0x2c,
+  0x22, 0x4e, 0x75, 0x6d, 0x50, 0x61, 0x72, 0x65, 0x6e, 0x74, 0x73, 0x22, 0x3a,
+  0x30, 0x2c, 0x22, 0x42, 0x6c, 0x6f, 0x63, 0x6b, 0x65, 0x64, 0x53, 0x50, 0x4b,
+  0x49, 0x73, 0x22, 0x3a, 0x5b, 0x22, 0x36, 0x58, 0x36, 0x4d, 0x78, 0x52, 0x37,
+  0x58, 0x70, 0x4d, 0x51, 0x4b, 0x78, 0x49, 0x41, 0x39, 0x50, 0x6a, 0x36, 0x37,
+  0x36, 0x38, 0x76, 0x74, 0x55, 0x6b, 0x6b, 0x7a, 0x48, 0x79, 0x7a, 0x41, 0x6f,
+  0x6d, 0x6f, 0x4f, 0x68, 0x4b, 0x55, 0x6e, 0x7a, 0x73, 0x55, 0x3d, 0x22, 0x5d,
+  0x7d,
+};
+
+static const uint8 kCRLSetThawteSerialBlocked[] = {
+  0x60, 0x00, 0x7b, 0x22, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x3a,
+  0x30, 0x2c, 0x22, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x54, 0x79, 0x70,
+  0x65, 0x22, 0x3a, 0x22, 0x43, 0x52, 0x4c, 0x53, 0x65, 0x74, 0x22, 0x2c, 0x22,
+  0x53, 0x65, 0x71, 0x75, 0x65, 0x6e, 0x63, 0x65, 0x22, 0x3a, 0x30, 0x2c, 0x22,
+  0x44, 0x65, 0x6c, 0x74, 0x61, 0x46, 0x72, 0x6f, 0x6d, 0x22, 0x3a, 0x30, 0x2c,
+  0x22, 0x4e, 0x75, 0x6d, 0x50, 0x61, 0x72, 0x65, 0x6e, 0x74, 0x73, 0x22, 0x3a,
+  0x31, 0x2c, 0x22, 0x42, 0x6c, 0x6f, 0x63, 0x6b, 0x65, 0x64, 0x53, 0x50, 0x4b,
+  0x49, 0x73, 0x22, 0x3a, 0x5b, 0x5d, 0x7d, 0xb1, 0x12, 0x41, 0x42, 0xa5, 0xa1,
+  0xa5, 0xa2, 0x88, 0x19, 0xc7, 0x35, 0x34, 0x0e, 0xff, 0x8c, 0x9e, 0x2f, 0x81,
+  0x68, 0xfe, 0xe3, 0xba, 0x18, 0x7f, 0x25, 0x3b, 0xc1, 0xa3, 0x92, 0xd7, 0xe2,
+  // Note that this is actually blocking two serial numbers because on XP and
+  // Vista, CryptoAPI finds a different Thawte certificate.
+  0x02, 0x00, 0x00, 0x00,
+  0x04, 0x30, 0x00, 0x00, 0x02,
+  0x04, 0x30, 0x00, 0x00, 0x06,
+};
+
+static const uint8 kCRLSetGoogleSerialBlocked[] = {
+  0x60, 0x00, 0x7b, 0x22, 0x56, 0x65, 0x72, 0x73, 0x69, 0x6f, 0x6e, 0x22, 0x3a,
+  0x30, 0x2c, 0x22, 0x43, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x54, 0x79, 0x70,
+  0x65, 0x22, 0x3a, 0x22, 0x43, 0x52, 0x4c, 0x53, 0x65, 0x74, 0x22, 0x2c, 0x22,
+  0x53, 0x65, 0x71, 0x75, 0x65, 0x6e, 0x63, 0x65, 0x22, 0x3a, 0x30, 0x2c, 0x22,
+  0x44, 0x65, 0x6c, 0x74, 0x61, 0x46, 0x72, 0x6f, 0x6d, 0x22, 0x3a, 0x30, 0x2c,
+  0x22, 0x4e, 0x75, 0x6d, 0x50, 0x61, 0x72, 0x65, 0x6e, 0x74, 0x73, 0x22, 0x3a,
+  0x31, 0x2c, 0x22, 0x42, 0x6c, 0x6f, 0x63, 0x6b, 0x65, 0x64, 0x53, 0x50, 0x4b,
+  0x49, 0x73, 0x22, 0x3a, 0x5b, 0x5d, 0x7d, 0xe9, 0x7e, 0x8c, 0xc5, 0x1e, 0xd7,
+  0xa4, 0xc4, 0x0a, 0xc4, 0x80, 0x3d, 0x3e, 0x3e, 0xbb, 0xeb, 0xcb, 0xed, 0x52,
+  0x49, 0x33, 0x1f, 0x2c, 0xc0, 0xa2, 0x6a, 0x0e, 0x84, 0xa5, 0x27, 0xce, 0xc5,
+  0x01, 0x00, 0x00, 0x00, 0x10, 0x4f, 0x9d, 0x96, 0xd9, 0x66, 0xb0, 0x99, 0x2b,
+  0x54, 0xc2, 0x95, 0x7c, 0xb4, 0x15, 0x7d, 0x4d,
+};
+
+// Test that CRLSets are effective in making a certificate appear to be
+// revoked.
+TEST(X509CertificateTest, CRLSet) {
+  CertificateList certs = CreateCertificateListFromFile(
+      GetTestCertsDirectory(),
+      "googlenew.chain.pem",
+      X509Certificate::FORMAT_PEM_CERT_SEQUENCE);
+
+  X509Certificate::OSCertHandles intermediates;
+  intermediates.push_back(certs[1]->os_cert_handle());
+
+  scoped_refptr<X509Certificate> google_full_chain =
+      X509Certificate::CreateFromHandle(certs[0]->os_cert_handle(),
+                                        intermediates);
+
+  CertVerifyResult verify_result;
+  int error = google_full_chain->Verify(
+      "www.google.com", 0, NULL, &verify_result);
+  EXPECT_EQ(OK, error);
+
+  // First test blocking by SPKI.
+  base::StringPiece crl_set_bytes(
+      reinterpret_cast<const char*>(kCRLSetThawteSPKIBlocked),
+      sizeof(kCRLSetThawteSPKIBlocked));
+  scoped_refptr<CRLSet> crl_set;
+  ASSERT_TRUE(CRLSet::Parse(crl_set_bytes, &crl_set));
+
+  error = google_full_chain->Verify(
+      "www.google.com", 0, crl_set.get(), &verify_result);
+  EXPECT_EQ(ERR_CERT_REVOKED, error);
+
+  // Second, test revocation by serial number of a cert directly under the
+  // root.
+  crl_set_bytes = base::StringPiece(
+      reinterpret_cast<const char*>(kCRLSetThawteSerialBlocked),
+      sizeof(kCRLSetThawteSerialBlocked));
+  ASSERT_TRUE(CRLSet::Parse(crl_set_bytes, &crl_set));
+
+  error = google_full_chain->Verify(
+      "www.google.com", 0, crl_set.get(), &verify_result);
+  EXPECT_EQ(ERR_CERT_REVOKED, error);
+
+  // Lastly, test revocation by serial number of a certificate not under the
+  // root.
+  crl_set_bytes = base::StringPiece(
+      reinterpret_cast<const char*>(kCRLSetGoogleSerialBlocked),
+      sizeof(kCRLSetGoogleSerialBlocked));
+  ASSERT_TRUE(CRLSet::Parse(crl_set_bytes, &crl_set));
+
+  error = google_full_chain->Verify(
+      "www.google.com", 0, crl_set.get(), &verify_result);
+  EXPECT_EQ(ERR_CERT_REVOKED, error);
+}
+#endif
+
 class X509CertificateParseTest
     : public testing::TestWithParam<CertificateFormatTestData> {
  public:
@@ -1382,7 +1622,7 @@ const CertificateNameVerifyTestData kNameVerifyTestData[] = {
     { false, "f.uk", ".uk" },
     { false, "w.bar.foo.com", "?.bar.foo.com" },
     { false, "www.foo.com", "(www|ftp).foo.com" },
-    { false, "www.foo.com", "www.foo.com#" }, // # = null char.
+    { false, "www.foo.com", "www.foo.com#" },  // # = null char.
     { false, "www.foo.com", "", "www.foo.com#*.foo.com,#,#" },
     { false, "www.house.example", "ww.house.example" },
     { false, "test.org", "", "www.test.org,*.test.org,*.org" },
@@ -1520,7 +1760,7 @@ TEST_P(X509CertificateNameVerifyTest, VerifyHostname) {
     for (size_t i = 0; i < ip_addressses_ascii.size(); ++i) {
       std::string& addr_ascii = ip_addressses_ascii[i];
       ASSERT_NE(0U, addr_ascii.length());
-      if (addr_ascii[0] == 'x') { // Hex encoded address
+      if (addr_ascii[0] == 'x') {  // Hex encoded address
         addr_ascii.erase(0, 1);
         std::vector<uint8> bytes;
         EXPECT_TRUE(base::HexStringToBytes(addr_ascii, &bytes))
@@ -1613,12 +1853,41 @@ TEST_P(X509CertificateWeakDigestTest, Verify) {
 
   int flags = 0;
   CertVerifyResult verify_result;
-  ee_chain->Verify("127.0.0.1", flags, NULL, &verify_result);
+  int rv = ee_chain->Verify("127.0.0.1", flags, NULL, &verify_result);
   EXPECT_EQ(data.expected_has_md5, verify_result.has_md5);
   EXPECT_EQ(data.expected_has_md4, verify_result.has_md4);
   EXPECT_EQ(data.expected_has_md2, verify_result.has_md2);
   EXPECT_EQ(data.expected_has_md5_ca, verify_result.has_md5_ca);
   EXPECT_EQ(data.expected_has_md2_ca, verify_result.has_md2_ca);
+
+  // Ensure that MD4 and MD2 are tagged as invalid.
+  if (data.expected_has_md4 || data.expected_has_md2) {
+    EXPECT_EQ(CERT_STATUS_INVALID,
+              verify_result.cert_status & CERT_STATUS_INVALID);
+  }
+
+  // Ensure that MD5 is flagged as weak.
+  if (data.expected_has_md5) {
+    EXPECT_EQ(
+        CERT_STATUS_WEAK_SIGNATURE_ALGORITHM,
+        verify_result.cert_status & CERT_STATUS_WEAK_SIGNATURE_ALGORITHM);
+  }
+
+  // If a root cert is present, then check that the chain was rejected if any
+  // weak algorithms are present. This is only checked when a root cert is
+  // present because the error reported for incomplete chains with weak
+  // algorithms depends on which implementation was used to validate (NSS,
+  // OpenSSL, CryptoAPI, Security.framework) and upon which weak algorithm
+  // present (MD2, MD4, MD5).
+  if (data.root_cert_filename) {
+    if (data.expected_has_md4 || data.expected_has_md2) {
+      EXPECT_EQ(ERR_CERT_INVALID, rv);
+    } else if (data.expected_has_md5) {
+      EXPECT_EQ(ERR_CERT_WEAK_SIGNATURE_ALGORITHM, rv);
+    } else {
+      EXPECT_EQ(OK, rv);
+    }
+  }
 }
 
 // Unlike TEST/TEST_F, which are macros that expand to further macros,

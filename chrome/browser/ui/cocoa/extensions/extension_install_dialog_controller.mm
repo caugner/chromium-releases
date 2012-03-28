@@ -4,6 +4,7 @@
 
 #import "chrome/browser/ui/cocoa/extensions/extension_install_dialog_controller.h"
 
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/string_util.h"
@@ -19,6 +20,9 @@
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+
+using content::OpenURLParams;
+using content::Referrer;
 
 @interface ExtensionInstallDialogController ()
 - (bool)isInlineInstall;
@@ -89,15 +93,15 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
   // warnings, that respectively show webstore ratings data and are a more
   // nicely laid out.
   if (prompt.type() == ExtensionInstallUI::INLINE_INSTALL_PROMPT) {
-    nibpath = [base::mac::MainAppBundle()
+    nibpath = [base::mac::FrameworkBundle()
                pathForResource:@"ExtensionInstallPromptInline"
                         ofType:@"nib"];
   } else if (prompt.GetPermissionCount() == 0) {
-    nibpath = [base::mac::MainAppBundle()
+    nibpath = [base::mac::FrameworkBundle()
                pathForResource:@"ExtensionInstallPromptNoWarnings"
                         ofType:@"nib"];
   } else {
-   nibpath = [base::mac::MainAppBundle()
+   nibpath = [base::mac::FrameworkBundle()
               pathForResource:@"ExtensionInstallPrompt"
                        ofType:@"nib"];
   }
@@ -124,9 +128,9 @@ void AppendRatingStarsShim(const SkBitmap* skiaImage, void* data) {
 - (IBAction)storeLinkClicked:(id)sender {
   GURL store_url(
       extension_urls::GetWebstoreItemDetailURLPrefix() + extension_->id());
-  BrowserList::GetLastActiveWithProfile(profile_)->
-      OpenURL(store_url, GURL(), NEW_FOREGROUND_TAB,
-      content::PAGE_TRANSITION_LINK);
+  BrowserList::GetLastActiveWithProfile(profile_)->OpenURL(OpenURLParams(
+      store_url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
+      false));
 
   delegate_->InstallUIAbort(/*user_initiated=*/true);
   [NSApp endSheet:[self window]];

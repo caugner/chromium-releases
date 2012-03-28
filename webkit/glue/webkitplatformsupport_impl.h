@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -73,6 +73,20 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
   virtual bool isTraceEventEnabled() const;
   virtual void traceEventBegin(const char* name, void* id, const char* extra);
   virtual void traceEventEnd(const char* name, void* id, const char* extra);
+  virtual const unsigned char* getTraceCategoryEnabledFlag(
+      const char* category_name);
+  virtual int addTraceEvent(
+      char phase,
+      const unsigned char* category_enabled,
+      const char* name,
+      unsigned long long id,
+      int num_args,
+      const char** arg_names,
+      const unsigned char* arg_types,
+      const unsigned long long* arg_values,
+      int threshold_begin_id,
+      long long threshold,
+      unsigned char flags);
   virtual WebKit::WebData loadResource(const char* name);
   virtual bool loadAudioResource(
       WebKit::WebAudioBus* destination_bus, const char* audio_file_data,
@@ -123,6 +137,11 @@ class WEBKIT_GLUE_EXPORT WebKitPlatformSupportImpl :
 
   void SuspendSharedTimer();
   void ResumeSharedTimer();
+
+  virtual void didStartWorkerRunLoop(
+      const WebKit::WebWorkerRunLoop& runLoop) OVERRIDE;
+  virtual void didStopWorkerRunLoop(
+      const WebKit::WebWorkerRunLoop& runLoop) OVERRIDE;
 
  private:
   void DoTimeout() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,9 +26,12 @@ class ExtensionMenuItem;
 class PrintPreviewContextMenuObserver;
 class Profile;
 class RenderViewHost;
-class TabContents;
 class SpellingMenuObserver;
 class SpellCheckerSubMenuObserver;
+
+namespace content {
+class WebContents;
+}
 
 namespace gfx {
 class Point;
@@ -36,6 +39,7 @@ class Point;
 
 namespace WebKit {
 struct WebMediaPlayerAction;
+struct WebPluginAction;
 }
 
 // An interface that controls a RenderViewContextMenu instance from observers.
@@ -117,7 +121,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   static const size_t kMaxExtensionItemTitleLength;
   static const size_t kMaxSelectionTextLength;
 
-  RenderViewContextMenu(TabContents* tab_contents,
+  RenderViewContextMenu(content::WebContents* web_contents,
                         const ContextMenuParams& params);
 
   virtual ~RenderViewContextMenu();
@@ -163,7 +167,7 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
   ExtensionMenuItem* GetExtensionMenuItem(int id) const;
 
   ContextMenuParams params_;
-  TabContents* source_tab_contents_;
+  content::WebContents* source_web_contents_;
   Profile* profile_;
 
   ui::SimpleMenuModel menu_model_;
@@ -190,6 +194,11 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
       const ContextMenuParams& params,
       Profile* profile,
       bool can_cross_incognito);
+
+  // Gets the platform app (if any) associated with the TabContents that we're
+  // in.
+  const Extension* GetPlatformApp() const;
+  void AppendPlatformAppItems();
   bool AppendCustomItems();
   void AppendDeveloperItems();
   void AppendLinkItems();
@@ -242,6 +251,8 @@ class RenderViewContextMenu : public ui::SimpleMenuModel::Delegate,
 
   void MediaPlayerActionAt(const gfx::Point& location,
                            const WebKit::WebMediaPlayerAction& action);
+  void PluginActionAt(const gfx::Point& location,
+                      const WebKit::WebPluginAction& action);
 
   bool IsDevCommandEnabled(int id) const;
 

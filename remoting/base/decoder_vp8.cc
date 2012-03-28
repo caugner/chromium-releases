@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/base/decoder_vp8.h"
+
+#include <math.h>
 
 #include "base/logging.h"
 #include "media/base/media.h"
@@ -21,8 +23,7 @@ DecoderVp8::DecoderVp8()
       codec_(NULL),
       last_image_(NULL),
       clip_rect_(SkIRect::MakeEmpty()),
-      horizontal_scale_ratio_(1.0),
-      vertical_scale_ratio_(1.0) {
+      output_size_(SkISize::Make(0, 0)) {
 }
 
 DecoderVp8::~DecoderVp8() {
@@ -91,25 +92,22 @@ Decoder::DecodeResult DecoderVp8::DecodePacket(const VideoPacket* packet) {
   }
   last_image_ = image;
 
-  RectVector rects;
-  rects.reserve(packet->dirty_rects_size());
+  SkRegion region;
   for (int i = 0; i < packet->dirty_rects_size(); ++i) {
     Rect remoting_rect = packet->dirty_rects(i);
-    rects.push_back(SkIRect::MakeXYWH(remoting_rect.x(),
-                                      remoting_rect.y(),
-                                      remoting_rect.width(),
-                                      remoting_rect.height()));
+    SkIRect rect = SkIRect::MakeXYWH(remoting_rect.x(),
+                                     remoting_rect.y(),
+                                     remoting_rect.width(),
+                                     remoting_rect.height());
+    region.op(rect, SkRegion::kUnion_Op);
   }
 
-  if (!DoScaling())
-    ConvertRects(rects, &updated_rects_);
-  else
-    ScaleAndConvertRects(rects, &updated_rects_);
+  RefreshRegion(region);
   return DECODE_DONE;
 }
 
-void DecoderVp8::GetUpdatedRects(RectVector* rects) {
-  rects->swap(updated_rects_);
+void DecoderVp8::GetUpdatedRegion(SkRegion* region) {
+  region->swap(updated_region_);
 }
 
 void DecoderVp8::Reset() {
@@ -125,111 +123,121 @@ VideoPacketFormat::Encoding DecoderVp8::Encoding() {
   return VideoPacketFormat::ENCODING_VP8;
 }
 
-void DecoderVp8::SetScaleRatios(double horizontal_ratio,
-                                double vertical_ratio) {
-  // TODO(hclam): Ratio greater than 1.0 is not supported. This is
-  // because we need to reallocate the backing video frame and this
-  // is not implemented yet.
-  if (horizontal_ratio > 1.0 || horizontal_ratio <= 0.0 ||
-      vertical_ratio > 1.0 || vertical_ratio <= 0.0) {
-    return;
-  }
-
-  horizontal_scale_ratio_ = horizontal_ratio;
-  vertical_scale_ratio_ = vertical_ratio;
+void DecoderVp8::SetOutputSize(const SkISize& size) {
+  output_size_ = size;
 }
 
 void DecoderVp8::SetClipRect(const SkIRect& clip_rect) {
   clip_rect_ = clip_rect;
 }
 
-void DecoderVp8::RefreshRects(const RectVector& rects) {
-  if (!DoScaling())
-    ConvertRects(rects, &updated_rects_);
-  else
-    ScaleAndConvertRects(rects, &updated_rects_);
+void DecoderVp8::RefreshRegion(const SkRegion& region) {
+  // TODO(wez): Fix the rest of the decode pipeline not to assume the frame
+  // size is the host dimensions, since it's not when scaling.  If the host
+  // gets smaller, then the output size will be too big and we'll overrun the
+  // frame, so currently we render 1:1 in that case; the app will see the
+  // host size change and resize us if need be.
+  if (output_size_.width() > static_cast<int>(frame_->width()))
+    output_size_.set(frame_->width(), output_size_.height());
+  if (output_size_.height() > static_cast<int>(frame_->height()))
+    output_size_.set(output_size_.width(), frame_->height());
+
+  if (!DoScaling()) {
+    ConvertRegion(region, &updated_region_);
+  } else {
+    ScaleAndConvertRegion(region, &updated_region_);
+  }
 }
 
 bool DecoderVp8::DoScaling() const {
-  return horizontal_scale_ratio_ != 1.0 || vertical_scale_ratio_ != 1.0;
+  DCHECK(last_image_);
+  return !output_size_.equals(last_image_->d_w, last_image_->d_h);
 }
 
-void DecoderVp8::ConvertRects(const RectVector& rects,
-                              RectVector* output_rects) {
+void DecoderVp8::ConvertRegion(const SkRegion& input_region,
+                               SkRegion* output_region) {
   if (!last_image_)
     return;
 
-  uint8* data_start = frame_->data(media::VideoFrame::kRGBPlane);
-  const int stride = frame_->stride(media::VideoFrame::kRGBPlane);
+  output_region->setEmpty();
 
-  output_rects->clear();
-  output_rects->reserve(rects.size());
-  for (size_t i = 0; i < rects.size(); ++i) {
-    // Clip by the clipping rectangle first.
-    SkIRect dest_rect = rects[i];
-    if (!dest_rect.intersect(clip_rect_))
+  // Clip based on both the output dimensions and Pepper clip rect.
+  // ConvertYUVToRGB32WithRect() requires even X and Y coordinates, so we align
+  // |clip_rect| to prevent clipping from breaking alignment.  We then clamp it
+  // to the image dimensions, which may lead to odd width & height, which we
+  // can cope with.
+  SkIRect clip_rect = AlignRect(clip_rect_);
+  if (!clip_rect.intersect(SkIRect::MakeWH(last_image_->d_w, last_image_->d_h)))
+    return;
+
+  uint8* output_rgb_buf = frame_->data(media::VideoFrame::kRGBPlane);
+  const int output_stride = frame_->stride(media::VideoFrame::kRGBPlane);
+
+  for (SkRegion::Iterator i(input_region); !i.done(); i.next()) {
+    // Align the rectangle so the top-left coordinates are even, for
+    // ConvertYUVToRGB32WithRect().
+    SkIRect dest_rect(AlignRect(i.rect()));
+
+    // Clip the rectangle, preserving alignment since |clip_rect| is aligned.
+    if (!dest_rect.intersect(clip_rect))
       continue;
-
-    // Round down the image width and height.
-    int image_width = RoundToTwosMultiple(last_image_->d_w);
-    int image_height = RoundToTwosMultiple(last_image_->d_h);
-
-    // Then clip by the rounded down dimension of the image for safety.
-    if (!dest_rect.intersect(SkIRect::MakeWH(image_width, image_height)))
-      continue;
-
-    // Align the rectangle to avoid artifacts in color space conversion.
-    dest_rect = AlignRect(dest_rect);
 
     ConvertYUVToRGB32WithRect(last_image_->planes[0],
                               last_image_->planes[1],
                               last_image_->planes[2],
-                              data_start,
+                              output_rgb_buf,
                               dest_rect,
                               last_image_->stride[0],
                               last_image_->stride[1],
-                              stride);
-    output_rects->push_back(dest_rect);
+                              output_stride);
+
+    output_region->op(dest_rect, SkRegion::kUnion_Op);
   }
 }
 
-void DecoderVp8::ScaleAndConvertRects(const RectVector& rects,
-                                      RectVector* output_rects) {
+void DecoderVp8::ScaleAndConvertRegion(const SkRegion& input_region,
+                                       SkRegion* output_region) {
   if (!last_image_)
     return;
 
-  uint8* data_start = frame_->data(media::VideoFrame::kRGBPlane);
-  const int stride = frame_->stride(media::VideoFrame::kRGBPlane);
+  DCHECK(output_size_.width() <= static_cast<int>(frame_->width()));
+  DCHECK(output_size_.height() <= static_cast<int>(frame_->height()));
 
-  output_rects->clear();
-  output_rects->reserve(rects.size());
-  for (size_t i = 0; i < rects.size(); ++i) {
-    // Round down the image width and height.
-    int image_width = RoundToTwosMultiple(last_image_->d_w);
-    int image_height = RoundToTwosMultiple(last_image_->d_h);
+  output_region->setEmpty();
 
-    // Clip by the rounded down dimension of the image for safety.
-    SkIRect dest_rect = rects[i];
-    if (!dest_rect.intersect(SkIRect::MakeWH(image_width, image_height)))
+  // Clip based on both the output dimensions and Pepper clip rect.
+  SkIRect clip_rect = clip_rect_;
+  if (!clip_rect.intersect(SkIRect::MakeSize(output_size_)))
+    return;
+
+  SkISize image_size = SkISize::Make(last_image_->d_w, last_image_->d_h);
+  uint8* output_rgb_buf = frame_->data(media::VideoFrame::kRGBPlane);
+  const int output_stride = frame_->stride(media::VideoFrame::kRGBPlane);
+
+  for (SkRegion::Iterator i(input_region); !i.done(); i.next()) {
+    // Determine the scaled area affected by this rectangle changing.
+    SkIRect output_rect = ScaleRect(i.rect(), image_size, output_size_);
+    if (!output_rect.intersect(clip_rect))
       continue;
 
-    // Align the rectangle to avoid artifacts in color space conversion.
-    dest_rect = AlignRect(dest_rect);
+    // The scaler will not to read outside the input dimensions.
+    media::ScaleYUVToRGB32WithRect(last_image_->planes[0],
+                                   last_image_->planes[1],
+                                   last_image_->planes[2],
+                                   output_rgb_buf,
+                                   image_size.width(),
+                                   image_size.height(),
+                                   output_size_.width(),
+                                   output_size_.height(),
+                                   output_rect.x(),
+                                   output_rect.y(),
+                                   output_rect.right(),
+                                   output_rect.bottom(),
+                                   last_image_->stride[0],
+                                   last_image_->stride[1],
+                                   output_stride);
 
-    SkIRect scaled_rect = ScaleRect(dest_rect,
-                                    horizontal_scale_ratio_,
-                                    vertical_scale_ratio_);
-
-    ScaleYUVToRGB32WithRect(last_image_->planes[0],
-                            last_image_->planes[1],
-                            last_image_->planes[2],
-                            data_start,
-                            dest_rect,
-                            scaled_rect,
-                            last_image_->stride[0],
-                            last_image_->stride[1],
-                            stride);
-    output_rects->push_back(scaled_rect);
+    output_region->op(output_rect, SkRegion::kUnion_Op);
   }
 }
 

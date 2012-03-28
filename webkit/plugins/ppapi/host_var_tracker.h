@@ -8,13 +8,13 @@
 #include <map>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/hash_tables.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "ppapi/c/pp_instance.h"
-#include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/shared_impl/function_group_base.h"
 #include "ppapi/shared_impl/resource_tracker.h"
@@ -24,6 +24,7 @@
 typedef struct NPObject NPObject;
 
 namespace ppapi {
+class ArrayBufferVar;
 class NPObjectVar;
 class Var;
 }
@@ -61,6 +62,10 @@ class HostVarTracker : public ::ppapi::VarTracker {
   void ForceFreeNPObjectsForInstance(PP_Instance instance);
 
  private:
+  // VarTracker implementation.
+  virtual ::ppapi::ArrayBufferVar* CreateArrayBuffer(
+      uint32 size_in_bytes) OVERRIDE;
+
   typedef std::map<NPObject*, ::ppapi::NPObjectVar*> NPObjectToNPObjectVarMap;
 
   // Lists all known NPObjects, first indexed by the corresponding instance,

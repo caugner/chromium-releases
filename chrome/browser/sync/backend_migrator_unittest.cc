@@ -12,6 +12,7 @@
 #include "chrome/browser/sync/protocol/sync.pb.h"
 #include "chrome/browser/sync/sessions/session_state.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
+#include "chrome/browser/sync/syncable/model_type_test_util.h"
 #include "chrome/browser/sync/test/engine/test_user_share.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -22,7 +23,6 @@ using ::testing::Eq;
 using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::Return;
-using ::testing::SetArgumentPointee;
 
 namespace browser_sync {
 
@@ -39,12 +39,12 @@ class BackendMigratorTest : public testing::Test {
     test_user_share_.SetUp();
     Mock::VerifyAndClear(manager());
     Mock::VerifyAndClear(&service_);
-    preferred_types_.insert(syncable::BOOKMARKS);
-    preferred_types_.insert(syncable::PREFERENCES);
-    preferred_types_.insert(syncable::AUTOFILL);
+    preferred_types_.Put(syncable::BOOKMARKS);
+    preferred_types_.Put(syncable::PREFERENCES);
+    preferred_types_.Put(syncable::AUTOFILL);
 
-    ON_CALL(service_, GetPreferredDataTypes(_)).
-        WillByDefault(SetArgumentPointee<0>(preferred_types_));
+    ON_CALL(service_, GetPreferredDataTypes()).
+        WillByDefault(Return(preferred_types_));
 
     migrator_.reset(
         new BackendMigrator(
@@ -59,14 +59,14 @@ class BackendMigratorTest : public testing::Test {
 
   // Marks all types in |unsynced_types| as unsynced  and all other
   // types as synced.
-  void SetUnsyncedTypes(const syncable::ModelTypeSet& unsynced_types) {
+  void SetUnsyncedTypes(syncable::ModelTypeSet unsynced_types) {
     sync_api::WriteTransaction trans(FROM_HERE,
                                      test_user_share_.user_share());
     for (int i = syncable::FIRST_REAL_MODEL_TYPE;
          i < syncable::MODEL_TYPE_COUNT; ++i) {
       syncable::ModelType type = syncable::ModelTypeFromInt(i);
       sync_pb::DataTypeProgressMarker progress_marker;
-      if (unsynced_types.count(type) == 0) {
+      if (!unsynced_types.Has(type)) {
         progress_marker.set_token("dummy");
       }
       trans.GetLookup()->SetDownloadProgress(type, progress_marker);
@@ -74,7 +74,7 @@ class BackendMigratorTest : public testing::Test {
   }
 
   void SendConfigureDone(DataTypeManager::ConfigureStatus status,
-                         const syncable::ModelTypeSet& requested_types) {
+                         syncable::ModelTypeSet requested_types) {
     if (status == DataTypeManager::OK) {
       DataTypeManager::ConfigureResult result(status, requested_types);
       content::NotificationService::current()->Notify(
@@ -97,13 +97,13 @@ class BackendMigratorTest : public testing::Test {
 
   ProfileSyncService* service() { return &service_; }
   DataTypeManagerMock* manager() { return &manager_; }
-  const syncable::ModelTypeSet& preferred_types() { return preferred_types_; }
+  syncable::ModelTypeSet preferred_types() { return preferred_types_; }
   BackendMigrator* migrator() { return migrator_.get(); }
   void RemovePreferredType(syncable::ModelType type) {
-    preferred_types_.erase(type);
+    preferred_types_.Remove(type);
     Mock::VerifyAndClear(&service_);
-    ON_CALL(service_, GetPreferredDataTypes(_)).
-        WillByDefault(SetArgumentPointee<0>(preferred_types_));
+    ON_CALL(service_, GetPreferredDataTypes()).
+        WillByDefault(Return(preferred_types_));
   }
 
  private:
@@ -131,9 +131,9 @@ TEST_F(BackendMigratorTest, Sanity) {
   EXPECT_CALL(migration_observer, OnMigrationStateChange()).Times(4);
 
   syncable::ModelTypeSet to_migrate, difference;
-  to_migrate.insert(syncable::PREFERENCES);
-  difference.insert(syncable::AUTOFILL);
-  difference.insert(syncable::BOOKMARKS);
+  to_migrate.Put(syncable::PREFERENCES);
+  difference.Put(syncable::AUTOFILL);
+  difference.Put(syncable::BOOKMARKS);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURED));
@@ -158,9 +158,9 @@ TEST_F(BackendMigratorTest, Sanity) {
 // each state and wind up back in IDLE.
 TEST_F(BackendMigratorTest, MigrateNigori) {
   syncable::ModelTypeSet to_migrate, difference;
-  to_migrate.insert(syncable::NIGORI);
-  difference.insert(syncable::AUTOFILL);
-  difference.insert(syncable::BOOKMARKS);
+  to_migrate.Put(syncable::NIGORI);
+  difference.Put(syncable::AUTOFILL);
+  difference.Put(syncable::BOOKMARKS);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURED));
@@ -185,7 +185,7 @@ TEST_F(BackendMigratorTest, MigrateNigori) {
 // starting a migration.
 TEST_F(BackendMigratorTest, WaitToStart) {
   syncable::ModelTypeSet to_migrate;
-  to_migrate.insert(syncable::PREFERENCES);
+  to_migrate.Put(syncable::PREFERENCES);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURING));
@@ -207,11 +207,11 @@ TEST_F(BackendMigratorTest, WaitToStart) {
 // is in progress.
 TEST_F(BackendMigratorTest, RestartMigration) {
   syncable::ModelTypeSet to_migrate1, to_migrate2, to_migrate_union, bookmarks;
-  to_migrate1.insert(syncable::PREFERENCES);
-  to_migrate2.insert(syncable::AUTOFILL);
-  to_migrate_union.insert(syncable::PREFERENCES);
-  to_migrate_union.insert(syncable::AUTOFILL);
-  bookmarks.insert(syncable::BOOKMARKS);
+  to_migrate1.Put(syncable::PREFERENCES);
+  to_migrate2.Put(syncable::AUTOFILL);
+  to_migrate_union.Put(syncable::PREFERENCES);
+  to_migrate_union.Put(syncable::AUTOFILL);
+  bookmarks.Put(syncable::BOOKMARKS);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURED));
@@ -222,10 +222,8 @@ TEST_F(BackendMigratorTest, RestartMigration) {
   EXPECT_EQ(BackendMigrator::DISABLING_TYPES, migrator()->state());
   migrator()->MigrateTypes(to_migrate2);
 
-  syncable::ModelTypeSet difference1;
-  std::set_difference(preferred_types().begin(), preferred_types().end(),
-                      to_migrate1.begin(), to_migrate1.end(),
-                      std::inserter(difference1, difference1.end()));
+  const syncable::ModelTypeSet difference1 =
+      Difference(preferred_types(), to_migrate1);
 
   Mock::VerifyAndClearExpectations(manager());
   EXPECT_CALL(*manager(), Configure(_, sync_api::CONFIGURE_REASON_MIGRATION))
@@ -244,19 +242,19 @@ TEST_F(BackendMigratorTest, RestartMigration) {
 TEST_F(BackendMigratorTest, InterruptedWhileDisablingTypes) {
   syncable::ModelTypeSet to_migrate;
   syncable::ModelTypeSet difference;
-  to_migrate.insert(syncable::PREFERENCES);
-  difference.insert(syncable::AUTOFILL);
-  difference.insert(syncable::BOOKMARKS);
+  to_migrate.Put(syncable::PREFERENCES);
+  difference.Put(syncable::AUTOFILL);
+  difference.Put(syncable::BOOKMARKS);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURED));
-  EXPECT_CALL(*manager(), Configure(difference,
+  EXPECT_CALL(*manager(), Configure(HasModelTypes(difference),
       sync_api::CONFIGURE_REASON_MIGRATION));
   migrator()->MigrateTypes(to_migrate);
   EXPECT_EQ(BackendMigrator::DISABLING_TYPES, migrator()->state());
 
   Mock::VerifyAndClearExpectations(manager());
-  EXPECT_CALL(*manager(), Configure(difference,
+  EXPECT_CALL(*manager(), Configure(HasModelTypes(difference),
       sync_api::CONFIGURE_REASON_MIGRATION));
   SetUnsyncedTypes(syncable::ModelTypeSet());
   SendConfigureDone(DataTypeManager::OK, preferred_types());
@@ -269,9 +267,9 @@ TEST_F(BackendMigratorTest, InterruptedWhileDisablingTypes) {
 // from the sync db.
 TEST_F(BackendMigratorTest, WaitingForPurge) {
   syncable::ModelTypeSet to_migrate, difference;
-  to_migrate.insert(syncable::PREFERENCES);
-  to_migrate.insert(syncable::AUTOFILL);
-  difference.insert(syncable::BOOKMARKS);
+  to_migrate.Put(syncable::PREFERENCES);
+  to_migrate.Put(syncable::AUTOFILL);
+  difference.Put(syncable::BOOKMARKS);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURED));
@@ -285,7 +283,7 @@ TEST_F(BackendMigratorTest, WaitingForPurge) {
   EXPECT_EQ(BackendMigrator::DISABLING_TYPES, migrator()->state());
 
   syncable::ModelTypeSet prefs;
-  prefs.insert(syncable::PREFERENCES);
+  prefs.Put(syncable::PREFERENCES);
   SetUnsyncedTypes(prefs);
   SendConfigureDone(DataTypeManager::OK, difference);
   EXPECT_EQ(BackendMigrator::DISABLING_TYPES, migrator()->state());
@@ -297,7 +295,7 @@ TEST_F(BackendMigratorTest, WaitingForPurge) {
 
 TEST_F(BackendMigratorTest, MigratedTypeDisabledByUserDuringMigration) {
   syncable::ModelTypeSet to_migrate;
-  to_migrate.insert(syncable::PREFERENCES);
+  to_migrate.Put(syncable::PREFERENCES);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURED));
@@ -316,7 +314,7 @@ TEST_F(BackendMigratorTest, MigratedTypeDisabledByUserDuringMigration) {
 
 TEST_F(BackendMigratorTest, ConfigureFailure) {
   syncable::ModelTypeSet to_migrate;
-  to_migrate.insert(syncable::PREFERENCES);
+  to_migrate.Put(syncable::PREFERENCES);
 
   EXPECT_CALL(*manager(), state())
       .WillOnce(Return(DataTypeManager::CONFIGURED));

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "chrome/browser/notifications/balloon.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/window_sizer.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/public/browser/notification_service.h"
 #include "ui/gfx/rect.h"
@@ -41,7 +40,7 @@ BalloonCollectionImpl::~BalloonCollectionImpl() {
 void BalloonCollectionImpl::Add(const Notification& notification,
                                 Profile* profile) {
   Balloon* new_balloon = MakeBalloon(notification, profile);
-  base_.Add(new_balloon);
+  base_.Add(new_balloon, false);
   new_balloon->Show();
   notification_ui_->Add(new_balloon);
 
@@ -57,7 +56,7 @@ void BalloonCollectionImpl::Add(const Notification& notification,
 bool BalloonCollectionImpl::AddWebUIMessageCallback(
     const Notification& notification,
     const std::string& message,
-    const MessageCallback& callback) {
+    const BalloonViewHost::MessageCallback& callback) {
   Balloon* balloon = FindBalloon(notification);
   if (!balloon)
     return false;
@@ -67,16 +66,16 @@ bool BalloonCollectionImpl::AddWebUIMessageCallback(
   return host->AddWebUIMessageCallback(message, callback);
 }
 
+// Called from SystemNotification::Show for system notifications.
 void BalloonCollectionImpl::AddSystemNotification(
     const Notification& notification,
     Profile* profile,
-    bool sticky,
-    bool control) {
-
+    bool sticky) {
   Balloon* new_balloon = new Balloon(notification, profile, this);
   new_balloon->set_view(
-      new chromeos::BalloonViewImpl(sticky, control, true));
-  base_.Add(new_balloon);
+      new chromeos::BalloonViewImpl(
+          sticky, false /*no controls*/, true /*enable webui*/));
+  base_.Add(new_balloon, false);
   new_balloon->Show();
   notification_ui_->Add(new_balloon);
 
@@ -168,10 +167,12 @@ void BalloonCollectionImpl::Shutdown() {
   notification_ui_.reset();
 }
 
+// Called from BalloonCollectionImpl::Add for non system notifications.
 Balloon* BalloonCollectionImpl::MakeBalloon(const Notification& notification,
                                             Profile* profile) {
   Balloon* new_balloon = new Balloon(notification, profile, this);
-  new_balloon->set_view(new chromeos::BalloonViewImpl(false, true, false));
+  new_balloon->set_view(new chromeos::BalloonViewImpl(
+      false /*not sticky*/, true /*has controls*/, false /*no web ui*/));
   return new_balloon;
 }
 

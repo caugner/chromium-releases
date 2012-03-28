@@ -1,12 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_MAC_H_
 #define CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_MAC_H_
 #pragma once
-
-#if defined(__OBJC__)
 
 #import <Cocoa/Cocoa.h>
 
@@ -15,7 +13,6 @@
 #include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "content/browser/accessibility/browser_accessibility_delegate_mac.h"
-#include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/renderer_host/accelerated_surface_container_manager_mac.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/common/edit_command.h"
@@ -130,6 +127,8 @@ class RenderWidgetHostViewMacEditCommandHelper;
 - (void)setTakesFocusOnlyOnMouseDown:(BOOL)b;
 - (void)setCloseOnDeactivate:(BOOL)b;
 - (void)setToolTipAtMousePoint:(NSString *)string;
+// True for always-on-top special windows (e.g. Balloons and Panels).
+- (BOOL)acceptsMouseEventsWhenInactive;
 // Cancel ongoing composition (abandon the marked text).
 - (void)cancelComposition;
 // Confirm ongoing composition.
@@ -167,11 +166,12 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   explicit RenderWidgetHostViewMac(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewMac();
 
-  RenderWidgetHostViewCocoa* native_view() const { return cocoa_view_; }
+  RenderWidgetHostViewCocoa* cocoa_view() const { return cocoa_view_; }
 
   void SetDelegate(RenderWidgetHostViewMacDelegate* delegate);
 
   // Implementation of RenderWidgetHostView:
+  virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) OVERRIDE;
   virtual void InitAsFullscreen(
@@ -183,6 +183,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
@@ -280,6 +281,7 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
 
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+  virtual void ProcessTouchAck(bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -315,8 +317,6 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
   // This is true when we are currently painting and thus should handle extra
   // paint requests by expanding the invalid rect rather than actually painting.
   bool about_to_validate_and_paint_;
-
-  scoped_ptr<BrowserAccessibilityManager> browser_accessibility_manager_;
 
   // This is true when we have already scheduled a call to
   // |-callSetNeedsDisplayInRect:| but it has not been fulfilled yet.  Used to
@@ -402,19 +402,5 @@ class RenderWidgetHostViewMac : public RenderWidgetHostView {
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewMac);
 };
-
-#endif // __OBJC__
-
-// Functions that may be accessed from non-Objective-C C/C++ code.
-
-#include "content/common/content_export.h"
-
-class RenderWidgetHostView;
-class RenderWidgetHost;
-
-namespace render_widget_host_view_mac {
-CONTENT_EXPORT RenderWidgetHostView* CreateRenderWidgetHostView(
-    RenderWidgetHost* widget);
-}
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_RENDER_WIDGET_HOST_VIEW_MAC_H_

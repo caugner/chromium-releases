@@ -21,6 +21,7 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -65,7 +66,7 @@ void FontSettingsHandler::GetLocalizedValues(
 }
 
 void FontSettingsHandler::Initialize() {
-  DCHECK(web_ui_);
+  DCHECK(web_ui());
   SetUpStandardFontSample();
   SetUpSerifFontSample();
   SetUpSansSerifFontSample();
@@ -73,32 +74,27 @@ void FontSettingsHandler::Initialize() {
   SetUpMinimumFontSample();
 }
 
-WebUIMessageHandler* FontSettingsHandler::Attach(WebUI* web_ui) {
-  // Call through to superclass.
-  WebUIMessageHandler* handler = OptionsPageUIHandler::Attach(web_ui);
-
+void FontSettingsHandler::RegisterMessages() {
   // Perform validation for saved fonts.
-  DCHECK(web_ui_);
-  PrefService* pref_service = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
   FontSettingsUtilities::ValidateSavedFonts(pref_service);
 
   // Register for preferences that we need to observe manually.
-  standard_font_.Init(prefs::kWebKitStandardFontFamily, pref_service, this);
-  serif_font_.Init(prefs::kWebKitSerifFontFamily, pref_service, this);
-  sans_serif_font_.Init(prefs::kWebKitSansSerifFontFamily, pref_service, this);
-  fixed_font_.Init(prefs::kWebKitFixedFontFamily, pref_service, this);
-  font_encoding_.Init(prefs::kDefaultCharset, pref_service, this);
-  default_font_size_.Init(prefs::kWebKitDefaultFontSize, pref_service, this);
-  default_fixed_font_size_.Init(prefs::kWebKitDefaultFixedFontSize,
+  standard_font_.Init(prefs::kWebKitGlobalStandardFontFamily,
+                      pref_service, this);
+  serif_font_.Init(prefs::kWebKitGlobalSerifFontFamily, pref_service, this);
+  sans_serif_font_.Init(prefs::kWebKitGlobalSansSerifFontFamily,
+                        pref_service, this);
+  fixed_font_.Init(prefs::kWebKitGlobalFixedFontFamily, pref_service, this);
+  font_encoding_.Init(prefs::kGlobalDefaultCharset, pref_service, this);
+  default_font_size_.Init(prefs::kWebKitGlobalDefaultFontSize,
+                          pref_service, this);
+  default_fixed_font_size_.Init(prefs::kWebKitGlobalDefaultFixedFontSize,
                                 pref_service, this);
-  minimum_font_size_.Init(prefs::kWebKitMinimumFontSize, pref_service, this);
+  minimum_font_size_.Init(prefs::kWebKitGlobalMinimumFontSize,
+                          pref_service, this);
 
-  // Return result from the superclass.
-  return handler;
-}
-
-void FontSettingsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("fetchFontsData",
+  web_ui()->RegisterMessageCallback("fetchFontsData",
       base::Bind(&FontSettingsHandler::HandleFetchFontsData,
                  base::Unretained(this)));
 }
@@ -113,7 +109,7 @@ void FontSettingsHandler::FontsListHasLoaded(
     scoped_refptr<content::FontListResult> list) {
   ListValue encoding_list;
   const std::vector<CharacterEncoding::EncodingInfo>* encodings;
-  PrefService* pref_service = Profile::FromWebUI(web_ui_)->GetPrefs();
+  PrefService* pref_service = Profile::FromWebUI(web_ui())->GetPrefs();
   encodings = CharacterEncoding::GetCurrentDisplayEncodings(
       g_browser_process->GetApplicationLocale(),
       pref_service->GetString(prefs::kStaticEncodings),
@@ -147,9 +143,9 @@ void FontSettingsHandler::FontsListHasLoaded(
   selected_values.Append(Value::CreateStringValue(fixed_font_.GetValue()));
   selected_values.Append(Value::CreateStringValue(font_encoding_.GetValue()));
 
-  web_ui_->CallJavascriptFunction("FontSettings.setFontsData",
-                                  *list->list.get(), encoding_list,
-                                  selected_values);
+  web_ui()->CallJavascriptFunction("FontSettings.setFontsData",
+                                   *list->list.get(), encoding_list,
+                                   selected_values);
 }
 
 void FontSettingsHandler::Observe(int type,
@@ -157,20 +153,20 @@ void FontSettingsHandler::Observe(int type,
                                   const content::NotificationDetails& details) {
   if (type == chrome::NOTIFICATION_PREF_CHANGED) {
     std::string* pref_name = content::Details<std::string>(details).ptr();
-    if (*pref_name == prefs::kWebKitStandardFontFamily) {
+    if (*pref_name == prefs::kWebKitGlobalStandardFontFamily) {
       SetUpStandardFontSample();
-    } else if (*pref_name == prefs::kWebKitSerifFontFamily) {
+    } else if (*pref_name == prefs::kWebKitGlobalSerifFontFamily) {
       SetUpSerifFontSample();
-    } else if (*pref_name == prefs::kWebKitSansSerifFontFamily) {
+    } else if (*pref_name == prefs::kWebKitGlobalSansSerifFontFamily) {
       SetUpSansSerifFontSample();
-    } else if (*pref_name == prefs::kWebKitFixedFontFamily ||
-               *pref_name == prefs::kWebKitDefaultFixedFontSize) {
+    } else if (*pref_name == prefs::kWebKitGlobalFixedFontFamily ||
+               *pref_name == prefs::kWebKitGlobalDefaultFixedFontSize) {
       SetUpFixedFontSample();
-    } else if (*pref_name == prefs::kWebKitDefaultFontSize) {
+    } else if (*pref_name == prefs::kWebKitGlobalDefaultFontSize) {
       SetUpStandardFontSample();
       SetUpSerifFontSample();
       SetUpSansSerifFontSample();
-    } else if (*pref_name == prefs::kWebKitMinimumFontSize) {
+    } else if (*pref_name == prefs::kWebKitGlobalMinimumFontSize) {
       SetUpMinimumFontSample();
     }
   }
@@ -179,33 +175,33 @@ void FontSettingsHandler::Observe(int type,
 void FontSettingsHandler::SetUpStandardFontSample() {
   base::StringValue font_value(standard_font_.GetValue());
   base::FundamentalValue size_value(default_font_size_.GetValue());
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "FontSettings.setUpStandardFontSample", font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpSerifFontSample() {
   base::StringValue font_value(serif_font_.GetValue());
   base::FundamentalValue size_value(default_font_size_.GetValue());
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "FontSettings.setUpSerifFontSample", font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpSansSerifFontSample() {
   base::StringValue font_value(sans_serif_font_.GetValue());
   base::FundamentalValue size_value(default_font_size_.GetValue());
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "FontSettings.setUpSansSerifFontSample", font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpFixedFontSample() {
   base::StringValue font_value(fixed_font_.GetValue());
   base::FundamentalValue size_value(default_fixed_font_size_.GetValue());
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "FontSettings.setUpFixedFontSample", font_value, size_value);
 }
 
 void FontSettingsHandler::SetUpMinimumFontSample() {
   base::FundamentalValue size_value(minimum_font_size_.GetValue());
-  web_ui_->CallJavascriptFunction("FontSettings.setUpMinimumFontSample",
+  web_ui()->CallJavascriptFunction("FontSettings.setUpMinimumFontSample",
                                   size_value);
 }

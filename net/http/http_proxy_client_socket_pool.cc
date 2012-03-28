@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,7 +33,7 @@ HttpProxySocketParams::HttpProxySocketParams(
     const scoped_refptr<SSLSocketParams>& ssl_params,
     const GURL& request_url,
     const std::string& user_agent,
-    HostPortPair endpoint,
+    const HostPortPair& endpoint,
     HttpAuthCache* http_auth_cache,
     HttpAuthHandlerFactory* http_auth_handler_factory,
     SpdySessionPool* spdy_session_pool,
@@ -84,8 +84,10 @@ HttpProxyConnectJob::HttpProxyConnectJob(
       ssl_pool_(ssl_pool),
       resolver_(host_resolver),
       ALLOW_THIS_IN_INITIALIZER_LIST(
-          callback_(this, &HttpProxyConnectJob::OnIOComplete)),
-      using_spdy_(false) {
+          callback_(base::Bind(&HttpProxyConnectJob::OnIOComplete,
+                               base::Unretained(this)))),
+      using_spdy_(false),
+      protocol_negotiated_(SSLClientSocket::kProtoUnknown) {
 }
 
 HttpProxyConnectJob::~HttpProxyConnectJob() {}
@@ -171,12 +173,9 @@ int HttpProxyConnectJob::DoTransportConnect() {
   next_state_ = STATE_TCP_CONNECT_COMPLETE;
   transport_socket_handle_.reset(new ClientSocketHandle());
   return transport_socket_handle_->Init(
-      group_name(),
-      params_->transport_params(),
-      params_->transport_params()->destination().priority(),
-      &callback_,
-      transport_pool_,
-      net_log());
+      group_name(), params_->transport_params(),
+      params_->transport_params()->destination().priority(), callback_,
+      transport_pool_, net_log());
 }
 
 int HttpProxyConnectJob::DoTransportConnectComplete(int result) {
@@ -208,7 +207,7 @@ int HttpProxyConnectJob::DoSSLConnect() {
   return transport_socket_handle_->Init(
       group_name(), params_->ssl_params(),
       params_->ssl_params()->transport_params()->destination().priority(),
-      &callback_, ssl_pool_, net_log());
+      callback_, ssl_pool_, net_log());
 }
 
 int HttpProxyConnectJob::DoSSLConnectComplete(int result) {
@@ -224,6 +223,7 @@ int HttpProxyConnectJob::DoSSLConnectComplete(int result) {
     else
       // TODO(rch): allow the user to deal with proxy cert errors in the
       // same way as server cert errors.
+      transport_socket_handle_->socket()->Disconnect();
       return ERR_PROXY_CERTIFICATE_INVALID;
   }
   if (result < 0) {
@@ -235,6 +235,7 @@ int HttpProxyConnectJob::DoSSLConnectComplete(int result) {
   SSLClientSocket* ssl =
       static_cast<SSLClientSocket*>(transport_socket_handle_->socket());
   using_spdy_ = ssl->was_spdy_negotiated();
+  protocol_negotiated_ = ssl->protocol_negotiated();
 
   // Reset the timer to just the length of time allowed for HttpProxy handshake
   // so that a fast SSL connection plus a slow HttpProxy failure doesn't take
@@ -270,8 +271,9 @@ int HttpProxyConnectJob::DoHttpProxyConnect() {
                                 params_->http_auth_handler_factory(),
                                 params_->tunnel(),
                                 using_spdy_,
+                                protocol_negotiated_,
                                 params_->ssl_params() != NULL));
-  return transport_socket_->Connect(&callback_);
+  return transport_socket_->Connect(callback_);
 }
 
 int HttpProxyConnectJob::DoHttpProxyConnectComplete(int result) {
@@ -309,10 +311,9 @@ int HttpProxyConnectJob::DoSpdyProxyCreateStream() {
   }
 
   next_state_ = STATE_SPDY_PROXY_CREATE_STREAM_COMPLETE;
-  return spdy_session->CreateStream(params_->request_url(),
-                                    params_->destination().priority(),
-                                    &spdy_stream_, spdy_session->net_log(),
-                                    &callback_);
+  return spdy_session->CreateStream(
+      params_->request_url(), params_->destination().priority(),
+      &spdy_stream_, spdy_session->net_log(), callback_);
 }
 
 int HttpProxyConnectJob::DoSpdyProxyCreateStreamComplete(int result) {
@@ -328,7 +329,7 @@ int HttpProxyConnectJob::DoSpdyProxyCreateStreamComplete(int result) {
                                 params_->destination().host_port_pair(),
                                 params_->http_auth_cache(),
                                 params_->http_auth_handler_factory()));
-  return transport_socket_->Connect(&callback_);
+  return transport_socket_->Connect(callback_);
 }
 
 int HttpProxyConnectJob::ConnectInternal() {
@@ -395,12 +396,10 @@ HttpProxyClientSocketPool::HttpProxyClientSocketPool(
 
 HttpProxyClientSocketPool::~HttpProxyClientSocketPool() {}
 
-int HttpProxyClientSocketPool::RequestSocket(const std::string& group_name,
-                                             const void* socket_params,
-                                             RequestPriority priority,
-                                             ClientSocketHandle* handle,
-                                             OldCompletionCallback* callback,
-                                             const BoundNetLog& net_log) {
+int HttpProxyClientSocketPool::RequestSocket(
+    const std::string& group_name, const void* socket_params,
+    RequestPriority priority, ClientSocketHandle* handle,
+    const CompletionCallback& callback, const BoundNetLog& net_log) {
   const scoped_refptr<HttpProxySocketParams>* casted_socket_params =
       static_cast<const scoped_refptr<HttpProxySocketParams>*>(socket_params);
 

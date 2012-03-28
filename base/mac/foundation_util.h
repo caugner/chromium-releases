@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,19 +43,8 @@ BASE_EXPORT void SetOverrideAmIBundled(bool value);
 // Returns true if this process is marked as a "Background only process".
 BASE_EXPORT bool IsBackgroundOnlyProcess();
 
-// Returns the main bundle or the override, used for code that needs
-// to fetch resources from bundles, but work within a unittest where we
-// aren't a bundle.
-BASE_EXPORT NSBundle* MainAppBundle();
-BASE_EXPORT FilePath MainAppBundlePath();
-
-// Returns the path to a resource within the MainAppBundle.
-FilePath PathForMainAppBundleResource(CFStringRef resourceName);
-
-// Set the bundle that MainAppBundle will return, overriding the default value
-// (Restore the default by calling SetOverrideAppBundle(nil)).
-BASE_EXPORT void SetOverrideAppBundle(NSBundle* bundle);
-BASE_EXPORT void SetOverrideAppBundlePath(const FilePath& file_path);
+// Returns the path to a resource within the framework bundle.
+FilePath PathForFrameworkBundleResource(CFStringRef resourceName);
 
 // Returns the creator code associated with the CFBundleRef at bundle.
 OSType CreatorCodeForCFBundleRef(CFBundleRef bundle);

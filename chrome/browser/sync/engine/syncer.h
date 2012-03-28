@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
@@ -75,16 +74,6 @@ class Syncer {
                          SyncerStep first_step,
                          SyncerStep last_step);
 
-  class ScopedSyncStartStopTracker {
-   public:
-    explicit ScopedSyncStartStopTracker(sessions::SyncSession* session);
-    ~ScopedSyncStartStopTracker();
-   private:
-    sessions::SyncSession* session_;
-
-    DISALLOW_COPY_AND_ASSIGN(ScopedSyncStartStopTracker);
-  };
-
  private:
   // Implements the PROCESS_CLIENT_COMMAND syncer step.
   void ProcessClientCommand(sessions::SyncSession* session);
@@ -94,15 +83,9 @@ class Syncer {
 
   ConflictResolver resolver_;
 
-  // A callback hook used in unittests to simulate changes between conflict set
-  // building and conflict resolution.
-  Callback0::Type* pre_conflict_resolution_closure_;
-
   friend class SyncerTest;
   FRIEND_TEST_ALL_PREFIXES(SyncerTest, NameClashWithResolver);
   FRIEND_TEST_ALL_PREFIXES(SyncerTest, IllegalAndLegalUpdates);
-  FRIEND_TEST_ALL_PREFIXES(SusanDeletingTest,
-                           NewServerItemInAFolderHierarchyWeHaveDeleted3);
   FRIEND_TEST_ALL_PREFIXES(SyncerTest, TestCommitListOrderingAndNewParent);
   FRIEND_TEST_ALL_PREFIXES(SyncerTest,
                            TestCommitListOrderingAndNewParentAndChild);

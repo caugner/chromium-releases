@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -33,7 +33,7 @@ void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_Create(
 
   *resource = PPBTCPSocketPrivateInterface()->Create(instance);
 
-  DebugPrintf("PPB_TCPSocket_Private::Create: resource=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_TCPSocket_Private::Create: resource=%"NACL_PRId32"\n",
               *resource);
 }
 
@@ -49,11 +49,9 @@ void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_IsTCPSocket(
 
   PP_Bool pp_success =
       PPBTCPSocketPrivateInterface()->IsTCPSocket(resource);
-
-  DebugPrintf("PPB_TCPSocket_Private::IsTCPSocket: pp_success=%d\n",
-              pp_success);
-
-  *is_tcp_socket = (pp_success == PP_TRUE);
+  *is_tcp_socket = PP_ToBool(pp_success);
+  DebugPrintf("PPB_TCPSocket_Private::IsTCPSocket: is_tcp_socket=%d\n",
+              *is_tcp_socket);
 }
 
 void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_Connect(
@@ -61,7 +59,7 @@ void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_Connect(
     NaClSrpcClosure* done,
     // input
     PP_Resource tcp_socket,
-    char* host,
+    const char* host,
     int32_t port,
     int32_t callback_id,
     // output
@@ -138,11 +136,9 @@ void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_GetLocalAddress(
 
   PP_Bool pp_success = PPBTCPSocketPrivateInterface()->GetLocalAddress(
       tcp_socket, reinterpret_cast<struct PP_NetAddress_Private*>(local_addr));
-
-  DebugPrintf("PPB_TCPSocket_Private::GetLocalAddress: pp_success=%d\n",
-              pp_success);
-
-  *success = (pp_success == PP_TRUE);
+  *success = PP_ToBool(pp_success);
+  DebugPrintf("PPB_TCPSocket_Private::GetLocalAddress: success=%d\n",
+              *success);
   rpc->result = NACL_SRPC_RESULT_OK;
 }
 
@@ -165,11 +161,9 @@ void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_GetRemoteAddress(
       PPBTCPSocketPrivateInterface()->GetRemoteAddress(
           tcp_socket,
           reinterpret_cast<struct PP_NetAddress_Private*>(remote_addr));
-
-  DebugPrintf("PPB_TCPSocket_Private::GetRemoteAddress: pp_success=%d\n",
-              pp_success);
-
-  *success = (pp_success == PP_TRUE);
+  *success = PP_ToBool(pp_success);
+  DebugPrintf("PPB_TCPSocket_Private::GetRemoteAddress: success=%d\n",
+              *success);
   rpc->result = NACL_SRPC_RESULT_OK;
 }
 
@@ -178,7 +172,7 @@ void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_SSLHandshake(
     NaClSrpcClosure* done,
     // input
     PP_Resource tcp_socket,
-    char* server_name,
+    const char* server_name,
     int32_t server_port,
     int32_t callback_id,
     // output
@@ -303,7 +297,7 @@ void PpbTCPSocketPrivateRpcServer::PPB_TCPSocket_Private_Disconnect(
   NaClSrpcClosureRunner runner(done);
   rpc->result = NACL_SRPC_RESULT_OK;
 
-  DebugPrintf("PPB_TCPSocket_Private::Disconnect: tcp_socket=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_TCPSocket_Private::Disconnect: tcp_socket=%"NACL_PRId32"\n",
               tcp_socket);
 
   PPBTCPSocketPrivateInterface()->Disconnect(tcp_socket);

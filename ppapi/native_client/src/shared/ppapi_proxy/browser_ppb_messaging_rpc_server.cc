@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #endif
 
 using ppapi_proxy::PPBMessagingInterface;
+using ppapi_proxy::PPBVarInterface;
 using ppapi_proxy::DebugPrintf;
 using ppapi_proxy::DeserializeTo;
 
@@ -26,13 +27,17 @@ void PpbMessagingRpcServer::PPB_Messaging_PostMessage(
   rpc->result = NACL_SRPC_RESULT_APP_ERROR;
 
   PP_Var message;
-  if (!DeserializeTo(rpc->channel, message_bytes, message_size, 1, &message))
+  if (!DeserializeTo(message_bytes, message_size, 1, &message))
     return;
 
   PPBMessagingInterface()->PostMessage(instance, message);
-  DebugPrintf("PPB_Messaging::PostMessage: instance=%"NACL_PRIu32"\n",
+
+  // In the case of a string, DeserializeTo creates a PP_Var with a reference-
+  // count of 1. We must release the var, or it will stay in the browser's map.
+  PPBVarInterface()->Release(message);
+
+  DebugPrintf("PPB_Messaging::PostMessage: instance=%"NACL_PRId32"\n",
               instance);
 
   rpc->result = NACL_SRPC_RESULT_OK;
 }
-

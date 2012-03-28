@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -200,28 +200,32 @@ int NoOpVerifyCallback(X509_STORE_CTX*, void *) {
 
 // OpenSSL manages a cache of SSL_SESSION, this class provides the application
 // side policy for that cache about session re-use: we retain one session per
-// unique HostPortPair.
+// unique HostPortPair, per shard.
 class SSLSessionCache {
  public:
   SSLSessionCache() {}
 
-  void OnSessionAdded(const HostPortPair& host_and_port, SSL_SESSION* session) {
+  void OnSessionAdded(const HostPortPair& host_and_port,
+                      const std::string& shard,
+                      SSL_SESSION* session) {
     // Declare the session cleaner-upper before the lock, so any call into
     // OpenSSL to free the session will happen after the lock is released.
     crypto::ScopedOpenSSL<SSL_SESSION, SSL_SESSION_free> session_to_free;
     base::AutoLock lock(lock_);
 
     DCHECK_EQ(0U, session_map_.count(session));
+    const std::string cache_key = GetCacheKey(host_and_port, shard);
+
     std::pair<HostPortMap::iterator, bool> res =
-        host_port_map_.insert(std::make_pair(host_and_port, session));
+        host_port_map_.insert(std::make_pair(cache_key, session));
     if (!res.second) {  // Already exists: replace old entry.
       session_to_free.reset(res.first->second);
       session_map_.erase(session_to_free.get());
       res.first->second = session;
     }
     DVLOG(2) << "Adding session " << session << " => "
-             << host_and_port.ToString() << ", new entry = " << res.second;
-    DCHECK(host_port_map_[host_and_port] == session);
+             << cache_key << ", new entry = " << res.second;
+    DCHECK(host_port_map_[cache_key] == session);
     session_map_[session] = res.first;
     DCHECK_EQ(host_port_map_.size(), session_map_.size());
     DCHECK_LE(host_port_map_.size(), kSessionCacheMaxEntires);
@@ -236,8 +240,7 @@ class SSLSessionCache {
     SessionMap::iterator it = session_map_.find(session);
     if (it == session_map_.end())
       return;
-    DVLOG(2) << "Remove session " << session << " => "
-             << it->second->first.ToString();
+    DVLOG(2) << "Remove session " << session << " => " << it->second->first;
     DCHECK(it->second->second == session);
     host_port_map_.erase(it->second);
     session_map_.erase(it);
@@ -247,13 +250,14 @@ class SSLSessionCache {
 
   // Looks up the host:port in the cache, and if a session is found it is added
   // to |ssl|, returning true on success.
-  bool SetSSLSession(SSL* ssl, const HostPortPair& host_and_port) {
+  bool SetSSLSession(SSL* ssl, const HostPortPair& host_and_port,
+                     const std::string& shard) {
     base::AutoLock lock(lock_);
-    HostPortMap::iterator it = host_port_map_.find(host_and_port);
+    const std::string cache_key = GetCacheKey(host_and_port, shard);
+    HostPortMap::iterator it = host_port_map_.find(cache_key);
     if (it == host_port_map_.end())
       return false;
-    DVLOG(2) << "Lookup session: " << it->second << " => "
-             << host_and_port.ToString();
+    DVLOG(2) << "Lookup session: " << it->second << " => " << cache_key;
     SSL_SESSION* session = it->second;
     DCHECK(session);
     DCHECK(session_map_[session] == it);
@@ -265,12 +269,26 @@ class SSLSessionCache {
     return SSL_set_session(ssl, session) == 1;
   }
 
+  // Flush removes all entries from the cache. This is called when a client
+  // certificate is added.
+  void Flush() {
+    for (HostPortMap::iterator i = host_port_map_.begin();
+         i != host_port_map_.end(); i++) {
+      SSL_SESSION_free(i->second);
+    }
+    host_port_map_.clear();
+    session_map_.clear();
+  }
+
  private:
+  static std::string GetCacheKey(const HostPortPair& host_and_port,
+                                 const std::string& shard) {
+    return host_and_port.ToString() + "/" + shard;
+  }
+
   // A pair of maps to allow bi-directional lookups between host:port and an
   // associated session.
-  // TODO(joth): When client certificates are implemented we should key the
-  // cache on the client certificate used in addition to the host-port pair.
-  typedef std::map<HostPortPair, SSL_SESSION*> HostPortMap;
+  typedef std::map<std::string, SSL_SESSION*> HostPortMap;
   typedef std::map<SSL_SESSION*, HostPortMap::iterator> SessionMap;
   HostPortMap host_port_map_;
   SessionMap session_map_;
@@ -329,7 +347,9 @@ class SSLContext {
 
   int NewSessionCallback(SSL* ssl, SSL_SESSION* session) {
     SSLClientSocketOpenSSL* socket = GetClientSocketFromSSL(ssl);
-    session_cache_.OnSessionAdded(socket->host_and_port(), session);
+    session_cache_.OnSessionAdded(socket->host_and_port(),
+                                  socket->ssl_session_cache_shard(),
+                                  session);
     return 1;  // 1 => We took ownership of |session|.
   }
 
@@ -360,8 +380,11 @@ class SSLContext {
   // SSLClientSocketOpenSSL object from an SSL instance.
   int ssl_socket_data_index_;
 
-  crypto::ScopedOpenSSL<SSL_CTX, SSL_CTX_free> ssl_ctx_;
+  // session_cache_ must appear before |ssl_ctx_| because the destruction of
+  // |ssl_ctx_| may trigger callbacks into |session_cache_|. Therefore,
+  // |session_cache_| must be destructed after |ssl_ctx_|.
   SSLSessionCache session_cache_;
+  crypto::ScopedOpenSSL<SSL_CTX, SSL_CTX_free> ssl_ctx_;
 };
 
 // Utility to construct the appropriate set & clear masks for use the OpenSSL
@@ -379,20 +402,19 @@ struct SslSetClearMask {
 
 }  // namespace
 
+// static
+void SSLClientSocket::ClearSessionCache() {
+  SSLContext* context = SSLContext::GetInstance();
+  context->session_cache()->Flush();
+}
+
 SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
     ClientSocketHandle* transport_socket,
     const HostPortPair& host_and_port,
     const SSLConfig& ssl_config,
     const SSLClientSocketContext& context)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(buffer_send_callback_(
-          this, &SSLClientSocketOpenSSL::BufferSendComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(buffer_recv_callback_(
-          this, &SSLClientSocketOpenSSL::BufferRecvComplete)),
-      transport_send_busy_(false),
+    : transport_send_busy_(false),
       transport_recv_busy_(false),
-      user_connect_callback_(NULL),
-      user_read_callback_(NULL),
-      user_write_callback_(NULL),
       completed_handshake_(false),
       client_auth_cert_needed_(false),
       cert_verifier_(context.cert_verifier),
@@ -401,7 +423,9 @@ SSLClientSocketOpenSSL::SSLClientSocketOpenSSL(
       transport_(transport_socket),
       host_and_port_(host_and_port),
       ssl_config_(ssl_config),
+      ssl_session_cache_shard_(context.ssl_session_cache_shard),
       trying_cached_session_(false),
+      next_handshake_state_(STATE_NONE),
       npn_status_(kNextProtoUnsupported),
       net_log_(transport_socket->socket()->NetLog()) {
 }
@@ -425,7 +449,8 @@ bool SSLClientSocketOpenSSL::Init() {
     return false;
 
   trying_cached_session_ =
-      context->session_cache()->SetSSLSession(ssl_, host_and_port_);
+      context->session_cache()->SetSSLSession(ssl_, host_and_port_,
+                                              ssl_session_cache_shard_);
 
   BIO* ssl_bio = NULL;
   // 0 => use default buffer sizes.
@@ -562,8 +587,8 @@ void SSLClientSocketOpenSSL::GetSSLInfo(SSLInfo* ssl_info) {
       server_cert_verify_result_.is_issued_by_known_root;
   ssl_info->public_key_hashes =
     server_cert_verify_result_.public_key_hashes;
-  ssl_info->client_cert_sent =
-      ssl_config_.send_client_cert && ssl_config_.client_cert;
+  ssl_info->client_cert_sent = was_origin_bound_cert_sent() ||
+      (ssl_config_.send_client_cert && ssl_config_.client_cert);
 
   const SSL_CIPHER* cipher = SSL_get_current_cipher(ssl_);
   CHECK(cipher);
@@ -614,26 +639,25 @@ SSLClientSocket::NextProtoStatus SSLClientSocketOpenSSL::GetNextProto(
 void SSLClientSocketOpenSSL::DoReadCallback(int rv) {
   // Since Run may result in Read being called, clear |user_read_callback_|
   // up front.
-  OldCompletionCallback* c = user_read_callback_;
-  user_read_callback_ = NULL;
+  CompletionCallback c = user_read_callback_;
+  user_read_callback_.Reset();
   user_read_buf_ = NULL;
   user_read_buf_len_ = 0;
-  c->Run(rv);
+  c.Run(rv);
 }
 
 void SSLClientSocketOpenSSL::DoWriteCallback(int rv) {
   // Since Run may result in Write being called, clear |user_write_callback_|
   // up front.
-  OldCompletionCallback* c = user_write_callback_;
-  user_write_callback_ = NULL;
+  CompletionCallback c = user_write_callback_;
+  user_write_callback_.Reset();
   user_write_buf_ = NULL;
   user_write_buf_len_ = 0;
-  c->Run(rv);
+  c.Run(rv);
 }
 
-// StreamSocket methods
-
-int SSLClientSocketOpenSSL::Connect(OldCompletionCallback* callback) {
+// StreamSocket implementation.
+int SSLClientSocketOpenSSL::Connect(const CompletionCallback& callback) {
   net_log_.BeginEvent(NetLog::TYPE_SSL_CONNECT, NULL);
 
   // Set up new ssl object.
@@ -659,6 +683,9 @@ int SSLClientSocketOpenSSL::Connect(OldCompletionCallback* callback) {
 
 void SSLClientSocketOpenSSL::Disconnect() {
   if (ssl_) {
+    // Calling SSL_shutdown prevents the session from being marked as
+    // unresumable.
+    SSL_shutdown(ssl_);
     SSL_free(ssl_);
     ssl_ = NULL;
   }
@@ -677,9 +704,9 @@ void SSLClientSocketOpenSSL::Disconnect() {
   transport_recv_busy_ = false;
   recv_buffer_ = NULL;
 
-  user_connect_callback_ = NULL;
-  user_read_callback_    = NULL;
-  user_write_callback_   = NULL;
+  user_connect_callback_.Reset();
+  user_read_callback_.Reset();
+  user_write_callback_.Reset();
   user_read_buf_         = NULL;
   user_read_buf_len_     = 0;
   user_write_buf_        = NULL;
@@ -693,7 +720,6 @@ void SSLClientSocketOpenSSL::Disconnect() {
 }
 
 int SSLClientSocketOpenSSL::DoHandshakeLoop(int last_io_result) {
-  bool network_moved;
   int rv = last_io_result;
   do {
     // Default to STATE_NONE for next state.
@@ -704,9 +730,6 @@ int SSLClientSocketOpenSSL::DoHandshakeLoop(int last_io_result) {
     State state = next_handshake_state_;
     GotoState(STATE_NONE);
     switch (state) {
-      case STATE_NONE:
-        // we're just pumping data between the buffer and the network
-        break;
       case STATE_HANDSHAKE:
         rv = DoHandshake();
         break;
@@ -717,20 +740,21 @@ int SSLClientSocketOpenSSL::DoHandshakeLoop(int last_io_result) {
       case STATE_VERIFY_CERT_COMPLETE:
         rv = DoVerifyCertComplete(rv);
         break;
+      case STATE_NONE:
       default:
         rv = ERR_UNEXPECTED;
         NOTREACHED() << "unexpected state" << state;
         break;
     }
 
-    // To avoid getting an ERR_IO_PENDING here after handshake complete.
-    if (next_handshake_state_ == STATE_NONE)
-      break;
-
-    // Do the actual network I/O.
-    network_moved = DoTransportIO();
-  } while ((rv != ERR_IO_PENDING || network_moved) &&
-            next_handshake_state_ != STATE_NONE);
+    bool network_moved = DoTransportIO();
+    if (network_moved && next_handshake_state_ == STATE_HANDSHAKE) {
+      // In general we exit the loop if rv is ERR_IO_PENDING.  In this
+      // special case we keep looping even if rv is ERR_IO_PENDING because
+      // the transport IO may allow DoHandshake to make progress.
+      rv = OK;  // This causes us to stay in the loop.
+    }
+  } while (rv != ERR_IO_PENDING && next_handshake_state_ != STATE_NONE);
   return rv;
 }
 
@@ -938,9 +962,11 @@ int SSLClientSocketOpenSSL::BufferSend(void) {
 
   int rv = 0;
   while (send_buffer_) {
-    rv = transport_->socket()->Write(send_buffer_,
-                                     send_buffer_->BytesRemaining(),
-                                     &buffer_send_callback_);
+    rv = transport_->socket()->Write(
+        send_buffer_,
+        send_buffer_->BytesRemaining(),
+        base::Bind(&SSLClientSocketOpenSSL::BufferSendComplete,
+                   base::Unretained(this)));
     if (rv == ERR_IO_PENDING) {
       transport_send_busy_ = true;
       return rv;
@@ -984,8 +1010,10 @@ int SSLClientSocketOpenSSL::BufferRecv(void) {
     return ERR_IO_PENDING;
 
   recv_buffer_ = new IOBuffer(max_write);
-  int rv = transport_->socket()->Read(recv_buffer_, max_write,
-                                      &buffer_recv_callback_);
+  int rv = transport_->socket()->Read(
+      recv_buffer_, max_write,
+      base::Bind(&SSLClientSocketOpenSSL::BufferRecvComplete,
+                 base::Unretained(this)));
   if (rv == ERR_IO_PENDING) {
     transport_recv_busy_ = true;
   } else {
@@ -1019,9 +1047,11 @@ void SSLClientSocketOpenSSL::TransportReadComplete(int result) {
 }
 
 void SSLClientSocketOpenSSL::DoConnectCallback(int rv) {
-  OldCompletionCallback* c = user_connect_callback_;
-  user_connect_callback_ = NULL;
-  c->Run(rv > OK ? OK : rv);
+  if (!user_connect_callback_.is_null()) {
+    CompletionCallback c = user_connect_callback_;
+    user_connect_callback_.Reset();
+    c.Run(rv > OK ? OK : rv);
+  }
 }
 
 void SSLClientSocketOpenSSL::OnHandshakeIOComplete(int result) {
@@ -1033,7 +1063,7 @@ void SSLClientSocketOpenSSL::OnHandshakeIOComplete(int result) {
 }
 
 void SSLClientSocketOpenSSL::OnSendComplete(int result) {
-  if (next_handshake_state_ != STATE_NONE) {
+  if (next_handshake_state_ == STATE_HANDSHAKE) {
     // In handshake phase.
     OnHandshakeIOComplete(result);
     return;
@@ -1061,7 +1091,7 @@ void SSLClientSocketOpenSSL::OnSendComplete(int result) {
 }
 
 void SSLClientSocketOpenSSL::OnRecvComplete(int result) {
-  if (next_handshake_state_ != STATE_NONE) {
+  if (next_handshake_state_ == STATE_HANDSHAKE) {
     // In handshake phase.
     OnHandshakeIOComplete(result);
     return;
@@ -1151,7 +1181,7 @@ base::TimeDelta SSLClientSocketOpenSSL::GetConnectTimeMicros() const {
 
 int SSLClientSocketOpenSSL::Read(IOBuffer* buf,
                                  int buf_len,
-                                 OldCompletionCallback* callback) {
+                                 const CompletionCallback& callback) {
   user_read_buf_ = buf;
   user_read_buf_len_ = buf_len;
 
@@ -1183,7 +1213,7 @@ int SSLClientSocketOpenSSL::DoReadLoop(int result) {
 
 int SSLClientSocketOpenSSL::Write(IOBuffer* buf,
                                   int buf_len,
-                                  OldCompletionCallback* callback) {
+                                  const CompletionCallback& callback) {
   user_write_buf_ = buf;
   user_write_buf_len_ = buf_len;
 

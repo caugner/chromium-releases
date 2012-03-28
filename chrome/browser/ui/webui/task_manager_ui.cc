@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,13 +11,16 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/browser/ui/webui/task_manager_handler.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -60,8 +63,6 @@ ChromeWebUIDataSource* CreateTaskManagerUIHTMLSource() {
   source->AddLocalizedString("inspect", IDS_TASK_MANAGER_INSPECT);
   source->AddLocalizedString("activate", IDS_TASK_MANAGER_ACTIVATE);
   source->set_json_path("strings.js");
-  source->add_resource_path("main.js", IDR_TASK_MANAGER_JS);
-  source->add_resource_path("includes.js", IDR_TASK_MANAGER_INCLUDES_JS);
   source->set_default_resource(IDR_TASK_MANAGER_HTML);
 
   return source;
@@ -75,16 +76,11 @@ ChromeWebUIDataSource* CreateTaskManagerUIHTMLSource() {
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-TaskManagerUI::TaskManagerUI(TabContents* contents) : ChromeWebUI(contents) {
-  TaskManagerHandler* handler =
-      new TaskManagerHandler(TaskManager::GetInstance());
-
-  handler->Attach(this);
-  handler->Init();
-  AddMessageHandler(handler);
+TaskManagerUI::TaskManagerUI(content::WebUI* web_ui) : WebUIController(web_ui) {
+  web_ui->AddMessageHandler(new TaskManagerHandler(TaskManager::GetInstance()));
 
   // Set up the chrome://taskmanager/ source.
   ChromeWebUIDataSource* html_source = CreateTaskManagerUIHTMLSource();
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(html_source);
 }

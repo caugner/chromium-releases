@@ -1,24 +1,30 @@
 
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "content/browser/browser_url_handler.h"
 #include "content/browser/renderer_host/test_backing_store.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/navigation_controller.h"
+#include "content/browser/site_instance_impl.h"
+#include "content/browser/tab_contents/navigation_controller_impl.h"
+#include "content/browser/tab_contents/navigation_entry_impl.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/common/dom_storage_common.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/common/content_client.h"
 #include "content/test/test_browser_context.h"
 #include "ui/gfx/rect.h"
+#include "webkit/forms/password_form.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/glue/webpreferences.h"
-#include "webkit/glue/password_form.h"
 
-using webkit_glue::PasswordForm;
+using content::NavigationController;
+using content::NavigationEntry;
+using content::RenderViewHostDelegate;
+using content::SiteInstance;
+using webkit::forms::PasswordForm;
 
 void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
                         int page_id,
@@ -38,6 +44,28 @@ void InitNavigateParams(ViewHostMsg_FrameNavigate_Params* params,
   params->was_within_same_page = false;
   params->is_post = false;
   params->content_state = webkit_glue::CreateHistoryStateForURL(GURL(url));
+}
+
+void SimulateUpdateRect(RenderWidgetHost* widget,
+                        TransportDIB::Id bitmap,
+                        const gfx::Rect& rect) {
+  ViewHostMsg_UpdateRect_Params params;
+  params.bitmap_rect = rect;
+  params.view_size = params.bitmap_rect.size();
+  params.copy_rects.push_back(params.bitmap_rect);
+  params.flags = 0;
+  params.bitmap = bitmap;
+
+  ViewHostMsg_UpdateRect msg(1, params);
+  widget->OnMessageReceived(msg);
+}
+
+TestRenderViewHost* TestRenderViewHost::GetPendingForController(
+    content::NavigationController* controller) {
+  TabContents* tab_contents = static_cast<TabContents*>(
+      controller->GetWebContents());
+  return static_cast<TestRenderViewHost*>(
+      tab_contents->GetRenderManagerForTesting()->pending_render_view_host());
 }
 
 TestRenderViewHost::TestRenderViewHost(SiteInstance* instance,
@@ -63,7 +91,8 @@ TestRenderViewHost::~TestRenderViewHost() {
   delete view();
 }
 
-bool TestRenderViewHost::CreateRenderView(const string16& frame_name) {
+bool TestRenderViewHost::CreateRenderView(const string16& frame_name,
+                                          int32 max_page_id) {
   DCHECK(!render_view_created_);
   render_view_created_ = true;
   return true;
@@ -144,6 +173,10 @@ gfx::NativeView TestRenderWidgetHostView::GetNativeView() const {
 
 gfx::NativeViewId TestRenderWidgetHostView::GetNativeViewId() const {
   return 0;
+}
+
+gfx::NativeViewAccessible TestRenderWidgetHostView::GetNativeViewAccessible() {
+  return NULL;
 }
 
 bool TestRenderWidgetHostView::HasFocus() const {
@@ -280,7 +313,8 @@ RenderViewHost* TestRenderViewHostFactory::CreateRenderViewHost(
     int routing_id,
     SessionStorageNamespace* session_storage) {
   // See declaration of render_process_host_factory_ below.
-  instance->set_render_process_host_factory(render_process_host_factory_);
+  static_cast<SiteInstanceImpl*>(instance)->
+      set_render_process_host_factory(render_process_host_factory_);
   return new TestRenderViewHost(instance, delegate, routing_id);
 }
 
@@ -294,7 +328,7 @@ RenderViewHostTestHarness::~RenderViewHostTestHarness() {
 }
 
 NavigationController& RenderViewHostTestHarness::controller() {
-  return contents()->controller();
+  return contents()->GetController();
 }
 
 TestTabContents* RenderViewHostTestHarness::contents() {
@@ -302,12 +336,12 @@ TestTabContents* RenderViewHostTestHarness::contents() {
 }
 
 TestRenderViewHost* RenderViewHostTestHarness::rvh() {
-  return static_cast<TestRenderViewHost*>(contents()->render_view_host());
+  return static_cast<TestRenderViewHost*>(contents()->GetRenderViewHost());
 }
 
 TestRenderViewHost* RenderViewHostTestHarness::pending_rvh() {
   return static_cast<TestRenderViewHost*>(
-      contents()->render_manager_for_testing()->pending_render_view_host());
+      contents()->GetRenderManagerForTesting()->pending_render_view_host());
 }
 
 TestRenderViewHost* RenderViewHostTestHarness::active_rvh() {
@@ -338,8 +372,7 @@ TestTabContents* RenderViewHostTestHarness::CreateTestTabContents() {
     browser_context_.reset(new TestBrowserContext());
 
   // This will be deleted when the TabContents goes away.
-  SiteInstance* instance =
-      SiteInstance::CreateSiteInstance(browser_context_.get());
+  SiteInstance* instance = SiteInstance::Create(browser_context_.get());
 
   return new TestTabContents(browser_context_.get(), instance);
 }
@@ -352,7 +385,7 @@ void RenderViewHostTestHarness::Reload() {
   NavigationEntry* entry = controller().GetLastCommittedEntry();
   DCHECK(entry);
   controller().Reload(false);
-  rvh()->SendNavigate(entry->page_id(), entry->url());
+  rvh()->SendNavigate(entry->GetPageID(), entry->GetURL());
 }
 
 void RenderViewHostTestHarness::SetUp() {

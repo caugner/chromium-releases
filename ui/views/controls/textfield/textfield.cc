@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -75,7 +75,7 @@ Textfield::Textfield(StyleFlags style)
       vertical_margins_were_set_(false),
       text_input_type_(ui::TEXT_INPUT_TYPE_TEXT) {
   set_focusable(true);
-  if (IsPassword())
+  if (IsObscured())
     SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
 }
 
@@ -92,6 +92,7 @@ TextfieldController* Textfield::GetController() const {
 
 void Textfield::SetReadOnly(bool read_only) {
   read_only_ = read_only;
+  set_focusable(!read_only);
   if (native_wrapper_) {
     native_wrapper_->UpdateReadOnly();
     native_wrapper_->UpdateTextColor();
@@ -99,34 +100,34 @@ void Textfield::SetReadOnly(bool read_only) {
   }
 }
 
-bool Textfield::IsPassword() const {
-  return style_ & STYLE_PASSWORD;
+bool Textfield::IsObscured() const {
+  return style_ & STYLE_OBSCURED;
 }
 
-void Textfield::SetPassword(bool password) {
-  if (password) {
-    style_ = static_cast<StyleFlags>(style_ | STYLE_PASSWORD);
+void Textfield::SetObscured(bool obscured) {
+  if (obscured) {
+    style_ = static_cast<StyleFlags>(style_ | STYLE_OBSCURED);
     SetTextInputType(ui::TEXT_INPUT_TYPE_PASSWORD);
   } else {
-    style_ = static_cast<StyleFlags>(style_ & ~STYLE_PASSWORD);
+    style_ = static_cast<StyleFlags>(style_ & ~STYLE_OBSCURED);
     SetTextInputType(ui::TEXT_INPUT_TYPE_TEXT);
   }
   if (native_wrapper_)
-    native_wrapper_->UpdateIsPassword();
+    native_wrapper_->UpdateIsObscured();
 }
 
 
 ui::TextInputType Textfield::GetTextInputType() const {
-  if (read_only() || !IsEnabled())
+  if (read_only() || !enabled())
     return ui::TEXT_INPUT_TYPE_NONE;
   return text_input_type_;
 }
 
 void Textfield::SetTextInputType(ui::TextInputType type) {
   text_input_type_ = type;
-  bool should_be_password = type == ui::TEXT_INPUT_TYPE_PASSWORD;
-  if (IsPassword() != should_be_password)
-    SetPassword(should_be_password);
+  bool should_be_obscured = type == ui::TEXT_INPUT_TYPE_PASSWORD;
+  if (IsObscured() != should_be_obscured)
+    SetObscured(should_be_obscured);
 }
 
 void Textfield::SetText(const string16& text) {
@@ -247,7 +248,7 @@ void Textfield::UpdateAllProperties() {
     native_wrapper_->UpdateFont();
     native_wrapper_->UpdateEnabled();
     native_wrapper_->UpdateBorder();
-    native_wrapper_->UpdateIsPassword();
+    native_wrapper_->UpdateIsObscured();
     native_wrapper_->UpdateHorizontalMargins();
     native_wrapper_->UpdateVerticalMargins();
   }
@@ -326,12 +327,15 @@ gfx::Size Textfield::GetPreferredSize() {
   gfx::Insets insets;
   if (draw_border_ && native_wrapper_)
     insets = native_wrapper_->CalculateInsets();
+  // For NativeTextfieldViews, we might use a pre-defined font list (defined in
+  // IDS_UI_FONT_FAMILY_CROS) as the fonts to render text. The fonts in the
+  // list might be different (in name or in size) from |font_|, so we need to
+  // use GetFontHeight() to get the height of the first font in the list to
+  // guide textfield's height.
+  const int font_height = native_wrapper_ ? native_wrapper_->GetFontHeight() :
+                                            font_.GetHeight();
   return gfx::Size(font_.GetExpectedTextWidth(default_width_in_chars_) +
-                       insets.width(), font_.GetHeight() + insets.height());
-}
-
-bool Textfield::IsFocusable() const {
-  return View::IsFocusable() && !read_only_;
+                       insets.width(), font_height + insets.height());
 }
 
 void Textfield::AboutToRequestFocusFromTabTraversal(bool reverse) {
@@ -399,7 +403,7 @@ void Textfield::GetAccessibleState(ui::AccessibleViewState* state) {
   state->name = accessible_name_;
   if (read_only())
     state->state |= ui::AccessibilityTypes::STATE_READONLY;
-  if (IsPassword())
+  if (IsObscured())
     state->state |= ui::AccessibilityTypes::STATE_PROTECTED;
   state->value = text_;
 

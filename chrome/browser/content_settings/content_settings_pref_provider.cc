@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,13 +21,14 @@
 #include "chrome/common/content_settings.h"
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
 #include "googleurl/src/gurl.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -69,9 +70,7 @@ void ClearSettings(ContentSettingsType type,
 // Otherwise, returns false.
 bool GetResourceTypeName(ContentSettingsType content_type,
                          std::string* pref_key) {
-  if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS &&
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableResourceContentSettings)) {
+  if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS) {
     *pref_key = kPerPluginPrefName;
     return true;
   }
@@ -165,7 +164,8 @@ bool PrefProvider::SetWebsiteSetting(
   // sites/origins defined by the |primary_pattern| and the |secondary_pattern|.
   // Default settings are handled by the |DefaultProvider|.
   if (primary_pattern == ContentSettingsPattern::Wildcard() &&
-      secondary_pattern == ContentSettingsPattern::Wildcard()) {
+      secondary_pattern == ContentSettingsPattern::Wildcard() &&
+      resource_identifier.empty()) {
     return false;
   }
 
@@ -200,7 +200,6 @@ bool PrefProvider::SetWebsiteSetting(
                content_type,
                resource_identifier,
                value.get());
-    prefs_->ScheduleSavePersistentPrefs();
   }
 
   NotifyObservers(
@@ -228,7 +227,6 @@ void PrefProvider::ClearAllContentSettingsRules(
       rules_to_delete.push_back(rule_iterator->Next());
 
     map_to_modify->DeleteValues(content_type, "");
-    prefs_->ScheduleSavePersistentPrefs();
   }
 
   for (std::vector<Rule>::const_iterator it = rules_to_delete.begin();
@@ -275,7 +273,6 @@ void PrefProvider::Observe(
         return;
       }
     }
-    prefs_->ScheduleSavePersistentPrefs();
     ReadContentSettingsFromPref(true);
 
     NotifyObservers(ContentSettingsPattern(),
@@ -420,8 +417,6 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
             found = resource_dictionary->GetIntegerWithoutPathExpansion(
                 resource_identifier, &setting);
             DCHECK_NE(CONTENT_SETTING_DEFAULT, setting);
-            setting = ClickToPlayFixup(content_type,
-                                       ContentSetting(setting));
             value_map_.SetValue(pattern_pair.first,
                                 pattern_pair.second,
                                 content_type,
@@ -429,21 +424,18 @@ void PrefProvider::ReadContentSettingsFromPref(bool overwrite) {
                                 Value::CreateIntegerValue(setting));
           }
         }
-      } else {
-        int setting = CONTENT_SETTING_DEFAULT;
-        if (settings_dictionary->GetIntegerWithoutPathExpansion(
-                GetTypeName(ContentSettingsType(i)), &setting)) {
-          DCHECK_NE(CONTENT_SETTING_DEFAULT, setting);
-          setting = FixObsoleteCookiePromptMode(content_type,
-                                                ContentSetting(setting));
-          setting = ClickToPlayFixup(content_type,
-                                     ContentSetting(setting));
-          value_map_.SetValue(pattern_pair.first,
-                              pattern_pair.second,
-                              content_type,
-                              ResourceIdentifier(""),
-                              Value::CreateIntegerValue(setting));
-        }
+      }
+      int setting = CONTENT_SETTING_DEFAULT;
+      if (settings_dictionary->GetIntegerWithoutPathExpansion(
+              GetTypeName(ContentSettingsType(i)), &setting)) {
+        DCHECK_NE(CONTENT_SETTING_DEFAULT, setting);
+        setting = FixObsoleteCookiePromptMode(content_type,
+                                              ContentSetting(setting));
+        value_map_.SetValue(pattern_pair.first,
+                            pattern_pair.second,
+                            content_type,
+                            ResourceIdentifier(""),
+                            Value::CreateIntegerValue(setting));
       }
     }
   }
@@ -477,7 +469,8 @@ void PrefProvider::UpdateObsoletePatternsPref(
 
   if (settings_dictionary) {
     std::string res_dictionary_path;
-    if (GetResourceTypeName(content_type, &res_dictionary_path)) {
+    if (GetResourceTypeName(content_type, &res_dictionary_path) &&
+        !resource_identifier.empty()) {
       DictionaryValue* resource_dictionary = NULL;
       found = settings_dictionary->GetDictionary(
           res_dictionary_path, &resource_dictionary);
@@ -509,11 +502,11 @@ void PrefProvider::UpdateObsoletePatternsPref(
         settings_dictionary->SetWithoutPathExpansion(
             setting_path, Value::CreateIntegerValue(setting));
       }
-      // Remove the settings dictionary if it is empty.
-      if (settings_dictionary->empty()) {
-        all_settings_dictionary->RemoveWithoutPathExpansion(
-            pattern_str, NULL);
-      }
+    }
+    // Remove the settings dictionary if it is empty.
+    if (settings_dictionary->empty()) {
+      all_settings_dictionary->RemoveWithoutPathExpansion(
+          pattern_str, NULL);
     }
   }
 }
@@ -540,7 +533,8 @@ void PrefProvider::UpdatePatternPairsSettings(
 
   if (settings_dictionary) {
     std::string res_dictionary_path;
-    if (GetResourceTypeName(content_type, &res_dictionary_path)) {
+    if (GetResourceTypeName(content_type, &res_dictionary_path) &&
+        !resource_identifier.empty()) {
       DictionaryValue* resource_dictionary = NULL;
       found = settings_dictionary->GetDictionary(
           res_dictionary_path, &resource_dictionary);
@@ -606,10 +600,11 @@ void PrefProvider::UpdateObsoleteGeolocationPref(
   DictionaryPrefUpdate update(prefs_, prefs::kGeolocationContentSettings);
   DictionaryValue* obsolete_geolocation_settings = update.Get();
   DictionaryValue* requesting_origin_settings_dictionary = NULL;
-  obsolete_geolocation_settings->GetDictionaryWithoutPathExpansion(
-      requesting_origin.spec(), &requesting_origin_settings_dictionary);
+  bool settings_found =
+      obsolete_geolocation_settings->GetDictionaryWithoutPathExpansion(
+          requesting_origin.spec(), &requesting_origin_settings_dictionary);
   if (setting == CONTENT_SETTING_DEFAULT) {
-    if (requesting_origin_settings_dictionary) {
+    if (settings_found) {
       requesting_origin_settings_dictionary->RemoveWithoutPathExpansion(
           embedding_origin.spec(), NULL);
       if (requesting_origin_settings_dictionary->empty()) {
@@ -618,7 +613,7 @@ void PrefProvider::UpdateObsoleteGeolocationPref(
       }
     }
   } else {
-    if (!requesting_origin_settings_dictionary) {
+    if (!settings_found) {
       requesting_origin_settings_dictionary = new DictionaryValue;
       obsolete_geolocation_settings->SetWithoutPathExpansion(
           requesting_origin.spec(), requesting_origin_settings_dictionary);
@@ -743,7 +738,6 @@ void PrefProvider::MigrateObsoletePerhostPref() {
           ContentSetting setting = IntToContentSetting(setting_int_value);
 
           setting = FixObsoleteCookiePromptMode(content_type, setting);
-          setting = ClickToPlayFixup(content_type, setting);
 
           if (setting != CONTENT_SETTING_DEFAULT) {
             SetWebsiteSetting(
@@ -1083,8 +1077,10 @@ void PrefProvider::SyncObsoletePrefs() {
     DCHECK(pattern_pair.first.IsValid() && pattern_pair.second.IsValid());
 
     DictionaryValue* settings_dictionary = NULL;
-    pattern_pairs_dictionary->GetDictionaryWithoutPathExpansion(
-        key, &settings_dictionary);
+    bool settings_found =
+        pattern_pairs_dictionary->GetDictionaryWithoutPathExpansion(
+            key, &settings_dictionary);
+    DCHECK(settings_found);
 
     int setting_value = 0;
     if (settings_dictionary->GetInteger(

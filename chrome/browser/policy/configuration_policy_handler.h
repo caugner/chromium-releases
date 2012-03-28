@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/basictypes.h"
 #include "base/values.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
-#include "policy/configuration_policy_type.h"
 
 class PrefValueMap;
 
@@ -39,7 +38,11 @@ class ConfigurationPolicyHandler {
   virtual void ApplyPolicySettings(const PolicyMap& policies,
                                    PrefValueMap* prefs) = 0;
 
-  // Converts sensitive policy values to others more appropriate for displaying.
+  // Modifies the values of some of the policies in |policies| so that they
+  // are more suitable to display to the user. This can be used to remove
+  // sensitive values such as passwords, or to pretty-print values.
+  // The base implementation just converts DictionaryValue policies to a
+  // StringValue representation.
   virtual void PrepareForDisplaying(PolicyMap* policies) const;
 
  private:
@@ -50,7 +53,7 @@ class ConfigurationPolicyHandler {
 // subclassed to handle a single policy (not a combination of policies).
 class TypeCheckingPolicyHandler : public ConfigurationPolicyHandler {
  public:
-  TypeCheckingPolicyHandler(ConfigurationPolicyType policy_type,
+  TypeCheckingPolicyHandler(const char* policy_name,
                             base::Value::Type value_type);
 
   // ConfigurationPolicyHandler methods:
@@ -65,11 +68,11 @@ class TypeCheckingPolicyHandler : public ConfigurationPolicyHandler {
                         PolicyErrorMap* errors,
                         const Value** value);
 
-  ConfigurationPolicyType policy_type() const;
+  const char* policy_name() const;
 
  private:
-  // The ConfigurationPolicyType of the policy.
-  ConfigurationPolicyType policy_type_;
+  // The name of the policy.
+  const char* policy_name_;
 
   // The type the value of the policy should have.
   base::Value::Type value_type_;
@@ -80,9 +83,9 @@ class TypeCheckingPolicyHandler : public ConfigurationPolicyHandler {
 // ConfigurationPolicyHandler for policies that map directly to a preference.
 class SimplePolicyHandler : public TypeCheckingPolicyHandler {
  public:
-  SimplePolicyHandler(ConfigurationPolicyType policy_type,
-                      base::Value::Type value_type,
-                      const char* pref_path);
+  SimplePolicyHandler(const char* policy_name,
+                      const char* pref_path,
+                      base::Value::Type value_type);
   virtual ~SimplePolicyHandler();
 
   // ConfigurationPolicyHandler methods:
@@ -217,10 +220,10 @@ class DefaultSearchPolicyHandler : public ConfigurationPolicyHandler {
   bool CheckIndividualPolicies(const PolicyMap& policies,
                                PolicyErrorMap* errors);
 
-  // Returns true if there is a value for |policy_type| in |policies| and false
+  // Returns true if there is a value for |policy_name| in |policies| and false
   // otherwise.
   bool HasDefaultSearchPolicy(const PolicyMap& policies,
-                              ConfigurationPolicyType policy_type);
+                              const char* policy_name);
 
   // Returns true if any default search policies are specified in |policies| and
   // false otherwise.
@@ -247,6 +250,24 @@ class DefaultSearchPolicyHandler : public ConfigurationPolicyHandler {
 // ConfigurationPolicyHandler for the proxy policies.
 class ProxyPolicyHandler : public ConfigurationPolicyHandler {
  public:
+  // Constants for the "Proxy Server Mode" defined in the policies.
+  // Note that these diverge from internal presentation defined in
+  // ProxyPrefs::ProxyMode for legacy reasons. The following four
+  // PolicyProxyModeType types were not very precise and had overlapping use
+  // cases.
+  enum ProxyModeType {
+    // Disable Proxy, connect directly.
+    PROXY_SERVER_MODE = 0,
+    // Auto detect proxy or use specific PAC script if given.
+    PROXY_AUTO_DETECT_PROXY_SERVER_MODE = 1,
+    // Use manually configured proxy servers (fixed servers).
+    PROXY_MANUALLY_CONFIGURED_PROXY_SERVER_MODE = 2,
+    // Use system proxy server.
+    PROXY_USE_SYSTEM_PROXY_SERVER_MODE = 3,
+
+    MODE_COUNT
+  };
+
   ProxyPolicyHandler();
   virtual ~ProxyPolicyHandler();
 
@@ -258,7 +279,7 @@ class ProxyPolicyHandler : public ConfigurationPolicyHandler {
 
  private:
   const Value* GetProxyPolicyValue(const PolicyMap& policies,
-                                   ConfigurationPolicyType policy);
+                                   const char* policy_name);
 
   // Converts the deprecated ProxyServerMode policy value to a ProxyMode value
   // and places the result in |mode_value|. Returns true if the conversion

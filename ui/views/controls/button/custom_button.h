@@ -76,7 +76,6 @@ class VIEWS_EXPORT CustomButton : public Button,
   virtual void SetHotTracked(bool flag) OVERRIDE;
   virtual bool IsHotTracked() const OVERRIDE;
   virtual void OnEnabledChanged() OVERRIDE;
-  virtual bool IsEnabled() const OVERRIDE;
   virtual std::string GetClassName() const OVERRIDE;
   virtual bool OnMousePressed(const MouseEvent& event) OVERRIDE;
   virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
@@ -119,7 +118,6 @@ class VIEWS_EXPORT CustomButton : public Button,
   virtual void ViewHierarchyChanged(bool is_add,
                                     View* parent,
                                     View* child) OVERRIDE;
-  virtual bool IsFocusable() const OVERRIDE;
   virtual void OnBlur() OVERRIDE;
 
   // The button state (defined in implementation)

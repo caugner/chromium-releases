@@ -13,7 +13,7 @@
 #include "base/basictypes.h"
 #include "base/location.h"
 #include "base/memory/linked_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
@@ -28,6 +28,7 @@ namespace net {
 
 class ClientSocketHandle;
 class GrowableIOBuffer;
+class HostPortPair;
 class HttpNetworkSession;
 class HttpRequestHeaders;
 class HttpResponseInfo;
@@ -47,10 +48,12 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
  public:
   HttpPipelinedConnectionImpl(ClientSocketHandle* connection,
                               Delegate* delegate,
+                              const HostPortPair& origin,
                               const SSLConfig& used_ssl_config,
                               const ProxyInfo& used_proxy_info,
                               const BoundNetLog& net_log,
-                              bool was_npn_negotiated);
+                              bool was_npn_negotiated,
+                              SSLClientSocket::NextProto protocol_negotiated);
   virtual ~HttpPipelinedConnectionImpl();
 
   // HttpPipelinedConnection interface.
@@ -66,8 +69,9 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
   // Used by HttpStreamFactoryImpl.
   virtual const SSLConfig& used_ssl_config() const OVERRIDE;
   virtual const ProxyInfo& used_proxy_info() const OVERRIDE;
-  virtual const NetLog::Source& source() const OVERRIDE;
+  virtual const BoundNetLog& net_log() const OVERRIDE;
   virtual bool was_npn_negotiated() const OVERRIDE;
+  virtual SSLClientSocket::NextProto protocol_negotiated() const OVERRIDE;
 
   // Used by HttpPipelinedStream.
 
@@ -86,14 +90,14 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
                   const HttpRequestHeaders& headers,
                   UploadDataStream* request_body,
                   HttpResponseInfo* response,
-                  OldCompletionCallback* callback);
+                  const CompletionCallback& callback);
 
   int ReadResponseHeaders(int pipeline_id,
-                          OldCompletionCallback* callback);
+                          const CompletionCallback& callback);
 
   int ReadResponseBody(int pipeline_id,
                        IOBuffer* buf, int buf_len,
-                       OldCompletionCallback* callback);
+                       const CompletionCallback& callback);
 
   void Close(int pipeline_id,
              bool not_reusable);
@@ -162,7 +166,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
     HttpRequestHeaders headers;
     UploadDataStream* request_body;
     HttpResponseInfo* response;
-    OldCompletionCallback* callback;
+    CompletionCallback callback;
   };
 
   struct StreamInfo {
@@ -170,9 +174,10 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
     ~StreamInfo();
 
     linked_ptr<HttpStreamParser> parser;
-    OldCompletionCallback* read_headers_callback;
-    OldCompletionCallback* pending_user_callback;
+    CompletionCallback read_headers_callback;
+    CompletionCallback pending_user_callback;
     StreamState state;
+    NetLog::Source source;
   };
 
   typedef std::map<int, StreamInfo> StreamInfoMap;
@@ -256,9 +261,12 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
   // HttpPipelinedSockets indicates the connection was suddenly closed.
   int DoEvictPendingReadHeaders(int result);
 
-  // Reports back to |delegate_| whether pipelining will work. This is called
-  // every time we receive headers.
-  void CheckHeadersForPipelineCompatibility(int result, int pipeline_id);
+  // Determines if the response headers indicate pipelining will work. This is
+  // called every time we receive headers.
+  void CheckHeadersForPipelineCompatibility(int pipeline_id, int result);
+
+  // Reports back to |delegate_| whether pipelining will work.
+  void ReportPipelineFeedback(int pipeline_id, Feedback feedback);
 
   // Posts a task to fire the user's callback in response to SendRequest() or
   // ReadResponseHeaders() completing on an underlying parser. This might be
@@ -267,7 +275,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
   // synchronously, but we've already returned ERR_IO_PENDING to the user's
   // SendRequest() or ReadResponseHeaders() call into us.
   void QueueUserCallback(int pipeline_id,
-                         OldCompletionCallback* callback,
+                         const CompletionCallback& callback,
                          int rv,
                          const tracked_objects::Location& from_here);
 
@@ -280,12 +288,14 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
   ProxyInfo used_proxy_info_;
   BoundNetLog net_log_;
   bool was_npn_negotiated_;
+  // Protocol negotiated with the server.
+  SSLClientSocket::NextProto protocol_negotiated_;
   scoped_refptr<GrowableIOBuffer> read_buf_;
   int next_pipeline_id_;
   bool active_;
   bool usable_;
   bool completed_one_request_;
-  ScopedRunnableMethodFactory<HttpPipelinedConnectionImpl> method_factory_;
+  base::WeakPtrFactory<HttpPipelinedConnectionImpl> weak_factory_;
 
   StreamInfoMap stream_info_map_;
 
@@ -295,12 +305,10 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnectionImpl
   scoped_ptr<PendingSendRequest> active_send_request_;
   SendRequestState send_next_state_;
   bool send_still_on_call_stack_;
-  OldCompletionCallbackImpl<HttpPipelinedConnectionImpl> send_io_callback_;
 
   ReadHeadersState read_next_state_;
   int active_read_id_;
   bool read_still_on_call_stack_;
-  OldCompletionCallbackImpl<HttpPipelinedConnectionImpl> read_io_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(HttpPipelinedConnectionImpl);
 };

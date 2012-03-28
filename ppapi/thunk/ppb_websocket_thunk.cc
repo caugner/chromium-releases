@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -71,14 +71,14 @@ int32_t SendMessage(PP_Resource resource, PP_Var message) {
 uint64_t GetBufferedAmount(PP_Resource resource) {
   EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
-    return PP_ERROR_BADRESOURCE;
+    return 0;
   return enter.object()->GetBufferedAmount();
 }
 
 uint16_t GetCloseCode(PP_Resource resource) {
   EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
-    return PP_ERROR_BADRESOURCE;
+    return 0;
   return enter.object()->GetCloseCode();
 }
 
@@ -110,10 +110,10 @@ PP_Var GetProtocol(PP_Resource resource) {
   return enter.object()->GetProtocol();
 }
 
-PP_WebSocketReadyState_Dev GetReadyState(PP_Resource resource) {
+PP_WebSocketReadyState GetReadyState(PP_Resource resource) {
   EnterResource<PPB_WebSocket_API> enter(resource, false);
   if (enter.failed())
-    return PP_WEBSOCKETREADYSTATE_INVALID_DEV;
+    return PP_WEBSOCKETREADYSTATE_INVALID;
   return enter.object()->GetReadyState();
 }
 
@@ -124,8 +124,7 @@ PP_Var GetURL(PP_Resource resource) {
   return enter.object()->GetURL();
 }
 
-
-const PPB_WebSocket_Dev g_ppb_websocket_thunk = {
+const PPB_WebSocket_1_0 g_ppb_websocket_1_0_thunk = {
   &Create,
   &IsWebSocket,
   &Connect,
@@ -144,8 +143,8 @@ const PPB_WebSocket_Dev g_ppb_websocket_thunk = {
 
 }  // namespace
 
-const PPB_WebSocket_Dev* GetPPB_WebSocket_Dev_Thunk() {
-  return &g_ppb_websocket_thunk;
+const PPB_WebSocket_1_0* GetPPB_WebSocket_1_0_Thunk() {
+  return &g_ppb_websocket_1_0_thunk;
 }
 
 }  // namespace thunk

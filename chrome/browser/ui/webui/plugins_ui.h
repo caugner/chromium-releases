@@ -6,14 +6,14 @@
 #define CHROME_BROWSER_UI_WEBUI_PLUGINS_UI_H_
 #pragma once
 
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
 
 class PrefService;
 class RefCountedMemory;
 
-class PluginsUI : public ChromeWebUI {
+class PluginsUI : public content::WebUIController {
  public:
-  explicit PluginsUI(TabContents* contents);
+  explicit PluginsUI(content::WebUI* web_ui);
 
   static RefCountedMemory* GetFaviconResourceBytes();
   static void RegisterUserPrefs(PrefService* prefs);

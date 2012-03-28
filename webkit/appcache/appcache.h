@@ -60,8 +60,13 @@ class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
 
   const EntryMap& entries() const { return entries_; }
 
-  // Returns the URL of the resource used as the fallback for 'namespace_url'.
-  GURL GetFallbackEntryUrl(const GURL& namespace_url) const;
+  // Returns the URL of the resource used as entry for 'namespace_url'.
+  GURL GetFallbackEntryUrl(const GURL& namespace_url) const {
+    return GetNamespaceEntryUrl(fallback_namespaces_, namespace_url);
+  }
+  GURL GetInterceptEntryUrl(const GURL& namespace_url) const {
+    return GetNamespaceEntryUrl(intercept_namespaces_, namespace_url);
+  }
 
   AppCacheHosts& associated_hosts() { return associated_hosts_; }
 
@@ -92,7 +97,8 @@ class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
   void InitializeWithDatabaseRecords(
       const AppCacheDatabase::CacheRecord& cache_record,
       const std::vector<AppCacheDatabase::EntryRecord>& entries,
-      const std::vector<AppCacheDatabase::FallbackNameSpaceRecord>& fallbacks,
+      const std::vector<AppCacheDatabase::NamespaceRecord>& intercepts,
+      const std::vector<AppCacheDatabase::NamespaceRecord>& fallbacks,
       const std::vector<AppCacheDatabase::OnlineWhiteListRecord>& whitelists);
 
   // Returns the database records to be stored in the AppCacheDatabase
@@ -101,12 +107,14 @@ class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
       const AppCacheGroup* group,
       AppCacheDatabase::CacheRecord* cache_record,
       std::vector<AppCacheDatabase::EntryRecord>* entries,
-      std::vector<AppCacheDatabase::FallbackNameSpaceRecord>* fallbacks,
+      std::vector<AppCacheDatabase::NamespaceRecord>* intercepts,
+      std::vector<AppCacheDatabase::NamespaceRecord>* fallbacks,
       std::vector<AppCacheDatabase::OnlineWhiteListRecord>* whitelists);
 
   bool FindResponseForRequest(const GURL& url,
-      AppCacheEntry* found_entry, AppCacheEntry* found_fallback_entry,
-      GURL* found_fallback_namespace, bool* found_network_namespace);
+      AppCacheEntry* found_entry, GURL* found_intercept_namespace,
+      AppCacheEntry* found_fallback_entry, GURL* found_fallback_namespace,
+      bool* found_network_namespace);
 
   // Populates the 'infos' vector with an element per entry in the appcache.
   void ToResourceInfoVector(AppCacheResourceInfoVector* infos) const;
@@ -128,7 +136,17 @@ class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
   void set_owning_group(AppCacheGroup* group) { owning_group_ = group; }
 
   // FindResponseForRequest helpers
-  FallbackNamespace* FindFallbackNamespace(const GURL& url);
+  const Namespace* FindInterceptNamespace(const GURL& url) {
+    return FindNamespace(intercept_namespaces_, url);
+  }
+  const Namespace* FindFallbackNamespace(const GURL& url) {
+    return FindNamespace(fallback_namespaces_, url);
+  }
+  const Namespace* FindNamespace(const NamespaceVector& namespaces,
+                                 const GURL& url);
+
+  GURL GetNamespaceEntryUrl(const NamespaceVector& namespaces,
+                            const GURL& namespace_url) const;
 
   // Use AppCacheHost::Associate*Cache() to manipulate host association.
   void AssociateHost(AppCacheHost* host) {
@@ -142,7 +160,8 @@ class APPCACHE_EXPORT AppCache : public base::RefCounted<AppCache> {
 
   EntryMap entries_;    // contains entries of all types
 
-  std::vector<FallbackNamespace> fallback_namespaces_;
+  NamespaceVector intercept_namespaces_;
+  NamespaceVector fallback_namespaces_;
   std::vector<GURL> online_whitelist_namespaces_;
   bool online_whitelist_all_;
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "chrome/browser/chromeos/status/memory_menu_button.h"
 #include "chrome/browser/chromeos/status/network_menu_button.h"
 #include "chrome/browser/chromeos/status/power_menu_button.h"
+#include "chrome/browser/chromeos/status/volume_menu_button.h"
 #include "chrome/browser/chromeos/view_ids.h"
 #include "chrome/common/chrome_switches.h"
 
@@ -71,13 +72,6 @@ void StatusAreaViewChromeos::UpdateClockText() {
     clock_button->UpdateText();
 }
 
-void StatusAreaViewChromeos::SetDefaultUse24HourClock(bool use_24hour_clock) {
-  ClockMenuButton* clock_button =
-      static_cast<ClockMenuButton*>(GetViewByID(VIEW_ID_STATUS_BUTTON_CLOCK));
-  if (clock_button)
-    clock_button->SetDefaultUse24HourClock(use_24hour_clock);
-}
-
 // static
 void StatusAreaViewChromeos::AddChromeosButtons(
     StatusAreaView* status_area,
@@ -96,6 +90,7 @@ void StatusAreaViewChromeos::AddChromeosButtons(
   if (clock_button)
     *clock_button = clock;
 
+  status_area->AddButton(new VolumeMenuButton(delegate), no_border);
   status_area->AddButton(new InputMethodMenuButton(delegate), no_border);
   status_area->AddButton(new NetworkMenuButton(delegate), no_border);
   status_area->AddButton(new PowerMenuButton(delegate), no_border);

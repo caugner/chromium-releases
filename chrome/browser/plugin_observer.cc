@@ -1,33 +1,46 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/plugin_observer.h"
 
+#include "base/auto_reset.h"
 #include "base/bind.h"
+#include "base/stl_util.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/plugin_finder.h"
-#include "chrome/browser/plugin_installer.h"
-#include "chrome/browser/plugin_installer_infobar_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
+#include "grit/theme_resources.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "webkit/plugins/npapi/plugin_group.h"
 #include "webkit/plugins/webplugininfo.h"
+
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+#include "chrome/browser/plugin_installer.h"
+#include "chrome/browser/plugin_installer_infobar_delegate.h"
+#include "chrome/browser/plugin_installer_observer.h"
+#include "chrome/browser/ui/tab_modal_confirm_dialog_delegate.h"
+#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::UserMetricsAction;
+using content::WebContents;
 
 namespace {
 
@@ -71,10 +84,12 @@ bool PluginInfoBarDelegate::Cancel() {
 }
 
 bool PluginInfoBarDelegate::LinkClicked(WindowOpenDisposition disposition) {
-  owner()->tab_contents()->OpenURL(
-      google_util::AppendGoogleLocaleParam(GURL(GetLearnMoreURL())), GURL(),
+  OpenURLParams params(
+      GURL(GetLearnMoreURL()), Referrer(),
       (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK);
+      content::PAGE_TRANSITION_LINK,
+      false);
+  owner()->web_contents()->OpenURL(params);
   return false;
 }
 
@@ -119,27 +134,27 @@ BlockedPluginInfoBarDelegate::BlockedPluginInfoBarDelegate(
     const string16& utf16_name)
     : PluginInfoBarDelegate(infobar_helper, utf16_name),
       content_settings_(content_settings) {
-  UserMetrics::RecordAction(UserMetricsAction("BlockedPluginInfobar.Shown"));
+  content::RecordAction(UserMetricsAction("BlockedPluginInfobar.Shown"));
   std::string name = UTF16ToUTF8(utf16_name);
   if (name == webkit::npapi::PluginGroup::kJavaGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("BlockedPluginInfobar.Shown.Java"));
   else if (name == webkit::npapi::PluginGroup::kQuickTimeGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("BlockedPluginInfobar.Shown.QuickTime"));
   else if (name == webkit::npapi::PluginGroup::kShockwaveGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("BlockedPluginInfobar.Shown.Shockwave"));
   else if (name == webkit::npapi::PluginGroup::kRealPlayerGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("BlockedPluginInfobar.Shown.RealPlayer"));
   else if (name == webkit::npapi::PluginGroup::kWindowsMediaPlayerGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("BlockedPluginInfobar.Shown.WindowsMediaPlayer"));
 }
 
 BlockedPluginInfoBarDelegate::~BlockedPluginInfoBarDelegate() {
-  UserMetrics::RecordAction(UserMetricsAction("BlockedPluginInfobar.Closed"));
+  content::RecordAction(UserMetricsAction("BlockedPluginInfobar.Closed"));
 }
 
 std::string BlockedPluginInfoBarDelegate::GetLearnMoreURL() const {
@@ -157,16 +172,16 @@ string16 BlockedPluginInfoBarDelegate::GetButtonLabel(
 }
 
 bool BlockedPluginInfoBarDelegate::Accept() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("BlockedPluginInfobar.AllowThisTime"));
   return PluginInfoBarDelegate::Cancel();
 }
 
 bool BlockedPluginInfoBarDelegate::Cancel() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("BlockedPluginInfobar.AlwaysAllow"));
-  content_settings_->AddExceptionForURL(owner()->tab_contents()->GetURL(),
-                                        owner()->tab_contents()->GetURL(),
+  content_settings_->AddExceptionForURL(owner()->web_contents()->GetURL(),
+                                        owner()->web_contents()->GetURL(),
                                         CONTENT_SETTINGS_TYPE_PLUGINS,
                                         std::string(),
                                         CONTENT_SETTING_ALLOW);
@@ -174,13 +189,13 @@ bool BlockedPluginInfoBarDelegate::Cancel() {
 }
 
 void BlockedPluginInfoBarDelegate::InfoBarDismissed() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("BlockedPluginInfobar.Dismissed"));
 }
 
 bool BlockedPluginInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("BlockedPluginInfobar.LearnMore"));
   return PluginInfoBarDelegate::LinkClicked(disposition);
 }
@@ -216,30 +231,30 @@ OutdatedPluginInfoBarDelegate::OutdatedPluginInfoBarDelegate(
     const GURL& update_url)
     : PluginInfoBarDelegate(infobar_helper, utf16_name),
       update_url_(update_url) {
-  UserMetrics::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Shown"));
+  content::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Shown"));
   std::string name = UTF16ToUTF8(utf16_name);
   if (name == webkit::npapi::PluginGroup::kJavaGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OutdatedPluginInfobar.Shown.Java"));
   else if (name == webkit::npapi::PluginGroup::kQuickTimeGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OutdatedPluginInfobar.Shown.QuickTime"));
   else if (name == webkit::npapi::PluginGroup::kShockwaveGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OutdatedPluginInfobar.Shown.Shockwave"));
   else if (name == webkit::npapi::PluginGroup::kRealPlayerGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OutdatedPluginInfobar.Shown.RealPlayer"));
   else if (name == webkit::npapi::PluginGroup::kSilverlightGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OutdatedPluginInfobar.Shown.Silverlight"));
   else if (name == webkit::npapi::PluginGroup::kAdobeReaderGroupName)
-    UserMetrics::RecordAction(
+    content::RecordAction(
         UserMetricsAction("OutdatedPluginInfobar.Shown.Reader"));
 }
 
 OutdatedPluginInfoBarDelegate::~OutdatedPluginInfoBarDelegate() {
-  UserMetrics::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Closed"));
+  content::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Closed"));
 }
 
 std::string OutdatedPluginInfoBarDelegate::GetLearnMoreURL() const {
@@ -257,50 +272,165 @@ string16 OutdatedPluginInfoBarDelegate::GetButtonLabel(
 }
 
 bool OutdatedPluginInfoBarDelegate::Accept() {
-  UserMetrics::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Update"));
-  owner()->tab_contents()->OpenURL(update_url_, GURL(), NEW_FOREGROUND_TAB,
-                                   content::PAGE_TRANSITION_LINK);
+  content::RecordAction(UserMetricsAction("OutdatedPluginInfobar.Update"));
+  OpenURLParams params(
+      update_url_, Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK, false);
+  owner()->web_contents()->OpenURL(params);
   return false;
 }
 
 bool OutdatedPluginInfoBarDelegate::Cancel() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("OutdatedPluginInfobar.AllowThisTime"));
   return PluginInfoBarDelegate::Cancel();
 }
 
 void OutdatedPluginInfoBarDelegate::InfoBarDismissed() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("OutdatedPluginInfobar.Dismissed"));
 }
 
 bool OutdatedPluginInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("OutdatedPluginInfobar.LearnMore"));
   return PluginInfoBarDelegate::LinkClicked(disposition);
 }
 
-}  // namespace
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+class ConfirmInstallDialogDelegate : public TabModalConfirmDialogDelegate,
+                                     public WeakPluginInstallerObserver {
+ public:
+  ConfirmInstallDialogDelegate(WebContents* web_contents,
+                               PluginInstaller* installer);
 
+  // TabModalConfirmDialogDelegate methods:
+  virtual string16 GetTitle() OVERRIDE;
+  virtual string16 GetMessage() OVERRIDE;
+  virtual string16 GetAcceptButtonTitle() OVERRIDE;
+  virtual void OnAccepted() OVERRIDE;
+  virtual void OnCanceled() OVERRIDE;
+
+  // PluginInstallerObserver methods:
+  virtual void DidStartDownload() OVERRIDE;
+  virtual void OnlyWeakObserversLeft() OVERRIDE;
+
+ private:
+  net::URLRequestContextGetter* request_context_;
+};
+
+ConfirmInstallDialogDelegate::ConfirmInstallDialogDelegate(
+    WebContents* web_contents,
+    PluginInstaller* installer)
+    : TabModalConfirmDialogDelegate(web_contents),
+      WeakPluginInstallerObserver(installer),
+      request_context_(web_contents->GetBrowserContext()->GetRequestContext()) {
+}
+
+string16 ConfirmInstallDialogDelegate::GetTitle() {
+  return l10n_util::GetStringFUTF16(
+      IDS_PLUGIN_CONFIRM_INSTALL_DIALOG_TITLE, installer()->name());
+}
+
+string16 ConfirmInstallDialogDelegate::GetMessage() {
+  return l10n_util::GetStringFUTF16(IDS_PLUGIN_CONFIRM_INSTALL_DIALOG_MSG,
+                                    installer()->name());
+}
+
+string16 ConfirmInstallDialogDelegate::GetAcceptButtonTitle() {
+  return l10n_util::GetStringUTF16(
+      IDS_PLUGIN_CONFIRM_INSTALL_DIALOG_ACCEPT_BUTTON);
+}
+
+void ConfirmInstallDialogDelegate::OnAccepted() {
+  installer()->StartInstalling(request_context_);
+}
+
+void ConfirmInstallDialogDelegate::OnCanceled() {
+}
+
+void ConfirmInstallDialogDelegate::DidStartDownload() {
+  Cancel();
+}
+
+void ConfirmInstallDialogDelegate::OnlyWeakObserversLeft() {
+  Cancel();
+}
+#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+
+}  // namespace
 
 // PluginObserver -------------------------------------------------------------
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+class PluginObserver::MissingPluginHost : public PluginInstallerObserver {
+ public:
+  MissingPluginHost(PluginObserver* observer,
+                    int routing_id,
+                    PluginInstaller* installer)
+      : PluginInstallerObserver(installer),
+        observer_(observer),
+        routing_id_(routing_id) {
+    switch (installer->state()) {
+      case PluginInstaller::kStateIdle: {
+        observer->Send(new ChromeViewMsg_FoundMissingPlugin(routing_id_,
+                                                            installer->name()));
+        break;
+      }
+      case PluginInstaller::kStateDownloading: {
+        DidStartDownload();
+        break;
+      }
+    }
+  }
+
+  // PluginInstallerObserver methods:
+  virtual void DidStartDownload() OVERRIDE {
+    observer_->Send(new ChromeViewMsg_StartedDownloadingPlugin(routing_id_));
+  }
+
+  virtual void DidFinishDownload() OVERRIDE {
+    observer_->Send(new ChromeViewMsg_FinishedDownloadingPlugin(routing_id_));
+  }
+
+  virtual void DownloadError(const std::string& msg) OVERRIDE {
+    observer_->Send(new ChromeViewMsg_ErrorDownloadingPlugin(routing_id_, msg));
+  }
+
+ private:
+  // Weak pointer; owns us.
+  PluginObserver* observer_;
+
+  int routing_id_;
+};
+#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+
 PluginObserver::PluginObserver(TabContentsWrapper* tab_contents)
-    : TabContentsObserver(tab_contents->tab_contents()),
+    : content::WebContentsObserver(tab_contents->web_contents()),
       ALLOW_THIS_IN_INITIALIZER_LIST(weak_ptr_factory_(this)),
       tab_contents_(tab_contents) {
 }
 
 PluginObserver::~PluginObserver() {
+#if defined(ENABLE_PLUGIN_INSTALLATION)
+  STLDeleteValues(&missing_plugins_);
+#endif
 }
 
 bool PluginObserver::OnMessageReceived(const IPC::Message& message) {
   IPC_BEGIN_MESSAGE_MAP(PluginObserver, message)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_BlockedOutdatedPlugin,
                         OnBlockedOutdatedPlugin)
+#if defined(ENABLE_PLUGIN_INSTALLATION)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FindMissingPlugin,
                         OnFindMissingPlugin)
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_RemoveMissingPluginHost,
+                        OnRemoveMissingPluginHost)
+#endif
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_OpenAboutPlugins,
+                        OnOpenAboutPlugins)
+
     IPC_MESSAGE_UNHANDLED(return false)
   IPC_END_MESSAGE_MAP()
 
@@ -318,6 +448,7 @@ void PluginObserver::OnBlockedOutdatedPlugin(const string16& name,
       new OutdatedPluginInfoBarDelegate(infobar_helper, name, update_url));
 }
 
+#if defined(ENABLE_PLUGIN_INSTALLATION)
 void PluginObserver::OnFindMissingPlugin(int placeholder_id,
                                          const std::string& mime_type) {
   PluginFinder* plugin_finder = PluginFinder::GetInstance();
@@ -327,35 +458,57 @@ void PluginObserver::OnFindMissingPlugin(int placeholder_id,
       base::Bind(&PluginObserver::FoundMissingPlugin,
                  weak_ptr_factory_.GetWeakPtr(), placeholder_id, mime_type),
       base::Bind(&PluginObserver::DidNotFindMissingPlugin,
-                 weak_ptr_factory_.GetWeakPtr(), placeholder_id, mime_type));
+                 weak_ptr_factory_.GetWeakPtr(), placeholder_id));
 }
 
 void PluginObserver::FoundMissingPlugin(int placeholder_id,
                                         const std::string& mime_type,
                                         PluginInstaller* installer) {
-  Send(new ChromeViewMsg_FoundMissingPlugin(placeholder_id, installer->name()));
+  missing_plugins_[placeholder_id] =
+      new MissingPluginHost(this, placeholder_id, installer);
   InfoBarTabHelper* infobar_helper = tab_contents_->infobar_tab_helper();
-  infobar_helper->AddInfoBar(new PluginInstallerInfoBarDelegate(
-      infobar_helper,
-      installer->name(),
-      installer->help_url(),
+  InfoBarDelegate* delegate = PluginInstallerInfoBarDelegate::Create(
+      infobar_helper, installer,
       base::Bind(&PluginObserver::InstallMissingPlugin,
-                 weak_ptr_factory_.GetWeakPtr(), installer)));
+                 weak_ptr_factory_.GetWeakPtr(), installer));
+  infobar_helper->AddInfoBar(delegate);
 }
 
-void PluginObserver::DidNotFindMissingPlugin(int placeholder_id,
-                                             const std::string& mime_type) {
+void PluginObserver::DidNotFindMissingPlugin(int placeholder_id) {
   Send(new ChromeViewMsg_DidNotFindMissingPlugin(placeholder_id));
 }
 
 void PluginObserver::InstallMissingPlugin(PluginInstaller* installer) {
   if (installer->url_for_display()) {
-    tab_contents()->OpenURL(OpenURLParams(
+    web_contents()->OpenURL(OpenURLParams(
         installer->plugin_url(),
-        content::Referrer(tab_contents()->GetURL(),
+        content::Referrer(web_contents()->GetURL(),
                           WebKit::WebReferrerPolicyDefault),
         NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_TYPED, false));
+    installer->DidOpenDownloadURL();
   } else {
-    NOTIMPLEMENTED();
+    browser::ShowTabModalConfirmDialog(
+        new ConfirmInstallDialogDelegate(web_contents(), installer),
+        tab_contents_);
   }
+}
+
+void PluginObserver::OnRemoveMissingPluginHost(int placeholder_id) {
+  std::map<int, MissingPluginHost*>::iterator it =
+      missing_plugins_.find(placeholder_id);
+  if (it == missing_plugins_.end()) {
+    NOTREACHED();
+    return;
+  }
+  delete it->second;
+  missing_plugins_.erase(it);
+}
+#endif  // defined(ENABLE_PLUGIN_INSTALLATION)
+
+void PluginObserver::OnOpenAboutPlugins() {
+    web_contents()->OpenURL(OpenURLParams(
+        GURL(chrome::kAboutPluginsURL),
+        content::Referrer(web_contents()->GetURL(),
+                          WebKit::WebReferrerPolicyDefault),
+        NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_TYPED, false));
 }

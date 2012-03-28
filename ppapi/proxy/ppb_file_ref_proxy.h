@@ -11,9 +11,9 @@
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_time.h"
-#include "ppapi/cpp/completion_callback.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/proxy_non_thread_safe_ref_count.h"
+#include "ppapi/utility/completion_callback_factory.h"
 
 namespace ppapi {
 
@@ -31,6 +31,8 @@ class PPB_FileRef_Proxy : public InterfaceProxy {
 
   static PP_Resource CreateProxyResource(PP_Resource file_system,
                                          const char* path);
+  static PP_Resource CreateProxyResource(
+      const PPB_FileRef_CreateInfo& serialized);
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -60,7 +62,7 @@ class PPB_FileRef_Proxy : public InterfaceProxy {
   static const ApiID kApiID = API_ID_PPB_FILE_REF;
 
  private:
-  // Message handlers.
+  // Plugin -> host message handlers.
   void OnMsgCreate(const HostResource& file_system,
                    const std::string& path,
                    PPB_FileRef_CreateInfo* result);

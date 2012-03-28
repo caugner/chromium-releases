@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "remoting/protocol/session_config.h"
 
 namespace net {
+class IPEndPoint;
 class Socket;
 class StreamSocket;
 }  // namespace net
@@ -36,10 +37,14 @@ class Session : public base::NonThreadSafe {
 
     // Sent or received session-initiate, but haven't sent or received
     // session-accept.
+    // TODO(sergeyu): Do we really need this state?
     CONNECTING,
 
-    // Session has been accepted.
+    // Session has been accepted and is pending authentication.
     CONNECTED,
+
+    // Session has been connected and authenticated.
+    AUTHENTICATED,
 
     // Session has been closed.
     CLOSED,
@@ -56,9 +61,19 @@ class Session : public base::NonThreadSafe {
     INCOMPATIBLE_PROTOCOL,
     AUTHENTICATION_FAILED,
     CHANNEL_CONNECTION_ERROR,
+    UNKNOWN_ERROR,
   };
 
-  typedef base::Callback<void(State)> StateChangeCallback;
+  // State change callbacks are called after session state has
+  // changed. It is not safe to destroy the session from within the
+  // handler unless |state| is CLOSED or FAILED.
+  typedef base::Callback<void(State state)> StateChangeCallback;
+
+  // TODO(lambroslambrou): Merge this together with StateChangeCallback into a
+  // single interface.
+  typedef base::Callback<void(
+      const std::string& channel_name,
+      const net::IPEndPoint& end_point)> RouteChangeCallback;
 
   // TODO(sergeyu): Specify connection error code when channel
   // connection fails.
@@ -69,8 +84,12 @@ class Session : public base::NonThreadSafe {
   virtual ~Session() { }
 
   // Set callback that is called when state of the connection is changed.
-  // Must be called on the jingle thread only.
   virtual void SetStateChangeCallback(const StateChangeCallback& callback) = 0;
+
+  // Set callback that is called when the route for a channel is changed.
+  // The callback must be registered immediately after
+  // JingleSessionManager::Connect() or from OnIncomingSession() callback.
+  virtual void SetRouteChangeCallback(const RouteChangeCallback& callback) = 0;
 
   // Returns error code for a failed session.
   virtual Error error() = 0;
@@ -80,8 +99,8 @@ class Session : public base::NonThreadSafe {
   // callback is called with NULL if connection failed for any reason.
   // Ownership of the channel socket is given to the caller when the
   // callback is called. All channels must be destroyed before the
-  // session is destroyed. Can be called only when in CONNECTING or
-  // CONNECTED state.
+  // session is destroyed. Can be called only when in CONNECTING,
+  // CONNECTED or AUTHENTICATED states.
   virtual void CreateStreamChannel(
       const std::string& name, const StreamChannelCallback& callback) = 0;
   virtual void CreateDatagramChannel(

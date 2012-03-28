@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,11 +42,12 @@ class NonFrontendDataTypeController : public DataTypeController {
  public:
   NonFrontendDataTypeController(
       ProfileSyncComponentsFactory* profile_sync_factory,
-      Profile* profile);
+      Profile* profile,
+      ProfileSyncService* sync_service);
   virtual ~NonFrontendDataTypeController();
 
   // DataTypeController interface.
-  virtual void Start(StartCallback* start_callback) OVERRIDE;
+  virtual void Start(const StartCallback& start_callback) OVERRIDE;
   virtual void Stop() OVERRIDE;
   virtual syncable::ModelType type() const = 0;
   virtual browser_sync::ModelSafeGroup model_safe_group() const = 0;
@@ -134,7 +135,7 @@ class NonFrontendDataTypeController : public DataTypeController {
   ProfileSyncComponentsFactory* profile_sync_factory() const;
   Profile* profile() const;
   ProfileSyncService* profile_sync_service() const;
-  void set_start_callback(StartCallback* callback);
+  void set_start_callback(const StartCallback& callback);
   void set_state(State state);
 
   virtual AssociatorInterface* associator() const;
@@ -149,7 +150,7 @@ class NonFrontendDataTypeController : public DataTypeController {
 
   State state_;
 
-  scoped_ptr<StartCallback> start_callback_;
+  StartCallback start_callback_;
   scoped_ptr<AssociatorInterface> model_associator_;
   scoped_ptr<ChangeProcessor> change_processor_;
 

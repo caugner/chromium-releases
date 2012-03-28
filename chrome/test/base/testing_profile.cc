@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/top_sites.h"
-#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/proxy_service_factory.h"
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/desktop_notification_service_factory.h"
@@ -36,9 +35,9 @@
 #include "chrome/browser/search_engines/template_url_fetcher.h"
 #include "chrome/browser/search_engines/template_url_service.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/speech/chrome_speech_input_preferences.h"
 #include "chrome/browser/sync/profile_sync_service_mock.h"
-#include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -59,6 +58,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/fileapi/file_system_context.h"
+#include "webkit/fileapi/file_system_options.h"
 #include "webkit/quota/mock_quota_manager.h"
 #include "webkit/quota/quota_manager.h"
 
@@ -68,6 +68,8 @@
 
 using base::Time;
 using content::BrowserThread;
+using content::DownloadManager;
+using content::HostZoomMap;
 using testing::NiceMock;
 using testing::Return;
 
@@ -123,6 +125,14 @@ class TestExtensionURLRequestContextGetter
 
 ProfileKeyedService* CreateTestDesktopNotificationService(Profile* profile) {
   return new DesktopNotificationService(profile, NULL);
+}
+
+fileapi::FileSystemOptions CreateTestingFileSystemOptions(bool is_incognito) {
+  return fileapi::FileSystemOptions(
+      is_incognito
+          ? fileapi::FileSystemOptions::PROFILE_MODE_INCOGNITO
+          : fileapi::FileSystemOptions::PROFILE_MODE_NORMAL,
+      std::vector<std::string>());
 }
 
 }  // namespace
@@ -204,6 +214,7 @@ void TestingProfile::Init() {
 }
 
 void TestingProfile::FinishInit() {
+  DCHECK(content::NotificationService::current());
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PROFILE_CREATED,
       content::Source<Profile>(static_cast<Profile*>(this)),
@@ -214,6 +225,7 @@ void TestingProfile::FinishInit() {
 }
 
 TestingProfile::~TestingProfile() {
+  DCHECK(content::NotificationService::current());
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_PROFILE_DESTROYED,
       content::Source<Profile>(static_cast<Profile*>(this)),
@@ -257,7 +269,7 @@ void TestingProfile::DestroyHistoryService() {
     return;
 
   history_service_->NotifyRenderProcessHostDestruction(0);
-  history_service_->SetOnBackendDestroyTask(new MessageLoop::QuitTask);
+  history_service_->SetOnBackendDestroyTask(MessageLoop::QuitClosure());
   history_service_->Cleanup();
   history_service_ = NULL;
 
@@ -269,7 +281,7 @@ void TestingProfile::DestroyHistoryService() {
 
   // Make sure we don't have any event pending that could disrupt the next
   // test.
-  MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   MessageLoop::current()->Run();
 }
 
@@ -564,7 +576,6 @@ PasswordStore* TestingProfile::GetPasswordStore(ServiceAccessType access) {
 }
 
 void TestingProfile::SetPrefService(PrefService* prefs) {
-  DCHECK(!prefs_.get());
   prefs_.reset(prefs);
 }
 
@@ -607,9 +618,7 @@ fileapi::FileSystemContext* TestingProfile::GetFileSystemContext() {
       GetExtensionSpecialStoragePolicy(),
       NULL,
       GetPath(),
-      IsOffTheRecord(),
-      true,  // Allow file access from files.
-      NULL);
+      CreateTestingFileSystemOptions(IsOffTheRecord()));
   }
   return file_system_context_.get();
 }
@@ -676,12 +685,6 @@ const content::ResourceContext& TestingProfile::GetResourceContext() {
   return *content::MockResourceContext::GetInstance();
 }
 
-FindBarState* TestingProfile::GetFindBarState() {
-  if (!find_bar_state_.get())
-    find_bar_state_.reset(new FindBarState());
-  return find_bar_state_.get();
-}
-
 HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
   if (!host_content_settings_map_.get()) {
     host_content_settings_map_ = new HostContentSettingsMap(
@@ -690,7 +693,7 @@ HostContentSettingsMap* TestingProfile::GetHostContentSettingsMap() {
   return host_content_settings_map_.get();
 }
 
-GeolocationPermissionContext*
+content::GeolocationPermissionContext*
 TestingProfile::GetGeolocationPermissionContext() {
   if (!geolocation_permission_context_.get()) {
     geolocation_permission_context_ =
@@ -709,7 +712,7 @@ HostZoomMap* TestingProfile::GetHostZoomMap() {
   return NULL;
 }
 
-bool TestingProfile::HasProfileSyncService() const {
+bool TestingProfile::HasProfileSyncService() {
   return (profile_sync_service_.get() != NULL);
 }
 
@@ -743,10 +746,6 @@ base::Time TestingProfile::GetStartTime() const {
 
 ProtocolHandlerRegistry* TestingProfile::GetProtocolHandlerRegistry() {
   return protocol_handler_registry_.get();
-}
-
-SpellCheckHost* TestingProfile::GetSpellCheckHost() {
-  return NULL;
 }
 
 WebKitContext* TestingProfile::GetWebKitContext() {
@@ -796,11 +795,6 @@ TokenService* TestingProfile::GetTokenService() {
 }
 
 ProfileSyncService* TestingProfile::GetProfileSyncService() {
-  return GetProfileSyncService("");
-}
-
-ProfileSyncService* TestingProfile::GetProfileSyncService(
-    const std::string& cros_user) {
   if (!profile_sync_service_.get()) {
     // Use a NiceMock here since we are really using the mock as a
     // fake.  Test cases that want to set expectations on a
@@ -841,10 +835,6 @@ void TestingProfile::ClearNetworkingHistorySince(base::Time time) {
 
 GURL TestingProfile::GetHomePage() {
   return GURL(chrome::kChromeUINewTabURL);
-}
-
-NetworkActionPredictor* TestingProfile::GetNetworkActionPredictor() {
-  return NULL;
 }
 
 PrefService* TestingProfile::GetOffTheRecordPrefs() {

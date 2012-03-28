@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "grit/locale_settings.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/views/controls/button/text_button.h"
 #include "ui/views/layout/layout_constants.h"
 
 namespace chromeos {
@@ -63,8 +64,9 @@ bool TakePhotoDialog::Accept() {
   return true;
 }
 
-bool TakePhotoDialog::IsModal() const {
-  return true;
+ui::ModalType TakePhotoDialog::GetModalType() const {
+  // TODO(flackr): Use MODAL_TYPE_WINDOW when launched from the settings page.
+  return ui::MODAL_TYPE_SYSTEM;
 }
 
 views::View* TakePhotoDialog::GetContentsView() {

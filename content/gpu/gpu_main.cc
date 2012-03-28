@@ -22,14 +22,17 @@
 #include "ui/gfx/gl/gl_surface.h"
 #include "ui/gfx/gl/gl_switches.h"
 
-#if defined(OS_MACOSX)
-#include "content/common/chrome_application_mac.h"
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
+#include "content/common/gpu/media/dxva_video_decode_accelerator.h"
 #include "sandbox/src/sandbox.h"
 #endif
 
 #if defined(USE_X11)
 #include "ui/base/x/x11_util.h"
+#endif
+
+#if defined(TOOLKIT_USES_GTK)
+#include "ui/gfx/gtk_util.h"
 #endif
 
 // Main function for starting the Gpu process.
@@ -51,6 +54,9 @@ int GpuMain(const content::MainFunctionParams& parameters) {
         SEM_NOOPENFILEERRORBOX);
 #elif defined(USE_X11)
     ui::SetDefaultX11ErrorHandlers();
+#endif
+#if defined(TOOLKIT_USES_GTK)
+    gfx::GtkInitFromCommandLine(*CommandLine::ForCurrentProcess());
 #endif
   }
 
@@ -78,15 +84,13 @@ int GpuMain(const content::MainFunctionParams& parameters) {
 #if defined(OS_WIN)
   sandbox::TargetServices* target_services =
       parameters.sandbox_info->target_services;
+  // Initialize H/W video decoding stuff which fails in the sandbox.
+  DXVAVideoDecodeAccelerator::PreSandboxInitialization();
   // For windows, if the target_services interface is not zero, the process
   // is sandboxed and we must call LowerToken() before rendering untrusted
   // content.
   if (target_services)
     target_services->LowerToken();
-#endif
-
-#if defined(OS_MACOSX)
-  chrome_application_mac::RegisterCrApp();
 #endif
 
   MessageLoop::Type message_loop_type = MessageLoop::TYPE_UI;

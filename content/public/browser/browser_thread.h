@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/callback.h"
-#include "base/task.h"
+#include "base/message_loop_proxy.h"
 #include "base/tracked_objects.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread_delegate.h"
@@ -20,7 +20,7 @@
 class MessageLoop;
 
 namespace base {
-class MessageLoopProxy;
+class SequencedWorkerPool;
 class Thread;
 }
 
@@ -64,7 +64,9 @@ class CONTENT_EXPORT BrowserThread {
 
     // This is the "main" thread for WebKit within the browser process when
     // NOT in --single-process mode.
-    WEBKIT,
+    // Deprecated: Do not design new code to use this thread; see
+    // http://crbug.com/106839
+    WEBKIT_DEPRECATED,
 
     // This is the thread that interacts with the file system.
     FILE,
@@ -82,12 +84,10 @@ class CONTENT_EXPORT BrowserThread {
     // This is the thread that processes IPC and network messages.
     IO,
 
-#if defined(OS_CHROMEOS)
-    // This thread runs websocket to TCP proxy.
-    // TODO(dilmah): remove this thread, instead implement this functionality
-    // as hooks into websocket layer.
-    WEB_SOCKET_PROXY,
-#endif
+    // NOTE: do not add new threads here that are only used by a small number of
+    // files. Instead you should just use a Thread class and pass its
+    // MessageLoopProxy around. Named threads there are only for threads that
+    // are used in many places.
 
     // This identifier does not represent a thread.  Instead it counts the
     // number of well-known threads.  Insert new well-known threads before this
@@ -116,23 +116,6 @@ class CONTENT_EXPORT BrowserThread {
       const base::Closure& task,
       int64 delay_ms);
 
-  // TODO(brettw) remove these when Task->Closure conversion is done.
-  static bool PostTask(ID identifier,
-                       const tracked_objects::Location& from_here,
-                       Task* task);
-  static bool PostDelayedTask(ID identifier,
-                              const tracked_objects::Location& from_here,
-                              Task* task,
-                              int64 delay_ms);
-  static bool PostNonNestableTask(ID identifier,
-                                  const tracked_objects::Location& from_here,
-                                  Task* task);
-  static bool PostNonNestableDelayedTask(
-      ID identifier,
-      const tracked_objects::Location& from_here,
-      Task* task,
-      int64 delay_ms);
-
   static bool PostTaskAndReply(
       ID identifier,
       const tracked_objects::Location& from_here,
@@ -143,17 +126,45 @@ class CONTENT_EXPORT BrowserThread {
   static bool DeleteSoon(ID identifier,
                          const tracked_objects::Location& from_here,
                          const T* object) {
-    return PostNonNestableTask(
-        identifier, from_here, new DeleteTask<T>(object));
+    return GetMessageLoopProxyForThread(identifier)->DeleteSoon(
+        from_here, object);
   }
 
   template <class T>
   static bool ReleaseSoon(ID identifier,
                           const tracked_objects::Location& from_here,
                           const T* object) {
-    return PostNonNestableTask(
-        identifier, from_here, new ReleaseTask<T>(object));
+    return GetMessageLoopProxyForThread(identifier)->ReleaseSoon(
+        from_here, object);
   }
+
+  // Simplified wrappers for posting to the blocking thread pool. Use this
+  // for doing things like blocking I/O.
+  //
+  // The first variant will run the task in the pool with no sequencing
+  // semantics, so may get run in parallel with other posted tasks. The
+  // second variant provides sequencing between tasks with the same
+  // sequence token name.
+  //
+  // These tasks are guaranteed to run before shutdown.
+  //
+  // If you need to provide different shutdown semantics (like you have
+  // something slow and noncritical that doesn't need to block shutdown),
+  // or you want to manually provide a sequence token (which saves a map
+  // lookup and is guaranteed unique without you having to come up with a
+  // unique string), you can access the sequenced worker pool directly via
+  // GetBlockingPool().
+  static bool PostBlockingPoolTask(const tracked_objects::Location& from_here,
+                                   const base::Closure& task);
+  static bool PostBlockingPoolSequencedTask(
+      const std::string& sequence_token_name,
+      const tracked_objects::Location& from_here,
+      const base::Closure& task);
+
+  // Returns the thread pool used for blocking file I/O. Use this object to
+  // perform random blocking operations such as file writes or querying the
+  // Windows registry.
+  static base::SequencedWorkerPool* GetBlockingPool();
 
   // Callable on any thread.  Returns whether the given ID corresponds to a well
   // known thread.
@@ -177,39 +188,15 @@ class CONTENT_EXPORT BrowserThread {
   static scoped_refptr<base::MessageLoopProxy> GetMessageLoopProxyForThread(
       ID identifier);
 
-  // Gets the Thread object for the specified thread, or NULL if the
-  // thread has not been created (or has been destroyed during
-  // shutdown).
+  // Returns a pointer to the thread's message loop, which will become
+  // invalid during shutdown, so you probably shouldn't hold onto it.
   //
-  // Before calling this, you must have called content::ContentMain
-  // with a command-line that would specify a browser process (e.g. an
-  // empty command line).
+  // This must not be called before the thread is started, or after
+  // the thread is stopped, or it will DCHECK.
   //
-  // It is unsafe to store this pointer as it may become invalid close
-  // to shutdown.
-  //
-  // TODO(joi): Remove this once clients such as BrowserProcessImpl
-  // (and classes that call things like
-  // g_browser_process->file_thread()) are switched to using
-  // MessageLoopProxy.
-  static base::Thread* UnsafeGetBrowserThread(ID identifier);
-
-  // Gets the MessageLoop for the specified thread, or NULL if the
-  // thread has not been created (or has been destroyed during
-  // shutdown).
-  //
-  // Before calling this, you must have called content::ContentMain
-  // with a command-line that would specify a browser process (e.g. an
-  // empty command line).
-  //
-  // It is unsafe to store this pointer as it may become invalid close
-  // to shutdown.
-  //
-  // TODO(joi): Remove this once clients such as BrowserProcessImpl
-  // (and classes that call things like
-  // g_browser_process->file_thread()) are switched to using
-  // MessageLoopProxy.
-  static MessageLoop* UnsafeGetMessageLoop(ID identifier);
+  // Ownership remains with the BrowserThread implementation, so you
+  // must not delete the pointer.
+  static MessageLoop* UnsafeGetMessageLoopForThread(ID identifier);
 
   // Sets the delegate for the specified BrowserThread.
   //
@@ -261,7 +248,7 @@ class CONTENT_EXPORT BrowserThread {
   struct DeleteOnIOThread : public DeleteOnThread<IO> { };
   struct DeleteOnFileThread : public DeleteOnThread<FILE> { };
   struct DeleteOnDBThread : public DeleteOnThread<DB> { };
-  struct DeleteOnWebKitThread : public DeleteOnThread<WEBKIT> { };
+  struct DeleteOnWebKitThread : public DeleteOnThread<WEBKIT_DEPRECATED> { };
 
  private:
   friend class BrowserThreadImpl;

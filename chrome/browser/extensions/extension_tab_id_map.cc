@@ -7,17 +7,21 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
+#include "chrome/browser/tab_contents/retargeting_details.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 
 using content::BrowserThread;
+using content::WebContents;
 
 //
 // ExtensionTabIdMap::TabObserver
@@ -48,7 +52,7 @@ ExtensionTabIdMap::TabObserver::TabObserver() {
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, content::NOTIFICATION_TAB_PARENTED,
                  content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, content::NOTIFICATION_RETARGETING,
+  registrar_.Add(this, chrome::NOTIFICATION_RETARGETING,
                  content::NotificationService::AllBrowserContextsAndSources());
 }
 
@@ -61,7 +65,7 @@ void ExtensionTabIdMap::TabObserver::Observe(
     const content::NotificationDetails& details) {
   switch (type) {
     case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
-      TabContents* contents = content::Source<TabContents>(source).ptr();
+      WebContents* contents = content::Source<WebContents>(source).ptr();
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(contents);
       if (!tab)
@@ -82,7 +86,7 @@ void ExtensionTabIdMap::TabObserver::Observe(
     case content::NOTIFICATION_TAB_PARENTED: {
       TabContentsWrapper* tab =
           content::Source<TabContentsWrapper>(source).ptr();
-      RenderViewHost* host = tab->render_view_host();
+      RenderViewHost* host = tab->web_contents()->GetRenderViewHost();
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
           base::Bind(
@@ -93,15 +97,15 @@ void ExtensionTabIdMap::TabObserver::Observe(
               tab->restore_tab_helper()->window_id().id()));
       break;
     }
-    case content::NOTIFICATION_RETARGETING: {
-      content::RetargetingDetails* retargeting_details =
-          content::Details<content::RetargetingDetails>(details).ptr();
-      TabContents* contents = retargeting_details->target_tab_contents;
+    case chrome::NOTIFICATION_RETARGETING: {
+      RetargetingDetails* retargeting_details =
+          content::Details<RetargetingDetails>(details).ptr();
+      WebContents* contents = retargeting_details->target_web_contents;
       TabContentsWrapper* tab =
           TabContentsWrapper::GetCurrentWrapperForContents(contents);
       if (!tab)
         break;
-      RenderViewHost* host = tab->render_view_host();
+      RenderViewHost* host = contents->GetRenderViewHost();
       BrowserThread::PostTask(
           BrowserThread::IO, FROM_HERE,
           base::Bind(

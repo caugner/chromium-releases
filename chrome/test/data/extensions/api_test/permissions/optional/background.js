@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -116,7 +116,7 @@ chrome.test.getConfig(function(config) {
     // defined in "optional_permissions".
     function requestNonOptional() {
       chrome.permissions.request(
-          {permissions: ['debugger']}, fail(NOT_OPTIONAL_ERROR));
+          {permissions: ['bookmarks']}, fail(NOT_OPTIONAL_ERROR));
       chrome.permissions.request(
           {origins: ['http://*.b.com/*']}, fail(NOT_OPTIONAL_ERROR));
       chrome.permissions.request(
@@ -127,6 +127,9 @@ chrome.test.getConfig(function(config) {
     // We should be able to request the tabs API since it's in the granted
     // permissions list (see permissions_apitest.cc).
     function requestTabs() {
+      // chrome.windows is a optional permission, so the API definition should
+      // exist but its use disallowed.
+      assertTrue(!!chrome.windows);
       try {
         chrome.windows.getAll({populate: true}, function() {
           chrome.test.fail("Should not have tabs API permission.");
@@ -149,6 +152,16 @@ chrome.test.getConfig(function(config) {
             chrome.permissions.getAll(pass(function(permissions) {
               assertTrue(checkPermSetsEq(permissionsWithTabs, permissions));
             }));
+      }));
+    },
+
+    // These permissions should be on the granted list because they're on the
+    // extension's default permission list.
+    function requestGrantedPermission() {
+      chrome.permissions.request(
+          {permissions: ['management'], origins: ['http://a.com/*']},
+          pass(function(granted) {
+        assertTrue(granted);
       }));
     },
 
@@ -301,7 +314,7 @@ chrome.test.getConfig(function(config) {
       });
 
       chrome.permissions.request(
-          {permissions: ['tabs']}, pass(function(granted) {
+          {permissions: ['tabs', 'management']}, pass(function(granted) {
         assertTrue(granted);
         chrome.permissions.remove(
             {permissions: ['tabs']}, pass(function() {

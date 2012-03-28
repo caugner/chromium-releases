@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,15 @@
 #include "base/lazy_instance.h"
 #include "base/message_loop.h"
 #include "chrome/browser/speech/speech_input_bubble.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skbitmap_operations.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -106,23 +108,23 @@ base::LazyInstance<SpeechInputBubbleImages> g_images =
 SpeechInputBubble::FactoryMethod SpeechInputBubble::factory_ = NULL;
 const int SpeechInputBubble::kBubbleTargetOffsetX = 10;
 
-SpeechInputBubble* SpeechInputBubble::Create(TabContents* tab_contents,
+SpeechInputBubble* SpeechInputBubble::Create(WebContents* web_contents,
                                              Delegate* delegate,
                                              const gfx::Rect& element_rect) {
   if (factory_)
-    return (*factory_)(tab_contents, delegate, element_rect);
+    return (*factory_)(web_contents, delegate, element_rect);
 
   // Has the tab already closed before bubble create request was processed?
-  if (!tab_contents)
+  if (!web_contents)
     return NULL;
 
-  return CreateNativeBubble(tab_contents, delegate, element_rect);
+  return CreateNativeBubble(web_contents, delegate, element_rect);
 }
 
-SpeechInputBubbleBase::SpeechInputBubbleBase(TabContents* tab_contents)
+SpeechInputBubbleBase::SpeechInputBubbleBase(WebContents* web_contents)
     : ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       display_mode_(DISPLAY_MODE_RECORDING),
-      tab_contents_(tab_contents) {
+      web_contents_(web_contents) {
   mic_image_.reset(new SkBitmap());
   mic_image_->setConfig(SkBitmap::kARGB_8888_Config,
                         g_images.Get().mic_empty()->width(),
@@ -156,8 +158,9 @@ void SpeechInputBubbleBase::DoWarmingUpAnimationStep() {
       FROM_HERE,
       base::Bind(&SpeechInputBubbleBase::DoWarmingUpAnimationStep,
           weak_factory_.GetWeakPtr()),
-      animation_step_ == 0 ? kWarmingUpAnimationStartMs
-                           : kWarmingUpAnimationStepMs);
+      base::TimeDelta::FromMilliseconds(
+          animation_step_ == 0 ? kWarmingUpAnimationStartMs
+                               : kWarmingUpAnimationStepMs));
   if (++animation_step_ >= static_cast<int>(g_images.Get().warm_up().size()))
     animation_step_ = 1;  // Frame 0 is skipped during the animation.
 }
@@ -184,7 +187,7 @@ void SpeechInputBubbleBase::DoRecognizingAnimationStep() {
       FROM_HERE,
       base::Bind(&SpeechInputBubbleBase::DoRecognizingAnimationStep,
           weak_factory_.GetWeakPtr()),
-      kRecognizingAnimationStepMs);
+      base::TimeDelta::FromMilliseconds(kRecognizingAnimationStepMs));
 }
 
 void SpeechInputBubbleBase::SetMessage(const string16& text) {
@@ -232,8 +235,8 @@ void SpeechInputBubbleBase::SetInputVolume(float volume, float noise_volume) {
   SetImage(*mic_image_.get());
 }
 
-TabContents* SpeechInputBubbleBase::tab_contents() {
-  return tab_contents_;
+WebContents* SpeechInputBubbleBase::web_contents() {
+  return web_contents_;
 }
 
 void SpeechInputBubbleBase::SetImage(const SkBitmap& image) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,7 @@
 #include "grit/generated_resources.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
-#include "webkit/glue/password_form.h"
+#include "webkit/forms/password_form.h"
 
 using content::BrowserThread;
 
@@ -311,7 +311,7 @@ void Firefox3Importer::ImportPasswords() {
     return;
   }
 
-  std::vector<webkit_glue::PasswordForm> forms;
+  std::vector<webkit::forms::PasswordForm> forms;
   FilePath source_path = source_path_;
   FilePath file = source_path.AppendASCII("signons.sqlite");
   if (file_util::PathExists(file)) {
@@ -341,9 +341,9 @@ void Firefox3Importer::ImportSearchEngines() {
 
   std::vector<TemplateURL*> search_engines;
   ParseSearchEnginesFromXMLFiles(files, &search_engines);
-  int default_index =
-      GetFirefoxDefaultSearchEngineIndex(search_engines, source_path_);
-  bridge_->SetKeywords(search_engines, default_index, true);
+
+  // Import the list of search engines, but do not override the default.
+  bridge_->SetKeywords(search_engines, -1 /*default_keyword_index*/, true);
 }
 
 void Firefox3Importer::ImportHomepage() {
@@ -380,28 +380,30 @@ void Firefox3Importer::GetSearchEnginesXMLFiles(
   // user has added a engine. So we get search engines from sqlite db as well
   // as from the file system.
   if (s.Step()) {
-    const std::wstring kAppPrefix = L"[app]/";
-    const std::wstring kProfilePrefix = L"[profile]/";
+    const std::string kAppPrefix("[app]/");
+    const std::string kProfilePrefix("[profile]/");
     do {
       FilePath file;
-      std::wstring engine = UTF8ToWide(s.ColumnString(0));
+      std::string engine(s.ColumnString(0));
 
       // The string contains [app]/<name>.xml or [profile]/<name>.xml where
       // the [app] and [profile] need to be replaced with the actual app or
       // profile path.
       size_t index = engine.find(kAppPrefix);
-      if (index != std::wstring::npos) {
+      if (index != std::string::npos) {
         // Remove '[app]/'.
-        file = app_path.Append(FilePath::FromWStringHack(
-                                   engine.substr(index + kAppPrefix.length())));
-      } else if ((index = engine.find(kProfilePrefix)) != std::wstring::npos) {
+        file = app_path.AppendASCII(engine.substr(index + kAppPrefix.length()));
+      } else if ((index = engine.find(kProfilePrefix)) != std::string::npos) {
         // Remove '[profile]/'.
-          file = profile_path.Append(
-              FilePath::FromWStringHack(
-                  engine.substr(index + kProfilePrefix.length())));
+          file = profile_path.AppendASCII(
+              engine.substr(index + kProfilePrefix.length()));
       } else {
         // Looks like absolute path to the file.
-        file = FilePath::FromWStringHack(engine);
+#if defined(OS_WIN)
+        file = FilePath(UTF8ToWide(engine));
+#else
+        file = FilePath(engine);
+#endif
       }
       files->push_back(file);
     } while (s.Step() && !cancelled());

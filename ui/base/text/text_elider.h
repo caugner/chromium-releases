@@ -1,12 +1,15 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+//
+// This file defines utility functions for eliding and formatting UI text.
 
 #ifndef UI_BASE_TEXT_TEXT_ELIDER_H_
 #define UI_BASE_TEXT_TEXT_ELIDER_H_
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/string16.h"
@@ -40,13 +43,21 @@ UI_EXPORT string16 ElideUrl(const GURL& url,
                             int available_pixel_width,
                             const std::string& languages);
 
-// Elides |text| to fit in |available_pixel_width|.  If |elide_in_middle| is
-// set the ellipsis is placed in the middle of the string; otherwise it is
-// placed at the end.
+enum ElideBehavior {
+  // Add ellipsis at the end of the string.
+  ELIDE_AT_END,
+  // Add ellipsis in the middle of the string.
+  ELIDE_IN_MIDDLE,
+  // Truncate the end of the string.
+  TRUNCATE_AT_END
+};
+
+// Elides |text| to fit in |available_pixel_width| according to the specified
+// |elide_behavior|.
 UI_EXPORT string16 ElideText(const string16& text,
                              const gfx::Font& font,
                              int available_pixel_width,
-                             bool elide_in_middle);
+                             ElideBehavior elide_behavior);
 
 // Elide a filename to fit a given pixel width, with an emphasis on not hiding
 // the extension unless we have to. If filename contains a path, the path will
@@ -89,6 +100,8 @@ class UI_EXPORT SortedDisplayURL {
   size_t prefix_end_;
 
   string16 display_url_;
+
+  DISALLOW_COPY_AND_ASSIGN(SortedDisplayURL);
 };
 
 // Functions to elide strings when the font information is unknown.  As
@@ -119,6 +132,39 @@ UI_EXPORT bool ElideString(const string16& input, int max_len,
 UI_EXPORT bool ElideRectangleString(const string16& input, size_t max_rows,
                                     size_t max_cols, bool strict,
                                     string16* output);
+
+// Specifies the word wrapping behavior of |ElideRectangleText()| when a word
+// would exceed the available width.
+enum WordWrapBehavior {
+  // Words that are too wide will be put on a new line, but will not be
+  // truncated or elided.
+  IGNORE_LONG_WORDS,
+
+  // Words that are too wide will be put on a new line and will be truncated to
+  // the available width.
+  TRUNCATE_LONG_WORDS,
+
+  // Words that are too wide will be put on a new line and will be elided to the
+  // available width.
+  ELIDE_LONG_WORDS,
+
+  // Words that are too wide will be put on a new line and will be wrapped over
+  // multiple lines.
+  WRAP_LONG_WORDS,
+};
+
+// Reformats |text| into output vector |lines| so that the resulting text fits
+// into an |available_pixel_width| by |available_pixel_height| rectangle with
+// the specified |font|. Input newlines are respected, but lines that are too
+// long are broken into pieces. For words that are too wide to fit on a single
+// line, the wrapping behavior can be specified with the |wrap_behavior| param.
+// Returns |true| if the input had to be truncated (and not just reformatted).
+UI_EXPORT bool ElideRectangleText(const string16& text,
+                                  const gfx::Font& font,
+                                  int available_pixel_width,
+                                  int available_pixel_height,
+                                  WordWrapBehavior wrap_behavior,
+                                  std::vector<string16>* lines);
 
 // Truncates the string to length characters. This breaks the string at
 // the first word break before length, adding the horizontal ellipsis

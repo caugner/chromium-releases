@@ -16,14 +16,14 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/ui/blocked_content/blocked_content_tab_helper_delegate.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 class TabContents;
 class TabContentsWrapper;
 
 // Takes ownership of TabContents that are unrequested popup windows.
 class BlockedContentContainer : public BlockedContentTabHelperDelegate,
-                                public TabContentsDelegate {
+                                public content::WebContentsDelegate {
  public:
   // Creates a container for a certain TabContents:
   explicit BlockedContentContainer(TabContentsWrapper* owner);
@@ -54,27 +54,29 @@ class BlockedContentContainer : public BlockedContentTabHelperDelegate,
   virtual TabContentsWrapper* GetConstrainingContentsWrapper(
       TabContentsWrapper* source) OVERRIDE;
 
-  // Overridden from TabContentsDelegate:
+  // Overridden from content::WebContentsDelegate:
 
   // Forwards OpenURLFromTab to our |owner_|.
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const OpenURLParams& params) OVERRIDE;
+  virtual content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params) OVERRIDE;
 
   // Forwards AddNewContents to our |owner_|.
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
+  virtual void AddNewContents(content::WebContents* source,
+                              content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_position,
                               bool user_gesture) OVERRIDE;
 
   // Removes |source| from our internal list of blocked contents.
-  virtual void CloseContents(TabContents* source) OVERRIDE;
+  virtual void CloseContents(content::WebContents* source) OVERRIDE;
 
   // Changes the opening rectangle associated with |source|.
-  virtual void MoveContents(TabContents* source,
+  virtual void MoveContents(content::WebContents* source,
                             const gfx::Rect& new_bounds) OVERRIDE;
 
-  virtual bool IsPopupOrPanel(const TabContents* source) const OVERRIDE;
+  virtual bool IsPopupOrPanel(
+      const content::WebContents* source) const OVERRIDE;
 
   // Always returns true.
   virtual bool ShouldSuppressDialogs() OVERRIDE;

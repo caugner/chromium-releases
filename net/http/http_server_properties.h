@@ -10,6 +10,7 @@
 #include "base/basictypes.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
+#include "net/http/http_pipelined_host_capability.h"
 #include "net/spdy/spdy_framer.h"  // TODO(willchan): Reconsider this.
 
 namespace net {
@@ -17,6 +18,7 @@ namespace net {
 enum AlternateProtocol {
   NPN_SPDY_1 = 0,
   NPN_SPDY_2,
+  NPN_SPDY_21,
   NUM_ALTERNATE_PROTOCOLS,
   ALTERNATE_PROTOCOL_BROKEN,  // The alternate protocol is known to be broken.
   UNINITIALIZED_ALTERNATE_PROTOCOL,
@@ -35,6 +37,8 @@ struct NET_EXPORT PortAlternateProtocolPair {
 
 typedef std::map<HostPortPair, PortAlternateProtocolPair> AlternateProtocolMap;
 typedef std::map<HostPortPair, spdy::SpdySettings> SpdySettingsMap;
+typedef std::map<HostPortPair,
+        HttpPipelinedHostCapability> PipelineCapabilityMap;
 
 extern const char kAlternateProtocolHeader[];
 extern const char* const kAlternateProtocolStrings[NUM_ALTERNATE_PROTOCOLS];
@@ -94,6 +98,17 @@ class NET_EXPORT HttpServerProperties {
 
   // Returns all persistent SpdySettings.
   virtual const SpdySettingsMap& spdy_settings_map() const = 0;
+
+  virtual HttpPipelinedHostCapability GetPipelineCapability(
+      const HostPortPair& origin) = 0;
+
+  virtual void SetPipelineCapability(
+      const HostPortPair& origin,
+      HttpPipelinedHostCapability capability) = 0;
+
+  virtual void ClearPipelineCapabilities() = 0;
+
+  virtual PipelineCapabilityMap GetPipelineCapabilityMap() const = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(HttpServerProperties);

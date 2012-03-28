@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model.h"
@@ -33,21 +34,27 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
+#include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/image/image.h"
+
+using content::PageNavigator;
+using content::UserMetricsAction;
+using content::WebContents;
 
 namespace {
 
@@ -280,6 +287,7 @@ void BookmarkBarGtk::Init() {
 void BookmarkBarGtk::SetBookmarkBarState(
     BookmarkBar::State state,
     BookmarkBar::AnimateChangeType animate_type) {
+  TRACE_EVENT0("ui::gtk", "BookmarkBarGtk::SetBookmarkBarState");
   if (animate_type == BookmarkBar::ANIMATE_STATE_CHANGE &&
       (state == BookmarkBar::DETACHED ||
        bookmark_bar_state_ == BookmarkBar::DETACHED)) {
@@ -426,13 +434,14 @@ void BookmarkBarGtk::Show(BookmarkBar::State old_state,
   // probably be improved.
   if (bookmark_bar_state_ == BookmarkBar::DETACHED) {
     if (theme_service_->UsingNativeTheme()) {
-      if (GTK_WIDGET_REALIZED(event_box_->parent))
-        gdk_window_lower(event_box_->parent->window);
-      if (GTK_WIDGET_REALIZED(event_box_.get()))
-        gdk_window_lower(event_box_->window);
+      GtkWidget* parent = gtk_widget_get_parent(event_box_.get());
+      if (gtk_widget_get_realized(parent))
+        gdk_window_lower(gtk_widget_get_window(parent));
+      if (gtk_widget_get_realized(event_box_.get()))
+        gdk_window_lower(gtk_widget_get_window(event_box_.get()));
     } else {  // Chromium theme mode.
-      if (GTK_WIDGET_REALIZED(paint_box_)) {
-        gdk_window_lower(paint_box_->window);
+      if (gtk_widget_get_realized(paint_box_)) {
+        gdk_window_lower(gtk_widget_get_window(paint_box_));
         // The event box won't stay below its children's GdkWindows unless we
         // toggle the above-child property here. If the event box doesn't stay
         // below its children then events will be routed to it rather than the
@@ -557,7 +566,7 @@ void BookmarkBarGtk::SetOverflowButtonAppearance() {
 
   GtkWidget* new_child = theme_service_->UsingNativeTheme() ?
       gtk_arrow_new(GTK_ARROW_DOWN, GTK_SHADOW_NONE) :
-      gtk_image_new_from_pixbuf(ResourceBundle::GetSharedInstance().
+      gtk_image_new_from_pixbuf(ui::ResourceBundle::GetSharedInstance().
           GetRTLEnabledPixbufNamed(IDR_BOOKMARK_BAR_CHEVRONS));
 
   gtk_container_add(GTK_CONTAINER(overflow_button_), new_child);
@@ -672,17 +681,17 @@ bool BookmarkBarGtk::GetTabContentsSize(gfx::Size* size) {
     NOTREACHED();
     return false;
   }
-  TabContents* tab_contents = browser->GetSelectedTabContents();
-  if (!tab_contents) {
+  WebContents* web_contents = browser->GetSelectedWebContents();
+  if (!web_contents) {
     // It is possible to have a browser but no TabContents while under testing,
     // so don't NOTREACHED() and error the program.
     return false;
   }
-  if (!tab_contents->view()) {
+  if (!web_contents->GetView()) {
     NOTREACHED();
     return false;
   }
-  *size = tab_contents->view()->GetContainerSize();
+  *size = web_contents->GetView()->GetContainerSize();
   return true;
 }
 
@@ -1132,7 +1141,7 @@ void BookmarkBarGtk::OnClicked(GtkWidget* sender) {
   bookmark_utils::OpenAll(window_->GetNativeHandle(), profile, page_navigator_,
       node, gtk_util::DispositionForCurrentButtonPressEvent());
 
-  UserMetrics::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
+  content::RecordAction(UserMetricsAction("ClickedBookmarkBarURLButton"));
 }
 
 void BookmarkBarGtk::OnButtonDragBegin(GtkWidget* button,
@@ -1271,17 +1280,15 @@ void BookmarkBarGtk::OnDragReceived(GtkWidget* widget,
 
   switch (target_type) {
     case ui::CHROME_BOOKMARK_ITEM: {
-      std::vector<const BookmarkNode*> nodes =
-          bookmark_utils::GetNodesFromSelection(context, selection_data,
-                                                target_type,
-                                                browser_->profile(),
-                                                &delete_selection_data,
-                                                &dnd_success);
-      DCHECK(!nodes.empty());
-      for (std::vector<const BookmarkNode*>::iterator it = nodes.begin();
-           it != nodes.end(); ++it) {
-        model_->Move(*it, dest_node, index);
-        index = dest_node->GetIndexOf(*it) + 1;
+      Pickle pickle(reinterpret_cast<char*>(selection_data->data),
+                    selection_data->length);
+      BookmarkNodeData drag_data;
+      if (drag_data.ReadFromPickle(&pickle)) {
+        dnd_success = bookmark_utils::PerformBookmarkDrop(
+            browser_->profile(),
+            drag_data,
+            dest_node,
+            index) != ui::DragDropTypes::DRAG_NONE;
       }
       break;
     }
@@ -1366,6 +1373,7 @@ gboolean BookmarkBarGtk::OnFolderDragMotion(GtkWidget* button,
 
 gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
                                           GdkEventExpose* event) {
+  TRACE_EVENT0("ui::gtk", "BookmarkBarGtk::OnEventBoxExpose");
   GtkThemeService* theme_provider = theme_service_;
 
   // We don't need to render the toolbar image in GTK mode, except when
@@ -1395,9 +1403,9 @@ gboolean BookmarkBarGtk::OnEventBoxExpose(GtkWidget* widget,
     GtkAllocation allocation;
     gtk_widget_get_allocation(widget, &allocation);
 
-    gfx::Rect area = GTK_WIDGET_NO_WINDOW(widget) ?
-        gfx::Rect(allocation) :
-        gfx::Rect(0, 0, allocation.width, allocation.height);
+    gfx::Rect area = gtk_widget_get_has_window(widget) ?
+                     gfx::Rect(0, 0, allocation.width, allocation.height) :
+                     gfx::Rect(allocation);
     NtpBackgroundUtil::PaintBackgroundDetachedMode(theme_provider, &canvas,
         area, tab_contents_size.height());
   }

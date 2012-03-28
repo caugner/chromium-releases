@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,9 @@
 #include "chrome/browser/ui/gtk/menu_gtk.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::OpenURLParams;
+using content::PageNavigator;
 
 // Per chrome/app/chrome_command_ids.h, values < 4000 are for "dynamic menu
 // items". We only use one command id for all the bookmarks, because we handle
@@ -120,6 +123,12 @@ BookmarkSubMenuModel::~BookmarkSubMenuModel() {
     model()->RemoveObserver(this);
 }
 
+void BookmarkSubMenuModel::Loaded(BookmarkModel* model, bool ids_reassigned) {
+  // For now, just close the menu when the bookmarks are finished loading.
+  // TODO(mdm): it would be slicker to just populate the menu while it's open.
+  BookmarkModelChanged();
+}
+
 void BookmarkSubMenuModel::BookmarkModelChanged() {
   if (menu_)
     menu_->Cancel();
@@ -145,6 +154,9 @@ void BookmarkSubMenuModel::MenuWillShow() {
       return;
     model()->AddObserver(this);
   }
+  // We can't do anything further if the model isn't loaded yet.
+  if (!model()->IsLoaded())
+    return;
   // The node count includes the node itself, so 1 means empty.
   if (model()->bookmark_bar_node()->GetTotalNodeCount() > 1) {
     AddSeparator();
@@ -155,12 +167,16 @@ void BookmarkSubMenuModel::MenuWillShow() {
     PopulateMenu();
   }
   bookmark_end_ = GetItemCount();
+  // We want only one separator after the top-level bookmarks and before the
+  // other node and/or mobile node. Keep track of whether we've added it yet.
+  bool added_separator = false;
   if (model()->other_node()->GetTotalNodeCount() > 1) {
     AddSeparator();
+    added_separator = true;
     AddSubMenuForNode(model()->other_node());
   }
   if (model()->mobile_node()->GetTotalNodeCount() > 1) {
-    if (model()->other_node()->GetTotalNodeCount() == 1)
+    if (!added_separator)
       AddSeparator();
     AddSubMenuForNode(model()->mobile_node());
   }

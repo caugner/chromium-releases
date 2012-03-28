@@ -1,15 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "media/base/mock_filters.h"
 
 #include "base/logging.h"
+#include "base/memory/scoped_ptr.h"
 #include "media/base/filter_host.h"
 
 using ::testing::_;
 using ::testing::Invoke;
 using ::testing::NotNull;
+using ::testing::Return;
 
 namespace media {
 
@@ -20,8 +22,8 @@ MockDataSource::MockDataSource()
 
 MockDataSource::~MockDataSource() {}
 
-void MockDataSource::set_host(FilterHost* filter_host) {
-  Filter::set_host(filter_host);
+void MockDataSource::set_host(DataSourceHost* data_source_host) {
+  DataSource::set_host(data_source_host);
 
   if (total_bytes_ > 0)
     host()->SetTotalBytes(total_bytes_);
@@ -65,17 +67,17 @@ void MockDemuxerFactory::RunBuildCallback(const std::string& url,
   callback.Run(status_, NULL);
 }
 
-DemuxerFactory* MockDemuxerFactory::Clone() const {
-  return new MockDemuxerFactory(demuxer_.get());
-}
-
 MockDemuxer::MockDemuxer()
-  : total_bytes_(-1), buffered_bytes_(-1), duration_() {}
+    : total_bytes_(-1), buffered_bytes_(-1), duration_() {
+  EXPECT_CALL(*this, GetBitrate()).WillRepeatedly(Return(0));
+  EXPECT_CALL(*this, IsLocalSource()).WillRepeatedly(Return(false));
+  EXPECT_CALL(*this, IsSeekable()).WillRepeatedly(Return(false));
+}
 
 MockDemuxer::~MockDemuxer() {}
 
-void MockDemuxer::set_host(FilterHost* filter_host) {
-  Demuxer::set_host(filter_host);
+void MockDemuxer::set_host(DemuxerHost* demuxer_host) {
+  Demuxer::set_host(demuxer_host);
 
   if (total_bytes_ > 0)
     host()->SetTotalBytes(total_bytes_);
@@ -98,7 +100,9 @@ MockDemuxerStream::MockDemuxerStream() {}
 
 MockDemuxerStream::~MockDemuxerStream() {}
 
-MockVideoDecoder::MockVideoDecoder() {}
+MockVideoDecoder::MockVideoDecoder() {
+  EXPECT_CALL(*this, HasAlpha()).WillRepeatedly(Return(false));
+}
 
 MockVideoDecoder::~MockVideoDecoder() {}
 
@@ -124,33 +128,34 @@ MockFilterCollection::MockFilterCollection()
 
 MockFilterCollection::~MockFilterCollection() {}
 
-FilterCollection* MockFilterCollection::filter_collection(
+scoped_ptr<FilterCollection> MockFilterCollection::filter_collection(
     bool include_demuxer,
     bool run_build_callback,
     bool run_build,
     PipelineStatus build_status) const {
-  FilterCollection* collection = new FilterCollection();
+  scoped_ptr<FilterCollection> collection(new FilterCollection());
 
-  MockDemuxerFactory* demuxer_factory =
-      new MockDemuxerFactory(include_demuxer ? demuxer_ : NULL);
+  scoped_ptr<MockDemuxerFactory> demuxer_factory(
+      new MockDemuxerFactory(include_demuxer ? demuxer_ : NULL));
 
   if (build_status != PIPELINE_OK)
     demuxer_factory->SetError(build_status);
 
   if (run_build_callback) {
     ON_CALL(*demuxer_factory, Build(_, _)).WillByDefault(Invoke(
-        demuxer_factory, &MockDemuxerFactory::RunBuildCallback));
+        demuxer_factory.get(), &MockDemuxerFactory::RunBuildCallback));
   }  // else ignore Build calls.
 
   if (run_build)
     EXPECT_CALL(*demuxer_factory, Build(_, _));
 
-  collection->SetDemuxerFactory(demuxer_factory);
+  collection->SetDemuxerFactory(scoped_ptr<DemuxerFactory>(
+      demuxer_factory.release()));
   collection->AddVideoDecoder(video_decoder_);
   collection->AddAudioDecoder(audio_decoder_);
   collection->AddVideoRenderer(video_renderer_);
   collection->AddAudioRenderer(audio_renderer_);
-  return collection;
+  return collection.Pass();
 }
 
 void RunFilterCallback(::testing::Unused, const base::Closure& callback) {

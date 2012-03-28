@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/extensions/extension_installed_bubble_controller.h"
 
 #include "base/i18n/rtl.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
@@ -23,6 +24,7 @@
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_source.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #import "skia/ext/skia_utils_mac.h"
 #import "third_party/GTM/AppKit/GTMUILocalizerAndLayoutTweaker.h"
@@ -85,8 +87,8 @@ class ExtensionLoadedNotificationObserver
                    browser:(Browser*)browser
                       icon:(SkBitmap)icon {
   NSString* nibPath =
-      [base::mac::MainAppBundle() pathForResource:@"ExtensionInstalledBubble"
-                                          ofType:@"nib"];
+      [base::mac::FrameworkBundle() pathForResource:@"ExtensionInstalledBubble"
+                                             ofType:@"nib"];
   if ((self = [super initWithWindowNibPath:nibPath owner:self])) {
     DCHECK(parentWindow);
     parentWindow_ = parentWindow;

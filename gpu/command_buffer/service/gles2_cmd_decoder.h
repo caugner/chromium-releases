@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -43,6 +43,7 @@ struct DisallowedFeatures {
 class GLES2Decoder : public CommonDecoder {
  public:
   typedef error::Error Error;
+  typedef base::Callback<void(int32 id, const std::string& msg)> MsgCallback;
 
   // Creates a decoder.
   static GLES2Decoder* Create(ContextGroup* group);
@@ -53,8 +54,18 @@ class GLES2Decoder : public CommonDecoder {
     return debug_;
   }
 
+  // Set to true to call glGetError after every command.
   void set_debug(bool debug) {
     debug_ = debug;
+  }
+
+  bool log_commands() const {
+    return log_commands_;
+  }
+
+  // Set to true to LOG every command.
+  void set_log_commands(bool log_commands) {
+    log_commands_ = log_commands;
   }
 
   // Initializes the graphics context. Can create an offscreen
@@ -108,9 +119,6 @@ class GLES2Decoder : public CommonDecoder {
   virtual void SetResizeCallback(
       const base::Callback<void(gfx::Size)>& callback) = 0;
 
-  // Sets a callback which is called when a SwapBuffers command is processed.
-  virtual void SetSwapBuffersCallback(const base::Closure& callback) = 0;
-
   virtual void SetStreamTextureManager(StreamTextureManager* manager) = 0;
 
   // Get the service texture ID corresponding to a client texture ID.
@@ -131,13 +139,18 @@ class GLES2Decoder : public CommonDecoder {
       unsigned format,
       unsigned type,
       int width,
-      int height) = 0;
+      int height,
+      bool is_texture_immutable) = 0;
+
+  // A callback for messages from the decoder.
+  virtual void SetMsgCallback(const MsgCallback& callback) = 0;
 
  protected:
   GLES2Decoder();
 
  private:
   bool debug_;
+  bool log_commands_;
 
   DISALLOW_COPY_AND_ASSIGN(GLES2Decoder);
 };

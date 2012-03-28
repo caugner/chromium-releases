@@ -30,9 +30,6 @@
       <include name="IDR_ABOUT_VERSION_HTML" file="resources\about_version.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_ABOUT_VERSION_JS" file="resources\about_version.js" type="BINDATA" />
       <include name="IDR_BOOKMARKS_MANIFEST" file="resources\bookmark_manager\manifest.json" type="BINDATA" />
-      <include name="IDR_BUGREPORT_HTML" file="resources\bug_report.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-      <include name="IDR_BUGREPORT_HTML_INVALID" file="resources\bug_report_invalid.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_BUGREPORT_JS" file="resources\bug_report.js" flattenhtml="true" type="BINDATA" />
       <if expr="is_posix and not is_macosx">
         <include name="IDR_CERTIFICATE_VIEWER_HTML" file="resources\certificate_viewer.html" type="BINDATA" />
         <include name="IDR_CERTIFICATE_VIEWER_JS" file="resources\certificate_viewer.js" type="BINDATA" />
@@ -57,6 +54,9 @@
       <if expr="not is_macosx">
         <include name="IDR_EXTENSIONS_INFOBAR_CSS" file="resources\extensions_infobar.css" flattenhtml="true" type="BINDATA" />
       </if>
+      <include name="IDR_EXTENSION_LIST_JS" file="resources\extensions\extension_list.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_EXTENSIONS_HTML" file="resources\extensions\extensions.html" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_EXTENSIONS_JS" file="resources\extensions\extensions.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_FLAGS_HTML" file="resources\flags.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_FLAGS_HTML_WARNING" file="resources\flags_warning.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_FLAGS_JS" file="resources\flags.js" type="BINDATA" />
@@ -74,12 +74,17 @@
       <include name="IDR_KEYBOARD_MANIFEST" file="resources\keyboard\manifest.json" type="BINDATA" />
       <include name="IDR_MEDIA_INTERNALS_HTML" file="resources\media_internals.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_MEDIA_INTERNALS_JS" file="resources\media_internals\media_internals.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_NETWORK_ACTION_PREDICTOR_HTML" file="resources\network_action_predictor\network_action_predictor.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_NETWORK_ACTION_PREDICTOR_JS" file="resources\network_action_predictor\network_action_predictor.js" type="BINDATA" />
       <include name="IDR_NEW_INCOGNITO_TAB_THEME_CSS" file="resources\new_incognito_tab_theme.css" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NEW_TAB_4_HTML" file="resources\ntp4\new_tab.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NEW_TAB_4_THEME_CSS" file="resources\ntp4\new_tab_theme.css" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NOTIFICATION_1LINE_HTML" file="resources\notification_1line.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NOTIFICATION_2LINE_HTML" file="resources\notification_2line.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_NOTIFICATION_ICON_HTML" file="resources\notification_icon.html" type="BINDATA" />
+      <include name="IDR_OMNIBOX_HTML" file="resources\omnibox\omnibox.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_OMNIBOX_CSS" file="resources\omnibox\omnibox.css" type="BINDATA" />
+      <include name="IDR_OMNIBOX_JS" file="resources\omnibox\omnibox.js" type="BINDATA" />
       <include name="IDR_PLUGINS_HTML" file="resources\plugins.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_PLUGINS_JS" file="resources\plugins.js" type="BINDATA" />
       <if expr="is_win">
@@ -91,10 +96,12 @@
       <include name="IDR_POLICY_CSS" file="resources\policy.css" type="BINDATA"/>
       <include name="IDR_POLICY_HTML" file="resources\policy.html" flattenhtml="true" allowexternalscript="true" type="BINDATA"/>
       <include name="IDR_POLICY_JS" file="resources\policy.js" type="BINDATA"/>
+      <include name="IDR_PRINT_PREVIEW_DUMMY_HTML" file="resources\print_preview\print_preview_dummy.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_PRINT_PREVIEW_DUMMY_JS" file="resources\print_preview\print_preview_dummy.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_PRINT_PREVIEW_HTML" file="resources\print_preview\print_preview.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_PRINT_PREVIEW_JS" file="resources\print_preview\print_preview.js" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_PROFILER_HTML" file="resources\profiler.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-      <include name="IDR_PROFILER_JS" file="resources\profiler.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_PROFILER_HTML" file="resources\profiler\profiler.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_PROFILER_JS" file="resources\profiler\profiler.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_READER_OUT_OF_DATE_HTML" file="resources\reader_out_of_date.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_SAFE_BROWSING_MALWARE_BLOCK" file="resources\safe_browsing_malware_block.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_SAFE_BROWSING_MULTIPLE_THREAT_BLOCK" file="resources\safe_browsing_multiple_threat_block.html" flattenhtml="true" type="BINDATA" />
@@ -111,12 +118,18 @@
       <include name="IDR_SYNC_SETTING_UP_HTML" file="sync\resources\setting_up.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_SYNC_SETUP_DONE_HTML" file="sync\resources\setup_done.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_SYNC_SETUP_FLOW_HTML" file="sync\resources\setup_flow.html" flattenhtml="true" type="BINDATA" />
-      <include name="IDR_TASK_MANAGER_HTML" file="resources\task_manager\main.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
-      <include name="IDR_TASK_MANAGER_INCLUDES_JS" file="resources\task_manager\includes.js" type="BINDATA" />
-      <include name="IDR_TASK_MANAGER_JS" file="resources\task_manager\main.js" type="BINDATA" />
+      <include name="IDR_TASK_MANAGER_HTML" file="resources\task_manager\main.html" flattenhtml="true" type="BINDATA" />
       <include name="IDR_TRACING_HTML" file="resources\tracing.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       <include name="IDR_TRACING_JS" file="resources\tracing.js" flattenhtml="true" type="BINDATA" />
       <include name="IDR_TRANSLATE_JS" file="resources\translate.js" type="BINDATA" />
+      <include name="IDR_FEEDBACK_HTML" file="resources\feedback.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
+      <include name="IDR_FEEDBACK_HTML_INVALID" file="resources\feedback_invalid.html" allowexternalscript="true" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_FEEDBACK_JS" file="resources\feedback.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_UBER_HTML" file="resources\uber\uber.html" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_UBER_JS" file="resources\uber\uber.js" type="BINDATA" />
+      <include name="IDR_UBER_FRAME_HTML" file="resources\uber\uber_frame.html" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_UBER_FRAME_JS" file="resources\uber\uber_frame.js" flattenhtml="true" type="BINDATA" />
+      <include name="IDR_UBER_UTILS_JS" file="resources\uber\uber_utils.js" type="BINDATA" />
       <include name="IDR_WEBSTORE_MANIFEST" file="resources\webstore_app\manifest.json" type="BINDATA" />
       <include name="IDR_ENTERPRISE_WEBSTORE_MANIFEST" file="resources\enterprise_webstore_app\manifest.json" type="BINDATA" />
       <if expr="not pp_ifdef('chromeos')">
@@ -124,6 +137,8 @@
         <include name="IDR_SYNC_PROMO_HTML" file="resources\sync_promo\sync_promo.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
       </if>
       <if expr="pp_ifdef('chromeos')">
+        <include name="IDR_ABOUT_PAGE_HTML" file="resources\about_page\about_page.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_ABOUT_PAGE_JS" file="resources\about_page\about_page.js" flattenhtml="true" type="BINDATA" />
         <include name="IDR_ABOUT_SYS_HTML" file="resources\chromeos\about_sys.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_ACTIVE_DOWNLOADS_HTML" file="resources\chromeos\active_downloads.html" flattenhtml="true" allowexternalscript="true" type="BINDATA" />
         <include name="IDR_ACTIVE_DOWNLOADS_JS" file="resources\chromeos\active_downloads.js" type="BINDATA" />
@@ -161,10 +176,7 @@
       <if expr="(is_linux and pp_ifdef('toolkit_views')) or pp_ifdef('use_aura')">
         <include name="IDR_COLLECTED_COOKIES_HTML" file="resources\collected_cookies.html" flattenhtml="true" type="BINDATA" />
         <include name="IDR_HTTP_AUTH_HTML" file="resources\http_auth.html" flattenhtml="true" type="BINDATA" />
-        <include name="IDR_REPOST_FORM_WARNING_HTML" file="resources\repost_form_warning.html" flattenhtml="true" type="BINDATA" />
-      </if>
-      <if expr="pp_ifdef('use_aura')">
-        <include name="IDR_APP_LIST_HTML" file="resources\aura\app_list\app_list.html" flattenhtml="true" type="BINDATA" />
+        <include name="IDR_TAB_MODAL_CONFIRM_DIALOG_HTML" file="resources\tab_modal_confirm_dialog.html" flattenhtml="true" type="BINDATA" />
       </if>
       <if expr="pp_ifdef('chromeos') and pp_ifdef('_google_chrome')">
         <include name="IDR_HELP_MANIFEST" file="resources\help_app\manifest.json" type="BINDATA" />

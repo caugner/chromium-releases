@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,16 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "content/browser/browser_child_process_host.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/browser_child_process_host_delegate.h"
+#include "content/public/browser/browser_child_process_host_iterator.h"
 #include "ipc/ipc_channel_proxy.h"
 #include "webkit/plugins/webplugininfo.h"
 #include "ui/gfx/native_widget_types.h"
+
+class BrowserChildProcessHostImpl;
 
 namespace content {
 class ResourceContext;
@@ -41,7 +45,9 @@ struct ChannelHandle;
 // starting the plugin process when a plugin is created that doesn't already
 // have a process.  After that, most of the communication is directly between
 // the renderer and plugin processes.
-class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
+class CONTENT_EXPORT PluginProcessHost
+    : public content::BrowserChildProcessHostDelegate,
+      public IPC::Message::Sender {
  public:
   class Client {
    public:
@@ -65,9 +71,12 @@ class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
   PluginProcessHost();
   virtual ~PluginProcessHost();
 
+  // IPC::Message::Sender implementation:
+  virtual bool Send(IPC::Message* message) OVERRIDE;
+
   // Initialize the new plugin process, returning true on success. This must
   // be called before the object can be used.
-  bool Init(const webkit::WebPluginInfo& info, const std::string& locale);
+  bool Init(const webkit::WebPluginInfo& info);
 
   // Force the plugin process to shutdown (cleanly).
   void ForceShutdown();
@@ -124,6 +133,7 @@ class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
 #if defined(OS_WIN)
   void OnPluginWindowDestroyed(HWND window, HWND parent);
   void OnReparentPluginWindow(HWND window, HWND parent);
+  void OnReportExecutableMemory(size_t size);
 #endif
 
 #if defined(USE_X11)
@@ -140,6 +150,7 @@ class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
 #endif
 
   virtual bool CanShutdown() OVERRIDE;
+  virtual void OnProcessCrashed(int exit_code) OVERRIDE;
 
   void CancelRequests();
 
@@ -169,7 +180,17 @@ class CONTENT_EXPORT PluginProcessHost : public BrowserChildProcessHost {
   bool plugin_cursor_visible_;
 #endif
 
+  scoped_ptr<BrowserChildProcessHostImpl> process_;
+
   DISALLOW_COPY_AND_ASSIGN(PluginProcessHost);
+};
+
+class PluginProcessHostIterator
+    : public content::BrowserChildProcessHostTypeIterator<PluginProcessHost> {
+ public:
+  PluginProcessHostIterator()
+      : content::BrowserChildProcessHostTypeIterator<PluginProcessHost>(
+          content::PROCESS_TYPE_PLUGIN) {}
 };
 
 #endif  // CONTENT_BROWSER_PLUGIN_PROCESS_HOST_H_

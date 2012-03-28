@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,18 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class JavaBridgeDispatcherHost;
 class RenderViewHost;
 struct NPObject;
 
 // This class handles injecting Java objects into all of the RenderViews
-// associated with a TabContents. It manages a set of JavaBridgeDispatcherHost
+// associated with a WebContents. It manages a set of JavaBridgeDispatcherHost
 // objects, one per RenderViewHost.
-class JavaBridgeDispatcherHostManager : public TabContentsObserver {
+class JavaBridgeDispatcherHostManager : public content::WebContentsObserver {
  public:
-  JavaBridgeDispatcherHostManager(TabContents* tab_contents);
+  JavaBridgeDispatcherHostManager(content::WebContents* web_contents);
   virtual ~JavaBridgeDispatcherHostManager();
 
   // These methods add or remove the object to each JavaBridgeDispatcherHost.
@@ -31,10 +31,11 @@ class JavaBridgeDispatcherHostManager : public TabContentsObserver {
   void AddNamedObject(const string16& name, NPObject* object);
   void RemoveNamedObject(const string16& name);
 
-  // TabContentsObserver overrides
+  // content::WebContentsObserver overrides
   virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
   virtual void RenderViewDeleted(RenderViewHost* render_view_host) OVERRIDE;
-  virtual void TabContentsDestroyed(TabContents* tab_contents) OVERRIDE;
+  virtual void WebContentsDestroyed(
+      content::WebContents* web_contents) OVERRIDE;
 
  private:
   typedef std::map<RenderViewHost*, scoped_refptr<JavaBridgeDispatcherHost> >

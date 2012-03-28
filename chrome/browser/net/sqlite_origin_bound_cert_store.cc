@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "chrome/browser/diagnostics/sqlite_diagnostics.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/ssl_client_cert_type.h"
+#include "net/base/x509_certificate.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
@@ -117,7 +118,7 @@ class SQLiteOriginBoundCertStore::Backend
 };
 
 // Version number of the database.
-static const int kCurrentVersionNumber = 2;
+static const int kCurrentVersionNumber = 4;
 static const int kCompatibleVersionNumber = 1;
 
 namespace {
@@ -129,7 +130,9 @@ bool InitTable(sql::Connection* db) {
                      "origin TEXT NOT NULL UNIQUE PRIMARY KEY,"
                      "private_key BLOB NOT NULL,"
                      "cert BLOB NOT NULL,"
-                     "cert_type INTEGER)"))
+                     "cert_type INTEGER,"
+                     "expiration_time INTEGER,"
+                     "creation_time INTEGER)"))
       return false;
   }
 
@@ -171,7 +174,8 @@ bool SQLiteOriginBoundCertStore::Backend::Load(
 
   // Slurp all the certs into the out-vector.
   sql::Statement smt(db_->GetUniqueStatement(
-      "SELECT origin, private_key, cert, cert_type FROM origin_bound_certs"));
+      "SELECT origin, private_key, cert, cert_type, expiration_time, "
+      "creation_time FROM origin_bound_certs"));
   if (!smt) {
     NOTREACHED() << "select statement prep failed";
     db_.reset();
@@ -186,6 +190,8 @@ bool SQLiteOriginBoundCertStore::Backend::Load(
         new net::DefaultOriginBoundCertStore::OriginBoundCert(
             smt.ColumnString(0),  // origin
             static_cast<net::SSLClientCertType>(smt.ColumnInt(3)),
+            base::Time::FromInternalValue(smt.ColumnInt64(5)),
+            base::Time::FromInternalValue(smt.ColumnInt64(4)),
             private_key_from_db,
             cert_from_db));
     certs->push_back(cert.release());
@@ -224,6 +230,82 @@ bool SQLiteOriginBoundCertStore::Backend::EnsureDatabaseVersion() {
       return false;
     }
     ++cur_version;
+    meta_table_.SetVersionNumber(cur_version);
+    meta_table_.SetCompatibleVersionNumber(
+        std::min(cur_version, kCompatibleVersionNumber));
+    transaction.Commit();
+  }
+
+  if (cur_version <= 3) {
+    sql::Transaction transaction(db_.get());
+    if (!transaction.Begin())
+      return false;
+
+    if (cur_version == 2) {
+      if (!db_->Execute("ALTER TABLE origin_bound_certs ADD COLUMN "
+                        "expiration_time INTEGER")) {
+        LOG(WARNING) << "Unable to update origin bound cert database to "
+                     << "version 4.";
+        return false;
+      }
+    }
+
+    if (!db_->Execute("ALTER TABLE origin_bound_certs ADD COLUMN "
+                      "creation_time INTEGER")) {
+      LOG(WARNING) << "Unable to update origin bound cert database to "
+                   << "version 4.";
+      return false;
+    }
+
+    sql::Statement smt(db_->GetUniqueStatement(
+        "SELECT origin, cert FROM origin_bound_certs"));
+    sql::Statement update_expires_smt(db_->GetUniqueStatement(
+        "UPDATE origin_bound_certs SET expiration_time = ? WHERE origin = ?"));
+    sql::Statement update_creation_smt(db_->GetUniqueStatement(
+        "UPDATE origin_bound_certs SET creation_time = ? WHERE origin = ?"));
+    if (!smt || !update_expires_smt || !update_creation_smt) {
+      LOG(WARNING) << "Unable to update origin bound cert database to "
+                   << "version 4.";
+      return false;
+    }
+    while (smt.Step()) {
+      std::string origin = smt.ColumnString(0);
+      std::string cert_from_db;
+      smt.ColumnBlobAsString(1, &cert_from_db);
+      // Parse the cert and extract the real value and then update the DB.
+      scoped_refptr<net::X509Certificate> cert(
+          net::X509Certificate::CreateFromBytes(
+              cert_from_db.data(), cert_from_db.size()));
+      if (cert) {
+        if (cur_version == 2) {
+          update_expires_smt.Reset();
+          update_expires_smt.BindInt64(0,
+                                       cert->valid_expiry().ToInternalValue());
+          update_expires_smt.BindString(1, origin);
+          if (!update_expires_smt.Run()) {
+            LOG(WARNING) << "Unable to update origin bound cert database to "
+                         << "version 4.";
+            return false;
+          }
+        }
+
+        update_creation_smt.Reset();
+        update_creation_smt.BindInt64(0, cert->valid_start().ToInternalValue());
+        update_creation_smt.BindString(1, origin);
+        if (!update_creation_smt.Run()) {
+          LOG(WARNING) << "Unable to update origin bound cert database to "
+                       << "version 4.";
+          return false;
+        }
+      } else {
+        // If there's a cert we can't parse, just leave it.  It'll get replaced
+        // with a new one if we ever try to use it.
+        LOG(WARNING) << "Error parsing cert for database upgrade for origin "
+                     << smt.ColumnString(0);
+      }
+    }
+
+    cur_version = 4;
     meta_table_.SetVersionNumber(cur_version);
     meta_table_.SetCompatibleVersionNumber(
         std::min(cur_version, kCompatibleVersionNumber));
@@ -274,12 +356,12 @@ void SQLiteOriginBoundCertStore::Backend::BatchOperation(
     // We've gotten our first entry for this batch, fire off the timer.
     BrowserThread::PostDelayedTask(
         BrowserThread::DB, FROM_HERE,
-        NewRunnableMethod(this, &Backend::Commit), kCommitIntervalMs);
+        base::Bind(&Backend::Commit, this), kCommitIntervalMs);
   } else if (num_pending == kCommitAfterBatchSize) {
     // We've reached a big enough batch, fire off a commit now.
     BrowserThread::PostTask(
         BrowserThread::DB, FROM_HERE,
-        NewRunnableMethod(this, &Backend::Commit));
+        base::Bind(&Backend::Commit, this));
   }
 }
 
@@ -298,8 +380,8 @@ void SQLiteOriginBoundCertStore::Backend::Commit() {
     return;
 
   sql::Statement add_smt(db_->GetCachedStatement(SQL_FROM_HERE,
-      "INSERT INTO origin_bound_certs (origin, private_key, cert, cert_type) "
-      "VALUES (?,?,?,?)"));
+      "INSERT INTO origin_bound_certs (origin, private_key, cert, cert_type, "
+      "expiration_time) VALUES (?,?,?,?,?)"));
   if (!add_smt) {
     NOTREACHED();
     return;
@@ -330,6 +412,7 @@ void SQLiteOriginBoundCertStore::Backend::Commit() {
         const std::string& cert = po->cert().cert();
         add_smt.BindBlob(2, cert.data(), cert.size());
         add_smt.BindInt(3, po->cert().type());
+        add_smt.BindInt64(4, po->cert().expiration_time().ToInternalValue());
         if (!add_smt.Run())
           NOTREACHED() << "Could not add an origin bound cert to the DB.";
         break;
@@ -370,7 +453,7 @@ void SQLiteOriginBoundCertStore::Backend::Close() {
   // Must close the backend on the background thread.
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
-      NewRunnableMethod(this, &Backend::InternalBackgroundClose));
+      base::Bind(&Backend::InternalBackgroundClose, this));
 }
 
 void SQLiteOriginBoundCertStore::Backend::InternalBackgroundClose() {

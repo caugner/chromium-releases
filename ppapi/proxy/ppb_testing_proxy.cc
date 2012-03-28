@@ -15,6 +15,7 @@
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_input_event_api.h"
 
+using ppapi::thunk::EnterInstance;
 using ppapi::thunk::EnterResource;
 using ppapi::thunk::PPB_InputEvent_API;
 
@@ -87,13 +88,35 @@ void SimulateInputEvent(PP_Instance instance_id, PP_Resource input_event) {
       API_ID_PPB_TESTING, instance_id, input_event_data));
 }
 
+PP_Var GetDocumentURL(PP_Instance instance, PP_URLComponents_Dev* components) {
+  EnterInstance enter(instance);
+  if (enter.failed())
+    return PP_MakeUndefined();
+  return enter.functions()->GetDocumentURL(instance, components);
+}
+
+// TODO(dmichael): Ideally we could get a way to check the number of vars in the
+// host-side tracker when running out-of-process, to make sure the proxy does
+// not leak host-side vars.
+uint32_t GetLiveVars(PP_Var live_vars[], uint32_t array_size) {
+  std::vector<PP_Var> vars =
+      PpapiGlobals::Get()->GetVarTracker()->GetLiveVars();
+  for (size_t i = 0u;
+       i < std::min(static_cast<size_t>(array_size), vars.size());
+       ++i)
+    live_vars[i] = vars[i];
+  return vars.size();
+}
+
 const PPB_Testing_Dev testing_interface = {
   &ReadImageData,
   &RunMessageLoop,
   &QuitMessageLoop,
   &GetLiveObjectsForInstance,
   &IsOutOfProcess,
-  &SimulateInputEvent
+  &SimulateInputEvent,
+  &GetDocumentURL,
+  &GetLiveVars
 };
 
 InterfaceProxy* CreateTestingProxy(Dispatcher* dispatcher) {
@@ -165,10 +188,10 @@ void PPB_Testing_Proxy::OnMsgGetLiveObjectsForInstance(PP_Instance instance,
 void PPB_Testing_Proxy::OnMsgSimulateInputEvent(
     PP_Instance instance,
     const InputEventData& input_event) {
-  scoped_refptr<InputEventImpl> input_event_impl(
-      new InputEventImpl(InputEventImpl::InitAsProxy(),
-                         instance,
-                         input_event));
+  scoped_refptr<PPB_InputEvent_Shared> input_event_impl(
+      new PPB_InputEvent_Shared(PPB_InputEvent_Shared::InitAsProxy(),
+                                instance,
+                                input_event));
   ppb_testing_impl_->SimulateInputEvent(instance,
                                         input_event_impl->pp_resource());
 }

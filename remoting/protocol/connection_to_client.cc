@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,9 @@ ConnectionToClient::ConnectionToClient(protocol::Session* session)
       session_(session) {
   session_->SetStateChangeCallback(
       base::Bind(&ConnectionToClient::OnSessionStateChange,
+                 base::Unretained(this)));
+  session_->SetRouteChangeCallback(
+      base::Bind(&ConnectionToClient::OnSessionRouteChange,
                  base::Unretained(this)));
 }
 
@@ -88,16 +91,18 @@ void ConnectionToClient::set_input_stub(protocol::InputStub* input_stub) {
   input_stub_ = input_stub;
 }
 
-void ConnectionToClient::OnSessionStateChange(protocol::Session::State state) {
+void ConnectionToClient::OnSessionStateChange(Session::State state) {
   DCHECK(CalledOnValidThread());
 
   DCHECK(handler_);
   switch(state) {
-    case protocol::Session::CONNECTING:
-      // Don't care about this message.
+    case Session::INITIALIZING:
+    case Session::CONNECTING:
+    case Session::CONNECTED:
+      // Don't care about these events.
       break;
 
-    case protocol::Session::CONNECTED:
+    case Session::AUTHENTICATED:
       // Initialize channels.
       control_dispatcher_.reset(new HostControlDispatcher());
       control_dispatcher_->Init(session_.get(), base::Bind(
@@ -118,19 +123,20 @@ void ConnectionToClient::OnSessionStateChange(protocol::Session::State state) {
 
       break;
 
-    case protocol::Session::CLOSED:
+    case Session::CLOSED:
       CloseChannels();
       handler_->OnConnectionClosed(this);
       break;
 
-    case protocol::Session::FAILED:
+    case Session::FAILED:
       CloseOnError();
       break;
-
-    default:
-      // We shouldn't receive other states.
-      NOTREACHED();
   }
+}
+
+void ConnectionToClient::OnSessionRouteChange(
+    const std::string& channel_name, const net::IPEndPoint& end_point) {
+  handler_->OnClientIpAddress(this, channel_name, end_point);
 }
 
 void ConnectionToClient::OnChannelInitialized(bool successful) {

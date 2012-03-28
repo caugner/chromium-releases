@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,21 +6,22 @@
 #define CHROME_BROWSER_UI_WEBUI_TASK_MANAGER_HANDLER_H_
 #pragma once
 
+#include <set>
+#include <string>
 #include <vector>
-#include "content/browser/webui/web_ui.h"
+
+#include "content/public/browser/web_ui_message_handler.h"
 #include "chrome/browser/task_manager/task_manager.h"
 
 namespace base {
 class ListValue;
 }
 
-class TaskManagerHandler : public WebUIMessageHandler,
+class TaskManagerHandler : public content::WebUIMessageHandler,
                            public TaskManagerModelObserver {
  public:
   explicit TaskManagerHandler(TaskManager* tm);
   virtual ~TaskManagerHandler();
-
-  void Init();
 
   // TaskManagerModelObserver implementation.
   // Invoked when the model has been completely changed.
@@ -35,8 +36,8 @@ class TaskManagerHandler : public WebUIMessageHandler,
   // WebUIMessageHandler implementation.
   virtual void RegisterMessages() OVERRIDE;
 
-  // Callback for the "killProcess" message.
-  void HandleKillProcess(const base::ListValue* indexes);
+  // Callback for the "killProcesses" message.
+  void HandleKillProcesses(const base::ListValue* indexes);
 
   // Callback for the "activatePage" message.
   void HandleActivatePage(const base::ListValue* resource_index);
@@ -47,6 +48,9 @@ class TaskManagerHandler : public WebUIMessageHandler,
   void EnableTaskManager(const base::ListValue* indexes);
   void DisableTaskManager(const base::ListValue* indexes);
   void OpenAboutMemory(const base::ListValue* indexes);
+
+  // Callback for the "setUpdateColumn" message.
+  void HandleSetUpdateColumn(const base::ListValue* args);
 
  private:
   bool is_alive();
@@ -59,6 +63,9 @@ class TaskManagerHandler : public WebUIMessageHandler,
 
   // Table to cache the group index of the resource index.
   std::vector<int> resource_to_group_table_;
+
+  // Set to store the enabled columns.
+  std::set<std::string> enabled_columns_;
 
   // Invoked when group(s) are added/changed/removed.
   // These method are called from OnItemAdded/-Changed/-Removed internally.

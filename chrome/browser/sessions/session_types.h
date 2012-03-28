@@ -19,8 +19,11 @@
 #include "ui/base/ui_base_types.h"
 #include "ui/gfx/rect.h"
 
-class NavigationEntry;
 class Profile;
+
+namespace content {
+class NavigationEntry;
+}
 
 // TabNavigation  -------------------------------------------------------------
 
@@ -47,12 +50,13 @@ class TabNavigation {
 
   // Converts this TabNavigation into a NavigationEntry with a page id of
   // |page_id|. The caller owns the returned NavigationEntry.
-  NavigationEntry* ToNavigationEntry(int page_id, Profile* profile) const;
+  content::NavigationEntry* ToNavigationEntry(int page_id,
+                                              Profile* profile) const;
 
   // Resets this TabNavigation from |entry|.
-  void SetFromNavigationEntry(const NavigationEntry& entry);
+  void SetFromNavigationEntry(const content::NavigationEntry& entry);
 
-  // Virtual URL of the page. See NavigationEntry::virtual_url() for details.
+  // Virtual URL of the page. See NavigationEntry::GetVirtualURL() for details.
   void set_virtual_url(const GURL& url) { virtual_url_ = url; }
   const GURL& virtual_url() const { return virtual_url_; }
 
@@ -90,7 +94,7 @@ class TabNavigation {
   static void CreateNavigationEntriesFromTabNavigations(
       Profile* profile,
       const std::vector<TabNavigation>& navigations,
-      std::vector<NavigationEntry*>* entries);
+      std::vector<content::NavigationEntry*>* entries);
 
  private:
   friend class BaseSessionService;

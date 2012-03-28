@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,14 +9,14 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "media/base/filters.h"
-#include "media/base/pts_stream.h"
 #include "ui/gfx/size.h"
 
 class MessageLoop;
 
-namespace media {
+struct AVCodecContext;
+struct AVFrame;
 
-class VideoDecodeEngine;
+namespace media {
 
 class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
  public:
@@ -31,7 +31,7 @@ class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
 
   // VideoDecoder implementation.
   virtual void Initialize(DemuxerStream* demuxer_stream,
-                          const base::Closure& callback,
+                          const PipelineStatusCB& callback,
                           const StatisticsCallback& stats_callback) OVERRIDE;
   virtual void Read(const ReadCB& callback) OVERRIDE;
   virtual const gfx::Size& natural_size() OVERRIDE;
@@ -53,19 +53,35 @@ class MEDIA_EXPORT FFmpegVideoDecoder : public VideoDecoder {
 
   // Carries out the decoding operation scheduled by DecodeBuffer().
   void DoDecodeBuffer(const scoped_refptr<Buffer>& buffer);
+  bool Decode(const scoped_refptr<Buffer>& buffer,
+              scoped_refptr<VideoFrame>* video_frame);
 
   // Delivers the frame to |read_cb_| and resets the callback.
   void DeliverFrame(const scoped_refptr<VideoFrame>& video_frame);
 
+  // Releases resources associated with |codec_context_| and |av_frame_|
+  // and resets them to NULL.
+  void ReleaseFFmpegResources();
+
+  // Allocates a video frame based on the current format and dimensions based on
+  // the current state of |codec_context_|.
+  scoped_refptr<VideoFrame> AllocateVideoFrame();
+
   MessageLoop* message_loop_;
 
-  PtsStream pts_stream_;
   DecoderState state_;
-  scoped_ptr<VideoDecodeEngine> decode_engine_;
 
   StatisticsCallback statistics_callback_;
 
   ReadCB read_cb_;
+
+  // FFmpeg structures owned by this object.
+  AVCodecContext* codec_context_;
+  AVFrame* av_frame_;
+
+  // Frame rate of the video.
+  int frame_rate_numerator_;
+  int frame_rate_denominator_;
 
   // TODO(scherkus): I think this should be calculated by VideoRenderers based
   // on information provided by VideoDecoders (i.e., aspect ratio).

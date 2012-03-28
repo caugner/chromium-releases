@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include <string>
 
+#include "chrome/browser/chromeos/cros/network_ui_data.h"
 #include "chrome/browser/policy/configuration_policy_provider.h"
 
 namespace chromeos {
@@ -30,6 +31,9 @@ class NetworkConfigurationUpdater
   // ConfigurationPolicyProvider::Observer:
   virtual void OnUpdatePolicy(ConfigurationPolicyProvider* provider) OVERRIDE;
 
+  // Empty network configuration blob.
+  static const char kEmptyConfiguration[];
+
  private:
   // Grabs network configuration from policy and applies it.
   void Update();
@@ -38,7 +42,8 @@ class NetworkConfigurationUpdater
   // |network_library_| if it's different from |*cached_value| (which is
   // updated).
   void ApplyNetworkConfiguration(const PolicyMap& policy_map,
-                                 ConfigurationPolicyType policy_type,
+                                 const char* policy_name,
+                                 chromeos::NetworkUIData::ONCSource onc_source,
                                  std::string* cached_value);
 
   // Wraps the provider we read network configuration from.

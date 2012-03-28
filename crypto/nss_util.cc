@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,6 +30,7 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/native_library.h"
+#include "base/scoped_temp_dir.h"
 #include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -217,9 +218,13 @@ class NSPRInitSingleton {
   }
 };
 
-base::LazyInstance<NSPRInitSingleton,
-                   base::LeakyLazyInstanceTraits<NSPRInitSingleton> >
+base::LazyInstance<NSPRInitSingleton>::Leaky
     g_nspr_singleton = LAZY_INSTANCE_INITIALIZER;
+
+// This is a LazyInstance so that it will be deleted automatically when the
+// unittest exits.  NSSInitSingleton is a LeakySingleton, so it would not be
+// deleted if it were a regular member.
+base::LazyInstance<ScopedTempDir> g_test_nss_db_dir = LAZY_INSTANCE_INITIALIZER;
 
 class NSSInitSingleton {
  public:
@@ -344,8 +349,12 @@ class NSSInitSingleton {
 #endif  // defined(OS_CHROMEOS)
 
 
-  bool OpenTestNSSDB(const FilePath& path, const char* description) {
-    test_slot_ = OpenUserDB(path, description);
+  bool OpenTestNSSDB() {
+    if (test_slot_)
+      return true;
+    if (!g_test_nss_db_dir.Get().CreateUniqueTempDir())
+      return false;
+    test_slot_ = OpenUserDB(g_test_nss_db_dir.Get().path(), "Test DB");
     return !!test_slot_;
   }
 
@@ -356,6 +365,7 @@ class NSSInitSingleton {
         PLOG(ERROR) << "SECMOD_CloseUserDB failed: " << PORT_GetError();
       PK11_FreeSlot(test_slot_);
       test_slot_ = NULL;
+      ignore_result(g_test_nss_db_dir.Get().Delete());
     }
   }
 
@@ -612,8 +622,7 @@ class NSSInitSingleton {
 // static
 bool NSSInitSingleton::force_nodb_init_ = false;
 
-base::LazyInstance<NSSInitSingleton,
-                   base::LeakyLazyInstanceTraits<NSSInitSingleton> >
+base::LazyInstance<NSSInitSingleton>::Leaky
     g_nss_singleton = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -700,12 +709,8 @@ bool CheckNSSVersion(const char* version) {
 }
 
 #if defined(USE_NSS)
-bool OpenTestNSSDB(const FilePath& path, const char* description) {
-  return g_nss_singleton.Get().OpenTestNSSDB(path, description);
-}
-
-void CloseTestNSSDB() {
-  g_nss_singleton.Get().CloseTestNSSDB();
+bool OpenTestNSSDB() {
+  return g_nss_singleton.Get().OpenTestNSSDB();
 }
 
 base::Lock* GetNSSWriteLock() {
@@ -769,23 +774,13 @@ SymmetricKey* GetSupplementalUserKey() {
 }
 #endif  // defined(OS_CHROMEOS)
 
-// TODO(port): Implement this more simply.  We can convert by subtracting an
-// offset (the difference between NSPR's and base::Time's epochs).
 base::Time PRTimeToBaseTime(PRTime prtime) {
-  PRExplodedTime prxtime;
-  PR_ExplodeTime(prtime, PR_GMTParameters, &prxtime);
+  return base::Time::FromInternalValue(
+      prtime + base::Time::UnixEpoch().ToInternalValue());
+}
 
-  base::Time::Exploded exploded;
-  exploded.year         = prxtime.tm_year;
-  exploded.month        = prxtime.tm_month + 1;
-  exploded.day_of_week  = prxtime.tm_wday;
-  exploded.day_of_month = prxtime.tm_mday;
-  exploded.hour         = prxtime.tm_hour;
-  exploded.minute       = prxtime.tm_min;
-  exploded.second       = prxtime.tm_sec;
-  exploded.millisecond  = prxtime.tm_usec / 1000;
-
-  return base::Time::FromUTCExploded(exploded);
+PRTime BaseTimeToPRTime(base::Time time) {
+  return time.ToInternalValue() - base::Time::UnixEpoch().ToInternalValue();
 }
 
 PK11SlotInfo* GetPublicNSSKeySlot() {

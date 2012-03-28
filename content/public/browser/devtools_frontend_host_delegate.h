@@ -33,10 +33,15 @@ class DevToolsFrontendHostDelegate {
   // own window.
   virtual void UndockWindow() = 0;
 
+  // Specifies side for devtools to dock to.
+  virtual void SetDockSide(const std::string& side) = 0;
+
+  // Opens given |url| in the new tab.
+  virtual void OpenInNewTab(const std::string& url) = 0;
+
   // Shows "Save As..." dialog to save |content|.
   virtual void SaveToFile(const std::string& suggested_file_name,
                           const std::string& content) = 0;
-
 
   // This method is called when tab inspected by this devtools frontend is
   // closing.
@@ -48,7 +53,7 @@ class DevToolsFrontendHostDelegate {
 
   // Invoked when tab inspected by this devtools frontend is replaced by
   // another tab. This is triggered by TabStripModel::ReplaceTabContentsAt.
-  virtual void TabReplaced(TabContents* new_tab) = 0;
+  virtual void TabReplaced(WebContents* new_tab) = 0;
 };
 
 }  // namespace content

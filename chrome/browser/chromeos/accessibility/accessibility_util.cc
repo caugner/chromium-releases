@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,8 +20,8 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/accessibility/browser_accessibility_state.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -83,10 +83,10 @@ class ContentScriptLoader {
   std::queue<ExtensionResource> resources_;
 };
 
-void EnableAccessibility(bool enabled, WebUI* login_web_ui) {
+void EnableAccessibility(bool enabled, content::WebUI* login_web_ui) {
   bool accessibility_enabled = g_browser_process &&
       g_browser_process->local_state()->GetBoolean(
-          prefs::kAccessibilityEnabled);
+          prefs::kSpokenFeedbackEnabled);
   if (accessibility_enabled == enabled) {
     LOG(INFO) << "Accessibility is already " <<
         (enabled ? "enabled" : "disabled") << ".  Going to do nothing.";
@@ -94,8 +94,8 @@ void EnableAccessibility(bool enabled, WebUI* login_web_ui) {
   }
 
   g_browser_process->local_state()->SetBoolean(
-      prefs::kAccessibilityEnabled, enabled);
-  g_browser_process->local_state()->ScheduleSavePersistentPrefs();
+      prefs::kSpokenFeedbackEnabled, enabled);
+  g_browser_process->local_state()->CommitPendingWrite();
   ExtensionAccessibilityEventRouter::GetInstance()->
       SetAccessibilityEnabled(enabled);
   BrowserAccessibilityState::GetInstance()->OnAccessibilityEnabledManually();
@@ -117,7 +117,20 @@ void EnableAccessibility(bool enabled, WebUI* login_web_ui) {
 
     if (login_web_ui) {
       RenderViewHost* render_view_host =
-          login_web_ui->tab_contents()->render_view_host();
+          login_web_ui->GetWebContents()->GetRenderViewHost();
+      // Set a flag to tell ChromeVox that it's just been enabled,
+      // so that it won't interrupt our speech feedback enabled message.
+      ExtensionMsg_ExecuteCode_Params params;
+      params.request_id = 0;
+      params.extension_id = extension->id();
+      params.is_javascript = true;
+      params.code = "window.INJECTED_AFTER_LOAD = true;";
+      params.all_frames = true;
+      params.in_main_world = false;
+      render_view_host->Send(new ExtensionMsg_ExecuteCode(
+          render_view_host->routing_id(), params));
+
+      // Inject ChromeVox' content scripts.
       ContentScriptLoader* loader = new ContentScriptLoader(
           extension->id(), render_view_host);
 
@@ -140,10 +153,28 @@ void EnableAccessibility(bool enabled, WebUI* login_web_ui) {
   }
 }
 
-void ToggleAccessibility(WebUI* login_web_ui) {
+void EnableHighContrast(bool enabled) {
+  PrefService* pref_service = g_browser_process->local_state();
+  pref_service->SetBoolean(prefs::kHighContrastEnabled, enabled);
+  pref_service->CommitPendingWrite();
+}
+
+void EnableScreenMagnifier(bool enabled) {
+  PrefService* pref_service = g_browser_process->local_state();
+  pref_service->SetBoolean(prefs::kScreenMagnifierEnabled, enabled);
+  pref_service->CommitPendingWrite();
+}
+
+void EnableVirtualKeyboard(bool enabled) {
+  PrefService* pref_service = g_browser_process->local_state();
+  pref_service->SetBoolean(prefs::kVirtualKeyboardEnabled, enabled);
+  pref_service->CommitPendingWrite();
+}
+
+void ToggleAccessibility(content::WebUI* login_web_ui) {
   bool accessibility_enabled = g_browser_process &&
       g_browser_process->local_state()->GetBoolean(
-          prefs::kAccessibilityEnabled);
+          prefs::kSpokenFeedbackEnabled);
   accessibility_enabled = !accessibility_enabled;
   EnableAccessibility(accessibility_enabled, login_web_ui);
 };
@@ -163,7 +194,7 @@ bool IsAccessibilityEnabled() {
   }
   PrefService* prefs = g_browser_process->local_state();
   bool accessibility_enabled = prefs &&
-      prefs->GetBoolean(prefs::kAccessibilityEnabled);
+      prefs->GetBoolean(prefs::kSpokenFeedbackEnabled);
   return accessibility_enabled;
 }
 

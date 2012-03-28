@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,6 +11,7 @@
     'gles2_c_lib_source_files': [
       'command_buffer/client/gles2_c_lib.cc',
       'command_buffer/client/gles2_c_lib_autogen.h',
+      'command_buffer/client/gles2_c_lib_export.h',
       'command_buffer/client/gles2_lib.h',
       'command_buffer/client/gles2_lib.cc',
     ],
@@ -39,6 +40,7 @@
       },
       'dependencies': [
         '../base/base.gyp:base',
+        'command_buffer/command_buffer.gyp:gles2_utils',
       ],
       'export_dependent_settings': [
         '../base/base.gyp:base',
@@ -49,18 +51,15 @@
         'command_buffer/common/cmd_buffer_common.h',
         'command_buffer/common/cmd_buffer_common.cc',
         'command_buffer/common/command_buffer.h',
+        'command_buffer/common/compiler_specific.h',
         'command_buffer/common/constants.h',
         'command_buffer/common/gles2_cmd_ids_autogen.h',
         'command_buffer/common/gles2_cmd_ids.h',
         'command_buffer/common/gles2_cmd_format_autogen.h',
         'command_buffer/common/gles2_cmd_format.cc',
         'command_buffer/common/gles2_cmd_format.h',
-        'command_buffer/common/gles2_cmd_utils.cc',
-        'command_buffer/common/gles2_cmd_utils.h',
         'command_buffer/common/id_allocator.cc',
         'command_buffer/common/id_allocator.h',
-        'command_buffer/common/logging.cc',
-        'command_buffer/common/logging.h',
         'command_buffer/common/thread_local.h',
         'command_buffer/common/types.h',
       ],
@@ -103,6 +102,27 @@
       'type': 'static_library',
       'defines': [
         'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
+      ],
+      'dependencies': [
+        '../base/base.gyp:base',
+        'gles2_cmd_helper',
+      ],
+      'all_dependent_settings': {
+        'include_dirs': [
+          # For GLES2/gl2.h
+          '<(DEPTH)/third_party/khronos',
+        ],
+      },
+      'sources': [
+        '<@(gles2_implementation_source_files)',
+      ],
+    },
+    {
+      # Library emulates GLES2 using command_buffers.
+      'target_name': 'gles2_implementation_client_side_arrays_no_check',
+      'type': 'static_library',
+      'defines': [
+        'GLES2_SUPPORT_CLIENT_SIDE_ARRAYS=1',
         'GLES2_CONFORMANCE_TESTS=1',
       ],
       'dependencies': [
@@ -123,10 +143,14 @@
       # Stub to expose gles2_implemenation in C instead of C++.
       # so GLES2 C programs can work with no changes.
       'target_name': 'gles2_c_lib',
-      'type': 'static_library',
+      'type': '<(component)',
       'dependencies': [
         '../base/base.gyp:base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         'gles2_implementation',
+      ],
+      'defines': [
+        'GLES2_C_LIB_IMPLEMENTATION',
       ],
       'sources': [
         '<@(gles2_c_lib_source_files)',
@@ -136,12 +160,15 @@
       # Same as gles2_c_lib except with no parameter checking. Required for
       # OpenGL ES 2.0 conformance tests.
       'target_name': 'gles2_c_lib_nocheck',
-      'type': 'static_library',
+      'type': '<(component)',
       'defines': [
+        'GLES2_C_LIB_IMPLEMENTATION',
         'GLES2_CONFORMANCE_TESTS=1',
       ],
       'dependencies': [
-        'gles2_implementation_client_side_arrays',
+        '../base/base.gyp:base',
+        '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
+        'gles2_implementation_client_side_arrays_no_check',
       ],
       'sources': [
         '<@(gles2_c_lib_source_files)',
@@ -172,6 +199,8 @@
         'command_buffer/client/mapped_memory.h',
         'command_buffer/client/ring_buffer.cc',
         'command_buffer/client/ring_buffer.h',
+        'command_buffer/client/transfer_buffer.cc',
+        'command_buffer/client/transfer_buffer.h',
       ],
     },
     {
@@ -222,6 +251,8 @@
         'command_buffer/service/gpu_scheduler.h',
         'command_buffer/service/gpu_scheduler.cc',
         'command_buffer/service/gpu_scheduler_mock.h',
+        'command_buffer/service/gpu_switches.h',
+        'command_buffer/service/gpu_switches.cc',
         'command_buffer/service/id_manager.h',
         'command_buffer/service/id_manager.cc',
         'command_buffer/service/mocks.h',
@@ -269,21 +300,25 @@
         'gles2_implementation_client_side_arrays',
         'gles2_cmd_helper',
       ],
+      'defines': [
+        'GLES2_C_LIB_IMPLEMENTATION',
+      ],
       'sources': [
         '<@(gles2_c_lib_source_files)',
+        'command_buffer/client/client_test_helper.cc',
+        'command_buffer/client/client_test_helper.h',
         'command_buffer/client/cmd_buffer_helper_test.cc',
         'command_buffer/client/fenced_allocator_test.cc',
         'command_buffer/client/gles2_implementation_unittest.cc',
         'command_buffer/client/mapped_memory_unittest.cc',
         'command_buffer/client/program_info_manager_unittest.cc',
         'command_buffer/client/ring_buffer_test.cc',
+        'command_buffer/client/transfer_buffer_unittest.cc',
         'command_buffer/common/bitfield_helpers_test.cc',
         'command_buffer/common/command_buffer_mock.cc',
         'command_buffer/common/command_buffer_mock.h',
         'command_buffer/common/gles2_cmd_format_test.cc',
         'command_buffer/common/gles2_cmd_format_test_autogen.h',
-        'command_buffer/common/gles2_cmd_id_test.cc',
-        'command_buffer/common/gles2_cmd_id_test_autogen.h',
         'command_buffer/common/gles2_cmd_utils_unittest.cc',
         'command_buffer/common/id_allocator_test.cc',
         'command_buffer/common/trace_event.h',

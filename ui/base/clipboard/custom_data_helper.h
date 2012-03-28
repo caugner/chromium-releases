@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -19,7 +19,21 @@
 
 class Pickle;
 
+#if defined(OS_MACOSX)
+#ifdef __OBJC__
+@class NSString;
+#else
+class NSString;
+#endif
+#endif  // defined(OS_MACOSX)
+
 namespace ui {
+
+#if defined(OS_MACOSX)
+UI_EXPORT extern NSString* const kWebCustomDataPboardType;
+#elif (!defined(OS_WIN) && defined(USE_AURA)) || defined(TOOLKIT_USES_GTK)
+UI_EXPORT extern const char kMimeTypeWebCustomData[];
+#endif
 
 UI_EXPORT void ReadCustomDataTypes(const void* data,
                                    size_t data_length,

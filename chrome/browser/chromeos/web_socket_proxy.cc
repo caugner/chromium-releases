@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include <map>
 #include <vector>
 
-#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -26,15 +25,19 @@
 #include "base/base64.h"
 #include "base/basictypes.h"
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
+#include "base/message_loop_helpers.h"
 #include "base/sha1.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
+#include "base/sys_byteorder.h"
 #include "chrome/browser/chromeos/web_socket_proxy_helper.h"
 #include "chrome/browser/internal_auth.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -433,9 +436,7 @@ class Conn {
   // Used to schedule a timeout for initial phase of connection.
   scoped_ptr<struct event> destconnect_timeout_event_;
 
-  static base::LazyInstance<EventKeyMap,
-                            base::LeakyLazyInstanceTraits<EventKeyMap> >
-      evkey_map_;
+  static base::LazyInstance<EventKeyMap>::Leaky evkey_map_;
   static EventKey last_evkey_;
 
   DISALLOW_COPY_AND_ASSIGN(Conn);
@@ -553,12 +554,7 @@ class SSLChan : public MessageLoopForIO::Watcher {
         outbound_stream_(WebSocketProxy::kBufferLimit),
         read_pipe_(read_pipe),
         write_pipe_(write_pipe),
-        method_factory_(this),
-        socket_connect_callback_(NewCallback(this, &SSLChan::OnSocketConnect)),
-        ssl_handshake_callback_(
-            NewCallback(this, &SSLChan::OnSSLHandshakeCompleted)),
-        socket_read_callback_(NewCallback(this, &SSLChan::OnSocketRead)),
-        socket_write_callback_(NewCallback(this, &SSLChan::OnSocketWrite)) {
+        ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
     if (!SetNonBlock(read_pipe_) || !SetNonBlock(write_pipe_)) {
       Shut(net::ERR_UNEXPECTED);
       return;
@@ -571,7 +567,8 @@ class SSLChan : public MessageLoopForIO::Watcher {
       Shut(net::ERR_FAILED);
       return;
     }
-    int result = socket_->Connect(socket_connect_callback_.get());
+    int result = socket_->Connect(base::Bind(&SSLChan::OnSocketConnect,
+                                             base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
       OnSocketConnect(result);
   }
@@ -593,8 +590,9 @@ class SSLChan : public MessageLoopForIO::Watcher {
       };
       for (int i = arraysize(buf); i--;) {
         if (buf[i] && buf[i]->size() > 0) {
-          MessageLoop::current()->PostTask(FROM_HERE,
-              method_factory_.NewRunnableMethod(&SSLChan::Proceed));
+          MessageLoop::current()->PostTask(
+              FROM_HERE,
+              base::Bind(&SSLChan::Proceed, weak_factory_.GetWeakPtr()));
           return;
         }
       }
@@ -631,7 +629,8 @@ class SSLChan : public MessageLoopForIO::Watcher {
       OnSSLHandshakeCompleted(net::ERR_UNEXPECTED);
       return;
     }
-    result = socket_->Connect(ssl_handshake_callback_.get());
+    result = socket_->Connect(base::Bind(&SSLChan::OnSSLHandshakeCompleted,
+                                         base::Unretained(this)));
     if (result != net::ERR_IO_PENDING)
       OnSSLHandshakeCompleted(result);
   }
@@ -729,11 +728,14 @@ class SSLChan : public MessageLoopForIO::Watcher {
         scoped_refptr<net::IOBufferWithSize> buf =
             inbound_stream_.GetIOBufferToFill();
         if (buf && buf->size() > 0) {
-          int rv = socket_->Read(buf, buf->size(), socket_read_callback_.get());
+          int rv = socket_->Read(
+              buf, buf->size(),
+              base::Bind(&SSLChan::OnSocketRead, base::Unretained(this)));
           is_socket_read_pending_ = true;
           if (rv != net::ERR_IO_PENDING) {
-            MessageLoop::current()->PostTask(FROM_HERE,
-                method_factory_.NewRunnableMethod(&SSLChan::OnSocketRead, rv));
+            MessageLoop::current()->PostTask(
+                FROM_HERE, base::Bind(&SSLChan::OnSocketRead,
+                                      weak_factory_.GetWeakPtr(), rv));
           }
         }
       }
@@ -742,11 +744,13 @@ class SSLChan : public MessageLoopForIO::Watcher {
             outbound_stream_.GetIOBufferToProcess();
         if (buf && buf->size() > 0) {
           int rv = socket_->Write(
-              buf, buf->size(), socket_write_callback_.get());
+              buf, buf->size(),
+              base::Bind(&SSLChan::OnSocketWrite, base::Unretained(this)));
           is_socket_write_pending_ = true;
           if (rv != net::ERR_IO_PENDING) {
-            MessageLoop::current()->PostTask(FROM_HERE,
-                method_factory_.NewRunnableMethod(&SSLChan::OnSocketWrite, rv));
+            MessageLoop::current()->PostTask(
+                FROM_HERE, base::Bind(&SSLChan::OnSocketWrite,
+                                      weak_factory_.GetWeakPtr(), rv));
           }
         } else if (phase_ == PHASE_CLOSING) {
           Shut(0);
@@ -791,15 +795,11 @@ class SSLChan : public MessageLoopForIO::Watcher {
   bool is_socket_write_pending_;
   bool is_read_pipe_blocked_;
   bool is_write_pipe_blocked_;
-  ScopedRunnableMethodFactory<SSLChan> method_factory_;
-  scoped_ptr<net::OldCompletionCallback> socket_connect_callback_;
-  scoped_ptr<net::OldCompletionCallback> ssl_handshake_callback_;
-  scoped_ptr<net::OldCompletionCallback> socket_read_callback_;
-  scoped_ptr<net::OldCompletionCallback> socket_write_callback_;
+  base::WeakPtrFactory<SSLChan> weak_factory_;
   MessageLoopForIO::FileDescriptorWatcher read_pipe_controller_;
   MessageLoopForIO::FileDescriptorWatcher write_pipe_controller_;
 
-  friend class DeleteTask<SSLChan>;
+  friend class base::DeleteHelper<SSLChan>;
   DISALLOW_COPY_AND_ASSIGN(SSLChan);
 };
 
@@ -1893,8 +1893,7 @@ void Conn::OnDestchanError(struct bufferevent* bev,
 Conn::EventKey Conn::last_evkey_ = 0;
 
 // static
-base::LazyInstance<Conn::EventKeyMap,
-                   base::LeakyLazyInstanceTraits<Conn::EventKeyMap> >
+base::LazyInstance<Conn::EventKeyMap>::Leaky
     Conn::evkey_map_ = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace

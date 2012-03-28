@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,6 @@
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/extensions/extension_event_router_forwarder.h"
 #include "chrome/browser/extensions/extension_tab_id_map.h"
-#include "chrome/browser/extensions/network_delay_listener.h"
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/first_run/upgrade_util.h"
 #include "chrome/browser/google/google_url_tracker.h"
@@ -51,7 +50,6 @@
 #include "chrome/browser/renderer_host/chrome_resource_dispatcher_host_delegate.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/status_icons/status_tray.h"
 #include "chrome/browser/tab_closeable_state_watcher.h"
 #include "chrome/browser/tab_contents/thumbnail_generator.h"
@@ -67,20 +65,17 @@
 #include "chrome/common/switch_utils.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "content/browser/browser_child_process_host.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/download/download_file_manager.h"
 #include "content/browser/download/download_status_updater.h"
 #include "content/browser/download/mhtml_generation_manager.h"
-#include "content/browser/download/save_file_manager.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/net/browser_online_state_observer.h"
-#include "content/browser/plugin_service.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
+#include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/url_fetcher.h"
+#include "media/audio/audio_manager.h"
 #include "net/socket/client_socket_pool_manager.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/clipboard/clipboard.h"
@@ -93,7 +88,6 @@
 #endif
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/web_socket_proxy_controller.h"
 #include "chrome/browser/oom_priority_manager.h"
 #endif  // defined(OS_CHROMEOS)
 
@@ -119,15 +113,14 @@ static const int kEndSessionTimeoutSeconds = 10;
 #endif
 
 using content::BrowserThread;
+using content::PluginService;
 
 BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
-    : created_resource_dispatcher_host_(false),
-      created_metrics_service_(false),
+    : created_metrics_service_(false),
       created_watchdog_thread_(false),
       created_profile_manager_(false),
       created_local_state_(false),
       created_icon_manager_(false),
-      created_sidebar_manager_(false),
       created_browser_policy_connector_(false),
       created_notification_ui_manager_(false),
       created_safe_browsing_service_(false),
@@ -156,10 +149,6 @@ BrowserProcessImpl::BrowserProcessImpl(const CommandLine& command_line)
 }
 
 BrowserProcessImpl::~BrowserProcessImpl() {
-  // See StartTearDown and PreStopThread functions below, this is where
-  // most destruction happens so that it can be interleaved with threads
-  // going away.
-
   // Wait for the pending print jobs to finish.
   print_job_manager_->OnQuit();
   print_job_manager_.reset();
@@ -206,24 +195,11 @@ void BrowserProcessImpl::StartTearDown() {
   // those things during teardown.
   notification_ui_manager_.reset();
 
-  // FIXME - We shouldn't need this, it's because of DefaultRequestContext! :(
-  // We need to kill off all URLFetchers using profile related
-  // URLRequestContexts. Normally that'd be covered by deleting the Profiles,
-  // but we have some URLFetchers using the DefaultRequestContext, so they need
-  // to be cancelled too. Remove this when DefaultRequestContext goes away.
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::Bind(&content::URLFetcher::CancelAll));
-
   // Need to clear profiles (download managers) before the io_thread_.
   profile_manager_.reset();
 
   // Debugger must be cleaned up before IO thread and NotificationService.
   remote_debugging_server_.reset();
-
-  if (resource_dispatcher_host_.get()) {
-    // Cancel pending requests and prevent new requests.
-    resource_dispatcher_host()->Shutdown();
-  }
 
   ExtensionTabIdMap::GetInstance()->Shutdown();
 
@@ -241,61 +217,18 @@ void BrowserProcessImpl::StartTearDown() {
   watchdog_thread_.reset();
 }
 
-void BrowserProcessImpl::PreStartThread(BrowserThread::ID thread_id) {
-  switch (thread_id) {
-    case BrowserThread::IO:
-      CreateIOThreadState();
-      break;
+void BrowserProcessImpl::PostDestroyThreads() {
+  // With the file_thread_ flushed, we can release any icon resources.
+  icon_manager_.reset();
 
-    default:
-      break;
-  }
-}
-
-void BrowserProcessImpl::PostStartThread(BrowserThread::ID thread_id) {
-}
-
-void BrowserProcessImpl::PreStopThread(BrowserThread::ID thread_id) {
-  switch (thread_id) {
-#if defined(OS_CHROMEOS)
-    case BrowserThread::WEB_SOCKET_PROXY:
-      chromeos::WebSocketProxyController::Shutdown();
-      break;
-#endif
-    case BrowserThread::FILE:
-      // Clean up state that lives on or uses the file_thread_ before
-      // it goes away.
-      if (resource_dispatcher_host_.get()) {
-        resource_dispatcher_host()->download_file_manager()->Shutdown();
-        resource_dispatcher_host()->save_file_manager()->Shutdown();
-      }
-      break;
-    case BrowserThread::WEBKIT:
-      // Need to destroy ResourceDispatcherHost before PluginService
-      // and SafeBrowsingService, since it caches a pointer to
-      // it.
-      resource_dispatcher_host_.reset();
-      break;
-    default:
-      break;
-  }
-}
-
-void BrowserProcessImpl::PostStopThread(BrowserThread::ID thread_id) {
-  switch (thread_id) {
-    case BrowserThread::FILE:
-      // With the file_thread_ flushed, we can release any icon resources.
-      icon_manager_.reset();
-      break;
-    case BrowserThread::IO:
-      // Reset associated state right after actual thread is stopped,
-      // as io_thread_.global_ cleanup happens in CleanUp on the IO
-      // thread, i.e. as the thread exits its message loop.
-      io_thread_.reset();
-      break;
-    default:
-      break;
-  }
+  // Reset associated state right after actual thread is stopped,
+  // as io_thread_.global_ cleanup happens in CleanUp on the IO
+  // thread, i.e. as the thread exits its message loop.
+  //
+  // This is important also because in various places, the
+  // IOThread object being NULL is considered synonymous with the
+  // IO thread having stopped.
+  io_thread_.reset();
 }
 
 #if defined(OS_WIN)
@@ -305,7 +238,7 @@ void BrowserProcessImpl::PostStopThread(BrowserThread::ID thread_id) {
 // send the QuitTask that terminated the message loop.
 static void PostQuit(MessageLoop* message_loop) {
   g_end_session_file_thread_has_completed = true;
-  message_loop->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  message_loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 #elif defined(USE_X11)
 static void Signal(base::WaitableEvent* event) {
@@ -334,8 +267,8 @@ unsigned int BrowserProcessImpl::ReleaseModule() {
     BrowserThread::PostTask(
         BrowserThread::IO,
         FROM_HERE,
-        base::IgnoreReturn<bool>(
-            base::Bind(&base::ThreadRestrictions::SetIOAllowed, true)));
+        base::Bind(base::IgnoreResult(&base::ThreadRestrictions::SetIOAllowed),
+                   true));
 
 #if defined(OS_MACOSX)
     MessageLoop::current()->PostTask(
@@ -360,7 +293,7 @@ void BrowserProcessImpl::EndSession() {
     metrics->RecordStartOfSessionEnd();
 
     // MetricsService lazily writes to prefs, force it to write now.
-    local_state()->SavePersistentPrefs();
+    local_state()->CommitPendingWrite();
   }
 
   // We must write that the profile and metrics service shutdown cleanly,
@@ -388,17 +321,10 @@ void BrowserProcessImpl::EndSession() {
   } while (!g_end_session_file_thread_has_completed);
   // If we did get extra quits, then we should re-post them to the message loop.
   while (--quits_received > 0)
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 #else
   NOTIMPLEMENTED();
 #endif
-}
-
-ResourceDispatcherHost* BrowserProcessImpl::resource_dispatcher_host() {
-  DCHECK(CalledOnValidThread());
-  if (!created_resource_dispatcher_host_)
-    CreateResourceDispatcherHost();
-  return resource_dispatcher_host_.get();
 }
 
 MetricsService* BrowserProcessImpl::metrics_service() {
@@ -414,16 +340,6 @@ IOThread* BrowserProcessImpl::io_thread() {
   return io_thread_.get();
 }
 
-base::Thread* BrowserProcessImpl::file_thread() {
-  DCHECK(CalledOnValidThread());
-  return BrowserThread::UnsafeGetBrowserThread(BrowserThread::FILE);
-}
-
-base::Thread* BrowserProcessImpl::db_thread() {
-  DCHECK(CalledOnValidThread());
-  return BrowserThread::UnsafeGetBrowserThread(BrowserThread::DB);
-}
-
 WatchDogThread* BrowserProcessImpl::watchdog_thread() {
   DCHECK(CalledOnValidThread());
   if (!created_watchdog_thread_)
@@ -431,13 +347,6 @@ WatchDogThread* BrowserProcessImpl::watchdog_thread() {
   DCHECK(watchdog_thread_.get() != NULL);
   return watchdog_thread_.get();
 }
-
-#if defined(OS_CHROMEOS)
-base::Thread* BrowserProcessImpl::web_socket_proxy_thread() {
-  DCHECK(CalledOnValidThread());
-  return BrowserThread::UnsafeGetBrowserThread(BrowserThread::WEB_SOCKET_PROXY);
-}
-#endif
 
 ProfileManager* BrowserProcessImpl::profile_manager() {
   DCHECK(CalledOnValidThread());
@@ -451,13 +360,6 @@ PrefService* BrowserProcessImpl::local_state() {
   if (!created_local_state_)
     CreateLocalState();
   return local_state_.get();
-}
-
-SidebarManager* BrowserProcessImpl::sidebar_manager() {
-  DCHECK(CalledOnValidThread());
-  if (!created_sidebar_manager_)
-    CreateSidebarManager();
-  return sidebar_manager_.get();
 }
 
 ui::Clipboard* BrowserProcessImpl::clipboard() {
@@ -715,25 +617,22 @@ CRLSetFetcher* BrowserProcessImpl::crl_set_fetcher() {
 #endif
 }
 
-void BrowserProcessImpl::CreateResourceDispatcherHost() {
-  DCHECK(!created_resource_dispatcher_host_ &&
-         resource_dispatcher_host_.get() == NULL);
-  created_resource_dispatcher_host_ = true;
+AudioManager* BrowserProcessImpl::audio_manager() {
+  DCHECK(CalledOnValidThread());
+  if (!audio_manager_)
+    audio_manager_ = AudioManager::Create();
 
-  // UserScriptListener and NetworkDelayListener will delete themselves.
-  ResourceQueue::DelegateSet resource_queue_delegates;
-  resource_queue_delegates.insert(new UserScriptListener());
-  resource_queue_delegates.insert(new NetworkDelayListener());
+  return audio_manager_;
+}
 
-  resource_dispatcher_host_.reset(
-      new ResourceDispatcherHost(resource_queue_delegates));
-  resource_dispatcher_host_->Initialize();
+void BrowserProcessImpl::ResourceDispatcherHostCreated() {
+  // UserScriptListener will delete itself.
+  ResourceDispatcherHost* rdh = ResourceDispatcherHost::Get();
+  rdh->AddResourceQueueDelegate(new UserScriptListener());
 
   resource_dispatcher_host_delegate_.reset(
-      new ChromeResourceDispatcherHostDelegate(resource_dispatcher_host_.get(),
-                                               prerender_tracker()));
-  resource_dispatcher_host_->set_delegate(
-      resource_dispatcher_host_delegate_.get());
+      new ChromeResourceDispatcherHostDelegate(rdh, prerender_tracker()));
+  rdh->set_delegate(resource_dispatcher_host_delegate_.get());
 
   pref_change_registrar_.Add(prefs::kAllowCrossOriginAuthPrompt, this);
   ApplyAllowCrossOriginAuthPromptPolicy();
@@ -744,38 +643,6 @@ void BrowserProcessImpl::CreateMetricsService() {
   created_metrics_service_ = true;
 
   metrics_service_.reset(new MetricsService);
-}
-
-void BrowserProcessImpl::CreateIOThreadState() {
-  // Prior to any processing happening on the io thread, we create the
-  // plugin service as it is predominantly used from the io thread,
-  // but must be created on the main thread. The service ctor is
-  // inexpensive and does not invoke the io_thread() accessor.
-  PluginService* plugin_service = PluginService::GetInstance();
-  plugin_service->Init();
-  plugin_service->set_filter(ChromePluginServiceFilter::GetInstance());
-  plugin_service->StartWatchingPlugins();
-
-  // Register the internal Flash if available.
-  FilePath path;
-  if (!CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableInternalFlash) &&
-      PathService::Get(chrome::FILE_FLASH_PLUGIN, &path)) {
-    plugin_service->AddExtraPluginPath(path);
-  }
-
-#if defined(OS_POSIX)
-  // Also find plugins in a user-specific plugins dir,
-  // e.g. ~/.config/chromium/Plugins.
-  FilePath user_data_dir;
-  if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
-    plugin_service->AddExtraPluginPath(user_data_dir.Append("Plugins"));
-  }
-#endif
-
-  scoped_ptr<IOThread> thread(new IOThread(
-      local_state(), net_log_.get(), extension_event_router_forwarder_.get()));
-  io_thread_.swap(thread);
 }
 
 void BrowserProcessImpl::CreateWatchdogThread() {
@@ -844,7 +711,33 @@ void BrowserProcessImpl::CreateLocalState() {
   local_state_->RegisterBooleanPref(prefs::kAllowCrossOriginAuthPrompt, false);
 }
 
+void BrowserProcessImpl::PreCreateThreads() {
+  io_thread_.reset(new IOThread(
+      local_state(), net_log_.get(), extension_event_router_forwarder_.get()));
+}
+
 void BrowserProcessImpl::PreMainMessageLoopRun() {
+  PluginService* plugin_service = PluginService::GetInstance();
+  plugin_service->SetFilter(ChromePluginServiceFilter::GetInstance());
+  plugin_service->StartWatchingPlugins();
+
+  // Register the internal Flash if available.
+  FilePath path;
+  if (!CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableInternalFlash) &&
+      PathService::Get(chrome::FILE_FLASH_PLUGIN, &path)) {
+    plugin_service->AddExtraPluginPath(path);
+  }
+
+#if defined(OS_POSIX)
+  // Also find plugins in a user-specific plugins dir,
+  // e.g. ~/.config/chromium/Plugins.
+  FilePath user_data_dir;
+  if (PathService::Get(chrome::DIR_USER_DATA, &user_data_dir)) {
+    plugin_service->AddExtraPluginDir(user_data_dir.Append("Plugins"));
+  }
+#endif
+
   if (local_state_->IsManagedPreference(prefs::kDefaultBrowserSettingEnabled))
     ApplyDefaultBrowserPolicy();
 }
@@ -853,12 +746,6 @@ void BrowserProcessImpl::CreateIconManager() {
   DCHECK(!created_icon_manager_ && icon_manager_.get() == NULL);
   created_icon_manager_ = true;
   icon_manager_.reset(new IconManager);
-}
-
-void BrowserProcessImpl::CreateSidebarManager() {
-  DCHECK(sidebar_manager_.get() == NULL);
-  created_sidebar_manager_ = true;
-  sidebar_manager_ = new SidebarManager();
 }
 
 void BrowserProcessImpl::CreateGoogleURLTracker() {
@@ -940,7 +827,7 @@ void BrowserProcessImpl::ApplyDefaultBrowserPolicy() {
 
 void BrowserProcessImpl::ApplyAllowCrossOriginAuthPromptPolicy() {
   bool value = local_state()->GetBoolean(prefs::kAllowCrossOriginAuthPrompt);
-  resource_dispatcher_host()->set_allow_cross_origin_auth_prompt(value);
+  ResourceDispatcherHost::Get()->set_allow_cross_origin_auth_prompt(value);
 }
 
 // Mac is currently not supported.

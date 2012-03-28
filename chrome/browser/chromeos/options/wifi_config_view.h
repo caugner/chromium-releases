@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,6 +95,18 @@ class WifiConfigView : public ChildNetworkConfigView,
   // Returns true if there is a selected user certificate and it is valid.
   bool IsUserCertValid() const;
 
+  // Returns true if the phase 2 auth is relevant.
+  bool Phase2AuthActive() const;
+
+  // Returns whether the current configuration requires a passphrase.
+  bool PassphraseActive() const;
+
+  // Returns true if a user cert should be selected.
+  bool UserCertActive() const;
+
+  // Returns true if a CA cert selection should be allowed.
+  bool CaCertActive() const;
+
   // Updates state of the Login button.
   void UpdateDialogButtons();
 
@@ -106,6 +118,18 @@ class WifiConfigView : public ChildNetworkConfigView,
 
   // Updates the error text label.
   void UpdateErrorLabel();
+
+  // Parses a WiFi UI |property| from the ONC associated with |network|. |key|
+  // is the property name within the ONC WiFi dictionary.
+  void ParseWiFiUIProperty(NetworkPropertyUIData* property_ui_data,
+                           Network* network,
+                           const std::string& key);
+
+  // Parses a WiFi EAP UI |property| from the ONC associated with |network|.
+  // |key| is the property name within the ONC WiFi.EAP dictionary.
+  void ParseWiFiEAPUIProperty(NetworkPropertyUIData* property_ui_data,
+                              Network* network,
+                              const std::string& key);
 
   CertLibrary* cert_library_;
 

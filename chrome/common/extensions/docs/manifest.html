@@ -17,10 +17,26 @@
     <script type="text/javascript" src="js/bootstrap.js"></script>
     <script type="text/javascript" src="js/sidebar.js"></script>
   <title>Formats: Manifest Files - Google Chrome Extensions - Google Code</title></head>
-  <body>  <div id="gc-container" class="labs">
-      <div id="devModeWarning">
-        You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
-      </div>
+  <body>  <div id="devModeWarning" class="displayModeWarning">
+    You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
+  </div>
+  <div id="branchWarning" class="displayModeWarning">
+    <span>WARNING: This is the <span id="branchName">BETA</span> documentation.
+    It may not work with the stable release of Chrome.</span>
+    <select id="branchChooser">
+      <option>Choose a different version...
+      </option><option value="">Stable
+      </option><option value="beta">Beta
+      </option><option value="dev">Dev
+      </option><option value="trunk">Trunk
+    </option></select>
+  </div>
+  <div id="unofficialWarning" class="displayModeWarning">
+    <span>WARNING: This is unofficial documentation. It may not work with the
+    current release of Chrome.</span>
+    <button id="goToOfficialDocs">Go to the official docs</button>
+  </div>
+  <div id="gc-container" class="labs">
       <!-- SUBTEMPLATES: DO NOT MOVE FROM THIS LOCATION -->
       <!-- In particular, sub-templates that recurse, must be used by allowing
            jstemplate to make a copy of the template in this section which
@@ -229,6 +245,7 @@
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
                   <li><a href="cookies.html">Cookies</a></li>
+                  <li><a href="devtools.html">Developer Tools</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="management.html">Management</a></li>
@@ -317,8 +334,6 @@
                 </li><li>
                   <a href="#description">description</a>
                 </li><li>
-                  <a href="#content_security_policy">content_security_policy</a>
-                </li><li>
                   <a href="#homepage_url">homepage_url</a>
                 </li><li>
                   <a href="#icons">icons</a>
@@ -337,7 +352,11 @@
                 </li><li>
                   <a href="#permissions">permissions</a>
                 </li><li>
+                  <a href="#requirements">requirements</a>
+                </li><li>
                   <a href="#version">version</a>
+                </li><li>
+                  <a href="#manifest_version">manifest_version</a>
                 </li>
               </ol>
             </li>
@@ -383,6 +402,7 @@ are <b>name</b> and <b>version</b>.
   <em>// Required</em>
   "<a href="#name">name</a>": "<em>My Extension</em>",
   "<a href="#version">version</a>": "<em>versionString</em>",
+  "<a href="#manifest_version">manifest_version</a>": 2,
 
   <em>// Recommended</em>
   "<a href="#description">description</a>": "<em>A plain text description</em>",
@@ -396,10 +416,10 @@ are <b>name</b> and <b>version</b>.
   "<a href="#app">app</a>": {...},
 
   <em>// Add any of these that you need</em>
-  "<a href="background_pages.html">background_page</a>": "<em>aFile</em>.html",
+  "<a href="background_pages.html">background</a>": {...},
   "<a href="override.html">chrome_url_overrides</a>": {...},
   "<a href="content_scripts.html">content_scripts</a>": [...],
-  "<a href="#content_security_policy">content_security_policy</a>": "<em>policyString</em>",
+  "<a href="contentSecurityPolicy.html">content_security_policy</a>": "<em>policyString</em>",
   "<a href="fileBrowserHandler.html">file_browser_handlers</a>": [...],
   "<a href="#homepage_url">homepage_url</a>": "http://<em>path/to/homepage</em>",
   "<a href="#incognito">incognito</a>": "spanning" <em>or</em> "split",
@@ -411,6 +431,7 @@ are <b>name</b> and <b>version</b>.
   "<a href="options.html">options_page</a>": "<em>aFile</em>.html",
   "<a href="#permissions">permissions</a>": [...],
   "<a href="npapi.html">plugins</a>": [...],
+  "<a href="#requirements">requirements</a>": {...},
   "<a href="autoupdate.html">update_url</a>": "http://<em>path/to/updateInfo</em>.xml"
 }
 </pre>
@@ -469,33 +490,6 @@ and the <a href="https://chrome.google.com/webstore">Chrome Web Store</a>.
 You can specify locale-specific strings for this field;
 see <a href="i18n.html">Internationalization</a> for details.
 </p>
-
-<h3 id="content_security_policy">content_security_policy</h3>
-
-<p>
-A security policy to apply to resources in your extension.
-You can use this policy to help prevent cross-site scripting
-vulnerabilities in your extension.
-To specify that your extension loads resources
-only from its own package, use the following policy:
-</p>
-
-<pre>"content_security_policy": "default-src 'self' " </pre>
-
-<p>
-If you need to load resources from websites,
-you can add them to the whitelist.
-For example, if your extension uses Google Analytics,
-you might use the following policy:
-</p>
-
-<pre>"content_security_policy": "default-src 'self' https://ssl.google-analytics.com"</pre>
-
-<p>
-For details, see the
-<a href="http://dvcs.w3.org/hg/content-security-policy/raw-file/tip/csp-specification.dev.html">Content Security Policy specification</a>.
-</p>
-
 
 <h3 id="homepage_url">homepage_url</h3>
 
@@ -907,6 +901,11 @@ table.
        <a href="notifications.html">Desktop Notifications</a>.</td>
 </tr>
 <tr>
+  <td> "privacy" </td>
+  <td> Required if the extension uses the
+       <a href="privacy.html">chrome.privacy</a> module. </td>
+</tr>
+<tr>
   <td> "proxy" </td>
   <td> Required if the extension uses the
        <a href="proxy.html">chrome.proxy</a> module. </td>
@@ -962,6 +961,41 @@ table.
 
 </tbody></table>
 
+<h3 id="requirements">requirements</h3>
+
+<p>
+Technologies required by the app or extension.
+Hosting sites such as the Chrome Web Store may use this list
+to dissuade users from installing apps or extensions
+that will not work on their computer.
+</p>
+
+<p>
+The only supported requirement is "3D",
+which denotes GPU hardware acceleration.
+For that requirement,
+you can list the 3D-related features your app requires,
+as demonstrated in the following example:
+</p>
+
+<pre>"requirements": {
+  "3D": {
+    "features": ["css3d", "webgl"]
+  }
+}
+</pre>
+
+<p>
+The "css3d" requirement refers to the
+<a href="http://www.w3.org/TR/css3-3d-transforms/">CSS 3D Transforms specification</a>,
+and the "webgl" requirement refers to the
+<a href="http://www.khronos.org/webgl/">WebGL API</a>.
+For more information on Chrome 3D graphics support,
+see the help article on
+<a href="http://www.google.com/support/chrome/bin/answer.py?answer=1220892">WebGL and 3D graphics</a>.
+Support for additional requirements checks may be added in the future.
+</p>
+
 
 <h3 id="version">version</h3>
 
@@ -1011,6 +1045,22 @@ For example, 1.1.9.9999 is newer than 1.1.
 For more information, see
 <a href="autoupdate.html">Autoupdating</a>.
 </p>
+
+
+<h3 id="manifest_version">manifest_version</h3>
+
+<p>
+The version of the manifest format that this extension uses. Currently,
+extensions should use the value <code>2</code> (without quotes):
+</p>
+
+<pre>"manifest_version": 2</pre>
+
+<p>
+Future breaking changes to the extension system may require a new version
+number.
+</p>
+
 
 <!-- [PENDING: Possibly: point to the store/dashboard and make a big deal of the fact that autoupdating is free if you use them.] -->
 </div>

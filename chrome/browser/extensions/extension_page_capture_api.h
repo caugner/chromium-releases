@@ -9,10 +9,13 @@
 
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "webkit/blob/deletable_file_reference.h"
 
 class FilePath;
+
+namespace content {
+class WebContents;
+}
 
 class PageCaptureSaveAsMHTMLFunction : public AsyncExtensionFunction {
  public:
@@ -44,8 +47,8 @@ class PageCaptureSaveAsMHTMLFunction : public AsyncExtensionFunction {
   // Callback called once the MHTML generation is done.
   void MHTMLGenerated(const FilePath& file_path, int64 mhtml_file_size);
 
-  // Returns the TabContents we are associated with, NULL if it's been closed.
-  TabContents* GetTabContents();
+  // Returns the WebContents we are associated with, NULL if it's been closed.
+  content::WebContents* GetWebContents();
 
   int tab_id_;
 

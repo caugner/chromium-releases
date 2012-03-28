@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -56,6 +56,7 @@ VideoCaptureImpl::VideoCaptureImpl(
       state_(video_capture::kStopped) {
   DCHECK(filter);
   memset(&current_params_, 0, sizeof(current_params_));
+  memset(&device_info_, 0, sizeof(device_info_));
   current_params_.session_id = id;
 }
 
@@ -298,6 +299,7 @@ void VideoCaptureImpl::DoBufferReceived(int buffer_id, base::Time timestamp) {
   media::VideoCapture::VideoFrameBuffer* buffer;
   DCHECK(cached_dibs_.find(buffer_id) != cached_dibs_.end());
   buffer = cached_dibs_[buffer_id]->mapped_memory;
+  buffer->timestamp = timestamp;
 
   for (ClientInfo::iterator it = clients_.begin(); it != clients_.end(); it++) {
     it->first->OnBufferReady(this, buffer);
@@ -430,8 +432,8 @@ void VideoCaptureImpl::Send(IPC::Message* message) {
       ChildProcess::current()->io_message_loop_proxy();
 
   io_message_loop_proxy->PostTask(FROM_HERE,
-      base::IgnoreReturn<bool>(base::Bind(&VideoCaptureMessageFilter::Send,
-                                          message_filter_.get(), message)));
+      base::Bind(base::IgnoreResult(&VideoCaptureMessageFilter::Send),
+                 message_filter_.get(), message));
 }
 
 bool VideoCaptureImpl::ClientHasDIB() {

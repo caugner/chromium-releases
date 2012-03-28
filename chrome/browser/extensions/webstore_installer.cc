@@ -1,15 +1,20 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/extensions/webstore_installer.h"
 
+#include "base/basictypes.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/file_util.h"
+#include "base/rand_util.h"
 #include "base/stringprintf.h"
 #include "base/string_util.h"
+#include "base/string_number_conversions.h"
+#include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/download/download_util.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,24 +26,30 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/browser/download/download_file.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_types.h"
-#include "content/browser/tab_contents/navigation_controller.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_manager.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/escape.h"
 
 using content::BrowserThread;
+using content::DownloadFile;
+using content::NavigationController;
 
 namespace {
 
 const char kInvalidIdError[] = "Invalid id";
 const char kNoBrowserError[] = "No browser found";
+const char kDownloadDirectoryError[] = "Could not create download directory";
 
 const char kInlineInstallSource[] = "inline";
 const char kDefaultInstallSource[] = "";
+
+FilePath* g_download_directory_for_tests = NULL;
 
 GURL GetWebstoreInstallURL(
     const std::string& extension_id, const std::string& install_source) {
@@ -66,10 +77,30 @@ GURL GetWebstoreInstallURL(
 }
 
 // Must be executed on the FILE thread.
-void GetDownloadFilePath(const std::string& id,
+void GetDownloadFilePath(const FilePath& download_directory,
+                         const std::string& id,
                          const base::Callback<void(FilePath)>& callback) {
-  FilePath file =
-      download_util::GetDefaultDownloadDirectory().AppendASCII(id + ".crx");
+  const FilePath& directory(g_download_directory_for_tests ?
+      *g_download_directory_for_tests : download_directory);
+
+  // Ensure the download directory exists. TODO(asargent) - make this use
+  // common code from the downloads system.
+  if (!file_util::DirectoryExists(directory)) {
+    if (!file_util::CreateDirectory(directory)) {
+      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
+                              base::Bind(callback, FilePath()));
+      return;
+    }
+  }
+
+  // This is to help avoid a race condition between when we generate this
+  // filename and when the download starts writing to it (think concurrently
+  // running sharded browser tests installing the same test file, for
+  // instance).
+  std::string random_number =
+      base::Uint64ToString(base::RandGenerator(kuint16max));
+
+  FilePath file = directory.AppendASCII(id + "_" + random_number + ".crx");
 
   int uniquifier = DownloadFile::GetUniquePathNumber(file);
   if (uniquifier > 0)
@@ -112,9 +143,11 @@ void WebstoreInstaller::Start() {
     return;
   }
 
+  FilePath download_path = DownloadPrefs::FromDownloadManager(
+      profile_->GetDownloadManager())->download_path();
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(&GetDownloadFilePath, id_,
+      base::Bind(&GetDownloadFilePath, download_path, id_,
                  base::Bind(&WebstoreInstaller::StartDownload,
                             base::Unretained(this))));
 
@@ -139,10 +172,12 @@ void WebstoreInstaller::Observe(int type,
       if (!profile_->IsSameProfile(crx_installer->profile()))
         return;
 
-      const std::string* error =
-          content::Details<const std::string>(details).ptr();
+      // TODO(rdevlin.cronin): Continue removing std::string errors and
+      // replacing with string16
+      const string16* error = content::Details<const string16>(details).ptr();
+      const std::string utf8_error = UTF16ToUTF8(*error);
       if (download_url_ == crx_installer->original_download_url())
-        ReportFailure(*error);
+        ReportFailure(utf8_error);
       break;
     }
 
@@ -151,15 +186,24 @@ void WebstoreInstaller::Observe(int type,
   }
 }
 
+void WebstoreInstaller::SetDownloadDirectoryForTests(FilePath* directory) {
+  g_download_directory_for_tests = directory;
+}
+
 void WebstoreInstaller::StartDownload(FilePath file) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  if (file.empty()) {
+    ReportFailure(kDownloadDirectoryError);
+    return;
+  }
 
   // TODO(mihaip): For inline installs, we pretend like the referrer is the
   // gallery, even though this could be an inline install, in order to pass the
   // checks in ExtensionService::IsDownloadFromGallery. We should instead pass
   // the real referrer, track if this is an inline install in the whitelist
   // entry and look that up when checking that this is a valid download.
-  GURL referrer = controller_->GetActiveEntry()->url();
+  GURL referrer = controller_->GetActiveEntry()->GetURL();
   if (flags_ & FLAG_INLINE_INSTALL)
     referrer = GURL(extension_urls::GetWebstoreItemDetailURLPrefix() + id_);
 
@@ -169,8 +213,11 @@ void WebstoreInstaller::StartDownload(FilePath file) {
   // The download url for the given extension is contained in |download_url_|.
   // We will navigate the current tab to this url to start the download. The
   // download system will then pass the crx to the CrxInstaller.
-  profile_->GetDownloadManager()->DownloadUrlToFile(
-      download_url_, referrer, "", save_info, controller_->tab_contents());
+  download_util::RecordDownloadCount(
+        download_util::INITIATED_BY_WEBSTORE_INSTALLER_COUNT);
+  profile_->GetDownloadManager()->DownloadUrl(
+      download_url_, referrer, "",
+      false, save_info, controller_->GetWebContents());
 }
 
 void WebstoreInstaller::ReportFailure(const std::string& error) {

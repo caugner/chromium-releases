@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,10 +22,8 @@ Cryptographer::Observer::~Observer() {}
 
 Cryptographer::Cryptographer()
     : default_nigori_(NULL),
-      encrypt_everything_(false) {
-  syncable::ModelTypeSet sensitive_types = SensitiveTypes();
-  encrypted_types_.insert(sensitive_types.begin(), sensitive_types.end());
-}
+      encrypted_types_(SensitiveTypes()),
+      encrypt_everything_(false) {}
 
 Cryptographer::~Cryptographer() {}
 
@@ -57,9 +55,11 @@ bool Cryptographer::CanDecryptUsingDefaultKey(
   return default_nigori_ && (data.key_name() == default_nigori_->first);
 }
 
-bool Cryptographer::Encrypt(const ::google::protobuf::MessageLite& message,
-                            sync_pb::EncryptedData* encrypted) const {
-  if (!encrypted || !default_nigori_) {
+bool Cryptographer::Encrypt(
+    const ::google::protobuf::MessageLite& message,
+    sync_pb::EncryptedData* encrypted) const {
+  DCHECK(encrypted);
+  if (!default_nigori_) {
     LOG(ERROR) << "Cryptographer not ready, failed to encrypt.";
     return false;
   }
@@ -68,6 +68,14 @@ bool Cryptographer::Encrypt(const ::google::protobuf::MessageLite& message,
   if (!message.SerializeToString(&serialized)) {
     LOG(ERROR) << "Message is invalid/missing a required field.";
     return false;
+  }
+
+  if (CanDecryptUsingDefaultKey(*encrypted)) {
+    const std::string& original_serialized = DecryptToString(*encrypted);
+    if (original_serialized == serialized) {
+      DVLOG(2) << "Re-encryption unnecessary, encrypted data already matches.";
+      return true;
+    }
   }
 
   encrypted->set_key_name(default_nigori_->first);
@@ -123,8 +131,6 @@ bool Cryptographer::GetKeys(sync_pb::EncryptedData* encrypted) const {
 }
 
 bool Cryptographer::AddKey(const KeyParams& params) {
-  DCHECK(NULL == pending_keys_.get());
-
   // Create the new Nigori and make it the default encryptor.
   scoped_ptr<Nigori> nigori(new Nigori);
   if (!nigori->InitByDerivation(params.hostname,
@@ -133,6 +139,15 @@ bool Cryptographer::AddKey(const KeyParams& params) {
     NOTREACHED();  // Invalid username or password.
     return false;
   }
+  return AddKeyImpl(nigori.release());
+}
+
+bool Cryptographer::AddKeyFromBootstrapToken(
+    const std::string restored_bootstrap_token) {
+  // Create the new Nigori and make it the default encryptor.
+  scoped_ptr<Nigori> nigori(UnpackBootstrapToken(restored_bootstrap_token));
+  if (!nigori.get())
+    return false;
   return AddKeyImpl(nigori.release());
 }
 
@@ -162,6 +177,11 @@ bool Cryptographer::SetKeys(const sync_pb::EncryptedData& encrypted) {
 void Cryptographer::SetPendingKeys(const sync_pb::EncryptedData& encrypted) {
   DCHECK(!CanDecrypt(encrypted));
   pending_keys_.reset(new sync_pb::EncryptedData(encrypted));
+}
+
+const sync_pb::EncryptedData& Cryptographer::GetPendingKeys() const {
+  DCHECK(has_pending_keys());
+  return *(pending_keys_.get());
 }
 
 bool Cryptographer::DecryptPendingKeys(const KeyParams& params) {
@@ -276,11 +296,11 @@ Cryptographer::UpdateResult Cryptographer::Update(
 
 // Static
 syncable::ModelTypeSet Cryptographer::SensitiveTypes() {
-  syncable::ModelTypeSet types;
   // Both of these have their own encryption schemes, but we include them
   // anyways.
-  types.insert(syncable::PASSWORDS);
-  types.insert(syncable::NIGORI);
+  syncable::ModelTypeSet types;
+  types.Put(syncable::PASSWORDS);
+  types.Put(syncable::NIGORI);
   return types;
 }
 
@@ -293,37 +313,37 @@ void Cryptographer::UpdateEncryptedTypesFromNigori(
 
   syncable::ModelTypeSet encrypted_types(SensitiveTypes());
   if (nigori.encrypt_bookmarks())
-    encrypted_types.insert(syncable::BOOKMARKS);
+    encrypted_types.Put(syncable::BOOKMARKS);
   if (nigori.encrypt_preferences())
-    encrypted_types.insert(syncable::PREFERENCES);
+    encrypted_types.Put(syncable::PREFERENCES);
   if (nigori.encrypt_autofill_profile())
-    encrypted_types.insert(syncable::AUTOFILL_PROFILE);
+    encrypted_types.Put(syncable::AUTOFILL_PROFILE);
   if (nigori.encrypt_autofill())
-    encrypted_types.insert(syncable::AUTOFILL);
+    encrypted_types.Put(syncable::AUTOFILL);
   if (nigori.encrypt_themes())
-    encrypted_types.insert(syncable::THEMES);
+    encrypted_types.Put(syncable::THEMES);
   if (nigori.encrypt_typed_urls())
-    encrypted_types.insert(syncable::TYPED_URLS);
+    encrypted_types.Put(syncable::TYPED_URLS);
   if (nigori.encrypt_extension_settings())
-    encrypted_types.insert(syncable::EXTENSION_SETTINGS);
+    encrypted_types.Put(syncable::EXTENSION_SETTINGS);
   if (nigori.encrypt_extensions())
-    encrypted_types.insert(syncable::EXTENSIONS);
+    encrypted_types.Put(syncable::EXTENSIONS);
   if (nigori.encrypt_search_engines())
-    encrypted_types.insert(syncable::SEARCH_ENGINES);
+    encrypted_types.Put(syncable::SEARCH_ENGINES);
   if (nigori.encrypt_sessions())
-    encrypted_types.insert(syncable::SESSIONS);
+    encrypted_types.Put(syncable::SESSIONS);
   if (nigori.encrypt_app_settings())
-    encrypted_types.insert(syncable::APP_SETTINGS);
+    encrypted_types.Put(syncable::APP_SETTINGS);
   if (nigori.encrypt_apps())
-    encrypted_types.insert(syncable::APPS);
+    encrypted_types.Put(syncable::APPS);
   if (nigori.encrypt_app_notifications())
-    encrypted_types.insert(syncable::APP_NOTIFICATIONS);
+    encrypted_types.Put(syncable::APP_NOTIFICATIONS);
 
   // Note: the initial version with encryption did not support the
   // encrypt_everything field. If anything more than the sensitive types were
   // encrypted, it meant we were encrypting everything.
   if (!nigori.has_encrypt_everything() &&
-      encrypted_types.size() > SensitiveTypes().size()) {
+      !Difference(encrypted_types, SensitiveTypes()).Empty()) {
     set_encrypt_everything();
     return;
   }
@@ -335,38 +355,38 @@ void Cryptographer::UpdateNigoriFromEncryptedTypes(
     sync_pb::NigoriSpecifics* nigori) const {
   nigori->set_encrypt_everything(encrypt_everything_);
   nigori->set_encrypt_bookmarks(
-      encrypted_types_.count(syncable::BOOKMARKS) > 0);
+      encrypted_types_.Has(syncable::BOOKMARKS));
   nigori->set_encrypt_preferences(
-      encrypted_types_.count(syncable::PREFERENCES) > 0);
+      encrypted_types_.Has(syncable::PREFERENCES));
   nigori->set_encrypt_autofill_profile(
-      encrypted_types_.count(syncable::AUTOFILL_PROFILE) > 0);
-  nigori->set_encrypt_autofill(encrypted_types_.count(syncable::AUTOFILL) > 0);
-  nigori->set_encrypt_themes(encrypted_types_.count(syncable::THEMES) > 0);
+      encrypted_types_.Has(syncable::AUTOFILL_PROFILE));
+  nigori->set_encrypt_autofill(encrypted_types_.Has(syncable::AUTOFILL));
+  nigori->set_encrypt_themes(encrypted_types_.Has(syncable::THEMES));
   nigori->set_encrypt_typed_urls(
-      encrypted_types_.count(syncable::TYPED_URLS) > 0);
+      encrypted_types_.Has(syncable::TYPED_URLS));
   nigori->set_encrypt_extension_settings(
-      encrypted_types_.count(syncable::EXTENSION_SETTINGS) > 0);
+      encrypted_types_.Has(syncable::EXTENSION_SETTINGS));
   nigori->set_encrypt_extensions(
-      encrypted_types_.count(syncable::EXTENSIONS) > 0);
+      encrypted_types_.Has(syncable::EXTENSIONS));
   nigori->set_encrypt_search_engines(
-      encrypted_types_.count(syncable::SEARCH_ENGINES) > 0);
-  nigori->set_encrypt_sessions(encrypted_types_.count(syncable::SESSIONS) > 0);
+      encrypted_types_.Has(syncable::SEARCH_ENGINES));
+  nigori->set_encrypt_sessions(encrypted_types_.Has(syncable::SESSIONS));
   nigori->set_encrypt_app_settings(
-      encrypted_types_.count(syncable::APP_SETTINGS) > 0);
-  nigori->set_encrypt_apps(encrypted_types_.count(syncable::APPS) > 0);
+      encrypted_types_.Has(syncable::APP_SETTINGS));
+  nigori->set_encrypt_apps(encrypted_types_.Has(syncable::APPS));
   nigori->set_encrypt_app_notifications(
-      encrypted_types_.count(syncable::APP_NOTIFICATIONS) > 0);
+      encrypted_types_.Has(syncable::APP_NOTIFICATIONS));
 }
 
 void Cryptographer::set_encrypt_everything() {
   if (encrypt_everything_) {
-    DCHECK(encrypted_types_ == syncable::GetAllRealModelTypes());
+    DCHECK(encrypted_types_.Equals(syncable::ModelTypeSet::All()));
     return;
   }
   encrypt_everything_ = true;
   // Change |encrypted_types_| directly to avoid sending more than one
   // notification.
-  encrypted_types_ = syncable::GetAllRealModelTypes();
+  encrypted_types_ = syncable::ModelTypeSet::All();
   EmitEncryptedTypesChangedNotification();
 }
 
@@ -379,14 +399,13 @@ syncable::ModelTypeSet Cryptographer::GetEncryptedTypes() const {
 }
 
 void Cryptographer::MergeEncryptedTypesForTest(
-    const syncable::ModelTypeSet& encrypted_types) {
+    syncable::ModelTypeSet encrypted_types) {
   MergeEncryptedTypes(encrypted_types);
 }
 
 void Cryptographer::MergeEncryptedTypes(
-    const syncable::ModelTypeSet& encrypted_types) {
-  if (std::includes(encrypted_types_.begin(), encrypted_types_.end(),
-                    encrypted_types.begin(), encrypted_types.end())) {
+    syncable::ModelTypeSet encrypted_types) {
+  if (encrypted_types_.HasAll(encrypted_types)) {
     return;
   }
   encrypted_types_ = encrypted_types;

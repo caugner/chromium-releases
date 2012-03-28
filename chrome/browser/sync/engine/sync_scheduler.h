@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -37,8 +37,7 @@ namespace browser_sync {
 
 struct ServerConnectionEvent;
 
-class SyncScheduler : public sessions::SyncSession::Delegate,
-                      public ServerConnectionEventListener {
+class SyncScheduler : public sessions::SyncSession::Delegate {
  public:
   enum Mode {
     // In this mode, the thread only performs configuration tasks.  This is
@@ -79,7 +78,7 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
 
   // The meat and potatoes.
   void ScheduleNudge(const base::TimeDelta& delay, NudgeSource source,
-                     const syncable::ModelTypeBitSet& types,
+                     syncable::ModelTypeSet types,
                      const tracked_objects::Location& nudge_location);
   void ScheduleNudgeWithPayloads(
       const base::TimeDelta& delay, NudgeSource source,
@@ -89,7 +88,7 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   // Note: The source argument of this function must come from the subset of
   // GetUpdatesCallerInfo values related to configurations.
   void ScheduleConfig(
-      const syncable::ModelTypeBitSet& types,
+      syncable::ModelTypeSet types,
       sync_pb::GetUpdatesCallerInfo::GetUpdatesSource source);
 
   void ScheduleClearUserData();
@@ -109,6 +108,12 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   // TODO(tim): Look at URLRequestThrottlerEntryInterface.
   static base::TimeDelta GetRecommendedDelay(const base::TimeDelta& base_delay);
 
+  // Called when credentials are updated by the user.
+  void OnCredentialsUpdated();
+
+  // Called when the network layer detects a connection status change.
+  void OnConnectionStatusChange();
+
   // SyncSession::Delegate implementation.
   virtual void OnSilencedUntil(
       const base::TimeTicks& silenced_until) OVERRIDE;
@@ -122,11 +127,6 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   virtual void OnShouldStopSyncingPermanently() OVERRIDE;
   virtual void OnSyncProtocolError(
       const sessions::SyncSessionSnapshot& snapshot) OVERRIDE;
-
-  // ServerConnectionEventListener implementation.
-  // TODO(tim): schedule a nudge when valid connection detected? in 1 minute?
-  virtual void OnServerConnectionEvent(
-      const ServerConnectionEvent& event) OVERRIDE;
 
  private:
   enum JobProcessDecision {
@@ -183,6 +183,8 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest,
       DropNudgeWhileExponentialBackOff);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, SaveNudge);
+  FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest,
+                           SaveNudgeWhileTypeThrottled);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, ContinueNudge);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, DropPoll);
   FRIEND_TEST_ALL_PREFIXES(SyncSchedulerWhiteboxTest, ContinuePoll);
@@ -252,14 +254,10 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   void PostDelayedTask(const tracked_objects::Location& from_here,
                        const char* name,
                        const base::Closure& task,
-                       int64 delay_ms);
+                       base::TimeDelta delay);
 
   // Helper to assemble a job and post a delayed task to sync.
-  void ScheduleSyncSessionJob(
-      const base::TimeDelta& delay,
-      SyncSessionJob::SyncSessionJobPurpose purpose,
-      sessions::SyncSession* session,
-      const tracked_objects::Location& from_here);
+  void ScheduleSyncSessionJob(const SyncSessionJob& job);
 
   // Invoke the Syncer to perform a sync.
   void DoSyncSessionJob(const SyncSessionJob& job);
@@ -331,6 +329,9 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
   // re-established, mode changes etc.
   void DoPendingJobIfPossible(bool is_canary_job);
 
+  // Called when the root cause of the current connection error is fixed.
+  void OnServerConnectionErrorFixed();
+
   // The pointer is owned by the caller.
   browser_sync::sessions::SyncSession* CreateSyncSession(
       const browser_sync::sessions::SyncSourceInfo& info);
@@ -344,11 +345,8 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
                                 SyncerStep* start,
                                 SyncerStep* end);
 
-  // Initializes the hookup between the ServerConnectionManager and us.
-  void WatchConnectionManager();
-
   // Used to update |server_connection_ok_|, see below.
-  void CheckServerConnectionManagerStatus(
+  void UpdateServerConnectionManagerStatus(
       HttpResponse::ServerConnectionCode code);
 
   // Called once the first time thread_ is started to broadcast an initial
@@ -397,6 +395,9 @@ class SyncScheduler : public sessions::SyncSession::Delegate,
 
   // Have we observed a valid server connection?
   bool server_connection_ok_;
+
+  // The latest connection code we got while trying to connect.
+  HttpResponse::ServerConnectionCode connection_code_;
 
   // Tracks in-flight nudges so we can coalesce.
   scoped_ptr<SyncSessionJob> pending_nudge_;

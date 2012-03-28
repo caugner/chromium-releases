@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -77,7 +77,7 @@ TEST_F(JsSyncManagerObserverTest, OnSyncCycleCompleted) {
                                          sessions::ErrorCounters(),
                                          100,
                                          false,
-                                         syncable::ModelTypeBitSet(),
+                                         syncable::ModelTypeSet(),
                                          download_progress_markers,
                                          false,
                                          true,
@@ -87,7 +87,8 @@ TEST_F(JsSyncManagerObserverTest, OnSyncCycleCompleted) {
                                          false,
                                          sessions::SyncSourceInfo(),
                                          0,
-                                         base::Time::Now());
+                                         base::Time::Now(),
+                                         false);
   DictionaryValue expected_details;
   expected_details.Set("snapshot", snapshot.ToValue());
 
@@ -167,11 +168,15 @@ TEST_F(JsSyncManagerObserverTest, OnPassphraseRequired) {
                                reason_set_passphrase_failed_details)));
 
   js_sync_manager_observer_.OnPassphraseRequired(
-      sync_api::REASON_PASSPHRASE_NOT_REQUIRED);
-  js_sync_manager_observer_.OnPassphraseRequired(sync_api::REASON_ENCRYPTION);
-  js_sync_manager_observer_.OnPassphraseRequired(sync_api::REASON_DECRYPTION);
+      sync_api::REASON_PASSPHRASE_NOT_REQUIRED,
+      sync_pb::EncryptedData());
+  js_sync_manager_observer_.OnPassphraseRequired(sync_api::REASON_ENCRYPTION,
+                                                 sync_pb::EncryptedData());
+  js_sync_manager_observer_.OnPassphraseRequired(sync_api::REASON_DECRYPTION,
+                                                 sync_pb::EncryptedData());
   js_sync_manager_observer_.OnPassphraseRequired(
-      sync_api::REASON_SET_PASSPHRASE_FAILED);
+      sync_api::REASON_SET_PASSPHRASE_FAILED,
+      sync_pb::EncryptedData());
   PumpLoop();
 }
 
@@ -186,11 +191,11 @@ TEST_F(JsSyncManagerObserverTest, SensitiveNotifiations) {
                            HasDetailsAsDictionary(redacted_token_details)));
   EXPECT_CALL(mock_js_event_handler_,
               HandleJsEvent(
-                  "onPassphraseAccepted",
+                  "OnBootstrapTokenUpdated",
                   HasDetailsAsDictionary(redacted_bootstrap_token_details)));
 
   js_sync_manager_observer_.OnUpdatedToken("sensitive_token");
-  js_sync_manager_observer_.OnPassphraseAccepted("sensitive_token");
+  js_sync_manager_observer_.OnBootstrapTokenUpdated("sensitive_token");
   PumpLoop();
 }
 
@@ -205,7 +210,7 @@ TEST_F(JsSyncManagerObserverTest, OnEncryptedTypesChanged) {
   for (int i = syncable::FIRST_REAL_MODEL_TYPE;
        i < syncable::MODEL_TYPE_COUNT; ++i) {
     syncable::ModelType type = syncable::ModelTypeFromInt(i);
-    encrypted_types.insert(type);
+    encrypted_types.Put(type);
     encrypted_type_values->Append(Value::CreateStringValue(
         syncable::ModelTypeToString(type)));
   }

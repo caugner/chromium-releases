@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,28 +9,25 @@
 namespace protector {
 
 BaseSettingChange::BaseSettingChange()
-    : protector_(NULL) {
+    : profile_(NULL) {
 }
 
 BaseSettingChange::~BaseSettingChange() {
 }
 
-bool BaseSettingChange::Init(Protector* protector) {
-  DCHECK(protector);
-  protector_ = protector;
+bool BaseSettingChange::Init(Profile* profile) {
+  DCHECK(profile);
+  profile_ = profile;
   return true;
 }
 
-void BaseSettingChange::Apply() {
+void BaseSettingChange::Apply(Browser* browser) {
 }
 
-void BaseSettingChange::Discard() {
+void BaseSettingChange::Discard(Browser* browser) {
 }
 
 void BaseSettingChange::Timeout() {
-}
-
-void BaseSettingChange::OnBeforeRemoved() {
 }
 
 }  // namespace protector

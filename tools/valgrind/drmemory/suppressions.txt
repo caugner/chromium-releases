@@ -101,6 +101,11 @@ ppapi_tests.dll!*
 ...
 *!base::internal::RunnableAdapter<*>::Run
 
+INVALID HEAP ARGUMENT
+name=http://crbug.com/107567 intentional mismatch in _DebugHeapDelete, no frame
+*!std::numpunct<*>::_Tidy
+*!std::numpunct<*>::~numpunct<*>
+
 ############################
 # Intentional errors in Chromium tests (ToolsSanityTests)
 LEAK
@@ -204,12 +209,6 @@ name=NPAPITesterBase.NoHangIfInitCrashes deliberate crash
 # TODO(bruening): switch to annotation once have support for that
 npapi_test_plugin.dll!NPAPIClient::PluginClient::Initialize
 
-# This test has a death test at the end that derefences a NULL pointer.
-UNADDRESSABLE ACCESS
-name=BrowserAboutHandlerTest.WillHandleBrowserAboutURL deliberate crash
-...
-unit_tests.exe!BrowserAboutHandlerTest_WillHandleBrowserAboutURL_Test::TestBody
-
 # Deliberate NULL deref to crash the child process
 UNADDRESSABLE ACCESS
 name=CrashingChildProcess deliberate crash
@@ -266,8 +265,23 @@ name=http://crbug.com/88213
 
 UNADDRESSABLE ACCESS
 name=http://crbug.com/96010
-...
-*!NotificationService::Notify
+*!TestingProfile::FinishInit
+*!TestingProfile::TestingProfile
+*!BrowserAboutHandlerTest_WillHandleBrowserAboutURL_Test::TestBody
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/106522
+npapi_test_plugin.dll!NPAPIClient::PluginTest::id
+npapi_test_plugin.dll!NPAPIClient::ExecuteGetJavascriptUrlTest::TimerProc
+
+UNADDRESSABLE ACCESS
+name=http://crbug.com/110642
+*!PrefsTabHelper::RegisterUserPrefs
+*!browser::RegisterUserPrefs
+*!TestingProfile::CreateTestingPrefService
+*!TestingProfile::GetPrefs
+*!ProfileKeyedServiceFactory::RegisterUserPrefsOnProfile
+*!ProfileDependencyManager::CreateProfileServices
 
 # Empty line at EOF - workaround for
 # http://code.google.com/p/drmemory/issues/detail?id=41

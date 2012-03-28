@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -259,7 +259,7 @@ BASE_EXPORT bool IsDirectoryEmpty(const FilePath& dir_path);
 BASE_EXPORT bool GetTempDir(FilePath* path);
 // Get a temporary directory for shared memory files.
 // Only useful on POSIX; redirects to GetTempDir() on Windows.
-BASE_EXPORT bool GetShmemTempDir(FilePath* path);
+BASE_EXPORT bool GetShmemTempDir(FilePath* path, bool executable);
 
 // Get the home directory.  This is more complicated than just getenv("HOME")
 // as it knows to fall back on getpwent() etc.
@@ -279,7 +279,10 @@ BASE_EXPORT bool CreateTemporaryFileInDir(const FilePath& dir,
 // Returns a handle to the opened file or NULL if an error occured.
 BASE_EXPORT FILE* CreateAndOpenTemporaryFile(FilePath* path);
 // Like above but for shmem files.  Only useful for POSIX.
-BASE_EXPORT FILE* CreateAndOpenTemporaryShmemFile(FilePath* path);
+// The executable flag says the file needs to support using
+// mprotect with PROT_EXEC after mapping.
+BASE_EXPORT FILE* CreateAndOpenTemporaryShmemFile(FilePath* path,
+                                                  bool executable);
 // Similar to CreateAndOpenTemporaryFile, but the file is created in |dir|.
 BASE_EXPORT FILE* CreateAndOpenTemporaryFileInDir(const FilePath& dir,
                                                   FilePath* path);
@@ -321,10 +324,17 @@ BASE_EXPORT bool IsDotDot(const FilePath& path);
 BASE_EXPORT bool NormalizeFilePath(const FilePath& path, FilePath* real_path);
 
 #if defined(OS_WIN)
-// Given an existing file in |path|, it returns in |real_path| the path
-// in the native NT format, of the form "\Device\HarddiskVolumeXX\..".
-// Returns false it it fails. Empty files cannot be resolved with this
-// function.
+
+// Given a path in NT native form ("\Device\HarddiskVolumeXX\..."),
+// return in |drive_letter_path| the equivalent path that starts with
+// a drive letter ("C:\...").  Return false if no such path exists.
+BASE_EXPORT bool DevicePathToDriveLetterPath(const FilePath& device_path,
+                                             FilePath* drive_letter_path);
+
+// Given an existing file in |path|, set |real_path| to the path
+// in native NT format, of the form "\Device\HarddiskVolumeXX\..".
+// Returns false if the path can not be found. Empty files cannot
+// be resolved with this function.
 BASE_EXPORT bool NormalizeToNativeFilePath(const FilePath& path,
                                            FilePath* nt_path);
 #endif

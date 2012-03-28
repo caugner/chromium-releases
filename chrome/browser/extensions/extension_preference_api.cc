@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,8 +29,15 @@
 namespace {
 
 struct PrefMappingEntry {
+  // Name of the preference referenced by the extension API JSON.
   const char* extension_pref;
+
+  // Name of the preference in the PrefStores.
   const char* browser_pref;
+
+  // Permission required to access this preference.
+  // Use ExtensionAPIPermission::kInvalid for |permission| to express that no
+  // permission is necessary.
   ExtensionAPIPermission::ID permission;
 };
 
@@ -48,28 +55,23 @@ const char kOnPrefChangeFormat[] = "types.ChromeSetting.%s.onChange";
 PrefMappingEntry kPrefMapping[] = {
   { "alternateErrorPagesEnabled",
     prefs::kAlternateErrorPagesEnabled,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "autofillEnabled",
     prefs::kAutofillEnabled,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "hyperlinkAuditingEnabled",
     prefs::kEnableHyperlinkAuditing,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "instantEnabled",
     prefs::kInstantEnabled,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
-  // TODO(mkwst): come back to this once the UMA discussion has been resolved.
-  // { "metricsReportingEnabled",
-  //   prefs::kMetricsReportingEnabled,
-  //   ExtensionAPIPermission::kMetrics
-  // },
   { "networkPredictionEnabled",
     prefs::kNetworkPredictionEnabled,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "proxy",
     prefs::kProxy,
@@ -77,23 +79,23 @@ PrefMappingEntry kPrefMapping[] = {
   },
   { "referrersEnabled",
     prefs::kEnableReferrers,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "searchSuggestEnabled",
     prefs::kSearchSuggestEnabled,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "safeBrowsingEnabled",
     prefs::kSafeBrowsingEnabled,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "thirdPartyCookiesAllowed",
     prefs::kBlockThirdPartyCookies,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   },
   { "translationServiceEnabled",
     prefs::kEnableTranslate,
-    ExtensionAPIPermission::kExperimental
+    ExtensionAPIPermission::kPrivacy
   }
 };
 
@@ -309,8 +311,8 @@ void ExtensionPreferenceEventRouter::OnPrefChanged(
   ExtensionEventRouter* router = profile_->GetExtensionEventRouter();
   if (!router || !router->HasEventListener(event_name))
     return;
-  const ExtensionList* extensions = extension_service->extensions();
-  for (ExtensionList::const_iterator it = extensions->begin();
+  const ExtensionSet* extensions = extension_service->extensions();
+  for (ExtensionSet::const_iterator it = extensions->begin();
        it != extensions->end(); ++it) {
     std::string extension_id = (*it)->id();
     // TODO(bauerb): Only iterate over registered event listeners.

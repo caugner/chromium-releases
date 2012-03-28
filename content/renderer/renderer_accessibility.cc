@@ -1,7 +1,8 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "content/common/view_messages.h"
 #include "content/public/common/content_switches.h"
@@ -20,6 +21,8 @@ using WebKit::WebAccessibilityObject;
 using WebKit::WebDocument;
 using WebKit::WebFrame;
 using WebKit::WebNode;
+using WebKit::WebPoint;
+using WebKit::WebRect;
 using WebKit::WebSize;
 using WebKit::WebView;
 using webkit_glue::WebAccessibility;
@@ -82,12 +85,11 @@ bool WebAccessibilityNotificationToViewHostMsg(
 
 RendererAccessibility::RendererAccessibility(RenderViewImpl* render_view)
     : content::RenderViewObserver(render_view),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       browser_root_(NULL),
       last_scroll_offset_(gfx::Size()),
       ack_pending_(false),
-      logging_(false),
-      sent_load_complete_(false) {
+      logging_(false) {
   const CommandLine& command_line = *CommandLine::ForCurrentProcess();
   if (command_line.HasSwitch(switches::kEnableAccessibility))
     WebAccessibilityObject::enableAccessibility();
@@ -107,8 +109,10 @@ bool RendererAccessibility::OnMessageReceived(const IPC::Message& message) {
                         OnAccessibilityDoDefaultAction)
     IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityNotifications_ACK,
                         OnAccessibilityNotificationsAck)
-    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityChangeScrollPosition,
-                        OnChangeScrollPosition)
+    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityScrollToMakeVisible,
+                        OnScrollToMakeVisible)
+    IPC_MESSAGE_HANDLER(ViewMsg_AccessibilityScrollToPoint,
+                        OnScrollToPoint)
     IPC_MESSAGE_HANDLER(ViewMsg_AccessibilitySetTextSelection,
                         OnSetTextSelection)
     IPC_MESSAGE_UNHANDLED(handled = false)
@@ -149,7 +153,7 @@ void RendererAccessibility::DidFinishLoad(WebKit::WebFrame* frame) {
   if (!browser_root_ || new_root.axID() != browser_root_->id) {
     PostAccessibilityNotification(
         new_root,
-        WebKit::WebAccessibilityNotificationLoadComplete);
+        WebKit::WebAccessibilityNotificationLayoutComplete);
   }
 }
 
@@ -163,15 +167,6 @@ void RendererAccessibility::PostAccessibilityNotification(
   if (document.isNull())
     return;
 
-  if (notification != WebKit::WebAccessibilityNotificationLoadComplete &&
-      !sent_load_complete_) {
-    // Load complete should be our first notification sent. Send it manually
-    // in cases where we don't get it first to avoid focus problems.
-    PostAccessibilityNotification(
-        document.accessibilityObject(),
-        WebKit::WebAccessibilityNotificationLoadComplete);
-  }
-
   gfx::Size scroll_offset = document.frame()->scrollOffset();
   if (scroll_offset != last_scroll_offset_) {
     // Make sure the browser is always aware of the scroll position of
@@ -180,13 +175,12 @@ void RendererAccessibility::PostAccessibilityNotification(
     // TODO(dmazzoni): remove this as soon as
     // https://bugs.webkit.org/show_bug.cgi?id=73460 is fixed.
     last_scroll_offset_ = scroll_offset;
-    PostAccessibilityNotification(
-        document.accessibilityObject(),
-        WebKit::WebAccessibilityNotificationLayoutComplete);
+    if (!obj.equals(document.accessibilityObject())) {
+      PostAccessibilityNotification(
+          document.accessibilityObject(),
+          WebKit::WebAccessibilityNotificationLayoutComplete);
+    }
   }
-
-  if (notification == WebKit::WebAccessibilityNotificationLoadComplete)
-    sent_load_complete_ = true;
 
   // Add the accessibility object to our cache and ensure it's valid.
   Notification acc_notification;
@@ -206,14 +200,15 @@ void RendererAccessibility::PostAccessibilityNotification(
   }
   pending_notifications_.push_back(acc_notification);
 
-  if (!ack_pending_ && method_factory_.empty()) {
+  if (!ack_pending_ && !weak_factory_.HasWeakPtrs()) {
     // When no accessibility notifications are in-flight post a task to send
     // the notifications to the browser. We use PostTask so that we can queue
     // up additional notifications.
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &RendererAccessibility::SendPendingAccessibilityNotifications));
+        base::Bind(
+            &RendererAccessibility::SendPendingAccessibilityNotifications,
+            weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -230,7 +225,10 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
   for (size_t i = 0; i < pending_notifications_.size(); ++i) {
     Notification& notification = pending_notifications_[i];
 
-    bool includes_children = ShouldIncludeChildren(notification);
+    // TODO(dtseng): Come up with a cleaner way of deciding to include children.
+    int root_id = document.accessibilityObject().axID();
+    bool includes_children = ShouldIncludeChildren(notification) ||
+        root_id == notification.id;
     WebAccessibilityObject obj = document.accessibilityObjectFromID(
         notification.id);
 
@@ -239,7 +237,6 @@ void RendererAccessibility::SendPendingAccessibilityNotifications() {
     // notification on a node before the page has loaded. Work our way
     // up the parent chain until we find a node the browser has, or until
     // we reach the root.
-    int root_id = document.accessibilityObject().axID();
     while (browser_id_map_.find(obj.axID()) == browser_id_map_.end() &&
            obj.isValid() &&
            obj.axID() != root_id) {
@@ -380,8 +377,8 @@ void RendererAccessibility::OnAccessibilityDoDefaultAction(int acc_obj_id) {
   obj.performDefaultAction();
 }
 
-void RendererAccessibility::OnChangeScrollPosition(
-    int acc_obj_id, int scroll_x, int scroll_y) {
+void RendererAccessibility::OnScrollToMakeVisible(
+    int acc_obj_id, gfx::Rect subfocus) {
   if (!WebAccessibilityObject::accessibilityEnabled())
     return;
 
@@ -389,34 +386,54 @@ void RendererAccessibility::OnChangeScrollPosition(
   if (document.isNull())
     return;
 
-  WebAccessibilityObject root = document.accessibilityObject();
-
-  // TODO(dmazzoni): Support scrolling of any scrollable container,
-  // not just the main document frame.
-  if (acc_obj_id != root.axID())
+  WebAccessibilityObject obj = document.accessibilityObjectFromID(acc_obj_id);
+  if (!obj.isValid()) {
+#ifndef NDEBUG
+    if (logging_)
+      LOG(WARNING) << "ScrollToMakeVisible on invalid object id " << acc_obj_id;
+#endif
     return;
+  }
 
-  WebFrame* frame = document.frame();
-  if (!frame)
-    return;
-
-  WebSize min_offset = frame->minimumScrollOffset();
-  WebSize max_offset = frame->maximumScrollOffset();
-  scroll_x = std::max(min_offset.width, scroll_x);
-  scroll_x = std::min(max_offset.width, scroll_x);
-  scroll_y = std::max(min_offset.height, scroll_y);
-  scroll_y = std::min(max_offset.height, scroll_y);
-
-  frame->setScrollOffset(WebSize(scroll_x, scroll_y));
-  if (frame->view())
-    frame->view()->layout();
+  obj.scrollToMakeVisibleWithSubFocus(
+      WebRect(subfocus.x(), subfocus.y(),
+              subfocus.width(), subfocus.height()));
 
   // Make sure the browser gets a notification when the scroll
   // position actually changes.
   // TODO(dmazzoni): remove this once this bug is fixed:
   // https://bugs.webkit.org/show_bug.cgi?id=73460
   PostAccessibilityNotification(
-      root,
+      document.accessibilityObject(),
+      WebKit::WebAccessibilityNotificationLayoutComplete);
+}
+
+void RendererAccessibility::OnScrollToPoint(
+    int acc_obj_id, gfx::Point point) {
+  if (!WebAccessibilityObject::accessibilityEnabled())
+    return;
+
+  const WebDocument& document = GetMainDocument();
+  if (document.isNull())
+    return;
+
+  WebAccessibilityObject obj = document.accessibilityObjectFromID(acc_obj_id);
+  if (!obj.isValid()) {
+#ifndef NDEBUG
+    if (logging_)
+      LOG(WARNING) << "ScrollToPoint on invalid object id " << acc_obj_id;
+#endif
+    return;
+  }
+
+  obj.scrollToGlobalPoint(WebPoint(point.x(), point.y()));
+
+  // Make sure the browser gets a notification when the scroll
+  // position actually changes.
+  // TODO(dmazzoni): remove this once this bug is fixed:
+  // https://bugs.webkit.org/show_bug.cgi?id=73460
+  PostAccessibilityNotification(
+      document.accessibilityObject(),
       WebKit::WebAccessibilityNotificationLayoutComplete);
 }
 
@@ -468,7 +485,7 @@ void RendererAccessibility::OnEnableAccessibility() {
     // accessibility tree by sending it a 'load complete' notification.
     PostAccessibilityNotification(
         document.accessibilityObject(),
-        WebKit::WebAccessibilityNotificationLoadComplete);
+        WebKit::WebAccessibilityNotificationLayoutComplete);
   }
 }
 

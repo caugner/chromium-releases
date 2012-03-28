@@ -1,20 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef REMOTING_BASE_DECODER_H_
 #define REMOTING_BASE_DECODER_H_
 
-#include <vector>
-
 #include "base/memory/scoped_ptr.h"
 #include "media/base/video_frame.h"
 #include "remoting/proto/video.pb.h"
-#include "third_party/skia/include/core/SkRect.h"
+#include "third_party/skia/include/core/SkRegion.h"
 
 namespace remoting {
-
-typedef std::vector<SkIRect> RectVector;
 
 // Interface for a decoder that takes a stream of bytes from the network and
 // outputs frames of data.
@@ -42,10 +38,10 @@ class Decoder {
   // Feeds more data into the decoder.
   virtual DecodeResult DecodePacket(const VideoPacket* packet) = 0;
 
-  // Returns rects that were updated in the last frame. Can be called only
+  // Returns the region affected by the most recent frame.  Can be called only
   // after DecodePacket returned DECODE_DONE. Caller keeps ownership of
-  // |rects|. |rects| is kept empty if whole screen needs to be updated.
-  virtual void GetUpdatedRects(RectVector* rects) = 0;
+  // |region|.
+  virtual void GetUpdatedRegion(SkRegion* region) = 0;
 
   // Reset the decoder to an uninitialized state. Release all references to
   // the initialized |frame|.  Initialize() must be called before the decoder
@@ -57,24 +53,20 @@ class Decoder {
 
   virtual VideoPacketFormat::Encoding Encoding() = 0;
 
-  // Set the scale factors of the decoded output. If the decoder doesn't support
-  // scaling then this all is ignored.
-  // If both |horizontal_ratio| and |vertical_ratio| equal 1.0 then scaling is
-  // turned off.
-  virtual void SetScaleRatios(double horizontal_ratio, double vertical_ratio) {}
+  // Set the output dimensions for the decoder.  If the dimensions are empty
+  // then the source is rendered without scaling.
+  // Output dimensions are ignored if the decoder doesn't support scaling.
+  virtual void SetOutputSize(const SkISize& size) {}
 
   // Set the clipping rectangle to the decoder. Decoder should respect this and
   // only output changes in this rectangle. The new clipping rectangle will be
   // effective on the next decoded video frame.
-  //
-  // When scaling is enabled clipping rectangles are ignored.
   virtual void SetClipRect(const SkIRect& clip_rect) {}
 
-  // Force decoder to output a video frame with content in |rects| using the
-  // last decoded video frame.
-  //
-  // Coordinates of rectangles supplied here are before scaling.
-  virtual void RefreshRects(const RectVector& rects) {}
+  // Force decoder to output a frame based on the specified |region| of the
+  // most recently decoded video frame.  |region| is expressed in video frame
+  // rather than output coordinates.
+  virtual void RefreshRegion(const SkRegion& region) {}
 };
 
 }  // namespace remoting

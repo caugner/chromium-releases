@@ -18,7 +18,8 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/time_format.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -26,6 +27,8 @@
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif
+
+using content::WebContents;
 
 ChromeWebUIDataSource* CreatePolicyUIHTMLSource() {
   ChromeWebUIDataSource* source =
@@ -96,11 +99,11 @@ PolicyUIHandler::~PolicyUIHandler() {
 }
 
 void PolicyUIHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "requestData",
       base::Bind(&PolicyUIHandler::HandleRequestData,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "fetchPolicy",
       base::Bind(&PolicyUIHandler::HandleFetchPolicy,
                  base::Unretained(this)));
@@ -128,7 +131,7 @@ void PolicyUIHandler::SendDataToUI(bool is_policy_update) {
   results.Set("status", dict);
   results.SetBoolean("isPolicyUpdate", is_policy_update);
 
-  web_ui_->CallJavascriptFunction("Policy.returnData", results);
+  web_ui()->CallJavascriptFunction("Policy.returnData", results);
 }
 
 DictionaryValue* PolicyUIHandler::GetStatusData() {
@@ -230,11 +233,11 @@ string16 PolicyUIHandler::CreateStatusMessageString(
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-PolicyUI::PolicyUI(TabContents* contents) : ChromeWebUI(contents) {
-  AddMessageHandler((new PolicyUIHandler)->Attach(this));
+PolicyUI::PolicyUI(content::WebUI* web_ui) : WebUIController(web_ui) {
+  web_ui->AddMessageHandler(new PolicyUIHandler);
 
   // Set up the chrome://policy/ source.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(CreatePolicyUIHTMLSource());
 }
 

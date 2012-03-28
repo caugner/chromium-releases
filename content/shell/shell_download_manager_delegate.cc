@@ -14,11 +14,11 @@
 #include "base/logging.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/browser_context.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_state_info.h"
 #include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_manager.h"
 #include "net/base/net_util.h"
 
 namespace content {
@@ -36,7 +36,9 @@ void ShellDownloadManagerDelegate::SetDownloadManager(
   download_manager_ = download_manager;
 }
 
-void ShellDownloadManagerDelegate::Shutdown() {
+DownloadId ShellDownloadManagerDelegate::GetNextId() {
+  static int next_id;
+  return DownloadId(this, ++next_id);
 }
 
 bool ShellDownloadManagerDelegate::ShouldStartDownload(int32 download_id) {
@@ -72,7 +74,7 @@ void ShellDownloadManagerDelegate::GenerateFilename(
     DownloadStateInfo state,
     const FilePath& generated_name) {
   if (state.suggested_path.empty()) {
-    state.suggested_path = download_manager_->BrowserContext()->GetPath().
+    state.suggested_path = download_manager_->GetBrowserContext()->GetPath().
         Append(FILE_PATH_LITERAL("Downloads"));
     if (!file_util::PathExists(state.suggested_path))
       file_util::CreateDirectory(state.suggested_path);
@@ -100,7 +102,7 @@ void ShellDownloadManagerDelegate::RestartDownload(
 }
 
 void ShellDownloadManagerDelegate::ChooseDownloadPath(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     const FilePath& suggested_path,
     void* data) {
   FilePath result;
@@ -111,7 +113,7 @@ void ShellDownloadManagerDelegate::ChooseDownloadPath(
   OPENFILENAME save_as;
   ZeroMemory(&save_as, sizeof(save_as));
   save_as.lStructSize = sizeof(OPENFILENAME);
-  save_as.hwndOwner = tab_contents->GetNativeView();
+  save_as.hwndOwner = web_contents->GetNativeView();
   save_as.lpstrFile = file_name;
   save_as.nMaxFile = arraysize(file_name);
 
@@ -134,74 +136,6 @@ void ShellDownloadManagerDelegate::ChooseDownloadPath(
   } else {
     download_manager_->FileSelected(result, data);
   }
-}
-
-bool ShellDownloadManagerDelegate::OverrideIntermediatePath(
-    DownloadItem* item,
-    FilePath* intermediate_path) {
-  return false;
-}
-
-TabContents* ShellDownloadManagerDelegate::
-    GetAlternativeTabContentsToNotifyForDownload() {
-  return NULL;
-}
-
-bool ShellDownloadManagerDelegate::ShouldOpenFileBasedOnExtension(
-    const FilePath& path) {
-  return false;
-}
-
-bool ShellDownloadManagerDelegate::ShouldCompleteDownload(DownloadItem* item) {
-  return true;
-}
-
-bool ShellDownloadManagerDelegate::ShouldOpenDownload(DownloadItem* item) {
-  return true;
-}
-
-bool ShellDownloadManagerDelegate::GenerateFileHash() {
-  return false;
-}
-
-void ShellDownloadManagerDelegate::OnResponseCompleted(DownloadItem* item) {
-}
-
-void ShellDownloadManagerDelegate::AddItemToPersistentStore(
-    DownloadItem* item) {
-}
-
-void ShellDownloadManagerDelegate::UpdateItemInPersistentStore(
-    DownloadItem* item) {
-}
-
-void ShellDownloadManagerDelegate::UpdatePathForItemInPersistentStore(
-    DownloadItem* item,
-    const FilePath& new_path) {
-}
-
-void ShellDownloadManagerDelegate::RemoveItemFromPersistentStore(
-    DownloadItem* item) {
-}
-
-void ShellDownloadManagerDelegate::RemoveItemsFromPersistentStoreBetween(
-    const base::Time remove_begin,
-    const base::Time remove_end) {
-}
-
-void ShellDownloadManagerDelegate::GetSaveDir(
-    TabContents* tab_contents,
-    FilePath* website_save_dir,
-    FilePath* download_save_dir) {
-}
-
-void ShellDownloadManagerDelegate::ChooseSavePath(
-    const base::WeakPtr<SavePackage>& save_package,
-    const FilePath& suggested_path,
-    bool can_save_as_complete) {
-}
-
-void ShellDownloadManagerDelegate::DownloadProgressUpdated() {
 }
 
 }  // namespace content

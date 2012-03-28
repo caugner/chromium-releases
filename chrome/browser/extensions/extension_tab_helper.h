@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "chrome/browser/extensions/image_loading_tracker.h"
 #include "chrome/browser/extensions/webstore_inline_installer.h"
 #include "chrome/common/web_apps.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 class Extension;
@@ -26,7 +26,7 @@ struct LoadCommittedDetails;
 
 // Per-tab extension helper. Also handles non-extension apps.
 class ExtensionTabHelper
-    : public TabContentsObserver,
+    : public content::WebContentsObserver,
       public ExtensionFunctionDispatcher::Delegate,
       public ImageLoadingTracker::Observer,
       public WebstoreInlineInstaller::Delegate,
@@ -83,16 +83,16 @@ class ExtensionTabHelper
     return wrapper_;
   }
 
-  TabContents* tab_contents() const {
-    return TabContentsObserver::tab_contents();
+  content::WebContents* web_contents() const {
+    return content::WebContentsObserver::web_contents();
   }
 
   // Sets a non-extension app icon associated with TabContents and fires an
-  // INVALIDATE_TITLE navigation state change to trigger repaint of title.
+  // INVALIDATE_TYPE_TITLE navigation state change to trigger repaint of title.
   void SetAppIcon(const SkBitmap& app_icon);
 
  private:
-  // TabContentsObserver overrides.
+  // content::WebContentsObserver overrides.
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;
@@ -100,8 +100,7 @@ class ExtensionTabHelper
 
   // ExtensionFunctionDispatcher::Delegate overrides.
   virtual Browser* GetBrowser() OVERRIDE;
-  virtual gfx::NativeView GetNativeViewOfHost() OVERRIDE;
-  virtual TabContents* GetAssociatedTabContents() const OVERRIDE;
+  virtual content::WebContents* GetAssociatedWebContents() const OVERRIDE;
 
   // Message handlers.
   void OnDidGetApplicationInfo(int32 page_id, const WebApplicationInfo& info);

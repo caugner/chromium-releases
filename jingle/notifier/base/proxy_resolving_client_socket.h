@@ -47,12 +47,12 @@ class ProxyResolvingClientSocket : public net::StreamSocket {
 
   // net::StreamSocket implementation.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback) OVERRIDE;
+                   const net::CompletionCallback& callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback) OVERRIDE;
+                    const net::CompletionCallback& callback) OVERRIDE;
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
-  virtual int Connect(net::OldCompletionCallback* callback) OVERRIDE;
+  virtual int Connect(const net::CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
@@ -77,9 +77,8 @@ class ProxyResolvingClientSocket : public net::StreamSocket {
   void ReportSuccessfulProxyConnection();
 
   // Callbacks passed to net APIs.
-  net::OldCompletionCallbackImpl<ProxyResolvingClientSocket>
-      proxy_resolve_callback_;
-  net::OldCompletionCallbackImpl<ProxyResolvingClientSocket> connect_callback_;
+  net::CompletionCallback proxy_resolve_callback_;
+  net::CompletionCallback connect_callback_;
 
   scoped_refptr<net::HttpNetworkSession> network_session_;
 
@@ -95,7 +94,7 @@ class ProxyResolvingClientSocket : public net::StreamSocket {
   base::WeakPtrFactory<ProxyResolvingClientSocket> weak_factory_;
 
   // The callback passed to Connect().
-  net::OldCompletionCallback* user_connect_callback_;
+  net::CompletionCallback user_connect_callback_;
 };
 
 }  // namespace notifier

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,13 +32,10 @@ sync_api::SyncManager::Status AllStatus::CreateBlankStatus() const {
   // whose values accumulate (e.g. lifetime counters like updates_received)
   // are not to be cleared here.
   sync_api::SyncManager::Status status = status_;
-  status.syncing = true;
   status.unsynced_count = 0;
   status.conflicting_count = 0;
   status.initial_sync_ended = false;
-  status.syncer_stuck = false;
   status.max_consecutive_errors = 0;
-  status.server_broken = false;
   status.updates_available = 0;
   return status;
 }
@@ -53,22 +50,19 @@ sync_api::SyncManager::Status AllStatus::CalcSyncing(
   // But this is only used for status, so it is better to have visibility.
   status.conflicting_count += snapshot->num_conflicting_updates;
 
-  status.syncing |= snapshot->syncer_status.sync_in_progress;
-  status.syncing =
-      snapshot->has_more_to_sync && snapshot->is_silenced;
+  if (event.what_happened == SyncEngineEvent::SYNC_CYCLE_BEGIN) {
+    status.syncing = true;
+  } else if (event.what_happened == SyncEngineEvent::SYNC_CYCLE_ENDED) {
+    status.syncing = false;
+  }
+
   status.initial_sync_ended |= snapshot->is_share_usable;
-  status.syncer_stuck |= snapshot->syncer_status.syncer_stuck;
 
   const sessions::ErrorCounters& errors(snapshot->errors);
   if (errors.consecutive_errors > status.max_consecutive_errors)
     status.max_consecutive_errors = errors.consecutive_errors;
 
-  // 100 is an arbitrary limit.
-  if (errors.consecutive_transient_error_commits > 100)
-    status.server_broken = true;
-
   status.updates_available += snapshot->num_server_changes_remaining;
-
   status.sync_protocol_error = snapshot->errors.sync_protocol_error;
 
   // Accumulate update count only once per session to avoid double-counting.
@@ -101,11 +95,9 @@ sync_api::SyncManager::Status AllStatus::CalcSyncing(
 void AllStatus::CalcStatusChanges() {
   const bool unsynced_changes = status_.unsynced_count > 0;
   const bool online = status_.authenticated &&
-    status_.server_reachable && status_.server_up && !status_.server_broken;
+    status_.server_reachable && status_.server_up;
   if (online) {
-    if (status_.syncer_stuck)
-      status_.summary = sync_api::SyncManager::Status::CONFLICT;
-    else if (unsynced_changes || status_.syncing)
+    if (status_.syncing)
       status_.summary = sync_api::SyncManager::Status::SYNCING;
     else
       status_.summary = sync_api::SyncManager::Status::READY;
@@ -121,8 +113,9 @@ void AllStatus::CalcStatusChanges() {
 void AllStatus::OnSyncEngineEvent(const SyncEngineEvent& event) {
   ScopedStatusLock lock(this);
   switch (event.what_happened) {
-    case SyncEngineEvent::SYNC_CYCLE_ENDED:
+    case SyncEngineEvent::SYNC_CYCLE_BEGIN:
     case SyncEngineEvent::STATUS_CHANGED:
+    case SyncEngineEvent::SYNC_CYCLE_ENDED:
       status_ = CalcSyncing(event);
       break;
     case SyncEngineEvent::STOP_SYNCING_PERMANENTLY:
@@ -173,7 +166,7 @@ void AllStatus::IncrementNotificationsReceived() {
   ++status_.notifications_received;
 }
 
-void AllStatus::SetEncryptedTypes(const syncable::ModelTypeSet& types) {
+void AllStatus::SetEncryptedTypes(syncable::ModelTypeSet types) {
   ScopedStatusLock lock(this);
   status_.encrypted_types = types;
 }

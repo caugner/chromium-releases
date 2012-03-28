@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -42,6 +42,14 @@
         'INFOPLIST_FILE': 'app/app-Info.plist',
       },
       'conditions': [
+        ['order_text_section!=""', {
+          'target_conditions' : [
+            ['_toolset=="target"', {
+              'ldflags': [
+                '-Wl,-section-ordering-file=<(order_text_section)' ],
+            }],
+          ]
+        }],
         ['OS == "android"', {
           # Don't put the 'chrome' target in 'all' on android
           'suppress_wildcard': 1,
@@ -306,17 +314,18 @@
             {
               # Modify the Info.plist as needed.  The script explains why this
               # is needed.  This is also done in the helper_app and chrome_dll
-              # targets.  Use -b0 to not include any Breakpad information; that
-              # all goes into the framework's Info.plist.  Keystone information
-              # is included if Keystone is enabled.  The application reads
-              # Keystone keys from this plist and not the framework's, and
-              # the ticket will reference this Info.plist to determine the tag
-              # of the installed product.  Use -s1 to include Subversion
-              # information.  The -p flag controls whether to insert PDF as a
-              # supported type identifier that can be opened.
+              # targets.  Use --breakpad=0 to not include any Breakpad
+              # information; that all goes into the framework's Info.plist.
+              # Keystone information is included if Keystone is enabled.  The
+              # application reads Keystone keys from this plist and not the
+              # framework's, and the ticket will reference this Info.plist to
+              # determine the tag of the installed product.  Use -s1 to
+              # include Subversion information.  The -p flag controls whether
+              # to insert PDF as a supported type identifier that can be
+              # opened.
               'postbuild_name': 'Tweak Info.plist',
               'action': ['<(tweak_info_plist_path)',
-                         '-b0',
+                         '--breakpad=0',
                          '-k<(mac_keystone)',
                          '-s1',
                          '-p<(internal_pdf)',
@@ -416,7 +425,9 @@
         ['OS=="linux"', {
           'conditions': [
             # For now, do not build nacl_helper when disable_nacl=1
-            ['disable_nacl!=1', {
+            # or when arm is enabled
+            # http://code.google.com/p/gyp/issues/detail?id=239
+            ['disable_nacl==0 and target_arch!="arm"', {
               'dependencies': [
                 '../native_client/src/trusted/service_runtime/linux/nacl_bootstrap.gyp:nacl_helper_bootstrap',
                 'nacl_helper',

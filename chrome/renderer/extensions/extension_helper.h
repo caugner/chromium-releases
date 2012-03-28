@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -48,8 +48,8 @@ class ExtensionHelper
                                                 string16* error);
 
   void InlineWebstoreInstall(int install_id,
-                             std::string webstore_item_id,
-                             GURL requestor_url);
+                             const std::string& webstore_item_id,
+                             const GURL& requestor_url);
 
   int browser_window_id() const { return browser_window_id_; }
   content::ViewType view_type() const { return view_type_; }

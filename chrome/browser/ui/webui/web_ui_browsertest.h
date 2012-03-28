@@ -12,14 +12,18 @@
 #include "base/string16.h"
 #include "chrome/browser/ui/webui/web_ui_test_handler.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/base/js_injection_ready_observer.h"
-#include "chrome/test/base/test_navigation_observer.h"
+#include "content/test/js_injection_ready_observer.h"
+#include "content/test/test_navigation_observer.h"
 
 class RenderViewHost;
-class WebUIMessageHandler;
 
 namespace base {
 class Value;
+}
+
+namespace content {
+class WebUI;
+class WebUIMessageHandler;
 }
 
 // This macro simplifies the declaration of simple javascript unit tests.
@@ -131,10 +135,10 @@ class WebUIBrowserTest
   virtual void TearDownInProcessBrowserTestFixture() OVERRIDE;
 
   // Set a WebUI instance to run tests on.
-  void SetWebUIInstance(WebUI* web_ui);
+  void SetWebUIInstance(content::WebUI* web_ui);
 
   // Returns a mock WebUI object under test (if any).
-  virtual WebUIMessageHandler* GetMockMessageHandler();
+  virtual content::WebUIMessageHandler* GetMockMessageHandler();
 
   // Returns a file:// GURL constructed from |path| inside the test data dir for
   // webui tests.
@@ -192,7 +196,7 @@ class WebUIBrowserTest
 
   // When this is non-NULL, this is The WebUI instance used for testing.
   // Otherwise the selected tab's web_ui is used.
-  WebUI* override_selected_web_ui_;
+  content::WebUI* override_selected_web_ui_;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_WEB_UI_BROWSERTEST_H_

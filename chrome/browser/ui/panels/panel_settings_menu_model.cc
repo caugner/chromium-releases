@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,8 +12,12 @@
 #include "chrome/browser/ui/panels/panel.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/url_constants.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::OpenURLParams;
+using content::Referrer;
 
 PanelSettingsMenuModel::PanelSettingsMenuModel(Panel* panel)
     : ALLOW_THIS_IN_INITIALIZER_LIST(ui::SimpleMenuModel(this)),
@@ -23,10 +27,11 @@ PanelSettingsMenuModel::PanelSettingsMenuModel(Panel* panel)
 
   AddItem(COMMAND_NAME, UTF8ToUTF16(extension->name()));
   AddSeparator();
-  AddItem(COMMAND_CONFIGURE, l10n_util::GetStringUTF16(IDS_EXTENSIONS_OPTIONS));
+  AddItem(COMMAND_CONFIGURE,
+          l10n_util::GetStringUTF16(IDS_EXTENSIONS_OPTIONS_MENU_ITEM));
   AddItem(COMMAND_DISABLE, l10n_util::GetStringUTF16(IDS_EXTENSIONS_DISABLE));
   AddItem(COMMAND_UNINSTALL,
-          l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
+      l10n_util::GetStringUTF16(IDS_EXTENSIONS_UNINSTALL));
   AddSeparator();
   AddItem(COMMAND_MANAGE, l10n_util::GetStringUTF16(IDS_MANAGE_EXTENSIONS));
 }
@@ -73,12 +78,13 @@ void PanelSettingsMenuModel::ExecuteCommand(int command_id) {
 
   Browser* browser = panel_->browser();
   switch (command_id) {
-    case COMMAND_NAME:
-     browser->OpenURL(extension->GetHomepageURL(),
-                      GURL(),
-                      NEW_FOREGROUND_TAB,
-                      content::PAGE_TRANSITION_LINK);
+    case COMMAND_NAME: {
+      OpenURLParams params(
+          extension->GetHomepageURL(), Referrer(), NEW_FOREGROUND_TAB,
+          content::PAGE_TRANSITION_LINK, false);
+      browser->OpenURL(params);
       break;
+    }
     case COMMAND_CONFIGURE:
       DCHECK(!extension->options_url().is_empty());
       browser->GetProfile()->GetExtensionProcessManager()->OpenOptionsPage(

@@ -11,22 +11,29 @@
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/search_engines/template_url_fetcher_ui_callbacks.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/favicon_status.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
+
+using content::NavigationController;
+using content::NavigationEntry;
+using content::WebContents;
 
 namespace {
 
 // Returns true if the entry's transition type is FORM_SUBMIT.
 bool IsFormSubmit(const NavigationEntry* entry) {
-  return (content::PageTransitionStripQualifier(entry->transition_type()) ==
+  return (content::PageTransitionStripQualifier(entry->GetTransitionType()) ==
           content::PAGE_TRANSITION_FORM_SUBMIT);
 }
 
 }  // namespace
 
-SearchEngineTabHelper::SearchEngineTabHelper(TabContents* tab_contents)
-    : TabContentsObserver(tab_contents) {
-  DCHECK(tab_contents);
+SearchEngineTabHelper::SearchEngineTabHelper(WebContents* web_contents)
+    : content::WebContentsObserver(web_contents) {
+  DCHECK(web_contents);
 }
 
 SearchEngineTabHelper::~SearchEngineTabHelper() {
@@ -59,8 +66,8 @@ void SearchEngineTabHelper::OnPageHasOSDD(
   // Make sure page_id is the current page and other basic checks.
   DCHECK(doc_url.is_valid());
   Profile* profile =
-      Profile::FromBrowserContext(tab_contents()->browser_context());
-  if (!tab_contents()->IsActiveEntry(page_id))
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  if (!web_contents()->IsActiveEntry(page_id))
     return;
   if (!profile->GetTemplateURLFetcher())
     return;
@@ -86,7 +93,7 @@ void SearchEngineTabHelper::OnPageHasOSDD(
       return;
   }
 
-  const NavigationController& controller = tab_contents()->controller();
+  const NavigationController& controller = web_contents()->GetController();
   const NavigationEntry* entry = controller.GetLastCommittedEntry();
   DCHECK(entry);
 
@@ -94,7 +101,7 @@ void SearchEngineTabHelper::OnPageHasOSDD(
   if (IsFormSubmit(base_entry)) {
     // If the current page is a form submit, find the last page that was not
     // a form submit and use its url to generate the keyword from.
-    int index = controller.last_committed_entry_index() - 1;
+    int index = controller.GetLastCommittedEntryIndex() - 1;
     while (index >= 0 && IsFormSubmit(controller.GetEntryAtIndex(index)))
       index--;
     if (index >= 0)
@@ -107,8 +114,8 @@ void SearchEngineTabHelper::OnPageHasOSDD(
   // the user typed to get here, and fall back on the regular URL if not.
   if (!base_entry)
     return;
-  GURL keyword_url = base_entry->user_typed_url().is_valid() ?
-          base_entry->user_typed_url() : base_entry->url();
+  GURL keyword_url = base_entry->GetUserTypedURL().is_valid() ?
+          base_entry->GetUserTypedURL() : base_entry->GetURL();
   if (!keyword_url.is_valid())
     return;
 
@@ -121,8 +128,8 @@ void SearchEngineTabHelper::OnPageHasOSDD(
   profile->GetTemplateURLFetcher()->ScheduleDownload(
       keyword,
       doc_url,
-      base_entry->favicon().url(),
-      new TemplateURLFetcherUICallbacks(this, tab_contents()),
+      base_entry->GetFavicon().url,
+      new TemplateURLFetcherUICallbacks(this, web_contents()),
       provider_type);
 }
 
@@ -132,12 +139,12 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
     return;
 
   Profile* profile =
-      Profile::FromBrowserContext(tab_contents()->browser_context());
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   if (profile->IsOffTheRecord())
     return;
 
-  const NavigationController& controller = tab_contents()->controller();
-  int last_index = controller.last_committed_entry_index();
+  const NavigationController& controller = web_contents()->GetController();
+  int last_index = controller.GetLastCommittedEntryIndex();
   // When there was no previous page, the last index will be 0. This is
   // normally due to a form submit that opened in a new tab.
   // TODO(brettw) bug 916126: we should support keywords when form submits
@@ -152,8 +159,8 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
     return;
   }
 
-  GURL keyword_url = previous_entry->user_typed_url().is_valid() ?
-          previous_entry->user_typed_url() : previous_entry->url();
+  GURL keyword_url = previous_entry->GetUserTypedURL().is_valid() ?
+          previous_entry->GetUserTypedURL() : previous_entry->GetURL();
   string16 keyword =
       TemplateURLService::GenerateKeyword(keyword_url, true);  // autodetected
   if (keyword.empty())
@@ -189,7 +196,7 @@ void SearchEngineTabHelper::GenerateKeywordIfNecessary(
   new_url->add_input_encoding(params.searchable_form_encoding);
   DCHECK(controller.GetLastCommittedEntry());
   const GURL& favicon_url =
-      controller.GetLastCommittedEntry()->favicon().url();
+      controller.GetLastCommittedEntry()->GetFavicon().url;
   if (favicon_url.is_valid()) {
     new_url->SetFaviconURL(favicon_url);
   } else {

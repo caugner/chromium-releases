@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_VIEWS_GLOBAL_ERROR_BUBBLE_VIEW_H_
 #pragma once
 
+#include "base/memory/weak_ptr.h"
+#include "chrome/browser/ui/global_error_bubble_view_base.h"
 #include "ui/views/bubble/bubble_delegate.h"
 #include "ui/views/controls/button/button.h"
 
@@ -13,12 +15,13 @@ class Browser;
 class GlobalError;
 
 class GlobalErrorBubbleView : public views::ButtonListener,
-                              public views::BubbleDelegateView {
+                              public views::BubbleDelegateView,
+                              public GlobalErrorBubbleViewBase {
  public:
   GlobalErrorBubbleView(views::View* anchor_view,
                         views::BubbleBorder::ArrowLocation location,
                         Browser* browser,
-                        GlobalError* error);
+                        const base::WeakPtr<GlobalError>& error);
   virtual ~GlobalErrorBubbleView();
 
   // views::BubbleDelegateView implementation.
@@ -31,9 +34,12 @@ class GlobalErrorBubbleView : public views::ButtonListener,
   // views::WidgetDelegate implementation.
   virtual void WindowClosing() OVERRIDE;
 
+  // GlobalErrorBubbleViewBase implementation.
+  virtual void CloseBubbleView() OVERRIDE;
+
  private:
   Browser* browser_;
-  GlobalError* error_;
+  base::WeakPtr<GlobalError> error_;
 
   DISALLOW_COPY_AND_ASSIGN(GlobalErrorBubbleView);
 };

@@ -8,7 +8,10 @@
 #include "base/bind_helpers.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_ui.h"
+
+using content::UserMetricsAction;
 
 namespace chromeos {
 
@@ -25,7 +28,7 @@ void StatsOptionsHandler::Initialize() {
 
 // WebUIMessageHandler implementation.
 void StatsOptionsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("metricsReportingCheckboxAction",
+  web_ui()->RegisterMessageCallback("metricsReportingCheckboxAction",
       base::Bind(&StatsOptionsHandler::HandleMetricsReportingCheckbox,
                  base::Unretained(this)));
 }
@@ -35,7 +38,7 @@ void StatsOptionsHandler::HandleMetricsReportingCheckbox(
 #if defined(GOOGLE_CHROME_BUILD)
   const std::string checked_str = UTF16ToUTF8(ExtractStringValue(args));
   const bool enabled = (checked_str == "true");
-  UserMetrics::RecordAction(
+  content::RecordAction(
       enabled ?
       UserMetricsAction("Options_MetricsReportingCheckbox_Enable") :
       UserMetricsAction("Options_MetricsReportingCheckbox_Disable"));

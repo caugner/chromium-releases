@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/ppb_input_event.h"
-#include "ppapi/cpp/completion_callback.h"
 #include "ppapi/cpp/graphics_2d.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/input_event.h"
@@ -18,6 +17,7 @@
 #include "ppapi/cpp/mouse_lock.h"
 #include "ppapi/cpp/rect.h"
 #include "ppapi/cpp/var.h"
+#include "ppapi/utility/completion_callback_factory.h"
 
 class MyInstance : public pp::Instance, public pp::MouseLock {
  public:
@@ -75,8 +75,9 @@ class MyInstance : public pp::Instance, public pp::MouseLock {
             LockMouse(callback_factory_.NewRequiredCallback(
                 &MyInstance::DidLockMouse));
           }
+          return true;
         }
-        return true;
+        return false;
       }
       default:
         return false;

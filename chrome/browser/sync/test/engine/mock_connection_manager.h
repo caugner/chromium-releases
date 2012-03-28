@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -51,7 +51,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   virtual bool IsUserAuthenticated() OVERRIDE;
 
   // Control of commit response.
-  void SetMidCommitCallback(Callback0::Type* callback);
+  void SetMidCommitCallback(const base::Closure& callback);
   void SetMidCommitObserver(MidCommitObserver* observer);
 
   // Set this if you want commit to perform commit time rename. Will request
@@ -95,6 +95,12 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
                                          std::string name,
                                          int64 version,
                                          int64 sync_ts);
+  // Versions of the AddUpdate function that accept specifics.
+  sync_pb::SyncEntity* AddUpdateSpecifics(int id, int parent_id,
+      std::string name,int64 version, int64 sync_ts, bool is_dir,
+      int64 position, const sync_pb::EntitySpecifics& specifics);
+  sync_pb::SyncEntity* SetNigori(int id, int64 version, int64 sync_ts,
+      const sync_pb::EntitySpecifics& specifics);
 
   // Find the last commit sent by the client, and replay it for the next get
   // updates command.  This can be used to simulate the GetUpdates that happens
@@ -128,8 +134,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   void FailNextPostBufferToPathCall() { fail_next_postbuffer_ = true; }
 
-  void SetClearUserDataResponseStatus(
-      sync_pb::ClientToServerResponse::ErrorType errortype);
+  void SetClearUserDataResponseStatus(sync_pb::SyncEnums::ErrorType errortype);
 
   // A visitor class to allow a test to change some monitoring state atomically
   // with the action of overriding the response codes sent back to the Syncer
@@ -207,7 +212,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   // Expect that GetUpdates will request exactly the types indicated in
   // the bitset.
   void ExpectGetUpdatesRequestTypes(
-      std::bitset<syncable::MODEL_TYPE_COUNT> expected_filter) {
+      syncable::ModelTypeSet expected_filter) {
     expected_filter_ = expected_filter;
   }
 
@@ -238,6 +243,10 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
                                      std::string parentid, std::string name,
                                      int64 version, int64 sync_ts,
                                      bool is_dir);
+  sync_pb::SyncEntity* AddUpdateMeta(std::string id, std::string parentid,
+                                    std::string name, int64 version,
+                                    int64 sync_ts);
+
   // Functions to handle the various types of server request.
   void ProcessGetUpdates(sync_pb::ClientToServerMessage* csm,
                          sync_pb::ClientToServerResponse* response);
@@ -308,12 +317,11 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
 
   // The updates we'll return to the next request.
   std::list<sync_pb::GetUpdatesResponse> update_queue_;
-  scoped_ptr<Callback0::Type> mid_commit_callback_;
+  base::Closure mid_commit_callback_;
   MidCommitObserver* mid_commit_observer_;
 
   // The clear data response we'll return in the next response
-  sync_pb::ClientToServerResponse::ErrorType
-      clear_user_data_response_errortype_;
+  sync_pb::SyncEnums::ErrorType clear_user_data_response_errortype_;
 
   // The AUTHENTICATE response we'll return for auth requests.
   sync_pb::AuthenticateResponse auth_response_;
@@ -344,7 +352,7 @@ class MockConnectionManager : public browser_sync::ServerConnectionManager {
   // use the older sync_pb::SyncEntity_BookmarkData-style protocol.
   bool use_legacy_bookmarks_protocol_;
 
-  std::bitset<syncable::MODEL_TYPE_COUNT> expected_filter_;
+  syncable::ModelTypeSet expected_filter_;
 
   syncable::ModelTypePayloadMap expected_payloads_;
 

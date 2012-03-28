@@ -125,9 +125,9 @@ void ShowItemInFolder(const FilePath& full_path) {
 
 void OpenItem(const FilePath& full_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  BrowserThread::PostTask(BrowserThread::FILE, FROM_HERE,
-      base::IgnoreReturn<bool>(base::Bind(&ui::win::OpenItemViaShell,
-                                          full_path)));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(base::IgnoreResult(&ui::win::OpenItemViaShell), full_path));
 }
 
 void OpenExternal(const GURL& url) {
@@ -174,6 +174,7 @@ void OpenExternal(const GURL& url) {
   }
 }
 
+#if !defined(USE_AURA)
 gfx::NativeWindow GetTopLevel(gfx::NativeView view) {
   return ::GetAncestor(view, GA_ROOT);
 }
@@ -194,5 +195,6 @@ bool IsVisible(gfx::NativeView view) {
   // MSVC complains if we don't include != 0.
   return ::IsWindowVisible(view) != 0;
 }
+#endif
 
 }  // namespace platform_util

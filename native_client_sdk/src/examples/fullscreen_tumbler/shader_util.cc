@@ -1,11 +1,13 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "examples/fullscreen_tumbler/shader_util.h"
-
 #include <stdio.h>
 #include <stdlib.h>
+#include <GLES2/gl2.h>
+
+#include "ppapi/gles2/gl2ext_ppapi.h"
+#include "shader_util.h"
 
 namespace shader_util {
 

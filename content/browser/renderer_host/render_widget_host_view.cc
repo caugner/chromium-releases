@@ -5,6 +5,7 @@
 #include "content/browser/renderer_host/render_widget_host_view.h"
 
 #include "base/logging.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
 
 #if defined(TOOLKIT_USES_GTK)
@@ -12,16 +13,6 @@
 #include <gtk/gtk.h>
 
 #include "content/browser/renderer_host/gtk_window_utils.h"
-#endif
-
-#if defined(TOUCH_UI) && !defined(USE_AURA)
-// static
-void RenderWidgetHostView::GetDefaultScreenInfo(
-    WebKit::WebScreenInfo* results) {
-  GdkWindow* gdk_window =
-      gdk_display_get_default_group(gdk_display_get_default());
-  content::GetScreenInfoFromNativeWindow(gdk_window, results);
-}
 #endif
 
 RenderWidgetHostView::RenderWidgetHostView()
@@ -39,6 +30,15 @@ void RenderWidgetHostView::SetBackground(const SkBitmap& background) {
   background_ = background;
 }
 
+BrowserAccessibilityManager*
+    RenderWidgetHostView::GetBrowserAccessibilityManager() const {
+  return browser_accessibility_manager_.get();
+}
+
+void RenderWidgetHostView::SetBrowserAccessibilityManager(
+    BrowserAccessibilityManager* manager) {
+  browser_accessibility_manager_.reset(manager);
+}
 
 void RenderWidgetHostView::SelectionChanged(const string16& text,
                                             size_t offset,

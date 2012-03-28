@@ -1,25 +1,25 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/message_loop.h"
+#include "extension_prefs_unittest.h"
+
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/stl_util.h"
 #include "base/string_number_conversions.h"
 #include "base/stringprintf.h"
 #include "chrome/browser/extensions/extension_prefs.h"
-#include "chrome/browser/extensions/test_extension_prefs.h"
+#include "chrome/browser/extensions/extension_pref_value_map.h"
 #include "chrome/browser/prefs/pref_change_registrar.h"
 #include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_permission_set.h"
+#include "chrome/common/string_ordinal.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/test/notification_observer_mock.h"
-#include "content/test/test_browser_thread.h"
-#include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
 using base::TimeDelta;
@@ -45,52 +45,28 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
   extent->AddPattern(URLPattern(schemes, pattern));
 }
 
-// Base class for tests.
-class ExtensionPrefsTest : public testing::Test {
- public:
-  ExtensionPrefsTest()
-      : ui_thread_(BrowserThread::UI, &message_loop_),
-        file_thread_(BrowserThread::FILE, &message_loop_) {
-  }
+ExtensionPrefsTest::ExtensionPrefsTest()
+    : ui_thread_(BrowserThread::UI, &message_loop_),
+      file_thread_(BrowserThread::FILE, &message_loop_) {
+}
 
-  // This function will get called once, and is the right place to do operations
-  // on ExtensionPrefs that write data.
-  virtual void Initialize() = 0;
+ExtensionPrefsTest::~ExtensionPrefsTest() {}
 
-  // This function will be called twice - once while the original ExtensionPrefs
-  // object is still alive, and once after recreation. Thus, it tests that
-  // things don't break after any ExtensionPrefs startup work.
-  virtual void Verify() = 0;
+void ExtensionPrefsTest::RegisterPreferences() {}
 
-  // This function is called to Register preference default values.
-  virtual void RegisterPreferences() {}
+void ExtensionPrefsTest::SetUp() {
+  RegisterPreferences();
+  Initialize();
+}
 
-  virtual void SetUp() {
-    RegisterPreferences();
-    Initialize();
-  }
+void ExtensionPrefsTest::TearDown() {
+  Verify();
 
-  virtual void TearDown() {
-    Verify();
-
-    // Reset ExtensionPrefs, and re-verify.
-    prefs_.RecreateExtensionPrefs();
-    RegisterPreferences();
-    Verify();
-  }
-
- protected:
-  ExtensionPrefs* prefs() { return prefs_.prefs(); }
-
-  MessageLoop message_loop_;
-  content::TestBrowserThread ui_thread_;
-  content::TestBrowserThread file_thread_;
-
-  TestExtensionPrefs prefs_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ExtensionPrefsTest);
-};
+  // Reset ExtensionPrefs, and re-verify.
+  prefs_.RecreateExtensionPrefs();
+  RegisterPreferences();
+  Verify();
+}
 
 // Tests the LastPingDay/SetLastPingDay functions.
 class ExtensionPrefsLastPingDay : public ExtensionPrefsTest {
@@ -654,7 +630,8 @@ class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
     prefs()->OnExtensionInstalled(
-        extension_.get(), Extension::DISABLED, false, -1);
+        extension_.get(), Extension::DISABLED, false,
+        StringOrdinal());
   }
 
   virtual void Verify() {
@@ -667,99 +644,13 @@ class ExtensionPrefsOnExtensionInstalled : public ExtensionPrefsTest {
 TEST_F(ExtensionPrefsOnExtensionInstalled,
        ExtensionPrefsOnExtensionInstalled) {}
 
-class ExtensionPrefsAppLaunchIndex : public ExtensionPrefsTest {
- public:
-  virtual void Initialize() {
-    // No extensions yet.
-    EXPECT_EQ(0, prefs()->GetNextAppLaunchIndex(0));
-
-    extension_ = prefs_.AddApp("on_extension_installed");
-    EXPECT_FALSE(prefs()->IsExtensionDisabled(extension_->id()));
-    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
-                                  false, -1);
-  }
-
-  virtual void Verify() {
-    int launch_index = prefs()->GetAppLaunchIndex(extension_->id());
-    // Extension should have been assigned a launch index > 0.
-    EXPECT_GT(launch_index, 0);
-    EXPECT_EQ(launch_index + 1, prefs()->GetNextAppLaunchIndex(0));
-    // Set a new launch index of one higher and verify.
-    prefs()->SetAppLaunchIndex(extension_->id(),
-                               prefs()->GetNextAppLaunchIndex(0));
-    int new_launch_index = prefs()->GetAppLaunchIndex(extension_->id());
-    EXPECT_EQ(launch_index + 1, new_launch_index);
-
-    // This extension doesn't exist, so it should return -1.
-    EXPECT_EQ(-1, prefs()->GetAppLaunchIndex("foo"));
-
-    // The second page doesn't have any apps so its next launch index should
-    // still be 0.
-    EXPECT_EQ(prefs()->GetNextAppLaunchIndex(1), 0);
-  }
-
- private:
-  scoped_refptr<Extension> extension_;
-};
-TEST_F(ExtensionPrefsAppLaunchIndex, ExtensionPrefsAppLaunchIndex) {}
-
-class ExtensionPrefsPageIndex : public ExtensionPrefsTest {
- public:
-  virtual void Initialize() {
-    extension_ = prefs_.AddApp("page_index");
-    // Install to page 3 (index 2).
-    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
-                                  false, 2);
-    EXPECT_EQ(2, prefs()->GetPageIndex(extension_->id()));
-
-    scoped_refptr<Extension> extension2 = prefs_.AddApp("page_index_2");
-    // Install without any page preference.
-    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
-                                  false, -1);
-    EXPECT_EQ(0, prefs()->GetPageIndex(extension_->id()));
-  }
-
-  virtual void Verify() {
-    // Set the page index.
-    prefs()->SetPageIndex(extension_->id(), 1);
-    // Verify the page index.
-    EXPECT_EQ(1, prefs()->GetPageIndex(extension_->id()));
-
-    // This extension doesn't exist, so it should return -1.
-    EXPECT_EQ(-1, prefs()->GetPageIndex("foo"));
-  }
-
- private:
-  scoped_refptr<Extension> extension_;
-};
-TEST_F(ExtensionPrefsPageIndex, ExtensionPrefsPageIndex) {}
-
-class ExtensionPrefsAppLocation : public ExtensionPrefsTest {
- public:
-  virtual void Initialize() {
-    extension_ = prefs_.AddExtension("not_an_app");
-    // Non-apps should not have any app launch index or page index.
-    prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
-                                  false, 0);
-  }
-
-  virtual void Verify() {
-    EXPECT_EQ(-1, prefs()->GetAppLaunchIndex(extension_->id()));
-    EXPECT_EQ(-1, prefs()->GetPageIndex(extension_->id()));
-  }
-
- private:
-  scoped_refptr<Extension> extension_;
-};
-TEST_F(ExtensionPrefsAppLocation, ExtensionPrefsAppLocation) {}
-
 class ExtensionPrefsAppDraggedByUser : public ExtensionPrefsTest {
  public:
   virtual void Initialize() {
     extension_ = prefs_.AddExtension("on_extension_installed");
     EXPECT_FALSE(prefs()->WasAppDraggedByUser(extension_->id()));
     prefs()->OnExtensionInstalled(extension_.get(), Extension::ENABLED,
-                                  false, -1);
+                                  false, StringOrdinal());
   }
 
   virtual void Verify() {
@@ -815,125 +706,121 @@ TEST_F(ExtensionPrefsFlags, ExtensionPrefsFlags) {}
 
 namespace keys = extension_manifest_keys;
 
-class ExtensionPrefsPreferencesBase : public ExtensionPrefsTest {
- public:
-  ExtensionPrefsPreferencesBase()
-      : ExtensionPrefsTest(),
-        ext1_(NULL),
-        ext2_(NULL),
-        ext3_(NULL),
-        installed() {
-    DictionaryValue simple_dict;
-    std::string error;
+ExtensionPrefsPrepopulatedTest::ExtensionPrefsPrepopulatedTest()
+    : ExtensionPrefsTest(),
+      ext1_(NULL),
+      ext2_(NULL),
+      ext3_(NULL),
+      ext4_(NULL),
+      installed() {
+  DictionaryValue simple_dict;
+  std::string error;
 
-    simple_dict.SetString(keys::kVersion, "1.0.0.0");
-    simple_dict.SetString(keys::kName, "unused");
+  simple_dict.SetString(keys::kVersion, "1.0.0.0");
+  simple_dict.SetString(keys::kName, "unused");
 
-    ext1_scoped_ = Extension::Create(
-        prefs_.temp_dir().AppendASCII("ext1_"), Extension::EXTERNAL_PREF,
-        simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
-    ext2_scoped_ = Extension::Create(
-        prefs_.temp_dir().AppendASCII("ext2_"), Extension::EXTERNAL_PREF,
-        simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
-    ext3_scoped_ = Extension::Create(
-        prefs_.temp_dir().AppendASCII("ext3_"), Extension::EXTERNAL_PREF,
-        simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+  ext1_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext1_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+  ext2_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext2_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+  ext3_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext3_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
+  ext4_scoped_ = Extension::Create(
+      prefs_.temp_dir().AppendASCII("ext4_"), Extension::EXTERNAL_PREF,
+      simple_dict, Extension::STRICT_ERROR_CHECKS, &error);
 
-    ext1_ = ext1_scoped_.get();
-    ext2_ = ext2_scoped_.get();
-    ext3_ = ext3_scoped_.get();
+  ext1_ = ext1_scoped_.get();
+  ext2_ = ext2_scoped_.get();
+  ext3_ = ext3_scoped_.get();
+  ext4_ = ext4_scoped_.get();
 
-    for (size_t i = 0; i < arraysize(installed); ++i)
+  for (size_t i = 0; i < arraysize(installed); ++i)
+    installed[i] = false;
+}
+
+ExtensionPrefsPrepopulatedTest::~ExtensionPrefsPrepopulatedTest() {}
+
+void ExtensionPrefsPrepopulatedTest::RegisterPreferences() {
+  prefs()->pref_service()->RegisterStringPref(kPref1,
+                                              kDefaultPref1,
+                                              PrefService::UNSYNCABLE_PREF);
+  prefs()->pref_service()->RegisterStringPref(kPref2,
+                                              kDefaultPref2,
+                                              PrefService::UNSYNCABLE_PREF);
+  prefs()->pref_service()->RegisterStringPref(kPref3,
+                                              kDefaultPref3,
+                                              PrefService::UNSYNCABLE_PREF);
+  prefs()->pref_service()->RegisterStringPref(kPref4,
+                                              kDefaultPref4,
+                                              PrefService::UNSYNCABLE_PREF);
+}
+
+void ExtensionPrefsPrepopulatedTest::InstallExtControlledPref(
+    Extension *ext,
+    const std::string& key,
+    Value* val) {
+  EnsureExtensionInstalled(ext);
+  prefs()->SetExtensionControlledPref(
+      ext->id(), key, kExtensionPrefsScopeRegular, val);
+}
+
+void ExtensionPrefsPrepopulatedTest::InstallExtControlledPrefIncognito(
+    Extension *ext,
+    const std::string& key,
+    Value* val) {
+  EnsureExtensionInstalled(ext);
+  prefs()->SetExtensionControlledPref(
+      ext->id(), key, kExtensionPrefsScopeIncognitoPersistent, val);
+}
+
+void ExtensionPrefsPrepopulatedTest
+::InstallExtControlledPrefIncognitoSessionOnly(Extension *ext,
+                                               const std::string& key,
+                                               Value* val) {
+  EnsureExtensionInstalled(ext);
+  prefs()->SetExtensionControlledPref(
+      ext->id(), key, kExtensionPrefsScopeIncognitoSessionOnly, val);
+}
+
+void ExtensionPrefsPrepopulatedTest::InstallExtension(Extension *ext) {
+  EnsureExtensionInstalled(ext);
+}
+
+void ExtensionPrefsPrepopulatedTest::UninstallExtension(
+    const std::string& extension_id) {
+  EnsureExtensionUninstalled(extension_id);
+}
+
+void ExtensionPrefsPrepopulatedTest::EnsureExtensionInstalled(Extension *ext) {
+  // Install extension the first time a preference is set for it.
+  Extension* extensions[] = {ext1_, ext2_, ext3_, ext4_};
+  for (size_t i = 0; i < arraysize(extensions); ++i) {
+    if (ext == extensions[i] && !installed[i]) {
+      prefs()->OnExtensionInstalled(ext, Extension::ENABLED,
+                                    false, StringOrdinal());
+      installed[i] = true;
+      break;
+    }
+  }
+}
+
+void ExtensionPrefsPrepopulatedTest::EnsureExtensionUninstalled(
+    const std::string& extension_id) {
+  Extension* extensions[] = {ext1_, ext2_, ext3_, ext4_};
+  for (size_t i = 0; i < arraysize(extensions); ++i) {
+    if (extensions[i]->id() == extension_id) {
       installed[i] = false;
-  }
-
-  void RegisterPreferences() {
-    prefs()->pref_service()->RegisterStringPref(kPref1,
-                                                kDefaultPref1,
-                                                PrefService::UNSYNCABLE_PREF);
-    prefs()->pref_service()->RegisterStringPref(kPref2,
-                                                kDefaultPref2,
-                                                PrefService::UNSYNCABLE_PREF);
-    prefs()->pref_service()->RegisterStringPref(kPref3,
-                                                kDefaultPref3,
-                                                PrefService::UNSYNCABLE_PREF);
-    prefs()->pref_service()->RegisterStringPref(kPref4,
-                                                kDefaultPref4,
-                                                PrefService::UNSYNCABLE_PREF);
-  }
-
-  void InstallExtControlledPref(Extension *ext,
-                                const std::string& key,
-                                Value* val) {
-    EnsureExtensionInstalled(ext);
-    prefs()->SetExtensionControlledPref(
-        ext->id(), key, kExtensionPrefsScopeRegular, val);
-  }
-
-  void InstallExtControlledPrefIncognito(Extension *ext,
-                                         const std::string& key,
-                                         Value* val) {
-    EnsureExtensionInstalled(ext);
-    prefs()->SetExtensionControlledPref(
-        ext->id(), key, kExtensionPrefsScopeIncognitoPersistent, val);
-  }
-
-  void InstallExtControlledPrefIncognitoSessionOnly(
-      Extension *ext,
-      const std::string& key,
-      Value* val) {
-    EnsureExtensionInstalled(ext);
-    prefs()->SetExtensionControlledPref(
-        ext->id(), key, kExtensionPrefsScopeIncognitoSessionOnly, val);
-  }
-
-  void InstallExtension(Extension *ext) {
-    EnsureExtensionInstalled(ext);
-  }
-
-  void UninstallExtension(const std::string& extension_id) {
-    EnsureExtensionUninstalled(extension_id);
-  }
-
-  // Weak references, for convenience.
-  Extension* ext1_;
-  Extension* ext2_;
-  Extension* ext3_;
-
-  // Flags indicating whether each of the extensions has been installed, yet.
-  bool installed[3];
-
- private:
-  void EnsureExtensionInstalled(Extension *ext) {
-    // Install extension the first time a preference is set for it.
-    Extension* extensions[] = {ext1_, ext2_, ext3_};
-    for (int i = 0; i < 3; ++i) {
-      if (ext == extensions[i] && !installed[i]) {
-        prefs()->OnExtensionInstalled(ext, Extension::ENABLED, false, -1);
-        installed[i] = true;
-        break;
-      }
+      break;
     }
   }
-
-  void EnsureExtensionUninstalled(const std::string& extension_id) {
-    Extension* extensions[] = {ext1_, ext2_, ext3_};
-    for (int i = 0; i < 3; ++i) {
-      if (extensions[i]->id() == extension_id) {
-        installed[i] = false;
-        break;
-      }
-    }
-    prefs()->OnExtensionUninstalled(extension_id, Extension::INTERNAL, false);
-  }
-
-  scoped_refptr<Extension> ext1_scoped_;
-  scoped_refptr<Extension> ext2_scoped_;
-  scoped_refptr<Extension> ext3_scoped_;
-};
+  prefs()->OnExtensionUninstalled(extension_id, Extension::INTERNAL, false);
+}
 
 class ExtensionPrefsInstallOneExtension
-    : public ExtensionPrefsPreferencesBase {
+    : public ExtensionPrefsPrepopulatedTest {
   virtual void Initialize() {
     InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
   }
@@ -946,7 +833,7 @@ TEST_F(ExtensionPrefsInstallOneExtension, ExtensionPrefsInstallOneExtension) {}
 
 // Check that we do not forget persistent incognito values after a reload.
 class ExtensionPrefsInstallIncognitoPersistent
-    : public ExtensionPrefsPreferencesBase {
+    : public ExtensionPrefsPrepopulatedTest {
  public:
   virtual void Initialize() {
     InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
@@ -971,7 +858,7 @@ TEST_F(ExtensionPrefsInstallIncognitoPersistent,
 
 // Check that we forget 'session only' incognito values after a reload.
 class ExtensionPrefsInstallIncognitoSessionOnly
-    : public ExtensionPrefsPreferencesBase {
+    : public ExtensionPrefsPrepopulatedTest {
  public:
   ExtensionPrefsInstallIncognitoSessionOnly() : iteration_(0) {}
 
@@ -1004,8 +891,7 @@ class ExtensionPrefsInstallIncognitoSessionOnly
 TEST_F(ExtensionPrefsInstallIncognitoSessionOnly,
        ExtensionPrefsInstallOneExtension) {}
 
-class ExtensionPrefsUninstallExtension
-    : public ExtensionPrefsPreferencesBase {
+class ExtensionPrefsUninstallExtension : public ExtensionPrefsPrepopulatedTest {
   virtual void Initialize() {
     InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
     InstallExtControlledPref(ext1_, kPref2, Value::CreateStringValue("val2"));
@@ -1032,11 +918,10 @@ class ExtensionPrefsUninstallExtension
   }
 };
 TEST_F(ExtensionPrefsUninstallExtension,
-    ExtensionPrefsUninstallExtension) {}
+       ExtensionPrefsUninstallExtension) {}
 
 // Tests triggering of notifications to registered observers.
-class ExtensionPrefsNotifyWhenNeeded
-    : public ExtensionPrefsPreferencesBase {
+class ExtensionPrefsNotifyWhenNeeded : public ExtensionPrefsPrepopulatedTest {
   virtual void Initialize() {
     using testing::_;
     using testing::Mock;
@@ -1112,8 +997,7 @@ TEST_F(ExtensionPrefsNotifyWhenNeeded,
     ExtensionPrefsNotifyWhenNeeded) {}
 
 // Tests disabling an extension.
-class ExtensionPrefsDisableExt
-    : public ExtensionPrefsPreferencesBase {
+class ExtensionPrefsDisableExt : public ExtensionPrefsPrepopulatedTest {
   virtual void Initialize() {
     InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
     std::string actual = prefs()->pref_service()->GetString(kPref1);
@@ -1128,8 +1012,7 @@ class ExtensionPrefsDisableExt
 TEST_F(ExtensionPrefsDisableExt,  ExtensionPrefsDisableExt) {}
 
 // Tests disabling and reenabling an extension.
-class ExtensionPrefsReenableExt
-    : public ExtensionPrefsPreferencesBase {
+class ExtensionPrefsReenableExt : public ExtensionPrefsPrepopulatedTest {
   virtual void Initialize() {
     InstallExtControlledPref(ext1_, kPref1, Value::CreateStringValue("val1"));
     prefs()->SetExtensionState(ext1_->id(), Extension::DISABLED);
@@ -1155,7 +1038,7 @@ class MockStringValue : public StringValue {
 };
 
 class ExtensionPrefsSetExtensionControlledPref
-    : public ExtensionPrefsPreferencesBase {
+    : public ExtensionPrefsPrepopulatedTest {
  public:
   virtual void Initialize() {
     MockStringValue* v1 = new MockStringValue("https://www.chromium.org");
@@ -1191,8 +1074,7 @@ TEST_F(ExtensionPrefsSetExtensionControlledPref,
 
 // Tests that the switches::kDisableExtensions command-line flag prevents
 // extension controlled preferences from being enacted.
-class ExtensionPrefsDisableExtensions
-    : public ExtensionPrefsPreferencesBase {
+class ExtensionPrefsDisableExtensions : public ExtensionPrefsPrepopulatedTest {
  public:
   ExtensionPrefsDisableExtensions()
       : iteration_(0) {}

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/synchronization/waitable_event.h"
 #include "content/browser/renderer_host/media/mock_media_observer.h"
 #include "content/renderer/mock_content_renderer_client.h"
 #include "ipc/ipc_channel.h"
@@ -20,6 +19,7 @@
 #include "third_party/webrtc/common_types.h"
 
 class AudioInputRendererHost;
+class AudioManager;
 class AudioRendererHost;
 class RenderThreadImpl;
 class WebRTCMockRenderProcess;
@@ -109,6 +109,7 @@ class AudioUtilInterface {
   virtual ~AudioUtilInterface() {}
   virtual double GetAudioHardwareSampleRate() = 0;
   virtual double GetAudioInputHardwareSampleRate() = 0;
+  virtual uint32 GetAudioInputHardwareChannelCount() = 0;
 };
 
 // Implemented and defined in the cc file.
@@ -118,19 +119,6 @@ class WebRTCAudioDeviceTest
     : public ::testing::Test,
       public IPC::Channel::Listener {
  public:
-  class SetupTask : public base::RefCountedThreadSafe<SetupTask> {
-   public:
-    explicit SetupTask(WebRTCAudioDeviceTest* test) : test_(test) {
-      DCHECK(test);  // Catch this early since we dereference much later.
-    }
-    void InitializeIOThread(const char* thread_name) {
-      test_->InitializeIOThread(thread_name);
-    }
-    void UninitializeIOThread() { test_->UninitializeIOThread(); }
-   protected:
-    WebRTCAudioDeviceTest* test_;
-  };
-
   WebRTCAudioDeviceTest();
   virtual ~WebRTCAudioDeviceTest();
 
@@ -145,18 +133,20 @@ class WebRTCAudioDeviceTest
  protected:
   void InitializeIOThread(const char* thread_name);
   void UninitializeIOThread();
-  void CreateChannel(const char* name,
-                     content::ResourceContext* resource_context);
+  void CreateChannel(const char* name);
   void DestroyChannel();
 
   void OnGetHardwareSampleRate(double* sample_rate);
   void OnGetHardwareInputSampleRate(double* sample_rate);
+  void OnGetHardwareInputChannelCount(uint32* channels);
 
   // IPC::Channel::Listener implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Posts a final task to the IO message loop and waits for completion.
   void WaitForIOThreadCompletion();
+  void WaitForAudioManagerCompletion();
+  void WaitForMessageLoopCompletion(base::MessageLoopProxy* loop);
 
   // Convenience getter for gmock.
   MockMediaObserver& media_observer() const {
@@ -170,9 +160,9 @@ class WebRTCAudioDeviceTest
   content::MockContentRendererClient mock_content_renderer_client_;
   RenderThreadImpl* render_thread_;  // Owned by mock_process_.
   scoped_ptr<WebRTCMockRenderProcess> mock_process_;
-  base::WaitableEvent event_;
   scoped_ptr<MockMediaObserver> media_observer_;
   scoped_ptr<media_stream::MediaStreamManager> media_stream_manager_;
+  scoped_refptr<AudioManager> audio_manager_;
   scoped_ptr<content::ResourceContext> resource_context_;
   scoped_refptr<net::URLRequestContext> test_request_context_;
   scoped_ptr<IPC::Channel> channel_;

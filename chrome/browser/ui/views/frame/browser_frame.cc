@@ -1,9 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 
+#include "base/command_line.h"
+#include "base/i18n/rtl.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -14,12 +16,20 @@
 #include "chrome/browser/ui/views/frame/native_browser_frame.h"
 #include "chrome/common/chrome_switches.h"
 #include "ui/base/theme_provider.h"
+#include "ui/gfx/screen.h"
 #include "ui/views/widget/native_widget.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/ui/views/frame/glass_browser_frame_view.h"
 #elif defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/system/runtime_environment.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ash/ash_switches.h"
+#include "ash/shell.h"
+#include "chrome/browser/chromeos/status/status_area_view.h"
+#include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,19 +61,36 @@ void BrowserFrame::InitBrowserFrame() {
     params.bounds = browser_view_->browser()->GetSavedWindowBounds();
     params.show_state = browser_view_->browser()->GetSavedWindowShowState();
   }
-  if (browser_view_->browser()->is_type_panel()) {
+  if (browser_view_->IsPanel()) {
     // We need to set the top-most bit when the panel window is created.
     // There is a Windows bug/feature that would very likely prevent the window
     // from being changed to top-most after the window is created without
     // activation.
-    params.keep_on_top = true;
+    params.type = views::Widget::InitParams::TYPE_PANEL;
   }
-  Init(params);
-#if defined(OS_CHROMEOS) && !defined(USE_AURA)
-  // On ChromeOS we always want top-level windows to appear active.
-  if (!browser_view_->IsBrowserTypePopup())
-    DisableInactiveRendering();
+#if defined(USE_AURA)
+  CommandLine* command_line = CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(ash::switches::kAuraTranslucentFrames))
+    params.transparent = true;
+  // Aura compact mode fills the monitor with with its windows.
+  if (ash::Shell::GetInstance()->IsWindowModeCompact() &&
+      browser_view_->IsBrowserTypeNormal()) {
+    params.bounds = gfx::Screen::GetPrimaryMonitorBounds();
+    params.show_state = ui::SHOW_STATE_MAXIMIZED;
+  }
 #endif
+  Init(params);
+
+  // On ChromeOS and Aura compact mode we always want top-level windows
+  // to appear active.
+  bool disable_inactive_rendering = false;
+#if defined(USE_AURA)
+  disable_inactive_rendering = ash::Shell::GetInstance()->IsWindowModeCompact();
+#elif defined(OS_CHROMEOS)
+  disable_inactive_rendering = true;
+#endif
+  if (disable_inactive_rendering && browser_view_->IsBrowserTypeNormal())
+    DisableInactiveRendering();
 }
 
 int BrowserFrame::GetMinimizeButtonOffset() const {
@@ -71,7 +98,38 @@ int BrowserFrame::GetMinimizeButtonOffset() const {
 }
 
 gfx::Rect BrowserFrame::GetBoundsForTabStrip(views::View* tabstrip) const {
-  return browser_frame_view_->GetBoundsForTabStrip(tabstrip);
+  gfx::Rect tab_strip_bounds =
+      browser_frame_view_->GetBoundsForTabStrip(tabstrip);
+#if defined(USE_AURA)
+  // Leave space for status area in Aura compact window mode.
+  if (ash::Shell::GetInstance()->IsWindowModeCompact() &&
+      ChromeShellDelegate::instance()) {
+    StatusAreaView* status_area =
+        ChromeShellDelegate::instance()->GetStatusArea();
+    if (status_area) {
+      int reserve_width = 0;
+      gfx::Rect screen_bounds = gfx::Screen::GetPrimaryMonitorBounds();
+      if (base::i18n::IsRTL()) {
+        // Get top-right corner of status area in screen coordinates.
+        gfx::Point status_origin(status_area->bounds().right(), 0);
+        views::View::ConvertPointToScreen(status_area, &status_origin);
+        // Reserve the width between the left edge of screen and the right edge
+        // of status area.
+        reserve_width = status_origin.x() - screen_bounds.x();
+      } else {
+        // Get top-left corner of status area in screen coordinates.
+        gfx::Point status_origin;
+        views::View::ConvertPointToScreen(status_area, &status_origin);
+        // Reserve the width between the right edge of screen and the left edge
+        // of status area.
+        reserve_width = screen_bounds.right() - status_origin.x();
+      }
+      // Views handles the RTL adjustment of tab strip.
+      tab_strip_bounds.set_width(tab_strip_bounds.width() - reserve_width);
+    }
+  }
+#endif
+  return tab_strip_bounds;
 }
 
 int BrowserFrame::GetHorizontalTabStripVerticalOffset(bool restored) const {
@@ -95,14 +153,25 @@ void BrowserFrame::TabStripDisplayModeChanged() {
   native_browser_frame_->TabStripDisplayModeChanged();
 }
 
+bool BrowserFrame::IsSingleWindowMode() const {
+  bool single_window_mode = false;
+#if defined(USE_AURA)
+  single_window_mode = ash::Shell::GetInstance()->IsWindowModeCompact();
+#elif defined(OS_CHROMEOS)
+  single_window_mode =
+      chromeos::system::runtime_environment::IsRunningOnChromeOS();
+#endif
+  return single_window_mode;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
-// BrowserFrameWin, views::Window overrides:
+// BrowserFrame, views::Widget overrides:
 
 bool BrowserFrame::IsMaximized() const {
 #if defined(OS_CHROMEOS) && !defined(USE_AURA)
   if (chromeos::system::runtime_environment::IsRunningOnChromeOS()) {
     return !IsFullscreen() &&
-        (!browser_view_->IsBrowserTypePopup() || Widget::IsMaximized());
+        (browser_view_->IsBrowserTypeNormal() || Widget::IsMaximized());
   }
 #endif
   return Widget::IsMaximized();

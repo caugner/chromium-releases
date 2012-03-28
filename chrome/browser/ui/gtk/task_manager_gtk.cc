@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,6 +34,7 @@
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
+#include "ui/gfx/image/image.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/views/controls/menu/menu_2.h"
@@ -498,13 +499,13 @@ void TaskManagerGtk::Init() {
 
   // Setting the link widget to secondary positions the button on the left side
   // of the action area (vice versa for RTL layout).
-  gtk_button_box_set_child_secondary(
-      GTK_BUTTON_BOX(GTK_DIALOG(dialog_)->action_area), link, TRUE);
+  GtkWidget* action_area = gtk_dialog_get_action_area(GTK_DIALOG(dialog_));
+  gtk_button_box_set_child_secondary(GTK_BUTTON_BOX(action_area), link, TRUE);
 
   ConnectAccelerators();
 
-  gtk_box_set_spacing(GTK_BOX(GTK_DIALOG(dialog_)->vbox),
-                      ui::kContentAreaSpacing);
+  GtkWidget* content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog_));
+  gtk_box_set_spacing(GTK_BOX(content_area), ui::kContentAreaSpacing);
 
   destroy_handler_id_ = g_signal_connect(dialog_, "destroy",
                                          G_CALLBACK(OnDestroyThunk), this);
@@ -758,10 +759,10 @@ std::string TaskManagerGtk::GetModelText(int row, int col_id) {
 GdkPixbuf* TaskManagerGtk::GetModelIcon(int row) {
   SkBitmap icon = model_->GetResourceIcon(row);
   if (icon.pixelRef() ==
-      ResourceBundle::GetSharedInstance().GetBitmapNamed(
+      ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
           IDR_DEFAULT_FAVICON)->pixelRef()) {
     return static_cast<GdkPixbuf*>(g_object_ref(
-        GtkThemeService::GetDefaultFavicon(true)));
+        GtkThemeService::GetDefaultFavicon(true)->ToGdkPixbuf()));
   }
 
   return gfx::GdkPixbufFromSkBitmap(&icon);

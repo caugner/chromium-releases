@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 
 #include <cairo/cairo.h>
 
+#include <algorithm>
 #include <cstdarg>
-
 #include <map>
 
 #include "base/environment.h"
 #include "base/i18n/rtl.h"
-#include "base/linux_util.h"
 #include "base/logging.h"
 #include "base/nix/xdg_util.h"
 #include "base/string_number_conversions.h"
@@ -27,13 +26,11 @@
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "content/browser/disposition_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/renderer_preferences.h"
 #include "googleurl/src/gurl.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
-#include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/events.h"
 #include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/gtk/gtk_hig_constants.h"
@@ -53,8 +50,10 @@
 #endif
 
 // These conflict with base/tracked_objects.h, so need to come last.
-#include <gdk/gdkx.h>
-#include <gtk/gtk.h>
+#include <gdk/gdkx.h>  // NOLINT
+#include <gtk/gtk.h>   // NOLINT
+
+using content::WebContents;
 
 namespace {
 
@@ -109,8 +108,9 @@ int GetCharacterWidthForPixels(GtkWidget* widget, int pixel_width) {
       << " widget must be realized to compute font metrics correctly";
 
   PangoContext* context = gtk_widget_create_pango_context(widget);
+  GtkStyle* style = gtk_widget_get_style(widget);
   PangoFontMetrics* metrics = pango_context_get_metrics(context,
-      widget->style->font_desc, pango_context_get_language(context));
+      style->font_desc, pango_context_get_language(context));
 
   // This technique (max of char and digit widths) matches the code in
   // gtklabel.c.
@@ -127,12 +127,12 @@ int GetCharacterWidthForPixels(GtkWidget* widget, int pixel_width) {
 void OnLabelRealize(GtkWidget* label, gpointer pixel_width) {
   gtk_label_set_width_chars(
       GTK_LABEL(label),
-      GetCharacterWidthForPixels(label,GPOINTER_TO_INT(pixel_width)));
+      GetCharacterWidthForPixels(label, GPOINTER_TO_INT(pixel_width)));
 }
 
 // Ownership of |icon_list| is passed to the caller.
 GList* GetIconList() {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   GList* icon_list = NULL;
   icon_list = g_list_append(icon_list,
                             rb.GetNativeImageNamed(IDR_PRODUCT_LOGO_32));
@@ -159,10 +159,10 @@ gboolean PaintNoBackground(GtkWidget* widget,
 
 #if defined(OS_CHROMEOS)
 
-TabContents* GetBrowserWindowSelectedTabContents(BrowserWindow* window) {
+WebContents* GetBrowserWindowSelectedWebContents(BrowserWindow* window) {
   chromeos::BrowserView* browser_view = static_cast<chromeos::BrowserView*>(
       window);
-  return browser_view->GetSelectedTabContents();
+  return browser_view->GetSelectedWebContents();
 }
 
 GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
@@ -179,10 +179,10 @@ GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
 
 #else
 
-TabContents* GetBrowserWindowSelectedTabContents(BrowserWindow* window) {
+WebContents* GetBrowserWindowSelectedWebContents(BrowserWindow* window) {
   BrowserWindowGtk* browser_window = static_cast<BrowserWindowGtk*>(
       window);
-  return browser_window->browser()->GetSelectedTabContents();
+  return browser_window->browser()->GetSelectedWebContents();
 }
 
 GtkWidget* GetBrowserWindowFocusedWidget(BrowserWindow* window) {
@@ -207,9 +207,9 @@ int EventFlagsFromGdkState(guint state) {
   flags |= (state & GDK_CONTROL_MASK) ? ui::EF_CONTROL_DOWN : 0;
   flags |= (state & GDK_SHIFT_MASK) ? ui::EF_SHIFT_DOWN : 0;
   flags |= (state & GDK_MOD1_MASK) ? ui::EF_ALT_DOWN : 0;
-  flags |= (state & GDK_BUTTON1_MASK) ? ui::EF_LEFT_BUTTON_DOWN : 0;
-  flags |= (state & GDK_BUTTON2_MASK) ? ui::EF_MIDDLE_BUTTON_DOWN : 0;
-  flags |= (state & GDK_BUTTON3_MASK) ? ui::EF_RIGHT_BUTTON_DOWN : 0;
+  flags |= (state & GDK_BUTTON1_MASK) ? ui::EF_LEFT_MOUSE_BUTTON : 0;
+  flags |= (state & GDK_BUTTON2_MASK) ? ui::EF_MIDDLE_MOUSE_BUTTON : 0;
+  flags |= (state & GDK_BUTTON3_MASK) ? ui::EF_RIGHT_MOUSE_BUTTON : 0;
   return flags;
 }
 
@@ -281,8 +281,9 @@ void GetWidgetSizeFromCharacters(
   DCHECK(gtk_widget_get_realized(widget))
       << " widget must be realized to compute font metrics correctly";
   PangoContext* context = gtk_widget_create_pango_context(widget);
+  GtkStyle* style = gtk_widget_get_style(widget);
   PangoFontMetrics* metrics = pango_context_get_metrics(context,
-      widget->style->font_desc, pango_context_get_language(context));
+      style->font_desc, pango_context_get_language(context));
   if (width) {
     *width = static_cast<int>(
         pango_font_metrics_get_approximate_char_width(metrics) *
@@ -344,47 +345,6 @@ void SetWindowSizeFromResources(GtkWindow* window,
         height == -1 ? -1 : std::max(height, requisition.height));
   }
   gtk_window_set_resizable(window, resizable ? TRUE : FALSE);
-}
-
-void CenterOverWindow(GtkWindow* window, GtkWindow* parent) {
-  gfx::Rect frame_bounds = gtk_util::GetWidgetScreenBounds(GTK_WIDGET(parent));
-  gfx::Point origin = frame_bounds.origin();
-  gfx::Size size = gtk_util::GetWidgetSize(GTK_WIDGET(window));
-  origin.Offset(
-      (frame_bounds.width() - size.width()) / 2,
-      (frame_bounds.height() - size.height()) / 2);
-
-  // Prevent moving window out of monitor bounds.
-  GdkScreen* screen = gtk_window_get_screen(parent);
-  if (screen) {
-    // It would be better to check against workarea for given monitor
-    // but getting workarea for particular monitor is tricky.
-    gint monitor = gdk_screen_get_monitor_at_window(screen,
-        GTK_WIDGET(parent)->window);
-    GdkRectangle rect;
-    gdk_screen_get_monitor_geometry(screen, monitor, &rect);
-
-    // Check the right bottom corner.
-    if (origin.x() > rect.x + rect.width - size.width())
-      origin.set_x(rect.x + rect.width - size.width());
-    if (origin.y() > rect.y + rect.height - size.height())
-      origin.set_y(rect.y + rect.height - size.height());
-
-    // Check the left top corner.
-    if (origin.x() < rect.x)
-      origin.set_x(rect.x);
-    if (origin.y() < rect.y)
-      origin.set_y(rect.y);
-  }
-
-  gtk_window_move(window, origin.x(), origin.y());
-
-  // Move to user expected desktop if window is already visible.
-  if (GTK_WIDGET(window)->window) {
-    ui::ChangeWindowDesktop(
-        ui::GetX11WindowFromGtkWidget(GTK_WIDGET(window)),
-        ui::GetX11WindowFromGtkWidget(GTK_WIDGET(parent)));
-  }
 }
 
 void MakeAppModalWindowGroup() {
@@ -457,17 +417,21 @@ void UndoForceFontSize(GtkWidget* widget) {
 }
 
 gfx::Point GetWidgetScreenPosition(GtkWidget* widget) {
-  if (!widget->window) {
+  GdkWindow* window = gtk_widget_get_window(widget);
+
+  if (!window) {
     NOTREACHED() << "Must only be called on realized widgets.";
     return gfx::Point(0, 0);
   }
 
   gint x, y;
-  gdk_window_get_origin(widget->window, &x, &y);
+  gdk_window_get_origin(window, &x, &y);
 
-  if (GTK_WIDGET_NO_WINDOW(widget)) {
-    x += widget->allocation.x;
-    y += widget->allocation.y;
+  if (!gtk_widget_get_has_window(widget)) {
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    x += allocation.x;
+    y += allocation.y;
   }
 
   return gfx::Point(x, y);
@@ -475,8 +439,12 @@ gfx::Point GetWidgetScreenPosition(GtkWidget* widget) {
 
 gfx::Rect GetWidgetScreenBounds(GtkWidget* widget) {
   gfx::Point position = GetWidgetScreenPosition(widget);
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+
   return gfx::Rect(position.x(), position.y(),
-                   widget->allocation.width, widget->allocation.height);
+                   allocation.width, allocation.height);
 }
 
 gfx::Size GetWidgetSize(GtkWidget* widget) {
@@ -548,18 +516,27 @@ void SetButtonTriggersNavigation(GtkWidget* button) {
 int MirroredLeftPointForRect(GtkWidget* widget, const gfx::Rect& bounds) {
   if (!base::i18n::IsRTL())
     return bounds.x();
-  return widget->allocation.width - bounds.x() - bounds.width();
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+  return allocation.width - bounds.x() - bounds.width();
 }
 
 int MirroredRightPointForRect(GtkWidget* widget, const gfx::Rect& bounds) {
   if (!base::i18n::IsRTL())
     return bounds.right();
-  return widget->allocation.width - bounds.x();
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+  return allocation.width - bounds.x();
 }
 
 int MirroredXCoordinate(GtkWidget* widget, int x) {
-  if (base::i18n::IsRTL())
-    return widget->allocation.width - x;
+  if (base::i18n::IsRTL()) {
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    return allocation.width - x;
+  }
   return x;
 }
 
@@ -787,6 +764,18 @@ void DrawTextEntryBackground(GtkWidget* offscreen_entry,
   g_object_unref(our_style);
 }
 
+void SetLayoutText(PangoLayout* layout, const string16& text) {
+  // Pango is really easy to overflow and send into a computational death
+  // spiral that can corrupt the screen. Assume that we'll never have more than
+  // 2000 characters, which should be a safe assumption until we all get robot
+  // eyes. http://crbug.com/66576
+  std::string text_utf8 = UTF16ToUTF8(text);
+  if (text_utf8.length() > 2000)
+    text_utf8 = text_utf8.substr(0, 2000);
+
+  pango_layout_set_text(layout, text_utf8.data(), text_utf8.length());
+}
+
 void DrawThemedToolbarBackground(GtkWidget* widget,
                                  cairo_t* cr,
                                  GdkEventExpose* event,
@@ -801,9 +790,10 @@ void DrawThemedToolbarBackground(GtkWidget* widget,
   // The toolbar is supposed to blend in with the active tab, so we have to pass
   // coordinates for the IDR_THEME_TOOLBAR bitmap relative to the top of the
   // tab strip.
-  gfx::CairoCachedSurface* background = theme_service->GetSurfaceNamed(
-      IDR_THEME_TOOLBAR, widget);
-  background->SetSource(cr, widget, tabstrip_origin.x(), tabstrip_origin.y());
+  const gfx::Image* background =
+      theme_service->GetImageNamed(IDR_THEME_TOOLBAR);
+  background->ToCairo()->SetSource(cr, widget,
+                                   tabstrip_origin.x(), tabstrip_origin.y());
   // We tile the toolbar background in both directions.
   cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
   cairo_rectangle(cr,
@@ -824,24 +814,8 @@ GdkColor AverageColors(GdkColor color_one, GdkColor color_two) {
 }
 
 void SetAlwaysShowImage(GtkWidget* image_menu_item) {
-  // Compile time check: if it's available, just use the API.
-  // GTK_CHECK_VERSION is TRUE if the passed version is compatible.
-#if GTK_CHECK_VERSION(2, 16, 1)
   gtk_image_menu_item_set_always_show_image(
       GTK_IMAGE_MENU_ITEM(image_menu_item), TRUE);
-#else
-  // Run time check: if the API is not available, set the property manually.
-  // This will still only work with GTK 2.16+ as the property doesn't exist
-  // in earlier versions.
-  // gtk_check_version() returns NULL if the passed version is compatible.
-  if (!gtk_check_version(2, 16, 1)) {
-    GValue true_value = { 0 };
-    g_value_init(&true_value, G_TYPE_BOOLEAN);
-    g_value_set_boolean(&true_value, TRUE);
-    g_object_set_property(G_OBJECT(image_menu_item), "always-show-image",
-                          &true_value);
-  }
-#endif
 }
 
 gfx::Rect GetWidgetRectRelativeToToplevel(GtkWidget* widget) {
@@ -856,7 +830,10 @@ gfx::Rect GetWidgetRectRelativeToToplevel(GtkWidget* widget) {
                                    toplevel,
                                    0, 0,
                                    &x, &y);
-  return gfx::Rect(x, y, widget->allocation.width, widget->allocation.height);
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+  return gfx::Rect(x, y, allocation.width, allocation.height);
 }
 
 void SuppressDefaultPainting(GtkWidget* container) {
@@ -882,7 +859,9 @@ bool GrabAllInput(GtkWidget* widget) {
   if (!gtk_widget_get_visible(widget))
     return false;
 
-  if (!gdk_pointer_grab(widget->window, TRUE,
+  GdkWindow* gdk_window = gtk_widget_get_window(widget);
+  if (!gdk_pointer_grab(gdk_window,
+                        TRUE,
                         GdkEventMask(GDK_BUTTON_PRESS_MASK |
                                      GDK_BUTTON_RELEASE_MASK |
                                      GDK_ENTER_NOTIFY_MASK |
@@ -892,8 +871,8 @@ bool GrabAllInput(GtkWidget* widget) {
     return false;
   }
 
-  if (!gdk_keyboard_grab(widget->window, TRUE, time) == 0) {
-    gdk_display_pointer_ungrab(gdk_drawable_get_display(widget->window), time);
+  if (!gdk_keyboard_grab(gdk_window, TRUE, time) == 0) {
+    gdk_display_pointer_ungrab(gdk_drawable_get_display(gdk_window), time);
     return false;
   }
 
@@ -906,15 +885,18 @@ gfx::Rect WidgetBounds(GtkWidget* widget) {
   //
   //   Widget coordinates are a bit odd; for historical reasons, they are
   //   defined as widget->window coordinates for widgets that are not
-  //   GTK_NO_WINDOW widgets, and are relative to widget->allocation.x,
-  //   widget->allocation.y for widgets that are GTK_NO_WINDOW widgets.
+  //   GTK_NO_WINDOW widgets, and are relative to allocation.x, allocation.y
+  //   for widgets that are GTK_NO_WINDOW widgets.
   //
   // So the base is always (0,0).
-  return gfx::Rect(0, 0, widget->allocation.width, widget->allocation.height);
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+  return gfx::Rect(0, 0, allocation.width, allocation.height);
 }
 
 void SetWMLastUserActionTime(GtkWindow* window) {
-  gdk_x11_window_set_user_time(GTK_WIDGET(window)->window, XTimeNow());
+  gdk_x11_window_set_user_time(gtk_widget_get_window(GTK_WIDGET(window)),
+                               XTimeNow());
 }
 
 guint32 XTimeNow() {
@@ -1189,9 +1171,9 @@ void DoCutCopyPaste(BrowserWindow* window,
   if (widget == NULL)
     return;  // Do nothing if no focused widget.
 
-  TabContents* current_tab = GetBrowserWindowSelectedTabContents(window);
+  WebContents* current_tab = GetBrowserWindowSelectedWebContents(window);
   if (current_tab && widget == current_tab->GetContentNativeView()) {
-    (current_tab->render_view_host()->*method)();
+    (current_tab->GetRenderViewHost()->*method)();
   } else {
     guint id;
     if ((id = g_signal_lookup(signal, G_OBJECT_TYPE(widget))) != 0)

@@ -8,12 +8,12 @@
 #include "content/browser/debugger/render_view_devtools_agent_host.h"
 #include "content/browser/mock_content_browser_client.h"
 #include "content/browser/renderer_host/test_render_view_host.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/devtools_client_host.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::TimeDelta;
@@ -22,6 +22,7 @@ using content::DevToolsAgentHostRegistry;
 using content::DevToolsClientHost;
 using content::DevToolsManager;
 using content::DevToolsManagerImpl;
+using content::WebContents;
 
 namespace {
 
@@ -53,7 +54,7 @@ class TestDevToolsClientHost : public DevToolsClientHost {
     last_sent_message = &message;
   }
 
-  virtual void TabReplaced(TabContents* new_tab) {
+  virtual void TabReplaced(WebContents* new_tab) {
   }
 
   static void ResetCounters() {
@@ -75,12 +76,12 @@ class TestDevToolsClientHost : public DevToolsClientHost {
 int TestDevToolsClientHost::close_counter = 0;
 
 
-class TestTabContentsDelegate : public TabContentsDelegate {
+class TestWebContentsDelegate : public content::WebContentsDelegate {
  public:
-  TestTabContentsDelegate() : renderer_unresponsive_received_(false) {}
+  TestWebContentsDelegate() : renderer_unresponsive_received_(false) {}
 
   // Notification that the tab is hung.
-  virtual void RendererUnresponsive(TabContents* source) {
+  virtual void RendererUnresponsive(WebContents* source) {
     renderer_unresponsive_received_ = true;
   }
 
@@ -181,9 +182,9 @@ TEST_F(DevToolsManagerTest, ForwardMessageToClient) {
 TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedTab) {
   TestRenderViewHost* inspected_rvh = rvh();
   inspected_rvh->set_render_view_created(true);
-  EXPECT_FALSE(contents()->delegate());
-  TestTabContentsDelegate delegate;
-  contents()->set_delegate(&delegate);
+  EXPECT_FALSE(contents()->GetDelegate());
+  TestWebContentsDelegate delegate;
+  contents()->SetDelegate(&delegate);
 
   TestDevToolsClientHost client_host;
   DevToolsAgentHost* agent_host =
@@ -195,7 +196,7 @@ TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedTab) {
   inspected_rvh->StartHangMonitorTimeout(TimeDelta::FromMilliseconds(10));
   // Wait long enough for first timeout and see if it fired.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          new MessageLoop::QuitTask(), 10);
+                                          MessageLoop::QuitClosure(), 10);
   MessageLoop::current()->Run();
   EXPECT_FALSE(delegate.renderer_unresponsive_received());
 
@@ -205,11 +206,11 @@ TEST_F(DevToolsManagerTest, NoUnresponsiveDialogInInspectedTab) {
   inspected_rvh->StartHangMonitorTimeout(TimeDelta::FromMilliseconds(10));
   // Wait long enough for first timeout and see if it fired.
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                          new MessageLoop::QuitTask(), 10);
+                                          MessageLoop::QuitClosure(), 10);
   MessageLoop::current()->Run();
   EXPECT_TRUE(delegate.renderer_unresponsive_received());
 
-  contents()->set_delegate(NULL);
+  contents()->SetDelegate(NULL);
 }
 
 TEST_F(DevToolsManagerTest, ReattachOnCancelPendingNavigation) {

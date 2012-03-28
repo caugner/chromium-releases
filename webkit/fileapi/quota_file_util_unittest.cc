@@ -1,18 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/fileapi/quota_file_util.h"
 
 #include "base/file_path.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/scoped_temp_dir.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_test_helper.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
@@ -22,9 +20,7 @@ namespace fileapi {
 
 class QuotaFileUtilTest : public testing::Test {
  public:
-  QuotaFileUtilTest()
-      : callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
-  }
+  QuotaFileUtilTest() {}
 
   void SetUp() {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
@@ -80,7 +76,6 @@ class QuotaFileUtilTest : public testing::Test {
   FileSystemTestOriginHelper obfuscated_test_helper_;
   FileSystemTestOriginHelper quota_test_helper_;
   scoped_ptr<QuotaFileUtil> quota_file_util_;
-  base::ScopedCallbackFactory<QuotaFileUtilTest> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(QuotaFileUtilTest);
 };

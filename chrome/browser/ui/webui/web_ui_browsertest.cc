@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 #include "chrome/browser/ui/webui/web_ui_browsertest.h"
@@ -9,23 +9,34 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/path_service.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/printing/print_preview_tab_controller.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/webui/chrome_url_data_manager.h"
 #include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "chrome/browser/ui/webui/test_chrome_web_ui_factory.h"
+#include "chrome/browser/ui/webui/test_chrome_web_ui_controller_factory.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/test_tab_strip_model_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui_controller.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest-spi.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::NavigationController;
+using content::WebContents;
+using content::WebUIController;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -178,13 +189,18 @@ void WebUIBrowserTest::PreLoadJavascriptLibraries(
 void WebUIBrowserTest::BrowsePreload(const GURL& browse_to) {
   TestNavigationObserver navigation_observer(
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->controller()),
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()),
       this, 1);
   browser::NavigateParams params(
       browser(), GURL(browse_to), content::PAGE_TRANSITION_TYPED);
   params.disposition = CURRENT_TAB;
   browser::Navigate(&params);
-  navigation_observer.WaitForObservation();
+  navigation_observer.WaitForObservation(
+      base::Bind(&ui_test_utils::RunMessageLoop),
+      base::Bind(&MessageLoop::Quit,
+                 base::Unretained(MessageLoopForUI::current())));
+
 }
 
 void WebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
@@ -193,14 +209,18 @@ void WebUIBrowserTest::BrowsePrintPreload(const GURL& browse_to) {
   TestTabStripModelObserver tabstrip_observer(
       browser()->tabstrip_model(), this);
   browser()->Print();
-  tabstrip_observer.WaitForObservation();
+  tabstrip_observer.WaitForObservation(
+      base::Bind(&ui_test_utils::RunMessageLoop),
+      base::Bind(&MessageLoop::Quit,
+                 base::Unretained(MessageLoopForUI::current())));
+
   printing::PrintPreviewTabController* tab_controller =
       printing::PrintPreviewTabController::GetInstance();
   ASSERT_TRUE(tab_controller);
   TabContentsWrapper* preview_tab = tab_controller->GetPrintPreviewForTab(
       browser()->GetSelectedTabContentsWrapper());
   ASSERT_TRUE(preview_tab);
-  SetWebUIInstance(preview_tab->web_ui());
+  SetWebUIInstance(preview_tab->web_contents()->GetWebUI());
 }
 
 const char WebUIBrowserTest::kDummyURL[] = "chrome://DummyURL";
@@ -222,14 +242,50 @@ void WebUIBrowserTest::set_preload_test_name(
 
 namespace {
 
-class MockWebUIProvider : public TestChromeWebUIFactory::WebUIProvider {
+// DataSource for the dummy URL.  If no data source is provided then an error
+// page is shown. While this doesn't matter for most tests, without it,
+// navigation to different anchors cannot be listened to (via the hashchange
+// event).
+class MockWebUIDataSource : public ChromeURLDataManager::DataSource {
+ public:
+  MockWebUIDataSource()
+      : ChromeURLDataManager::DataSource("dummyurl", MessageLoop::current()) {}
+
+ private:
+  virtual void StartDataRequest(const std::string& path,
+                                bool is_incognito,
+                                int request_id) OVERRIDE {
+    std::string dummy_html = "<html><body>Dummy</body></html>";
+    scoped_refptr<base::RefCountedString> response =
+        base::RefCountedString::TakeString(&dummy_html);
+    SendResponse(request_id, response);
+  }
+
+  std::string GetMimeType(const std::string& path) const OVERRIDE {
+    return "text/html";
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(MockWebUIDataSource);
+};
+
+// WebUIProvider to allow attaching the DataSource for the dummy URL when
+// testing.
+class MockWebUIProvider
+    : public TestChromeWebUIControllerFactory::WebUIProvider {
  public:
   MockWebUIProvider() {}
 
-  // Returns a new ChromeWebUI
-  WebUI* NewWebUI(TabContents* tab_contents, const GURL& url) OVERRIDE {
-    return new ChromeWebUI(tab_contents);
+  // Returns a new WebUI
+  WebUIController* NewWebUI(content::WebUI* web_ui, const GURL& url) OVERRIDE {
+    WebUIController* controller = new content::WebUIController(web_ui);
+    Profile* profile = Profile::FromWebUI(web_ui);
+    profile->GetChromeURLDataManager()->AddDataSource(
+        new MockWebUIDataSource());
+    return controller;
   }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MockWebUIProvider);
 };
 
 base::LazyInstance<MockWebUIProvider> mock_provider_ =
@@ -251,8 +307,8 @@ void WebUIBrowserTest::CleanUpOnMainThread() {
 
 void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
   InProcessBrowserTest::SetUpInProcessBrowserTestFixture();
-  TestChromeWebUIFactory::AddFactoryOverride(GURL(kDummyURL).host(),
-                                             mock_provider_.Pointer());
+  TestChromeWebUIControllerFactory::AddFactoryOverride(
+      GURL(kDummyURL).host(), mock_provider_.Pointer());
 
   ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_directory_));
   test_data_directory_ = test_data_directory_.Append(kWebUITestFolder);
@@ -276,10 +332,11 @@ void WebUIBrowserTest::SetUpInProcessBrowserTestFixture() {
 
 void WebUIBrowserTest::TearDownInProcessBrowserTestFixture() {
   InProcessBrowserTest::TearDownInProcessBrowserTestFixture();
-  TestChromeWebUIFactory::RemoveFactoryOverride(GURL(kDummyURL).host());
+  TestChromeWebUIControllerFactory::RemoveFactoryOverride(
+      GURL(kDummyURL).host());
 }
 
-void WebUIBrowserTest::SetWebUIInstance(WebUI* web_ui) {
+void WebUIBrowserTest::SetWebUIInstance(content::WebUI* web_ui) {
   override_selected_web_ui_ = web_ui;
 }
 
@@ -347,7 +404,7 @@ string16 WebUIBrowserTest::BuildRunTestJSCall(
     baked_argument_list.Append(const_cast<Value*>(*arguments_iterator));
   }
   arguments.push_back(&baked_argument_list);
-  return WebUI::GetJavascriptCall(std::string("runTest"), arguments);
+  return content::WebUI::GetJavascriptCall(std::string("runTest"), arguments);
 }
 
 bool WebUIBrowserTest::RunJavascriptUsingHandler(
@@ -367,8 +424,8 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
       called_function = BuildRunTestJSCall(
           is_async, function_name, function_arguments);
     } else {
-      called_function = WebUI::GetJavascriptCall(function_name,
-                                                 function_arguments);
+      called_function = content::WebUI::GetJavascriptCall(function_name,
+                                                          function_arguments);
     }
     content.append(called_function);
   }
@@ -394,15 +451,18 @@ bool WebUIBrowserTest::RunJavascriptUsingHandler(
 }
 
 void WebUIBrowserTest::SetupHandlers() {
-  WebUI* web_ui_instance = override_selected_web_ui_ ?
+  content::WebUI* web_ui_instance = override_selected_web_ui_ ?
       override_selected_web_ui_ :
-      browser()->GetSelectedTabContents()->web_ui();
+      browser()->GetSelectedWebContents()->GetWebUI();
   ASSERT_TRUE(web_ui_instance != NULL);
-  web_ui_instance->set_register_callback_overwrites(true);
-  test_handler_->Attach(web_ui_instance);
 
-  if (GetMockMessageHandler())
-    GetMockMessageHandler()->Attach(web_ui_instance);
+  test_handler_->set_web_ui(web_ui_instance);
+  test_handler_->RegisterMessages();
+
+  if (GetMockMessageHandler()) {
+    GetMockMessageHandler()->set_web_ui(web_ui_instance);
+    GetMockMessageHandler()->RegisterMessages();
+  }
 }
 
 // According to the interface for EXPECT_FATAL_FAILURE
@@ -498,16 +558,16 @@ class WebUIBrowserAsyncTest : public WebUIBrowserTest {
 
    private:
     virtual void RegisterMessages() OVERRIDE {
-      web_ui_->RegisterMessageCallback("startAsyncTest",
+      web_ui()->RegisterMessageCallback("startAsyncTest",
           base::Bind(&AsyncWebUIMessageHandler::HandleStartAsyncTest,
                      base::Unretained(this)));
-      web_ui_->RegisterMessageCallback("testContinues",
+      web_ui()->RegisterMessageCallback("testContinues",
           base::Bind(&AsyncWebUIMessageHandler::HandleTestContinues,
                      base::Unretained(this)));
-      web_ui_->RegisterMessageCallback("testFails",
+      web_ui()->RegisterMessageCallback("testFails",
           base::Bind(&AsyncWebUIMessageHandler::HandleTestFails,
                      base::Unretained(this)));
-      web_ui_->RegisterMessageCallback("testPasses",
+      web_ui()->RegisterMessageCallback("testPasses",
           base::Bind(&AsyncWebUIMessageHandler::HandleTestPasses,
                      base::Unretained(this)));
     }
@@ -516,7 +576,7 @@ class WebUIBrowserAsyncTest : public WebUIBrowserTest {
     void HandleStartAsyncTest(const ListValue* list_value) {
       Value* test_name;
       ASSERT_TRUE(list_value->Get(0, &test_name));
-      web_ui_->CallJavascriptFunction("runAsync", *test_name);
+      web_ui()->CallJavascriptFunction("runAsync", *test_name);
     }
 
     DISALLOW_COPY_AND_ASSIGN(AsyncWebUIMessageHandler);

@@ -123,7 +123,7 @@ bool SharedMemory::Create(const SharedMemoryCreateOptions& options) {
     DCHECK(!options.open_existing);
     // Q: Why not use the shm_open() etc. APIs?
     // A: Because they're limited to 4mb on OS X.  FFFFFFFUUUUUUUUUUU
-    fp = file_util::CreateAndOpenTemporaryShmemFile(&path);
+    fp = file_util::CreateAndOpenTemporaryShmemFile(&path, options.executable);
 
     // Deleting the file prevents anyone else from mapping it in
     // (making it private), and prevents the need for cleanup (once
@@ -317,7 +317,7 @@ bool SharedMemory::FilePathForMemoryName(const std::string& mem_name,
   DCHECK_EQ(std::string::npos, mem_name.find('\0'));
 
   FilePath temp_dir;
-  if (!file_util::GetShmemTempDir(&temp_dir))
+  if (!file_util::GetShmemTempDir(&temp_dir, false))
     return false;
 
 #if !defined(OS_MACOSX)
@@ -340,7 +340,7 @@ void SharedMemory::LockOrUnlockCommon(int function) {
       continue;
     } else if (errno == ENOLCK) {
       // temporary kernel resource exaustion
-      base::PlatformThread::Sleep(500);
+      base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(500));
       continue;
     } else {
       NOTREACHED() << "lockf() failed."

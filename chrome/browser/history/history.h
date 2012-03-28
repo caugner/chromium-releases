@@ -15,12 +15,11 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
-#include "base/task.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/history_types.h"
 #include "chrome/browser/search_engines/template_url_id.h"
 #include "chrome/common/ref_counted_util.h"
-#include "content/browser/cancelable_request.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/common/page_transition_types.h"
@@ -380,6 +379,10 @@ class HistoryService : public CancelableRequestProvider,
   // Delete all the information related to a single url.
   void DeleteURL(const GURL& url);
 
+  // Delete all the information related to a list of urls.  (Deleting
+  // URLs one by one is slow as it has to flush to disk each time.)
+  void DeleteURLsForTest(const std::vector<GURL>& urls);
+
   // Removes all visits in the selected time range (including the start time),
   // updating the URLs accordingly. This deletes the associated data, including
   // the full text index. This function also deletes the associated favicons,
@@ -529,7 +532,7 @@ class HistoryService : public CancelableRequestProvider,
   // There can be only one closing task, so this will override any previously
   // set task. We will take ownership of the pointer and delete it when done.
   // The task will be run on the calling thread (this function is threadsafe).
-  void SetOnBackendDestroyTask(Task* task);
+  void SetOnBackendDestroyTask(const base::Closure& task);
 
   // Used for unit testing and potentially importing to get known information
   // into the database. This assumes the URL doesn't exist in the database

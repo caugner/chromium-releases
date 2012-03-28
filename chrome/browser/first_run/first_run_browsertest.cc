@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,16 @@ typedef InProcessBrowserTest FirstRunBrowserTest;
 IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShowFirstRunBubblePref) {
   EXPECT_TRUE(g_browser_process->local_state()->FindPreference(
       prefs::kShouldShowFirstRunBubble));
-  EXPECT_TRUE(FirstRun::SetShowFirstRunBubblePref(true));
+  EXPECT_TRUE(first_run::SetShowFirstRunBubblePref(true));
   ASSERT_TRUE(g_browser_process->local_state()->FindPreference(
       prefs::kShouldShowFirstRunBubble));
+  EXPECT_TRUE(g_browser_process->local_state()->GetBoolean(
+      prefs::kShouldShowFirstRunBubble));
+  // Test that toggling the value works in either direction after it's been set.
+  EXPECT_TRUE(first_run::SetShowFirstRunBubblePref(false));
+  EXPECT_FALSE(g_browser_process->local_state()->GetBoolean(
+      prefs::kShouldShowFirstRunBubble));
+  EXPECT_TRUE(first_run::SetShowFirstRunBubblePref(true));
   EXPECT_TRUE(g_browser_process->local_state()->GetBoolean(
       prefs::kShouldShowFirstRunBubble));
 }
@@ -24,29 +31,9 @@ IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShowFirstRunBubblePref) {
 IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetShowWelcomePagePref) {
   EXPECT_FALSE(g_browser_process->local_state()->FindPreference(
       prefs::kShouldShowWelcomePage));
-  EXPECT_TRUE(FirstRun::SetShowWelcomePagePref());
+  EXPECT_TRUE(first_run::SetShowWelcomePagePref());
   ASSERT_TRUE(g_browser_process->local_state()->FindPreference(
       prefs::kShouldShowWelcomePage));
   EXPECT_TRUE(g_browser_process->local_state()->GetBoolean(
       prefs::kShouldShowWelcomePage));
-}
-
-IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetOEMFirstRunBubblePref) {
-  EXPECT_FALSE(g_browser_process->local_state()->FindPreference(
-      prefs::kShouldUseOEMFirstRunBubble));
-  EXPECT_TRUE(FirstRun::SetOEMFirstRunBubblePref());
-  ASSERT_TRUE(g_browser_process->local_state()->FindPreference(
-      prefs::kShouldUseOEMFirstRunBubble));
-  EXPECT_TRUE(g_browser_process->local_state()->GetBoolean(
-      prefs::kShouldUseOEMFirstRunBubble));
-}
-
-IN_PROC_BROWSER_TEST_F(FirstRunBrowserTest, SetMinimalFirstRunBubblePref) {
-  EXPECT_FALSE(g_browser_process->local_state()->FindPreference(
-      prefs::kShouldUseMinimalFirstRunBubble));
-  EXPECT_TRUE(FirstRun::SetMinimalFirstRunBubblePref());
-  ASSERT_TRUE(g_browser_process->local_state()->FindPreference(
-      prefs::kShouldUseMinimalFirstRunBubble));
-  EXPECT_TRUE(g_browser_process->local_state()->GetBoolean(
-      prefs::kShouldUseMinimalFirstRunBubble));
 }

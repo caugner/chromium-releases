@@ -214,8 +214,8 @@ class DatabaseTracker_TestHelper_Test {
     // Delete db1. Should also delete origin1.
     TestObserver observer;
     tracker->AddObserver(&observer);
-    TestOldCompletionCallback callback;
-    int result = tracker->DeleteDatabase(kOrigin1, kDB1, &callback);
+    net::TestCompletionCallback callback;
+    int result = tracker->DeleteDatabase(kOrigin1, kDB1, callback.callback());
     EXPECT_EQ(net::ERR_IO_PENDING, result);
     ASSERT_FALSE(callback.have_result());
     EXPECT_TRUE(observer.DidReceiveNewNotification());
@@ -252,7 +252,7 @@ class DatabaseTracker_TestHelper_Test {
     base::Time yesterday = base::Time::Now();
     yesterday -= base::TimeDelta::FromDays(1);
     result = tracker->DeleteDataModifiedSince(
-        yesterday, &callback);
+        yesterday, callback.callback());
     EXPECT_EQ(net::ERR_IO_PENDING, result);
     ASSERT_FALSE(callback.have_result());
     EXPECT_TRUE(observer.DidReceiveNewNotification());
@@ -456,7 +456,8 @@ class DatabaseTracker_TestHelper_Test {
 
     tracker->DatabaseClosed(kOriginId, kName);
     EXPECT_TRUE(test_quota_proxy->WasAccessNotified(kOrigin));
-    EXPECT_EQ(net::OK, tracker->DeleteDatabase(kOriginId, kName, NULL));
+    EXPECT_EQ(net::OK, tracker->DeleteDatabase(
+        kOriginId, kName, net::CompletionCallback()));
     EXPECT_TRUE(test_quota_proxy->WasModificationNotified(kOrigin, -100));
     test_quota_proxy->reset();
 
@@ -477,7 +478,8 @@ class DatabaseTracker_TestHelper_Test {
     test_quota_proxy->reset();
 
     EXPECT_EQ(net::ERR_IO_PENDING,
-              tracker->DeleteDatabase(kOriginId, kName, NULL));
+              tracker->DeleteDatabase(kOriginId, kName,
+                                      net::CompletionCallback()));
     EXPECT_FALSE(test_quota_proxy->WasModificationNotified(kOrigin, -100));
 
     tracker->DatabaseClosed(kOriginId, kName);
@@ -687,6 +689,83 @@ class DatabaseTracker_TestHelper_Test {
     EXPECT_FALSE(file_util::PathExists(origin2_db_dir));
   }
 
+  static void DatabaseTrackerSaveSessionState() {
+    int64 database_size = 0;
+    const string16 kOrigin1 =
+        DatabaseUtil::GetOriginIdentifier(GURL(kOrigin1Url));
+    const string16 kOrigin2 =
+        DatabaseUtil::GetOriginIdentifier(GURL(kOrigin2Url));
+    const string16 kDB1 = ASCIIToUTF16("db1");
+    const string16 kDB2 = ASCIIToUTF16("db2");
+    const string16 kDescription = ASCIIToUTF16("database_description");
+
+    // Initialize the tracker database.
+    ScopedTempDir temp_dir;
+    ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+    FilePath origin1_db_dir;
+    FilePath origin2_db_dir;
+    {
+      scoped_refptr<quota::MockSpecialStoragePolicy> special_storage_policy =
+          new quota::MockSpecialStoragePolicy;
+      special_storage_policy->AddSessionOnly(GURL(kOrigin2Url));
+      scoped_refptr<DatabaseTracker> tracker(
+          new DatabaseTracker(
+              temp_dir.path(), false, true /*clear_local_state_on_exit*/,
+              special_storage_policy, NULL,
+              base::MessageLoopProxy::current()));
+      tracker->SaveSessionState();
+
+      // Open two new databases.
+      tracker->DatabaseOpened(kOrigin1, kDB1, kDescription, 0,
+                              &database_size);
+      EXPECT_EQ(0, database_size);
+      tracker->DatabaseOpened(kOrigin2, kDB2, kDescription, 0,
+                              &database_size);
+      EXPECT_EQ(0, database_size);
+
+      // Write some data to each file.
+      FilePath db_file;
+      db_file = tracker->GetFullDBFilePath(kOrigin1, kDB1);
+      EXPECT_TRUE(file_util::CreateDirectory(db_file.DirName()));
+      EXPECT_TRUE(EnsureFileOfSize(db_file, 1));
+
+      db_file = tracker->GetFullDBFilePath(kOrigin2, kDB2);
+      EXPECT_TRUE(file_util::CreateDirectory(db_file.DirName()));
+      EXPECT_TRUE(EnsureFileOfSize(db_file, 2));
+
+      // Store the origin database directories as long as they still exist.
+      origin1_db_dir = tracker->GetFullDBFilePath(kOrigin1, kDB1).DirName();
+      origin2_db_dir = tracker->GetFullDBFilePath(kOrigin2, kDB2).DirName();
+
+      tracker->DatabaseModified(kOrigin1, kDB1);
+      tracker->DatabaseModified(kOrigin2, kDB2);
+
+      // Close all databases.
+      tracker->DatabaseClosed(kOrigin1, kDB1);
+      tracker->DatabaseClosed(kOrigin2, kDB2);
+
+      tracker->Shutdown();
+    }
+
+    // At this point, the database tracker should be gone. Create a new one.
+    scoped_refptr<DatabaseTracker> tracker(
+        new DatabaseTracker(temp_dir.path(), false, false,
+                            NULL, NULL, NULL));
+
+    // Get all data for all origins.
+    std::vector<OriginInfo> origins_info;
+    EXPECT_TRUE(tracker->GetAllOriginsInfo(&origins_info));
+    // No origins were deleted.
+    EXPECT_EQ(size_t(2), origins_info.size());
+    EXPECT_TRUE(
+        file_util::PathExists(tracker->GetFullDBFilePath(kOrigin1, kDB1)));
+    EXPECT_TRUE(
+        file_util::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB2)));
+
+    EXPECT_TRUE(file_util::PathExists(origin1_db_dir));
+    EXPECT_TRUE(file_util::PathExists(origin2_db_dir));
+  }
+
   static void EmptyDatabaseNameIsValid() {
     const GURL kOrigin(kOrigin1Url);
     const string16 kOriginId = DatabaseUtil::GetOriginIdentifier(kOrigin);
@@ -727,7 +806,8 @@ class DatabaseTracker_TestHelper_Test {
     tracker->DatabaseClosed(kOriginId, kEmptyName);
 
     // Deleting it should return to the initial state.
-    EXPECT_EQ(net::OK, tracker->DeleteDatabase(kOriginId, kEmptyName, NULL));
+    EXPECT_EQ(net::OK, tracker->DeleteDatabase(kOriginId, kEmptyName,
+                                               net::CompletionCallback()));
     infos.clear();
     EXPECT_TRUE(tracker->GetAllOriginsInfo(&infos));
     EXPECT_TRUE(infos.empty());
@@ -764,6 +844,11 @@ TEST(DatabaseTrackerTest, DatabaseTrackerClearSessionOnlyDatabasesOnExit) {
   // Only works for regular mode.
   DatabaseTracker_TestHelper_Test::
       DatabaseTrackerClearSessionOnlyDatabasesOnExit();
+}
+
+TEST(DatabaseTrackerTest, DatabaseTrackerSaveSessionState) {
+  // Only works for regular mode.
+  DatabaseTracker_TestHelper_Test::DatabaseTrackerSaveSessionState();
 }
 
 TEST(DatabaseTrackerTest, EmptyDatabaseNameIsValid) {

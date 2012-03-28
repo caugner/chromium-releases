@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,8 @@
 #include "ui/views/widget/widget_delegate.h"
 
 class Browser;
+class HtmlDialogController;
+class Profile;
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -40,7 +42,9 @@ class HtmlDialogView
       public views::WidgetDelegate,
       public TabFirstRenderWatcher::Delegate {
  public:
-  HtmlDialogView(Profile* profile, HtmlDialogUIDelegate* delegate);
+  HtmlDialogView(Profile* profile,
+                 Browser* browser,
+                 HtmlDialogUIDelegate* delegate);
   virtual ~HtmlDialogView();
 
   // Initializes the contents of the dialog (the DOMView and the callbacks).
@@ -55,7 +59,7 @@ class HtmlDialogView
 
   // Overridden from views::WidgetDelegate:
   virtual bool CanResize() const OVERRIDE;
-  virtual bool IsModal() const OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual void WindowClosing() OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
@@ -65,24 +69,34 @@ class HtmlDialogView
   virtual const views::Widget* GetWidget() const OVERRIDE;
 
   // Overridden from HtmlDialogUIDelegate:
-  virtual bool IsDialogModal() const OVERRIDE;
+  virtual ui::ModalType GetDialogModalType() const OVERRIDE;
   virtual string16 GetDialogTitle() const OVERRIDE;
   virtual GURL GetDialogContentURL() const OVERRIDE;
   virtual void GetWebUIMessageHandlers(
-      std::vector<WebUIMessageHandler*>* handlers) const OVERRIDE;
+      std::vector<content::WebUIMessageHandler*>* handlers) const OVERRIDE;
   virtual void GetDialogSize(gfx::Size* size) const OVERRIDE;
   virtual std::string GetDialogArgs() const OVERRIDE;
   virtual void OnDialogClosed(const std::string& json_retval) OVERRIDE;
-  virtual void OnCloseContents(TabContents* source, bool* out_close_dialog)
-      OVERRIDE;
+  virtual void OnCloseContents(content::WebContents* source,
+                               bool* out_close_dialog) OVERRIDE;
   virtual bool ShouldShowDialogTitle() const OVERRIDE;
   virtual bool HandleContextMenu(const ContextMenuParams& params) OVERRIDE;
 
-  // Overridden from TabContentsDelegate:
-  virtual void MoveContents(TabContents* source, const gfx::Rect& pos) OVERRIDE;
+  // Overridden from content::WebContentsDelegate:
+  virtual void MoveContents(content::WebContents* source,
+                            const gfx::Rect& pos) OVERRIDE;
   virtual void HandleKeyboardEvent(const NativeWebKeyboardEvent& event)
       OVERRIDE;
-  virtual void CloseContents(TabContents* source) OVERRIDE;
+  virtual void CloseContents(content::WebContents* source) OVERRIDE;
+  virtual content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params) OVERRIDE;
+  virtual void AddNewContents(content::WebContents* source,
+                              content::WebContents* new_contents,
+                              WindowOpenDisposition disposition,
+                              const gfx::Rect& initial_pos,
+                              bool user_gesture) OVERRIDE;
+  virtual void LoadingStateChanged(content::WebContents* source) OVERRIDE;
 
  protected:
   // Register accelerators for this dialog.
@@ -109,6 +123,9 @@ class HtmlDialogView
   // closing) we delegate to the creator of this view, which we keep track of
   // using this variable.
   HtmlDialogUIDelegate* delegate_;
+
+  // Controls lifetime of dialog.
+  scoped_ptr<HtmlDialogController> dialog_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(HtmlDialogView);
 };

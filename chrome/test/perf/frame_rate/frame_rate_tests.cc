@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/automation/automation_proxy.h"
 #include "chrome/test/automation/tab_proxy.h"
+#include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/javascript_test_util.h"
 #include "chrome/test/ui/ui_perf_test.h"
 #include "net/base/net_util.h"
@@ -120,15 +121,16 @@ class FrameRateTest
   }
 
   bool DidRunOnGpu(const std::string& json_events) {
-    using namespace trace_analyzer;
+    using trace_analyzer::Query;
+    using trace_analyzer::TraceAnalyzer;
 
     // Check trace for GPU accleration.
     scoped_ptr<TraceAnalyzer> analyzer(TraceAnalyzer::Create(json_events));
 
     gfx::GLImplementation gl_impl = gfx::kGLImplementationNone;
-    const TraceEvent* gpu_event = analyzer->FindOneEvent(
-        Query(EVENT_NAME) == Query::String("SwapBuffers") &&
-        Query(EVENT_HAS_NUMBER_ARG, "GLImpl"));
+    const trace_analyzer::TraceEvent* gpu_event = analyzer->FindOneEvent(
+        Query::EventName() == Query::String("SwapBuffers") &&
+        Query::EventHasNumberArg("GLImpl"));
     if (gpu_event)
       gl_impl = static_cast<gfx::GLImplementation>(
           gpu_event->GetKnownArgAsInt("GLImpl"));
@@ -233,8 +235,8 @@ class FrameRateTest
                                                 results["sigmas"].c_str());
 
     std::string mean_and_error = results["mean"] + "," + results["sigma"];
-    PrintResultMeanAndError(name, "", trace_name, mean_and_error,
-                            "frames-per-second", true);
+    perf_test::PrintResultMeanAndError(name, "", trace_name, mean_and_error,
+                                       "milliseconds-per-frame", true);
   }
 };
 

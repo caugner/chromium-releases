@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "grit/generated_resources.h"
-#include "grit/theme_resources_standard.h"
+#include "grit/ui_resources_standard.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
@@ -48,9 +48,8 @@ MessageBubble::~MessageBubble() {
 void MessageBubble::Init() {
   using views::GridLayout;
 
-  views::View* control_view = new views::View();
-  GridLayout* layout = new GridLayout(control_view);
-  control_view->SetLayoutManager(layout);
+  GridLayout* layout = new GridLayout(this);
+  SetLayoutManager(layout);
   views::ColumnSet* column_set = layout->AddColumnSet(0);
   column_set->AddColumn(GridLayout::LEADING, GridLayout::LEADING, 0,
                         GridLayout::USE_PREF, 0, 0);

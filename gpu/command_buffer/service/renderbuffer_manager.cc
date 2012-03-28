@@ -1,9 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "gpu/command_buffer/service/renderbuffer_manager.h"
 #include "base/logging.h"
+#include "base/debug/trace_event.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 
@@ -14,17 +15,36 @@ RenderbufferManager::RenderbufferManager(
     GLint max_renderbuffer_size, GLint max_samples)
     : max_renderbuffer_size_(max_renderbuffer_size),
       max_samples_(max_samples),
-      num_uncleared_renderbuffers_(0)  {
+      num_uncleared_renderbuffers_(0),
+      mem_represented_(0) {
+  UpdateMemRepresented();
 }
 
 RenderbufferManager::~RenderbufferManager() {
   DCHECK(renderbuffer_infos_.empty());
 }
 
+size_t RenderbufferManager::RenderbufferInfo::EstimatedSize() {
+  return width_ * height_ * samples_ *
+         GLES2Util::RenderbufferBytesPerPixel(internal_format_);
+}
+
+RenderbufferManager::RenderbufferInfo::~RenderbufferInfo() {
+  if (manager_) {
+    manager_->StopTracking(this);
+    manager_ = NULL;
+  }
+}
+
+void RenderbufferManager::UpdateMemRepresented() {
+  TRACE_COUNTER_ID1(
+      "RenderbufferManager", "RenderbufferMemory", this, mem_represented_);
+}
+
 void RenderbufferManager::Destroy(bool have_context) {
   while (!renderbuffer_infos_.empty()) {
+    RenderbufferInfo* info = renderbuffer_infos_.begin()->second;
     if (have_context) {
-      RenderbufferInfo* info = renderbuffer_infos_.begin()->second;
       if (!info->IsDeleted()) {
         GLuint service_id = info->service_id();
         glDeleteRenderbuffersEXT(1, &service_id);
@@ -33,16 +53,28 @@ void RenderbufferManager::Destroy(bool have_context) {
     }
     renderbuffer_infos_.erase(renderbuffer_infos_.begin());
   }
+  DCHECK_EQ(0u, mem_represented_);
+  UpdateMemRepresented();
+}
+
+void RenderbufferManager::StopTracking(RenderbufferInfo* renderbuffer) {
+  if (!renderbuffer->cleared()) {
+    --num_uncleared_renderbuffers_;
+  }
+  mem_represented_ -= renderbuffer->EstimatedSize();
 }
 
 void RenderbufferManager::SetInfo(
-  RenderbufferInfo* renderbuffer,
-  GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) {
+    RenderbufferInfo* renderbuffer,
+    GLsizei samples, GLenum internalformat, GLsizei width, GLsizei height) {
   DCHECK(renderbuffer);
   if (!renderbuffer->cleared()) {
     --num_uncleared_renderbuffers_;
   }
+  mem_represented_ -= renderbuffer->EstimatedSize();
   renderbuffer->SetInfo(samples, internalformat, width, height);
+  mem_represented_ += renderbuffer->EstimatedSize();
+  UpdateMemRepresented();
   if (!renderbuffer->cleared()) {
     ++num_uncleared_renderbuffers_;
   }
@@ -61,7 +93,7 @@ void RenderbufferManager::SetCleared(RenderbufferInfo* renderbuffer) {
 
 void RenderbufferManager::CreateRenderbufferInfo(
     GLuint client_id, GLuint service_id) {
-  RenderbufferInfo::Ref info(new RenderbufferInfo(service_id));
+  RenderbufferInfo::Ref info(new RenderbufferInfo(this, service_id));
   std::pair<RenderbufferInfoMap::iterator, bool> result =
       renderbuffer_infos_.insert(std::make_pair(client_id, info));
   DCHECK(result.second);
@@ -80,9 +112,6 @@ void RenderbufferManager::RemoveRenderbufferInfo(GLuint client_id) {
   RenderbufferInfoMap::iterator it = renderbuffer_infos_.find(client_id);
   if (it != renderbuffer_infos_.end()) {
     RenderbufferInfo* info = it->second;
-    if (!info->cleared()) {
-      --num_uncleared_renderbuffers_;
-    }
     info->MarkAsDeleted();
     renderbuffer_infos_.erase(it);
   }

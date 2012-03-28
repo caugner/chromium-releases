@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/file_util.h"
+#include "base/message_loop.h"
 #include "base/scoped_temp_dir.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/utf_string_conversions.h"
@@ -37,7 +38,7 @@ class WebIntentsModelTest : public testing::Test {
       wds_->Shutdown();
 
     db_thread_.Stop();
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
   }
 

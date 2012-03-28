@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include <map>
 
+#include "base/json/json_value_serializer.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/process_util.h"
@@ -15,9 +16,14 @@
 #include "chrome/browser/bookmarks/bookmark_extension_api.h"
 #include "chrome/browser/bookmarks/bookmark_manager_extension_api.h"
 #include "chrome/browser/download/download_extension_api.h"
+#include "chrome/browser/extensions/api/app/app_api.h"
+#include "chrome/browser/extensions/api/dns/dns_api.h"
+#include "chrome/browser/extensions/api/permissions/permissions_api.h"
+#include "chrome/browser/extensions/api/serial/serial_api.h"
 #include "chrome/browser/extensions/api/socket/socket_api.h"
+#include "chrome/browser/extensions/api/webrequest/webrequest_api.h"
 #include "chrome/browser/extensions/execute_code_in_tab_function.h"
-#include "chrome/browser/extensions/extension_app_api.h"
+#include "chrome/browser/extensions/extension_activity_log.h"
 #include "chrome/browser/extensions/extension_browser_actions_api.h"
 #include "chrome/browser/extensions/extension_chrome_auth_private_api.h"
 #include "chrome/browser/extensions/extension_clear_api.h"
@@ -34,12 +40,10 @@
 #include "chrome/browser/extensions/extension_omnibox_api.h"
 #include "chrome/browser/extensions/extension_page_actions_module.h"
 #include "chrome/browser/extensions/extension_page_capture_api.h"
-#include "chrome/browser/extensions/extension_permissions_api.h"
 #include "chrome/browser/extensions/extension_preference_api.h"
 #include "chrome/browser/extensions/extension_processes_api.h"
 #include "chrome/browser/extensions/extension_proxy_api.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_sidebar_api.h"
 #include "chrome/browser/extensions/extension_tabs_module.h"
 #include "chrome/browser/extensions/extension_test_api.h"
 #include "chrome/browser/extensions/extension_tts_api.h"
@@ -47,9 +51,9 @@
 #include "chrome/browser/extensions/extension_web_socket_proxy_private_api.h"
 #include "chrome/browser/extensions/extension_web_ui.h"
 #include "chrome/browser/extensions/extension_webnavigation_api.h"
-#include "chrome/browser/extensions/extension_webrequest_api.h"
 #include "chrome/browser/extensions/extension_webstore_private_api.h"
 #include "chrome/browser/extensions/extensions_quota_service.h"
+#include "chrome/browser/extensions/system/system_api.h"
 #include "chrome/browser/extensions/process_map.h"
 #include "chrome/browser/extensions/settings/settings_api.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
@@ -64,11 +68,14 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/extensions/api/extension_api.h"
 #include "chrome/common/extensions/extension_messages.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_process_host.h"
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_message_macros.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "chrome/browser/extensions/extension_input_api.h"
@@ -79,6 +86,7 @@
 #endif
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/extensions/api/terminal/terminal_private_api.h"
 #include "chrome/browser/extensions/extension_file_browser_private_api.h"
 #include "chrome/browser/extensions/extension_info_private_api_chromeos.h"
 #include "chrome/browser/extensions/extension_input_ime_api.h"
@@ -87,6 +95,7 @@
 #endif
 
 using extensions::ExtensionAPI;
+using WebKit::WebSecurityOrigin;
 
 // FactoryRegistry -------------------------------------------------------------
 
@@ -180,12 +189,18 @@ void FactoryRegistry::ResetFunctions() {
 
   // Browsing Data.
   RegisterFunction<ClearBrowsingDataFunction>();
+  RegisterFunction<ClearAppCacheFunction>();
   RegisterFunction<ClearCacheFunction>();
   RegisterFunction<ClearCookiesFunction>();
   RegisterFunction<ClearDownloadsFunction>();
+  RegisterFunction<ClearFileSystemsFunction>();
   RegisterFunction<ClearFormDataFunction>();
   RegisterFunction<ClearHistoryFunction>();
+  RegisterFunction<ClearIndexedDBFunction>();
+  RegisterFunction<ClearLocalStorageFunction>();
+  RegisterFunction<ClearPluginDataFunction>();
   RegisterFunction<ClearPasswordsFunction>();
+  RegisterFunction<ClearWebSQLFunction>();
 
   // Bookmarks.
   RegisterFunction<GetBookmarksFunction>();
@@ -272,6 +287,7 @@ void FactoryRegistry::ResetFunctions() {
   // Accessibility.
   RegisterFunction<GetFocusedControlFunction>();
   RegisterFunction<SetAccessibilityEnabledFunction>();
+  RegisterFunction<GetAlertsForTabFunction>();
 
   // Text-to-speech.
   RegisterFunction<ExtensionTtsEngineSendTtsEventFunction>();
@@ -289,17 +305,6 @@ void FactoryRegistry::ResetFunctions() {
   // Omnibox.
   RegisterFunction<OmniboxSendSuggestionsFunction>();
   RegisterFunction<OmniboxSetDefaultSuggestionFunction>();
-
-  // Sidebar.
-  RegisterFunction<CollapseSidebarFunction>();
-  RegisterFunction<ExpandSidebarFunction>();
-  RegisterFunction<GetStateSidebarFunction>();
-  RegisterFunction<HideSidebarFunction>();
-  RegisterFunction<NavigateSidebarFunction>();
-  RegisterFunction<SetBadgeTextSidebarFunction>();
-  RegisterFunction<SetIconSidebarFunction>();
-  RegisterFunction<SetTitleSidebarFunction>();
-  RegisterFunction<ShowSidebarFunction>();
 
   // Speech input.
   RegisterFunction<StartSpeechInputFunction>();
@@ -361,6 +366,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<BeginInstallWithManifestFunction>();
   RegisterFunction<CompleteInstallFunction>();
   RegisterFunction<SilentlyInstallFunction>();
+  RegisterFunction<GetWebGLStatusFunction>();
 
   // WebNavigation.
   RegisterFunction<GetFrameFunction>();
@@ -411,6 +417,11 @@ void FactoryRegistry::ResetFunctions() {
   // InputMethod
   RegisterFunction<GetInputMethodFunction>();
 
+  // Terminal
+  RegisterFunction<OpenTerminalProcessFunction>();
+  RegisterFunction<SendInputToTerminalProcessFunction>();
+  RegisterFunction<CloseTerminalProcessFunction>();
+
 #if defined(USE_VIRTUAL_KEYBOARD)
   // Input
   RegisterFunction<SendHandwritingStrokeFunction>();
@@ -432,6 +443,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<extensions::SetSettingsFunction>();
   RegisterFunction<extensions::RemoveSettingsFunction>();
   RegisterFunction<extensions::ClearSettingsFunction>();
+  RegisterFunction<extensions::GetBytesInUseSettingsFunction>();
 
   // Content settings.
   RegisterFunction<GetResourceIdentifiersFunction>();
@@ -463,6 +475,7 @@ void FactoryRegistry::ResetFunctions() {
   RegisterFunction<DownloadsAcceptDangerFunction>();
   RegisterFunction<DownloadsShowFunction>();
   RegisterFunction<DownloadsDragFunction>();
+  RegisterFunction<DownloadsGetFileIconFunction>();
 
   // PageCapture
   RegisterFunction<PageCaptureSaveAsMHTMLFunction>();
@@ -470,12 +483,24 @@ void FactoryRegistry::ResetFunctions() {
   // TopSites
   RegisterFunction<GetTopSitesFunction>();
 
+  // Serial
+  RegisterFunction<extensions::SerialOpenFunction>();
+  RegisterFunction<extensions::SerialCloseFunction>();
+
   // Sockets
   RegisterFunction<extensions::SocketCreateFunction>();
   RegisterFunction<extensions::SocketDestroyFunction>();
   RegisterFunction<extensions::SocketConnectFunction>();
-  RegisterFunction<extensions::SocketCloseFunction>();
+  RegisterFunction<extensions::SocketDisconnectFunction>();
+  RegisterFunction<extensions::SocketReadFunction>();
   RegisterFunction<extensions::SocketWriteFunction>();
+
+  // DNS
+  RegisterFunction<extensions::DNSResolveFunction>();
+
+  // System
+  RegisterFunction<extensions::GetIncognitoModeAvailabilityFunction>();
+  RegisterFunction<extensions::GetUpdateStatusFunction>();
 }
 
 void FactoryRegistry::GetAllNames(std::vector<std::string>* names) {
@@ -502,6 +527,47 @@ ExtensionFunction* FactoryRegistry::NewFunction(const std::string& name) {
   ExtensionFunction* function = iter->second();
   function->set_name(name);
   return function;
+}
+
+const char kAccessDenied[] = "access denied";
+const char kQuotaExceeded[] = "quota exceeded";
+
+void LogSuccess(const Extension* extension,
+                const ExtensionHostMsg_Request_Params& params) {
+  ExtensionActivityLog* extension_activity_log =
+      ExtensionActivityLog::GetInstance();
+  if (extension_activity_log->HasObservers(extension)) {
+    std::string call_signature = params.name + "(";
+    ListValue::const_iterator it = params.arguments.begin();
+    for (; it != params.arguments.end(); ++it) {
+      std::string arg;
+      JSONStringValueSerializer serializer(&arg);
+      if (serializer.SerializeAndOmitBinaryValues(**it)) {
+        if (it != params.arguments.begin())
+          call_signature += ", ";
+        call_signature += arg;
+      }
+    }
+    call_signature += ")";
+
+    extension_activity_log->Log(
+        extension,
+        ExtensionActivityLog::ACTIVITY_EXTENSION_API_CALL,
+        call_signature);
+  }
+}
+
+void LogFailure(const Extension* extension,
+                const std::string& func_name,
+                const char* reason) {
+  ExtensionActivityLog* extension_activity_log =
+      ExtensionActivityLog::GetInstance();
+  if (extension_activity_log->HasObservers(extension)) {
+    extension_activity_log->Log(
+        extension,
+        ExtensionActivityLog::ACTIVITY_EXTENSION_API_BLOCK,
+        func_name + ": " + reason);
+  }
 }
 
 };  // namespace
@@ -537,8 +603,10 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
       CreateExtensionFunction(params, extension, render_process_id,
                               extension_info_map->process_map(), profile,
                               ipc_sender, routing_id));
-  if (!function)
+  if (!function) {
+    LogFailure(extension, params.name, kAccessDenied);
     return;
+  }
 
   IOThreadExtensionFunction* function_io =
       function->AsIOThreadExtensionFunction();
@@ -555,8 +623,10 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
   if (quota->Assess(extension->id(), function, &params.arguments,
                     base::TimeTicks::Now())) {
     function->Run();
+    LogSuccess(extension, params);
   } else {
     function->OnQuotaExceeded();
+    LogFailure(extension, params.name, kQuotaExceeded);
   }
 }
 
@@ -584,7 +654,7 @@ Browser* ExtensionFunctionDispatcher::GetCurrentBrowser(
   // |include_incognito|.
   Profile* profile = Profile::FromBrowserContext(
       render_view_host->process()->GetBrowserContext());
-  browser = BrowserList::FindTabbedBrowser(profile, include_incognito);
+  browser = BrowserList::FindAnyBrowser(profile, include_incognito);
 
   // NOTE(rafaelw): This can return NULL in some circumstances. In particular,
   // a background_page onload chrome.tabs api call can make it into here
@@ -603,10 +673,12 @@ void ExtensionFunctionDispatcher::Dispatch(
   if (!service || !process_map)
     return;
 
-  const Extension* extension = service->GetExtensionById(
-      params.extension_id, false);
+  const Extension* extension = service->extensions()->GetByID(
+      params.extension_id);
   if (!extension)
-    extension = service->GetExtensionByWebExtent(params.source_url);
+    extension = service->extensions()->GetHostedAppByURL(ExtensionURLInfo(
+        WebSecurityOrigin::createFromString(params.source_origin),
+        params.source_url));
 
   scoped_refptr<ExtensionFunction> function(
       CreateExtensionFunction(params, extension,
@@ -614,8 +686,10 @@ void ExtensionFunctionDispatcher::Dispatch(
                               *(service->process_map()),
                               profile(), render_view_host,
                               render_view_host->routing_id()));
-  if (!function)
+  if (!function) {
+    LogFailure(extension, params.name, kAccessDenied);
     return;
+  }
 
   UIThreadExtensionFunction* function_ui =
       function->AsUIThreadExtensionFunction();
@@ -635,8 +709,10 @@ void ExtensionFunctionDispatcher::Dispatch(
     ExternalProtocolHandler::PermitLaunchUrl();
 
     function->Run();
+    LogSuccess(extension, params);
   } else {
     function->OnQuotaExceeded();
+    LogFailure(extension, params.name, kQuotaExceeded);
   }
 }
 

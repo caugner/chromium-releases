@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,6 @@
 #import "chrome/browser/ui/cocoa/bookmarks/bookmark_bubble_controller.h"
 #import "chrome/browser/ui/cocoa/browser_command_executor.h"
 #import "chrome/browser/ui/cocoa/fullscreen_exit_bubble_controller.h"
-#import "chrome/browser/ui/cocoa/tab_contents/tab_contents_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_strip_controller.h"
 #import "chrome/browser/ui/cocoa/tabs/tab_window_controller.h"
 #import "chrome/browser/ui/cocoa/themed_window.h"
@@ -42,19 +41,20 @@ class ConstrainedWindowMac;
 class LocationBarViewMac;
 @class PresentationModeController;
 @class PreviewableContentsController;
-@class SidebarController;
 class StatusBubbleMac;
-class TabContents;
 @class TabStripController;
 @class TabStripView;
 @class ToolbarController;
+
+namespace content {
+class WebContents;
+}
 
 @interface BrowserWindowController :
   TabWindowController<NSUserInterfaceValidations,
                       BookmarkBarControllerDelegate,
                       BrowserCommandExecutor,
                       ViewResizer,
-                      TabContentsControllerDelegate,
                       TabStripControllerDelegate> {
  @private
   // The ordering of these members is important as it determines the order in
@@ -71,7 +71,6 @@ class TabContents;
   scoped_nsobject<DownloadShelfController> downloadShelfController_;
   scoped_nsobject<BookmarkBarController> bookmarkBarController_;
   scoped_nsobject<DevToolsController> devToolsController_;
-  scoped_nsobject<SidebarController> sidebarController_;
   scoped_nsobject<PreviewableContentsController> previewableContentsController_;
   scoped_nsobject<PresentationModeController> presentationModeController_;
   scoped_nsobject<FullscreenExitBubbleController>
@@ -210,11 +209,15 @@ class TabContents;
 // the specified |tab|.  If |shouldRestore| is true, we're switching
 // (back?) to this tab and should restore any previous location bar state
 // (such as user editing) as well.
-- (void)updateToolbarWithContents:(TabContents*)tab
+- (void)updateToolbarWithContents:(content::WebContents*)tab
                shouldRestoreState:(BOOL)shouldRestore;
 
 // Sets whether or not the current page in the frontmost tab is bookmarked.
 - (void)setStarredState:(BOOL)isStarred;
+
+// Return the rect, in WebKit coordinates (flipped), of the window's grow box
+// in the coordinate system of the content area of the currently selected tab.
+- (NSRect)selectedTabGrowBoxRect;
 
 // Called to tell the selected tab to update its loading state.
 // |force| is set if the update is due to changing tabs, as opposed to
@@ -286,11 +289,10 @@ class TabContents;
 - (BOOL)canAttachConstrainedWindow;
 
 // Shows or hides the docked web inspector depending on |contents|'s state.
-- (void)updateDevToolsForContents:(TabContents*)contents;
+- (void)updateDevToolsForContents:(content::WebContents*)contents;
 
-// Displays the active sidebar linked to the |contents| or hides sidebar UI,
-// if there's no such sidebar.
-- (void)updateSidebarForContents:(TabContents*)contents;
+// Specifies whether devtools should dock to right.
+- (void)setDevToolsDockToRight:(bool)dock_to_right;
 
 // Gets the current theme provider.
 - (ui::ThemeProvider*)themeProvider;
@@ -305,7 +307,7 @@ class TabContents;
 - (NSPoint)bookmarkBubblePoint;
 
 // Shows or hides the Instant preview contents.
-- (void)showInstant:(TabContents*)previewContents;
+- (void)showInstant:(content::WebContents*)previewContents;
 - (void)hideInstant;
 - (void)commitInstant;
 
@@ -451,7 +453,8 @@ class TabContents;
 // partially offscreen, its height is not adjusted at all.  This function
 // prefers to grow the window down, but will grow up if needed.  Calls to this
 // function should be followed by a call to |layoutSubviews|.
-- (void)adjustWindowHeightBy:(CGFloat)deltaH;
+// Returns if the window height was changed.
+- (BOOL)adjustWindowHeightBy:(CGFloat)deltaH;
 
 // Return an autoreleased NSWindow suitable for fullscreen use.
 - (NSWindow*)createFullscreenWindow;

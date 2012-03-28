@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -147,22 +147,13 @@ MessageLoop::MessageLoop(Type type)
 #elif defined(OS_MACOSX)
 #define MESSAGE_PUMP_UI base::MessagePumpMac::Create()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
-#elif defined(OS_ANDROID)
-#define MESSAGE_PUMP_UI new base::MessagePumpForUI()
-#define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
-#elif defined(USE_WAYLAND)
-#define MESSAGE_PUMP_UI new base::MessagePumpWayland()
-#define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
-#elif defined(USE_AURA)
-#define MESSAGE_PUMP_UI new base::MessagePumpX()
-#define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #elif defined(OS_NACL)
 // Currently NaCl doesn't have a UI or an IO MessageLoop.
 // TODO(abarth): Figure out if we need these.
 #define MESSAGE_PUMP_UI NULL
 #define MESSAGE_PUMP_IO NULL
 #elif defined(OS_POSIX)  // POSIX but not MACOSX.
-#define MESSAGE_PUMP_UI new base::MessagePumpGtk()
+#define MESSAGE_PUMP_UI new base::MessagePumpForUI()
 #define MESSAGE_PUMP_IO new base::MessagePumpLibevent()
 #else
 #error Not implemented
@@ -258,54 +249,6 @@ void MessageLoop::RemoveDestructionObserver(
 }
 
 void MessageLoop::PostTask(
-    const tracked_objects::Location& from_here, Task* task) {
-  DCHECK(task);
-  PendingTask pending_task(
-      from_here,
-      base::Bind(
-          &base::subtle::TaskClosureAdapter::Run,
-          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
-      CalculateDelayedRuntime(0), true);
-  AddToIncomingQueue(&pending_task);
-}
-
-void MessageLoop::PostDelayedTask(
-    const tracked_objects::Location& from_here, Task* task, int64 delay_ms) {
-  DCHECK(task);
-  PendingTask pending_task(
-      from_here,
-      base::Bind(
-          &base::subtle::TaskClosureAdapter::Run,
-          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
-      CalculateDelayedRuntime(delay_ms), true);
-  AddToIncomingQueue(&pending_task);
-}
-
-void MessageLoop::PostNonNestableTask(
-    const tracked_objects::Location& from_here, Task* task) {
-  DCHECK(task);
-  PendingTask pending_task(
-      from_here,
-      base::Bind(
-          &base::subtle::TaskClosureAdapter::Run,
-          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
-      CalculateDelayedRuntime(0), false);
-  AddToIncomingQueue(&pending_task);
-}
-
-void MessageLoop::PostNonNestableDelayedTask(
-    const tracked_objects::Location& from_here, Task* task, int64 delay_ms) {
-  DCHECK(task);
-  PendingTask pending_task(
-      from_here,
-      base::Bind(
-          &base::subtle::TaskClosureAdapter::Run,
-          new base::subtle::TaskClosureAdapter(task, &should_leak_tasks_)),
-      CalculateDelayedRuntime(delay_ms), false);
-  AddToIncomingQueue(&pending_task);
-}
-
-void MessageLoop::PostTask(
     const tracked_objects::Location& from_here, const base::Closure& task) {
   DCHECK(!task.is_null()) << from_here.ToString();
   PendingTask pending_task(from_here, task, CalculateDelayedRuntime(0), true);
@@ -313,12 +256,20 @@ void MessageLoop::PostTask(
 }
 
 void MessageLoop::PostDelayedTask(
-    const tracked_objects::Location& from_here, const base::Closure& task,
+    const tracked_objects::Location& from_here,
+    const base::Closure& task,
     int64 delay_ms) {
   DCHECK(!task.is_null()) << from_here.ToString();
   PendingTask pending_task(from_here, task,
                            CalculateDelayedRuntime(delay_ms), true);
   AddToIncomingQueue(&pending_task);
+}
+
+void MessageLoop::PostDelayedTask(
+    const tracked_objects::Location& from_here,
+    const base::Closure& task,
+    base::TimeDelta delay) {
+  PostDelayedTask(from_here, task, delay.InMillisecondsRoundedUp());
 }
 
 void MessageLoop::PostNonNestableTask(
@@ -335,6 +286,13 @@ void MessageLoop::PostNonNestableDelayedTask(
   PendingTask pending_task(from_here, task,
                            CalculateDelayedRuntime(delay_ms), false);
   AddToIncomingQueue(&pending_task);
+}
+
+void MessageLoop::PostNonNestableDelayedTask(
+    const tracked_objects::Location& from_here,
+    const base::Closure& task,
+    base::TimeDelta delay) {
+  PostNonNestableDelayedTask(from_here, task, delay.InMillisecondsRoundedUp());
 }
 
 void MessageLoop::Run() {
@@ -493,7 +451,7 @@ void MessageLoop::RunTask(const PendingTask& pending_task) {
   HistogramEvent(kTaskRunEvent);
 
   tracked_objects::TrackedTime start_time =
-      tracked_objects::ThreadData::NowForStartOfRun();
+      tracked_objects::ThreadData::NowForStartOfRun(pending_task.birth_tally);
 
   FOR_EACH_OBSERVER(TaskObserver, task_observers_,
                     WillProcessTask(pending_task.time_posted));
@@ -748,6 +706,19 @@ bool MessageLoop::DoIdleWork() {
     pump_->Quit();
 
   return false;
+}
+
+void MessageLoop::DeleteSoonInternal(const tracked_objects::Location& from_here,
+                                     void(*deleter)(const void*),
+                                     const void* object) {
+  PostNonNestableTask(from_here, base::Bind(deleter, object));
+}
+
+void MessageLoop::ReleaseSoonInternal(
+    const tracked_objects::Location& from_here,
+    void(*releaser)(const void*),
+    const void* object) {
+  PostNonNestableTask(from_here, base::Bind(releaser, object));
 }
 
 //------------------------------------------------------------------------------

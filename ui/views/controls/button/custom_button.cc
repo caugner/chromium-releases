@@ -94,17 +94,13 @@ bool CustomButton::IsHotTracked() const {
 }
 
 void CustomButton::OnEnabledChanged() {
-  if (View::IsEnabled() ? (state_ != BS_DISABLED) : (state_ == BS_DISABLED))
+  if (enabled() ? (state_ != BS_DISABLED) : (state_ == BS_DISABLED))
     return;
 
-  if (View::IsEnabled())
+  if (enabled())
     SetState(IsMouseHovered() ? BS_HOT : BS_NORMAL);
   else
     SetState(BS_DISABLED);
-}
-
-bool CustomButton::IsEnabled() const {
-  return state_ != BS_DISABLED;
 }
 
 std::string CustomButton::GetClassName() const {
@@ -198,9 +194,6 @@ bool CustomButton::OnKeyReleased(const KeyEvent& event) {
 }
 
 bool CustomButton::AcceleratorPressed(const ui::Accelerator& accelerator) {
-  if (!View::IsEnabled())
-    return false;
-
   SetState(BS_NORMAL);
   KeyEvent key_event(ui::ET_KEY_RELEASED, accelerator.key_code(),
                      accelerator.modifiers());
@@ -257,7 +250,7 @@ CustomButton::CustomButton(ButtonListener* listener)
       state_(BS_NORMAL),
       animate_on_state_change_(true),
       is_throbbing_(false),
-      triggerable_event_flags_(ui::EF_LEFT_BUTTON_DOWN),
+      triggerable_event_flags_(ui::EF_LEFT_MOUSE_BUTTON),
       request_focus_on_press_(true) {
   hover_animation_.reset(new ui::ThrobAnimation(this));
   hover_animation_->SetSlideDuration(kHoverFadeDurationMs);
@@ -281,10 +274,6 @@ void CustomButton::ViewHierarchyChanged(bool is_add, View *parent,
                                         View *child) {
   if (!is_add && state_ != BS_DISABLED)
     SetState(BS_NORMAL);
-}
-
-bool CustomButton::IsFocusable() const {
-  return (state_ != BS_DISABLED) && View::IsFocusable();
 }
 
 void CustomButton::OnBlur() {

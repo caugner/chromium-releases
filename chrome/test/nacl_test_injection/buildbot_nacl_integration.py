@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -11,11 +11,6 @@ import sys
 def Main(args):
   pwd = os.environ.get('PWD', '')
   is_integration_bot = 'nacl-chrome' in pwd
-
-  if not is_integration_bot and sys.platform == 'darwin':
-    # TODO: Reenable.
-    sys.stdout.write('Skipping nacl_integration, see http://crbug.com/105406\n')
-    return
 
   # On the main Chrome waterfall, we may need to control where the tests are
   # run.
@@ -46,6 +41,19 @@ def Main(args):
     # This test failed and caused the build's gatekeep to close the tree.
     # http://code.google.com/p/chromium/issues/detail?id=96434
     tests_to_disable.append('run_ppapi_example_post_message_test')
+    # These tests are flakey on the chrome waterfall and need to be looked at.
+    # TODO(bsy): http://code.google.com/p/nativeclient/issues/detail?id=2509
+    tests_to_disable.append('run_pm_redir_stderr_fg_0_chrome_browser_test')
+    tests_to_disable.append('run_pm_redir_stderr_bg_0_chrome_browser_test')
+    tests_to_disable.append('run_pm_redir_stderr_bg_1000_chrome_browser_test')
+    tests_to_disable.append('run_pm_redir_stderr_bg_1000000_chrome_browser_test')
+    # http://code.google.com/p/nativeclient/issues/detail?id=2511
+    tests_to_disable.append('run_ppapi_ppb_image_data_browser_test')
+    # TODO(cdn): Reenable once we can pass
+    # --disable-extensions-resource-whitelist to chrome for this test.
+    # http://code.google.com/p/nativeclient/issues/detail?id=108131
+    tests_to_disable.append('run_ppapi_extension_mime_handler_browser_test')
+
 
     # TODO(ncbray) why did these tests flake?
     # http://code.google.com/p/nativeclient/issues/detail?id=2230

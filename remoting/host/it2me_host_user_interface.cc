@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -50,40 +50,43 @@ void It2MeHostUserInterface::InitFrom(DisconnectWindow* disconnect_window,
   disconnect_window_.reset(disconnect_window);
   continue_window_.reset(continue_window);
   local_input_monitor_.reset(monitor);
-}
-
-void It2MeHostUserInterface::OnSignallingConnected(
-    SignalStrategy* signal_strategy, const std::string& full_jid) {
-}
-
-void It2MeHostUserInterface::OnSignallingDisconnected() {
+  host_->AddStatusObserver(this);
 }
 
 void It2MeHostUserInterface::OnClientAuthenticated(const std::string& jid) {
-  // There should not be more than one concurrent authenticated connection.
-  DCHECK(authenticated_jid_.empty());
+  if (!authenticated_jid_.empty()) {
+    // If we already authenticated another client then one of the
+    // connections may be an attacker, so both are suspect and we have
+    // to reject the second connection and shutdown the host.
+    host_->RejectAuthenticatingClient();
+    context_->network_message_loop()->PostTask(FROM_HERE, base::Bind(
+        &ChromotingHost::Shutdown, host_, base::Closure()));
+    return;
+  }
+
   authenticated_jid_ = jid;
 
   std::string username = jid.substr(0, jid.find('/'));
   ui_thread_proxy_.PostTask(FROM_HERE, base::Bind(
-    &It2MeHostUserInterface::ProcessOnClientAuthenticated,
-    base::Unretained(this),
-    username));
+      &It2MeHostUserInterface::ProcessOnClientAuthenticated,
+      base::Unretained(this), username));
 }
 
 void It2MeHostUserInterface::OnClientDisconnected(const std::string& jid) {
   if (jid == authenticated_jid_) {
-    authenticated_jid_.clear();
     ui_thread_proxy_.PostTask(FROM_HERE, base::Bind(
         &It2MeHostUserInterface::ProcessOnClientDisconnected,
         base::Unretained(this)));
   }
 }
 
-void It2MeHostUserInterface::OnAccessDenied() {
+void It2MeHostUserInterface::OnAccessDenied(const std::string& jid) {
 }
 
 void It2MeHostUserInterface::OnShutdown() {
+  // Host status observers must be removed on the network thread, so
+  // it must happen here instead of in the destructor.
+  host_->RemoveStatusObserver(this);
 }
 
 void It2MeHostUserInterface::Shutdown() {

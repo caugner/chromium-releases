@@ -21,11 +21,8 @@
 
 // Force a reference to _tls_used to make the linker create the TLS directory
 // if it's not already there (that is, even if __declspec(thread) is not used).
-// To make sure we really traverse the whole list, we put down two elements, and
-// then check that we called both functions when we scanned the list.
-// Force a reference to p_thread_callback_dllmain_first_entry and
-// p_thread_callback_dllmain_first_entry to prevent whole program optimization
-// from discarding the variables.
+// Force a reference to p_thread_callback_dllmain_typical_entry to prevent whole
+// program optimization from discarding the variables.
 
 #include <windows.h>
 
@@ -37,7 +34,7 @@
 // shows that some other service is handling callbacks.
 static bool linker_notifications_are_active = false;
 
-// This will be our mostly no-op callback that we'll list (twice).  We won't
+// This will be our mostly no-op callback that we'll list.  We won't
 // deliberately call it, and if it is called, that means we don't need to do any
 // of the callbacks anymore.  We expect such a call to arrive via a
 // THREAD_ATTACH message, long before we'd have to perform our THREAD_DETACH
@@ -47,16 +44,18 @@ static void NTAPI on_callback(PVOID h, DWORD reason, PVOID reserved);
 #ifdef _WIN64
 
 #pragma comment(linker, "/INCLUDE:_tls_used")
-#pragma comment(linker, "/INCLUDE:p_thread_callback_dllmain_first_entry")
-#pragma comment(linker, "/INCLUDE:p_thread_callback_dllmain_later_entry")
+#pragma comment(linker, "/INCLUDE:p_thread_callback_dllmain_typical_entry")
 
 #else  // _WIN64
 
 #pragma comment(linker, "/INCLUDE:__tls_used")
-#pragma comment(linker, "/INCLUDE:_p_thread_callback_dllmain_first_entry")
-#pragma comment(linker, "/INCLUDE:_p_thread_callback_dllmain_later_entry")
+#pragma comment(linker, "/INCLUDE:_p_thread_callback_dllmain_typical_entry")
 
 #endif  // _WIN64
+
+// Explicitly depend on tlssup.cc variable to bracket the list of TLS callbacks.
+extern "C" PIMAGE_TLS_CALLBACK __xl_a;
+extern "C" PIMAGE_TLS_CALLBACK __xl_z;
 
 // extern "C" suppresses C++ name mangling so we know the symbol names for the
 // linker /INCLUDE:symbol pragmas above.
@@ -65,27 +64,20 @@ extern "C" {
 
 // .CRT section is merged with .rdata on x64 so it must be constant data.
 #pragma data_seg(push, old_seg)
-// Use earliest possible name in the .CRT$XL? list of segments.
-#pragma const_seg(".CRT$XLA")
+// Use a typical possible name in the .CRT$XL? list of segments.
+#pragma const_seg(".CRT$XLB")
 // When defining a const variable, it must have external linkage to be sure the
 // linker doesn't discard it.
-extern const PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_first_entry;
-const PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_first_entry = on_callback;
-// The latest possible name in the .CRT$XL? (other than *Z, which has a NULL).
-#pragma const_seg(".CRT$XLY")
-extern const PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_later_entry;
-const PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_later_entry = on_callback;
+extern const PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_typical_entry;
+const PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_typical_entry = on_callback;
 #pragma data_seg(pop, old_seg)
 
 #else  // _WIN64
 
 #pragma data_seg(push, old_seg)
-// Use earliest possible name in the .CRT$XL? list of segments.
-#pragma data_seg(".CRT$XLA")
-PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_first_entry = on_callback;
-// The latest possible name in the .CRT$XL? (other than *Z, which has a NULL).
-#pragma data_seg(".CRT$XLY")
-PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_later_entry = on_callback;
+// Use a typical possible name in the .CRT$XL? list of segments.
+#pragma data_seg(".CRT$XLB")
+PIMAGE_TLS_CALLBACK p_thread_callback_dllmain_typical_entry = on_callback;
 #pragma data_seg(pop, old_seg)
 
 #endif  // _WIN64
@@ -101,9 +93,7 @@ BOOL WINAPI DllMain(PVOID h, DWORD reason, PVOID reserved) {
   if (linker_notifications_are_active)
     return true;  // Some other service is doing this work.
 
-  // Use our first entry as a starting point, but don't call it.
-  PIMAGE_TLS_CALLBACK* it = &p_thread_callback_dllmain_first_entry;
-  while (*++it != NULL || it < &p_thread_callback_dllmain_later_entry) {
+  for (PIMAGE_TLS_CALLBACK* it = &__xl_a; it < &__xl_z; ++it) {
     if (*it == NULL || *it == on_callback)
       continue;  // Don't bother to call our own callback.
     (*it)(h, reason, reserved);

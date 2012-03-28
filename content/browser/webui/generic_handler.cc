@@ -9,8 +9,10 @@
 #include "base/logging.h"
 #include "base/values.h"
 #include "content/browser/disposition_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "googleurl/src/gurl.h"
+#include "content/browser/webui/web_ui_impl.h"
+#include "content/public/browser/web_contents.h"
+
+using content::OpenURLParams;
 
 GenericHandler::GenericHandler() {
 }
@@ -19,7 +21,7 @@ GenericHandler::~GenericHandler() {
 }
 
 void GenericHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("navigateToUrl",
+  web_ui()->RegisterMessageCallback("navigateToUrl",
       base::Bind(&GenericHandler::HandleNavigateToUrl, base::Unretained(this)));
 }
 
@@ -49,8 +51,9 @@ void GenericHandler::HandleNavigateToUrl(const ListValue* args) {
   if (disposition == CURRENT_TAB && target_string == "_blank")
     disposition = NEW_FOREGROUND_TAB;
 
-  web_ui_->tab_contents()->OpenURL(
-      GURL(url_string), GURL(), disposition, content::PAGE_TRANSITION_LINK);
+  web_ui()->GetWebContents()->OpenURL(OpenURLParams(
+      GURL(url_string), content::Referrer(), disposition,
+      content::PAGE_TRANSITION_LINK, false));
 
   // This may delete us!
 }

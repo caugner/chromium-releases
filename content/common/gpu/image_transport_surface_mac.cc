@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,15 +18,13 @@
 
 namespace {
 
-// We are backed by an Pbuffer offscreen surface for the purposes of creating a
-// context, but use FBOs to render to texture backed IOSurface
-class IOSurfaceImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
+// We are backed by an offscreen surface for the purposes of creating
+// a context, but use FBOs to render to texture backed IOSurface
+class IOSurfaceImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
                                        public ImageTransportSurface {
  public:
   IOSurfaceImageTransportSurface(GpuChannelManager* manager,
-                                 int32 render_view_id,
-                                 int32 renderer_id,
-                                 int32 command_buffer_id,
+                                 GpuCommandBufferStub* stub,
                                  gfx::PluginWindowHandle handle);
 
   // GLSurface implementation
@@ -42,7 +40,7 @@ class IOSurfaceImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
 
  protected:
   // ImageTransportSurface implementation
-  virtual void OnNewSurfaceACK(uint64 surface_id,
+  virtual void OnNewSurfaceACK(uint64 surface_handle,
                                TransportDIB::Handle shm_handle) OVERRIDE;
   virtual void OnBuffersSwappedACK() OVERRIDE;
   virtual void OnPostSubBufferACK() OVERRIDE;
@@ -58,7 +56,7 @@ class IOSurfaceImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
   base::mac::ScopedCFTypeRef<CFTypeRef> io_surface_;
 
   // The id of |io_surface_| or 0 if that's NULL.
-  uint64 io_surface_id_;
+  uint64 io_surface_handle_;
 
   // Weak pointer to the context that this was last made current to.
   gfx::GLContext* context_;
@@ -73,15 +71,13 @@ class IOSurfaceImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
   DISALLOW_COPY_AND_ASSIGN(IOSurfaceImageTransportSurface);
 };
 
-// We are backed by an Pbuffer offscreen surface for the purposes of creating a
-// context, but use FBOs to render offscreen.
-class TransportDIBImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
+// We are backed by an offscreen surface for the purposes of creating
+// a context, but use FBOs to render to texture backed IOSurface
+class TransportDIBImageTransportSurface : public gfx::NoOpGLSurfaceCGL,
                                           public ImageTransportSurface {
  public:
   TransportDIBImageTransportSurface(GpuChannelManager* manager,
-                                    int32 render_view_id,
-                                    int32 renderer_id,
-                                    int32 command_buffer_id,
+                                    GpuCommandBufferStub* stub,
                                     gfx::PluginWindowHandle handle);
 
   // GLSurface implementation
@@ -99,7 +95,7 @@ class TransportDIBImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
   // ImageTransportSurface implementation
   virtual void OnBuffersSwappedACK() OVERRIDE;
   virtual void OnPostSubBufferACK() OVERRIDE;
-  virtual void OnNewSurfaceACK(uint64 surface_id,
+  virtual void OnNewSurfaceACK(uint64 surface_handle,
                                TransportDIB::Handle shm_handle) OVERRIDE;
   virtual void OnResizeViewACK() OVERRIDE;
   virtual void OnResize(gfx::Size size) OVERRIDE;
@@ -114,7 +110,7 @@ class TransportDIBImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
 
   gfx::Size size_;
 
-  static uint32 next_id_;
+  static uint32 next_handle_;
 
   // Whether or not we've successfully made the surface current once.
   bool made_current_;
@@ -124,7 +120,7 @@ class TransportDIBImageTransportSurface : public gfx::PbufferGLSurfaceCGL,
   DISALLOW_COPY_AND_ASSIGN(TransportDIBImageTransportSurface);
 };
 
-uint32 TransportDIBImageTransportSurface::next_id_ = 1;
+uint32 TransportDIBImageTransportSurface::next_handle_ = 1;
 
 void AddBooleanValue(CFMutableDictionaryRef dictionary,
                      const CFStringRef key,
@@ -143,23 +139,15 @@ void AddIntegerValue(CFMutableDictionaryRef dictionary,
 
 IOSurfaceImageTransportSurface::IOSurfaceImageTransportSurface(
     GpuChannelManager* manager,
-    int32 render_view_id,
-    int32 renderer_id,
-    int32 command_buffer_id,
+    GpuCommandBufferStub* stub,
     gfx::PluginWindowHandle handle)
-        : gfx::PbufferGLSurfaceCGL(gfx::Size(1, 1)),
-          fbo_id_(0),
-          texture_id_(0),
-          io_surface_id_(0),
-          context_(NULL),
-          made_current_(false) {
-  helper_.reset(new ImageTransportHelper(this,
-                                         manager,
-                                         render_view_id,
-                                         renderer_id,
-                                         command_buffer_id,
-                                         handle));
-
+    : gfx::NoOpGLSurfaceCGL(gfx::Size(1, 1)),
+      fbo_id_(0),
+      texture_id_(0),
+      io_surface_handle_(0),
+      context_(NULL),
+      made_current_(false) {
+  helper_.reset(new ImageTransportHelper(this, manager, stub, handle));
 }
 
 IOSurfaceImageTransportSurface::~IOSurfaceImageTransportSurface() {
@@ -170,12 +158,13 @@ bool IOSurfaceImageTransportSurface::Initialize() {
   // Only support IOSurfaces if the GL implementation is the native desktop GL.
   // IO surfaces will not work with, for example, OSMesa software renderer
   // GL contexts.
-  if (gfx::GetGLImplementation() != gfx::kGLImplementationDesktopGL)
+  if (gfx::GetGLImplementation() != gfx::kGLImplementationDesktopGL &&
+      gfx::GetGLImplementation() != gfx::kGLImplementationAppleGL)
     return false;
 
   if (!helper_->Initialize())
     return false;
-  return PbufferGLSurfaceCGL::Initialize();
+  return NoOpGLSurfaceCGL::Initialize();
 }
 
 void IOSurfaceImageTransportSurface::Destroy() {
@@ -190,7 +179,7 @@ void IOSurfaceImageTransportSurface::Destroy() {
   }
 
   helper_->Destroy();
-  PbufferGLSurfaceCGL::Destroy();
+  NoOpGLSurfaceCGL::Destroy();
 }
 
 bool IOSurfaceImageTransportSurface::IsOffscreen() {
@@ -225,7 +214,7 @@ bool IOSurfaceImageTransportSurface::SwapBuffers() {
   glFlush();
 
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
-  params.surface_id = io_surface_id_;
+  params.surface_handle = io_surface_handle_;
   helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
   helper_->SetScheduled(false);
@@ -234,14 +223,25 @@ bool IOSurfaceImageTransportSurface::SwapBuffers() {
 
 bool IOSurfaceImageTransportSurface::PostSubBuffer(
     int x, int y, int width, int height) {
-  NOTREACHED();
-  return false;
+  glFlush();
+
+  GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params;
+  params.surface_handle = io_surface_handle_;
+  params.x = x;
+  params.y = y;
+  params.width = width;
+  params.height = height;
+  helper_->SendAcceleratedSurfacePostSubBuffer(params);
+
+  helper_->SetScheduled(false);
+  return true;
 }
 
 std::string IOSurfaceImageTransportSurface::GetExtensions() {
   std::string extensions = gfx::GLSurface::GetExtensions();
   extensions += extensions.empty() ? "" : " ";
-  extensions += "GL_CHROMIUM_front_buffer_cached";
+  extensions += "GL_CHROMIUM_front_buffer_cached ";
+  extensions += "GL_CHROMIUM_post_sub_buffer";
   return extensions;
 }
 
@@ -254,13 +254,13 @@ void IOSurfaceImageTransportSurface::OnBuffersSwappedACK() {
 }
 
 void IOSurfaceImageTransportSurface::OnPostSubBufferACK() {
-  NOTREACHED();
+  helper_->SetScheduled(true);
 }
 
 void IOSurfaceImageTransportSurface::OnNewSurfaceACK(
-    uint64 surface_id,
+    uint64 surface_handle,
     TransportDIB::Handle /* shm_handle */) {
-  DCHECK_EQ(io_surface_id_, surface_id);
+  DCHECK_EQ(io_surface_handle_, surface_handle);
   helper_->SetScheduled(true);
 }
 
@@ -341,7 +341,7 @@ void IOSurfaceImageTransportSurface::OnResize(gfx::Size size) {
       io_surface_.get(),
       plane);
 
-  io_surface_id_ = io_surface_support->IOSurfaceGetID(io_surface_);
+  io_surface_handle_ = io_surface_support->IOSurfaceGetID(io_surface_);
   glFlush();
 
   glBindTexture(target, previous_texture_id);
@@ -350,7 +350,7 @@ void IOSurfaceImageTransportSurface::OnResize(gfx::Size size) {
   GpuHostMsg_AcceleratedSurfaceNew_Params params;
   params.width = size_.width();
   params.height = size_.height();
-  params.surface_id = io_surface_id_;
+  params.surface_handle = io_surface_handle_;
   params.create_transport_dib = false;
   helper_->SendAcceleratedSurfaceNew(params);
 
@@ -359,20 +359,13 @@ void IOSurfaceImageTransportSurface::OnResize(gfx::Size size) {
 
 TransportDIBImageTransportSurface::TransportDIBImageTransportSurface(
     GpuChannelManager* manager,
-    int32 render_view_id,
-    int32 renderer_id,
-    int32 command_buffer_id,
+    GpuCommandBufferStub* stub,
     gfx::PluginWindowHandle handle)
-        : gfx::PbufferGLSurfaceCGL(gfx::Size(1, 1)),
+        : gfx::NoOpGLSurfaceCGL(gfx::Size(1, 1)),
           fbo_id_(0),
           render_buffer_id_(0),
           made_current_(false) {
-  helper_.reset(new ImageTransportHelper(this,
-                                         manager,
-                                         render_view_id,
-                                         renderer_id,
-                                         command_buffer_id,
-                                         handle));
+  helper_.reset(new ImageTransportHelper(this, manager, stub, handle));
 
 }
 
@@ -383,7 +376,7 @@ TransportDIBImageTransportSurface::~TransportDIBImageTransportSurface() {
 bool TransportDIBImageTransportSurface::Initialize() {
   if (!helper_->Initialize())
     return false;
-  return PbufferGLSurfaceCGL::Initialize();
+  return NoOpGLSurfaceCGL::Initialize();
 }
 
 void TransportDIBImageTransportSurface::Destroy() {
@@ -398,7 +391,7 @@ void TransportDIBImageTransportSurface::Destroy() {
   }
 
   helper_->Destroy();
-  PbufferGLSurfaceCGL::Destroy();
+  NoOpGLSurfaceCGL::Destroy();
 }
 
 bool TransportDIBImageTransportSurface::IsOffscreen() {
@@ -448,7 +441,7 @@ bool TransportDIBImageTransportSurface::SwapBuffers() {
   glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, previous_fbo_id);
 
   GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params params;
-  params.surface_id = next_id_;
+  params.surface_handle = next_handle_;
   helper_->SendAcceleratedSurfaceBuffersSwapped(params);
 
   helper_->SetScheduled(false);
@@ -457,14 +450,50 @@ bool TransportDIBImageTransportSurface::SwapBuffers() {
 
 bool TransportDIBImageTransportSurface::PostSubBuffer(
     int x, int y, int width, int height) {
-  NOTREACHED();
-  return false;
+  DCHECK_NE(shared_mem_.get(), static_cast<void*>(NULL));
+
+  GLint previous_fbo_id = 0;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING_EXT, &previous_fbo_id);
+
+  glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo_id_);
+
+  GLint current_alignment = 0, current_pack_row_length = 0;
+  glGetIntegerv(GL_PACK_ALIGNMENT, &current_alignment);
+  glGetIntegerv(GL_PACK_ROW_LENGTH, &current_pack_row_length);
+
+  glPixelStorei(GL_PACK_ALIGNMENT, 4);
+  glPixelStorei(GL_PACK_ROW_LENGTH, size_.width());
+
+  unsigned char* buffer =
+      static_cast<unsigned char*>(shared_mem_->memory());
+  glReadPixels(x, y,
+               width, height,
+               GL_BGRA,  // This pixel format should have no conversion.
+               GL_UNSIGNED_INT_8_8_8_8_REV,
+               &buffer[(x + y * size_.width()) * 4]);
+
+  glPixelStorei(GL_PACK_ALIGNMENT, current_alignment);
+  glPixelStorei(GL_PACK_ROW_LENGTH, current_pack_row_length);
+
+  glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, previous_fbo_id);
+
+  GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params params;
+  params.surface_handle = next_handle_;
+  params.x = x;
+  params.y = y;
+  params.width = width;
+  params.height = height;
+  helper_->SendAcceleratedSurfacePostSubBuffer(params);
+
+  helper_->SetScheduled(false);
+  return true;
 }
 
 std::string TransportDIBImageTransportSurface::GetExtensions() {
   std::string extensions = gfx::GLSurface::GetExtensions();
   extensions += extensions.empty() ? "" : " ";
-  extensions += "GL_CHROMIUM_front_buffer_cached";
+  extensions += "GL_CHROMIUM_front_buffer_cached ";
+  extensions += "GL_CHROMIUM_post_sub_buffer";
   return extensions;
 }
 
@@ -477,11 +506,11 @@ void TransportDIBImageTransportSurface::OnBuffersSwappedACK() {
 }
 
 void TransportDIBImageTransportSurface::OnPostSubBufferACK() {
-  NOTREACHED();
+  helper_->SetScheduled(true);
 }
 
 void TransportDIBImageTransportSurface::OnNewSurfaceACK(
-    uint64 surface_id,
+    uint64 surface_handle,
     TransportDIB::Handle shm_handle) {
   helper_->SetScheduled(true);
 
@@ -522,7 +551,7 @@ void TransportDIBImageTransportSurface::OnResize(gfx::Size size) {
   GpuHostMsg_AcceleratedSurfaceNew_Params params;
   params.width = size_.width();
   params.height = size_.height();
-  params.surface_id = next_id_++;
+  params.surface_handle = next_handle_++;
   params.create_transport_dib = true;
   helper_->SendAcceleratedSurfaceNew(params);
 
@@ -534,27 +563,18 @@ void TransportDIBImageTransportSurface::OnResize(gfx::Size size) {
 // static
 scoped_refptr<gfx::GLSurface> ImageTransportSurface::CreateSurface(
     GpuChannelManager* manager,
-    int32 render_view_id,
-    int32 renderer_id,
-    int32 command_buffer_id,
+    GpuCommandBufferStub* stub,
     gfx::PluginWindowHandle handle) {
   scoped_refptr<gfx::GLSurface> surface;
   IOSurfaceSupport* io_surface_support = IOSurfaceSupport::Initialize();
 
   switch (gfx::GetGLImplementation()) {
     case gfx::kGLImplementationDesktopGL:
+    case gfx::kGLImplementationAppleGL:
       if (!io_surface_support) {
-        surface = new TransportDIBImageTransportSurface(manager,
-                                                        render_view_id,
-                                                        renderer_id,
-                                                        command_buffer_id,
-                                                        handle);
+        surface = new TransportDIBImageTransportSurface(manager, stub, handle);
       } else {
-        surface = new IOSurfaceImageTransportSurface(manager,
-                                                     render_view_id,
-                                                     renderer_id,
-                                                     command_buffer_id,
-                                                     handle);
+        surface = new IOSurfaceImageTransportSurface(manager, stub, handle);
       }
       break;
     default:

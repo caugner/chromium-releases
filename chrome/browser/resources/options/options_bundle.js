@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -21,7 +21,9 @@
   <include src="chromeos/internet_options.js"></include>
   <include src="chromeos/internet_detail.js"></include>
   <include src="chromeos/system_options.js"></include>
-  <include src="chromeos/bluetooth_list_element.js"></include>
+  <include src="chromeos/bluetooth_device_list.js"></include>
+  <include src="chromeos/bluetooth_add_device_overlay.js"></include>
+  <include src="chromeos/bluetooth_pair_device_overlay.js"></include>
   <include src="chromeos/accounts_options.js"></include>
   <include src="chromeos/proxy_options.js"></include>
   <include src="chromeos/proxy_rules_list.js"></include>
@@ -35,6 +37,8 @@
   var InternetOptions = options.InternetOptions;
   var DetailsInternetPage = options.internet.DetailsInternetPage;
   var SystemOptions = options.SystemOptions;
+  var BluetoothOptions = options.BluetoothOptions;
+  var BluetoothPairing = options.BluetoothPairing;
 </if>
 <if expr="not pp_ifdef('win32') and not pp_ifdef('darwin')">
   <include src="certificate_tree.js"></include>
@@ -51,7 +55,6 @@
 </if>
 <include src="advanced_options.js"></include>
 <include src="alert_overlay.js"></include>
-<include src="autocomplete_list.js"></include>
 <include src="autofill_edit_address_overlay.js"></include>
 <include src="autofill_edit_creditcard_overlay.js"></include>
 <include src="autofill_options_list.js"></include>
@@ -68,12 +71,12 @@
 <include src="extension_settings.js"></include>
 <include src="font_settings.js"></include>
 <if expr="pp_ifdef('enable_register_protocol_handler')">
-  <include src="handler_options.js"></script>
-  <include src="handler_options_list.js"></script>
+  <include src="handler_options.js"></include>
+  <include src="handler_options_list.js"></include>
 </if>
 <include src="import_data_overlay.js"></include>
 <include src="instant_confirm_overlay.js"></include>
-<if expr="pp_ifdef('enable_web_intents')">
+<if expr="pp_ifdef('enable_web_intents_tag')">
   <include src="intents_list.js"></include>
   <include src="intents_view.js"></include>
 </if>

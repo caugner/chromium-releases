@@ -4,8 +4,6 @@
 
 #include "chrome/browser/sync/backend_migrator.h"
 
-#include <algorithm>
-
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "base/tracked_objects.h"
@@ -49,19 +47,13 @@ BackendMigrator::~BackendMigrator() {
 
 #define SDVLOG(verbose_level) DVLOG(verbose_level) << name_ << ": "
 
-void BackendMigrator::MigrateTypes(const syncable::ModelTypeSet& types) {
+void BackendMigrator::MigrateTypes(syncable::ModelTypeSet types) {
   const ModelTypeSet old_to_migrate = to_migrate_;
-  {
-    ModelTypeSet temp;
-    std::set_union(to_migrate_.begin(), to_migrate_.end(),
-                   types.begin(), types.end(),
-                   std::inserter(temp, temp.end()));
-    std::swap(temp, to_migrate_);
-  }
+  to_migrate_.PutAll(types);
   SDVLOG(1) << "MigrateTypes called with " << ModelTypeSetToString(types)
-            << ", old_to_migrate = " << ModelTypeSetToString(old_to_migrate)
-            << ", to_migrate_ = " << ModelTypeSetToString(to_migrate_);
-  if (old_to_migrate == to_migrate_) {
+           << ", old_to_migrate = " << ModelTypeSetToString(old_to_migrate)
+          << ", to_migrate_ = " << ModelTypeSetToString(to_migrate_);
+  if (old_to_migrate.Equals(to_migrate_)) {
     SDVLOG(1) << "MigrateTypes called with no new types; ignoring";
     return;
   }
@@ -111,13 +103,9 @@ bool BackendMigrator::TryStart() {
 void BackendMigrator::RestartMigration() {
   // We'll now disable any running types that need to be migrated.
   ChangeState(DISABLING_TYPES);
-  ModelTypeSet full_set;
-  service_->GetPreferredDataTypes(&full_set);
-  ModelTypeSet difference;
-  std::set_difference(full_set.begin(), full_set.end(),
-                      to_migrate_.begin(), to_migrate_.end(),
-                      std::inserter(difference, difference.end()));
-  bool configure_with_nigori = to_migrate_.count(syncable::NIGORI) == 0;
+  const ModelTypeSet full_set = service_->GetPreferredDataTypes();
+  const ModelTypeSet difference = Difference(full_set, to_migrate_);
+  bool configure_with_nigori = !to_migrate_.Has(syncable::NIGORI);
   SDVLOG(1) << "BackendMigrator disabling types "
             << ModelTypeSetToString(to_migrate_) << "; configuring "
             << ModelTypeSetToString(difference)
@@ -162,7 +150,7 @@ syncable::ModelTypeSet GetUnsyncedDataTypes(sync_api::UserShare* user_share) {
     sync_pb::DataTypeProgressMarker progress_marker;
     trans.GetLookup()->GetDownloadProgress(type, &progress_marker);
     if (progress_marker.token().empty()) {
-      unsynced_data_types.insert(type);
+      unsynced_data_types.Put(type);
     }
   }
   return unsynced_data_types;
@@ -184,14 +172,11 @@ void BackendMigrator::OnConfigureDone(
 
   DCHECK_GT(state_, WAITING_TO_START);
 
-  ModelTypeSet intersection;
-  std::set_intersection(
-      result.requested_types.begin(), result.requested_types.end(),
-      to_migrate_.begin(), to_migrate_.end(),
-      std::inserter(intersection, intersection.end()));
+  const ModelTypeSet intersection =
+      Intersection(result.requested_types, to_migrate_);
   // This intersection check is to determine if our disable request
   // was interrupted by a user changing preferred types.
-  if (state_ == DISABLING_TYPES && !intersection.empty()) {
+  if (state_ == DISABLING_TYPES && !intersection.Empty()) {
     SDVLOG(1) << "Disable request interrupted by user changing types";
     RestartMigration();
     return;
@@ -207,15 +192,14 @@ void BackendMigrator::OnConfigureDone(
     // migration as the type will still be enabled on restart.
     SLOG(WARNING) << "Unable to migrate, configuration failed!";
     ChangeState(IDLE);
-    to_migrate_.clear();
+    to_migrate_.Clear();
     return;
   }
 
   if (state_ == DISABLING_TYPES) {
-    const syncable::ModelTypeSet& unsynced_types =
+    const syncable::ModelTypeSet unsynced_types =
         GetUnsyncedDataTypes(user_share_);
-    if (!std::includes(unsynced_types.begin(), unsynced_types.end(),
-                       to_migrate_.begin(), to_migrate_.end())) {
+    if (!unsynced_types.HasAll(to_migrate_)) {
       SLOG(WARNING) << "Set of unsynced types: "
                     << syncable::ModelTypeSetToString(unsynced_types)
                     << " does not contain types to migrate: "
@@ -227,8 +211,7 @@ void BackendMigrator::OnConfigureDone(
     ChangeState(REENABLING_TYPES);
     // Don't use |to_migrate_| for the re-enabling because the user
     // may have chosen to disable types during the migration.
-    ModelTypeSet full_set;
-    service_->GetPreferredDataTypes(&full_set);
+    const ModelTypeSet full_set = service_->GetPreferredDataTypes();
     SDVLOG(1) << "BackendMigrator re-enabling types: "
               << syncable::ModelTypeSetToString(full_set);
     manager_->Configure(full_set, sync_api::CONFIGURE_REASON_MIGRATION);
@@ -238,7 +221,7 @@ void BackendMigrator::OnConfigureDone(
 
     SDVLOG(1) << "BackendMigrator: Migration complete for: "
               << syncable::ModelTypeSetToString(to_migrate_);
-    to_migrate_.clear();
+    to_migrate_.Clear();
   }
 }
 

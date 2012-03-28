@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,6 +46,11 @@ class ProfileKeyedServiceFactory {
   // attached to a single |profile|.
   void RegisterUserPrefsOnProfile(Profile* profile);
 
+#ifndef NDEBUG
+  // Returns our name. We don't keep track of this in release mode.
+  const char* name() const { return service_name_; }
+#endif
+
  protected:
   // ProfileKeyedServiceFactories must communicate with a
   // ProfileDependencyManager. For all non-test code, write your subclass
@@ -53,15 +58,18 @@ class ProfileKeyedServiceFactory {
   //
   //   MyServiceFactory::MyServiceFactory()
   //     : ProfileKeyedServiceFactory(
+  //         "MyService",
   //         ProfileDependencyManager::GetInstance())
   //   {}
-  explicit ProfileKeyedServiceFactory(ProfileDependencyManager* manager);
+  explicit ProfileKeyedServiceFactory(const char* name,
+                                      ProfileDependencyManager* manager);
   virtual ~ProfileKeyedServiceFactory();
 
   // Common implementation that maps |profile| to some service object. Deals
   // with incognito profiles per subclass instructions with
-  // ServiceActiveInIncognito(). If |create| is true, the service will be
-  // created using BuildServiceInstanceFor() if it doesn't already exist.
+  // ServiceRedirectedInIncognito() and ServiceHasOwnInstanceInIncognito().
+  // If |create| is true, the service will be created using
+  // BuildServiceInstanceFor() if it doesn't already exist.
   ProfileKeyedService* GetServiceForProfile(Profile* profile, bool create);
 
   // The main public interface for declaring dependencies between services
@@ -131,6 +139,13 @@ class ProfileKeyedServiceFactory {
   // this will always be ProfileDependencyManager::GetInstance(), but unit
   // tests will want to use their own copy.
   ProfileDependencyManager* dependency_manager_;
+
+#if !defined(NDEBUG)
+  // A static string passed in to our constructor. Should be unique across all
+  // services. This is used only for debugging in debug mode. (We can print
+  // pretty graphs with GraphViz with this information.)
+  const char* service_name_;
+#endif
 };
 
 #endif  // CHROME_BROWSER_PROFILES_PROFILE_KEYED_SERVICE_FACTORY_H_

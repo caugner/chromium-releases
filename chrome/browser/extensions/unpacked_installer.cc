@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,10 @@
 #include "chrome/browser/extensions/extension_install_ui.h"
 #include "chrome/browser/extensions/extension_prefs.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/extensions/permissions_updater.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_file_util.h"
+#include "chrome/common/string_ordinal.h"
 
 using content::BrowserThread;
 
@@ -28,8 +30,8 @@ class SimpleExtensionLoadPrompt : public ExtensionInstallUI::Delegate {
   void ShowPrompt();
 
   // ExtensionInstallUI::Delegate
-  virtual void InstallUIProceed();
-  virtual void InstallUIAbort(bool user_initiated);
+  virtual void InstallUIProceed() OVERRIDE;
+  virtual void InstallUIAbort(bool user_initiated) OVERRIDE;
 
  private:
   base::WeakPtr<ExtensionService> service_weak_;
@@ -54,9 +56,12 @@ void SimpleExtensionLoadPrompt::ShowPrompt() {
 }
 
 void SimpleExtensionLoadPrompt::InstallUIProceed() {
-  if (service_weak_.get())
+  if (service_weak_.get()) {
+    extensions::PermissionsUpdater perms_updater(service_weak_->profile());
+    perms_updater.GrantActivePermissions(extension_);
     service_weak_->OnExtensionInstalled(
-        extension_, false, -1);  // Not from web store.
+        extension_, false, StringOrdinal());  // Not from web store.
+  }
   delete this;
 }
 
@@ -194,15 +199,12 @@ void UnpackedInstaller::OnLoaded(
   CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!service_weak_.get())
     return;
-  const ExtensionList* disabled_extensions =
+  const ExtensionSet* disabled_extensions =
       service_weak_->disabled_extensions();
   if (service_weak_->show_extensions_prompts() &&
       prompt_for_plugins_ &&
       !extension->plugins().empty() &&
-      std::find(disabled_extensions->begin(),
-                disabled_extensions->end(),
-                extension) !=
-      disabled_extensions->end()) {
+      !disabled_extensions->Contains(extension->id())) {
     SimpleExtensionLoadPrompt* prompt = new SimpleExtensionLoadPrompt(
         service_weak_->profile(),
         service_weak_,
@@ -210,9 +212,12 @@ void UnpackedInstaller::OnLoaded(
     prompt->ShowPrompt();
     return;  // continues in SimpleExtensionLoadPrompt::InstallUI*
   }
+
+  PermissionsUpdater perms_updater(service_weak_->profile());
+  perms_updater.GrantActivePermissions(extension);
   service_weak_->OnExtensionInstalled(extension,
                                       false,  // Not from web store.
-                                      -1);
+                                      StringOrdinal());
 }
 
 }  // namespace extensions

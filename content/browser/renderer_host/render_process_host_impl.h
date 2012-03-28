@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,13 +68,9 @@ class CONTENT_EXPORT RenderProcessHostImpl
   virtual void DumpHandles() OVERRIDE;
   virtual base::ProcessHandle GetHandle() OVERRIDE;
   virtual TransportDIB* GetTransportDIB(TransportDIB::Id dib_id) OVERRIDE;
-  virtual void SetCompositingSurface(
-      int render_widget_id,
-      gfx::PluginWindowHandle compositing_surface) OVERRIDE;
   virtual content::BrowserContext* GetBrowserContext() const OVERRIDE;
   virtual int GetID() const OVERRIDE;
   virtual bool HasConnection() const OVERRIDE;
-  virtual void UpdateMaxPageID(int32 page_id) OVERRIDE;
   virtual IPC::Channel::Listener* GetListenerByID(int routing_id) OVERRIDE;
   virtual void SetIgnoreInputEvents(bool ignore_input_events) OVERRIDE;
   virtual bool IgnoreInputEvents() const OVERRIDE;
@@ -92,7 +88,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   virtual bool FastShutdownForPageCount(size_t count) OVERRIDE;
   virtual bool FastShutdownStarted() const OVERRIDE;
   virtual base::TimeDelta GetChildProcessIdleTime() const OVERRIDE;
-  virtual void UpdateAndSendMaxPageID(int32 page_id) OVERRIDE;
 
   // IPC::Channel::Sender via RenderProcessHost.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -120,6 +115,12 @@ class CONTENT_EXPORT RenderProcessHostImpl
   static void RegisterHost(int host_id, content::RenderProcessHost* host);
   static void UnregisterHost(int host_id);
 
+  // Returns true if the given host is suitable for launching a new view
+  // associated with the given browser context.
+  static bool IsSuitableHost(content::RenderProcessHost* host,
+                             content::BrowserContext* browser_context,
+                             const GURL& site_url);
+
  protected:
   // A proxy for our IPC::Channel that lives on the IO thread (see
   // browser_process.h)
@@ -128,9 +129,6 @@ class CONTENT_EXPORT RenderProcessHostImpl
   // The registered listeners. When this list is empty or all NULL, we should
   // delete ourselves
   IDMap<IPC::Channel::Listener> listeners_;
-
-  // The maximum page ID we've ever seen from the renderer process.
-  int32 max_page_id_;
 
   // True if fast shutdown has been performed on this RPH.
   bool fast_shutdown_started_;

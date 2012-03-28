@@ -1,19 +1,24 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/mac/mac_util.h"
 
 #import <Cocoa/Cocoa.h>
+#import <IOKit/IOKitLib.h>
 #include <string.h>
 #include <sys/utsname.h>
 
 #include "base/file_path.h"
 #include "base/logging.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
+#include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
+#include "base/memory/scoped_generic_obj.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/string_number_conversions.h"
+#include "base/string_piece.h"
 #include "base/sys_string_conversions.h"
 
 namespace base {
@@ -71,7 +76,7 @@ LSSharedFileListItemRef GetLoginItemForApp() {
   scoped_nsobject<NSArray> login_items_array(
       CFToNSCast(LSSharedFileListCopySnapshot(login_items, NULL)));
 
-  NSURL* url = [NSURL fileURLWithPath:[[NSBundle mainBundle] bundlePath]];
+  NSURL* url = [NSURL fileURLWithPath:[base::mac::MainBundle() bundlePath]];
 
   for(NSUInteger i = 0; i < [login_items_array count]; ++i) {
     LSSharedFileListItemRef item = reinterpret_cast<LSSharedFileListItemRef>(
@@ -216,7 +221,7 @@ void ActivateProcess(pid_t pid) {
   if (status == noErr) {
     SetFrontProcess(&process);
   } else {
-    DLOG(WARNING) << "Unable to get process for pid " << pid;
+    OSSTATUS_DLOG(WARNING, status) << "Unable to get process for pid " << pid;
   }
 }
 
@@ -224,7 +229,7 @@ bool AmIForeground() {
   ProcessSerialNumber foreground_psn = { 0 };
   OSErr err = GetFrontProcess(&foreground_psn);
   if (err != noErr) {
-    DLOG(WARNING) << "GetFrontProcess: " << err;
+    OSSTATUS_DLOG(WARNING, err) << "GetFrontProcess";
     return false;
   }
 
@@ -233,7 +238,7 @@ bool AmIForeground() {
   Boolean result = FALSE;
   err = SameProcess(&foreground_psn, &my_psn, &result);
   if (err != noErr) {
-    DLOG(WARNING) << "SameProcess: " << err;
+    OSSTATUS_DLOG(WARNING, err) << "SameProcess";
     return false;
   }
 
@@ -254,11 +259,9 @@ bool SetFileBackupExclusion(const FilePath& file_path) {
   OSStatus os_err =
       CSBackupSetItemExcluded(base::mac::NSToCFCast(file_url), TRUE, FALSE);
   if (os_err != noErr) {
-    DLOG(WARNING) << "Failed to set backup exclusion for file '"
-                 << file_path.value().c_str() << "' with error "
-                 << os_err << " (" << GetMacOSStatusErrorString(os_err)
-                 << ": " << GetMacOSStatusCommentString(os_err)
-                 << ").  Continuing.";
+    OSSTATUS_DLOG(WARNING, os_err)
+        << "Failed to set backup exclusion for file '"
+        << file_path.value().c_str() << "'";
   }
   return os_err == noErr;
 }
@@ -349,7 +352,8 @@ void SetProcessName(CFStringRef process_name) {
                                                ls_display_name_key,
                                                process_name,
                                                NULL /* optional out param */);
-  DLOG_IF(ERROR, err) << "Call to set process name failed, err " << err;
+  OSSTATUS_DLOG_IF(ERROR, err != noErr, err)
+      << "Call to set process name failed";
 }
 
 // Converts a NSImage to a CGImageRef.  Normally, the system frameworks can do
@@ -415,7 +419,7 @@ void AddToLoginItems(bool hide_on_startup) {
     LSSharedFileListItemRemove(login_items, item);
   }
 
-  NSURL* url = [NSURL fileURLWithPath:[[NSBundle mainBundle] bundlePath]];
+  NSURL* url = [NSURL fileURLWithPath:[base::mac::MainBundle() bundlePath]];
 
   BOOL hide = hide_on_startup ? YES : NO;
   NSDictionary* properties =
@@ -521,7 +525,9 @@ int DarwinMajorVersionInternal() {
   int darwin_major_version = 0;
   char* dot = strchr(uname_info.release, '.');
   if (dot) {
-    if (!base::StringToInt(uname_info.release, dot, &darwin_major_version)) {
+    if (!base::StringToInt(base::StringPiece(uname_info.release,
+                                             dot - uname_info.release),
+                           &darwin_major_version)) {
       dot = NULL;
     }
   }
@@ -617,6 +623,59 @@ bool IsOSLaterThanLion() {
   return MacOSXMinorVersion() > LION_MINOR_VERSION;
 }
 #endif
+
+namespace {
+
+// ScopedGenericObj functor for IOObjectRelease().
+class ScopedReleaseIOObject {
+ public:
+  void operator()(io_object_t x) const {
+    IOObjectRelease(x);
+  }
+};
+
+}  // namespace
+
+std::string GetModelIdentifier() {
+  ScopedGenericObj<io_service_t, ScopedReleaseIOObject>
+      platform_expert(IOServiceGetMatchingService(
+          kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice")));
+  if (!platform_expert)
+    return "";
+  ScopedCFTypeRef<CFDataRef> model_data(
+      static_cast<CFDataRef>(IORegistryEntryCreateCFProperty(
+          platform_expert,
+          CFSTR("model"),
+          kCFAllocatorDefault,
+          0)));
+  if (!model_data)
+    return "";
+  return reinterpret_cast<const char*>(
+      CFDataGetBytePtr(model_data));
+}
+
+bool ParseModelIdentifier(const std::string& ident,
+                          std::string* type,
+                          int32* major,
+                          int32* minor) {
+  size_t number_loc = ident.find_first_of("0123456789");
+  if (number_loc == std::string::npos)
+    return false;
+  size_t comma_loc = ident.find(',', number_loc);
+  if (comma_loc == std::string::npos)
+    return false;
+  int32 major_tmp, minor_tmp;
+  std::string::const_iterator begin = ident.begin();
+  if (!StringToInt(
+          StringPiece(begin + number_loc, begin + comma_loc), &major_tmp) ||
+      !StringToInt(
+          StringPiece(begin + comma_loc + 1, ident.end()), &minor_tmp))
+    return false;
+  *type = ident.substr(0, number_loc);
+  *major = major_tmp;
+  *minor = minor_tmp;
+  return true;
+}
 
 }  // namespace mac
 }  // namespace base

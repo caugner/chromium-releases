@@ -62,7 +62,7 @@ bool NativeControlWin::ProcessMessage(UINT message,
 void NativeControlWin::OnEnabledChanged() {
   View::OnEnabledChanged();
   if (native_view())
-    EnableWindow(native_view(), IsEnabled());
+    EnableWindow(native_view(), enabled());
 }
 
 void NativeControlWin::ViewHierarchyChanged(bool is_add, View* parent,
@@ -79,18 +79,18 @@ void NativeControlWin::ViewHierarchyChanged(bool is_add, View* parent,
 void NativeControlWin::VisibilityChanged(View* starting_from, bool is_visible) {
   // We might get called due to visibility changes at any point in the
   // hierarchy, lets check whether we are really visible or not.
-  bool visible = IsVisibleInRootView();
-  if (!visible && native_view()) {
+  bool is_drawn = IsDrawn();
+  if (!is_drawn && native_view()) {
     // We destroy the child control HWND when we become invisible because of the
     // performance cost of maintaining many HWNDs.
     HWND hwnd = native_view();
     Detach();
     DestroyWindow(hwnd);
-  } else if (visible && !native_view()) {
+  } else if (is_drawn && !native_view()) {
     if (GetWidget())
       CreateNativeControl();
   }
-  if (visible) {
+  if (is_drawn) {
     // The view becomes visible after native control is created.
     // Layout now.
     Layout();
@@ -146,7 +146,7 @@ void NativeControlWin::NativeControlCreated(HWND native_control) {
   // native_view() is now valid.
 
   // Update the newly created HWND with any resident enabled state.
-  EnableWindow(native_view(), IsEnabled());
+  EnableWindow(native_view(), enabled());
 
   // This message ensures that the focus border is shown.
   SendMessage(native_view(), WM_CHANGEUISTATE,

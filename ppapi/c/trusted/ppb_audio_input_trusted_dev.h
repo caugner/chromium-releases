@@ -1,9 +1,11 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From trusted/ppb_audio_input_trusted_dev.idl modified Mon Nov 21 12:37:35 2011. */
+/* From trusted/ppb_audio_input_trusted_dev.idl,
+ *   modified Wed Jan  4 11:09:00 2012.
+ */
 
 #ifndef PPAPI_C_TRUSTED_PPB_AUDIO_INPUT_TRUSTED_DEV_H_
 #define PPAPI_C_TRUSTED_PPB_AUDIO_INPUT_TRUSTED_DEV_H_
@@ -35,7 +37,7 @@
  * resource; most of the PPB_AudioInput interface is also usable on this
  * resource.
  */
-struct PPB_AudioInputTrusted_Dev {
+struct PPB_AudioInputTrusted_Dev_0_1 {
   /** Returns an audio input resource. */
   PP_Resource (*CreateTrusted)(PP_Instance instance);
   /**
@@ -60,6 +62,8 @@ struct PPB_AudioInputTrusted_Dev {
                              int* shm_handle,
                              uint32_t* shm_size);
 };
+
+typedef struct PPB_AudioInputTrusted_Dev_0_1 PPB_AudioInputTrusted_Dev;
 /**
  * @}
  */

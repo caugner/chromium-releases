@@ -8,14 +8,15 @@
 #include "base/metrics/histogram.h"
 #include "base/process.h"
 #include "base/shared_memory.h"
-#include "content/browser/renderer_host/media/audio_common.h"
 #include "content/browser/renderer_host/media/audio_input_device_manager.h"
 #include "content/browser/renderer_host/media/audio_input_sync_writer.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/resource_context.h"
 #include "content/common/media/audio_messages.h"
 #include "ipc/ipc_logging.h"
+#include "media/audio/audio_util.h"
 
+using content::BrowserMessageFilter;
 using content::BrowserThread;
 
 AudioInputRendererHost::AudioEntry::AudioEntry()
@@ -220,7 +221,8 @@ void AudioInputRendererHost::OnCreateStream(
 
   // Select the hardware packet size if not specified.
   if (!audio_params.samples_per_packet) {
-    audio_params.samples_per_packet = SelectSamplesPerPacket(audio_params);
+    audio_params.samples_per_packet =
+        media::SelectSamplesPerPacket(audio_params.sample_rate);
   }
   uint32 packet_size = audio_params.GetPacketSize();
 
@@ -246,6 +248,7 @@ void AudioInputRendererHost::OnCreateStream(
   // entry and construct an AudioInputController.
   entry->writer.reset(writer.release());
   entry->controller = media::AudioInputController::CreateLowLatency(
+      resource_context_->audio_manager(),
       this,
       audio_params,
       device_id,

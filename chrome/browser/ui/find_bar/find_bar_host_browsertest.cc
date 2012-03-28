@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,10 +20,10 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "net/test/test_server.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/keycodes/keyboard_codes.h"
@@ -37,6 +37,9 @@
 #elif defined(OS_MACOSX)
 #include "chrome/browser/ui/cocoa/find_bar/find_bar_bridge.h"
 #endif
+
+using content::NavigationController;
+using content::WebContents;
 
 const std::string kSimplePage = "404_is_enough_for_us.html";
 const std::string kFramePage = "files/find_in_page/frames.html";
@@ -221,12 +224,12 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindInPageFrames) {
 }
 
 // Specifying a prototype so that we can add the WARN_UNUSED_RESULT attribute.
-bool FocusedOnPage(TabContents* tab_contents, std::string* result)
+bool FocusedOnPage(WebContents* web_contents, std::string* result)
     WARN_UNUSED_RESULT;
 
-bool FocusedOnPage(TabContents* tab_contents, std::string* result) {
+bool FocusedOnPage(WebContents* web_contents, std::string* result) {
   return ui_test_utils::ExecuteJavaScriptAndExtractString(
-      tab_contents->render_view_host(),
+      web_contents->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(getFocusedElement());",
       result);
@@ -247,7 +250,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindInPageEndState) {
 
   // Verify that nothing has focus.
   std::string result;
-  ASSERT_TRUE(FocusedOnPage(tab_contents->tab_contents(), &result));
+  ASSERT_TRUE(FocusedOnPage(tab_contents->web_contents(), &result));
   ASSERT_STREQ("{nothing focused}", result.c_str());
 
   // Search for a text that exists within a link on the page.
@@ -261,7 +264,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindInPageEndState) {
       find_tab_helper()->StopFinding(FindBarController::kKeepSelection);
 
   // Verify that the link is focused.
-  ASSERT_TRUE(FocusedOnPage(tab_contents->tab_contents(), &result));
+  ASSERT_TRUE(FocusedOnPage(tab_contents->web_contents(), &result));
   EXPECT_STREQ("link1", result.c_str());
 
   // Search for a text that exists within a link on the page.
@@ -271,7 +274,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindInPageEndState) {
 
   // Move the selection to link 1, after searching.
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      tab_contents->render_view_host(),
+      tab_contents->web_contents()->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(selectLink1());",
       &result));
@@ -281,7 +284,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindInPageEndState) {
       find_tab_helper()->StopFinding(FindBarController::kKeepSelection);
 
   // Verify that link2 is not focused.
-  ASSERT_TRUE(FocusedOnPage(tab_contents->tab_contents(), &result));
+  ASSERT_TRUE(FocusedOnPage(tab_contents->web_contents(), &result));
   EXPECT_STREQ("", result.c_str());
 }
 
@@ -345,7 +348,7 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest,
   // Move the selection to link 1, after searching.
   std::string result;
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractString(
-      tab->render_view_host(),
+      tab->web_contents()->GetRenderViewHost(),
       L"",
       L"window.domAutomationController.send(selectLink1());",
       &result));
@@ -588,7 +591,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, FindDisappearOnNavigate) {
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
       content::Source<NavigationController>(
-          &browser()->GetSelectedTabContentsWrapper()->controller()));
+          &browser()->GetSelectedTabContentsWrapper()->web_contents()->
+              GetController()));
   browser()->Reload(CURRENT_TAB);
   observer.Wait();
 
@@ -1113,7 +1117,8 @@ IN_PROC_BROWSER_TEST_F(FindInPageControllerTest, ActivateLinkNavigatesPage) {
   // End the find session, click on the link.
   ui_test_utils::WindowedNotificationObserver observer(
       content::NOTIFICATION_LOAD_STOP,
-      content::Source<NavigationController>(&tab->controller()));
+      content::Source<NavigationController>(
+          &tab->web_contents()->GetController()));
   tab->find_tab_helper()->StopFinding(FindBarController::kActivateSelection);
   observer.Wait();
 }

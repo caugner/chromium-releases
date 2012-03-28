@@ -20,7 +20,7 @@
         'build_glibc': 0,
         'build_newlib': 1,
         'sources': [
-          '<@(cpp_sources)',
+          '<@(cpp_source_files)',
           'cpp/module_embedder.h',
           'cpp/ppp_entrypoints.cc',
         ],
@@ -50,16 +50,16 @@
           '-lppapi',
         ],
         'extra_deps64': [
-          '<(PRODUCT_DIR)/obj/gen/tc_newlib/lib64/libppapi_cpp.a',
-          '<(PRODUCT_DIR)/obj/gen/tc_newlib/lib64/libppapi.a',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libppapi_cpp.a',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib64/libppapi.a',
         ],
         'extra_deps32': [
-          '<(PRODUCT_DIR)/obj/gen/tc_newlib/lib32/libppapi_cpp.a',
-          '<(PRODUCT_DIR)/obj/gen/tc_newlib/lib32/libppapi.a',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libppapi_cpp.a',
+          '<(SHARED_INTERMEDIATE_DIR)/tc_newlib/lib32/libppapi.a',
         ],
         'sources': [
-          '<@(test_sources_common)',
-          '<@(test_sources_nacl)',
+          '<@(test_common_source_files)',
+          '<@(test_nacl_source_files)',
         ],
       },
     },

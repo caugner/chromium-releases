@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,7 @@
 #include "base/memory/ref_counted.h"
 #include "ipc/ipc_message.h"
 
+class AudioManager;
 class AutomationProviderList;
 class BackgroundModeManager;
 class ChromeNetLog;
@@ -38,15 +39,10 @@ class Profile;
 class ProfileManager;
 class ResourceDispatcherHost;
 class SafeBrowsingService;
-class SidebarManager;
 class StatusTray;
 class TabCloseableStateWatcher;
 class ThumbnailGenerator;
 class WatchDogThread;
-
-namespace base {
-class Thread;
-}
 
 #if defined(OS_CHROMEOS)
 namespace browser {
@@ -87,6 +83,9 @@ class BrowserProcess {
   BrowserProcess();
   virtual ~BrowserProcess();
 
+  // Called when the ResourceDispatcherHost object is created by content.
+  virtual void ResourceDispatcherHostCreated() = 0;
+
   // Invoked when the user is logging out/shutting down. When logging off we may
   // not have enough time to do a normal shutdown. This method is invoked prior
   // to normal shutdown and saves any state that must be saved before we are
@@ -94,12 +93,9 @@ class BrowserProcess {
   virtual void EndSession() = 0;
 
   // Services: any of these getters may return NULL
-  virtual ResourceDispatcherHost* resource_dispatcher_host() = 0;
-
   virtual MetricsService* metrics_service() = 0;
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
-  virtual SidebarManager* sidebar_manager() = 0;
   virtual ui::Clipboard* clipboard() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
 
@@ -114,34 +110,18 @@ class BrowserProcess {
   // Returns the manager for desktop notifications.
   virtual NotificationUIManager* notification_ui_manager() = 0;
 
-  // Returns the thread that we perform I/O coordination on (network requests,
-  // communication with renderers, etc.
-  // NOTE: You should ONLY use this to pass to IPC or other objects which must
-  // need a MessageLoop*.  If you just want to post a task, use
-  // BrowserThread::PostTask (or other variants) as they take care of checking
-  // that a thread is still alive, race conditions, lifetime differences etc.
-  // If you still must use this check the return value for NULL.
+  // Returns the state object for the thread that we perform I/O
+  // coordination on (network requests, communication with renderers,
+  // etc.
+  //
+  // Can be NULL close to startup and shutdown.
+  //
+  // NOTE: If you want to post a task to the IO thread, use
+  // BrowserThread::PostTask (or other variants).
   virtual IOThread* io_thread() = 0;
-
-  // Returns the thread that we perform random file operations on. For code
-  // that wants to do I/O operations (not network requests or even file: URL
-  // requests), this is the thread to use to avoid blocking the UI thread.
-  // It might be nicer to have a thread pool for this kind of thing.
-  virtual base::Thread* file_thread() = 0;
-
-  // Returns the thread that is used for database operations such as the web
-  // database. History has its own thread since it has much higher traffic.
-  virtual base::Thread* db_thread() = 0;
 
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
-
-#if defined(OS_CHROMEOS)
-  // Returns thread for websocket to TCP proxy.
-  // TODO(dilmah): remove this thread.  Instead provide this functionality via
-  // hooks into websocket bridge layer.
-  virtual base::Thread* web_socket_proxy_thread() = 0;
-#endif
 
   virtual policy::BrowserPolicyConnector* browser_policy_connector() = 0;
 
@@ -221,6 +201,8 @@ class BrowserProcess {
   virtual ComponentUpdateService* component_updater() = 0;
 
   virtual CRLSetFetcher* crl_set_fetcher() = 0;
+
+  virtual AudioManager* audio_manager() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserProcess);

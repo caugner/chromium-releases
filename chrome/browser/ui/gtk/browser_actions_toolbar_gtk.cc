@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
+#include "base/message_loop.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_browser_event_router.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
@@ -30,7 +31,6 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/theme_resources.h"
@@ -308,8 +308,9 @@ class BrowserActionButton : public content::NotificationObserver,
       return FALSE;
 
     gfx::CanvasSkiaPaint canvas(event, false);
-    gfx::Rect bounding_rect(widget->allocation);
-    action->PaintBadge(&canvas, bounding_rect, tab_id);
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    action->PaintBadge(&canvas, gfx::Rect(allocation), tab_id);
     return FALSE;
   }
 
@@ -583,7 +584,11 @@ void BrowserActionsToolbarGtk::HidePopup() {
 
 void BrowserActionsToolbarGtk::AnimateToShowNIcons(int count) {
   desired_width_ = WidthForIconCount(count);
-  start_width_ = button_hbox_->allocation.width;
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(button_hbox_.get(), &allocation);
+  start_width_ = allocation.width;
+
   resize_animation_.Reset();
   resize_animation_.Show();
 }
@@ -762,8 +767,12 @@ gboolean BrowserActionsToolbarGtk::OnDragMotion(GtkWidget* widget,
   if (!drag_button_)
     return FALSE;
 
-  if (base::i18n::IsRTL())
-    x = widget->allocation.width - x;
+  if (base::i18n::IsRTL()) {
+    GtkAllocation allocation;
+    gtk_widget_get_allocation(widget, &allocation);
+    x = allocation.width - x;
+  }
+
   drop_index_ = x < kButtonWidth ? 0 : x / (kButtonWidth + kButtonPadding);
 
   // We will go ahead and reorder the child in order to provide visual feedback
@@ -829,10 +838,18 @@ gboolean BrowserActionsToolbarGtk::OnGripperMotionNotify(
 
   // Calculate how much the user dragged the gripper and subtract that off the
   // button container's width.
-  int distance_dragged = base::i18n::IsRTL() ?
-      -event->x :
-      event->x - widget->allocation.width;
-  gint new_width = button_hbox_->allocation.width - distance_dragged;
+  int distance_dragged;
+  if (base::i18n::IsRTL()) {
+    distance_dragged = -event->x;
+  } else {
+    GtkAllocation widget_allocation;
+    gtk_widget_get_allocation(widget, &widget_allocation);
+    distance_dragged = event->x - widget_allocation.width;
+  }
+
+  GtkAllocation button_hbox_allocation;
+  gtk_widget_get_allocation(button_hbox_.get(), &button_hbox_allocation);
+  gint new_width = button_hbox_allocation.width - distance_dragged;
   SetButtonHBoxWidth(new_width);
 
   return FALSE;
@@ -864,8 +881,10 @@ gboolean BrowserActionsToolbarGtk::OnGripperLeaveNotify(
 
 gboolean BrowserActionsToolbarGtk::OnGripperButtonRelease(
     GtkWidget* gripper, GdkEventButton* event) {
-  gfx::Rect gripper_rect(0, 0,
-                         gripper->allocation.width, gripper->allocation.height);
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(gripper, &allocation);
+  gfx::Rect gripper_rect(0, 0, allocation.width, allocation.height);
+
   gfx::Point release_point(event->x, event->y);
   if (!gripper_rect.Contains(release_point))
     gdk_window_set_cursor(gtk_widget_get_window(gripper), NULL);

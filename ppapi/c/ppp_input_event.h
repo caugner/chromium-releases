@@ -1,9 +1,9 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From ppp_input_event.idl modified Wed Aug 17 11:16:34 2011. */
+/* From ppp_input_event.idl modified Mon Dec 19 19:44:12 2011. */
 
 #ifndef PPAPI_C_PPP_INPUT_EVENT_H_
 #define PPAPI_C_PPP_INPUT_EVENT_H_
@@ -27,7 +27,7 @@
  * @addtogroup Interfaces
  * @{
  */
-struct PPP_InputEvent {
+struct PPP_InputEvent_0_1 {
   /**
    * Function for receiving input events from the browser.
    *
@@ -63,7 +63,7 @@ struct PPP_InputEvent {
    * handler) for mouse events. Otherwise, the instance will not receive focus
    * and keyboard events will not be sent.
    *
-   * \see PPB_InputEvent.ReqeustInputEvents and
+   * \see PPB_InputEvent.RequestInputEvents and
    * PPB_InputEvent.RequestFilteringInputEvents
    *
    * @return PP_TRUE if the event was handled, PP_FALSE if not. If you have
@@ -74,6 +74,8 @@ struct PPP_InputEvent {
    */
   PP_Bool (*HandleInputEvent)(PP_Instance instance, PP_Resource input_event);
 };
+
+typedef struct PPP_InputEvent_0_1 PPP_InputEvent;
 /**
  * @}
  */

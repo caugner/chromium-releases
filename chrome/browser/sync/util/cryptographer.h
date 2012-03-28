@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
+#include "chrome/browser/sync/protocol/encryption.pb.h"
 #include "chrome/browser/sync/protocol/nigori_specifics.pb.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "chrome/browser/sync/util/nigori.h"
@@ -62,7 +63,7 @@ class Cryptographer {
     // set of encrypted types is SensitiveTypes() and that the encrypt
     // everything flag is false.
     virtual void OnEncryptedTypesChanged(
-        const syncable::ModelTypeSet& encrypted_types,
+        syncable::ModelTypeSet encrypted_types,
         bool encrypt_everything) = 0;
 
    protected:
@@ -103,9 +104,12 @@ class Cryptographer {
   // key.
   bool CanDecryptUsingDefaultKey(const sync_pb::EncryptedData& encrypted) const;
 
-  // Encrypts |message| into |encrypted|. Returns true unless encryption fails.
-  // Note that encryption will fail if |message| isn't valid (eg. a required
-  // field isn't set).
+  // Encrypts |message| into |encrypted|. Does not overwrite |encrypted| if
+  // |message| already matches the decrypted data within |encrypted| and
+  // |encrypted| was encrypted with the current default key. This avoids
+  // unnecessarily modifying |encrypted| if the change had no practical effect.
+  // Returns true unless encryption fails or |message| isn't valid (e.g. a
+  // required field isn't set).
   bool Encrypt(const ::google::protobuf::MessageLite& message,
                sync_pb::EncryptedData* encrypted) const;
 
@@ -127,6 +131,11 @@ class Cryptographer {
   // Encrypt.
   bool AddKey(const KeyParams& params);
 
+  // Same as AddKey(..), but builds the new Nigori from a previously persisted
+  // bootstrap token. This can be useful when consuming a bootstrap token
+  // with a cryptographer that has already been initialized.
+  bool AddKeyFromBootstrapToken(const std::string restored_bootstrap_token);
+
   // Decrypts |encrypted| and uses its contents to initialize Nigori instances.
   // Returns true unless decryption of |encrypted| fails. The caller is
   // responsible for checking that CanDecrypt(encrypted) == true.
@@ -136,6 +145,12 @@ class Cryptographer {
   // DecryptPendingKeys. This should only be used if CanDecrypt(encrypted) ==
   // false.
   void SetPendingKeys(const sync_pb::EncryptedData& encrypted);
+
+  // Makes |pending_keys_| available to callers that may want to cache its
+  // value for later use on the UI thread. It is illegal to call this if the
+  // cryptographer has no pending keys. Like other calls that access the
+  // cryptographer, this method must be called from within a transaction.
+  const sync_pb::EncryptedData& GetPendingKeys() const;
 
   // Attempts to decrypt the set of keys that was copied in the previous call to
   // SetPendingKeys using |params|. Returns true if the pending keys were
@@ -184,7 +199,7 @@ class Cryptographer {
 
   // Forwards to MergeEncryptedTypes.
   void MergeEncryptedTypesForTest(
-      const syncable::ModelTypeSet& encrypted_types);
+      syncable::ModelTypeSet encrypted_types);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(CryptographerTest, PackUnpack);
@@ -192,7 +207,7 @@ class Cryptographer {
 
   // Merges the given set of encrypted types with the existing set and emits a
   // notification if necessary.
-  void MergeEncryptedTypes(const syncable::ModelTypeSet& encrypted_types);
+  void MergeEncryptedTypes(syncable::ModelTypeSet encrypted_types);
 
   void EmitEncryptedTypesChangedNotification();
 

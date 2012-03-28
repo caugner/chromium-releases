@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,52 +10,11 @@
  */
 cr.define('tracing', function() {
 
-  const palletteBase = [
-    {r: 138, g: 113, b: 152},
-    {r: 175, g: 112, b: 133},
-    {r: 127, g: 135, b: 225},
-    {r: 93, g: 81, b: 137},
-    {r: 116, g: 143, b: 119},
-    {r: 178, g: 214, b: 122},
-    {r: 87, g: 109, b: 147},
-    {r: 119, g: 155, b: 95},
-    {r: 114, g: 180, b: 160},
-    {r: 132, g: 85, b: 103},
-    {r: 157, g: 210, b: 150},
-    {r: 148, g: 94, b: 86},
-    {r: 164, g: 108, b: 138},
-    {r: 139, g: 191, b: 150},
-    {r: 110, g: 99, b: 145},
-    {r: 80, g: 129, b: 109},
-    {r: 125, g: 140, b: 149},
-    {r: 93, g: 124, b: 132},
-    {r: 140, g: 85, b: 140},
-    {r: 104, g: 163, b: 162},
-    {r: 132, g: 141, b: 178},
-    {r: 131, g: 105, b: 147},
-    {r: 135, g: 183, b: 98},
-    {r: 152, g: 134, b: 177},
-    {r: 141, g: 188, b: 141},
-    {r: 133, g: 160, b: 210},
-    {r: 126, g: 186, b: 148},
-    {r: 112, g: 198, b: 205},
-    {r: 180, g: 122, b: 195},
-    {r: 203, g: 144, b: 152}];
+  var pallette = tracing.getPallette();
+  var highlightIdBoost = tracing.getPalletteHighlightIdBoost();
 
-  function brighten(c) {
-    return {r: Math.min(255, c.r + Math.floor(c.r * 0.45)),
-      g: Math.min(255, c.g + Math.floor(c.g * 0.45)),
-      b: Math.min(255, c.b + Math.floor(c.b * 0.45))};
-  }
-  function colorToString(c) {
-    return 'rgb(' + c.r + ',' + c.g + ',' + c.b + ')';
-  }
-
-  const selectedIdBoost = palletteBase.length;
-
-  const pallette = palletteBase.concat(palletteBase.map(brighten)).
-      map(colorToString);
-
+  // TODO(jrg): possibly obsoleted with the elided string cache.
+  // Consider removing.
   var textWidthMap = { };
   function quickMeasureText(ctx, text) {
     var w = textWidthMap[text];
@@ -65,6 +24,16 @@ cr.define('tracing', function() {
     }
     return w;
   }
+
+  /**
+   * Cache for elided strings.
+   * Moved from the ElidedTitleCache protoype to a "global" for speed
+   * (variable reference is 100x faster).
+   *   key: String we wish to elide.
+   *   value: Another dict whose key is width
+   *     and value is an ElidedStringWidthPair.
+   */
+  var elidedTitleCacheDict = {};
 
   /**
    * A generic track that contains other tracks as its children.
@@ -199,6 +168,7 @@ cr.define('tracing', function() {
 
       this.tracks_.push(track);
       this.appendChild(track);
+      return track;
     },
 
     updateChildTracks_: function() {
@@ -206,6 +176,11 @@ cr.define('tracing', function() {
       this.textContent = '';
       this.tracks_ = [];
       if (this.thread_) {
+        if (this.thread_.cpuSlices) {
+          var track = this.addTrack_(this.thread_.cpuSlices);
+          track.height = '4px';
+        }
+
         for (var srI = 0; srI < this.thread_.nonNestedSubRows.length; ++srI) {
           this.addTrack_(this.thread_.nonNestedSubRows[srI]);
         }
@@ -213,9 +188,81 @@ cr.define('tracing', function() {
           this.addTrack_(this.thread_.subRows[srI]);
         }
         if (this.tracks_.length > 0) {
-          this.tracks_[0].heading = this.heading_;
-          this.tracks_[0].tooltip = this.tooltip_;
+          if (this.thread_.cpuSlices) {
+            this.tracks_[1].heading = this.heading_;
+            this.tracks_[1].tooltip = this.tooltip_;
+          } else {
+            this.tracks_[0].heading = this.heading_;
+            this.tracks_[0].tooltip = this.tooltip_;
+          }
         }
+      }
+    }
+  };
+
+  /**
+   * Visualizes a TimelineCpu using a series of of TimelineSliceTracks.
+   * @constructor
+   */
+  var TimelineCpuTrack = cr.ui.define(TimelineContainerTrack);
+  TimelineCpuTrack.prototype = {
+    __proto__: TimelineContainerTrack.prototype,
+
+    decorate: function() {
+      this.classList.add('timeline-thread-track');
+    },
+
+    get cpu(cpu) {
+      return this.cpu_;
+    },
+
+    set cpu(cpu) {
+      this.cpu_ = cpu;
+      this.updateChildTracks_();
+    },
+
+    get tooltip() {
+      return this.tooltip_;
+    },
+
+    set tooltip(value) {
+      this.tooltip_ = value;
+      this.updateChildTracks_();
+    },
+
+    get heading() {
+      return this.heading_;
+    },
+
+    set heading(h) {
+      this.heading_ = h;
+      this.updateChildTracks_();
+    },
+
+    get headingWidth() {
+      return this.headingWidth_;
+    },
+
+    set headingWidth(width) {
+      this.headingWidth_ = width;
+      this.updateChildTracks_();
+    },
+
+    updateChildTracks_: function() {
+      this.detach();
+      this.textContent = '';
+      this.tracks_ = [];
+      if (this.cpu_) {
+        var track = new TimelineSliceTrack();
+        track.slices = this.cpu_.slices;
+        track.headingWidth = this.headingWidth_;
+        track.viewport = this.viewport_;
+
+        this.tracks_.push(track);
+        this.appendChild(track);
+
+        this.tracks_[0].heading = this.heading_;
+        this.tracks_[0].tooltip = this.tooltip_;
       }
     }
   };
@@ -319,6 +366,59 @@ cr.define('tracing', function() {
 
   };
 
+   /**
+     * A pair representing an elided string and world-coordinate width
+     * to draw it.
+     * @constructor
+     */
+   function ElidedStringWidthPair(string, width) {
+     this.string = string;
+     this.width = width;
+   }
+
+    /**
+    * A cache for elided strings.
+    * @constructor
+    */
+   function ElidedTitleCache() {
+   }
+
+   ElidedTitleCache.prototype = {
+     /**
+      * Return elided text.
+      * @param {track} A timeline slice track or other object that defines
+      *                functions labelWidth() and labelWidthWorld().
+      * @param {pixWidth} Pixel width.
+      * @param {title} Original title text.
+      * @param {width} Drawn width in world coords.
+      * @param {sliceDuration} Where the title must fit (in world coords).
+      * @return {ElidedStringWidthPair} Elided string and width.
+      */
+     get: function(track, pixWidth, title, width, sliceDuration) {
+       var elidedDict = elidedTitleCacheDict[title];
+       if (!elidedDict) {
+         elidedDict = {};
+         elidedTitleCacheDict[title] = elidedDict;
+       }
+       var stringWidthPair = elidedDict[sliceDuration];
+       if (stringWidthPair === undefined) {
+          var newtitle = title;
+          var elided = false;
+          while (track.labelWidthWorld(newtitle, pixWidth) > sliceDuration) {
+            newtitle = newtitle.substring(0, newtitle.length * 0.75);
+            elided = true;
+          }
+          if (elided && newtitle.length > 3)
+            newtitle = newtitle.substring(0, newtitle.length - 3) + '...';
+         stringWidthPair = new ElidedStringWidthPair(
+                             newtitle,
+                             track.labelWidth(newtitle));
+         elidedDict[sliceDuration] = stringWidthPair;
+       }
+       return stringWidthPair;
+     },
+   };
+
   /**
    * A track that displays an array of TimelineSlice objects.
    * @constructor
@@ -331,8 +431,18 @@ cr.define('tracing', function() {
 
     __proto__: CanvasBasedTrack.prototype,
 
+   /**
+    * Should we elide text on trace labels?
+    * Without eliding, text that is too wide isn't drawn at all.
+    * Disable if you feel this causes a performance problem.
+    * This is a default value that can be overridden in tracks for testing.
+    * @const
+    */
+    SHOULD_ELIDE_TEXT: true,
+
     decorate: function() {
       this.classList.add('timeline-slice-track');
+      this.elidedTitleCache = new ElidedTitleCache();
     },
 
     get slices() {
@@ -342,6 +452,18 @@ cr.define('tracing', function() {
     set slices(slices) {
       this.slices_ = slices;
       this.invalidate();
+    },
+
+    set height(height) {
+      this.style.height = height;
+    },
+
+    labelWidth: function(title) {
+      return quickMeasureText(this.ctx_, title) + 2;
+    },
+
+    labelWidthWorld: function(title, pixWidth) {
+      return this.labelWidth(title) * pixWidth;
     },
 
     redraw: function() {
@@ -390,9 +512,8 @@ cr.define('tracing', function() {
         var x = slice.start;
         // Less than 0.001 causes short events to disappear when zoomed in.
         var w = Math.max(slice.duration, 0.001);
-        var colorId;
-        colorId = slice.selected ?
-            slice.colorId + selectedIdBoost :
+        var colorId = slice.selected ?
+            slice.colorId + highlightIdBoost :
             slice.colorId;
 
         if (w < pixWidth)
@@ -419,25 +540,37 @@ cr.define('tracing', function() {
       ctx.restore();
 
       // Labels.
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.font = '10px sans-serif';
-      ctx.strokeStyle = 'rgb(0,0,0)';
-      ctx.fillStyle = 'rgb(0,0,0)';
-      var quickDiscardThresshold = pixWidth * 20; // dont render until 20px wide
-      for (var i = 0; i < slices.length; ++i) {
-        var slice = slices[i];
-        if (slice.duration > quickDiscardThresshold) {
-          var title = slice.title;
-          if (slice.didNotFinish) {
-            title += ' (Did Not Finish)';
-          }
-          var labelWidth = quickMeasureText(ctx, title) + 2;
-          var labelWidthWorld = pixWidth * labelWidth;
-
-          if (labelWidthWorld < slice.duration) {
-            var cX = vp.xWorldToView(slice.start + 0.5 * slice.duration);
-            ctx.fillText(title, cX, 2.5, labelWidth);
+      if (canvasH > 8) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.font = '10px sans-serif';
+        ctx.strokeStyle = 'rgb(0,0,0)';
+        ctx.fillStyle = 'rgb(0,0,0)';
+        // Don't render text until until it is 20px wide
+        var quickDiscardThresshold = pixWidth * 20;
+        var shouldElide = this.SHOULD_ELIDE_TEXT;
+        for (var i = 0; i < slices.length; ++i) {
+          var slice = slices[i];
+          if (slice.duration > quickDiscardThresshold) {
+            var title = slice.title;
+            if (slice.didNotFinish) {
+              title += ' (Did Not Finish)';
+            }
+            var drawnTitle = title;
+            var drawnWidth = this.labelWidth(drawnTitle);
+            if (shouldElide &&
+                this.labelWidthWorld(drawnTitle, pixWidth) > slice.duration) {
+                var elidedValues = this.elidedTitleCache.get(
+                    this, pixWidth,
+                    drawnTitle, drawnWidth,
+                    slice.duration);
+                drawnTitle = elidedValues.string;
+                drawnWidth = elidedValues.width;
+            }
+            if (drawnWidth * pixWidth < slice.duration) {
+              var cX = vp.xWorldToView(slice.start + 0.5 * slice.duration);
+              ctx.fillText(drawnTitle, cX, 2.5, drawnWidth);
+            }
           }
         }
       }
@@ -549,6 +682,152 @@ cr.define('tracing', function() {
   };
 
   /**
+   * A track that displays the viewport size and scale.
+   * @constructor
+   * @extends {CanvasBasedTrack}
+   */
+
+  var TimelineViewportTrack = cr.ui.define(CanvasBasedTrack);
+
+  const logOf10 = Math.log(10);
+  function log10(x) {
+    return Math.log(x) / logOf10;;
+  }
+
+  TimelineViewportTrack.prototype = {
+
+    __proto__: CanvasBasedTrack.prototype,
+
+    decorate: function() {
+      this.classList.add('timeline-viewport-track');
+      this.strings_ = {};
+    },
+
+    redraw: function() {
+      var ctx = this.ctx_;
+      var canvasW = this.canvas_.width;
+      var canvasH = this.canvas_.height;
+
+      ctx.clearRect(0, 0, canvasW, canvasH);
+
+      // Culling parametrs.
+      var vp = this.viewport_;
+      var pixWidth = vp.xViewVectorToWorld(1);
+      var viewLWorld = vp.xViewToWorld(0);
+      var viewRWorld = vp.xViewToWorld(canvasW);
+
+      var idealMajorMarkDistancePix = 150;
+      var idealMajorMarkDistanceWorld =
+          vp.xViewVectorToWorld(idealMajorMarkDistancePix);
+
+      // The conservative guess is the nearest enclosing 0.1, 1, 10, 100, etc
+      var conservativeGuess =
+          Math.pow(10, Math.ceil(log10(idealMajorMarkDistanceWorld)));
+
+      // Once we have a conservative guess, consider things that evenly add up
+      // to the conservative guess, e.g. 0.5, 0.2, 0.1 Pick the one that still
+      // exceeds the ideal mark distance.
+      var divisors = [10, 5, 2, 1];
+      for (var i = 0; i < divisors.length; ++i) {
+        var tightenedGuess = conservativeGuess / divisors[i]
+        if (vp.xWorldVectorToView(tightenedGuess) < idealMajorMarkDistancePix)
+          continue;
+        majorMarkDistanceWorld = conservativeGuess / divisors[i-1];
+        break;
+      }
+      if (majorMarkDistanceWorld < 100) {
+        unit = 'ms';
+        unitDivisor = 1;
+      } else {
+        unit = 's';
+        unitDivisor = 1000;
+      }
+
+      var numTicksPerMajor = 5;
+      var minorMarkDistanceWorld = majorMarkDistanceWorld / numTicksPerMajor;
+      var minorMarkDistancePx = vp.xWorldVectorToView(minorMarkDistanceWorld);
+
+      var firstMajorMark =
+        Math.floor(viewLWorld / majorMarkDistanceWorld) *
+        majorMarkDistanceWorld;
+
+      var minorTickH = Math.floor(canvasH * 0.25);
+
+      ctx.fillStyle = 'rgb(0, 0, 0)';
+      ctx.strokeStyle = 'rgb(0, 0, 0)';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.font = '9px sans-serif';
+
+      // Each iteration of this loop draws one major mark
+      // and numTicksPerMajor minor ticks.
+      //
+      // Rendering can't be done in world space because canvas transforms
+      // affect line width. So, do the conversions manually.
+      for (var curX = firstMajorMark;
+           curX < viewRWorld;
+           curX += majorMarkDistanceWorld) {
+
+        var curXView = Math.floor(vp.xWorldToView(curX));
+
+        var unitValue = curX / unitDivisor;
+        var roundedUnitValue = Math.floor(unitValue * 100000) / 100000;
+        if (!this.strings_[roundedUnitValue])
+          this.strings_[roundedUnitValue] = roundedUnitValue + ' ' + unit;
+        ctx.fillText(this.strings_[roundedUnitValue], curXView + 2, 0);
+
+        ctx.beginPath();
+
+        // Major mark
+        ctx.moveTo(curXView, 0);
+        ctx.lineTo(curXView, canvasW);
+
+        // Minor marks
+        for (var i = 1; i < numTicksPerMajor; ++i) {
+          var xView = Math.floor(curXView + minorMarkDistancePx * i);
+          ctx.moveTo(xView, canvasH - minorTickH);
+          ctx.lineTo(xView, canvasH);
+        }
+
+        ctx.stroke();
+      }
+    },
+
+    /**
+     * Picks a slice, if any, at a given location.
+     * @param {number} wX X location to search at, in worldspace.
+     * @param {number} wY Y location to search at, in offset space.
+     *     offset space.
+     * @param {function():*} onHitCallback Callback to call with the slice,
+     *     if one is found.
+     * @return {boolean} true if a slice was found, otherwise false.
+     */
+    pick: function(wX, wY, onHitCallback) {
+      // Does nothing. There's nothing interesting to pick on the viewport
+      // track.
+    },
+
+    /**
+     * Finds slices intersecting the given interval.
+     * @param {number} loWX Lower X bound of the interval to search, in
+     *     worldspace.
+     * @param {number} hiWX Upper X bound of the interval to search, in
+     *     worldspace.
+     * @param {number} loY Lower Y bound of the interval to search, in
+     *     offset space.
+     * @param {number} hiY Upper Y bound of the interval to search, in
+     *     offset space.
+     * @param {function():*} onHitCallback Function to call for each slice
+     *     intersecting the interval.
+     */
+    pickRange: function(loWX, hiWX, loY, hiY, onHitCallback) {
+      // Does nothing. There's nothing interesting to pick on the viewport
+      // track.
+    }
+
+  };
+
+  /**
    * A track that displays a TimelineCounter object.
    * @constructor
    * @extends {CanvasBasedTrack}
@@ -588,7 +867,7 @@ cr.define('tracing', function() {
       var viewRWorld = vp.xViewToWorld(canvasW);
 
       // Drop sampels that are less than skipDistancePix apart.
-      var skipDistancePix = 16;
+      var skipDistancePix = 1;
       var skipDistanceWorld = vp.xViewVectorToWorld(skipDistancePix);
 
       // Begin rendering in world space.
@@ -696,6 +975,8 @@ cr.define('tracing', function() {
   return {
     TimelineCounterTrack: TimelineCounterTrack,
     TimelineSliceTrack: TimelineSliceTrack,
-    TimelineThreadTrack: TimelineThreadTrack
+    TimelineThreadTrack: TimelineThreadTrack,
+    TimelineViewportTrack: TimelineViewportTrack,
+    TimelineCpuTrack: TimelineCpuTrack
   };
 });

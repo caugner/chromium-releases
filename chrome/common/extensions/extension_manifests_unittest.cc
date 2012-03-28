@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,14 +22,14 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_error_utils.h"
-#include "chrome/common/extensions/extension_sidebar_defaults.h"
 #include "chrome/common/extensions/file_browser_handler.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
-
+#include "webkit/glue/web_intent_service_data.h"
 
 namespace {
 
@@ -74,6 +74,19 @@ class ExtensionManifestTest : public testing::Test {
     Manifest(DictionaryValue* manifest, const char* name)
         : name_(name), manifest_(manifest) {
     }
+    Manifest(const Manifest& m) {
+      // C++98 requires the copy constructor for a type to be visiable if you
+      // take a const-ref of a temporary for that type.  Since Manifest
+      // contains a scoped_ptr, its implicit copy constructor is declared
+      // Manifest(Manifest&) according to spec 12.8.5.  This breaks the first
+      // requirement and thus you cannot use it with LoadAndExpectError() or
+      // LoadAndExpectSuccess() easily.
+      //
+      // To get around this spec pedantry, we declare the copy constructor
+      // explicitly.  It will never get invoked.
+      NOTREACHED();
+    }
+
 
     const std::string& name() const { return name_; }
 
@@ -359,17 +372,7 @@ TEST_F(ExtensionManifestTest, AppWebUrls) {
           base::IntToString(1),
           errors::kCannotClaimAllHostsInExtent));
 
-  // Ports in app.urls only raise an error when loading as a
-  // developer would.
-  LoadAndExpectSuccess("web_urls_invalid_has_port.json");
-  LoadAndExpectError(
-      "web_urls_invalid_has_port.json",
-      ExtensionErrorUtils::FormatErrorMessage(
-          errors::kInvalidWebURL,
-          base::IntToString(1),
-          URLPattern::GetParseResultString(URLPattern::PARSE_ERROR_HAS_COLON)),
-      Extension::INTERNAL,
-      Extension::STRICT_ERROR_CHECKS);
+  LoadAndExpectSuccess("web_urls_has_port.json");
 
   scoped_refptr<Extension> extension(
       LoadAndExpectSuccess("web_urls_default.json"));
@@ -380,7 +383,6 @@ TEST_F(ExtensionManifestTest, AppWebUrls) {
 
 TEST_F(ExtensionManifestTest, AppLaunchContainer) {
   scoped_refptr<Extension> extension;
-  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePlatformApps);
 
   extension = LoadAndExpectSuccess("launch_tab.json");
   EXPECT_EQ(extension_misc::LAUNCH_TAB, extension->launch_container());
@@ -401,8 +403,6 @@ TEST_F(ExtensionManifestTest, AppLaunchContainer) {
                      errors::kInvalidLaunchContainer);
   LoadAndExpectError("launch_container_invalid_type.json",
                      errors::kInvalidLaunchContainer);
-  LoadAndExpectError("launch_container_invalid_type_for_platform.json",
-                     errors::kInvalidLaunchContainerForPlatform);
   LoadAndExpectError("launch_container_invalid_value.json",
                      errors::kInvalidLaunchContainer);
   LoadAndExpectError("launch_container_without_launch_url.json",
@@ -415,6 +415,13 @@ TEST_F(ExtensionManifestTest, AppLaunchContainer) {
                      errors::kInvalidLaunchHeightContainer);
   LoadAndExpectError("launch_height_negative.json",
                      errors::kInvalidLaunchHeight);
+}
+
+TEST_F(ExtensionManifestTest, PlatformAppLaunchContainer) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnablePlatformApps);
+
+  LoadAndExpectError("launch_container_invalid_type_for_platform.json",
+                     errors::kInvalidLaunchContainerForPlatform);
 }
 
 TEST_F(ExtensionManifestTest, AppLaunchURL) {
@@ -481,8 +488,7 @@ TEST_F(ExtensionManifestTest, ChromeResourcesPermissionValidOnlyForComponents) {
   EXPECT_EQ("", error);
 }
 
-TEST_F(ExtensionManifestTest, InvalidContentScriptMatchPattern) {
-
+TEST_F(ExtensionManifestTest, ContentScriptMatchPattern) {
   // chrome:// urls are not allowed.
   LoadAndExpectError(
       "content_script_chrome_url_invalid.json",
@@ -502,21 +508,7 @@ TEST_F(ExtensionManifestTest, InvalidContentScriptMatchPattern) {
           base::IntToString(0),
           errors::kExpectString));
 
-  // Ports in match patterns cause an error, but only when loading
-  // in developer mode.
-  LoadAndExpectSuccess("forbid_ports_in_content_scripts.json");
-
-  // Loading as a developer would should give an error.
-  LoadAndExpectError(
-      "forbid_ports_in_content_scripts.json",
-      ExtensionErrorUtils::FormatErrorMessage(
-          errors::kInvalidMatch,
-          base::IntToString(1),
-          base::IntToString(0),
-          URLPattern::GetParseResultString(
-              URLPattern::PARSE_ERROR_HAS_COLON)),
-      Extension::INTERNAL,
-      Extension::STRICT_ERROR_CHECKS);
+  LoadAndExpectSuccess("ports_in_content_scripts.json");
 }
 
 TEST_F(ExtensionManifestTest, ExcludeMatchPatterns) {
@@ -543,49 +535,14 @@ TEST_F(ExtensionManifestTest, ExperimentalPermission) {
 }
 
 TEST_F(ExtensionManifestTest, DevToolsExtensions) {
-  LoadAndExpectError("devtools_extension_no_permissions.json",
-      errors::kDevToolsExperimental);
   LoadAndExpectError("devtools_extension_url_invalid_type.json",
       errors::kInvalidDevToolsPage);
 
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalExtensionApis);
   scoped_refptr<Extension> extension;
   extension = LoadAndExpectSuccess("devtools_extension.json");
   EXPECT_EQ(extension->url().spec() + "devtools.html",
             extension->devtools_url().spec());
   EXPECT_TRUE(extension->HasEffectiveAccessToAllHosts());
-}
-
-TEST_F(ExtensionManifestTest, Sidebar) {
-  LoadAndExpectError("sidebar.json",
-      errors::kExperimentalFlagRequired);
-
-  CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableExperimentalExtensionApis);
-
-  LoadAndExpectError("sidebar_no_permissions.json",
-      errors::kSidebarExperimental);
-
-  LoadAndExpectError("sidebar_icon_empty.json",
-      errors::kInvalidSidebarDefaultIconPath);
-  LoadAndExpectError("sidebar_icon_invalid_type.json",
-      errors::kInvalidSidebarDefaultIconPath);
-  LoadAndExpectError("sidebar_page_empty.json",
-      errors::kInvalidSidebarDefaultPage);
-  LoadAndExpectError("sidebar_page_invalid_type.json",
-      errors::kInvalidSidebarDefaultPage);
-  LoadAndExpectError("sidebar_title_invalid_type.json",
-      errors::kInvalidSidebarDefaultTitle);
-
-  scoped_refptr<Extension> extension(LoadAndExpectSuccess("sidebar.json"));
-  ASSERT_TRUE(extension->sidebar_defaults() != NULL);
-  EXPECT_EQ(extension->sidebar_defaults()->default_title(),
-            ASCIIToUTF16("Default title"));
-  EXPECT_EQ(extension->sidebar_defaults()->default_icon_path(),
-            "icon.png");
-  EXPECT_EQ(extension->url().spec() + "sidebar.html",
-            extension->sidebar_defaults()->default_page().spec());
 }
 
 TEST_F(ExtensionManifestTest, BackgroundPermission) {
@@ -818,20 +775,18 @@ TEST_F(ExtensionManifestTest, TtsEngine) {
 }
 
 TEST_F(ExtensionManifestTest, WebIntents) {
-  CommandLine::ForCurrentProcess()->AppendSwitch("--enable-web-intents");
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableWebIntents);
 
-  LoadAndExpectError("intent_invalid_1.json",
-                     extension_manifest_errors::kInvalidIntents);
-  LoadAndExpectError("intent_invalid_2.json",
-                     extension_manifest_errors::kInvalidIntent);
-  LoadAndExpectError("intent_invalid_3.json",
-                     extension_manifest_errors::kInvalidIntentPath);
-  LoadAndExpectError("intent_invalid_4.json",
-                     extension_manifest_errors::kInvalidIntentDisposition);
-  LoadAndExpectError("intent_invalid_5.json",
-                     extension_manifest_errors::kInvalidIntentType);
-  LoadAndExpectError("intent_invalid_6.json",
-                     extension_manifest_errors::kInvalidIntentTitle);
+  Testcase testcases[] = {
+    {"intent_invalid_1.json", errors::kInvalidIntents},
+    {"intent_invalid_2.json", errors::kInvalidIntent},
+    {"intent_invalid_3.json", errors::kInvalidIntentPath},
+    {"intent_invalid_4.json", errors::kInvalidIntentDisposition},
+    {"intent_invalid_5.json", errors::kInvalidIntentType},
+    {"intent_invalid_6.json", errors::kInvalidIntentTitle},
+    {"intent_invalid_packaged_app.json", errors::kCannotAccessPage}
+  };
+  RunTestcases(testcases, arraysize(testcases));
 
   scoped_refptr<Extension> extension(
       LoadAndExpectSuccess("intent_valid.json"));
@@ -843,7 +798,7 @@ TEST_F(ExtensionManifestTest, WebIntents) {
             UTF16ToUTF8(extension->intents_services()[0].action));
   EXPECT_EQ("chrome-extension",
             extension->intents_services()[0].service_url.scheme());
-  EXPECT_EQ("///services/share",
+  EXPECT_EQ("//services/share",
             extension->intents_services()[0].service_url.path());
   EXPECT_EQ("Sample Sharing Intent",
             UTF16ToUTF8(extension->intents_services()[0].title));
@@ -855,7 +810,7 @@ TEST_F(ExtensionManifestTest, WebIntents) {
   ASSERT_TRUE(extension.get() != NULL);
 
   ASSERT_EQ(1u, extension->intents_services().size());
-  EXPECT_EQ("", UTF16ToUTF8(extension->intents_services()[0].type));
+  EXPECT_EQ("*", UTF16ToUTF8(extension->intents_services()[0].type));
   EXPECT_EQ("http://webintents.org/share",
             UTF16ToUTF8(extension->intents_services()[0].action));
   EXPECT_TRUE(extension->intents_services()[0].service_url.is_empty());
@@ -864,16 +819,73 @@ TEST_F(ExtensionManifestTest, WebIntents) {
             extension->intents_services()[0].disposition);
 }
 
-TEST_F(ExtensionManifestTest, ForbidPortsInPermissions) {
-  // Loading as a user would shoud not trigger an error.
-  LoadAndExpectSuccess("forbid_ports_in_permissions.json");
+TEST_F(ExtensionManifestTest, WebIntentsWithMultipleMimeTypes) {
+  CommandLine::ForCurrentProcess()->AppendSwitch(switches::kEnableWebIntents);
 
-  // Ideally, loading as a developer would give an error.
-  // To ensure that we do not error out on a valid permission
-  // in a future version of chrome, validation is to loose
-  // to flag this case.
-  LoadAndExpectSuccess("forbid_ports_in_permissions.json",
-                       Extension::INTERNAL, Extension::STRICT_ERROR_CHECKS);
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess("intent_valid_multitype.json"));
+  ASSERT_TRUE(extension.get() != NULL);
+
+  ASSERT_EQ(2u, extension->intents_services().size());
+
+  // One registration with multiple types generates a separate service for
+  // each MIME type.
+  for (int i = 0; i < 2; ++i) {
+    EXPECT_EQ("http://webintents.org/share",
+              UTF16ToUTF8(extension->intents_services()[i].action));
+    EXPECT_EQ("chrome-extension",
+              extension->intents_services()[i].service_url.scheme());
+    EXPECT_EQ("//services/share",
+              extension->intents_services()[i].service_url.path());
+    EXPECT_EQ("Sample Sharing Intent",
+              UTF16ToUTF8(extension->intents_services()[i].title));
+    EXPECT_EQ(webkit_glue::WebIntentServiceData::DISPOSITION_INLINE,
+              extension->intents_services()[i].disposition);
+  }
+  EXPECT_EQ("image/jpeg", UTF16ToUTF8(extension->intents_services()[0].type));
+  EXPECT_EQ("image/bmp", UTF16ToUTF8(extension->intents_services()[1].type));
+
+  LoadAndExpectError("intent_invalid_type_element.json",
+                     extension_manifest_errors::kInvalidIntentTypeElement);
+}
+
+TEST_F(ExtensionManifestTest, PortsInPermissions) {
+  // Loading as a user would shoud not trigger an error.
+  LoadAndExpectSuccess("ports_in_permissions.json");
+}
+
+TEST_F(ExtensionManifestTest, WebAccessibleResources) {
+  // Manifest version 2 with web accessible resources specified.
+  scoped_refptr<Extension> extension1(
+      LoadAndExpectSuccess("web_accessible_resources_1.json"));
+
+  // Manifest version 2 with no web accessible resources.
+  scoped_refptr<Extension> extension2(
+      LoadAndExpectSuccess("web_accessible_resources_2.json"));
+
+  // Default manifest version with web accessible resources specified.
+  scoped_refptr<Extension> extension3(
+      LoadAndExpectSuccess("web_accessible_resources_3.json"));
+
+  // Default manifest version with no web accessible resources.
+  scoped_refptr<Extension> extension4(
+      LoadAndExpectSuccess("web_accessible_resources_4.json"));
+
+  EXPECT_TRUE(extension1->HasWebAccessibleResources());
+  EXPECT_FALSE(extension2->HasWebAccessibleResources());
+  EXPECT_TRUE(extension3->HasWebAccessibleResources());
+  EXPECT_FALSE(extension4->HasWebAccessibleResources());
+
+  EXPECT_TRUE(extension1->IsResourceWebAccessible("/test"));
+  EXPECT_FALSE(extension1->IsResourceWebAccessible("/none"));
+
+  EXPECT_FALSE(extension2->IsResourceWebAccessible("/test"));
+
+  EXPECT_TRUE(extension3->IsResourceWebAccessible("/test"));
+  EXPECT_FALSE(extension3->IsResourceWebAccessible("/none"));
+
+  EXPECT_TRUE(extension4->IsResourceWebAccessible("/test"));
+  EXPECT_TRUE(extension4->IsResourceWebAccessible("/none"));
 }
 
 TEST_F(ExtensionManifestTest, IsolatedApps) {
@@ -994,4 +1006,64 @@ TEST_F(ExtensionManifestTest, PlatformAppOnlyPermissions) {
   for (ExtensionAPIPermissionSet::const_iterator i = apis.begin();
        i != apis.end(); ++i)
     EXPECT_NE(platform_app, info->GetByID(*i)->type_restrictions());
+}
+
+TEST_F(ExtensionManifestTest, BackgroundPage) {
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess("background_page.json"));
+  ASSERT_TRUE(extension);
+  EXPECT_EQ("/foo.html", extension->GetBackgroundURL().path());
+
+  std::string error;
+  scoped_ptr<DictionaryValue> manifest(
+      LoadManifestFile("background_page_legacy.json", &error));
+  ASSERT_TRUE(manifest.get());
+  extension = LoadAndExpectSuccess(Manifest(manifest.get(), ""));
+  ASSERT_TRUE(extension);
+  EXPECT_EQ("/foo.html", extension->GetBackgroundURL().path());
+
+  manifest->SetInteger(keys::kManifestVersion, 2);
+  extension = LoadAndExpectSuccess(Manifest(manifest.get(), ""));
+  ASSERT_TRUE(extension);
+  EXPECT_FALSE(extension->GetBackgroundURL().is_valid());
+}
+
+TEST_F(ExtensionManifestTest, BackgroundScripts) {
+  std::string error;
+  scoped_ptr<DictionaryValue> manifest(
+      LoadManifestFile("background_scripts.json", &error));
+  ASSERT_TRUE(manifest.get());
+
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess(Manifest(manifest.get(), "")));
+  ASSERT_TRUE(extension);
+  EXPECT_EQ(2u, extension->background_scripts().size());
+  EXPECT_EQ("foo.js", extension->background_scripts()[0u]);
+  EXPECT_EQ("bar/baz.js", extension->background_scripts()[1u]);
+
+  EXPECT_TRUE(extension->has_background_page());
+  EXPECT_EQ(std::string("/") +
+            extension_filenames::kGeneratedBackgroundPageFilename,
+            extension->GetBackgroundURL().path());
+
+  manifest->SetString("background_page", "monkey.html");
+  LoadAndExpectError(Manifest(manifest.get(), ""),
+                     errors::kInvalidBackgroundCombination);
+}
+
+TEST_F(ExtensionManifestTest, PageActionManifestVersion2) {
+  scoped_refptr<Extension> extension(
+      LoadAndExpectSuccess("page_action_manifest_version_2.json"));
+  ASSERT_TRUE(extension.get());
+  ASSERT_TRUE(extension->page_action());
+
+  EXPECT_EQ("", extension->page_action()->id());
+  EXPECT_EQ(0u, extension->page_action()->icon_paths()->size());
+  EXPECT_EQ("", extension->page_action()->GetTitle(
+      ExtensionAction::kDefaultTabId));
+  EXPECT_FALSE(extension->page_action()->HasPopup(
+      ExtensionAction::kDefaultTabId));
+
+  LoadAndExpectError("page_action_manifest_version_2b.json",
+                     errors::kInvalidPageActionPopup);
 }

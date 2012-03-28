@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,17 +16,18 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_entry.h"
+#include "content/browser/site_instance_impl.h"
+#include "content/browser/tab_contents/navigation_controller_impl.h"
+#include "content/browser/tab_contents/navigation_entry_impl.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/common/dom_storage_common.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents_view.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/page_transition_types.h"
 #include "content/public/common/view_type.h"
@@ -34,6 +35,13 @@
 #include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::NavigationEntry;
+using content::NavigationEntryImpl;
+using content::RenderViewHostDelegate;
+using content::SiteInstance;
+using content::WebContents;
+using content::WebContentsView;
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
 
@@ -112,10 +120,10 @@ class InterstitialPage::InterstitialPageRVHViewDelegate
 InterstitialPage::InterstitialPageMap*
     InterstitialPage::tab_to_interstitial_page_ =  NULL;
 
-InterstitialPage::InterstitialPage(TabContents* tab,
+InterstitialPage::InterstitialPage(WebContents* tab,
                                    bool new_navigation,
                                    const GURL& url)
-    : tab_(tab),
+    : tab_(static_cast<TabContents*>(tab)),
       url_(url),
       new_navigation_(new_navigation),
       should_discard_pending_nav_entry_(new_navigation),
@@ -123,8 +131,8 @@ InterstitialPage::InterstitialPage(TabContents* tab,
       enabled_(true),
       action_taken_(NO_ACTION),
       render_view_host_(NULL),
-      original_child_id_(tab->render_view_host()->process()->GetID()),
-      original_rvh_id_(tab->render_view_host()->routing_id()),
+      original_child_id_(tab->GetRenderProcessHost()->GetID()),
+      original_rvh_id_(tab->GetRenderViewHost()->routing_id()),
       should_revert_tab_title_(false),
       tab_was_loading_(false),
       resource_dispatcher_host_notified_(false),
@@ -135,7 +143,7 @@ InterstitialPage::InterstitialPage(TabContents* tab,
   // (which is the case when the interstitial was triggered by a sub-resource on
   // a page) when we have a pending entry (in the process of loading a new top
   // frame).
-  DCHECK(new_navigation || !tab->controller().pending_entry());
+  DCHECK(new_navigation || !tab->GetController().GetPendingEntry());
 }
 
 InterstitialPage::~InterstitialPage() {
@@ -177,7 +185,7 @@ void InterstitialPage::Show() {
   // already been destroyed.
   notification_registrar_.Add(
       this, content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
-      content::Source<RenderWidgetHost>(tab_->render_view_host()));
+      content::Source<RenderWidgetHost>(tab_->GetRenderViewHost()));
 
   // Update the tab_to_interstitial_page_ map.
   iter = tab_to_interstitial_page_->find(tab_);
@@ -185,37 +193,38 @@ void InterstitialPage::Show() {
   (*tab_to_interstitial_page_)[tab_] = this;
 
   if (new_navigation_) {
-    NavigationEntry* entry = new NavigationEntry;
-    entry->set_url(url_);
-    entry->set_virtual_url(url_);
+    NavigationEntryImpl* entry = new NavigationEntryImpl;
+    entry->SetURL(url_);
+    entry->SetVirtualURL(url_);
     entry->set_page_type(content::PAGE_TYPE_INTERSTITIAL);
 
     // Give sub-classes a chance to set some states on the navigation entry.
     UpdateEntry(entry);
 
-    tab_->controller().AddTransientEntry(entry);
+    tab_->GetControllerImpl().AddTransientEntry(entry);
   }
 
   DCHECK(!render_view_host_);
   render_view_host_ = CreateRenderViewHost();
-  CreateTabContentsView();
+  CreateWebContentsView();
 
   std::string data_url = "data:text/html;charset=utf-8," +
                          net::EscapePath(GetHTMLContents());
   render_view_host_->NavigateToURL(GURL(data_url));
 
   notification_registrar_.Add(this,
-                              content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
-                              content::Source<TabContents>(tab_));
+                              content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
+                              content::Source<WebContents>(tab_));
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_COMMITTED,
-      content::Source<NavigationController>(&tab_->controller()));
+      content::Source<NavigationController>(&tab_->GetController()));
   notification_registrar_.Add(this, content::NOTIFICATION_NAV_ENTRY_PENDING,
-      content::Source<NavigationController>(&tab_->controller()));
+      content::Source<NavigationController>(&tab_->GetController()));
 }
 
 void InterstitialPage::Hide() {
-  RenderWidgetHostView* old_view = tab_->render_view_host()->view();
-  if (tab_->interstitial_page() == this && old_view && !old_view->IsShowing()) {
+  RenderWidgetHostView* old_view = tab_->GetRenderViewHost()->view();
+  if (tab_->GetInterstitialPage() == this &&
+      old_view && !old_view->IsShowing()) {
     // Show the original RVH since we're going away.  Note it might not exist if
     // the renderer crashed while the interstitial was showing.
     // Note that it is important that we don't call Show() if the view is
@@ -227,20 +236,26 @@ void InterstitialPage::Hide() {
   // If the focus was on the interstitial, let's keep it to the page.
   // (Note that in unit-tests the RVH may not have a view).
   if (render_view_host_->view() && render_view_host_->view()->HasFocus() &&
-      tab_->render_view_host()->view()) {
-    tab_->render_view_host()->view()->Focus();
+      tab_->GetRenderViewHost()->view()) {
+    tab_->GetRenderViewHost()->view()->Focus();
   }
 
   render_view_host_->Shutdown();
   render_view_host_ = NULL;
-  if (tab_->interstitial_page())
+  if (tab_->GetInterstitialPage())
     tab_->remove_interstitial_page();
   // Let's revert to the original title if necessary.
-  NavigationEntry* entry = tab_->controller().GetActiveEntry();
+  NavigationEntry* entry = tab_->GetController().GetActiveEntry();
   if (!new_navigation_ && should_revert_tab_title_) {
-    entry->set_title(original_tab_title_);
-    tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TITLE);
+    entry->SetTitle(original_tab_title_);
+    tab_->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TITLE);
   }
+
+  content::NotificationService::current()->Notify(
+      content::NOTIFICATION_INTERSTITIAL_DETACHED,
+      content::Source<WebContents>(tab_),
+      content::NotificationService::NoDetails());
+
   delete this;
 }
 
@@ -272,7 +287,7 @@ void InterstitialPage::Observe(int type,
         TakeActionOnResourceDispatcher(CANCEL);
       }
       break;
-    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
       if (action_taken_ == NO_ACTION) {
         // We are navigating away from the interstitial or closing a tab with an
@@ -333,10 +348,10 @@ void InterstitialPage::DidNavigate(
   // hiding the bookmark bar.
   content::NotificationService::current()->Notify(
       content::NOTIFICATION_INTERSTITIAL_ATTACHED,
-      content::Source<TabContents>(tab_),
+      content::Source<WebContents>(tab_),
       content::NotificationService::NoDetails());
 
-  RenderWidgetHostView* rwh_view = tab_->render_view_host()->view();
+  RenderWidgetHostView* rwh_view = tab_->GetRenderViewHost()->view();
 
   // The RenderViewHost may already have crashed before we even get here.
   if (rwh_view) {
@@ -362,7 +377,7 @@ void InterstitialPage::UpdateTitle(RenderViewHost* render_view_host,
                                    const string16& title,
                                    base::i18n::TextDirection title_direction) {
   DCHECK(render_view_host == render_view_host_);
-  NavigationEntry* entry = tab_->controller().GetActiveEntry();
+  NavigationEntry* entry = tab_->GetController().GetActiveEntry();
   if (!entry) {
     // Crash reports from the field indicate this can be NULL.
     // This is unexpected as InterstitialPages constructed with the
@@ -379,13 +394,13 @@ void InterstitialPage::UpdateTitle(RenderViewHost* render_view_host,
   // If this interstitial is shown on an existing navigation entry, we'll need
   // to remember its title so we can revert to it when hidden.
   if (!new_navigation_ && !should_revert_tab_title_) {
-    original_tab_title_ = entry->title();
+    original_tab_title_ = entry->GetTitle();
     should_revert_tab_title_ = true;
   }
   // TODO(evan): make use of title_direction.
   // http://code.google.com/p/chromium/issues/detail?id=27094
-  entry->set_title(title);
-  tab_->NotifyNavigationStateChanged(TabContents::INVALIDATE_TITLE);
+  entry->SetTitle(title);
+  tab_->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TITLE);
 }
 
 content::RendererPreferences InterstitialPage::GetRendererPrefs(
@@ -393,25 +408,47 @@ content::RendererPreferences InterstitialPage::GetRendererPrefs(
   return renderer_preferences_;
 }
 
+WebPreferences InterstitialPage::GetWebkitPrefs() {
+  return content::GetContentClient()->browser()->GetWebkitPrefs(
+      render_view_host());
+}
+
+bool InterstitialPage::PreHandleKeyboardEvent(
+    const NativeWebKeyboardEvent& event,
+    bool* is_keyboard_shortcut) {
+  return tab_->PreHandleKeyboardEvent(event, is_keyboard_shortcut);
+}
+
+void InterstitialPage::HandleKeyboardEvent(
+      const NativeWebKeyboardEvent& event) {
+  return tab_->HandleKeyboardEvent(event);
+}
+
+WebContents* InterstitialPage::tab() const {
+  return tab_;
+}
+
 RenderViewHost* InterstitialPage::CreateRenderViewHost() {
   RenderViewHost* render_view_host = new RenderViewHost(
-      SiteInstance::CreateSiteInstance(tab()->browser_context()),
+      SiteInstance::Create(tab()->GetBrowserContext()),
       this, MSG_ROUTING_NONE, kInvalidSessionStorageNamespaceId);
   return render_view_host;
 }
 
-TabContentsView* InterstitialPage::CreateTabContentsView() {
-  TabContentsView* tab_contents_view = tab()->view();
+WebContentsView* InterstitialPage::CreateWebContentsView() {
+  WebContentsView* web_contents_view = tab()->GetView();
   RenderWidgetHostView* view =
-      tab_contents_view->CreateViewForWidget(render_view_host_);
+      web_contents_view->CreateViewForWidget(render_view_host_);
   render_view_host_->SetView(view);
   render_view_host_->AllowBindings(content::BINDINGS_POLICY_DOM_AUTOMATION);
 
-  render_view_host_->CreateRenderView(string16());
-  view->SetSize(tab_contents_view->GetContainerSize());
+  int32 max_page_id =
+      tab()->GetMaxPageIDForSiteInstance(render_view_host_->site_instance());
+  render_view_host_->CreateRenderView(string16(), max_page_id);
+  view->SetSize(web_contents_view->GetContainerSize());
   // Don't show the interstitial until we have navigated to it.
   view->Hide();
-  return tab_contents_view;
+  return web_contents_view;
 }
 
 void InterstitialPage::Proceed() {
@@ -468,11 +505,11 @@ void InterstitialPage::DontProceed() {
     // explicitely.  Note that by calling DiscardNonCommittedEntries() we also
     // discard the pending entry, which is what we want, since the navigation is
     // cancelled.
-    tab_->controller().DiscardNonCommittedEntries();
+    tab_->GetController().DiscardNonCommittedEntries();
   }
 
   if (reload_on_dont_proceed_)
-    tab_->controller().Reload(true);
+    tab_->GetController().Reload(true);
 
   Hide();
   // WARNING: we are now deleted!
@@ -517,6 +554,10 @@ content::ViewType InterstitialPage::GetRenderViewType() const {
   return content::VIEW_TYPE_INTERSTITIAL_PAGE;
 }
 
+gfx::Rect InterstitialPage::GetRootWindowResizerRect() const {
+  return gfx::Rect();
+}
+
 void InterstitialPage::Disable() {
   enabled_ = false;
 }
@@ -539,17 +580,15 @@ void InterstitialPage::TakeActionOnResourceDispatcher(
   // we don't have one.
   RenderViewHost* rvh = RenderViewHost::FromID(original_child_id_,
                                                original_rvh_id_);
-  if (!rvh ||
-      !content::GetContentClient()->browser()->GetResourceDispatcherHost()) {
+  if (!rvh || !ResourceDispatcherHost::Get())
     return;
-  }
 
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
       base::Bind(
           &ResourceRequestHelper,
-          content::GetContentClient()->browser()->GetResourceDispatcherHost(),
+          ResourceDispatcherHost::Get(),
           original_child_id_,
           original_rvh_id_,
           action));
@@ -563,8 +602,9 @@ void InterstitialPage::InitInterstitialPageMap() {
 
 // static
 InterstitialPage* InterstitialPage::GetInterstitialPage(
-    TabContents* tab_contents) {
+    WebContents* web_contents) {
   InitInterstitialPageMap();
+  TabContents* tab_contents = static_cast<TabContents*>(web_contents);
   InterstitialPageMap::const_iterator iter =
       tab_to_interstitial_page_->find(tab_contents);
   if (iter == tab_to_interstitial_page_->end())
@@ -645,8 +685,13 @@ void InterstitialPage::InterstitialPageRVHViewDelegate::GotFocus() {
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::TakeFocus(
     bool reverse) {
-  if (interstitial_page_->tab() && interstitial_page_->tab()->GetViewDelegate())
-    interstitial_page_->tab()->GetViewDelegate()->TakeFocus(reverse);
+  if (!interstitial_page_->tab())
+    return;
+  TabContents* tab = static_cast<TabContents*>(interstitial_page_->tab());
+  if (!tab->GetViewDelegate())
+    return;
+
+  tab->GetViewDelegate()->TakeFocus(reverse);
 }
 
 void InterstitialPage::InterstitialPageRVHViewDelegate::OnFindReply(

@@ -3812,10 +3812,8 @@ static void close_connection(struct mg_connection *conn) {
 }
 
 static void discard_current_request_from_buffer(struct mg_connection *conn) {
-  char *buffered;
   int buffered_len, body_len;
 
-  buffered = conn->buf + conn->request_len;
   buffered_len = conn->data_len - conn->request_len;
   assert(buffered_len >= 0);
 
@@ -3867,7 +3865,7 @@ static void handle_proxy_request(struct mg_connection *conn) {
     }
     conn->peer->client.is_ssl = is_ssl;
   }
-  
+
   // Forward client's request to the target
   mg_printf(conn->peer, "%s %s HTTP/%s\r\n", ri->request_method, ri->uri + len,
             ri->http_version);
@@ -4239,8 +4237,6 @@ struct mg_context *mg_start(mg_callback_t user_callback, void *user_data,
   // Ignore SIGPIPE signal, so if browser cancels the request, it
   // won't kill the whole process.
   (void) signal(SIGPIPE, SIG_IGN);
-  // Also ignoring SIGCHLD to let the OS to reap zombies properly.
-  (void) signal(SIGCHLD, SIG_IGN);
 #endif // !_WIN32
 
   (void) pthread_mutex_init(&ctx->mutex, NULL);

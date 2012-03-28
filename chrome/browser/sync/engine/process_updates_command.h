@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,6 +21,8 @@ class SyncEntity;
 
 namespace browser_sync {
 
+class Cryptographer;
+
 // A syncer command for processing updates.
 //
 // Preconditions - updates in the SyncerSesssion have been downloaded
@@ -36,18 +38,16 @@ class ProcessUpdatesCommand : public ModelChangingSyncerCommand {
 
  protected:
   // ModelChangingSyncerCommand implementation.
-  virtual bool HasCustomGroupsToChange() const OVERRIDE;
   virtual std::set<ModelSafeGroup> GetGroupsToChange(
       const sessions::SyncSession& session) const OVERRIDE;
-  virtual bool ModelNeutralExecuteImpl(
-      sessions::SyncSession* session) OVERRIDE;
-  virtual void ModelChangingExecuteImpl(
+  virtual SyncerError ModelChangingExecuteImpl(
       sessions::SyncSession* session) OVERRIDE;
 
  private:
   ServerUpdateProcessingResult ProcessUpdate(
       const syncable::ScopedDirLookup& dir,
       const sync_pb::SyncEntity& proto_update,
+      const Cryptographer* cryptographer,
       syncable::WriteTransaction* const trans);
   DISALLOW_COPY_AND_ASSIGN(ProcessUpdatesCommand);
 };

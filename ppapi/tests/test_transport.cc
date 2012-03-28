@@ -12,13 +12,14 @@
 
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/cpp/completion_callback.h"
+#include "ppapi/c/pp_macros.h"
 #include "ppapi/cpp/dev/transport_dev.h"
 #include "ppapi/cpp/instance.h"
 #include "ppapi/cpp/module.h"
 #include "ppapi/cpp/var.h"
 #include "ppapi/tests/test_utils.h"
 #include "ppapi/tests/testing_instance.h"
+#include "ppapi/utility/completion_callback_factory.h"
 
 REGISTER_TEST_CASE(Transport);
 
@@ -102,9 +103,9 @@ TestTransport::~TestTransport() {
 }
 
 bool TestTransport::Init() {
-  transport_interface_ = reinterpret_cast<PPB_Transport_Dev const*>(
+  transport_interface_ = static_cast<const PPB_Transport_Dev*>(
       pp::Module::Get()->GetBrowserInterface(PPB_TRANSPORT_DEV_INTERFACE));
-  return transport_interface_ && InitTestingInterface();
+  return transport_interface_ && CheckTestingInterface();
 }
 
 void TestTransport::RunTests(const std::string& filter) {

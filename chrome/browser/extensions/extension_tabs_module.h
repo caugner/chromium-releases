@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,18 +11,19 @@
 
 #include "base/compiler_specific.h"
 #include "chrome/browser/extensions/extension_function.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "googleurl/src/gurl.h"
 
 class BackingStore;
 class SkBitmap;
-
 namespace base {
 class DictionaryValue;
 }  // namespace base
-
+namespace content {
+class WebContents;
+}  // namespace content
 // Windows
 class GetWindowFunction : public SyncExtensionFunction {
   virtual ~GetWindowFunction() {}
@@ -106,16 +107,20 @@ class HighlightTabsFunction : public SyncExtensionFunction {
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.highlight")
 };
 class UpdateTabFunction : public AsyncExtensionFunction,
-                          public TabContentsObserver {
+                          public content::WebContentsObserver {
  public:
   UpdateTabFunction();
  private:
   virtual ~UpdateTabFunction() {}
   virtual bool RunImpl() OVERRIDE;
+  virtual void WebContentsDestroyed(content::WebContents* tab) OVERRIDE;
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   void OnExecuteCodeFinished(int request_id,
                              bool success,
                              const std::string& error);
+  void PopulateResult();
+
+  content::WebContents* web_contents_;
   DECLARE_EXTENSION_FUNCTION_NAME("tabs.update")
 };
 class MoveTabsFunction : public SyncExtensionFunction {

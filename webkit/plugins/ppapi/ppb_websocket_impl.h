@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,14 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "ppapi/shared_impl/resource.h"
+#include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/ppb_websocket_api.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSocket.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSocketClient.h"
-
-struct PPB_Var;
 
 namespace ppapi {
 class StringVar;
-}
-
-namespace WebKit {
-class WebSocket;
+class Var;
 }
 
 namespace webkit {
@@ -56,13 +53,13 @@ class PPB_WebSocket_Impl : public ::ppapi::Resource,
   virtual PP_Bool GetCloseWasClean() OVERRIDE;
   virtual PP_Var GetExtensions() OVERRIDE;
   virtual PP_Var GetProtocol() OVERRIDE;
-  virtual PP_WebSocketReadyState_Dev GetReadyState() OVERRIDE;
+  virtual PP_WebSocketReadyState GetReadyState() OVERRIDE;
   virtual PP_Var GetURL() OVERRIDE;
 
   // WebSocketClient implementation.
   virtual void didConnect();
   virtual void didReceiveMessage(const WebKit::WebString& message);
-  virtual void didReceiveBinaryData(const WebKit::WebData& binaryData);
+  virtual void didReceiveArrayBuffer(const WebKit::WebArrayBuffer& binaryData);
   virtual void didReceiveMessageError();
   virtual void didUpdateBufferedAmount(unsigned long buffered_amount);
   virtual void didStartClosingHandshake();
@@ -74,18 +71,17 @@ class PPB_WebSocket_Impl : public ::ppapi::Resource,
   int32_t DoReceive();
 
   scoped_ptr<WebKit::WebSocket> websocket_;
-  PP_WebSocketReadyState_Dev state_;
+  PP_WebSocketReadyState state_;
   bool error_was_received_;
 
-  PP_CompletionCallback connect_callback_;
+  scoped_refptr< ::ppapi::TrackedCallback> connect_callback_;
 
-  PP_CompletionCallback receive_callback_;
+  scoped_refptr< ::ppapi::TrackedCallback> receive_callback_;
   PP_Var* receive_callback_var_;
   bool wait_for_receive_;
-  // TODO(toyoshim): Use std::queue<Var> when it supports binary.
-  std::queue<PP_Var> received_messages_;
+  std::queue< scoped_refptr< ::ppapi::Var> > received_messages_;
 
-  PP_CompletionCallback close_callback_;
+  scoped_refptr< ::ppapi::TrackedCallback> close_callback_;
   uint16_t close_code_;
   scoped_refptr< ::ppapi::StringVar> close_reason_;
   PP_Bool close_was_clean_;

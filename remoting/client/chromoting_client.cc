@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,12 +7,16 @@
 #include "base/bind.h"
 #include "remoting/client/chromoting_view.h"
 #include "remoting/client/client_context.h"
-#include "remoting/client/input_handler.h"
 #include "remoting/client/rectangle_update_decoder.h"
+#include "remoting/protocol/authentication_method.h"
 #include "remoting/protocol/connection_to_host.h"
+#include "remoting/protocol/negotiating_authenticator.h"
+#include "remoting/protocol/v1_authenticator.h"
 #include "remoting/protocol/session_config.h"
 
 namespace remoting {
+
+using protocol::AuthenticationMethod;
 
 ChromotingClient::QueuedVideoPacket::QueuedVideoPacket(
     const VideoPacket* packet, const base::Closure& done)
@@ -27,14 +31,12 @@ ChromotingClient::ChromotingClient(const ClientConfig& config,
                                    protocol::ConnectionToHost* connection,
                                    ChromotingView* view,
                                    RectangleUpdateDecoder* rectangle_decoder,
-                                   InputHandler* input_handler,
                                    const base::Closure& client_done)
     : config_(config),
       context_(context),
       connection_(connection),
       view_(view),
       rectangle_decoder_(rectangle_decoder),
-      input_handler_(input_handler),
       client_done_(client_done),
       packet_being_processed_(false),
       last_sequence_number_(0),
@@ -47,8 +49,18 @@ ChromotingClient::~ChromotingClient() {
 void ChromotingClient::Start(scoped_refptr<XmppProxy> xmpp_proxy) {
   DCHECK(message_loop()->BelongsToCurrentThread());
 
+  scoped_ptr<protocol::Authenticator> authenticator;
+  if (config_.use_v1_authenticator) {
+    authenticator.reset(new protocol::V1ClientAuthenticator(
+        config_.local_jid, config_.shared_secret));
+  } else {
+    authenticator = protocol::NegotiatingAuthenticator::CreateForClient(
+        config_.authentication_tag,
+        config_.shared_secret, config_.authentication_methods);
+  }
+
   connection_->Connect(xmpp_proxy, config_.local_jid, config_.host_jid,
-                       config_.host_public_key, config_.access_code,
+                       config_.host_public_key, authenticator.Pass(),
                        this, this, this);
 
   if (!view_->Initialize()) {
@@ -162,8 +174,7 @@ void ChromotingClient::OnConnectionState(
     protocol::ConnectionToHost::Error error) {
   DCHECK(message_loop()->BelongsToCurrentThread());
   VLOG(1) << "ChromotingClient::OnConnectionState(" << state << ")";
-  if (state == protocol::ConnectionToHost::CONNECTED ||
-      state == protocol::ConnectionToHost::AUTHENTICATED)
+  if (state == protocol::ConnectionToHost::CONNECTED)
     Initialize();
   view_->SetConnectionState(state, error);
 }
@@ -206,9 +217,6 @@ void ChromotingClient::Initialize() {
 
   // Initialize the decoder.
   rectangle_decoder_->Initialize(connection_->config());
-
-  // Schedule the input handler to process the event queue.
-  input_handler_->Initialize();
 }
 
 }  // namespace remoting

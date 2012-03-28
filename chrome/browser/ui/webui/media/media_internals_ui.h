@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_UI_WEBUI_MEDIA_MEDIA_INTERNALS_UI_H_
 #pragma once
 
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
 
 // The implementation for the chrome://media-internals page.
-class MediaInternalsUI : public ChromeWebUI {
+class MediaInternalsUI : public content::WebUIController {
  public:
-  explicit MediaInternalsUI(TabContents* contents);
+  explicit MediaInternalsUI(content::WebUI* web_ui);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MediaInternalsUI);

@@ -12,10 +12,9 @@
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
 
+class AudioManager;
 class ChromeAppCacheService;
 class ChromeBlobStorageContext;
-class DownloadIdFactory;
-class HostZoomMap;
 class MediaObserver;
 namespace fileapi {
 class FileSystemContext;
@@ -35,6 +34,8 @@ class DatabaseTracker;
 }  // namespace webkit_database
 
 namespace content {
+
+class HostZoomMap;
 
 // ResourceContext contains the relevant context information required for
 // resource loading. It lives on the IO thread, although it is constructed on
@@ -76,12 +77,12 @@ class CONTENT_EXPORT ResourceContext {
   MediaObserver* media_observer() const;
   void set_media_observer(MediaObserver* media_observer);
 
-  DownloadIdFactory* download_id_factory() const;
-  void set_download_id_factory(DownloadIdFactory* download_id_factory);
-
   media_stream::MediaStreamManager* media_stream_manager() const;
   void set_media_stream_manager(
       media_stream::MediaStreamManager* media_stream_manager);
+
+  AudioManager* audio_manager() const;
+  void set_audio_manager(AudioManager* audio_manager);
 
  protected:
   ResourceContext();
@@ -98,8 +99,8 @@ class CONTENT_EXPORT ResourceContext {
   quota::QuotaManager* quota_manager_;
   HostZoomMap* host_zoom_map_;
   MediaObserver* media_observer_;
-  DownloadIdFactory* download_id_factory_;
   media_stream::MediaStreamManager* media_stream_manager_;
+  AudioManager* audio_manager_;
 
   // Externally-defined data accessible by key.
   typedef std::map<const void*, void*> UserDataMap;

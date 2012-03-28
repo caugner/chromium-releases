@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -98,7 +98,7 @@ class SOCKSConnectJob : public ConnectJob {
   HostResolver* const resolver_;
 
   State next_state_;
-  OldCompletionCallbackImpl<SOCKSConnectJob> callback_;
+  CompletionCallback callback_;
   scoped_ptr<ClientSocketHandle> transport_socket_handle_;
   scoped_ptr<StreamSocket> socket_;
 
@@ -117,12 +117,12 @@ class NET_EXPORT_PRIVATE SOCKSClientSocketPool : public ClientSocketPool {
 
   virtual ~SOCKSClientSocketPool();
 
-  // ClientSocketPool methods:
+  // ClientSocketPool implementation.
   virtual int RequestSocket(const std::string& group_name,
                             const void* connect_params,
                             RequestPriority priority,
                             ClientSocketHandle* handle,
-                            OldCompletionCallback* callback,
+                            const CompletionCallback& callback,
                             const BoundNetLog& net_log) OVERRIDE;
 
   virtual void RequestSockets(const std::string& group_name,

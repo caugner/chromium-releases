@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011 The Chromium Authors. All rights reserved.
+ * Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
@@ -34,8 +34,19 @@
 #include "native_client/src/trusted/handle_pass/browser_handle.h"
 #include "native_client/src/trusted/nonnacl_util/sel_ldr_launcher.h"
 
+// browser_interface includes portability.h for uintptr_t etc, but it
+// also transitively includes windows.h, where PostMessage gets
+// defined as a preprocessor symbol
 #include "native_client/src/trusted/plugin/browser_interface.h"
+
 #include "native_client/src/trusted/plugin/manifest.h"
+
+// This is here due to a Windows API collision; plugin.h through
+// file_downloader.h transitively includes Instance.h which defines a
+// PostMessage method, so this undef must appear before any of those.
+#ifdef PostMessage
+#undef PostMessage
+#endif
 #include "native_client/src/trusted/plugin/plugin.h"
 #include "native_client/src/trusted/plugin/plugin_error.h"
 #include "native_client/src/trusted/plugin/scriptable_handle.h"
@@ -58,11 +69,13 @@ namespace plugin {
 PluginReverseInterface::PluginReverseInterface(
     nacl::WeakRefAnchor* anchor,
     Plugin* plugin,
+    const Manifest* manifest,
     ServiceRuntime* service_runtime,
     pp::CompletionCallback init_done_cb,
     pp::CompletionCallback crash_cb)
       : anchor_(anchor),
         plugin_(plugin),
+        manifest_(manifest),
         service_runtime_(service_runtime),
         shutting_down_(false),
         init_done_cb_(init_done_cb),
@@ -97,15 +110,27 @@ void PluginReverseInterface::Log(nacl::string message) {
       continuation);
 }
 
+void PluginReverseInterface::DoPostMessage(nacl::string message) {
+  PostMessageResource* continuation = new PostMessageResource(message);
+  CHECK(continuation != NULL);
+  NaClLog(4, "PluginReverseInterface::DoPostMessage(%s)\n", message.c_str());
+  plugin::WeakRefCallOnMainThread(
+      anchor_,
+      0,  /* delay in ms */
+      ALLOW_THIS_IN_INITIALIZER_LIST(this),
+      &plugin::PluginReverseInterface::PostMessage_MainThreadContinuation,
+      continuation);
+}
+
 void PluginReverseInterface::StartupInitializationComplete() {
-  NaClLog(0, "PluginReverseInterface::StartupInitializationComplete\n");
+  NaClLog(4, "PluginReverseInterface::StartupInitializationComplete\n");
   if (init_done_cb_.pp_completion_callback().func != NULL) {
-    NaClLog(0,
+    NaClLog(4,
             "PluginReverseInterface::StartupInitializationComplete:"
             " invoking CB\n");
     pp::Module::Get()->core()->CallOnMainThread(0, init_done_cb_, PP_OK);
   } else {
-    NaClLog(0,
+    NaClLog(1,
             "PluginReverseInterface::StartupInitializationComplete:"
             " init_done_cb_ not valid, skipping.\n");
   }
@@ -121,10 +146,19 @@ void PluginReverseInterface::Log_MainThreadContinuation(
   plugin_->browser_interface()->AddToConsole(static_cast<Plugin*>(plugin_),
                                              p->message);
 }
+void PluginReverseInterface::PostMessage_MainThreadContinuation(
+    PostMessageResource* p,
+    int32_t err) {
+  UNREFERENCED_PARAMETER(err);
+  NaClLog(4,
+          "PluginReverseInterface::PostMessage_MainThreadContinuation(%s)\n",
+          p->message.c_str());
+  plugin_->PostMessage(std::string("DEBUG_POSTMESSAGE:") + p->message);
+}
 
 bool PluginReverseInterface::EnumerateManifestKeys(
     std::set<nacl::string>* out_keys) {
-  Manifest const* mp = plugin_->manifest();
+  Manifest const* mp = manifest_;
 
   if (!mp->GetFileKeys(out_keys)) {
     return false;
@@ -219,8 +253,9 @@ void PluginReverseInterface::OpenManifestEntry_MainThreadContinuation(
   NaClLog(4, "Entered OpenManifestEntry_MainThreadContinuation\n");
 
   std::string mapped_url;
-  if (!plugin_->manifest()->ResolveKey(p->url, &mapped_url,
-                                       p->error_info, p->is_portable)) {
+  bool permit_extension_url = false;
+  if (!manifest_->ResolveKey(p->url, &mapped_url, &permit_extension_url,
+                             p->error_info, p->is_portable)) {
     NaClLog(4, "OpenManifestEntry_MainThreadContinuation: ResolveKey failed\n");
     // Failed, and error_info has the details on what happened.  Wake
     // up requesting thread -- we are done.
@@ -242,7 +277,9 @@ void PluginReverseInterface::OpenManifestEntry_MainThreadContinuation(
       this,
       &PluginReverseInterface::StreamAsFile_MainThreadContinuation,
       open_cont);
-  if (!plugin_->StreamAsFile(mapped_url, stream_cc.pp_completion_callback())) {
+  if (!plugin_->StreamAsFile(mapped_url,
+                             permit_extension_url,
+                             stream_cc.pp_completion_callback())) {
     NaClLog(4,
             "OpenManifestEntry_MainThreadContinuation: StreamAsFile failed\n");
     nacl::MutexLocker take(&mu_);
@@ -330,12 +367,12 @@ void PluginReverseInterface::CloseManifestEntry_MainThreadContinuation(
 }
 
 void PluginReverseInterface::ReportCrash() {
-  NaClLog(0, "PluginReverseInterface::ReportCrash\n");
+  NaClLog(4, "PluginReverseInterface::ReportCrash\n");
   if (crash_cb_.pp_completion_callback().func != NULL) {
-    NaClLog(0, "PluginReverseInterface::ReportCrash: invoking CB\n");
+    NaClLog(4, "PluginReverseInterface::ReportCrash: invoking CB\n");
     pp::Module::Get()->core()->CallOnMainThread(0, crash_cb_, PP_OK);
   } else {
-    NaClLog(0,
+    NaClLog(1,
             "PluginReverseInterface::ReportCrash:"
             " crash_cb_ not valid, skipping\n");
   }
@@ -346,9 +383,12 @@ void PluginReverseInterface::ReportExitStatus(int exit_status) {
 }
 
 ServiceRuntime::ServiceRuntime(Plugin* plugin,
+                               const Manifest* manifest,
+                               bool should_report_uma,
                                pp::CompletionCallback init_done_cb,
                                pp::CompletionCallback crash_cb)
     : plugin_(plugin),
+      should_report_uma_(should_report_uma),
       browser_interface_(plugin->browser_interface()),
       reverse_service_(NULL),
       subprocess_(NULL),
@@ -356,6 +396,7 @@ ServiceRuntime::ServiceRuntime(Plugin* plugin,
       async_send_desc_(NULL),
       anchor_(new nacl::WeakRefAnchor()),
       rev_interface_(new PluginReverseInterface(anchor_, plugin,
+                                                manifest,
                                                 this,
                                                 init_done_cb, crash_cb)),
       exit_status_(-1) {
@@ -456,7 +497,9 @@ bool ServiceRuntime::InitCommunication(nacl::DescWrapper* nacl_desc,
   }
   PLUGIN_PRINTF(("ServiceRuntime::InitCommunication (load_status=%d)\n",
                  load_status));
-  plugin_->ReportSelLdrLoadStatus(load_status);
+  if (should_report_uma_) {
+    plugin_->ReportSelLdrLoadStatus(load_status);
+  }
   if (LOAD_OK != load_status) {
     error_info->SetReport(
         ERROR_SEL_LDR_START_STATUS,
@@ -514,6 +557,7 @@ SrpcClient* ServiceRuntime::SetupAppChannel() {
     SrpcClient* srpc_client = SrpcClient::New(plugin(), connect_desc);
     PLUGIN_PRINTF(("ServiceRuntime::SetupAppChannel (srpc_client=%p)\n",
                    static_cast<void*>(srpc_client)));
+    delete connect_desc;
     return srpc_client;
   }
 }

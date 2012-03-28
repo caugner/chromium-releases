@@ -11,11 +11,11 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/debugger/devtools_toggle_action.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_frontend_host_delegate.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_contents_delegate.h"
 
 namespace IPC {
 class Message;
@@ -35,15 +35,17 @@ class Value;
 namespace content {
 class DevToolsAgentHost;
 class DevToolsClientHost;
+class WebContents;
 }
 
 class DevToolsWindow : private content::NotificationObserver,
-                       private TabContentsDelegate,
+                       private content::WebContentsDelegate,
                        private content::DevToolsFrontendHostDelegate {
  public:
   static const char kDevToolsApp[];
   static void RegisterUserPrefs(PrefService* prefs);
-  static TabContentsWrapper* GetDevToolsContents(TabContents* inspected_tab);
+  static TabContentsWrapper* GetDevToolsContents(
+      content::WebContents* inspected_tab);
   static bool IsDevToolsWindow(RenderViewHost* window_rvh);
 
   static DevToolsWindow* OpenDevToolsWindowForWorker(
@@ -59,7 +61,7 @@ class DevToolsWindow : private content::NotificationObserver,
 
   // Overridden from DevToolsClientHost.
   virtual void InspectedTabClosing() OVERRIDE;
-  virtual void TabReplaced(TabContents* new_tab) OVERRIDE;
+  virtual void TabReplaced(content::WebContents* new_tab) OVERRIDE;
   RenderViewHost* GetRenderViewHost();
 
   void Show(DevToolsToggleAction action);
@@ -97,16 +99,17 @@ class DevToolsWindow : private content::NotificationObserver,
   void AddDevToolsExtensionsToClient();
   void CallClientFunction(const string16& function_name,
                           const base::Value& arg);
-  // Overridden from TabContentsDelegate.
-  virtual TabContents* OpenURLFromTab(TabContents* source,
-                                      const OpenURLParams& params) OVERRIDE;
-  virtual void AddNewContents(TabContents* source,
-                              TabContents* new_contents,
+  // Overridden from content::WebContentsDelegate.
+  virtual content::WebContents* OpenURLFromTab(
+      content::WebContents* source,
+      const content::OpenURLParams& params) OVERRIDE;
+  virtual void AddNewContents(content::WebContents* source,
+                              content::WebContents* new_contents,
                               WindowOpenDisposition disposition,
                               const gfx::Rect& initial_pos,
                               bool user_gesture) OVERRIDE;
-  virtual void CloseContents(TabContents* source) OVERRIDE {}
-  virtual bool CanReloadContents(TabContents* source) const OVERRIDE;
+  virtual void CloseContents(content::WebContents* source) OVERRIDE {}
+  virtual bool CanReloadContents(content::WebContents* source) const OVERRIDE;
   virtual bool PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
                                       bool* is_keyboard_shortcut) OVERRIDE;
   virtual void HandleKeyboardEvent(
@@ -127,6 +130,8 @@ class DevToolsWindow : private content::NotificationObserver,
   virtual void MoveWindow(int x, int y) OVERRIDE;
   virtual void DockWindow() OVERRIDE;
   virtual void UndockWindow() OVERRIDE;
+  virtual void SetDockSide(const std::string& side) OVERRIDE;
+  virtual void OpenInNewTab(const std::string& url) OVERRIDE;
   virtual void SaveToFile(const std::string& suggested_file_name,
                           const std::string& content) OVERRIDE;
 

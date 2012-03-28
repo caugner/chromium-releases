@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,10 @@
 #define CHROME_BROWSER_INSTANT_INSTANT_LOADER_H_
 #pragma once
 
+#include <string>
+
 #include "base/basictypes.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/string16.h"
 #include "base/timer.h"
@@ -21,6 +24,7 @@
 
 class InstantLoaderDelegate;
 class InstantLoaderManagerTest;
+class SessionStorageNamespace;
 class TabContents;
 class TabContentsWrapper;
 class TemplateURL;
@@ -41,7 +45,11 @@ class InstantLoader : public content::NotificationObserver {
   static const char* const kInstantHeader;
   static const char* const kInstantHeaderValue;
 
-  InstantLoader(InstantLoaderDelegate* delegate, TemplateURLID id);
+  // |group| is an identifier suffixed to histograms to distinguish field trial
+  // statistics from regular operation; can be a blank string.
+  InstantLoader(InstantLoaderDelegate* delegate,
+                TemplateURLID id,
+                const std::string& group);
   virtual ~InstantLoader();
 
   // Invoked to load a URL. |tab_contents| is the TabContents the preview is
@@ -66,8 +74,11 @@ class InstantLoader : public content::NotificationObserver {
 
   // Releases the preview TabContents passing ownership to the caller. This is
   // intended to be called when the preview TabContents is committed. This does
-  // not notify the delegate.
-  TabContentsWrapper* ReleasePreviewContents(InstantCommitType type);
+  // not notify the delegate. |tab_contents| is the underlying tab onto which
+  // the preview will be committed. It can be NULL when the underlying tab is
+  // irrelevant, for example when |type| is INSTANT_COMMIT_DESTROY.
+  TabContentsWrapper* ReleasePreviewContents(InstantCommitType type,
+                                             TabContentsWrapper* tab_contents);
 
   // Calls through to method of same name on delegate.
   bool ShouldCommitInstantOnMouseUp();
@@ -238,6 +249,13 @@ class InstantLoader : public content::NotificationObserver {
 
   // True if the page needs to be reloaded.
   bool needs_reload_;
+
+  // See description above constructor.
+  std::string group_;
+
+  // The session storage namespace identifier of the original tab contents that
+  // the preview_contents_ was based upon.
+  scoped_refptr<SessionStorageNamespace> session_storage_namespace_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantLoader);
 };

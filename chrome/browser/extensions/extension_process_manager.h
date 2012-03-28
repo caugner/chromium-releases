@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,13 +17,15 @@
 #include "content/public/browser/notification_registrar.h"
 
 class Browser;
-class BrowsingInstance;
 class Extension;
 class ExtensionHost;
 class GURL;
 class Profile;
 class RenderViewHost;
+
+namespace content {
 class SiteInstance;
+};
 
 // Manages dynamic state of running Chromium extensions. There is one instance
 // of this class per Profile. OTR Profiles have a separate instance that keeps
@@ -53,6 +55,7 @@ class ExtensionProcessManager : public content::NotificationObserver {
                                    Browser* browser);
   ExtensionHost* CreateInfobarHost(const GURL& url,
                                    Browser* browser);
+  ExtensionHost* CreateShellHost(const Extension* extension, const GURL& url);
 
   // Open the extension's options page.
   void OpenOptionsPage(const Extension* extension, Browser* browser);
@@ -69,7 +72,7 @@ class ExtensionProcessManager : public content::NotificationObserver {
   // Returns the SiteInstance that the given URL belongs to.
   // TODO(aa): This only returns correct results for extensions and packaged
   // apps, not hosted apps.
-  virtual SiteInstance* GetSiteInstanceForURL(const GURL& url);
+  virtual content::SiteInstance* GetSiteInstanceForURL(const GURL& url);
 
   // Registers a RenderViewHost as hosting a given extension.
   void RegisterRenderViewHost(RenderViewHost* render_view_host,
@@ -109,6 +112,10 @@ class ExtensionProcessManager : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
+  // Gets the profile associated with site_instance_ and all other
+  // related SiteInstances.
+  Profile* GetProfile() const;
+
   content::NotificationRegistrar registrar_;
 
   // The set of all ExtensionHosts managed by this process manager.
@@ -117,9 +124,10 @@ class ExtensionProcessManager : public content::NotificationObserver {
   // The set of running viewless background extensions.
   ExtensionHostSet background_hosts_;
 
-  // The BrowsingInstance shared by all extensions in this profile.  This
-  // controls process grouping.
-  scoped_refptr<BrowsingInstance> browsing_instance_;
+  // A SiteInstance related to the SiteInstance for all extensions in
+  // this profile.  We create it in such a way that a new
+  // browsing instance is created.  This controls process grouping.
+  scoped_refptr<content::SiteInstance> site_instance_;
 
  private:
   // Contains all extension-related RenderViewHost instances for all extensions.

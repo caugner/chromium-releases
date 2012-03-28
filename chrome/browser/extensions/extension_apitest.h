@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,9 +102,21 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   bool RunExtensionSubtestNoFileAccess(const char* extension_name,
                                        const std::string& page_url);
 
+  // Same as RunExtensionSubtest, but enables the extension for incognito mode.
+  bool RunExtensionSubtestIncognito(const char* extension_name,
+                                    const std::string& page_url);
+
+  // Same as RunExtensionSubtestIncognito, but disables file access.
+  bool RunExtensionSubtestIncognitoNoFileAccess(const char* extension_name,
+                                                const std::string& page_url);
+
   // Load |page_url| and wait for pass / fail notification from the extension
   // API on the page.
   bool RunPageTest(const std::string& page_url);
+
+  // Similar to RunExtensionTest, except used for running tests in platform app
+  // shell windows.
+  bool RunPlatformAppTest(const char* extension_name);
 
   // Start the test server, and store details of its state.  Those details
   // will be available to javascript tests using chrome.test.getConfig().
@@ -121,11 +133,16 @@ class ExtensionApiTest : public ExtensionBrowserTest {
   std::string message_;
 
  private:
+  enum Flags {
+    kFlagNone = 0,
+    kFlagEnableIncognito = 1 << 0,
+    kFlagEnableFileAccess = 1 << 1,
+    kFlagLoadAsComponent = 1 << 2,
+    kFlagLaunchAppShell = 1 << 3
+  };
   bool RunExtensionTestImpl(const char* extension_name,
                             const std::string& test_page,
-                            bool enable_incognito,
-                            bool enable_fileaccess,
-                            bool load_as_component);
+                            int flags);
 
   // Hold details of the test, set in C++, which can be accessed by
   // javascript using chrome.test.getConfig().

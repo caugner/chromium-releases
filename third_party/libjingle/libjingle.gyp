@@ -1,11 +1,8 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 {
-  'variables': {
-    'no_libjingle_logging%': 0,
-  },
   'includes': [
     '../../build/win_precompile.gypi',
   ],
@@ -14,13 +11,15 @@
       'FEATURE_ENABLE_SSL',
       'FEATURE_ENABLE_VOICEMAIL',  # TODO(ncarter): Do we really need this?
       '_USE_32BIT_TIME_T',
-      'SAFE_TO_DEFINE_TALK_BASE_LOGGING_MACROS',
+      'LOGGING_INSIDE_LIBJINGLE',
       'EXPAT_RELATIVE_PATH',
       'JSONCPP_RELATIVE_PATH',
       'WEBRTC_RELATIVE_PATH',
       'HAVE_WEBRTC_VIDEO',
       'HAVE_WEBRTC_VOICE',
       'NO_SOUND_SYSTEM',
+      'HAVE_SRTP',
+      'SRTP_RELATIVE_PATH',
     ],
     'configurations': {
       'Debug': {
@@ -34,6 +33,7 @@
     'include_dirs': [
       './overrides',
       './source',
+      '../../third_party/libyuv/include',
     ],
     'dependencies': [
       '<(DEPTH)/base/base.gyp:base',
@@ -84,6 +84,11 @@
             'OSX',
           ],
         }],
+        ['OS=="android"', {
+          'defines': [
+            'ANDROID',
+          ],
+        }],
         ['os_posix == 1', {
           'defines': [
             'POSIX',
@@ -94,9 +99,14 @@
             'BSD',
           ],
         }],
-        ['no_libjingle_logging==1', {
+        ['OS=="openbsd"', {
           'defines': [
-            'NO_LIBJINGLE_LOGGING',
+            'OPENBSD',
+          ],
+        }],
+        ['OS=="freebsd"', {
+          'defines': [
+            'FREEBSD',
           ],
         }],
       ],
@@ -138,6 +148,16 @@
           'BSD',
         ],
       }],
+      ['OS=="openbsd"', {
+        'defines': [
+          'OPENBSD',
+        ],
+      }],
+      ['OS=="freebsd"', {
+        'defines': [
+          'FREEBSD',
+        ],
+      }],
     ],
   },
   'targets': [
@@ -148,10 +168,9 @@
         'overrides/talk/base/basictypes.h',
         'overrides/talk/base/constructormagic.h',
 
-        # Need to override logging.h because we need
-        # SAFE_TO_DEFINE_TALK_BASE_LOGGING_MACROS to work.
-        # TODO(sergeyu): push SAFE_TO_DEFINE_TALK_BASE_LOGGING_MACROS to
-        # libjingle and remove this override.
+        # Overrides logging.h/.cc because libjingle logging should be done to
+        # the same place as the chromium logging.
+        'overrides/talk/base/logging.cc',
         'overrides/talk/base/logging.h',
 
         'overrides/talk/base/scoped_ptr.h',
@@ -212,7 +231,6 @@
         'source/talk/base/json.cc',
         'source/talk/base/json.h',
         'source/talk/base/linked_ptr.h',
-        'source/talk/base/logging.cc',
         'source/talk/base/md5.h',
         'source/talk/base/md5c.c',
         'source/talk/base/messagehandler.cc',
@@ -271,8 +289,10 @@
         'source/talk/base/taskrunner.h',
         'source/talk/base/thread.cc',
         'source/talk/base/thread.h',
-        'source/talk/base/time.cc',
-        'source/talk/base/time.h',
+        'source/talk/base/timeutils.cc',
+        'source/talk/base/timeutils.h',
+        'source/talk/base/timing.cc',
+        'source/talk/base/timing.h',
         'source/talk/base/urlencode.cc',
         'source/talk/base/urlencode.h',
         'source/talk/base/worker.cc',
@@ -298,8 +318,6 @@
         'source/talk/xmpp/jid.h',
         'source/talk/xmpp/plainsaslhandler.h',
         'source/talk/xmpp/prexmppauth.h',
-        'source/talk/xmpp/ratelimitmanager.cc',
-        'source/talk/xmpp/ratelimitmanager.h',
         'source/talk/xmpp/saslcookiemechanism.h',
         'source/talk/xmpp/saslhandler.h',
         'source/talk/xmpp/saslmechanism.cc',
@@ -318,6 +336,12 @@
         'source/talk/xmpp/xmppstanzaparser.h',
         'source/talk/xmpp/xmpptask.cc',
         'source/talk/xmpp/xmpptask.h',
+      ],
+      'dependencies': [
+        '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+      ],
+      'export_dependent_settings': [
+        '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
       ],
       'conditions': [
         ['OS=="win"', {
@@ -362,12 +386,17 @@
             'source/talk/base/macutils.h',
           ],
         }],
-      ],
-      'dependencies': [
-        '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
-      ],
-      'export_dependent_settings': [
-        '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+        ['OS=="android"', {
+          'sources!': [
+            # These depend on jsoncpp which we don't load because we probably
+            # don't actually need this code at all.
+            'source/talk/base/json.cc',
+            'source/talk/base/json.h',
+          ],
+          'dependencies!': [
+            '<(DEPTH)/third_party/jsoncpp/jsoncpp.gyp:jsoncpp',
+          ],
+        }],
       ],
     },  # target libjingle
     # This has to be is a separate project due to a bug in MSVS:
@@ -389,6 +418,11 @@
         'source/talk/p2p/base/port.cc',
         'source/talk/p2p/base/port.h',
         'source/talk/p2p/base/portallocator.h',
+        'source/talk/p2p/base/portallocator.cc',
+        'source/talk/p2p/base/portallocatorsessionproxy.cc',
+        'source/talk/p2p/base/portallocatorsessionproxy.h',
+        'source/talk/p2p/base/portproxy.cc',
+        'source/talk/p2p/base/portproxy.h',
         'source/talk/p2p/base/pseudotcp.cc',
         'source/talk/p2p/base/pseudotcp.h',
         'source/talk/p2p/base/rawtransport.cc',
@@ -447,17 +481,46 @@
       'target_name': 'libjingle_peerconnection',
       'type': 'static_library',
       'sources': [
+        'source/talk/app/webrtc/audiotrackimpl.cc',
+        'source/talk/app/webrtc/audiotrackimpl.h',
+        'source/talk/app/webrtc/mediastream.h',
+        'source/talk/app/webrtc/mediastreamhandler.cc',
+        'source/talk/app/webrtc/mediastreamhandler.h',
+        'source/talk/app/webrtc/mediastreamimpl.cc',
+        'source/talk/app/webrtc/mediastreamimpl.h',
+        'source/talk/app/webrtc/mediastreamprovider.h',
+        'source/talk/app/webrtc/mediastreamproxy.cc',
+        'source/talk/app/webrtc/mediastreamproxy.h',
+        'source/talk/app/webrtc/mediastreamtrackproxy.cc',
+        'source/talk/app/webrtc/mediastreamtrackproxy.h',
+        'source/talk/app/webrtc/mediatrackimpl.h',
+        'source/talk/app/webrtc/notifierimpl.h',
         'source/talk/app/webrtc/peerconnection.h',
-        'source/talk/app/webrtc/peerconnectionfactory.cc',
-        'source/talk/app/webrtc/peerconnectionfactory.h',
+        'source/talk/app/webrtc/peerconnectionfactoryimpl.cc',
+        'source/talk/app/webrtc/peerconnectionfactoryimpl.h',
         'source/talk/app/webrtc/peerconnectionimpl.cc',
         'source/talk/app/webrtc/peerconnectionimpl.h',
-        'source/talk/app/webrtc/peerconnectionproxy.cc',
-        'source/talk/app/webrtc/peerconnectionproxy.h',
-        'source/talk/app/webrtc/webrtcsession.cc',
-        'source/talk/app/webrtc/webrtcsession.h',
+        'source/talk/app/webrtc/peerconnectionsignaling.cc',
+        'source/talk/app/webrtc/peerconnectionsignaling.h',
+        'source/talk/app/webrtc/portallocatorfactory.cc',
+        'source/talk/app/webrtc/portallocatorfactory.h',
+        'source/talk/app/webrtc/roaperrorcodes.h',
+        'source/talk/app/webrtc/roapmessages.cc',
+        'source/talk/app/webrtc/roapmessages.h',
+        'source/talk/app/webrtc/roapsession.cc',
+        'source/talk/app/webrtc/roapsession.h',
+        'source/talk/app/webrtc/sessiondescriptionprovider.h',
+        'source/talk/app/webrtc/streamcollectionimpl.h',
+        'source/talk/app/webrtc/videorendererimpl.cc',
+        'source/talk/app/webrtc/videotrackimpl.cc',
+        'source/talk/app/webrtc/videotrackimpl.h',
         'source/talk/app/webrtc/webrtcjson.cc',
         'source/talk/app/webrtc/webrtcjson.h',
+        'source/talk/app/webrtc/webrtcsdp.cc',
+        'source/talk/app/webrtc/webrtcsdp.h',
+        'source/talk/app/webrtc/webrtcsession.cc',
+        'source/talk/app/webrtc/webrtcsession.h',
+        'source/talk/app/webrtc/webrtcsessionobserver.h',
         'source/talk/session/phone/audiomonitor.cc',
         'source/talk/session/phone/audiomonitor.h',
         'source/talk/session/phone/call.cc',
@@ -501,6 +564,7 @@
         'source/talk/session/phone/srtpfilter.h',
         'source/talk/session/phone/ssrcmuxfilter.cc',
         'source/talk/session/phone/ssrcmuxfilter.h',
+        'source/talk/session/phone/streamparams.cc',
         'source/talk/session/phone/videocapturer.cc',
         'source/talk/session/phone/videocapturer.h',
         'source/talk/session/phone/videocommon.cc',
@@ -521,14 +585,20 @@
         'source/talk/session/phone/webrtcvoiceengine.cc',
         'source/talk/session/phone/webrtcvoiceengine.h',
       ],
-      'dependencies': [
-        '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_capture_module',
-        '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_render_module',
-        '<(DEPTH)/third_party/webrtc/video_engine/video_engine.gyp:video_engine_core',
-        '<(DEPTH)/third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine_core',
-        '<(DEPTH)/third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
-        'libjingle',
-        'libjingle_p2p',
+      'conditions': [
+        ['OS!="android"', {
+          'dependencies': [
+            # We won't build with WebRTC on Android.
+            '<(DEPTH)/third_party/libsrtp/libsrtp.gyp:libsrtp',
+            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_capture_module',
+            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_render_module',
+            '<(DEPTH)/third_party/webrtc/video_engine/video_engine.gyp:video_engine_core',
+            '<(DEPTH)/third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine_core',
+            '<(DEPTH)/third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
+            'libjingle',
+            'libjingle_p2p',
+          ],
+        }],
       ],
     },  # target libjingle_peerconnection
   ],

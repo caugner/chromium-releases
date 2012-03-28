@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/string16.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDevToolsAgentClient.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebFileSystem.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebGraphicsContext3D.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 
 namespace WebKit {
@@ -30,6 +31,10 @@ class WebURLRequest;
 class WebURLResponse;
 struct WebPluginParams;
 struct WebURLError;
+}
+
+namespace webkit_media {
+class MediaStreamClient;
 }
 
 // This package provides functions used by DumpRenderTree/chromium.
@@ -63,8 +68,15 @@ WebKit::WebPlugin* CreateWebPlugin(WebKit::WebFrame* frame,
                                    const WebKit::WebPluginParams& params);
 
 // This is used by WebFrameClient::createMediaPlayer().
-WebKit::WebMediaPlayer* CreateMediaPlayer(WebKit::WebFrame* frame,
-                                          WebKit::WebMediaPlayerClient* client);
+WebKit::WebMediaPlayer* CreateMediaPlayer(
+    WebKit::WebFrame* frame,
+    WebKit::WebMediaPlayerClient* client,
+    webkit_media::MediaStreamClient* media_stream_client);
+
+// This is used by WebFrameClient::createMediaPlayer().
+WebKit::WebMediaPlayer* CreateMediaPlayer(
+    WebKit::WebFrame* frame,
+    WebKit::WebMediaPlayerClient* client);
 
 // This is used by WebFrameClient::createApplicationCacheHost().
 WebKit::WebApplicationCacheHost* CreateApplicationCacheHost(
@@ -86,6 +98,11 @@ enum GraphicsContext3DImplementation {
 // Registers which GraphicsContext3D Implementation to use.
 void SetGraphicsContext3DImplementation(GraphicsContext3DImplementation);
 GraphicsContext3DImplementation GetGraphicsContext3DImplementation();
+
+WebKit::WebGraphicsContext3D* CreateGraphicsContext3D(
+    const WebKit::WebGraphicsContext3D::Attributes& attributes,
+    WebKit::WebView* web_view,
+    bool direct);
 
 // ------- URL load mocking.
 // Registers the file at |file_path| to be served when |url| is requested.

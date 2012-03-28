@@ -189,7 +189,7 @@
    Intentional LeakyLazyInstanceTraits leaks
    Heapcheck:Leak
    ...
-   fun:base::LeakyLazyInstanceTraits::New
+   fun:base::internal::LeakyLazyInstanceTraits::New
    fun:base::LazyInstance::Pointer
 }
 {
@@ -921,13 +921,12 @@
 {
    bug_70327
    Heapcheck:Leak
-   fun:g_malloc
+   ...
    fun:gfx::CanvasSkia::SizeStringInt
-   fun:gfx::PlatformFontGtk::GetStringWidth
+   fun:gfx::CanvasSkia::GetStringWidth
    fun:gfx::Font::GetStringWidth
-   fun:ui::ElideUrl
-   fun:ui::::RunTest
-   fun:ui::TextEliderTest_TestGeneralEliding_Test::TestBody
+   ...
+   fun:ui::TextEliderTest_*_Test::TestBody
 }
 {
    bug_70782
@@ -1220,7 +1219,7 @@
    bug_82974a
    Heapcheck:Leak
    fun:sqlite3MemMalloc
-   fun:net::X509Certificate::CreateOSCertHandleFromBytes
+   fun:net::X509Certificate::CreateOSCertHandleFromBytes*
 }
 {
    bug_82974b
@@ -1742,25 +1741,6 @@
    fun:browser_sync::NonFrontendDataTypeController::Start
    fun:browser_sync::DataTypeManagerImpl::StartNextType
    fun:browser_sync::DataTypeManagerImpl::DownloadReady
-   fun:base::internal::RunnableAdapter::Run
-   fun:base::internal::InvokeHelper::MakeItSo
-   fun:base::internal::Invoker::Run
-   fun:base::Callback::Run
-   fun:browser_sync::SyncBackendHost::FinishConfigureDataTypesOnFrontendLoop
-   fun:browser_sync::SyncBackendHostForProfileSyncTest::StartConfiguration
-   fun:browser_sync::SyncBackendHost::ConfigureDataTypes
-   fun:browser_sync::DataTypeManagerImpl::Restart
-   fun:browser_sync::DataTypeManagerImpl::ConfigureImpl
-   fun:browser_sync::DataTypeManagerImpl::Configure
-   fun:ProfileSyncService::ConfigureDataTypeManager
-   fun:ProfileSyncService::OnBackendInitialized
-   fun:TestProfileSyncService::OnBackendInitialized
-   fun:browser_sync::SyncBackendHost::HandleInitializationCompletedOnFrontendLoop
-   fun:browser_sync::SyncBackendHost::Core::HandleInitializationCompletedOnFrontendLoop
-   fun:base::internal::RunnableAdapter::Run
-   fun:base::internal::InvokeHelper::MakeItSo
-   fun:base::internal::Invoker::Run
-   fun:base::Callback::Run
 }
 {
    bug_105667_b
@@ -1769,19 +1749,95 @@
    fun:browser_sync::NonFrontendDataTypeController::Stop
    fun:browser_sync::DataTypeManagerImpl::FinishStop
    fun:browser_sync::DataTypeManagerImpl::Stop
+   ...
    fun:ProfileSyncService::Shutdown
 }
 {
-   bug_106109
+   bug_108398
    Heapcheck:Leak
    ...
-   fun:::DefaultFocusManagerFactory::CreateFocusManager
-   fun:views::FocusManagerFactory::Create
-   fun:views::Widget::OnNativeWidgetCreated
-   fun:views::NativeWidgetGtk::InitNativeWidget
-   fun:views::Widget::Init
-   fun:views::Widget::CreateWindowWithParentAndBounds
-   fun:views::Widget::CreateWindowWithBounds
-   fun:AccessibilityEventRouterViewsTest::CreateWindowWithContents
-   fun:AccessibilityEventRouterViewsTest_TestFocusNotification_Test::TestBody
+   fun:BrowserThemePack::BuildFromExtension
+   fun:BrowserThemePackTest_CanBuildAndReadPack_Test::TestBody
 }
+{
+   bug_108399
+   Heapcheck:Leak
+   ...
+   fun:*Buffer
+   fun:::WebSocketServerSocketImpl::ProcessHandshake
+   fun:::WebSocketServerSocketImpl::OnRead
+}
+{
+   bug_109613
+   Heapcheck:Leak
+   fun:AutofillProfileSyncableServiceTest::SetUp
+}
+{
+   bug_110955
+   Heapcheck:Leak
+   fun:browser_sync::TypedUrlDataTypeController::StopAssociationAsync
+   fun:browser_sync::NonFrontendDataTypeController::Stop
+   fun:browser_sync::DataTypeManagerImpl::FinishStop
+   fun:browser_sync::DataTypeManagerImpl::Stop
+   fun:ProfileSyncService::ShutdownImpl
+   fun:ProfileSyncService::Shutdown
+   fun:ProfileSyncService::~ProfileSyncService
+   fun:TestProfileSyncService::~TestProfileSyncService
+   fun:scoped_ptr::reset
+   fun:ProfileSyncServiceTypedUrlTest::TearDown
+}
+{
+   bug_111317
+   Heapcheck:Leak
+   ...
+   fun:PORT_Alloc_Util
+   ...
+   fun:crypto::::SignData
+   fun:crypto::ECSignatureCreator::Sign
+   fun:ECSignatureCreatorTest_BasicTest_Test::TestBody
+}
+{
+   bug_111588a
+   Heapcheck:Leak
+   ...
+   fun:ResourceDispatcherHost::CompleteRead
+   fun:ResourceDispatcherHost::OnReadCompleted
+   fun:net::URLRequest::NotifyReadCompleted
+   fun:net::URLRequestJob::NotifyReadComplete
+   fun:net::URLRequestTestJob::ProcessNextOperation
+   fun:net::URLRequestTestJob::ProcessOnePendingMessage
+   fun:ResourceDispatcherHostTest_*_Test::TestBody
+}
+{
+   bug_111588b
+   Heapcheck:Leak
+   fun:std::string::_Rep::_S_create
+   fun:std::string::_Rep::_M_clone
+   fun:std::string::reserve
+   fun:bool ::InitCanonical
+   fun:GURL
+   fun:IPC::ParamTraits::Read
+   fun:IPC::ReadParam
+   fun:IPC::ParamTraits::Read
+   fun:IPC::ReadParam
+   fun:IPC::ParamTraits::Read
+   fun:IPC::ReadParam
+   fun:IPC::MessageSchema::Read
+   fun:ResourceHostMsg_RequestResource::Read
+   fun:ResourceHostMsg_RequestResource::Dispatch
+   fun:ResourceDispatcherHost::OnMessageReceived
+   fun:ResourceDispatcherHostTest::MakeTestRequest
+   fun:ResourceDispatcherHostTest::MakeTestRequest
+   fun:ResourceDispatcherHostTest_*_Test::TestBody
+}
+{
+   bug_111757
+   Heapcheck:Leak
+   fun:WTF::fastMalloc
+   ...
+   fun:PeerConnectionHandler::CreateWebKitStreamDescriptor
+   fun:PeerConnectionHandler::OnAddStreamCallback
+   fun:PeerConnectionHandler::OnAddStream
+   fun:PeerConnectionHandlerTest_Basic_Test::TestBody
+}
+

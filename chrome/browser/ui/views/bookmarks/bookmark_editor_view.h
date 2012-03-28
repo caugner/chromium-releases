@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,24 +9,25 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/string16.h"
 #include "chrome/browser/bookmarks/bookmark_editor.h"
 #include "chrome/browser/bookmarks/bookmark_expanded_state_tracker.h"
 #include "chrome/browser/bookmarks/bookmark_model_observer.h"
-#include "testing/gtest/include/gtest/gtest_prod.h"
 #include "ui/base/models/simple_menu_model.h"
 #include "ui/base/models/tree_node_model.h"
 #include "ui/views/context_menu_controller.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
-#include "ui/views/controls/tree/tree_view.h"
+#include "ui/views/controls/tree/tree_view_controller.h"
 #include "ui/views/window/dialog_delegate.h"
 
 namespace views {
 class Label;
 class Menu2;
 class TextButton;
+class TreeView;
 }
 
 class BookmarkEditorViewTest;
@@ -66,7 +67,7 @@ class BookmarkEditorView : public BookmarkEditor,
     virtual void SetTitle(ui::TreeModelNode* node,
                           const string16& title) {
       if (!title.empty())
-        TreeNodeModel::SetTitle(node, title);
+        ui::TreeNodeModel<EditorNode>::SetTitle(node, title);
     }
 
    private:
@@ -83,7 +84,7 @@ class BookmarkEditorView : public BookmarkEditor,
   // views::DialogDelegateView:
   virtual string16 GetDialogButtonLabel(ui::DialogButton button) const OVERRIDE;
   virtual bool IsDialogButtonEnabled(ui::DialogButton button) const OVERRIDE;
-  virtual bool IsModal() const OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual bool CanResize() const  OVERRIDE;
   virtual string16 GetWindowTitle() const  OVERRIDE;
   virtual bool Accept() OVERRIDE;
@@ -261,7 +262,9 @@ class BookmarkEditorView : public BookmarkEditor,
 
   // The context menu.
   scoped_ptr<ui::SimpleMenuModel> context_menu_contents_;
+#if !defined(USE_AURA)
   scoped_ptr<views::Menu2> context_menu_;
+#endif
 
   // Mode used to create nodes from.
   BookmarkModel* bb_model_;

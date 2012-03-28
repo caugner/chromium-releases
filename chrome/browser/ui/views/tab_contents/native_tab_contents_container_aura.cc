@@ -8,12 +8,14 @@
 #include "chrome/browser/ui/views/tab_contents/tab_contents_container.h"
 #include "chrome/browser/ui/views/tab_contents/tab_contents_view_views.h"
 #include "content/browser/tab_contents/interstitial_page.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/aura/window.h"
 #include "ui/base/accessibility/accessible_view_state.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/focus/widget_focus_manager.h"
 #include "ui/views/views_delegate.h"
+
+using content::WebContents;
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsContainerAura, public:
@@ -30,7 +32,7 @@ NativeTabContentsContainerAura::~NativeTabContentsContainerAura() {
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTabContentsContainerAura, NativeTabContentsContainer overrides:
 
-void NativeTabContentsContainerAura::AttachContents(TabContents* contents) {
+void NativeTabContentsContainerAura::AttachContents(WebContents* contents) {
   // We need to register the tab contents window with the BrowserContainer so
   // that the BrowserContainer is the focused view when the focus is on the
   // TabContents window (for the TabContents case).
@@ -39,7 +41,7 @@ void NativeTabContentsContainerAura::AttachContents(TabContents* contents) {
   Attach(contents->GetNativeView());
 }
 
-void NativeTabContentsContainerAura::DetachContents(TabContents* contents) {
+void NativeTabContentsContainerAura::DetachContents(WebContents* contents) {
   // Detach the TabContents.  Do this before we unparent the
   // TabContentsViewViews so that the window hierarchy is intact for any
   // cleanup during Detach().
@@ -70,8 +72,7 @@ views::View* NativeTabContentsContainerAura::GetView() {
   return this;
 }
 
-void NativeTabContentsContainerAura::TabContentsFocused(
-    TabContents* tab_contents) {
+void NativeTabContentsContainerAura::WebContentsFocused(WebContents* contents) {
   views::FocusManager* focus_manager = GetFocusManager();
   if (!focus_manager) {
     NOTREACHED();
@@ -90,19 +91,19 @@ bool NativeTabContentsContainerAura::SkipDefaultKeyEventProcessing(
   // We'll first give the page a chance to process the key events.  If it does
   // not process them, they'll be returned to us and we'll treat them as
   // accelerators then.
-  return container_->tab_contents() &&
-         !container_->tab_contents()->is_crashed();
+  return container_->web_contents() &&
+         !container_->web_contents()->IsCrashed();
 }
 
 bool NativeTabContentsContainerAura::IsFocusable() const {
   // We need to be focusable when our contents is not a view hierarchy, as
   // clicking on the contents needs to focus us.
-  return container_->tab_contents() != NULL;
+  return container_->web_contents() != NULL;
 }
 
 void NativeTabContentsContainerAura::OnFocus() {
-  if (container_->tab_contents())
-    container_->tab_contents()->Focus();
+  if (container_->web_contents())
+    container_->web_contents()->Focus();
 }
 
 void NativeTabContentsContainerAura::RequestFocus() {
@@ -113,7 +114,7 @@ void NativeTabContentsContainerAura::RequestFocus() {
   // that should also have focus, RequestFocus() is invoked one the
   // TabContentsContainer.  In order to make sure OnFocus() is invoked we need
   // to clear the focus before hands.
-  {
+  if (GetFocusManager()) {
     // Disable notifications.  Clear focus will assign the focus to the main
     // browser window.  Because this change of focus was not user requested,
     // don't send it to listeners.
@@ -125,7 +126,7 @@ void NativeTabContentsContainerAura::RequestFocus() {
 
 void NativeTabContentsContainerAura::AboutToRequestFocusFromTabTraversal(
     bool reverse) {
-  container_->tab_contents()->FocusThroughTabTraversal(reverse);
+  container_->web_contents()->FocusThroughTabTraversal(reverse);
 }
 
 void NativeTabContentsContainerAura::GetAccessibleState(

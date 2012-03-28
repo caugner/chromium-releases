@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,6 +28,9 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
+
+using content::OpenURLParams;
+using content::Referrer;
 
 namespace {
 
@@ -78,7 +81,7 @@ class ExtensionInstallDialogView : public views::DialogDelegateView,
   virtual bool Accept() OVERRIDE;
 
   // views::WidgetDelegate:
-  virtual bool IsModal() const OVERRIDE;
+  virtual ui::ModalType GetModalType() const OVERRIDE;
   virtual string16 GetWindowTitle() const OVERRIDE;
   virtual views::View* GetContentsView() OVERRIDE;
 
@@ -283,12 +286,12 @@ bool ExtensionInstallDialogView::Accept() {
   return true;
 }
 
-bool ExtensionInstallDialogView::IsModal() const {
-  return true;
+ui::ModalType ExtensionInstallDialogView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 string16 ExtensionInstallDialogView::GetWindowTitle() const {
-  return prompt_.GetDialogTitle();
+  return prompt_.GetDialogTitle(extension_);
 }
 
 views::View* ExtensionInstallDialogView::GetContentsView() {
@@ -299,8 +302,10 @@ void ExtensionInstallDialogView::LinkClicked(views::Link* source,
                                              int event_flags) {
   GURL store_url(
       extension_urls::GetWebstoreItemDetailURLPrefix() + extension_->id());
-  BrowserList::GetLastActive()->OpenURL(
-      store_url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(
+      store_url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
+      false);
+  BrowserList::GetLastActive()->OpenURL(params);
   GetWidget()->Close();
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,6 +90,8 @@ var MainView = (function() {
     tabs.addTab(SocketsView.TAB_HANDLE_ID, SocketsView.getInstance(),
                 false, true);
     tabs.addTab(SpdyView.TAB_HANDLE_ID, SpdyView.getInstance(), false, true);
+    tabs.addTab(HttpPipelineView.TAB_HANDLE_ID, HttpPipelineView.getInstance(),
+                false, true);
     tabs.addTab(HttpCacheView.TAB_HANDLE_ID, HttpCacheView.getInstance(),
                 false, true);
     tabs.addTab(HttpThrottlingView.TAB_HANDLE_ID,
@@ -122,8 +124,8 @@ var MainView = (function() {
     // a high level status (i.e. if we are capturing events, or displaying a
     // log file). Below it we will position the main tabs and their content
     // area.
-    var statusView = new DivView(MainView.STATUS_VIEW_ID);
-    var verticalSplitView = new VerticalSplitView(statusView, this);
+    this.statusView_ = StatusView.getInstance(this);
+    var verticalSplitView = new VerticalSplitView(this.statusView_, this);
     var windowView = new WindowView(verticalSplitView);
 
     // Trigger initial layout.
@@ -139,10 +141,6 @@ var MainView = (function() {
   // IDs for special HTML elements in index.html
   MainView.CATEGORY_TAB_HANDLES_ID = 'category-tab-handles';
   MainView.SPLITTER_BOX_FOR_MAIN_TABS_ID = 'splitter-box-for-main-tabs';
-  MainView.STATUS_VIEW_ID = 'status-view';
-  MainView.STATUS_VIEW_FOR_CAPTURE_ID = 'status-view-for-capture';
-  MainView.STATUS_VIEW_FOR_FILE_ID = 'status-view-for-file';
-  MainView.STATUS_VIEW_DUMP_FILE_NAME_ID = 'status-view-dump-file-name';
 
   cr.addSingletonGetter(MainView);
 
@@ -171,26 +169,37 @@ var MainView = (function() {
      * without reloading the page.  Must be called before passing loaded data
      * to the individual views.
      *
-     * @param {String} fileName The name of the log file that has been loaded.
+     * @param {String} opt_fileName The name of the log file that has been
+     *     loaded, if we're loading a log file.
      */
-    onLoadLogFile: function(fileName) {
+    onLoadLog: function(opt_fileName) {
       isViewingLoadedLog = true;
 
-      // Swap out the status bar to indicate we have loaded from a file.
-      setNodeDisplay($(MainView.STATUS_VIEW_FOR_CAPTURE_ID), false);
-      setNodeDisplay($(MainView.STATUS_VIEW_FOR_FILE_ID), true);
-
-      // Indicate which file is being displayed.
-      $(MainView.STATUS_VIEW_DUMP_FILE_NAME_ID).innerText = fileName;
-
-      document.styleSheets[0].insertRule('.hideOnLoadLog { display: none; }');
-
       g_browser.sourceTracker.setSecurityStripping(false);
-      g_browser.disable();
+      this.stopCapturing();
+      if (opt_fileName != undefined) {
+        // If there's a file name, a log file was loaded, so swap out the status
+        // bar to indicate we're no longer capturing events.
+        this.statusView_.onSwitchMode(StatusView.FOR_FILE_ID, opt_fileName);
+      } else {
+        // Otherwise, the "Stop Capturing" button was presumably pressed.
+        this.statusView_.onSwitchMode(StatusView.FOR_VIEW_ID, '');
+      }
     },
+
+    switchToViewOnlyMode: function() {
+      // Since this won't be dumped to a file, we don't want to remove
+      // cookies and credentials.
+      log_util.createLogDumpAsync('', log_util.loadLogFile, false);
+    },
+
+    stopCapturing: function() {
+      g_browser.disable();
+      document.styleSheets[0].insertRule('.hideOnLoadLog { display: none; }');
+    }
   };
 
-  /*
+  /**
    * Takes the current hash in form of "#tab&param1=value1&param2=value2&...".
    * Puts the parameters in an object, and passes the resulting object to
    * |categoryTabSwitcher|.  Uses tab and |anchorMap| to find a tab ID,

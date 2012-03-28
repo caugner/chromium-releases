@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -36,14 +36,13 @@ class WebMTracksParser : public WebMParserClient {
 
  private:
   // WebMParserClient methods
-  virtual bool OnListStart(int id) OVERRIDE;
+  virtual WebMParserClient* OnListStart(int id) OVERRIDE;
   virtual bool OnListEnd(int id) OVERRIDE;
   virtual bool OnUInt(int id, int64 val) OVERRIDE;
   virtual bool OnFloat(int id, double val) OVERRIDE;
   virtual bool OnBinary(int id, const uint8* data, int size) OVERRIDE;
   virtual bool OnString(int id, const std::string& str) OVERRIDE;
-  virtual bool OnSimpleBlock(int track_num, int timecode, int flags,
-                             const uint8* data, int size) OVERRIDE;
+
   int64 timecode_scale_;
 
   int64 track_type_;

@@ -9,10 +9,12 @@
 #include <string>
 
 #include "base/basictypes.h"
-#include "content/browser/download/base_file.h"
-#include "content/browser/download/download_id.h"
+#include "base/file_path.h"
 #include "content/common/content_export.h"
+#include "content/public/browser/download_id.h"
 #include "net/base/net_errors.h"
+
+namespace content {
 
 class DownloadManager;
 
@@ -26,7 +28,7 @@ class CONTENT_EXPORT DownloadFile {
 
   // If calculate_hash is true, sha256 hash will be calculated.
   // Returns net::OK on success, or a network error code on failure.
-  virtual net::Error Initialize(bool calculate_hash) = 0;
+  virtual net::Error Initialize() = 0;
 
   // Write a new chunk of data to the file.
   // Returns net::OK on success (all bytes written to the file),
@@ -56,7 +58,10 @@ class CONTENT_EXPORT DownloadFile {
 
   // Set |hash| with sha256 digest for the file.
   // Returns true if digest is successfully calculated.
-  virtual bool GetSha256Hash(std::string* hash) = 0;
+  virtual bool GetHash(std::string* hash) = 0;
+
+  // Returns the current (intermediate) state of the hash as a byte string.
+  virtual std::string GetHashState() = 0;
 
   // Cancels the download request associated with this file.
   virtual void CancelDownloadRequest() = 0;
@@ -88,5 +93,7 @@ class CONTENT_EXPORT DownloadFile {
       const FilePath& path,
       const FilePath::StringType& suffix);
 };
+
+}  // namespace content
 
 #endif  // CONTENT_BROWSER_DOWNLOAD_DOWNLOAD_FILE_H_

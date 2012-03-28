@@ -67,7 +67,7 @@ class RegistrationManager {
 
   // Registers all types included in the given set (that are not
   // already disabled) and sets all other types to be unregistered.
-  void SetRegisteredTypes(const syncable::ModelTypeSet& types);
+  void SetRegisteredTypes(syncable::ModelTypeSet types);
 
   // Marks the registration for the |model_type| lost and re-registers
   // it (unless it's disabled).

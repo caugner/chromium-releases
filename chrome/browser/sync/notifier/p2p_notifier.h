@@ -53,14 +53,14 @@ class P2PNotificationData {
   P2PNotificationData();
   P2PNotificationData(const std::string& sender_id,
                       P2PNotificationTarget target,
-                      const syncable::ModelTypeSet& changed_types);
+                      syncable::ModelTypeSet changed_types);
 
   ~P2PNotificationData();
 
   // Returns true if the given ID is targeted by this notification.
   bool IsTargeted(const std::string& id) const;
 
-  const syncable::ModelTypeSet& GetChangedTypes() const;
+  syncable::ModelTypeSet GetChangedTypes() const;
 
   bool Equals(const P2PNotificationData& other) const;
 
@@ -104,9 +104,9 @@ class P2PNotifier
   virtual void UpdateCredentials(
       const std::string& email, const std::string& token) OVERRIDE;
   virtual void UpdateEnabledTypes(
-      const syncable::ModelTypeSet& enabled_types) OVERRIDE;
+      syncable::ModelTypeSet enabled_types) OVERRIDE;
   virtual void SendNotification(
-      const syncable::ModelTypeSet& changed_types) OVERRIDE;
+      syncable::ModelTypeSet changed_types) OVERRIDE;
 
   // TalkMediator::Delegate implementation.
   virtual void OnNotificationStateChange(bool notifications_enabled) OVERRIDE;

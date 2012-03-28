@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/message_box_flags.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/widget/widget.h"
@@ -19,13 +18,15 @@
 ////////////////////////////////////////////////////////////////////////////////
 // JSModalDialogViews, public:
 
-JSModalDialogViews::JSModalDialogViews(
-    JavaScriptAppModalDialog* parent)
-    : parent_(parent),
-      message_box_view_(new views::MessageBoxView(
-          parent->dialog_flags() | ui::MessageBoxFlags::kAutoDetectAlignment,
-          parent->message_text(),
-          parent->default_prompt_text())) {
+JSModalDialogViews::JSModalDialogViews(JavaScriptAppModalDialog* parent)
+    : parent_(parent) {
+  int options = views::MessageBoxView::DETECT_ALIGNMENT;
+  if (parent->javascript_message_type() == ui::JAVASCRIPT_MESSAGE_TYPE_PROMPT)
+    options |= views::MessageBoxView::HAS_PROMPT_FIELD;
+
+  message_box_view_ = new views::MessageBoxView(options,
+                                                parent->message_text(),
+                                                parent->default_prompt_text());
   DCHECK(message_box_view_);
 
   message_box_view_->AddAccelerator(
@@ -71,30 +72,19 @@ void JSModalDialogViews::CancelAppModalDialog() {
 // JSModalDialogViews, views::DialogDelegate implementation:
 
 int JSModalDialogViews::GetDefaultDialogButton() const {
-  if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasOKButton)
-    return ui::DIALOG_BUTTON_OK;
-
-  if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasCancelButton)
-    return ui::DIALOG_BUTTON_CANCEL;
-
-  return ui::DIALOG_BUTTON_NONE;
+  return ui::DIALOG_BUTTON_OK;
 }
 
 int JSModalDialogViews::GetDialogButtons() const {
-  int dialog_buttons = ui::DIALOG_BUTTON_NONE;
-  if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasOKButton)
-    dialog_buttons = ui::DIALOG_BUTTON_OK;
+  if (parent_->javascript_message_type() == ui::JAVASCRIPT_MESSAGE_TYPE_ALERT)
+    return ui::DIALOG_BUTTON_OK;
 
-  if (parent_->dialog_flags() & ui::MessageBoxFlags::kFlagHasCancelButton)
-    dialog_buttons |= ui::DIALOG_BUTTON_CANCEL;
-
-  return dialog_buttons;
+  return ui::DIALOG_BUTTON_OK | ui::DIALOG_BUTTON_CANCEL;
 }
 
 string16 JSModalDialogViews::GetWindowTitle() const {
   return parent_->title();
 }
-
 
 void JSModalDialogViews::WindowClosing() {
 }
@@ -143,8 +133,8 @@ string16 JSModalDialogViews::GetDialogButtonLabel(
 ///////////////////////////////////////////////////////////////////////////////
 // JSModalDialogViews, views::WidgetDelegate implementation:
 
-bool JSModalDialogViews::IsModal() const {
-  return true;
+ui::ModalType JSModalDialogViews::GetModalType() const {
+  return ui::MODAL_TYPE_SYSTEM;
 }
 
 views::View* JSModalDialogViews::GetContentsView() {

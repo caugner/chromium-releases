@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
+#include "base/synchronization/lock.h"
 #include "net/base/crl_set.h"
 #include "net/base/ssl_config_service_defaults.h"
 #include "net/base/ssl_false_start_blacklist.h"
@@ -59,21 +60,29 @@ bool SSLConfigService::IsKnownFalseStartIncompatibleServer(
 }
 
 static bool g_cached_info_enabled = false;
-static bool g_false_start_enabled = true;
 static bool g_dns_cert_provenance_checking = false;
-base::LazyInstance<scoped_refptr<CRLSet>,
-                   base::LeakyLazyInstanceTraits<scoped_refptr<CRLSet> > >
-    g_crl_set = LAZY_INSTANCE_INITIALIZER;
 
-// static
-void SSLConfigService::DisableFalseStart() {
-  g_false_start_enabled = false;
-}
+// GlobalCRLSet holds a reference to the global CRLSet. It simply wraps a lock
+// around a scoped_refptr so that getting a reference doesn't race with
+// updating the CRLSet.
+class GlobalCRLSet {
+ public:
+  void Set(const scoped_refptr<CRLSet>& new_crl_set) {
+    base::AutoLock locked(lock_);
+    crl_set_ = new_crl_set;
+  }
 
-// static
-bool SSLConfigService::false_start_enabled() {
-  return g_false_start_enabled;
-}
+  scoped_refptr<CRLSet> Get() const {
+    base::AutoLock locked(lock_);
+    return crl_set_;
+  }
+
+ private:
+  scoped_refptr<CRLSet> crl_set_;
+  mutable base::Lock lock_;
+};
+
+base::LazyInstance<GlobalCRLSet>::Leaky g_crl_set = LAZY_INSTANCE_INITIALIZER;
 
 // static
 void SSLConfigService::EnableDNSCertProvenanceChecking() {
@@ -87,12 +96,13 @@ bool SSLConfigService::dns_cert_provenance_checking_enabled() {
 
 // static
 void SSLConfigService::SetCRLSet(scoped_refptr<CRLSet> crl_set) {
-  g_crl_set.Get() = crl_set;
+  // Note: this can be called concurently with GetCRLSet().
+  g_crl_set.Get().Set(crl_set);
 }
 
 // static
 scoped_refptr<CRLSet> SSLConfigService::GetCRLSet() {
-  return g_crl_set.Get();
+  return g_crl_set.Get().Get();
 }
 
 void SSLConfigService::EnableCachedInfo() {
@@ -117,7 +127,6 @@ SSLConfigService::~SSLConfigService() {
 
 // static
 void SSLConfigService::SetSSLConfigFlags(SSLConfig* ssl_config) {
-  ssl_config->false_start_enabled = g_false_start_enabled;
   ssl_config->dns_cert_provenance_checking_enabled =
       g_dns_cert_provenance_checking;
   ssl_config->cached_info_enabled = g_cached_info_enabled;
@@ -132,7 +141,9 @@ void SSLConfigService::ProcessConfigUpdate(const SSLConfig& orig_config,
       (orig_config.disabled_cipher_suites !=
        new_config.disabled_cipher_suites) ||
       (orig_config.origin_bound_certs_enabled !=
-       new_config.origin_bound_certs_enabled);
+       new_config.origin_bound_certs_enabled) ||
+      (orig_config.false_start_enabled !=
+       new_config.false_start_enabled);
 
   if (config_changed)
     FOR_EACH_OBSERVER(Observer, observer_list_, OnSSLConfigChanged());

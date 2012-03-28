@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,6 @@
 #include "ui/gfx/platform_font_pango.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/skia_util.h"
-
-#if defined(TOOLKIT_USES_GTK)
-#include <gdk/gdk.h>
-#endif
 
 using std::max;
 
@@ -117,9 +113,9 @@ void DrawStringContext::Draw(const SkColor& text_color) {
 
 void DrawStringContext::DrawWithHalo(const SkColor& text_color,
                                      const SkColor& halo_color) {
-  gfx::CanvasSkia text_canvas(bounds_.width() + 2, bounds_.height() + 2, false);
-  text_canvas.FillRect(static_cast<SkColor>(0),
-      gfx::Rect(0, 0, bounds_.width() + 2, bounds_.height() + 2));
+  gfx::Size size(bounds_.width() + 2, bounds_.height() + 2);
+  gfx::CanvasSkia text_canvas(size, false);
+  text_canvas.FillRect(static_cast<SkColor>(0), gfx::Rect(gfx::Point(), size));
 
   {
     skia::ScopedPlatformPaint scoped_platform_paint(text_canvas.sk_canvas());
@@ -261,25 +257,6 @@ void CanvasSkia::DrawStringInt(const string16& text,
   gfx::Rect bounds(x, y, w, h);
   DrawStringContext context(this, text, font, bounds, bounds, flags);
   context.Draw(color);
-}
-
-#if defined(TOOLKIT_USES_GTK)
-void CanvasSkia::DrawGdkPixbuf(GdkPixbuf* pixbuf, int x, int y) {
-  if (!pixbuf) {
-    NOTREACHED();
-    return;
-  }
-
-  skia::ScopedPlatformPaint scoped_platform_paint(canvas_);
-  cairo_t* cr = scoped_platform_paint.GetPlatformSurface();
-  gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
-  cairo_paint(cr);
-}
-#endif  // defined(TOOLKIT_USES_GTK)
-
-ui::TextureID CanvasSkia::GetTextureID() {
-  // TODO(wjmaclean)
-  return 0;
 }
 
 }  // namespace gfx

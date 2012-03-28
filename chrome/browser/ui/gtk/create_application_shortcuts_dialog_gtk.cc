@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,12 @@
 #include "chrome/browser/ui/gtk/gtk_util.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/web_applications/web_app_ui.h"
-#include "chrome/browser/ui/webui/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/extensions/extension_resource.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -254,9 +254,7 @@ void CreateApplicationShortcutsDialogGtk::ShowErrorDialog() {
 
   // Label on top of the checkboxes.
   GtkWidget* description = gtk_label_new(
-      l10n_util::GetStringFUTF8(
-          IDS_CREATE_SHORTCUTS_ERROR_LABEL,
-          l10n_util::GetStringUTF16(IDS_PRODUCT_NAME)).c_str());
+      l10n_util::GetStringUTF8(IDS_CREATE_SHORTCUTS_ERROR_LABEL).c_str());
   gtk_label_set_line_wrap(GTK_LABEL(description), TRUE);
   gtk_misc_set_alignment(GTK_MISC(description), 0, 0);
   gtk_box_pack_start(GTK_BOX(vbox), description, FALSE, FALSE, 0);
@@ -293,9 +291,9 @@ CreateWebApplicationShortcutsDialogGtk::CreateWebApplicationShortcutsDialogGtk(
 }
 
 void CreateWebApplicationShortcutsDialogGtk::OnCreatedShortcut() {
-  if (tab_contents_->tab_contents()->delegate())
-    tab_contents_->tab_contents()->delegate()->ConvertContentsToApplication(
-        tab_contents_->tab_contents());
+  if (tab_contents_->web_contents()->GetDelegate())
+    tab_contents_->web_contents()->GetDelegate()->ConvertContentsToApplication(
+        tab_contents_->web_contents());
 }
 
 CreateChromeApplicationShortcutsDialogGtk::

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -18,13 +18,9 @@ class SpecialTabsTest(pyauto.PyUITest):
     """Get a dict of accelerators and corresponding tab titles."""
     ret = {
         pyauto.IDC_SHOW_HISTORY: 'History',
-        pyauto.IDC_MANAGE_EXTENSIONS: 'Preferences - Extensions',
+        pyauto.IDC_MANAGE_EXTENSIONS: 'Settings - Extensions',
         pyauto.IDC_SHOW_DOWNLOADS: 'Downloads',
     }
-    if pyauto.PyUITest.IsWin():
-      ret[pyauto.IDC_MANAGE_EXTENSIONS] = 'Options - Extensions'
-    elif pyauto.PyUITest.IsChromeOS():
-      ret[pyauto.IDC_MANAGE_EXTENSIONS] = 'Settings - Extensions'
     return ret
 
   special_url_redirects = {
@@ -44,14 +40,14 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://about': { 'title': 'Chrome URLs' },
     'chrome://appcache-internals': { 'title': 'AppCache Internals' },
     'chrome://blob-internals': { 'title': 'Blob Storage Internals' },
-    'chrome://bugreport': {},
-    'chrome://bugreport/#0': { 'title': 'Feedback' },
+    'chrome://feedback': {},
+    'chrome://feedback/#0': { 'title': 'Feedback' },
     'chrome://chrome-urls': { 'title': 'Chrome URLs' },
     'chrome://crashes': { 'title': 'Crashes' },
     'chrome://credits': { 'title': 'Credits', 'CSP': False },
     'chrome://downloads': { 'title': 'Downloads' },
     'chrome://dns': { 'title': 'About DNS' },
-    'chrome://settings/extensions': { 'title': 'Preferences - Extensions' },
+    'chrome://settings/extensions': { 'title': 'Settings - Extensions' },
     'chrome://flags': {},
     'chrome://flash': {},
     'chrome://gpu-internals': {},
@@ -64,7 +60,7 @@ class SpecialTabsTest(pyauto.PyUITest):
     'chrome://newtab': { 'title': 'New Tab', 'CSP': False },
     'chrome://plugins': { 'title': 'Plug-ins' },
     'chrome://sessions': { 'title': 'Sessions' },
-    'chrome://settings': { 'title': 'Preferences - Basics' },
+    'chrome://settings': { 'title': 'Settings - Basics' },
     'chrome://stats': {},
     'chrome://sync': { 'title': 'Sync Internals' },
     'chrome://sync-internals': { 'title': 'Sync Internals' },
@@ -158,10 +154,6 @@ class SpecialTabsTest(pyauto.PyUITest):
 
   win_special_url_tabs = {
     'chrome://conflicts': {},
-
-    # OVERRIDE - different title for page.
-    'chrome://settings': { 'title': 'Options - Basics' },
-    'chrome://settings/extensions': { 'title': 'Options - Extensions' },
   }
   broken_win_special_url_tabs = {
     # Sync on windows badly broken at the moment.
@@ -276,7 +268,9 @@ class SpecialTabsTest(pyauto.PyUITest):
     """Test special tabs created by URLs like chrome://downloads,
        chrome://settings/extensionSettings, chrome://history etc.
        Also ensures they specify content-security-policy and not inline
-       scripts for those pages that are expected to do so."""
+       scripts for those pages that are expected to do so.  Patches which
+       break this test by including new inline javascript are security
+       vulnerabilities and should be reverted."""
     tabs = self._GetPlatformSpecialURLTabs()
     for url, properties in tabs.iteritems():
       logging.debug('Testing URL %s.' % url)

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,9 +14,11 @@
 #include "base/basictypes.h"
 #include "base/logging.h"
 #include "base/shared_memory.h"
+#include "base/time.h"
 #if defined(OS_WIN)
 #include "base/win/windows_version.h"
 #endif
+#include "media/audio/audio_parameters.h"
 #include "media/audio/audio_util.h"
 #if defined(OS_MACOSX)
 #include "media/audio/mac/audio_low_latency_input_mac.h"
@@ -46,6 +48,30 @@ static void AdjustVolume(Format* buf_out,
   for (int i = 0; i < sample_count; ++i) {
     buf_out[i] = static_cast<Format>(ScaleChannel<Fixed>(buf_out[i] - bias,
                                                          fixed_volume) + bias);
+  }
+}
+
+// Type is the datatype of a data point in the waveform (i.e. uint8, int16,
+// int32, etc).
+template <class Type>
+static void DoCrossfade(int bytes_to_crossfade, int number_of_channels,
+                        int bytes_per_channel, const Type* src, Type* dest) {
+  DCHECK_EQ(sizeof(Type), static_cast<size_t>(bytes_per_channel));
+  int number_of_samples =
+      bytes_to_crossfade / (bytes_per_channel * number_of_channels);
+
+  const Type* dest_end = dest + number_of_samples * number_of_channels;
+  const Type* src_end = src + number_of_samples * number_of_channels;
+
+  for (int i = 0; i < number_of_samples; ++i) {
+    double crossfade_ratio = static_cast<double>(i) / number_of_samples;
+    for (int j = 0; j < number_of_channels; ++j) {
+      DCHECK_LT(dest, dest_end);
+      DCHECK_LT(src, src_end);
+      *dest = (*dest) * (1.0 - crossfade_ratio) + (*src) * crossfade_ratio;
+      ++src;
+      ++dest;
+    }
   }
 }
 
@@ -313,6 +339,22 @@ size_t GetAudioHardwareBufferSize() {
 #endif
 }
 
+uint32 GetAudioInputHardwareChannelCount() {
+  enum channel_layout { MONO = 1, STEREO = 2 };
+#if defined(OS_MACOSX)
+  return MONO;
+#elif defined(OS_WIN)
+  if (!IsWASAPISupported()) {
+    // Fall back to Windows Wave implementation on Windows XP or lower and
+    // use stereo by default.
+    return STEREO;
+  }
+  return WASAPIAudioInputStream::HardwareChannelCount(eConsole);
+#else
+  return STEREO;
+#endif
+}
+
 // When transferring data in the shared memory, first word is size of data
 // in bytes. Actual data starts immediately after it.
 
@@ -372,5 +414,53 @@ bool IsWASAPISupported() {
 }
 
 #endif
+
+void Crossfade(int bytes_to_crossfade, int number_of_channels,
+               int bytes_per_channel, const uint8* src, uint8* dest) {
+  // TODO(vrk): The type punning below is no good!
+  switch (bytes_per_channel) {
+    case 4:
+      DoCrossfade(bytes_to_crossfade, number_of_channels, bytes_per_channel,
+                  reinterpret_cast<const int32*>(src),
+                  reinterpret_cast<int32*>(dest));
+      break;
+    case 2:
+      DoCrossfade(bytes_to_crossfade, number_of_channels, bytes_per_channel,
+                  reinterpret_cast<const int16*>(src),
+                  reinterpret_cast<int16*>(dest));
+      break;
+    case 1:
+      DoCrossfade(bytes_to_crossfade, number_of_channels, bytes_per_channel,
+                  src, dest);
+      break;
+    default:
+      NOTREACHED() << "Unsupported audio bit depth in crossfade.";
+  }
+}
+
+// The minimum number of samples in a hardware packet.
+// This value is selected so that we can handle down to 5khz sample rate.
+static const int kMinSamplesPerHardwarePacket = 1024;
+
+// The maximum number of samples in a hardware packet.
+// This value is selected so that we can handle up to 192khz sample rate.
+static const int kMaxSamplesPerHardwarePacket = 64 * 1024;
+
+// This constant governs the hardware audio buffer size, this value should be
+// chosen carefully.
+// This value is selected so that we have 8192 samples for 48khz streams.
+static const int kMillisecondsPerHardwarePacket = 170;
+
+uint32 SelectSamplesPerPacket(int sample_rate) {
+  // Select the number of samples that can provide at least
+  // |kMillisecondsPerHardwarePacket| worth of audio data.
+  int samples = kMinSamplesPerHardwarePacket;
+  while (samples <= kMaxSamplesPerHardwarePacket &&
+         samples * base::Time::kMillisecondsPerSecond <
+         sample_rate * kMillisecondsPerHardwarePacket) {
+    samples *= 2;
+  }
+  return samples;
+}
 
 }  // namespace media

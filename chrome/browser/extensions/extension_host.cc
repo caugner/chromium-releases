@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,11 +17,11 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ui/app_modal_dialogs/message_box_handler.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
@@ -31,20 +31,21 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browsing_instance.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "webkit/glue/context_menu.h"
 
 #if defined(TOOLKIT_VIEWS)
 #include "ui/views/widget/widget.h"
@@ -52,6 +53,9 @@
 
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
+using content::OpenURLParams;
+using content::SiteInstance;
+using content::WebContents;
 
 // Helper class that rate-limits the creation of renderer processes for
 // ExtensionHosts, to avoid blocking the UI.
@@ -120,7 +124,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
     : extension_(extension),
       extension_id_(extension->id()),
       profile_(Profile::FromBrowserContext(
-          site_instance->browsing_instance()->browser_context())),
+          site_instance->GetBrowserContext())),
       render_view_host_(NULL),
       did_stop_loading_(false),
       document_element_available_(false),
@@ -128,20 +132,16 @@ ExtensionHost::ExtensionHost(const Extension* extension,
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(profile_, this)),
       extension_host_type_(host_type),
-      associated_tab_contents_(NULL) {
-  host_contents_.reset(new TabContents(
+      associated_web_contents_(NULL) {
+  host_contents_.reset(WebContents::Create(
       profile_, site_instance, MSG_ROUTING_NONE, NULL, NULL));
-  TabContentsObserver::Observe(host_contents_.get());
-  host_contents_->set_delegate(this);
-  host_contents_->set_view_type(host_type);
+  content::WebContentsObserver::Observe(host_contents_.get());
+  host_contents_->SetDelegate(this);
+  host_contents_->SetViewType(host_type);
 
-  // TODO(mpcomplete): This was lifted from PrefsTabHelper, but it might be
-  // better to reuse all of PrefsTabHelper. We'd first have to make it not
-  // depend on TabContentsWrapper.
-  renderer_preferences_util::UpdateFromSystemSettings(
-      host_contents_->GetMutableRendererPrefs(), profile_);
+  prefs_tab_helper_.reset(new PrefsTabHelper(host_contents()));
 
-  render_view_host_ = host_contents_->render_view_host();
+  render_view_host_ = host_contents_->GetRenderViewHost();
 
   // Listen for when an extension is unloaded from the same profile, as it may
   // be the same extension that this points to.
@@ -161,7 +161,7 @@ ExtensionHost::ExtensionHost(const Extension* extension,
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(profile_, this)),
       extension_host_type_(host_type),
-      associated_tab_contents_(NULL) {
+      associated_web_contents_(NULL) {
 }
 
 ExtensionHost::~ExtensionHost() {
@@ -190,8 +190,12 @@ void ExtensionHost::CreateView(Browser* browser) {
 #endif
 }
 
-TabContents* ExtensionHost::GetAssociatedTabContents() const {
-  return associated_tab_contents_;
+void ExtensionHost::CreateViewWithoutBrowser() {
+  CreateView(NULL);
+}
+
+WebContents* ExtensionHost::GetAssociatedWebContents() const {
+  return associated_web_contents_;
 }
 
 content::RenderProcessHost* ExtensionHost::render_process_host() const {
@@ -234,10 +238,6 @@ Browser* ExtensionHost::GetBrowser() {
   return view() ? view()->browser() : NULL;
 }
 
-gfx::NativeView ExtensionHost::GetNativeViewOfHost() {
-  return view() ? view()->native_view() : NULL;
-}
-
 const GURL& ExtensionHost::GetURL() const {
   return host_contents()->GetURL();
 }
@@ -251,7 +251,7 @@ void ExtensionHost::LoadInitialURL() {
     return;
   }
 
-  host_contents_->controller().LoadURL(
+  host_contents_->GetController().LoadURL(
       initial_url_, content::Referrer(), content::PAGE_TRANSITION_LINK,
       std::string());
 }
@@ -281,7 +281,7 @@ void ExtensionHost::Observe(int type,
   }
 }
 
-void ExtensionHost::UpdatePreferredSize(TabContents* source,
+void ExtensionHost::UpdatePreferredSize(WebContents* source,
                                         const gfx::Size& pref_size) {
   if (view_.get())
     view_->UpdatePreferredSize(pref_size);
@@ -332,7 +332,8 @@ void ExtensionHost::DidStopLoading() {
   did_stop_loading_ = true;
   if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
       extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_DIALOG ||
-      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR ||
+      extension_host_type_ == chrome::VIEW_TYPE_APP_SHELL) {
 #if defined(TOOLKIT_VIEWS) || defined(OS_MACOSX)
     if (view_.get())
       view_->DidStopLoading();
@@ -355,6 +356,8 @@ void ExtensionHost::DidStopLoading() {
     } else if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
       UMA_HISTOGRAM_TIMES("Extensions.InfobarLoadTime",
         since_created_.Elapsed());
+    } else if (extension_host_type_ == chrome::VIEW_TYPE_APP_SHELL) {
+      UMA_HISTOGRAM_TIMES("Extensions.ShellLoadTime", since_created_.Elapsed());
     }
   }
 }
@@ -379,16 +382,60 @@ void ExtensionHost::DocumentAvailableInMainFrame() {
   }
 }
 
-void ExtensionHost::CloseContents(TabContents* contents) {
+void ExtensionHost::DocumentLoadedInFrame(int64 frame_id) {
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_EXTENSION_HOST_DOM_CONTENT_LOADED,
+        content::Source<Profile>(profile_),
+        content::Details<ExtensionHost>(this));
+}
+
+void ExtensionHost::CloseContents(WebContents* contents) {
   if (extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_POPUP ||
       extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_DIALOG ||
       extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE ||
-      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR) {
+      extension_host_type_ == chrome::VIEW_TYPE_EXTENSION_INFOBAR ||
+      extension_host_type_ == chrome::VIEW_TYPE_APP_SHELL) {
     content::NotificationService::current()->Notify(
         chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
         content::Source<Profile>(profile_),
         content::Details<ExtensionHost>(this));
   }
+}
+
+bool ExtensionHost::ShouldSuppressDialogs() {
+  return extension_->is_platform_app();
+}
+
+WebContents* ExtensionHost::OpenURLFromTab(WebContents* source,
+                                           const OpenURLParams& params) {
+  // Whitelist the dispositions we will allow to be opened.
+  switch (params.disposition) {
+    case SINGLETON_TAB:
+    case NEW_FOREGROUND_TAB:
+    case NEW_BACKGROUND_TAB:
+    case NEW_POPUP:
+    case NEW_WINDOW:
+    case SAVE_TO_DISK:
+    case OFF_THE_RECORD: {
+      // Only allow these from hosts that are bound to a browser (e.g. popups).
+      // Otherwise they are not driven by a user gesture.
+      Browser* browser = GetBrowser();
+      return browser ? browser->OpenURL(params) : NULL;
+    }
+    default:
+      return NULL;
+  }
+}
+
+bool ExtensionHost::HandleContextMenu(const ContextMenuParams& params) {
+  // Only allow context menus on non-linked editable items and selections.
+  // Context entries for the page and "Save * as..." are currently unsupported.
+  bool has_link = !params.unfiltered_link_url.is_empty();
+  bool has_selection = !params.selection_text.empty();
+  bool editable = params.is_editable;
+  bool media = params.media_type != WebKit::WebContextMenuData::MediaTypeNone;
+  // Returning true suppresses the context menu, having been "handled" here.
+  return has_link || media || !(editable || has_selection);
 }
 
 bool ExtensionHost::PreHandleKeyboardEvent(const NativeWebKeyboardEvent& event,
@@ -456,72 +503,66 @@ void ExtensionHost::RenderViewDeleted(RenderViewHost* render_view_host) {
   // RVH. There is sometimes a small gap between the pending RVH being deleted
   // and RenderViewCreated being called, so we update it here.
   if (render_view_host == render_view_host_)
-    render_view_host_ = host_contents_->render_view_host();
+    render_view_host_ = host_contents_->GetRenderViewHost();
 }
 
 content::JavaScriptDialogCreator* ExtensionHost::GetJavaScriptDialogCreator() {
   return GetJavaScriptDialogCreatorInstance();
 }
 
-void ExtensionHost::AddNewContents(TabContents* source,
-                                   TabContents* new_contents,
+void ExtensionHost::RunFileChooser(WebContents* tab,
+                                   const content::FileChooserParams& params) {
+  Browser::RunFileChooserHelper(tab, params);
+}
+
+void ExtensionHost::AddNewContents(WebContents* source,
+                                   WebContents* new_contents,
                                    WindowOpenDisposition disposition,
                                    const gfx::Rect& initial_pos,
                                    bool user_gesture) {
-  // TODO(mpcomplete): is all this necessary? Maybe we can just call the
-  // brower's delegate, and fall back to browser::Navigate if browser is NULL.
-  TabContents* contents = new_contents;
-  if (!contents)
-    return;
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
-
-  if (disposition == NEW_POPUP) {
-    // Find a browser with a matching profile for creating a popup.
-    // (If none is found, NULL argument to NavigateParams is valid.)
-    Browser* browser = BrowserList::FindTabbedBrowser(
-        profile, false);  // Match incognito exactly.
-    TabContentsWrapper* wrapper = new TabContentsWrapper(contents);
-    browser::NavigateParams params(browser, wrapper);
-    if (!browser)
-      params.profile = profile;
-    // The extension_app_id parameter ends up as app_name in the Browser
-    // which causes the Browser to return true for is_app().  This affects
-    // among other things, whether the location bar gets displayed.
-    params.extension_app_id = extension_id_;
-    params.disposition = NEW_POPUP;
-    params.window_bounds = initial_pos;
-    params.window_action = browser::NavigateParams::SHOW_WINDOW;
-    params.user_gesture = user_gesture;
-    browser::Navigate(&params);
-    return;
-  }
-
   // First, if the creating extension view was associated with a tab contents,
   // use that tab content's delegate. We must be careful here that the
   // associated tab contents has the same profile as the new tab contents. In
   // the case of extensions in 'spanning' incognito mode, they can mismatch.
   // We don't want to end up putting a normal tab into an incognito window, or
   // vice versa.
-  TabContents* associated_contents = GetAssociatedTabContents();
-  if (associated_contents &&
-      associated_contents->browser_context() == contents->browser_context()) {
-    associated_contents->AddNewContents(
-        contents, disposition, initial_pos, user_gesture);
-    return;
+  // Note that we don't do this for popup windows, because we need to associate
+  // those with their extension_app_id.
+  if (disposition != NEW_POPUP) {
+    WebContents* associated_contents = GetAssociatedWebContents();
+    if (associated_contents &&
+        associated_contents->GetBrowserContext() ==
+            new_contents->GetBrowserContext()) {
+      associated_contents->AddNewContents(
+          new_contents, disposition, initial_pos, user_gesture);
+      return;
+    }
   }
 
-  // If there's no associated tab contents, or it doesn't have a matching
-  // profile, try finding an open window. Again, we must make sure to find a
-  // window with the correct profile.
+  // Find a browser with a profile that matches the new tab. If none is found,
+  // NULL argument to NavigateParams is valid.
+  Profile* profile =
+      Profile::FromBrowserContext(new_contents->GetBrowserContext());
   Browser* browser = BrowserList::FindTabbedBrowser(
       profile, false);  // Match incognito exactly.
+  TabContentsWrapper* wrapper = new TabContentsWrapper(new_contents);
+  browser::NavigateParams params(browser, wrapper);
 
-  // If there's no Browser open with the right profile, create a new one.
-  if (!browser) {
-    browser = Browser::Create(profile);
-    browser->window()->Show();
-  }
-  browser->AddTabContents(contents, disposition, initial_pos, user_gesture);
+  // The extension_app_id parameter ends up as app_name in the Browser
+  // which causes the Browser to return true for is_app().  This affects
+  // among other things, whether the location bar gets displayed.
+  // TODO(mpcomplete): This seems wrong. What if the extension content is hosted
+  // in a tab?
+  if (disposition == NEW_POPUP)
+    params.extension_app_id = extension_id_;
+
+  if (!browser)
+    params.profile = profile;
+  params.disposition = disposition;
+  params.window_bounds = initial_pos;
+  params.window_action = browser::NavigateParams::SHOW_WINDOW;
+  params.user_gesture = user_gesture;
+  browser::Navigate(&params);
 }
 
 

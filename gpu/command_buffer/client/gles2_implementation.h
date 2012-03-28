@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,17 +21,20 @@
 #if !defined(NDEBUG) && !defined(__native_client__) && !defined(GLES2_CONFORMANCE_TESTS)  // NOLINT
   #if defined(GLES2_INLINE_OPTIMIZATION)
     // TODO(gman): Replace with macros that work with inline optmization.
+    #define GPU_CLIENT_SINGLE_THREAD_CHECK()
     #define GPU_CLIENT_LOG(args)
     #define GPU_CLIENT_LOG_CODE_BLOCK(code)
     #define GPU_CLIENT_DCHECK_CODE_BLOCK(code)
   #else
     #include "base/logging.h"
+    #define GPU_CLIENT_SINGLE_THREAD_CHECK() SingleThreadChecker checker(this);
     #define GPU_CLIENT_LOG(args)  DLOG_IF(INFO, debug_) << args;
     #define GPU_CLIENT_LOG_CODE_BLOCK(code) code
     #define GPU_CLIENT_DCHECK_CODE_BLOCK(code) code
     #define GPU_CLIENT_DEBUG
   #endif
 #else
+  #define GPU_CLIENT_SINGLE_THREAD_CHECK()
   #define GPU_CLIENT_LOG(args)
   #define GPU_CLIENT_LOG_CODE_BLOCK(code)
   #define GPU_CLIENT_DCHECK_CODE_BLOCK(code)
@@ -71,12 +74,13 @@
 namespace gpu {
 
 class MappedMemoryManager;
+class ScopedTransferBufferPtr;
+class TransferBufferInterface;
 
 namespace gles2 {
 
 class ClientSideBufferHelper;
 class ProgramInfoManager;
-class AlignedRingBuffer;
 
 // Base class for IdHandlers
 class IdHandlerInterface {
@@ -92,83 +96,6 @@ class IdHandlerInterface {
 
   // Marks an id as used for glBind functions. id = 0 does nothing.
   virtual bool MarkAsUsedForBind(GLuint id) = 0;
-};
-
-// Wraps RingBufferWrapper to provide aligned allocations.
-class AlignedRingBuffer : public RingBufferWrapper {
- public:
-  AlignedRingBuffer(
-      unsigned int alignment,
-      int32 shm_id,
-      RingBuffer::Offset base_offset,
-      unsigned int size,
-      CommandBufferHelper* helper,
-      void* base)
-      : RingBufferWrapper(base_offset, size, helper, base),
-        alignment_(alignment),
-        shm_id_(shm_id) {
-  }
-  ~AlignedRingBuffer();
-
-  // Overrriden from RingBufferWrapper
-  void* Alloc(unsigned int size) {
-    return RingBufferWrapper::Alloc(RoundToAlignment(size));
-  }
-
-  template <typename T>T* AllocTyped(unsigned int count) {
-    return static_cast<T*>(Alloc(count * sizeof(T)));
-  }
-
-  int32 GetShmId() const {
-    return shm_id_;
-  }
-
- private:
-  unsigned int RoundToAlignment(unsigned int size) {
-    return (size + alignment_ - 1) & ~(alignment_ - 1);
-  }
-
-  unsigned int alignment_;
-  int32 shm_id_;
-};
-
-// Manages the transfer buffer.
-class TransferBuffer {
- public:
-  TransferBuffer(
-      CommandBufferHelper* helper,
-      int32 buffer_id,
-      void* buffer,
-      size_t buffer_size,
-      size_t result_size,
-      unsigned int alignment);
-  ~TransferBuffer();
-
-  AlignedRingBuffer* GetBuffer();
-  int GetShmId();
-  void* GetResultBuffer();
-  int GetResultOffset();
-
-  void Free();
-
-  // This is for unit testing only.
-  bool HaveBuffer() const {
-    return buffer_id_ != 0;
-  }
-
- private:
-  void AllocateRingBuffer();
-
-  void Setup(int32 buffer_id, void* buffer);
-
-  CommandBufferHelper* helper_;
-  scoped_ptr<AlignedRingBuffer> ring_buffer_;
-  unsigned int buffer_size_;
-  unsigned int result_size_;
-  unsigned int alignment_;
-  int32 buffer_id_;
-  void* result_buffer_;
-  uint32 result_shm_offset_;
 };
 
 // This class emulates GLES2 over command buffers. It can be used by a client
@@ -231,13 +158,16 @@ class GLES2Implementation {
 
   GLES2Implementation(
       GLES2CmdHelper* helper,
-      size_t transfer_buffer_size,
-      void* transfer_buffer,
-      int32 transfer_buffer_id,
+      TransferBufferInterface* transfer_buffer,
       bool share_resources,
       bool bind_generates_resource);
 
   ~GLES2Implementation();
+
+  bool Initialize(
+      unsigned int starting_transfer_buffer_size,
+      unsigned int min_transfer_buffer_size,
+      unsigned int max_transfer_buffer_size);
 
   // The GLES2CmdHelper being used by this GLES2Implementation. You can use
   // this to issue cmds at a lower level for certain kinds of optimization.
@@ -281,6 +211,8 @@ class GLES2Implementation {
   void FreeEverything();
 
  private:
+  friend class ClientSideBufferHelper;
+
   // Used to track whether an extension is available
   enum ExtensionStatus {
       kAvailableExtensionStatus,
@@ -383,19 +315,25 @@ class GLES2Implementation {
     GLuint bound_texture_cube_map;
   };
 
+  // Checks for single threaded access.
+  class SingleThreadChecker {
+   public:
+    SingleThreadChecker(GLES2Implementation* gles2_implementation);
+    ~SingleThreadChecker();
+
+   private:
+    GLES2Implementation* gles2_implementation_;
+  };
+
   // Gets the value of the result.
   template <typename T>
   T GetResultAs() {
-    return static_cast<T>(transfer_buffer_.GetResultBuffer());
+    return static_cast<T>(GetResultBuffer());
   }
 
-  int32 GetResultShmId() {
-    return transfer_buffer_.GetShmId();
-  }
-
-  uint32 GetResultShmOffset() {
-    return transfer_buffer_.GetResultOffset();
-  }
+  void* GetResultBuffer();
+  int32 GetResultShmId();
+  uint32 GetResultShmOffset();
 
   // Lazily determines if GL_ANGLE_pack_reverse_row_order is available
   bool IsAnglePackReverseRowOrderAvailable();
@@ -419,7 +357,7 @@ class GLES2Implementation {
   // a transfer buffer to function which is currently managed by this class.
 
   // Gets the contents of a bucket.
-  void GetBucketContents(uint32 bucket_id, std::vector<int8>* data);
+  bool GetBucketContents(uint32 bucket_id, std::vector<int8>* data);
 
   // Sets the contents of a bucket.
   void SetBucketContents(uint32 bucket_id, const void* data, size_t size);
@@ -452,11 +390,18 @@ class GLES2Implementation {
   bool DeleteProgramHelper(GLuint program);
   bool DeleteShaderHelper(GLuint shader);
 
+  void BufferDataHelper(
+      GLenum target, GLsizeiptr size, const void* data, GLenum usage);
+  void BufferSubDataHelper(
+      GLenum target, GLintptr offset, GLsizeiptr size, const void* data);
+  void BufferSubDataHelperImpl(
+      GLenum target, GLintptr offset, GLsizeiptr size, const void* data,
+      ScopedTransferBufferPtr* buffer);
+
   // Helper for GetVertexAttrib
   bool GetVertexAttribHelper(GLuint index, GLenum pname, uint32* param);
 
-  // Asks the service for the max index in an element array buffer.
-  GLsizei GetMaxIndexInElementArrayBuffer(
+  GLuint GetMaxValueInBufferCHROMIUMHelper(
       GLuint buffer_id, GLsizei count, GLenum type, GLuint offset);
 
   bool CopyRectToBufferFlipped(
@@ -465,7 +410,7 @@ class GLES2Implementation {
   void TexSubImage2DImpl(
       GLenum target, GLint level, GLint xoffset, GLint yoffset, GLsizei width,
       GLsizei height, GLenum format, GLenum type, const void* pixels,
-      GLboolean internal);
+      GLboolean internal, ScopedTransferBufferPtr* buffer);
 
   // Helpers for query functions.
   bool GetHelper(GLenum pname, GLint* params);
@@ -481,11 +426,14 @@ class GLES2Implementation {
   bool GetShaderivHelper(GLuint shader, GLenum pname, GLint* params);
   bool GetTexParameterfvHelper(GLenum target, GLenum pname, GLfloat* params);
   bool GetTexParameterivHelper(GLenum target, GLenum pname, GLint* params);
+  const GLubyte* GetStringHelper(GLenum name);
+
+  bool IsExtensionAvailable(const char* ext);
 
   GLES2Util util_;
   GLES2CmdHelper* helper_;
+  TransferBufferInterface* transfer_buffer_;
   scoped_ptr<IdHandlerInterface> id_handlers_[id_namespaces::kNumIdNamespaces];
-  TransferBuffer transfer_buffer_;
   std::string last_error_;
 
   std::queue<int32> swap_buffers_tokens_;
@@ -541,6 +489,9 @@ class GLES2Implementation {
   bool sharing_resources_;
 
   bool bind_generates_resource_;
+
+  // Used to check for single threaded access.
+  int use_count_;
 
   // Map of GLenum to Strings for glGetString.  We need to cache these because
   // the pointer passed back to the client has to remain valid for eternity.

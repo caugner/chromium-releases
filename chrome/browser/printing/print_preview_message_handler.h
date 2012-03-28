@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 #pragma once
 
 #include "base/compiler_specific.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 
 class PrintPreviewUI;
 class TabContentsWrapper;
@@ -22,21 +22,21 @@ struct PageSizeMargins;
 // TabContents offloads print preview message handling to
 // PrintPreviewMessageHandler. This object has the same life time as the
 // TabContents that owns it.
-class PrintPreviewMessageHandler : public TabContentsObserver {
+class PrintPreviewMessageHandler : public content::WebContentsObserver {
  public:
-  explicit PrintPreviewMessageHandler(TabContents* tab_contents);
+  explicit PrintPreviewMessageHandler(content::WebContents* web_contents);
   virtual ~PrintPreviewMessageHandler();
 
-  // TabContentsObserver implementation.
+  // content::WebContentsObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void NavigateToPendingEntry(const GURL& url,
-      NavigationController::ReloadType reload_type) OVERRIDE;
+      content::NavigationController::ReloadType reload_type) OVERRIDE;
 
  private:
-  // Gets the print preview tab associated with the TabContents being observed.
+  // Gets the print preview tab associated with the WebContents being observed.
   TabContentsWrapper* GetPrintPreviewTab();
 
-  // Helper function to return the TabContentsWrapper for tab_contents().
+  // Helper function to return the TabContentsWrapper for web_contents().
   TabContentsWrapper* tab_contents_wrapper();
 
   // Common code between failure handlers. Returns a PrintPreviewUI* if there
@@ -44,9 +44,10 @@ class PrintPreviewMessageHandler : public TabContentsObserver {
   PrintPreviewUI* OnFailure(int document_cookie);
 
   // Message handlers.
-  void OnRequestPrintPreview(bool source_is_modifiable);
+  void OnRequestPrintPreview(bool source_is_modifiable, bool webnode_only);
   void OnDidGetDefaultPageLayout(
-      const printing::PageSizeMargins& page_layout_in_points);
+      const printing::PageSizeMargins& page_layout_in_points,
+      bool has_custom_page_size_style);
   void OnDidGetPreviewPageCount(
       const PrintHostMsg_DidGetPreviewPageCount_Params& params);
   void OnDidPreviewPage(const PrintHostMsg_DidPreviewPage_Params& params);

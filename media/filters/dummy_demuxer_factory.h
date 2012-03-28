@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,7 @@
 #define MEDIA_FILTERS_DUMMY_DEMUXER_FACTORY_H_
 
 #include "base/compiler_specific.h"
-#include "media/base/filter_factories.h"
+#include "media/base/demuxer_factory.h"
 
 namespace media {
 
@@ -19,7 +19,6 @@ class MEDIA_EXPORT DummyDemuxerFactory : public DemuxerFactory {
 
   // DemuxerFactory methods.
   virtual void Build(const std::string& url, const BuildCallback& cb) OVERRIDE;
-  virtual DemuxerFactory* Clone() const OVERRIDE;
 
  private:
   bool has_video_;

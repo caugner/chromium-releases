@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,11 +12,11 @@
 #include "base/basictypes.h"
 #include "base/string16.h"
 
+class Browser;
+class Profile;
 class TemplateURL;
 
 namespace protector {
-
-class Protector;
 
 // Base class for setting change tracked by Protector.
 class BaseSettingChange {
@@ -26,23 +26,21 @@ class BaseSettingChange {
 
   // Applies initial actions to the setting if needed. Must be called before
   // any other calls are made, including text getters.
-  // Returns true if initialization was successful. Otherwise, no other
-  // calls should be made.
-  // Associates this change with |protector_| instance so overrides must
-  // call the base method.
-  virtual bool Init(Protector* protector);
+  // Returns true if initialization was successful.
+  // Associates this change with |profile| instance so overrides must call the
+  // base method.
+  virtual bool Init(Profile* profile);
 
-  // Persists new setting if needed.
-  virtual void Apply();
+  // Persists new setting if needed. |browser| is the Browser instance from
+  // which the user action originates.
+  virtual void Apply(Browser* browser);
 
-  // Restores old setting if needed.
-  virtual void Discard();
+  // Restores old setting if needed. |browser| is the Browser instance from
+  // which the user action originates.
+  virtual void Discard(Browser* browser);
 
   // Indicates that user has ignored this change and timeout has passed.
   virtual void Timeout();
-
-  // Called before the change is removed from the protector instance.
-  virtual void OnBeforeRemoved() = 0;
 
   // Returns the resource ID of the badge icon.
   virtual int GetBadgeIconID() const = 0;
@@ -66,11 +64,12 @@ class BaseSettingChange {
   // Returns text for the button to discard the change with |Discard|.
   virtual string16 GetDiscardButtonText() const = 0;
 
-  // Protector instance we've been associated with by an |Init| call.
-  Protector* protector() { return protector_; }
+ protected:
+  // Profile instance we've been associated with by an |Init| call.
+  Profile* profile() { return profile_; }
 
  private:
-  Protector* protector_;
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(BaseSettingChange);
 };
@@ -78,12 +77,15 @@ class BaseSettingChange {
 // TODO(ivankr): CompositeSettingChange that incapsulates multiple
 // BaseSettingChange instances.
 
-// Allocates and initializes SettingChange implementation for default search
-// provider setting. Both |actual| and |backup| may be NULL if corresponding
-// values are unknown or invalid.
+// Allocates and initializes BaseSettingChange implementation for default search
+// provider setting. Reports corresponding histograms. Both |actual| and
+// |backup| may be NULL if corresponding values are unknown or invalid.
+// |backup| will be owned by the returned |BaseSettingChange| instance. |actual|
+// is not owned and is safe to destroy after Protector::ShowChange has been
+// called for the returned instance.
 BaseSettingChange* CreateDefaultSearchProviderChange(
     const TemplateURL* actual,
-    const TemplateURL* backup);
+    TemplateURL* backup);
 
 }  // namespace protector
 

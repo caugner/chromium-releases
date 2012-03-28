@@ -19,10 +19,14 @@
 class BookmarkModel;
 class BookmarkNode;
 class Browser;
-class PageNavigator;
 class PrefService;
 class Profile;
 class TabContents;
+
+namespace content {
+class PageNavigator;
+class WebContents;
+}
 
 namespace views {
 class DropTargetEvent;
@@ -86,14 +90,14 @@ void DragBookmarks(Profile* profile,
 // no browser with the specified profile a new one is created.
 void OpenAll(gfx::NativeWindow parent,
              Profile* profile,
-             PageNavigator* navigator,
+             content::PageNavigator* navigator,
              const std::vector<const BookmarkNode*>& nodes,
              WindowOpenDisposition initial_disposition);
 
 // Convenience for |OpenAll| with a single BookmarkNode.
 void OpenAll(gfx::NativeWindow parent,
              Profile* profile,
-             PageNavigator* navigator,
+             content::PageNavigator* navigator,
              const BookmarkNode* node,
              WindowOpenDisposition initial_disposition);
 
@@ -188,8 +192,8 @@ void ToggleWhenVisible(Profile* profile);
 // Register user preferences for BookmarksBar.
 void RegisterUserPrefs(PrefService* prefs);
 
-// Fills in the URL and title for a bookmark of |tab_contents|.
-void GetURLAndTitleToBookmark(TabContents* tab_contents,
+// Fills in the URL and title for a bookmark of |web_contents|.
+void GetURLAndTitleToBookmark(content::WebContents* web_contents,
                               GURL* url,
                               string16* title);
 
@@ -241,6 +245,7 @@ extern int num_urls_before_prompting;
 
 // This enum is used for the Bookmarks.LaunchLocation histogram.
 enum BookmarkLaunchLocation {
+  LAUNCH_NONE,
   LAUNCH_ATTACHED_BAR = 0,
   LAUNCH_DETACHED_BAR,
   // These two are kind of sub-categories of the bookmark bar. Generally

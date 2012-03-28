@@ -8,7 +8,9 @@
 #include "base/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/common/render_messages.h"
+#include "chrome/renderer/print_web_view_helper.h"
 #include "content/public/common/child_process_sandbox_support_linux.h"
+#include "content/public/common/content_client.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
 #include "grit/webkit_resources.h"
@@ -22,6 +24,7 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebDocument.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebElement.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebNode.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPluginContainer.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -29,15 +32,14 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "unicode/usearch.h"
 #include "webkit/plugins/ppapi/host_globals.h"
-#include "webkit/plugins/ppapi/host_resource_tracker.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
-#include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/ppb_image_data_impl.h"
 
 using ppapi::PpapiGlobals;
 using webkit::ppapi::HostGlobals;
 using webkit::ppapi::PluginInstance;
+using WebKit::WebElement;
 using WebKit::WebView;
 using content::RenderThread;
 
@@ -119,13 +121,16 @@ static const ResourceImageInfo kResourceImageMap[] = {
   { PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_8, IDR_PDF_PROGRESS_BAR_8 },
   { PP_RESOURCEIMAGE_PDF_PROGRESS_BAR_BACKGROUND,
       IDR_PDF_PROGRESS_BAR_BACKGROUND },
+  { PP_RESOURCEIMAGE_PDF_PAGE_INDICATOR_BACKGROUND,
+      IDR_PDF_PAGE_INDICATOR_BACKGROUND },
   { PP_RESOURCEIMAGE_PDF_PAGE_DROPSHADOW, IDR_PDF_PAGE_DROPSHADOW },
   { PP_RESOURCEIMAGE_PDF_PAN_SCROLL_ICON, IDR_PAN_SCROLL_ICON },
 };
 
 PP_Var GetLocalizedString(PP_Instance instance_id,
                           PP_ResourceString string_id) {
-  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  PluginInstance* instance =
+      content::GetHostGlobals()->GetInstance(instance_id);
   if (!instance)
     return PP_MakeUndefined();
 
@@ -142,7 +147,7 @@ PP_Var GetLocalizedString(PP_Instance instance_id,
     NOTREACHED();
   }
 
-  return ppapi::StringVar::StringToPPVar(instance->module()->pp_module(), rv);
+  return ppapi::StringVar::StringToPPVar(rv);
 }
 
 PP_Resource GetResourceImage(PP_Instance instance_id,
@@ -161,7 +166,7 @@ PP_Resource GetResourceImage(PP_Instance instance_id,
       ResourceBundle::GetSharedInstance().GetBitmapNamed(res_id);
 
   // Validate the instance.
-  if (!HostGlobals::Get()->GetInstance(instance_id))
+  if (!content::GetHostGlobals()->GetInstance(instance_id))
     return 0;
   scoped_refptr<webkit::ppapi::PPB_ImageData_Impl> image_data(
       new webkit::ppapi::PPB_ImageData_Impl(instance_id));
@@ -175,7 +180,7 @@ PP_Resource GetResourceImage(PP_Instance instance_id,
   if (!mapper.is_valid())
     return 0;
 
-  skia::PlatformCanvas* canvas = image_data->mapped_canvas();
+  skia::PlatformCanvas* canvas = image_data->GetPlatformCanvas();
   // Note: Do not skBitmap::copyTo the canvas bitmap directly because it will
   // ignore the allocated pixels in shared memory and re-allocate a new buffer.
   canvas->writePixels(*res_bitmap, 0, 0);
@@ -189,7 +194,7 @@ PP_Resource GetFontFileWithFallback(
     PP_PrivateFontCharset charset) {
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
   // Validate the instance before using it below.
-  if (!HostGlobals::Get()->GetInstance(instance_id))
+  if (!content::GetHostGlobals()->GetInstance(instance_id))
     return 0;
 
   scoped_refptr<ppapi::StringVar> face_name(ppapi::StringVar::FromPPVar(
@@ -283,21 +288,23 @@ void SearchString(PP_Instance instance,
 }
 
 void DidStartLoading(PP_Instance instance_id) {
-  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  PluginInstance* instance = content::GetHostGlobals()->GetInstance(instance_id);
   if (!instance)
     return;
   instance->delegate()->DidStartLoading();
 }
 
 void DidStopLoading(PP_Instance instance_id) {
-  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  PluginInstance* instance =
+      content::GetHostGlobals()->GetInstance(instance_id);
   if (!instance)
     return;
   instance->delegate()->DidStopLoading();
 }
 
 void SetContentRestriction(PP_Instance instance_id, int restrictions) {
-  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  PluginInstance* instance =
+      content::GetHostGlobals()->GetInstance(instance_id);
   if (!instance)
     return;
   instance->delegate()->SetContentRestriction(restrictions);
@@ -315,7 +322,8 @@ void UserMetricsRecordAction(PP_Var action) {
 }
 
 void HasUnsupportedFeature(PP_Instance instance_id) {
-  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  PluginInstance* instance =
+      content::GetHostGlobals()->GetInstance(instance_id);
   if (!instance)
     return;
 
@@ -330,10 +338,26 @@ void HasUnsupportedFeature(PP_Instance instance_id) {
 }
 
 void SaveAs(PP_Instance instance_id) {
-  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  PluginInstance* instance =
+      content::GetHostGlobals()->GetInstance(instance_id);
   if (!instance)
     return;
   instance->delegate()->SaveURLAs(instance->plugin_url());
+}
+
+void Print(PP_Instance instance_id) {
+  PluginInstance* instance = HostGlobals::Get()->GetInstance(instance_id);
+  if (!instance)
+    return;
+
+  WebElement element = instance->container()->element();
+  WebView* view = element.document().frame()->view();
+  content::RenderView* render_view = content::RenderView::FromWebView(view);
+
+  PrintWebViewHelper* print_view_helper = PrintWebViewHelper::Get(render_view);
+  if (print_view_helper) {
+    print_view_helper->PrintNode(element);
+  }
 }
 
 const PPB_PDF ppb_pdf = {
@@ -348,7 +372,8 @@ const PPB_PDF ppb_pdf = {
   &HistogramPDFPageCount,
   &UserMetricsRecordAction,
   &HasUnsupportedFeature,
-  &SaveAs
+  &SaveAs,
+  &Print
 };
 
 // static
@@ -357,4 +382,3 @@ const PPB_PDF* PPB_PDF_Impl::GetInterface() {
 }
 
 }  // namespace chrome
-

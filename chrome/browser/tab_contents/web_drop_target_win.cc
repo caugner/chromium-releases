@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
 #include "ui/base/clipboard/clipboard_util_win.h"
@@ -29,6 +29,9 @@ using WebKit::WebDragOperationCopy;
 using WebKit::WebDragOperationLink;
 using WebKit::WebDragOperationMove;
 using WebKit::WebDragOperationGeneric;
+using content::OpenURLParams;
+using content::Referrer;
+using content::WebContents;
 
 namespace {
 
@@ -51,8 +54,8 @@ DWORD GetPreferredDropEffect(DWORD effect) {
 // in the drop data and handle links as navigations.
 class InterstitialDropTarget {
  public:
-  explicit InterstitialDropTarget(TabContents* tab_contents)
-      : tab_contents_(tab_contents) {}
+  explicit InterstitialDropTarget(WebContents* web_contents)
+      : web_contents_(web_contents) {}
 
   DWORD OnDragEnter(IDataObject* data_object, DWORD effect) {
     return ui::ClipboardUtil::HasUrl(data_object) ?
@@ -68,30 +71,32 @@ class InterstitialDropTarget {
   }
 
   DWORD OnDrop(IDataObject* data_object, DWORD effect) {
-    if (ui::ClipboardUtil::HasUrl(data_object)) {
-      std::wstring url;
-      std::wstring title;
-      ui::ClipboardUtil::GetUrl(data_object, &url, &title, true);
-      tab_contents_->OpenURL(GURL(url), GURL(), CURRENT_TAB,
-                             content::PAGE_TRANSITION_AUTO_BOOKMARK);
-      return GetPreferredDropEffect(effect);
-    }
-    return DROPEFFECT_NONE;
+    if (!ui::ClipboardUtil::HasUrl(data_object))
+      return DROPEFFECT_NONE;
+
+    std::wstring url;
+    std::wstring title;
+    ui::ClipboardUtil::GetUrl(data_object, &url, &title, true);
+    OpenURLParams params(
+        GURL(url), Referrer(), CURRENT_TAB,
+        content::PAGE_TRANSITION_AUTO_BOOKMARK, false);
+    web_contents_->OpenURL(params);
+    return GetPreferredDropEffect(effect);
   }
 
  private:
-  TabContents* tab_contents_;
+  WebContents* web_contents_;
 
   DISALLOW_COPY_AND_ASSIGN(InterstitialDropTarget);
 };
 
-WebDropTarget::WebDropTarget(HWND source_hwnd, TabContents* tab_contents)
+WebDropTarget::WebDropTarget(HWND source_hwnd, WebContents* web_contents)
     : ui::DropTarget(source_hwnd),
-      tab_contents_(tab_contents),
+      web_contents_(web_contents),
       tab_(NULL),
       current_rvh_(NULL),
       drag_cursor_(WebDragOperationNone),
-      interstitial_drop_target_(new InterstitialDropTarget(tab_contents)) {
+      interstitial_drop_target_(new InterstitialDropTarget(web_contents)) {
 }
 
 WebDropTarget::~WebDropTarget() {
@@ -101,15 +106,15 @@ DWORD WebDropTarget::OnDragEnter(IDataObject* data_object,
                                  DWORD key_state,
                                  POINT cursor_position,
                                  DWORD effects) {
-  current_rvh_ = tab_contents_->render_view_host();
+  current_rvh_ = web_contents_->GetRenderViewHost();
 
   if (!tab_)
-    tab_ = TabContentsWrapper::GetCurrentWrapperForContents(tab_contents_);
+    tab_ = TabContentsWrapper::GetCurrentWrapperForContents(web_contents_);
 
   // Don't pass messages to the renderer if an interstitial page is showing
   // because we don't want the interstitial page to navigate.  Instead,
   // pass the messages on to a separate interstitial DropTarget handler.
-  if (tab_contents_->showing_interstitial_page())
+  if (web_contents_->ShowingInterstitialPage())
     return interstitial_drop_target_->OnDragEnter(data_object, effects);
 
   // TODO(tc): PopulateWebDropData can be slow depending on what is in the
@@ -124,12 +129,12 @@ DWORD WebDropTarget::OnDragEnter(IDataObject* data_object,
 
   POINT client_pt = cursor_position;
   ScreenToClient(GetHWND(), &client_pt);
-  tab_contents_->render_view_host()->DragTargetDragEnter(drop_data,
+  web_contents_->GetRenderViewHost()->DragTargetDragEnter(drop_data,
       gfx::Point(client_pt.x, client_pt.y),
       gfx::Point(cursor_position.x, cursor_position.y),
       web_drag_utils_win::WinDragOpMaskToWebDragOpMask(effects));
 
-  // This is non-null if tab_contents_ is showing an ExtensionWebUI with
+  // This is non-null if web_contents_ is showing an ExtensionWebUI with
   // support for (at the moment experimental) drag and drop extensions.
   if (tab_ && tab_->bookmark_tab_helper()->GetBookmarkDragDelegate()) {
     ui::OSExchangeData os_exchange_data(
@@ -150,15 +155,15 @@ DWORD WebDropTarget::OnDragOver(IDataObject* data_object,
                                 POINT cursor_position,
                                 DWORD effects) {
   DCHECK(current_rvh_);
-  if (current_rvh_ != tab_contents_->render_view_host())
+  if (current_rvh_ != web_contents_->GetRenderViewHost())
     OnDragEnter(data_object, key_state, cursor_position, effects);
 
-  if (tab_contents_->showing_interstitial_page())
+  if (web_contents_->ShowingInterstitialPage())
     return interstitial_drop_target_->OnDragOver(data_object, effects);
 
   POINT client_pt = cursor_position;
   ScreenToClient(GetHWND(), &client_pt);
-  tab_contents_->render_view_host()->DragTargetDragOver(
+  web_contents_->GetRenderViewHost()->DragTargetDragOver(
       gfx::Point(client_pt.x, client_pt.y),
       gfx::Point(cursor_position.x, cursor_position.y),
       web_drag_utils_win::WinDragOpMaskToWebDragOpMask(effects));
@@ -177,13 +182,13 @@ DWORD WebDropTarget::OnDragOver(IDataObject* data_object,
 
 void WebDropTarget::OnDragLeave(IDataObject* data_object) {
   DCHECK(current_rvh_);
-  if (current_rvh_ != tab_contents_->render_view_host())
+  if (current_rvh_ != web_contents_->GetRenderViewHost())
     return;
 
-  if (tab_contents_->showing_interstitial_page()) {
+  if (web_contents_->ShowingInterstitialPage()) {
     interstitial_drop_target_->OnDragLeave(data_object);
   } else {
-    tab_contents_->render_view_host()->DragTargetDragLeave();
+    web_contents_->GetRenderViewHost()->DragTargetDragLeave();
   }
 
   if (tab_ && tab_->bookmark_tab_helper()->GetBookmarkDragDelegate()) {
@@ -201,18 +206,18 @@ DWORD WebDropTarget::OnDrop(IDataObject* data_object,
                             POINT cursor_position,
                             DWORD effect) {
   DCHECK(current_rvh_);
-  if (current_rvh_ != tab_contents_->render_view_host())
+  if (current_rvh_ != web_contents_->GetRenderViewHost())
     OnDragEnter(data_object, key_state, cursor_position, effect);
 
-  if (tab_contents_->showing_interstitial_page())
+  if (web_contents_->ShowingInterstitialPage())
     interstitial_drop_target_->OnDragOver(data_object, effect);
 
-  if (tab_contents_->showing_interstitial_page())
+  if (web_contents_->ShowingInterstitialPage())
     return interstitial_drop_target_->OnDrop(data_object, effect);
 
   POINT client_pt = cursor_position;
   ScreenToClient(GetHWND(), &client_pt);
-  tab_contents_->render_view_host()->DragTargetDrop(
+  web_contents_->GetRenderViewHost()->DragTargetDrop(
       gfx::Point(client_pt.x, client_pt.y),
       gfx::Point(cursor_position.x, cursor_position.y));
 
@@ -229,7 +234,7 @@ DWORD WebDropTarget::OnDrop(IDataObject* data_object,
 
   // Focus the target browser.
   Browser* browser = Browser::GetBrowserForController(
-      &tab_contents_->controller(), NULL);
+      &web_contents_->GetController(), NULL);
   if (browser)
     browser->window()->Show();
 

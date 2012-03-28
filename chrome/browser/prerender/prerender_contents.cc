@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/process_util.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/history/history_types.h"
@@ -27,14 +26,20 @@
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_request_details.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/gfx/rect.h"
 
 #if defined(OS_MACOSX)
 #include "content/browser/mach_broker_mac.h"
 #endif
+
+using content::DownloadItem;
+using content::OpenURLParams;
+using content::WebContents;
 
 namespace prerender {
 
@@ -82,13 +87,13 @@ PrerenderContents::PendingPrerenderData::PendingPrerenderData(
 // TabContentsDelegateImpl -----------------------------------------------------
 
 class PrerenderContents::TabContentsDelegateImpl
-    : public TabContentsDelegate {
+    : public content::WebContentsDelegate {
  public:
   explicit TabContentsDelegateImpl(PrerenderContents* prerender_contents) :
       prerender_contents_(prerender_contents) {
   }
 
- virtual TabContents* OpenURLFromTab(TabContents* source,
+ virtual WebContents* OpenURLFromTab(WebContents* source,
                                      const OpenURLParams& params) OVERRIDE {
     // |OpenURLFromTab| is typically called when a frame performs a navigation
     // that requires the browser to perform the transition instead of WebKit.
@@ -101,7 +106,7 @@ class PrerenderContents::TabContentsDelegateImpl
     return NULL;
   }
 
-  // TabContentsDelegate implementation:
+  // content::WebContentsDelegate implementation:
   virtual bool ShouldAddNavigationToHistory(
       const history::HistoryAddPageArgs& add_page_args,
       content::NavigationType navigation_type) OVERRIDE {
@@ -110,16 +115,28 @@ class PrerenderContents::TabContentsDelegateImpl
     return false;
   }
 
-  virtual bool CanDownload(TabContents* source, int request_id) OVERRIDE {
+  virtual bool CanDownload(WebContents* source, int request_id) OVERRIDE {
     prerender_contents_->Destroy(FINAL_STATUS_DOWNLOAD);
     // Cancel the download.
     return false;
   }
 
-  virtual void OnStartDownload(TabContents* source,
+  virtual void OnStartDownload(WebContents* source,
                                DownloadItem* download) OVERRIDE {
     // Prerendered pages should never be able to download files.
     NOTREACHED();
+  }
+
+  virtual bool ShouldCreateWebContents(
+      WebContents* web_contents,
+      int route_id,
+      WindowContainerType window_container_type,
+      const string16& frame_name) OVERRIDE {
+    // Since we don't want to permit child windows that would have a
+    // window.opener property, terminate prerendering.
+    prerender_contents_->Destroy(FINAL_STATUS_CREATE_NEW_WINDOW);
+    // Cancel the popup.
+    return false;
   }
 
   virtual bool OnGoToEntryOffset(int offset) OVERRIDE {
@@ -131,7 +148,7 @@ class PrerenderContents::TabContentsDelegateImpl
     return false;
   }
 
-  virtual void JSOutOfMemory(TabContents* tab) OVERRIDE {
+  virtual void JSOutOfMemory(WebContents* tab) OVERRIDE {
     prerender_contents_->OnJSOutOfMemory();
   }
 
@@ -205,10 +222,10 @@ PrerenderContents::PrerenderContents(
       has_stopped_loading_(false),
       final_status_(FINAL_STATUS_MAX),
       prerendering_has_started_(false),
+      match_complete_status_(MATCH_COMPLETE_DEFAULT),
       prerendering_has_been_cancelled_(false),
       child_id_(-1),
       route_id_(-1),
-      starting_page_id_(-1),
       origin_(origin),
       experiment_id_(experiment_id) {
   DCHECK(prerender_manager != NULL);
@@ -231,64 +248,39 @@ void PrerenderContents::StartPrerendering(
   DCHECK(prerender_contents_.get() == NULL);
 
   prerendering_has_started_ = true;
-  TabContents* new_contents = new TabContents(profile_, NULL, MSG_ROUTING_NONE,
-                                              NULL, session_storage_namespace);
+  WebContents* new_contents = WebContents::Create(
+      profile_, NULL, MSG_ROUTING_NONE, NULL, session_storage_namespace);
   prerender_contents_.reset(new TabContentsWrapper(new_contents));
-  TabContentsObserver::Observe(new_contents);
+  content::WebContentsObserver::Observe(new_contents);
 
-  gfx::Rect tab_bounds;
+  gfx::Rect tab_bounds(640, 480);
   if (source_render_view_host) {
     DCHECK(source_render_view_host->view() != NULL);
-    TabContents* source_tc =
-        source_render_view_host->delegate()->GetAsTabContents();
-    if (source_tc) {
-      // So that history merging will work, get the max page ID
-      // of the old page as a starting id.
-      starting_page_id_ = source_tc->GetMaxPageID();
-
+    WebContents* source_wc =
+        source_render_view_host->delegate()->GetAsWebContents();
+    if (source_wc) {
       // Set the size of the new TC to that of the old TC.
-      source_tc->view()->GetContainerBounds(&tab_bounds);
+      source_wc->GetView()->GetContainerBounds(&tab_bounds);
     }
   } else {
-    int max_page_id = -1;
-    // Get the largest page ID of all open tabs as a starting id.
-    for (BrowserList::BrowserVector::const_iterator browser_iter =
-            BrowserList::begin();
-         browser_iter != BrowserList::end();
-         ++browser_iter) {
-      const Browser* browser = *browser_iter;
-      int num_tabs = browser->tab_count();
-      for (int tab_index = 0; tab_index < num_tabs; ++tab_index) {
-        TabContents* tab_contents = browser->GetTabContentsAt(tab_index);
-        if (tab_contents != NULL)
-          max_page_id = std::max(max_page_id, tab_contents->GetMaxPageID());
-      }
-    }
-    starting_page_id_ = max_page_id;
-
     // Try to get the active tab of the active browser and use that for tab
     // bounds. If the browser has never been active, we will fail to get a size
     // but we shouldn't be prerendering in that case anyway.
     Browser* active_browser = BrowserList::GetLastActiveWithProfile(profile_);
     if (active_browser) {
-      TabContents* active_tab_contents = active_browser->GetTabContentsAt(
+      WebContents* active_web_contents = active_browser->GetWebContentsAt(
           active_browser->active_index());
-      active_tab_contents->view()->GetContainerBounds(&tab_bounds);
+      if (active_web_contents)
+        active_web_contents->GetView()->GetContainerBounds(&tab_bounds);
     }
   }
 
-  // Add a safety margin of kPrerenderPageIdOffset to the starting page id (for
-  // things such as redirects).
-  if (starting_page_id_ < 0)
-    starting_page_id_ = 0;
-  starting_page_id_ += kPrerenderPageIdOffset;
-  prerender_contents_->controller().set_max_restored_page_id(starting_page_id_);
-
   tab_contents_delegate_.reset(new TabContentsDelegateImpl(this));
-  new_contents->set_delegate(tab_contents_delegate_.get());
+  new_contents->SetDelegate(tab_contents_delegate_.get());
 
   // Set the size of the prerender TabContents.
-  prerender_contents_->view()->SizeContents(tab_bounds.size());
+  prerender_contents_->web_contents()->GetView()->SizeContents(
+      tab_bounds.size());
 
   // Register as an observer of the RenderViewHost so we get messages.
   render_view_host_observer_.reset(
@@ -320,28 +312,22 @@ void PrerenderContents::StartPrerendering(
   // Register to inform new RenderViews that we're prerendering.
   notification_registrar_.Add(
       this, content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB,
-      content::Source<TabContents>(new_contents));
+      content::Source<WebContents>(new_contents));
 
   // Register for redirect notifications sourced from |this|.
   notification_registrar_.Add(
       this, content::NOTIFICATION_RESOURCE_RECEIVED_REDIRECT,
-      content::Source<RenderViewHostDelegate>(GetRenderViewHostDelegate()));
-
-  // Register for new windows from any source.
-  notification_registrar_.Add(
-      this, content::NOTIFICATION_CREATING_NEW_WINDOW_CANCELLED,
-      content::Source<TabContents>(new_contents));
+      content::Source<WebContents>(GetWebContents()));
 
   DCHECK(load_start_time_.is_null());
   load_start_time_ = base::TimeTicks::Now();
 
-  content::PageTransition transition = content::PAGE_TRANSITION_LINK;
-  if (origin_ == ORIGIN_OMNIBOX_EXACT || origin_ == ORIGIN_OMNIBOX_EXACT_FULL)
-    transition = content::PAGE_TRANSITION_TYPED;
-  new_contents->controller().LoadURL(
+  new_contents->GetController().LoadURL(
       prerender_url_,
       referrer_,
-      transition, std::string());
+      (origin_ == ORIGIN_OMNIBOX ? content::PAGE_TRANSITION_TYPED :
+                                   content::PAGE_TRANSITION_LINK),
+      std::string());
 }
 
 bool PrerenderContents::GetChildId(int* child_id) const {
@@ -360,16 +346,7 @@ bool PrerenderContents::GetRouteId(int* route_id) const {
 
 void PrerenderContents::set_final_status(FinalStatus final_status) {
   DCHECK(final_status >= FINAL_STATUS_USED && final_status < FINAL_STATUS_MAX);
-  DCHECK(final_status_ == FINAL_STATUS_MAX ||
-         final_status_ == FINAL_STATUS_CONTROL_GROUP ||
-         final_status_ == FINAL_STATUS_MATCH_COMPLETE_DUMMY);
-
-  // Don't override final_status_ if it's FINAL_STATUS_CONTROL_GROUP or
-  // FINAL_STATUS_MATCH_COMPLETE_DUMMY, otherwise data will be collected
-  // in the Prerender.FinalStatus histogram.
-  if (final_status_ == FINAL_STATUS_CONTROL_GROUP ||
-      final_status_ == FINAL_STATUS_MATCH_COMPLETE_DUMMY)
-    return;
+  DCHECK(final_status_ == FINAL_STATUS_MAX);
 
   final_status_ = final_status;
 }
@@ -377,17 +354,14 @@ void PrerenderContents::set_final_status(FinalStatus final_status) {
 PrerenderContents::~PrerenderContents() {
   DCHECK(final_status_ != FINAL_STATUS_MAX);
   DCHECK(prerendering_has_been_cancelled_ ||
-         final_status_ == FINAL_STATUS_USED ||
-         final_status_ == FINAL_STATUS_CONTROL_GROUP ||
-         final_status_ == FINAL_STATUS_MATCH_COMPLETE_DUMMY);
+         final_status_ == FINAL_STATUS_USED);
   DCHECK(origin_ != ORIGIN_MAX);
 
-  // If we haven't even started prerendering, we were just in the control
-  // group (or a match complete dummy), which means we do not want to record
-  // the status.
-  if (prerendering_has_started())
-    prerender_manager_->RecordFinalStatus(origin_, experiment_id_,
-                                          final_status_);
+  prerender_manager_->RecordFinalStatusWithMatchCompleteStatus(
+      origin_,
+      experiment_id_,
+      match_complete_status_,
+      final_status_);
 
   if (child_id_ != -1 && route_id_ != -1)
     prerender_tracker_->OnPrerenderingFinished(child_id_, route_id_);
@@ -419,8 +393,7 @@ void PrerenderContents::Observe(int type,
       // to be remembered for future matching, and if it redirects to
       // an https resource, it needs to be canceled. If a subresource
       // is redirected, nothing changes.
-      DCHECK(content::Source<RenderViewHostDelegate>(source).ptr() ==
-             GetRenderViewHostDelegate());
+      DCHECK(content::Source<WebContents>(source).ptr() == GetWebContents());
       ResourceRedirectDetails* resource_redirect_details =
           content::Details<ResourceRedirectDetails>(details).ptr();
       CHECK(resource_redirect_details);
@@ -434,8 +407,8 @@ void PrerenderContents::Observe(int type,
 
     case content::NOTIFICATION_RENDER_VIEW_HOST_CREATED_FOR_TAB: {
       if (prerender_contents_.get()) {
-        DCHECK_EQ(content::Source<TabContents>(source).ptr(),
-                  prerender_contents_->tab_contents());
+        DCHECK_EQ(content::Source<WebContents>(source).ptr(),
+                  prerender_contents_->web_contents());
 
         content::Details<RenderViewHost> new_render_view_host(details);
         OnRenderViewHostCreated(new_render_view_host.ptr());
@@ -457,18 +430,7 @@ void PrerenderContents::Observe(int type,
         // size, is also sets itself to be visible, which would then break the
         // visibility API.
         new_render_view_host->WasResized();
-        prerender_contents_->tab_contents()->HideContents();
-      }
-      break;
-    }
-
-    case content::NOTIFICATION_CREATING_NEW_WINDOW_CANCELLED: {
-      if (prerender_contents_.get()) {
-        CHECK(content::Source<TabContents>(source).ptr() ==
-              prerender_contents_->tab_contents());
-        // Since we don't want to permit child windows that would have a
-        // window.opener property, terminate prerendering.
-        Destroy(FINAL_STATUS_CREATE_NEW_WINDOW);
+        prerender_contents_->web_contents()->HideContents();
       }
       break;
     }
@@ -648,16 +610,16 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
 }
 
 TabContentsWrapper* PrerenderContents::ReleasePrerenderContents() {
-  prerender_contents_->tab_contents()->set_delegate(NULL);
+  prerender_contents_->web_contents()->SetDelegate(NULL);
   render_view_host_observer_.reset();
-  TabContentsObserver::Observe(NULL);
+  content::WebContentsObserver::Observe(NULL);
   return prerender_contents_.release();
 }
 
-RenderViewHostDelegate* PrerenderContents::GetRenderViewHostDelegate() {
+WebContents* PrerenderContents::GetWebContents() {
   if (!prerender_contents_.get())
     return NULL;
-  return prerender_contents_->tab_contents();
+  return prerender_contents_->web_contents();
 }
 
 RenderViewHost* PrerenderContents::render_view_host_mutable() {
@@ -667,7 +629,7 @@ RenderViewHost* PrerenderContents::render_view_host_mutable() {
 const RenderViewHost* PrerenderContents::render_view_host() const {
   if (!prerender_contents_.get())
     return NULL;
-  return prerender_contents_->render_view_host();
+  return prerender_contents_->web_contents()->GetRenderViewHost();
 }
 
 void PrerenderContents::CommitHistory(TabContentsWrapper* tab) {
@@ -687,11 +649,11 @@ Value* PrerenderContents::GetAsValue() const {
 }
 
 bool PrerenderContents::IsCrossSiteNavigationPending() const {
-  if (!prerender_contents_.get() || !prerender_contents_->tab_contents())
+  if (!prerender_contents_.get() || !prerender_contents_->web_contents())
     return false;
-  const TabContents* tab_contents = prerender_contents_->tab_contents();
-  return (tab_contents->GetSiteInstance() !=
-          tab_contents->GetPendingSiteInstance());
+  const WebContents* web_contents = prerender_contents_->web_contents();
+  return (web_contents->GetSiteInstance() !=
+          web_contents->GetPendingSiteInstance());
 }
 
 

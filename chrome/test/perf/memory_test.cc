@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "chrome/test/automation/tab_proxy.h"
 #include "chrome/test/automation/window_proxy.h"
 #include "chrome/test/base/chrome_process_util.h"
+#include "chrome/test/perf/perf_test.h"
 #include "chrome/test/ui/ui_perf_test.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_util.h"
@@ -120,7 +121,7 @@ class MemoryTest : public UIPerfTest {
       SCOPED_TRACE(url);
 
       if (url == "<PAUSE>") {  // Special command to delay on this page
-        base::PlatformThread::Sleep(2000);
+        base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(2));
         continue;
       }
 
@@ -169,7 +170,7 @@ class MemoryTest : public UIPerfTest {
 
         // A new window will not load a url if requested too soon. The window
         // stays on the new tab page instead.
-        base::PlatformThread::Sleep(200);
+        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(200));
 
         active_window = window_count - 1;
         window = automation()->GetBrowserWindow(active_window);
@@ -196,14 +197,14 @@ class MemoryTest : public UIPerfTest {
       // TODO(mbelshe): Bug 2953
       // The automation crashes periodically if we cycle too quickly.
       // To make these tests more reliable, slowing them down a bit.
-      base::PlatformThread::Sleep(100);
+      base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
     }
 
     size_t stop_size = base::GetSystemCommitCharge();
     PrintIOPerfInfo(test_name);
     PrintMemoryUsageInfo(test_name);
-    PrintSystemCommitCharge(test_name, stop_size - start_size,
-                            true /* important */);
+    perf_test::PrintSystemCommitCharge(test_name, stop_size - start_size,
+                                       true /* important */);
   }
 
  private:

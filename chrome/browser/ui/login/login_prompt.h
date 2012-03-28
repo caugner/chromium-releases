@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,9 +11,16 @@
 #include "base/basictypes.h"
 #include "base/synchronization/lock.h"
 #include "chrome/browser/password_manager/password_manager.h"
-#include "content/browser/renderer_host/resource_dispatcher_host_login_delegate.h"
 #include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/resource_dispatcher_host_login_delegate.h"
+
+class ConstrainedWindow;
+class GURL;
+
+namespace content {
+class RenderViewHostDelegate;
+class NotificationRegistrar;
+}  // namespace content
 
 namespace net {
 class AuthChallengeInfo;
@@ -21,14 +28,10 @@ class HttpNetworkSession;
 class URLRequest;
 }  // namespace net
 
-class ConstrainedWindow;
-class GURL;
-class RenderViewHostDelegate;
-
 // This is the base implementation for the OS-specific classes that route
 // authentication info to the net::URLRequest that needs it. These functions
 // must be implemented in a thread safe manner.
-class LoginHandler : public ResourceDispatcherHostLoginDelegate,
+class LoginHandler : public content::ResourceDispatcherHostLoginDelegate,
                      public LoginModelObserver,
                      public content::NotificationObserver {
  public:
@@ -49,14 +52,14 @@ class LoginHandler : public ResourceDispatcherHostLoginDelegate,
 
   // Sets information about the authentication type (|form|) and the
   // |password_manager| for this profile.
-  void SetPasswordForm(const webkit_glue::PasswordForm& form);
+  void SetPasswordForm(const webkit::forms::PasswordForm& form);
   void SetPasswordManager(PasswordManager* password_manager);
 
-  // Returns the TabContents that needs authentication.
-  TabContents* GetTabContentsForLogin() const;
+  // Returns the WebContents that needs authentication.
+  content::WebContents* GetWebContentsForLogin() const;
 
   // Returns the RenderViewHostDelegate for the page that needs authentication.
-  RenderViewHostDelegate* GetRenderViewHostDelegate() const;
+  content::RenderViewHostDelegate* GetRenderViewHostDelegate() const;
 
   // Resend the request with authentication credentials.
   // This function can be called from either thread.
@@ -141,7 +144,7 @@ class LoginHandler : public ResourceDispatcherHostLoginDelegate,
   // when later notifying the password manager if the credentials were accepted
   // or rejected.
   // This should only be accessed on the UI loop.
-  webkit_glue::PasswordForm password_form_;
+  webkit::forms::PasswordForm password_form_;
 
   // Points to the password manager owned by the TabContents requesting auth.
   // Can be null if the TabContents is not a TabContents.
@@ -157,7 +160,8 @@ class LoginHandler : public ResourceDispatcherHostLoginDelegate,
   LoginModel* login_model_;
 
   // Observes other login handlers so this login handler can respond.
-  content::NotificationRegistrar registrar_;
+  // This is only accessed on the UI thread.
+  scoped_ptr<content::NotificationRegistrar> registrar_;
 };
 
 // Details to provide the content::NotificationObserver.  Used by the automation

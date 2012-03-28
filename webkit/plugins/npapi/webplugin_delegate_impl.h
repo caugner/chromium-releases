@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/message_loop_helpers.h"
 #include "base/time.h"
 #include "base/timer.h"
 #include "build/build_config.h"
@@ -85,6 +85,7 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
     PLUGIN_QUIRK_REPARENT_IN_BROWSER = 131072,  // Windows
     PLUGIN_QUIRK_PATCH_GETKEYSTATE = 262144,  // Windows
     PLUGIN_QUIRK_EMULATE_IME = 524288,  // Windows.
+    PLUGIN_QUIRK_PATCH_VM_API = 1048576,  // Windows.
   };
 
   static WebPluginDelegateImpl* Create(const FilePath& filename,
@@ -231,7 +232,7 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
 #endif
 
  private:
-  friend class DeleteTask<WebPluginDelegateImpl>;
+  friend class base::DeleteHelper<WebPluginDelegateImpl>;
   friend class WebPluginDelegate;
 
   WebPluginDelegateImpl(gfx::PluginWindowHandle containing_view,
@@ -409,6 +410,15 @@ class WEBKIT_PLUGINS_EXPORT WebPluginDelegateImpl : public WebPluginDelegate {
 
   // GetKeyStatePatch interceptor for UIPI Flash plugin.
   static SHORT WINAPI GetKeyStatePatch(int vkey);
+
+  static BOOL WINAPI VirtualProtectPatch(LPVOID address,
+                                         SIZE_T size,
+                                         DWORD new_protect,
+                                         PDWORD old_protect);
+
+  static BOOL WINAPI VirtualFreePatch(LPVOID address,
+                                      SIZE_T size,
+                                      DWORD free_type);
 
   // RegEnumKeyExW interceptor.
   static LONG WINAPI RegEnumKeyExWPatch(

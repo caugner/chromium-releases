@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,6 @@
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/browser/renderer_host/resource_message_filter.h"
 #include "content/browser/resource_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -42,24 +41,9 @@
 #endif
 
 using content::BrowserThread;
+using content::ResourceDispatcherHostLoginDelegate;
 
 namespace {
-
-// Empty ResourceDispatcherHostLoginDelegate implementation used for instant.
-// Auth navigations don't commit the load (the load remains pending) until the
-// user cancels or succeeds in authorizing. Since we don't allow merging of
-// TabContents with pending loads we disallow auth dialogs from showing during
-// instant. This empty ResourceDispatcherHostLoginDelegate implementation does
-// that.
-// TODO: see if we can handle this case more robustly.
-class InstantResourceDispatcherHostLoginDelegate
-    : public ResourceDispatcherHostLoginDelegate {
- public:
-  InstantResourceDispatcherHostLoginDelegate() {}
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InstantResourceDispatcherHostLoginDelegate);
-};
 
 void AddPrerenderOnUI(
     int render_process_id, int render_view_id,
@@ -183,12 +167,8 @@ ResourceHandler* ChromeResourceDispatcherHostDelegate::RequestBeginning(
       resource_context.appcache_service());
 #endif
 
-  // TODO(mpcomplete): Leaving disabled for now, since I'm checking this in
-  // close to the branch point.
-#if defined(TRANSFER_REDIRECTS_BUG79520)
   handler = new TransferNavigationResourceHandler(
       handler, resource_dispatcher_host_, request);
-#endif
 
   return handler;
 }
@@ -200,8 +180,7 @@ ResourceHandler* ChromeResourceDispatcherHostDelegate::DownloadStarting(
       int child_id,
       int route_id,
       int request_id,
-      bool is_new_request,
-      bool in_complete) {
+      bool is_new_request) {
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
@@ -227,7 +206,7 @@ ResourceHandler* ChromeResourceDispatcherHostDelegate::DownloadStarting(
 
   return new DownloadThrottlingResourceHandler(
       handler, resource_dispatcher_host_, download_request_limiter_, request,
-      request->url(), child_id, route_id, request_id, in_complete);
+      child_id, route_id, request_id);
 }
 
 bool ChromeResourceDispatcherHostDelegate::ShouldDeferStart(
@@ -286,10 +265,16 @@ ResourceDispatcherHostLoginDelegate*
     ChromeResourceDispatcherHostDelegate::CreateLoginDelegate(
         net::AuthChallengeInfo* auth_info, net::URLRequest* request) {
   std::string instant_header_value;
+  // For instant, return a NULl delegate. Auth navigations don't commit the load
+  // (the load remains pending) until the user cancels or succeeds in
+  // authorizing. Since we don't allow merging of WebContents with pending loads
+  // we disallow auth dialogs from showing during instant. Returning NULL does
+  // that.
+  // TODO: see if we can handle this case more robustly.
   if (request->extra_request_headers().GetHeader(
           InstantLoader::kInstantHeader, &instant_header_value) &&
       instant_header_value == InstantLoader::kInstantHeaderValue)
-    return new InstantResourceDispatcherHostLoginDelegate;
+    return NULL;
   return CreateLoginPrompt(auth_info, request);
 }
 
@@ -320,7 +305,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldForceDownloadResource(
 void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     net::URLRequest* request,
     content::ResourceResponse* response,
-    ResourceMessageFilter* filter) {
+    IPC::Message::Sender* sender) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
 
   ResourceDispatcherHostRequestInfo* info =
@@ -334,9 +319,8 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
       bool has_sni = net::SSLConfigService::IsSNIAvailable(
           context->ssl_config_service());
       if (state->GetDomainState(
-              &domain_state, request->url().host(), has_sni) &&
-          domain_state.ShouldMixedScriptingBeBlocked()) {
-        filter->Send(new ChromeViewMsg_AddStrictSecurityHost(
+              &domain_state, request->url().host(), has_sni)) {
+        sender->Send(new ChromeViewMsg_AddStrictSecurityHost(
             info->route_id(), request->url().host()));
       }
     }
@@ -351,7 +335,6 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
 
 void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
     net::URLRequest* request,
-    content::ResourceResponse* response,
-    ResourceMessageFilter* filter) {
+    content::ResourceResponse* response) {
   LoadTimingObserver::PopulateTimingInfo(request, response);
 }

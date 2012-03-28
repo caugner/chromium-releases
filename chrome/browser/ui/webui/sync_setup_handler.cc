@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,28 +8,25 @@
 #include "base/bind_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/metrics/histogram.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/google/google_util.h"
-#include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
+#include "chrome/browser/signin/signin_manager.h"
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/service_constants.h"
-#include "chrome/browser/sync/signin_manager.h"
 #include "chrome/browser/sync/sync_setup_flow.h"
 #include "chrome/browser/sync/util/oauth.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/webui/sync_promo_trial.h"
-#include "chrome/browser/ui/webui/sync_promo_ui.h"
-#include "chrome/browser/ui/webui/user_selectable_sync_type.h"
+#include "chrome/browser/ui/webui/sync_promo/sync_promo_ui.h"
 #include "chrome/common/net/gaia/gaia_constants.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/renderer_host/render_view_host.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -74,58 +71,58 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
   if (!result->GetBoolean("syncBookmarks", &sync_bookmarks))
     return false;
   if (sync_bookmarks)
-    config->data_types.insert(syncable::BOOKMARKS);
+    config->data_types.Put(syncable::BOOKMARKS);
 
   bool sync_preferences;
   if (!result->GetBoolean("syncPreferences", &sync_preferences))
     return false;
   if (sync_preferences)
-    config->data_types.insert(syncable::PREFERENCES);
+    config->data_types.Put(syncable::PREFERENCES);
 
   bool sync_themes;
   if (!result->GetBoolean("syncThemes", &sync_themes))
     return false;
   if (sync_themes)
-    config->data_types.insert(syncable::THEMES);
+    config->data_types.Put(syncable::THEMES);
 
   bool sync_passwords;
   if (!result->GetBoolean("syncPasswords", &sync_passwords))
     return false;
   if (sync_passwords)
-    config->data_types.insert(syncable::PASSWORDS);
+    config->data_types.Put(syncable::PASSWORDS);
 
   bool sync_autofill;
   if (!result->GetBoolean("syncAutofill", &sync_autofill))
     return false;
   if (sync_autofill)
-    config->data_types.insert(syncable::AUTOFILL);
+    config->data_types.Put(syncable::AUTOFILL);
 
   bool sync_extensions;
   if (!result->GetBoolean("syncExtensions", &sync_extensions))
     return false;
   if (sync_extensions) {
-    config->data_types.insert(syncable::EXTENSIONS);
-    config->data_types.insert(syncable::EXTENSION_SETTINGS);
+    config->data_types.Put(syncable::EXTENSIONS);
+    config->data_types.Put(syncable::EXTENSION_SETTINGS);
   }
 
   bool sync_typed_urls;
   if (!result->GetBoolean("syncTypedUrls", &sync_typed_urls))
     return false;
   if (sync_typed_urls)
-    config->data_types.insert(syncable::TYPED_URLS);
+    config->data_types.Put(syncable::TYPED_URLS);
 
   bool sync_sessions;
   if (!result->GetBoolean("syncSessions", &sync_sessions))
     return false;
   if (sync_sessions)
-    config->data_types.insert(syncable::SESSIONS);
+    config->data_types.Put(syncable::SESSIONS);
 
   bool sync_apps;
   if (!result->GetBoolean("syncApps", &sync_apps))
     return false;
   if (sync_apps) {
-    config->data_types.insert(syncable::APPS);
-    config->data_types.insert(syncable::APP_SETTINGS);
+    config->data_types.Put(syncable::APPS);
+    config->data_types.Put(syncable::APP_SETTINGS);
   }
 
   // Encryption settings.
@@ -155,60 +152,6 @@ bool GetConfiguration(const std::string& json, SyncConfiguration* config) {
     }
   }
   return true;
-}
-
-bool HasConfigurationChanged(const SyncConfiguration& config,
-                             Profile* profile) {
-  CHECK(profile);
-
-  // This function must be updated every time a new sync datatype is added to
-  // the sync preferences page.
-  COMPILE_ASSERT(17 == syncable::MODEL_TYPE_COUNT,
-                 UpdateCustomConfigHistogram);
-
-  // If service is null or if this is a first time configuration, return true.
-  ProfileSyncService* service = profile->GetProfileSyncService();
-  if (!service || !service->HasSyncSetupCompleted())
-    return true;
-
-  if ((config.set_secondary_passphrase || config.set_gaia_passphrase) &&
-      !service->IsUsingSecondaryPassphrase())
-    return true;
-
-  if (config.encrypt_all != service->EncryptEverythingEnabled())
-    return true;
-
-  PrefService* pref_service = profile->GetPrefs();
-  CHECK(pref_service);
-
-  if (config.sync_everything !=
-      pref_service->GetBoolean(prefs::kSyncKeepEverythingSynced))
-    return true;
-
-  // Only check the data types that are explicitly listed on the sync
-  // preferences page.
-  const syncable::ModelTypeSet& types = config.data_types;
-  if (((types.find(syncable::BOOKMARKS) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncBookmarks)) ||
-      ((types.find(syncable::PREFERENCES) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncPreferences)) ||
-      ((types.find(syncable::THEMES) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncThemes)) ||
-      ((types.find(syncable::PASSWORDS) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncPasswords)) ||
-      ((types.find(syncable::AUTOFILL) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncAutofill)) ||
-      ((types.find(syncable::EXTENSIONS) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncExtensions)) ||
-      ((types.find(syncable::TYPED_URLS) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncTypedUrls)) ||
-      ((types.find(syncable::SESSIONS) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncSessions)) ||
-      ((types.find(syncable::APPS) != types.end()) !=
-       pref_service->GetBoolean(prefs::kSyncApps)))
-    return true;
-
-  return false;
 }
 
 bool GetPassphrase(const std::string& json, std::string* passphrase) {
@@ -244,70 +187,54 @@ SyncSetupHandler::~SyncSetupHandler() {
 }
 
 void SyncSetupHandler::GetLocalizedValues(DictionaryValue* localized_strings) {
-  GetStaticLocalizedValues(localized_strings, web_ui_);
+  GetStaticLocalizedValues(localized_strings, web_ui());
 }
 
 void SyncSetupHandler::GetStaticLocalizedValues(
     DictionaryValue* localized_strings,
-    WebUI* web_ui) {
+    content::WebUI* web_ui) {
   DCHECK(localized_strings);
 
   localized_strings->SetString(
-      "invalidPasswordHelpURL",
-      google_util::StringAppendGoogleLocaleParam(
-          chrome::kInvalidPasswordHelpURL));
+      "invalidPasswordHelpURL", chrome::kInvalidPasswordHelpURL);
   localized_strings->SetString(
-      "cannotAccessAccountURL",
-      google_util::StringAppendGoogleLocaleParam(
-          chrome::kCanNotAccessAccountURL));
+      "cannotAccessAccountURL", chrome::kCanNotAccessAccountURL);
+  string16 product_name(GetStringUTF16(IDS_PRODUCT_NAME));
   localized_strings->SetString(
       "introduction",
-      GetStringFUTF16(IDS_SYNC_LOGIN_INTRODUCTION,
-                      GetStringUTF16(IDS_PRODUCT_NAME)));
+      GetStringFUTF16(IDS_SYNC_LOGIN_INTRODUCTION, product_name));
   localized_strings->SetString(
       "chooseDataTypesInstructions",
-      GetStringFUTF16(IDS_SYNC_CHOOSE_DATATYPES_INSTRUCTIONS,
-                      GetStringUTF16(IDS_PRODUCT_NAME)));
+      GetStringFUTF16(IDS_SYNC_CHOOSE_DATATYPES_INSTRUCTIONS, product_name));
   localized_strings->SetString(
       "encryptionInstructions",
-      GetStringFUTF16(IDS_SYNC_ENCRYPTION_INSTRUCTIONS,
-                      GetStringUTF16(IDS_PRODUCT_NAME)));
+      GetStringFUTF16(IDS_SYNC_ENCRYPTION_INSTRUCTIONS, product_name));
   localized_strings->SetString(
-      "encryptionHelpURL",
-      google_util::StringAppendGoogleLocaleParam(
-          chrome::kSyncEncryptionHelpURL));
+      "encryptionHelpURL", chrome::kSyncEncryptionHelpURL);
   localized_strings->SetString(
       "passphraseEncryptionMessage",
-      GetStringFUTF16(IDS_SYNC_PASSPHRASE_ENCRYPTION_MESSAGE,
-                      GetStringUTF16(IDS_PRODUCT_NAME)));
+      GetStringFUTF16(IDS_SYNC_PASSPHRASE_ENCRYPTION_MESSAGE, product_name));
   localized_strings->SetString(
       "passphraseRecover",
       GetStringFUTF16(IDS_SYNC_PASSPHRASE_RECOVER,
                       ASCIIToUTF16(google_util::StringAppendGoogleLocaleParam(
                           chrome::kSyncGoogleDashboardURL))));
+
+  bool is_launch_page = web_ui && SyncPromoUI::GetIsLaunchPageForSyncPromoURL(
+      web_ui->GetWebContents()->GetURL());
+  int title_id = is_launch_page ? IDS_SYNC_PROMO_TITLE_SHORT :
+                                  IDS_SYNC_PROMO_TITLE_EXISTING_USER;
+  string16 short_product_name(GetStringUTF16(IDS_SHORT_PRODUCT_NAME));
   localized_strings->SetString(
-      "promoTitle",
-      GetStringFUTF16(IDS_SYNC_PROMO_TITLE,
-                      GetStringUTF16(IDS_PRODUCT_NAME)));
+      "promoTitle", GetStringFUTF16(title_id, short_product_name));
+
   localized_strings->SetString(
       "promoMessageTitle",
-      GetStringFUTF16(IDS_SYNC_PROMO_MESSAGE_TITLE,
-                      GetStringUTF16(IDS_SHORT_PRODUCT_NAME)));
+      GetStringFUTF16(IDS_SYNC_PROMO_MESSAGE_TITLE, short_product_name));
   localized_strings->SetString(
-      "syncEverythingHelpURL",
-      google_util::StringAppendGoogleLocaleParam(
-          chrome::kSyncEverythingLearnMoreURL));
-
-  // The experimental body string only appears if we are on the launch page
-  // version of the Sync Promo.
-  int message_body_resource_id = IDS_SYNC_PROMO_MESSAGE_BODY_A;
-  if (web_ui && SyncPromoUI::GetIsLaunchPageForSyncPromoURL(
-      web_ui->tab_contents()->GetURL())) {
-    message_body_resource_id = sync_promo_trial::GetMessageBodyResID();
-  }
+      "syncEverythingHelpURL", chrome::kSyncEverythingLearnMoreURL);
   localized_strings->SetString(
-      "promoMessageBody",
-      GetStringUTF16(message_body_resource_id));
+      "syncErrorHelpURL", chrome::kSyncErrorsHelpURL);
 
   std::string create_account_url = google_util::StringAppendGoogleLocaleParam(
       chrome::kSyncCreateNewAccountURL);
@@ -317,6 +244,19 @@ void SyncSetupHandler::GetStaticLocalizedValues(
       create_account + UTF8ToUTF16("</a>");
   localized_strings->SetString("createAccountLinkHTML",
       GetStringFUTF16(IDS_SYNC_CREATE_ACCOUNT_PREFIX, create_account));
+
+  localized_strings->SetString("promoVerboseTitle", short_product_name);
+  localized_strings->SetString("promoVerboseMessageBody",
+      GetStringFUTF16(IDS_SYNC_PROMO_V_MESSAGE_BODY, short_product_name));
+
+  string16 sync_benefits_url(
+      UTF8ToUTF16(google_util::StringAppendGoogleLocaleParam(
+          chrome::kSyncLearnMoreURL)));
+  localized_strings->SetString("promoVerboseLearnMore",
+      GetStringFUTF16(IDS_SYNC_PROMO_V_LEARN_MORE, sync_benefits_url));
+  localized_strings->SetString("promoVerboseBackupBody",
+      GetStringFUTF16(IDS_SYNC_PROMO_V_BACKUP_BODY, short_product_name));
+  localized_strings->SetString("signUpURL", create_account_url);
 
   static OptionsStringResource resources[] = {
     { "syncSetupOverlayTitle", IDS_SYNC_SETUP_TITLE },
@@ -332,6 +272,7 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "unrecoverableErrorHelpURL", IDS_SYNC_UNRECOVERABLE_ERROR_HELP_URL },
     { "cannotAccessAccount", IDS_SYNC_CANNOT_ACCESS_ACCOUNT },
     { "cancel", IDS_CANCEL },
+    { "loginSuccess", IDS_SYNC_SUCCESS },
     { "settingUp", IDS_SYNC_LOGIN_SETTING_UP },
     { "errorSigningIn", IDS_SYNC_ERROR_SIGNING_IN },
     { "signinHeader", IDS_SYNC_PROMO_SIGNIN_HEADER},
@@ -388,12 +329,20 @@ void SyncSetupHandler::GetStaticLocalizedValues(
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
     { "encryptAllOption", IDS_SYNC_ENCRYPT_ALL_DATA },
     { "aspWarningText", IDS_SYNC_ASP_PASSWORD_WARNING_TEXT },
-    { "promoPageTitle", IDS_SYNC_PROMO_TAB_TITLE},
-    { "promoSkipButton", IDS_SYNC_PROMO_SKIP_BUTTON},
-    { "promoAdvanced", IDS_SYNC_PROMO_ADVANCED},
-    { "promoLearnMoreShow", IDS_SYNC_PROMO_LEARN_MORE_SHOW},
-    { "promoLearnMoreHide", IDS_SYNC_PROMO_LEARN_MORE_HIDE},
-    { "promoInformation", IDS_SYNC_PROMO_INFORMATION},
+    { "promoPageTitle", IDS_SYNC_PROMO_TAB_TITLE },
+    { "promoSkipButton", IDS_SYNC_PROMO_SKIP_BUTTON },
+    { "promoAdvanced", IDS_SYNC_PROMO_ADVANCED },
+    { "promoLearnMoreShow", IDS_SYNC_PROMO_LEARN_MORE_SHOW },
+    { "promoLearnMoreHide", IDS_SYNC_PROMO_LEARN_MORE_HIDE },
+    { "promoInformation", IDS_SYNC_PROMO_INFORMATION },
+    { "promoVerboseSyncTitle", IDS_SYNC_PROMO_V_SYNC_TITLE },
+    { "promoVerboseSyncBody", IDS_SYNC_PROMO_V_SYNC_BODY },
+    { "promoVerboseBackupTitle", IDS_SYNC_PROMO_V_BACKUP_TITLE },
+    { "promoVerboseServicesTitle", IDS_SYNC_PROMO_V_SERVICES_TITLE },
+    { "promoVerboseServicesBody", IDS_SYNC_PROMO_V_SERVICES_BODY },
+    { "promoVerboseSignUp", IDS_SYNC_PROMO_V_SIGN_UP },
+    { "promoTitleShort", IDS_SYNC_PROMO_MESSAGE_TITLE_SHORT },
+    { "promoMessageBody", IDS_SYNC_PROMO_MESSAGE_BODY },
   };
 
   RegisterStrings(localized_strings, resources, arraysize(resources));
@@ -412,28 +361,28 @@ void SyncSetupHandler::OnGetOAuthTokenFailure(
 }
 
 void SyncSetupHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("SyncSetupDidClosePage",
+  web_ui()->RegisterMessageCallback("SyncSetupDidClosePage",
       base::Bind(&SyncSetupHandler::OnDidClosePage,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncSetupSubmitAuth",
+  web_ui()->RegisterMessageCallback("SyncSetupSubmitAuth",
       base::Bind(&SyncSetupHandler::HandleSubmitAuth,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncSetupConfigure",
+  web_ui()->RegisterMessageCallback("SyncSetupConfigure",
       base::Bind(&SyncSetupHandler::HandleConfigure,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncSetupPassphrase",
+  web_ui()->RegisterMessageCallback("SyncSetupPassphrase",
       base::Bind(&SyncSetupHandler::HandlePassphraseEntry,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncSetupPassphraseCancel",
+  web_ui()->RegisterMessageCallback("SyncSetupPassphraseCancel",
       base::Bind(&SyncSetupHandler::HandlePassphraseCancel,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncSetupAttachHandler",
+  web_ui()->RegisterMessageCallback("SyncSetupAttachHandler",
       base::Bind(&SyncSetupHandler::HandleAttachHandler,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncSetupShowErrorUI",
+  web_ui()->RegisterMessageCallback("SyncSetupShowErrorUI",
       base::Bind(&SyncSetupHandler::HandleShowErrorUI,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("SyncSetupShowSetupUI",
+  web_ui()->RegisterMessageCallback("SyncSetupShowSetupUI",
       base::Bind(&SyncSetupHandler::HandleShowSetupUI,
                  base::Unretained(this)));
 }
@@ -445,7 +394,7 @@ void SyncSetupHandler::RegisterMessages() {
 void SyncSetupHandler::ShowOAuthLogin() {
   DCHECK(browser_sync::IsUsingOAuth());
 
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   oauth_login_.reset(new GaiaOAuthFetcher(this,
                                           profile->GetRequestContext(),
                                           profile,
@@ -457,46 +406,46 @@ void SyncSetupHandler::ShowOAuthLogin() {
 void SyncSetupHandler::ShowGaiaLogin(const DictionaryValue& args) {
   DCHECK(!browser_sync::IsUsingOAuth());
   StringValue page("login");
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page, args);
 }
 
 void SyncSetupHandler::ShowGaiaSuccessAndClose() {
-  web_ui_->CallJavascriptFunction("SyncSetupOverlay.showSuccessAndClose");
+  web_ui()->CallJavascriptFunction("SyncSetupOverlay.showSuccessAndClose");
 }
 
 void SyncSetupHandler::ShowGaiaSuccessAndSettingUp() {
-  web_ui_->CallJavascriptFunction("SyncSetupOverlay.showSuccessAndSettingUp");
+  web_ui()->CallJavascriptFunction("SyncSetupOverlay.showSuccessAndSettingUp");
 }
 
 void SyncSetupHandler::ShowConfigure(const DictionaryValue& args) {
   StringValue page("configure");
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page, args);
 }
 
 void SyncSetupHandler::ShowPassphraseEntry(const DictionaryValue& args) {
   StringValue page("passphrase");
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page, args);
 }
 
 void SyncSetupHandler::ShowSettingUp() {
   StringValue page("settingUp");
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page);
 }
 
 void SyncSetupHandler::ShowSetupDone(const string16& user) {
   StringValue page("done");
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "SyncSetupOverlay.showSyncSetupPage", page);
 
   // Suppress the sync promo once the user signs into sync. This way the user
   // doesn't see the sync promo even if they sign out of sync later on.
-  SyncPromoUI::SetUserSkippedSyncPromo(Profile::FromWebUI(web_ui_));
+  SyncPromoUI::SetUserSkippedSyncPromo(Profile::FromWebUI(web_ui()));
 
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   ProfileSyncService* service = profile->GetProfileSyncService();
   if (!service->HasSyncSetupCompleted()) {
     FilePath profile_file_path = profile->GetPath();
@@ -509,7 +458,7 @@ void SyncSetupHandler::SetFlow(SyncSetupFlow* flow) {
 }
 
 void SyncSetupHandler::Focus() {
-  static_cast<RenderViewHostDelegate*>(web_ui_->tab_contents())->Activate();
+  web_ui()->GetWebContents()->GetRenderViewHost()->delegate()->Activate();
 }
 
 void SyncSetupHandler::OnDidClosePage(const ListValue* args) {
@@ -563,55 +512,6 @@ void SyncSetupHandler::HandleConfigure(const ListValue* args) {
     return;
   }
 
-  // We do not do UMA logging during unit tests.
-  if (web_ui_) {
-    Profile* profile = Profile::FromWebUI(web_ui_);
-    if (HasConfigurationChanged(configuration, profile)) {
-      UMA_HISTOGRAM_BOOLEAN("Sync.SyncEverything",
-                            configuration.sync_everything);
-      if (!configuration.sync_everything) {
-        // Only log the data types that are explicitly listed on the sync
-        // preferences page.
-        const syncable::ModelTypeSet& types = configuration.data_types;
-        if (types.find(syncable::BOOKMARKS) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", BOOKMARKS, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::PREFERENCES) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", PREFERENCES, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::PASSWORDS) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", PASSWORDS, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::AUTOFILL) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", AUTOFILL, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::THEMES) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", THEMES, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::TYPED_URLS) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", TYPED_URLS, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::EXTENSIONS) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", EXTENSIONS, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::SESSIONS) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", SESSIONS, SELECTABLE_DATATYPE_COUNT + 1);
-        if (types.find(syncable::APPS) != types.end())
-          UMA_HISTOGRAM_ENUMERATION(
-              "Sync.CustomSync", APPS, SELECTABLE_DATATYPE_COUNT + 1);
-        COMPILE_ASSERT(17 == syncable::MODEL_TYPE_COUNT,
-                       UpdateCustomConfigHistogram);
-        COMPILE_ASSERT(9 == SELECTABLE_DATATYPE_COUNT,
-                       UpdateCustomConfigHistogram);
-      }
-      UMA_HISTOGRAM_BOOLEAN("Sync.EncryptAllData", configuration.encrypt_all);
-      UMA_HISTOGRAM_BOOLEAN("Sync.CustomPassphrase",
-                            configuration.set_gaia_passphrase ||
-                            configuration.set_secondary_passphrase);
-    }
-  }
-
   DCHECK(flow_);
   flow_->OnUserConfigured(configuration);
 
@@ -660,7 +560,7 @@ void SyncSetupHandler::HandleAttachHandler(const ListValue* args) {
 void SyncSetupHandler::HandleShowErrorUI(const ListValue* args) {
   DCHECK(!flow_);
 
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   ProfileSyncService* service = profile->GetProfileSyncService();
   DCHECK(service);
 
@@ -686,10 +586,9 @@ void SyncSetupHandler::CloseSyncSetup() {
 }
 
 void SyncSetupHandler::OpenSyncSetup() {
-  DCHECK(web_ui_);
   DCHECK(!flow_);
 
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   ProfileSyncService* service = profile->GetProfileSyncService();
   if (!service) {
     // If there's no sync service, the user tried to manually invoke a syncSetup
@@ -723,7 +622,7 @@ void SyncSetupHandler::OpenSyncSetup() {
 // Private member functions.
 
 bool SyncSetupHandler::FocusExistingWizard() {
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   ProfileSyncService* service = profile->GetProfileSyncService();
   if (!service)
     return false;
@@ -737,13 +636,13 @@ bool SyncSetupHandler::FocusExistingWizard() {
 }
 
 void SyncSetupHandler::CloseOverlay() {
-  web_ui_->CallJavascriptFunction("OptionsPage.closeOverlay");
+  web_ui()->CallJavascriptFunction("OptionsPage.closeOverlay");
 }
 
 bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,
                                             string16* error_message) {
   // Happens during unit tests.
-  if (!web_ui_ || !profile_manager_)
+  if (!web_ui() || !profile_manager_)
     return true;
 
   if (username.empty())
@@ -752,7 +651,7 @@ bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,
   // Check if the username is already in use by another profile.
   const ProfileInfoCache& cache = profile_manager_->GetProfileInfoCache();
   size_t current_profile_index = cache.GetIndexOfProfileWithPath(
-      Profile::FromWebUI(web_ui_)->GetPath());
+      Profile::FromWebUI(web_ui())->GetPath());
   string16 username_utf16 = UTF8ToUTF16(username);
 
   for (size_t i = 0; i < cache.GetNumberOfProfiles(); ++i) {
@@ -768,10 +667,9 @@ bool SyncSetupHandler::IsLoginAuthDataValid(const std::string& username,
 }
 
 void SyncSetupHandler::ShowLoginErrorMessage(const string16& error_message) {
+  DCHECK(flow_);
   DictionaryValue args;
-  Profile* profile = Profile::FromWebUI(web_ui_);
-  ProfileSyncService* service = profile->GetProfileSyncService();
-  SyncSetupFlow::GetArgsForGaiaLogin(service, &args);
+  flow_->GetArgsForGaiaLogin(&args);
   args.SetString("error_message", error_message);
   ShowGaiaLogin(args);
 }

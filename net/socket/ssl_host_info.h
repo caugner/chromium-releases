@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,13 +15,11 @@
 #include "net/base/cert_verifier.h"
 #include "net/base/cert_verify_result.h"
 #include "net/base/completion_callback.h"
-#include "net/base/dnsrr_resolver.h"
 #include "net/base/net_export.h"
 #include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
-class CRLSet;
 class X509Certificate;
 struct SSLConfig;
 
@@ -59,9 +57,6 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   // only be called once WaitForDataReady has returned OK or called its
   // callback.
   virtual void Persist() = 0;
-
-  // StartDnsLookup triggers a DNS lookup for the host.
-  void StartDnsLookup(DnsRRResolver* dnsrr_resolver);
 
   struct State {
     State();
@@ -125,19 +120,12 @@ class NET_EXPORT_PRIVATE SSLHostInfo {
   // These three members are taken from the SSLConfig.
   bool rev_checking_enabled_;
   bool verify_ev_cert_;
-  scoped_refptr<CRLSet> crl_set_;
   base::TimeTicks verification_start_time_;
   base::TimeTicks verification_end_time_;
   CertVerifyResult cert_verify_result_;
   SingleRequestCertVerifier verifier_;
   scoped_refptr<X509Certificate> cert_;
   base::WeakPtrFactory<SSLHostInfo> weak_factory_;
-
-  DnsRRResolver* dnsrr_resolver_;
-  OldCompletionCallback* dns_callback_;
-  DnsRRResolver::Handle dns_handle_;
-  RRResponse dns_response_;
-  base::TimeTicks dns_lookup_start_time_;
   base::TimeTicks cert_verification_finished_time_;
 };
 

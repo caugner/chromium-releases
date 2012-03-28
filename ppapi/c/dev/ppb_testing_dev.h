@@ -1,23 +1,27 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From dev/ppb_testing_dev.idl modified Sat Nov 19 15:58:18 2011. */
+/* From dev/ppb_testing_dev.idl modified Thu Dec 22 11:02:53 2011. */
 
 #ifndef PPAPI_C_DEV_PPB_TESTING_DEV_H_
 #define PPAPI_C_DEV_PPB_TESTING_DEV_H_
 
+#include "ppapi/c/dev/ppb_url_util_dev.h"
 #include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_macros.h"
 #include "ppapi/c/pp_point.h"
 #include "ppapi/c/pp_resource.h"
 #include "ppapi/c/pp_stdint.h"
+#include "ppapi/c/pp_var.h"
 
 #define PPB_TESTING_DEV_INTERFACE_0_7 "PPB_Testing(Dev);0.7"
 #define PPB_TESTING_DEV_INTERFACE_0_8 "PPB_Testing(Dev);0.8"
-#define PPB_TESTING_DEV_INTERFACE PPB_TESTING_DEV_INTERFACE_0_8
+#define PPB_TESTING_DEV_INTERFACE_0_9 "PPB_Testing(Dev);0.9"
+#define PPB_TESTING_DEV_INTERFACE_0_91 "PPB_Testing(Dev);0.91"
+#define PPB_TESTING_DEV_INTERFACE PPB_TESTING_DEV_INTERFACE_0_91
 
 /**
  * @file
@@ -31,7 +35,7 @@
  * @addtogroup Interfaces
  * @{
  */
-struct PPB_Testing_Dev {
+struct PPB_Testing_Dev_0_91 {
   /**
    * Reads the bitmap data out of the backing store for the given
    * DeviceContext2D and into the given image. If the data was successfully
@@ -112,7 +116,27 @@ struct PPB_Testing_Dev {
    * performs.
    */
   void (*SimulateInputEvent)(PP_Instance instance, PP_Resource input_event);
+  /**
+   * Returns the URL for the document. This is a safe way to retrieve
+   * window.location.href.
+   * If the canonicalized URL is valid, the method will parse the URL
+   * and fill in the components structure. This pointer may be NULL
+   * to specify that no component information is necessary.
+   */
+  struct PP_Var (*GetDocumentURL)(PP_Instance instance,
+                                  struct PP_URLComponents_Dev* components);
+  /**
+   * Fetches up to |array_size| active PP_Vars in the tracker. Returns the
+   * number of vars in the tracker. The active vars are written to |live_vars|
+   * contiguously starting at index 0. The vars are not in any particular order.
+   * If the number of live vars is greater than |array_size|, then an arbitrary
+   * subset of |array_size| vars is written to |live_vars|. The reference count
+   * of the returned PP_Vars will *not* be affected by this call.
+   */
+  uint32_t (*GetLiveVars)(struct PP_Var live_vars[], uint32_t array_size);
 };
+
+typedef struct PPB_Testing_Dev_0_91 PPB_Testing_Dev;
 
 struct PPB_Testing_Dev_0_7 {
   PP_Bool (*ReadImageData)(PP_Resource device_context_2d,
@@ -122,6 +146,30 @@ struct PPB_Testing_Dev_0_7 {
   void (*QuitMessageLoop)(PP_Instance instance);
   uint32_t (*GetLiveObjectsForInstance)(PP_Instance instance);
   PP_Bool (*IsOutOfProcess)();
+};
+
+struct PPB_Testing_Dev_0_8 {
+  PP_Bool (*ReadImageData)(PP_Resource device_context_2d,
+                           PP_Resource image,
+                           const struct PP_Point* top_left);
+  void (*RunMessageLoop)(PP_Instance instance);
+  void (*QuitMessageLoop)(PP_Instance instance);
+  uint32_t (*GetLiveObjectsForInstance)(PP_Instance instance);
+  PP_Bool (*IsOutOfProcess)();
+  void (*SimulateInputEvent)(PP_Instance instance, PP_Resource input_event);
+};
+
+struct PPB_Testing_Dev_0_9 {
+  PP_Bool (*ReadImageData)(PP_Resource device_context_2d,
+                           PP_Resource image,
+                           const struct PP_Point* top_left);
+  void (*RunMessageLoop)(PP_Instance instance);
+  void (*QuitMessageLoop)(PP_Instance instance);
+  uint32_t (*GetLiveObjectsForInstance)(PP_Instance instance);
+  PP_Bool (*IsOutOfProcess)();
+  void (*SimulateInputEvent)(PP_Instance instance, PP_Resource input_event);
+  struct PP_Var (*GetDocumentURL)(PP_Instance instance,
+                                  struct PP_URLComponents_Dev* components);
 };
 /**
  * @}

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,11 +16,14 @@ var lastSelectedPrinterIndex = 0;
 // Used to disable some printing options when the preview is not modifiable.
 var previewModifiable = false;
 
+// Used to identify whether the printing frame has specific page size style.
+var hasPageSizeStyle = false;
+
 // Destination list special value constants.
 const MANAGE_CLOUD_PRINTERS = 'manageCloudPrinters';
 const MANAGE_LOCAL_PRINTERS = 'manageLocalPrinters';
 const SIGN_IN = 'signIn';
-const PRINT_TO_PDF = 'Print to PDF';
+const PRINT_TO_PDF = 'Save as PDF';
 const PRINT_WITH_CLOUD_PRINT = 'printWithCloudPrint';
 
 // State of the print preview settings.
@@ -52,6 +55,10 @@ var isPrintReadyMetafileReady = false;
 
 // True when preview tab is hidden.
 var isTabHidden = false;
+
+// True in kiosk mode where print preview can print automatically without
+// user intervention. See http://crbug.com/31395.
+var printAutomaticallyInKioskMode = false;
 
 // @type {print_preview.PrintHeader} Holds the print and cancel buttons.
 var printHeader;
@@ -189,6 +196,9 @@ function setInitialSettings(initialSettings) {
         initialSettings['measurementSystem']);
     marginSettings.setLastUsedMargins(initialSettings);
   }
+  printAutomaticallyInKioskMode =
+      initialSettings['printAutomaticallyInKioskMode'];
+  headerFooterSettings.setChecked(initialSettings['headerFooterEnabled']);
   setDefaultPrinter(initialSettings['printerName'],
                     initialSettings['cloudPrintData']);
 }
@@ -289,7 +299,7 @@ function updateControlsWithSelectedPrinterCapabilities() {
         'printerDefaultDuplexValue': copiesSettings.UNKNOWN_DUPLEX_MODE,
         'disableCopiesOption': true});
     if (cr.isChromeOS && selectedValue == PRINT_WITH_CLOUD_PRINT)
-      sendPrintDocumentRequest();
+      requestToPrintDocument();
   } else {
     // This message will call back to 'updateWithPrinterCapabilities'
     // function.
@@ -765,11 +775,10 @@ function addDestinationListOptionAtPosition(position,
  * @param {boolean} color is true if the PDF plugin should display in color.
  */
 function setColor(color) {
-  var pdfViewer = $('pdf-viewer');
-  if (!pdfViewer) {
+  if (!previewArea.pdfPlugin)
     return;
-  }
-  pdfViewer.grayscale(!color);
+
+  previewArea.pdfPlugin.grayscale(!color);
   var printerList = $('printer-list');
   cloudprint.setColor(printerList[printerList.selectedIndex], color);
 }
@@ -811,14 +820,20 @@ function onPDFLoad() {
   if (previewModifiable) {
     setPluginPreviewPageCount();
   }
+  // Instruct the plugin which page numbers to display in the page number
+  // indicator.
+  previewArea.pdfPlugin.setPageNumbers(
+      JSON.stringify(pageSettings.selectedPagesSet));
   cr.dispatchSimpleEvent(document, customEvents.PDF_LOADED);
   isFirstPageLoaded = true;
   checkAndHideOverlayLayerIfValid();
   sendPrintDocumentRequestIfNeeded();
+  if (printAutomaticallyInKioskMode)
+    printHeader.printButton.click();
 }
 
 function setPluginPreviewPageCount() {
-  $('pdf-viewer').printPreviewPageCount(
+  previewArea.pdfPlugin.printPreviewPageCount(
       pageSettings.previouslySelectedPages.length);
 }
 
@@ -827,7 +842,7 @@ function setPluginPreviewPageCount() {
  * Called from PrintPreviewUI::OnDidGetPreviewPageCount().
  * @param {number} pageCount The number of pages.
  * @param {number} previewResponseId The preview request id that resulted in
- *     this response.
+ *      this response.
  */
 function onDidGetPreviewPageCount(pageCount, previewResponseId) {
   if (!isExpectedPreviewResponse(previewResponseId))
@@ -842,8 +857,11 @@ function onDidGetPreviewPageCount(pageCount, previewResponseId) {
 /**
  * @param {printing::PageSizeMargins} pageLayout The default layout of the page
  *     in points.
+ * @param {boolean} hasCustomPageSizeStyle Indicates whether the previewed
+ *      document has a custom page size style.
  */
-function onDidGetDefaultPageLayout(pageLayout) {
+function onDidGetDefaultPageLayout(pageLayout, hasCustomPageSizeStyle) {
+  hasPageSizeStyle = hasCustomPageSizeStyle;
   marginSettings.currentDefaultPageLayout = new print_preview.PageLayout(
       pageLayout.contentWidth,
       pageLayout.contentHeight,
@@ -883,7 +901,7 @@ function reloadPreviewPages(previewUid, previewResponseId) {
   checkAndHideOverlayLayerIfValid();
   var pageSet = pageSettings.previouslySelectedPages;
   for (var i = 0; i < pageSet.length; i++) {
-    $('pdf-viewer').loadPreviewPage(
+    previewArea.pdfPlugin.loadPreviewPage(
         getPageSrcURL(previewUid, pageSet[i] - 1), i);
   }
 
@@ -919,9 +937,9 @@ function onDidPreviewPage(pageNumber, previewUid, previewResponseId) {
 
   currentPreviewUid = previewUid;
   if (pageIndex == 0)
-    createPDFPlugin(pageNumber);
+    previewArea.createOrReloadPDFPlugin(pageNumber);
 
-  $('pdf-viewer').loadPreviewPage(
+  previewArea.pdfPlugin.loadPreviewPage(
       getPageSrcURL(previewUid, pageNumber), pageIndex);
 
   if (pageIndex + 1 == pageSettings.previouslySelectedPages.length) {
@@ -948,7 +966,7 @@ function updatePrintPreview(previewUid, previewResponseId) {
     // If the preview is not modifiable the plugin has not been created yet.
     currentPreviewUid = previewUid;
     hasPendingPreviewRequest = false;
-    createPDFPlugin(PRINT_READY_DATA_INDEX);
+    previewArea.createOrReloadPDFPlugin(PRINT_READY_DATA_INDEX);
   }
 
   cr.dispatchSimpleEvent(document, customEvents.UPDATE_PRINT_BUTTON);
@@ -1002,39 +1020,6 @@ function hasOnlyPageSettingsChanged() {
 }
 
 /**
- * Create the PDF plugin or reload the existing one.
- * @param {number} srcDataIndex Preview data source index.
- */
-function createPDFPlugin(srcDataIndex) {
-  var pdfViewer = $('pdf-viewer');
-  var srcURL = getPageSrcURL(currentPreviewUid, srcDataIndex);
-  if (pdfViewer) {
-    // Need to call this before the reload(), where the plugin resets its
-    // internal page count.
-    pdfViewer.goToPage('0');
-    pdfViewer.resetPrintPreviewUrl(srcURL);
-    pdfViewer.reload();
-    pdfViewer.grayscale(
-        colorSettings.colorMode == print_preview.ColorSettings.GRAY);
-    return;
-  }
-
-  pdfViewer = document.createElement('embed');
-  pdfViewer.setAttribute('id', 'pdf-viewer');
-  pdfViewer.setAttribute('type',
-                         'application/x-google-chrome-print-preview-pdf');
-  pdfViewer.setAttribute('src', srcURL);
-  pdfViewer.setAttribute('aria-live', 'polite');
-  pdfViewer.setAttribute('aria-atomic', 'true');
-  $('mainview').appendChild(pdfViewer);
-  pdfViewer.onload('onPDFLoad()');
-  pdfViewer.onScroll('onPreviewPositionChanged()');
-  pdfViewer.onPluginSizeChanged('onPreviewPositionChanged()');
-  pdfViewer.removePrintButton();
-  pdfViewer.grayscale(true);
-}
-
-/**
  * Called either when there is a scroll event or when the plugin size changes.
  */
 function onPreviewPositionChanged() {
@@ -1057,6 +1042,7 @@ function checkCompatiblePluginExists() {
                           dummyPlugin.pageXOffset,
                           dummyPlugin.pageYOffset,
                           dummyPlugin.setZoomLevel,
+                          dummyPlugin.setPageNumbers,
                           dummyPlugin.setPageXOffset,
                           dummyPlugin.setPageYOffset,
                           dummyPlugin.getHorizontalScrollbarThickness,

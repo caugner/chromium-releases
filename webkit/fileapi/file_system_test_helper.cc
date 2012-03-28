@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,13 @@
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "googleurl/src/gurl.h"
+#include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
 #include "webkit/fileapi/file_system_operation_context.h"
 #include "webkit/fileapi/file_system_usage_cache.h"
 #include "webkit/fileapi/file_system_util.h"
+#include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/fileapi/sandbox_mount_point_provider.h"
 #include "webkit/quota/mock_special_storage_policy.h"
 
@@ -34,35 +36,32 @@ FileSystemTestOriginHelper::~FileSystemTestOriginHelper() {
 
 void FileSystemTestOriginHelper::SetUp(
     const FilePath& base_dir, FileSystemFileUtil* file_util) {
-  SetUp(base_dir, false, false, NULL, file_util);
+  SetUp(base_dir, false, NULL, file_util);
 }
 
 void FileSystemTestOriginHelper::SetUp(
     FileSystemContext* file_system_context, FileSystemFileUtil* file_util) {
-  DCHECK(file_system_context->path_manager());
-  DCHECK(file_system_context->path_manager()->sandbox_provider());
+  DCHECK(file_system_context->sandbox_provider());
 
   file_util_ = file_util;
   file_system_context_ = file_system_context;
   if (!file_util_)
-    file_util_ = file_system_context->path_manager()->sandbox_provider()->
-        GetFileUtil();
+    file_util_ = file_system_context->sandbox_provider()->GetFileUtil();
   DCHECK(file_util_);
 
   // Prepare the origin's root directory.
-  file_system_context_->path_manager()->
-      ValidateFileSystemRootAndGetPathOnFileThread(
+  file_system_context_->GetMountPointProvider(type_)->
+      GetFileSystemRootPathOnFileThread(
           origin_, type_, FilePath(), true /* create */);
 
   // Initialize the usage cache file.
-  FilePath usage_cache_path = file_system_context_->path_manager()
-      ->sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
+  FilePath usage_cache_path = file_system_context_->
+      sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
   FileSystemUsageCache::UpdateUsage(usage_cache_path, 0);
 }
 
 void FileSystemTestOriginHelper::SetUp(
     const FilePath& base_dir,
-    bool incognito_mode,
     bool unlimited_quota,
     quota::QuotaManagerProxy* quota_manager_proxy,
     FileSystemFileUtil* file_util) {
@@ -77,22 +76,19 @@ void FileSystemTestOriginHelper::SetUp(
       special_storage_policy,
       quota_manager_proxy,
       base_dir,
-      incognito_mode,
-      true /* allow_file_access_from_files */,
-      NULL);
+      CreateAllowFileAccessOptions());
 
-  DCHECK(file_system_context_->path_manager());
-  DCHECK(file_system_context_->path_manager()->sandbox_provider());
+  DCHECK(file_system_context_->sandbox_provider());
 
   // Prepare the origin's root directory.
-  file_system_context_->path_manager()->
-      ValidateFileSystemRootAndGetPathOnFileThread(
+  file_system_context_->GetMountPointProvider(type_)->
+      GetFileSystemRootPathOnFileThread(
           origin_, type_, FilePath(), true /* create */);
 
   // Initialize the usage cache file.  This code assumes that we're either using
   // OFSFU or we've mocked it out in the sandbox provider.
-  FilePath usage_cache_path = file_system_context_->path_manager()
-      ->sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
+  FilePath usage_cache_path = file_system_context_->
+      sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
   FileSystemUsageCache::UpdateUsage(usage_cache_path, 0);
 }
 
@@ -102,8 +98,8 @@ void FileSystemTestOriginHelper::TearDown() {
 }
 
 FilePath FileSystemTestOriginHelper::GetOriginRootPath() const {
-  return file_system_context_->path_manager()->
-      ValidateFileSystemRootAndGetPathOnFileThread(
+  return file_system_context_->GetMountPointProvider(type_)->
+      GetFileSystemRootPathOnFileThread(
           origin_, type_, FilePath(), false);
 }
 
@@ -126,8 +122,8 @@ GURL FileSystemTestOriginHelper::GetURLForPath(const FilePath& path) const {
 }
 
 FilePath FileSystemTestOriginHelper::GetUsageCachePath() const {
-  return file_system_context_->path_manager()
-      ->sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
+  return file_system_context_->
+      sandbox_provider()->GetUsageCachePathForOriginAndType(origin_, type_);
 }
 
 int64 FileSystemTestOriginHelper::GetCachedOriginUsage() const {
@@ -150,7 +146,8 @@ FileSystemOperation* FileSystemTestOriginHelper::NewOperation(
   DCHECK(file_system_context_.get());
   DCHECK(file_util_);
   FileSystemOperation* operation =
-    new FileSystemOperation(callback_dispatcher,
+    new FileSystemOperation(scoped_ptr<FileSystemCallbackDispatcher>(
+                                callback_dispatcher),
                             base::MessageLoopProxy::current(),
                             file_system_context_.get());
   operation->set_override_file_util(file_util_);

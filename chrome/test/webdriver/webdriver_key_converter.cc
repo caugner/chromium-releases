@@ -1,15 +1,17 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/test/webdriver/webdriver_key_converter.h"
 
 #include "base/format_macros.h"
+#include "base/logging.h"
 #include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/webdriver/keycode_text_conversion.h"
+#include "chrome/test/webdriver/webdriver_logging.h"
 
 namespace {
 
@@ -178,16 +180,20 @@ WebKeyEvent CreateCharEvent(const std::string& unmodified_text,
 }
 
 bool ConvertKeysToWebKeyEvents(const string16& client_keys,
+                               const Logger& logger,
+                               bool release_modifiers,
+                               int* modifiers,
                                std::vector<WebKeyEvent>* client_key_events,
                                std::string* error_msg) {
   std::vector<WebKeyEvent> key_events;
 
+  string16 keys = client_keys;
   // Add an implicit NULL character to the end of the input to depress all
   // modifiers.
-  string16 keys = client_keys;
-  keys.push_back(kWebDriverNullKey);
+  if (release_modifiers)
+    keys.push_back(kWebDriverNullKey);
 
-  int sticky_modifiers = 0;
+  int sticky_modifiers = *modifiers;
   for (size_t i = 0; i < keys.size(); ++i) {
     char16 key = keys[i];
 
@@ -255,8 +261,16 @@ bool ConvertKeysToWebKeyEvents(const string16& client_keys,
         // For some reason Chrome expects a carriage return for the return key.
         modified_text = unmodified_text = "\r";
       } else {
-        unmodified_text = ConvertKeyCodeToText(key_code, 0);
-        modified_text = ConvertKeyCodeToText(key_code, all_modifiers);
+        // WebDriver assumes a numpad key should translate to the number,
+        // which requires NumLock to be on with some platforms. This isn't
+        // formally in the spec, but is expected by their tests.
+        int webdriver_modifiers = 0;
+        if (key_code >= ui::VKEY_NUMPAD0 && key_code <= ui::VKEY_NUMPAD9)
+          webdriver_modifiers = automation::kNumLockKeyMask;
+        unmodified_text = ConvertKeyCodeToText(key_code, webdriver_modifiers);
+        modified_text = ConvertKeyCodeToText(
+            key_code,
+            all_modifiers | webdriver_modifiers);
       }
     } else {
       int necessary_modifiers = 0;
@@ -268,8 +282,10 @@ bool ConvertKeysToWebKeyEvents(const string16& client_keys,
       }
       if (unmodified_text.empty() || modified_text.empty()) {
         // Do a best effort and use the raw key we were given.
-        LOG(WARNING) << "No translation for key code. Code point: "
-                     << static_cast<int>(key);
+        logger.Log(
+            kWarningLogLevel,
+            base::StringPrintf("No translation for key code. Code point: %d",
+                static_cast<int>(key)));
         if (unmodified_text.empty())
           unmodified_text = UTF16ToUTF8(keys.substr(i, 1));
         if (modified_text.empty())
@@ -304,6 +320,7 @@ bool ConvertKeysToWebKeyEvents(const string16& client_keys,
     }
   }
   client_key_events->swap(key_events);
+  *modifiers = sticky_modifiers;
   return true;
 }
 

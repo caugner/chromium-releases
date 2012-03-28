@@ -15,12 +15,15 @@
 #include "chrome/browser/translate/translate_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_constants.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using content::NavigationEntry;
 
 // static
 const size_t TranslateInfoBarDelegate::kNoIndex = static_cast<size_t>(-1);
@@ -111,29 +114,29 @@ void TranslateInfoBarDelegate::SetTargetLanguage(size_t language_index) {
 
 void TranslateInfoBarDelegate::Translate() {
   const std::string& original_language_code = GetOriginalLanguageCode();
-  if (!owner()->tab_contents()->browser_context()->IsOffTheRecord()) {
+  if (!owner()->web_contents()->GetBrowserContext()->IsOffTheRecord()) {
     prefs_.ResetTranslationDeniedCount(original_language_code);
     prefs_.IncrementTranslationAcceptedCount(original_language_code);
   }
 
-  TranslateManager::GetInstance()->TranslatePage(owner()->tab_contents(),
+  TranslateManager::GetInstance()->TranslatePage(owner()->web_contents(),
       GetLanguageCodeAt(original_language_index()),
       GetLanguageCodeAt(target_language_index()));
 }
 
 void TranslateInfoBarDelegate::RevertTranslation() {
-  TranslateManager::GetInstance()->RevertTranslation(owner()->tab_contents());
+  TranslateManager::GetInstance()->RevertTranslation(owner()->web_contents());
   RemoveSelf();
 }
 
 void TranslateInfoBarDelegate::ReportLanguageDetectionError() {
   TranslateManager::GetInstance()->
-      ReportLanguageDetectionError(owner()->tab_contents());
+      ReportLanguageDetectionError(owner()->web_contents());
 }
 
 void TranslateInfoBarDelegate::TranslationDeclined() {
   const std::string& original_language_code = GetOriginalLanguageCode();
-  if (!owner()->tab_contents()->browser_context()->IsOffTheRecord()) {
+  if (!owner()->web_contents()->GetBrowserContext()->IsOffTheRecord()) {
     prefs_.ResetTranslationAcceptedCount(original_language_code);
     prefs_.IncrementTranslationDeniedCount(original_language_code);
   }
@@ -144,7 +147,7 @@ void TranslateInfoBarDelegate::TranslationDeclined() {
   // happens when a load stops. That could happen multiple times, including
   // after the user already declined the translation.)
   TranslateTabHelper* helper = TabContentsWrapper::GetCurrentWrapperForContents(
-      owner()->tab_contents())->translate_tab_helper();
+      owner()->web_contents())->translate_tab_helper();
   helper->language_state().set_translation_declined(true);
 }
 
@@ -260,7 +263,7 @@ void TranslateInfoBarDelegate::MessageInfoBarButtonPressed() {
     return;
   }
   // This is the "Try again..." case.
-  TranslateManager::GetInstance()->TranslatePage(owner()->tab_contents(),
+  TranslateManager::GetInstance()->TranslatePage(owner()->web_contents(),
       GetOriginalLanguageCode(), GetTargetLanguageCode());
 }
 
@@ -270,13 +273,13 @@ bool TranslateInfoBarDelegate::ShouldShowMessageInfoBarButton() {
 
 bool TranslateInfoBarDelegate::ShouldShowNeverTranslateButton() {
   DCHECK_EQ(BEFORE_TRANSLATE, type_);
-  return !owner()->tab_contents()->browser_context()->IsOffTheRecord() &&
+  return !owner()->web_contents()->GetBrowserContext()->IsOffTheRecord() &&
       (prefs_.GetTranslationDeniedCount(GetOriginalLanguageCode()) >= 3);
 }
 
 bool TranslateInfoBarDelegate::ShouldShowAlwaysTranslateButton() {
   DCHECK_EQ(BEFORE_TRANSLATE, type_);
-  return !owner()->tab_contents()->browser_context()->IsOffTheRecord() &&
+  return !owner()->web_contents()->GetBrowserContext()->IsOffTheRecord() &&
       (prefs_.GetTranslationAcceptedCount(GetOriginalLanguageCode()) >= 3);
 }
 
@@ -399,6 +402,6 @@ TranslateInfoBarDelegate*
 
 std::string TranslateInfoBarDelegate::GetPageHost() {
   NavigationEntry* entry =
-      owner()->tab_contents()->controller().GetActiveEntry();
-  return entry ? entry->url().HostNoBrackets() : std::string();
+      owner()->web_contents()->GetController().GetActiveEntry();
+  return entry ? entry->GetURL().HostNoBrackets() : std::string();
 }

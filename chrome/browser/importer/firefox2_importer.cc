@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -30,7 +30,7 @@
 #include "googleurl/src/gurl.h"
 #include "grit/generated_resources.h"
 #include "net/base/data_url.h"
-#include "webkit/glue/password_form.h"
+#include "webkit/forms/password_form.h"
 
 namespace {
 const char kItemOpen[] = "<DT><A";
@@ -158,7 +158,6 @@ void Firefox2Importer::ImportBookmarksFile(
   std::vector<std::string> lines;
   base::SplitString(content, '\n', &lines);
 
-  std::vector<ProfileWriter::BookmarkEntry> toolbar_bookmarks;
   string16 last_folder;
   bool last_folder_on_toolbar = false;
   bool last_folder_is_empty = true;
@@ -217,7 +216,6 @@ void Firefox2Importer::ImportBookmarksFile(
         // The toolbar folder should be at the top level.
         entry.in_toolbar = true;
         entry.path.assign(path.begin() + toolbar_folder - 1, path.end());
-        toolbar_bookmarks.push_back(entry);
       } else {
         // Add this bookmark to the list of |bookmarks|.
         if (!has_subfolder && !last_folder.empty()) {
@@ -225,8 +223,8 @@ void Firefox2Importer::ImportBookmarksFile(
           last_folder.clear();
         }
         entry.path.assign(path.begin(), path.end());
-        bookmarks->push_back(entry);
       }
+      bookmarks->push_back(entry);
 
       // Save the favicon. DataURLToFaviconUsage will handle the case where
       // there is no favicon.
@@ -275,7 +273,7 @@ void Firefox2Importer::ImportBookmarksFile(
           if (toolbar_folder <= path.size()) {
             entry.in_toolbar = true;
             entry.path.assign(path.begin() + toolbar_folder - 1, path.end());
-            toolbar_bookmarks.push_back(entry);
+            bookmarks->push_back(entry);
           }
         } else {
           // Add this folder to the list of |bookmarks|.
@@ -291,9 +289,6 @@ void Firefox2Importer::ImportBookmarksFile(
         toolbar_folder = 0;
     }
   }
-
-  bookmarks->insert(bookmarks->begin(), toolbar_bookmarks.begin(),
-                    toolbar_bookmarks.end());
 }
 
 void Firefox2Importer::ImportBookmarks() {
@@ -347,7 +342,7 @@ void Firefox2Importer::ImportPasswords() {
 
   std::string content;
   file_util::ReadFileToString(file, &content);
-  std::vector<webkit_glue::PasswordForm> forms;
+  std::vector<webkit::forms::PasswordForm> forms;
   decryptor.ParseSignons(content, &forms);
 
   if (!cancelled()) {
@@ -369,9 +364,8 @@ void Firefox2Importer::ImportSearchEngines() {
   std::vector<TemplateURL*> search_engines;
   ParseSearchEnginesFromXMLFiles(files, &search_engines);
 
-  int default_index =
-      GetFirefoxDefaultSearchEngineIndex(search_engines, source_path_);
-  bridge_->SetKeywords(search_engines, default_index, true);
+  // Import the list of search engines, but do not override the default.
+  bridge_->SetKeywords(search_engines, -1 /*default_keyword_index*/, true);
 }
 
 void Firefox2Importer::ImportHomepage() {

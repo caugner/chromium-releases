@@ -6,12 +6,12 @@
 #define CHROME_BROWSER_UI_WEBUI_TRACING_UI_H_
 #pragma once
 
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
 
 // The C++ back-end for the chrome://tracing webui page.
-class TracingUI : public ChromeWebUI {
+class TracingUI : public content::WebUIController {
  public:
-  explicit TracingUI(TabContents* contents);
+  explicit TracingUI(content::WebUI* web_ui);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TracingUI);

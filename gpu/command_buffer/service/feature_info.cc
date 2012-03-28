@@ -1,10 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <set>
-#include <string>
 #include "gpu/command_buffer/service/feature_info.h"
+
+#include <set>
+
+#include "base/string_number_conversions.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_implementation.h"
@@ -404,6 +406,36 @@ void FeatureInfo::AddFeatures(const char* desired_features) {
     feature_flags_.angle_pack_reverse_row_order = true;
     validators_.pixel_store.AddValue(GL_PACK_REVERSE_ROW_ORDER_ANGLE);
     validators_.g_l_state.AddValue(GL_PACK_REVERSE_ROW_ORDER_ANGLE);
+  }
+
+  if (ext.HaveAndDesire("GL_ANGLE_texture_usage")) {
+    AddExtensionString("GL_ANGLE_texture_usage");
+    validators_.texture_parameter.AddValue(GL_TEXTURE_USAGE_ANGLE);
+  }
+
+  if (ext.HaveAndDesire("GL_EXT_texture_storage")) {
+    AddExtensionString("GL_EXT_texture_storage");
+    validators_.texture_parameter.AddValue(GL_TEXTURE_IMMUTABLE_FORMAT_EXT);
+    if (enable_texture_format_bgra8888)
+        validators_.texture_internal_format_storage.AddValue(GL_BGRA8_EXT);
+    if (enable_texture_float) {
+        validators_.texture_internal_format_storage.AddValue(GL_RGBA32F_EXT);
+        validators_.texture_internal_format_storage.AddValue(GL_RGB32F_EXT);
+        validators_.texture_internal_format_storage.AddValue(GL_ALPHA32F_EXT);
+        validators_.texture_internal_format_storage.AddValue(
+            GL_LUMINANCE32F_EXT);
+        validators_.texture_internal_format_storage.AddValue(
+            GL_LUMINANCE_ALPHA32F_EXT);
+    }
+    if (enable_texture_half_float) {
+        validators_.texture_internal_format_storage.AddValue(GL_RGBA16F_EXT);
+        validators_.texture_internal_format_storage.AddValue(GL_RGB16F_EXT);
+        validators_.texture_internal_format_storage.AddValue(GL_ALPHA16F_EXT);
+        validators_.texture_internal_format_storage.AddValue(
+            GL_LUMINANCE16F_EXT);
+        validators_.texture_internal_format_storage.AddValue(
+            GL_LUMINANCE_ALPHA16F_EXT);
+    }
   }
 }
 

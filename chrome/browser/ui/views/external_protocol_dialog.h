@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,9 @@
 #include "googleurl/src/gurl.h"
 #include "ui/views/window/dialog_delegate.h"
 
-class TabContents;
+namespace content {
+class WebContents;
+}
 
 namespace views {
 class MessageBoxView;
@@ -21,7 +23,7 @@ class MessageBoxView;
 class ExternalProtocolDialog : public views::DialogDelegate {
  public:
   // RunExternalProtocolDialog calls this private constructor.
-  ExternalProtocolDialog(TabContents* tab_contents,
+  ExternalProtocolDialog(content::WebContents* web_contents,
                          const GURL& url,
                          const std::wstring& command);
 
@@ -42,15 +44,12 @@ class ExternalProtocolDialog : public views::DialogDelegate {
   virtual views::Widget* GetWidget() OVERRIDE;
   virtual const views::Widget* GetWidget() const OVERRIDE;
 
-  // views::WidgetDelegate methods:
-  virtual bool IsModal() const OVERRIDE { return false; }
-
  private:
   // The message box view whose commands we handle.
   views::MessageBoxView* message_box_view_;
 
-  // The associated TabContents.
-  TabContents* tab_contents_;
+  // The associated WebContents.
+  content::WebContents* web_contents_;
 
   // URL of the external protocol request.
   GURL url_;

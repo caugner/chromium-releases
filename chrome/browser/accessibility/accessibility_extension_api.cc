@@ -1,15 +1,23 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
 
 #include "base/json/json_writer.h"
+#include "base/string_number_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/accessibility/accessibility_extension_api_constants.h"
 #include "chrome/browser/extensions/extension_event_router.h"
+#include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/infobars/infobar_delegate.h"
+#include "chrome/browser/infobars/infobar_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_contents/confirm_infobar_delegate.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
+#include "chrome/common/extensions/extension_error_utils.h"
 #include "content/public/browser/notification_service.h"
 
 namespace keys = extension_accessibility_api_constants;
@@ -55,15 +63,6 @@ ExtensionAccessibilityEventRouter::ExtensionAccessibilityEventRouter()
   registrar_.Add(this,
                  chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED,
                  content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_ACCESSIBILITY_SCREEN_UNLOCKED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_ACCESSIBILITY_WOKE_UP,
-                 content::NotificationService::AllSources());
 }
 
 ExtensionAccessibilityEventRouter::~ExtensionAccessibilityEventRouter() {
@@ -101,18 +100,6 @@ void ExtensionAccessibilityEventRouter::Observe(
     case chrome::NOTIFICATION_ACCESSIBILITY_MENU_CLOSED:
       OnMenuClosed(
           content::Details<const AccessibilityMenuInfo>(details).ptr());
-      break;
-    case chrome::NOTIFICATION_ACCESSIBILITY_VOLUME_CHANGED:
-      OnVolumeChanged(
-          content::Details<const AccessibilityVolumeInfo>(details).ptr());
-      break;
-    case chrome::NOTIFICATION_ACCESSIBILITY_SCREEN_UNLOCKED:
-      OnScreenUnlocked(
-          content::Details<const ScreenUnlockedEventInfo>(details).ptr());
-      break;
-    case chrome::NOTIFICATION_ACCESSIBILITY_WOKE_UP:
-      OnWokeUp(
-          content::Details<const WokeUpEventInfo>(details).ptr());
       break;
     default:
       NOTREACHED();
@@ -171,23 +158,6 @@ void ExtensionAccessibilityEventRouter::OnMenuClosed(
   DispatchEvent(info->profile(), keys::kOnMenuClosed, json_args);
 }
 
-void ExtensionAccessibilityEventRouter::OnVolumeChanged(
-    const AccessibilityVolumeInfo* info) {
-  std::string json_args = ControlInfoToJsonString(info);
-  DispatchEvent(info->profile(), keys::kOnVolumeChanged, json_args);
-}
-
-void ExtensionAccessibilityEventRouter::OnScreenUnlocked(
-    const ScreenUnlockedEventInfo* info) {
-  std::string json_args = ControlInfoToJsonString(info);
-  DispatchEvent(info->profile(), keys::kOnScreenUnlocked, json_args);
-}
-
-void ExtensionAccessibilityEventRouter::OnWokeUp(const WokeUpEventInfo* info) {
-  std::string json_args = ControlInfoToJsonString(info);
-  DispatchEvent(info->profile(), keys::kOnWokeUp, json_args);
-}
-
 void ExtensionAccessibilityEventRouter::DispatchEvent(
     Profile* profile,
     const char* event_name,
@@ -219,5 +189,40 @@ bool GetFocusedControlFunction::RunImpl() {
   } else {
     result_.reset(Value::CreateNullValue());
   }
+  return true;
+}
+
+bool GetAlertsForTabFunction::RunImpl() {
+  int tab_id;
+  EXTENSION_FUNCTION_VALIDATE(args_->GetInteger(0, &tab_id));
+
+  TabStripModel* tab_strip = NULL;
+  TabContentsWrapper* contents = NULL;
+  int tab_index = -1;
+  if (!ExtensionTabUtil::GetTabById(tab_id, profile(), include_incognito(),
+                                    NULL, &tab_strip, &contents, &tab_index)) {
+    error_ = ExtensionErrorUtils::FormatErrorMessage(
+        extension_tabs_module_constants::kTabNotFoundError,
+        base::IntToString(tab_id));
+    return false;
+  }
+
+  ListValue* alerts_value = new ListValue;
+
+  InfoBarTabHelper* infobar_helper = contents->infobar_tab_helper();
+  for (size_t i = 0; i < infobar_helper->infobar_count(); ++i) {
+    // TODO(hashimoto): Make other kind of alerts available.  crosbug.com/24281
+    InfoBarDelegate* infobar_delegate = infobar_helper->GetInfoBarDelegateAt(i);
+    ConfirmInfoBarDelegate* confirm_infobar_delegate =
+        infobar_delegate->AsConfirmInfoBarDelegate();
+    if (confirm_infobar_delegate) {
+      DictionaryValue* alert_value = new DictionaryValue;
+      const string16 message_text = confirm_infobar_delegate->GetMessageText();
+      alert_value->SetString(keys::kMessageKey, message_text);
+      alerts_value->Append(alert_value);
+    }
+  }
+
+  result_.reset(alerts_value);
   return true;
 }

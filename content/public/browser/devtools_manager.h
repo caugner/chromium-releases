@@ -37,7 +37,7 @@ class CONTENT_EXPORT DevToolsManager {
 
   // Invoked when a tab is replaced by another tab. This is triggered by
   // TabStripModel::ReplaceTabContentsAt.
-  virtual void TabReplaced(TabContents* old_tab, TabContents* new_tab) = 0;
+  virtual void TabReplaced(WebContents* old_tab, WebContents* new_tab) = 0;
 
   // Closes all open developer tools windows.
   virtual void CloseAllClientHosts() = 0;
@@ -45,6 +45,10 @@ class CONTENT_EXPORT DevToolsManager {
   // Returns client attached to the |agent_host| if there is one.
   virtual DevToolsClientHost* GetDevToolsClientHostFor(
       DevToolsAgentHost* agent_host) = 0;
+
+  // Returns agent that has |client_host| attachd to it if there is one.
+  virtual DevToolsAgentHost* GetDevToolsAgentHostFor(
+      DevToolsClientHost* client_host) = 0;
 
   // Registers new DevToolsClientHost for inspected |agent_host|. There must be
   // no other DevToolsClientHosts registered for the |agent_host| at the moment.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -58,8 +58,12 @@ class Edit {
   // successful, or false otherwise. Merged edit will be deleted after
   // redo and should not be reused.
   bool Merge(const Edit* edit) {
-    if (edit->merge_with_previous()) {
-      MergeSet(edit);
+    // Don't merge if previous edit is DELETE. This happens when a
+    // user deletes characters then hits return. In this case, the
+    // delete should be treated as separate edit that can be undone
+    // and should not be merged with the replace edit.
+    if (type_ != DELETE_EDIT && edit->merge_with_previous()) {
+      MergeReplace(edit);
       return true;
     }
     return mergeable() && edit->mergeable() && DoMerge(edit);
@@ -76,11 +80,11 @@ class Edit {
   Edit(Type type,
        MergeType merge_type,
        size_t old_cursor_pos,
-       string16 old_text,
+       const string16& old_text,
        size_t old_text_start,
        bool delete_backward,
        size_t new_cursor_pos,
-       string16 new_text,
+       const string16& new_text,
        size_t new_text_start)
       : type_(type),
         merge_type_(merge_type),
@@ -113,10 +117,10 @@ class Edit {
   // Returns the end index of the |new_text_|.
   size_t new_text_end() const { return new_text_start_ + new_text_.length(); }
 
-  // Merge the Set edit into the current edit. This is a special case to
+  // Merge the replace edit into the current edit. This is a special case to
   // handle an omnibox setting autocomplete string after new character is
   // typed in.
-  void MergeSet(const Edit* edit) {
+  void MergeReplace(const Edit* edit) {
     CHECK_EQ(REPLACE_EDIT, edit->type_);
     CHECK_EQ(0U, edit->old_text_start_);
     CHECK_EQ(0U, edit->new_text_start_);
@@ -277,7 +281,6 @@ TextfieldViewsModel::Delegate::~Delegate() {
 TextfieldViewsModel::TextfieldViewsModel(Delegate* delegate)
     : delegate_(delegate),
       render_text_(gfx::RenderText::CreateRenderText()),
-      is_password_(false),
       current_edit_(edit_history_.end()) {
 }
 
@@ -320,10 +323,9 @@ void TextfieldViewsModel::Append(const string16& text) {
   if (HasCompositionText())
     ConfirmCompositionText();
   size_t save = GetCursorPosition();
-  if (render_text_->GetTextDirection() == base::i18n::LEFT_TO_RIGHT)
-    MoveCursorRight(gfx::LINE_BREAK, false);
-  else
-    MoveCursorLeft(gfx::LINE_BREAK, false);
+  MoveCursor(gfx::LINE_BREAK,
+             render_text_->GetVisualDirectionOfLogicalEnd(),
+             false);
   InsertText(text);
   render_text_->SetCursorPosition(save);
   ClearSelection();
@@ -341,8 +343,8 @@ bool TextfieldViewsModel::Delete() {
   }
   if (GetText().length() > GetCursorPosition()) {
     size_t cursor_position = GetCursorPosition();
-    size_t next_grapheme_index =
-        render_text_->GetIndexOfNextGrapheme(cursor_position);
+    size_t next_grapheme_index = render_text_->IndexOfAdjacentGrapheme(
+        cursor_position, gfx::CURSOR_FORWARD);
     ExecuteAndRecordDelete(cursor_position, next_grapheme_index, true);
     return true;
   }
@@ -371,18 +373,12 @@ size_t TextfieldViewsModel::GetCursorPosition() const {
   return render_text_->GetCursorPosition();
 }
 
-void TextfieldViewsModel::MoveCursorLeft(gfx::BreakType break_type,
-                                         bool select) {
+void TextfieldViewsModel::MoveCursor(gfx::BreakType break_type,
+                                     gfx::VisualCursorDirection direction,
+                                     bool select) {
   if (HasCompositionText())
     ConfirmCompositionText();
-  render_text_->MoveCursorLeft(break_type, select);
-}
-
-void TextfieldViewsModel::MoveCursorRight(gfx::BreakType break_type,
-                                          bool select) {
-  if (HasCompositionText())
-    ConfirmCompositionText();
-  render_text_->MoveCursorRight(break_type, select);
+  render_text_->MoveCursor(break_type, direction, select);
 }
 
 bool TextfieldViewsModel::MoveCursorTo(const gfx::SelectionModel& selection) {
@@ -501,10 +497,6 @@ bool TextfieldViewsModel::Redo() {
   return old != GetText() || old_cursor != GetCursorPosition();
 }
 
-string16 TextfieldViewsModel::GetVisibleText() const {
-  return GetVisibleText(0U, GetText().length());
-}
-
 bool TextfieldViewsModel::Cut() {
   if (!HasCompositionText() && HasSelection()) {
     ui::ScopedClipboardWriter(views::ViewsDelegate::views_delegate
@@ -522,11 +514,13 @@ bool TextfieldViewsModel::Cut() {
   return false;
 }
 
-void TextfieldViewsModel::Copy() {
+bool TextfieldViewsModel::Copy() {
   if (!HasCompositionText() && HasSelection()) {
     ui::ScopedClipboardWriter(views::ViewsDelegate::views_delegate
         ->GetClipboard()).WriteText(GetSelectedText());
+    return true;
   }
+  return false;
 }
 
 bool TextfieldViewsModel::Paste() {
@@ -639,13 +633,6 @@ bool TextfieldViewsModel::HasCompositionText() const {
 /////////////////////////////////////////////////////////////////
 // TextfieldViewsModel: private
 
-string16 TextfieldViewsModel::GetVisibleText(size_t begin, size_t end) const {
-  DCHECK(end >= begin);
-  if (is_password_)
-    return string16(end - begin, '*');
-  return GetText().substr(begin, end - begin);
-}
-
 void TextfieldViewsModel::InsertTextInternal(const string16& text,
                                              bool mergeable) {
   if (HasCompositionText()) {
@@ -668,7 +655,8 @@ void TextfieldViewsModel::ReplaceTextInternal(const string16& text,
     const gfx::SelectionModel& model = render_text_->selection_model();
     // When there is no selection, the default is to replace the next grapheme
     // with |text|. So, need to find the index of next grapheme first.
-    size_t next = render_text_->GetIndexOfNextGrapheme(cursor);
+    size_t next =
+        render_text_->IndexOfAdjacentGrapheme(cursor, gfx::CURSOR_FORWARD);
     if (next == model.selection_end())
       render_text_->MoveCursorTo(model);
     else

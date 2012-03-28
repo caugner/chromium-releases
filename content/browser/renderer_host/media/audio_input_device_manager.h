@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -20,6 +20,8 @@
 #include "content/common/media/media_stream_options.h"
 #include "media/audio/audio_device_name.h"
 
+class AudioManager;
+
 namespace media_stream {
 
 class AudioInputDeviceManagerEventHandler;
@@ -34,7 +36,7 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   static const int kInvalidSessionId;
   static const char kInvalidDeviceId[];
 
-  AudioInputDeviceManager();
+  explicit AudioInputDeviceManager(AudioManager* audio_manager);
   virtual ~AudioInputDeviceManager();
 
   // MediaStreamProvider implementation, called on IO thread.
@@ -64,12 +66,11 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   EventHandlerMap event_handlers_;
   typedef std::map<int, media::AudioDeviceName> AudioInputDeviceMap;
   AudioInputDeviceMap devices_;
+  scoped_refptr<AudioManager> audio_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioInputDeviceManager);
 };
 
 }  // namespace media_stream
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(media_stream::AudioInputDeviceManager);
 
 #endif  // CONTENT_BROWSER_RENDERER_HOST_MEDIA_AUDIO_INPUT_DEVICE_MANAGER_H_

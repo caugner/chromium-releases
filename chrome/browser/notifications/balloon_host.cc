@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,23 +7,28 @@
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/webui/chrome_web_ui_factory.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/chrome_view_type.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/renderer_preferences.h"
 #include "ipc/ipc_message.h"
 #include "webkit/glue/webpreferences.h"
+
+using content::SiteInstance;
+using content::WebContents;
 
 BalloonHost::BalloonHost(Balloon* balloon)
     : balloon_(balloon),
@@ -32,13 +37,13 @@ BalloonHost::BalloonHost(Balloon* balloon)
       enable_web_ui_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(
           extension_function_dispatcher_(balloon_->profile(), this)) {
-  site_instance_ = SiteInstance::CreateSiteInstanceForURL(
+  site_instance_ = SiteInstance::CreateForURL(
       balloon_->profile(), balloon_->notification().content_url());
 }
 
 void BalloonHost::Shutdown() {
   NotifyDisconnect();
-  tab_contents_.reset();
+  web_contents_.reset();
 }
 
 Browser* BalloonHost::GetBrowser() {
@@ -46,12 +51,7 @@ Browser* BalloonHost::GetBrowser() {
   return NULL;
 }
 
-gfx::NativeView BalloonHost::GetNativeViewOfHost() {
-  // TODO(aa): Should this return the native view of the BalloonView*?
-  return NULL;
-}
-
-TabContents* BalloonHost::GetAssociatedTabContents() const {
+content::WebContents* BalloonHost::GetAssociatedWebContents() const {
   return NULL;
 }
 
@@ -59,7 +59,7 @@ const string16& BalloonHost::GetSource() const {
   return balloon_->notification().display_source();
 }
 
-void BalloonHost::CloseContents(TabContents* source) {
+void BalloonHost::CloseContents(WebContents* source) {
   balloon_->CloseByScript();
   NotifyDisconnect();
 }
@@ -68,9 +68,21 @@ void BalloonHost::HandleMouseDown() {
   balloon_->OnClick();
 }
 
-void BalloonHost::UpdatePreferredSize(TabContents* source,
+void BalloonHost::UpdatePreferredSize(WebContents* source,
                                       const gfx::Size& pref_size) {
   balloon_->SetContentPreferredSize(pref_size);
+}
+
+void BalloonHost::AddNewContents(WebContents* source,
+                                 WebContents* new_contents,
+                                 WindowOpenDisposition disposition,
+                                 const gfx::Rect& initial_pos,
+                                 bool user_gesture) {
+  Browser* browser = BrowserList::GetLastActiveWithProfile(
+      Profile::FromBrowserContext(new_contents->GetBrowserContext()));
+  if (!browser)
+    return;
+  browser->AddWebContents(new_contents, disposition, initial_pos, user_gesture);
 }
 
 void BalloonHost::RenderViewCreated(RenderViewHost* render_view_host) {
@@ -92,7 +104,7 @@ void BalloonHost::RenderViewReady() {
 }
 
 void BalloonHost::RenderViewGone(base::TerminationStatus status) {
-  CloseContents(tab_contents_.get());
+  CloseContents(web_contents_.get());
 }
 
 bool BalloonHost::OnMessageReceived(const IPC::Message& message) {
@@ -106,22 +118,22 @@ bool BalloonHost::OnMessageReceived(const IPC::Message& message) {
 
 void BalloonHost::OnRequest(const ExtensionHostMsg_Request_Params& params) {
   extension_function_dispatcher_.Dispatch(params,
-                                          tab_contents_->render_view_host());
+                                          web_contents_->GetRenderViewHost());
 }
 
 void BalloonHost::Init() {
-  DCHECK(!tab_contents_.get()) << "BalloonViewHost already initialized.";
-  tab_contents_.reset(new TabContents(
+  DCHECK(!web_contents_.get()) << "BalloonViewHost already initialized.";
+  web_contents_.reset(WebContents::Create(
       balloon_->profile(),
       site_instance_.get(),
       MSG_ROUTING_NONE,
       NULL,
       NULL));
-  tab_contents_->set_view_type(chrome::VIEW_TYPE_NOTIFICATION);
-  tab_contents_->set_delegate(this);
-  Observe(tab_contents_.get());
+  web_contents_->SetViewType(chrome::VIEW_TYPE_NOTIFICATION);
+  web_contents_->SetDelegate(this);
+  Observe(web_contents_.get());
 
-  tab_contents_->controller().LoadURL(
+  web_contents_->GetController().LoadURL(
       balloon_->notification().content_url(), content::Referrer(),
       content::PAGE_TRANSITION_LINK, std::string());
 
@@ -129,7 +141,7 @@ void BalloonHost::Init() {
 }
 
 void BalloonHost::EnableWebUI() {
-  DCHECK(!tab_contents_.get()) <<
+  DCHECK(!web_contents_.get()) <<
       "EnableWebUI has to be called before a renderer is created.";
   enable_web_ui_ = true;
 }

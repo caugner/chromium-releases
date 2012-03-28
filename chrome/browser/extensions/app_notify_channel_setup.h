@@ -104,6 +104,16 @@ class AppNotifyChannelSetup
     ERROR_STATE
   };
 
+  enum SetupError {
+    NONE,
+    AUTH_ERROR,
+    INTERNAL_ERROR,
+    USER_CANCELLED,
+
+    // This is used for histograms, and should always be the last value.
+    SETUP_ERROR_BOUNDARY
+  };
+
   friend class base::RefCountedThreadSafe<AppNotifyChannelSetup>;
   friend class AppNotifyChannelSetupTest;
 
@@ -123,8 +133,9 @@ class AppNotifyChannelSetup
   void BeginGetChannelId();
   void EndGetChannelId(const content::URLFetcher* source);
 
-  void ReportResult(const std::string& channel_id, const std::string& error);
+  void ReportResult(const std::string& channel_id, SetupError error);
 
+  static std::string GetErrorString(SetupError error);
   static GURL GetCWSChannelServiceURL();
   static GURL GetOAuth2IssueTokenURL();
   static std::string MakeOAuth2IssueTokenBody(
@@ -149,6 +160,11 @@ class AppNotifyChannelSetup
   scoped_ptr<AppNotifyChannelUI> ui_;
   State state_;
   std::string oauth2_access_token_;
+  // Keeps track of whether we have encountered failure in OAuth2 access
+  // token generation already. We use this to prevent us from doing an
+  // infinite loop of trying to generate access token, if that fails, try
+  // to login the user and generate access token, etc.
+  bool oauth2_access_token_failure_;
 
   DISALLOW_COPY_AND_ASSIGN(AppNotifyChannelSetup);
 };

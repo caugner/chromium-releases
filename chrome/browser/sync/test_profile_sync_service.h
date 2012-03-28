@@ -45,9 +45,6 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
   void SimulateSyncCycleCompletedInitialSyncEnded(
       const tracked_objects::Location&);
 
-  virtual sync_api::HttpPostProviderFactory* MakeHttpBridgeFactory(
-      const scoped_refptr<net::URLRequestContextGetter>& getter) OVERRIDE;
-
   virtual void StartConfiguration(const base::Closure& callback) OVERRIDE;
 
   static void SetDefaultExpectationsForWorkerCreation(ProfileMock* profile);
@@ -55,7 +52,7 @@ class SyncBackendHostForProfileSyncTest : public SyncBackendHost {
   static void SetHistoryServiceExpectations(ProfileMock* profile);
 
  protected:
-  virtual void InitCore(const Core::DoInitializeOptions& options) OVERRIDE;
+  virtual void InitCore(const DoInitializeOptions& options) OVERRIDE;
 
  private:
   bool synchronous_init_;
@@ -68,9 +65,12 @@ class TestProfileSyncService : public ProfileSyncService {
  public:
   // |callback| can be used to populate nodes before the OnBackendInitialized
   // callback fires.
+  // TODO(tim): Remove |synchronous_backend_initialization|, and add ability to
+  // inject TokenService alongside SigninManager.
   TestProfileSyncService(ProfileSyncComponentsFactory* factory,
                          Profile* profile,
-                         const std::string& test_user,
+                         SigninManager* signin,
+                         ProfileSyncService::StartBehavior behavior,
                          bool synchronous_backend_initialization,
                          const base::Closure& callback);
 

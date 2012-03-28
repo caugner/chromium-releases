@@ -4,15 +4,17 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
-#include "base/task.h"
 #include "chrome/browser/download/download_test_observer.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
+using content::DownloadItem;
+using content::DownloadManager;
 
 // These functions take scoped_refptr's to DownloadManager because they
 // are posted to message queues, and hence may execute arbitrarily after
@@ -80,7 +82,7 @@ bool DownloadTestObserver::IsFinished() const {
   return (finish_on_select_file_ && select_file_dialog_seen_);
 }
 
-void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
+void DownloadTestObserver::OnDownloadUpdated(content::DownloadItem* download) {
   // The REMOVING state indicates that the download is being destroyed.
   // Stop observing.  Do not do anything with it, as it is about to be gone.
   if (download->GetState() == DownloadItem::REMOVING) {
@@ -105,10 +107,8 @@ void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
         // real UI would.
         BrowserThread::PostTask(
             BrowserThread::UI, FROM_HERE,
-            NewRunnableFunction(
-                &AcceptDangerousDownload,
-                download_manager_,
-                download->GetId()));
+            base::Bind(&AcceptDangerousDownload, download_manager_,
+                       download->GetId()));
         break;
 
       case ON_DANGEROUS_DOWNLOAD_DENY:
@@ -116,10 +116,8 @@ void DownloadTestObserver::OnDownloadUpdated(DownloadItem* download) {
         // real UI would.
         BrowserThread::PostTask(
             BrowserThread::UI, FROM_HERE,
-            NewRunnableFunction(
-                &DenyDangerousDownload,
-                download_manager_,
-                download->GetId()));
+            base::Bind(&DenyDangerousDownload, download_manager_,
+                       download->GetId()));
         break;
 
       case ON_DANGEROUS_DOWNLOAD_FAIL:
@@ -142,6 +140,9 @@ void DownloadTestObserver::ModelChanged() {
   // (done by |OnDownloadUpdated()|).
   std::vector<DownloadItem*> downloads;
   download_manager_->GetAllDownloads(FilePath(), &downloads);
+  // As a test class, we're generally interested in whatever's there,
+  // so we include temporary downloads.
+  download_manager_->GetTemporaryDownloads(FilePath(), &downloads);
 
   for (std::vector<DownloadItem*>::iterator it = downloads.begin();
        it != downloads.end(); ++it) {
@@ -210,7 +211,8 @@ void DownloadTestFlushObserver::ModelChanged() {
   CheckDownloadsInProgress(true);
 }
 
-void DownloadTestFlushObserver::OnDownloadUpdated(DownloadItem* download) {
+void DownloadTestFlushObserver::OnDownloadUpdated(
+    content::DownloadItem* download) {
   // The REMOVING state indicates that the download is being destroyed.
   // Stop observing.  Do not do anything with it, as it is about to be gone.
   if (download->GetState() == DownloadItem::REMOVING) {
@@ -273,8 +275,7 @@ void DownloadTestFlushObserver::CheckDownloadsInProgress(
       // there's a self-task posting in the IO thread cancel path.
       BrowserThread::PostTask(
           BrowserThread::FILE, FROM_HERE,
-          NewRunnableMethod(this,
-                            &DownloadTestFlushObserver::PingFileThread, 2));
+          base::Bind(&DownloadTestFlushObserver::PingFileThread, this, 2));
     }
   }
 }
@@ -282,18 +283,16 @@ void DownloadTestFlushObserver::CheckDownloadsInProgress(
 void DownloadTestFlushObserver::PingFileThread(int cycle) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      NewRunnableMethod(this, &DownloadTestFlushObserver::PingIOThread,
-                        cycle));
+      base::Bind(&DownloadTestFlushObserver::PingIOThread, this, cycle));
 }
 
 void DownloadTestFlushObserver::PingIOThread(int cycle) {
   if (--cycle) {
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
-        NewRunnableMethod(this, &DownloadTestFlushObserver::PingFileThread,
-                          cycle));
+        base::Bind(&DownloadTestFlushObserver::PingFileThread, this, cycle));
   } else {
     BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, new MessageLoop::QuitTask());
+        BrowserThread::UI, FROM_HERE, MessageLoop::QuitClosure());
   }
 }

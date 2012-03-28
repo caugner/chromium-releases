@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,6 +66,7 @@
 #include "base/file_util.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
+#include "base/message_loop_helpers.h"
 #include "base/path_service.h"
 #include "base/process_util.h"
 #include "base/rand_util.h"
@@ -561,7 +562,7 @@ class ProcessSingleton::LinuxWatcher
 
  private:
   friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
-  friend class DeleteTask<ProcessSingleton::LinuxWatcher>;
+  friend class base::DeleteHelper<ProcessSingleton::LinuxWatcher>;
 
   virtual ~LinuxWatcher() {
     DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
@@ -834,7 +835,7 @@ ProcessSingleton::NotifyResult ProcessSingleton::NotifyOtherProcessWithTimeout(
       return PROCESS_NONE;
     }
 
-    base::PlatformThread::Sleep(1000 /* ms */);
+    base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(1));
   }
 
   timeval timeout = {timeout_seconds, 0};

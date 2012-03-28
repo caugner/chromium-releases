@@ -17,10 +17,26 @@
     <script type="text/javascript" src="js/bootstrap.js"></script>
     <script type="text/javascript" src="js/sidebar.js"></script>
   <title>chrome.* APIs - Google Chrome Extensions - Google Code</title></head>
-  <body>  <div id="gc-container" class="labs">
-      <div id="devModeWarning">
-        You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
-      </div>
+  <body>  <div id="devModeWarning" class="displayModeWarning">
+    You are viewing extension docs in chrome via the 'file:' scheme: are you expecting to see local changes when you refresh? You'll need run chrome with --allow-file-access-from-files.
+  </div>
+  <div id="branchWarning" class="displayModeWarning">
+    <span>WARNING: This is the <span id="branchName">BETA</span> documentation.
+    It may not work with the stable release of Chrome.</span>
+    <select id="branchChooser">
+      <option>Choose a different version...
+      </option><option value="">Stable
+      </option><option value="beta">Beta
+      </option><option value="dev">Dev
+      </option><option value="trunk">Trunk
+    </option></select>
+  </div>
+  <div id="unofficialWarning" class="displayModeWarning">
+    <span>WARNING: This is unofficial documentation. It may not work with the
+    current release of Chrome.</span>
+    <button id="goToOfficialDocs">Go to the official docs</button>
+  </div>
+  <div id="gc-container" class="labs">
       <!-- SUBTEMPLATES: DO NOT MOVE FROM THIS LOCATION -->
       <!-- In particular, sub-templates that recurse, must be used by allowing
            jstemplate to make a copy of the template in this section which
@@ -229,6 +245,7 @@
                 <ul>
                   <li><a href="bookmarks.html">Bookmarks</a></li>
                   <li><a href="cookies.html">Cookies</a></li>
+                  <li><a href="devtools.html">Developer Tools</a></li>
                   <li><a href="events.html">Events</a></li>
                   <li><a href="history.html">History</a></li>
                   <li><a href="management.html">Management</a></li>
@@ -357,7 +374,7 @@ Here are the supported chrome.* APIs:
 </p>
 
 <ul>
-  <li><a href="bookmarks.html" js="">bookmarks</a></li><li><a href="browserAction.html" js="">browserAction</a></li><li><a href="contentSettings.html" js="">contentSettings</a></li><li><a href="contextMenus.html" js="">contextMenus</a></li><li><a href="cookies.html" js="">cookies</a></li><li><a href="extension.html" js="">extension</a></li><li><a href="fileBrowserHandler.html" js="">fileBrowserHandler</a></li><li><a href="history.html" js="">history</a></li><li><a href="i18n.html" js="">i18n</a></li><li><a href="idle.html" js="">idle</a></li><li><a href="management.html" js="">management</a></li><li><a href="omnibox.html" js="">omnibox</a></li><li><a href="pageAction.html" js="">pageAction</a></li><li><a href="pageCapture.html" js="">pageCapture</a></li><li><a href="permissions.html" js="">permissions</a></li><li><a href="proxy.html" js="">proxy</a></li><li><a href="tabs.html" js="">tabs</a></li><li><a href="tts.html" js="">tts</a></li><li><a href="ttsEngine.html" js="">ttsEngine</a></li><li><a href="types.html" js="">types</a></li><li><a href="webNavigation.html" js="">webNavigation</a></li><li><a href="webRequest.html" js="">webRequest</a></li><li><a href="windows.html" js="">windows</a></li>
+  <li><a href="bookmarks.html" js="">bookmarks</a></li><li><a href="browserAction.html" js="">browserAction</a></li><li><a href="contentSettings.html" js="">contentSettings</a></li><li><a href="contextMenus.html" js="">contextMenus</a></li><li><a href="cookies.html" js="">cookies</a></li><li><a href="debugger.html" js="">debugger</a></li><li><a href="extension.html" js="">extension</a></li><li><a href="fileBrowserHandler.html" js="">fileBrowserHandler</a></li><li><a href="history.html" js="">history</a></li><li><a href="i18n.html" js="">i18n</a></li><li><a href="idle.html" js="">idle</a></li><li><a href="input.ime.html" js="">input.ime</a></li><li><a href="management.html" js="">management</a></li><li><a href="omnibox.html" js="">omnibox</a></li><li><a href="pageAction.html" js="">pageAction</a></li><li><a href="pageCapture.html" js="">pageCapture</a></li><li><a href="permissions.html" js="">permissions</a></li><li><a href="privacy.html" js="">privacy</a></li><li><a href="proxy.html" js="">proxy</a></li><li><a href="tabs.html" js="">tabs</a></li><li><a href="tts.html" js="">tts</a></li><li><a href="ttsEngine.html" js="">ttsEngine</a></li><li><a href="types.html" js="">types</a></li><li><a href="webNavigation.html" js="">webNavigation</a></li><li><a href="webRequest.html" js="">webRequest</a></li><li><a href="windows.html" js="">windows</a></li>
 </ul>
 
 <h2 id="experimental">Experimental APIs</h2>

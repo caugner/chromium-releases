@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,14 +8,12 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/task.h"
 #include "chrome/browser/tab_contents/chrome_interstitial_page.h"
 #include "net/base/network_change_notifier.h"
 
 class Extension;
-class OfflineResourceHandler;
-class TabContents;
 
 namespace base {
 class DictionaryValue;
@@ -30,9 +28,14 @@ namespace chromeos {
 class OfflineLoadPage : public ChromeInterstitialPage,
                         public net::NetworkChangeNotifier::OnlineStateObserver {
  public:
-  // Create a offline load page for the |tab_contents|.
-  OfflineLoadPage(TabContents* tab_contents, const GURL& url,
-                  OfflineResourceHandler* handler);
+  // Passed a boolean indicating whether or not it is OK to proceed with the
+  // page load.
+  typedef base::Callback<void(bool /*proceed*/)> CompletionCallback;
+
+  // Create a offline load page for the |web_contents|.  The callback will be
+  // run on the IO thread.
+  OfflineLoadPage(content::WebContents* web_contents, const GURL& url,
+                  const CompletionCallback& callback);
 
  protected:
   virtual ~OfflineLoadPage();
@@ -62,11 +65,10 @@ class OfflineLoadPage : public ChromeInterstitialPage,
   // has not been activated.
   bool ShowActivationMessage();
 
-  scoped_refptr<OfflineResourceHandler> handler_;
+  CompletionCallback callback_;
 
   // True if the proceed is chosen.
   bool proceeded_;
-  ScopedRunnableMethodFactory<OfflineLoadPage> method_factory_;
 
   bool in_test_;
 

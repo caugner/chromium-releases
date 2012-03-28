@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,8 +17,6 @@
 #include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/compositor/layer_animator.h"
-#include "ui/gfx/compositor/test/test_compositor.h"
-#include "ui/gfx/compositor/test/test_texture.h"
 #include "ui/gfx/path.h"
 #include "ui/gfx/transform.h"
 #include "ui/views/background.h"
@@ -31,7 +29,6 @@
 #include "ui/views/focus/accelerator_handler.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/test/views_test_base.h"
-#include "ui/views/touchui/gesture_manager.h"
 #include "ui/views/view.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/native_widget.h"
@@ -42,7 +39,9 @@
 #include "ui/views/test/test_views_delegate.h"
 #endif
 #if defined(USE_AURA)
-#include "ui/aura/desktop.h"
+#include "ui/aura/event.h"
+#include "ui/aura/root_window.h"
+#include "ui/aura/gestures/gesture_recognizer.h"
 #endif
 
 using ::testing::_;
@@ -119,11 +118,11 @@ bool ViewAndLayerTreeAreConsistent(const views::View* view,
       return false;
 
     // Check if the visibility states of the View and the Layer are in sync.
-    EXPECT_EQ(l->IsDrawn(), v->IsVisibleInRootView());
-    if (v->IsVisibleInRootView() != l->IsDrawn()) {
+    EXPECT_EQ(l->IsDrawn(), v->IsDrawn());
+    if (v->IsDrawn() != l->IsDrawn()) {
       for (const views::View* vv = v; vv; vv = vv->parent())
-        LOG(ERROR) << "V: " << vv << " " << vv->IsVisible() << " "
-                   << vv->IsVisibleInRootView() << " " << vv->layer();
+        LOG(ERROR) << "V: " << vv << " " << vv->visible() << " "
+                   << vv->IsDrawn() << " " << vv->layer();
       for (const ui::Layer* ll = l; ll; ll = ll->parent())
         LOG(ERROR) << "L: " << ll << " " << ll->IsDrawn();
       return false;
@@ -183,10 +182,10 @@ void ScrambleTree(views::View* view) {
     view->SetPaintToLayer(true);
 
   if (base::RandDouble() < 0.1)
-    view->SetVisible(!view->IsVisible());
+    view->SetVisible(!view->visible());
 }
 
-}
+}  // namespace
 
 namespace views {
 
@@ -205,6 +204,8 @@ class TestView : public View {
     location_.SetPoint(0, 0);
     last_touch_event_type_ = 0;
     last_touch_event_was_handled_ = false;
+    last_gesture_event_type_ = 0;
+    last_gesture_event_was_handled_ = false;
     last_clip_.setEmpty();
     accelerator_count_map_.clear();
   }
@@ -214,6 +215,8 @@ class TestView : public View {
   virtual bool OnMouseDragged(const MouseEvent& event) OVERRIDE;
   virtual void OnMouseReleased(const MouseEvent& event) OVERRIDE;
   virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
+  // Ignores GestureEvent by default.
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE;
   virtual void Paint(gfx::Canvas* canvas) OVERRIDE;
   virtual void SchedulePaintInRect(const gfx::Rect& rect) OVERRIDE;
   virtual bool AcceleratorPressed(const ui::Accelerator& accelerator) OVERRIDE;
@@ -229,6 +232,10 @@ class TestView : public View {
   // Painting.
   std::vector<gfx::Rect> scheduled_paint_rects_;
 
+  // GestureEvent
+  int last_gesture_event_type_;
+  bool last_gesture_event_was_handled_;
+
   // TouchEvent.
   int last_touch_event_type_;
   bool last_touch_event_was_handled_;
@@ -241,30 +248,6 @@ class TestView : public View {
   std::map<ui::Accelerator, int> accelerator_count_map_;
 };
 
-// Mock instance of the GestureManager for testing.
-class MockGestureManager : public GestureManager {
- public:
-  // Reset all test state.
-  void Reset() {
-    last_touch_event_ = 0;
-    last_view_ = NULL;
-    previously_handled_flag_ = false;
-    dispatched_synthetic_event_ = false;
-  }
-
-  bool ProcessTouchEventForGesture(const TouchEvent& event,
-                                   View* source,
-                                   ui::TouchStatus status);
-  MockGestureManager();
-
-  bool previously_handled_flag_;
-  int last_touch_event_;
-  View *last_view_;
-  bool dispatched_synthetic_event_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockGestureManager);
-};
-
 // A view subclass that ignores all touch events for testing purposes.
 class TestViewIgnoreTouch : public TestView {
  public:
@@ -273,6 +256,36 @@ class TestViewIgnoreTouch : public TestView {
 
  private:
   virtual ui::TouchStatus OnTouchEvent(const TouchEvent& event) OVERRIDE;
+};
+
+// A view subclass that consumes all Gesture events for testing purposes.
+class TestViewConsumeGesture : public TestView {
+ public:
+  TestViewConsumeGesture() : TestView() {}
+  virtual ~TestViewConsumeGesture() {}
+
+ private:
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE {
+    last_gesture_event_type_ = event.type();
+    location_.SetPoint(event.x(), event.y());
+    return ui::GESTURE_STATUS_CONSUMED;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(TestViewConsumeGesture);
+};
+
+// A view subclass that ignores all Gesture events.
+class TestViewIgnoreGesture: public TestView {
+ public:
+  TestViewIgnoreGesture() : TestView() {}
+  virtual ~TestViewIgnoreGesture() {}
+
+ private:
+  virtual ui::GestureStatus OnGestureEvent(const GestureEvent& event) OVERRIDE {
+    return ui::GESTURE_STATUS_UNKNOWN;
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(TestViewIgnoreGesture);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -343,7 +356,7 @@ TEST_F(ViewTest, MouseEvent) {
   MouseEvent pressed(ui::ET_MOUSE_PRESSED,
                      110,
                      120,
-                     ui::EF_LEFT_BUTTON_DOWN);
+                     ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(pressed);
   EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_PRESSED);
   EXPECT_EQ(v2->location_.x(), 10);
@@ -357,7 +370,7 @@ TEST_F(ViewTest, MouseEvent) {
   MouseEvent dragged(ui::ET_MOUSE_DRAGGED,
                      50,
                      40,
-                     ui::EF_LEFT_BUTTON_DOWN);
+                     ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMouseDragged(dragged);
   EXPECT_EQ(v2->last_mouse_event_type_, ui::ET_MOUSE_DRAGGED);
   EXPECT_EQ(v2->location_.x(), -50);
@@ -382,24 +395,6 @@ TEST_F(ViewTest, MouseEvent) {
 ////////////////////////////////////////////////////////////////////////////////
 // TouchEvent
 ////////////////////////////////////////////////////////////////////////////////
-bool MockGestureManager::ProcessTouchEventForGesture(
-    const TouchEvent& event,
-    View* source,
-    ui::TouchStatus status) {
-  if (status != ui::TOUCH_STATUS_UNKNOWN) {
-    dispatched_synthetic_event_ = false;
-    return false;
-  }
-  last_touch_event_ =  event.type();
-  last_view_ = source;
-  previously_handled_flag_ = status != ui::TOUCH_STATUS_UNKNOWN;
-  dispatched_synthetic_event_ = true;
-  return true;
-}
-
-MockGestureManager::MockGestureManager() {
-}
-
 ui::TouchStatus TestView::OnTouchEvent(const TouchEvent& event) {
   last_touch_event_type_ = event.type();
   location_.SetPoint(event.x(), event.y());
@@ -424,8 +419,6 @@ ui::TouchStatus TestViewIgnoreTouch::OnTouchEvent(const TouchEvent& event) {
 }
 
 TEST_F(ViewTest, TouchEvent) {
-  MockGestureManager gm;
-
   TestView* v1 = new TestView();
   v1->SetBounds(0, 0, 300, 300);
 
@@ -443,7 +436,6 @@ TEST_F(ViewTest, TouchEvent) {
   View* root = widget->GetRootView();
 
   root->AddChildView(v1);
-  static_cast<internal::RootView*>(root)->SetGestureManagerForTesting(&gm);
   v1->AddChildView(v2);
   v2->AddChildView(v3);
 
@@ -454,7 +446,6 @@ TEST_F(ViewTest, TouchEvent) {
   // does.
   v1->Reset();
   v2->Reset();
-  gm.Reset();
 
   TouchEvent unhandled(ui::ET_TOUCH_MOVED,
                        400,
@@ -467,15 +458,9 @@ TEST_F(ViewTest, TouchEvent) {
   EXPECT_EQ(v1->last_touch_event_type_, 0);
   EXPECT_EQ(v2->last_touch_event_type_, 0);
 
-  EXPECT_EQ(gm.previously_handled_flag_, false);
-  EXPECT_EQ(gm.last_touch_event_, ui::ET_TOUCH_MOVED);
-  EXPECT_EQ(gm.last_view_, root);
-  EXPECT_EQ(gm.dispatched_synthetic_event_, true);
-
   // Test press, drag, release touch sequence.
   v1->Reset();
   v2->Reset();
-  gm.Reset();
 
   TouchEvent pressed(ui::ET_TOUCH_PRESSED,
                      110,
@@ -491,11 +476,6 @@ TEST_F(ViewTest, TouchEvent) {
   EXPECT_EQ(v2->location_.y(), 20);
   // Make sure v1 did not receive the event
   EXPECT_EQ(v1->last_touch_event_type_, 0);
-
-  // Since v2 handled the touch-event, the gesture manager should not handle it.
-  EXPECT_EQ(gm.last_touch_event_, 0);
-  EXPECT_EQ(NULL, gm.last_view_);
-  EXPECT_EQ(gm.previously_handled_flag_, false);
 
   // Drag event out of bounds. Should still go to v2
   v1->Reset();
@@ -514,10 +494,6 @@ TEST_F(ViewTest, TouchEvent) {
   // Make sure v1 did not receive the event
   EXPECT_EQ(v1->last_touch_event_type_, 0);
 
-  EXPECT_EQ(gm.last_touch_event_, 0);
-  EXPECT_EQ(NULL, gm.last_view_);
-  EXPECT_EQ(gm.previously_handled_flag_, false);
-
   // Released event out of bounds. Should still go to v2
   v1->Reset();
   v2->Reset();
@@ -531,9 +507,61 @@ TEST_F(ViewTest, TouchEvent) {
   // Make sure v1 did not receive the event
   EXPECT_EQ(v1->last_touch_event_type_, 0);
 
-  EXPECT_EQ(gm.last_touch_event_, 0);
-  EXPECT_EQ(NULL, gm.last_view_);
-  EXPECT_EQ(gm.previously_handled_flag_, false);
+  widget->CloseNow();
+}
+
+ui::GestureStatus TestView::OnGestureEvent(const GestureEvent& event) {
+  return ui::GESTURE_STATUS_UNKNOWN;
+}
+
+TEST_F(ViewTest, GestureEvent) {
+  // Views hierarchy for non delivery of GestureEvent.
+  TestView* v1 = new TestViewConsumeGesture();
+  v1->SetBounds(0, 0, 300, 300);
+
+  TestView* v2 = new TestViewConsumeGesture();
+  v2->SetBounds(100, 100, 100, 100);
+
+  TestView* v3 = new TestViewIgnoreGesture();
+  v3->SetBounds(0, 0, 100, 100);
+
+  scoped_ptr<Widget> widget(new Widget());
+  Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  params.bounds = gfx::Rect(50, 50, 650, 650);
+  widget->Init(params);
+  View* root = widget->GetRootView();
+
+  root->AddChildView(v1);
+  v1->AddChildView(v2);
+  v2->AddChildView(v3);
+
+  // |v3| completely obscures |v2|, but all the gesture events on |v3| should
+  // reach |v2| because |v3| doesn't process any gesture events. However, since
+  // |v2| does process gesture events, gesture events on |v3| or |v2| should not
+  // reach |v1|.
+
+  v1->Reset();
+  v2->Reset();
+  v3->Reset();
+
+  // Gesture on |v3|
+  GestureEventForTest g1(ui::ET_GESTURE_TAP, 110, 110, 0);
+  root->OnGestureEvent(g1);
+  EXPECT_EQ(ui::ET_GESTURE_TAP, v2->last_gesture_event_type_);
+  EXPECT_EQ(gfx::Point(10, 10), v2->location_);
+  EXPECT_EQ(ui::ET_UNKNOWN, v1->last_gesture_event_type_);
+
+  v1->Reset();
+  v2->Reset();
+  v3->Reset();
+
+  // Gesture on |v1|
+  GestureEventForTest g2(ui::ET_GESTURE_TAP, 80, 80, 0);
+  root->OnGestureEvent(g2);
+  EXPECT_EQ(ui::ET_GESTURE_TAP, v1->last_gesture_event_type_);
+  EXPECT_EQ(gfx::Point(80, 80), v1->location_);
+  EXPECT_EQ(ui::ET_UNKNOWN, v2->last_gesture_event_type_);
 
   widget->CloseNow();
 }
@@ -866,7 +894,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   Textfield* normal = new Textfield();
   Textfield* read_only = new Textfield();
   read_only->SetReadOnly(true);
-  Textfield* password = new Textfield(Textfield::STYLE_PASSWORD);
+  Textfield* password = new Textfield(Textfield::STYLE_OBSCURED);
 
   root_view->AddChildView(normal);
   root_view->AddChildView(read_only);
@@ -926,7 +954,7 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   ::SendMessage(password->GetTestingHandle(), WM_COPY, 0, 0);
   result.clear();
   clipboard.ReadText(ui::Clipboard::BUFFER_STANDARD, &result);
-  // We don't let you copy from a password field, clipboard should not have
+  // We don't let you copy from an obscured field, clipboard should not have
   // changed.
   EXPECT_EQ(kNormalText, result);
 
@@ -1057,12 +1085,10 @@ TEST_F(ViewTest, HiddenViewWithAccelerator) {
   ASSERT_TRUE(focus_manager);
 
   view->SetVisible(false);
-  EXPECT_EQ(NULL,
-            focus_manager->GetCurrentTargetForAccelerator(return_accelerator));
+  EXPECT_FALSE(focus_manager->ProcessAccelerator(return_accelerator));
 
   view->SetVisible(true);
-  EXPECT_EQ(view,
-            focus_manager->GetCurrentTargetForAccelerator(return_accelerator));
+  EXPECT_TRUE(focus_manager->ProcessAccelerator(return_accelerator));
 
   widget->CloseNow();
 }
@@ -1087,16 +1113,16 @@ TEST_F(ViewTest, ViewInHiddenWidgetWithAccelerator) {
   FocusManager* focus_manager = widget->GetFocusManager();
   ASSERT_TRUE(focus_manager);
 
-  EXPECT_EQ(NULL,
-            focus_manager->GetCurrentTargetForAccelerator(return_accelerator));
+  EXPECT_FALSE(focus_manager->ProcessAccelerator(return_accelerator));
+  EXPECT_EQ(0, view->accelerator_count_map_[return_accelerator]);
 
   widget->Show();
-  EXPECT_EQ(view,
-            focus_manager->GetCurrentTargetForAccelerator(return_accelerator));
+  EXPECT_TRUE(focus_manager->ProcessAccelerator(return_accelerator));
+  EXPECT_EQ(1, view->accelerator_count_map_[return_accelerator]);
 
   widget->Hide();
-  EXPECT_EQ(NULL,
-            focus_manager->GetCurrentTargetForAccelerator(return_accelerator));
+  EXPECT_FALSE(focus_manager->ProcessAccelerator(return_accelerator));
+  EXPECT_EQ(1, view->accelerator_count_map_[return_accelerator]);
 
   widget->CloseNow();
 }
@@ -1484,9 +1510,9 @@ class ButtonDropDownTest : public ViewTest {
 // Ensure that regular clicks on the drop down button still work. (i.e. - the
 // click events are processed and the listener gets the click)
 TEST_F(ButtonDropDownTest, RegularClickTest) {
-  MouseEvent press_event(ui::ET_MOUSE_PRESSED, 1, 1, ui::EF_LEFT_BUTTON_DOWN);
+  MouseEvent press_event(ui::ET_MOUSE_PRESSED, 1, 1, ui::EF_LEFT_MOUSE_BUTTON);
   MouseEvent release_event(ui::ET_MOUSE_RELEASED, 1, 1,
-                           ui::EF_LEFT_BUTTON_DOWN);
+                           ui::EF_LEFT_MOUSE_BUTTON);
   button_as_view_->OnMousePressed(press_event);
   button_as_view_->OnMouseReleased(release_event);
   EXPECT_EQ(test_dialog_->last_pressed_button_, test_dialog_->button_drop_);
@@ -1744,7 +1770,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   MouseEvent pressed(ui::ET_MOUSE_PRESSED,
                      110, 210,
-                     ui::EF_LEFT_BUTTON_DOWN);
+                     ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(pressed);
   EXPECT_EQ(0, v1->last_mouse_event_type_);
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, v2->last_mouse_event_type_);
@@ -1768,7 +1794,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   MouseEvent p2(ui::ET_MOUSE_PRESSED,
                 110, 320,
-                ui::EF_LEFT_BUTTON_DOWN);
+                ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(p2);
   EXPECT_EQ(0, v1->last_mouse_event_type_);
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, v2->last_mouse_event_type_);
@@ -1803,7 +1829,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   MouseEvent p3(ui::ET_MOUSE_PRESSED,
                 112, 110,
-                ui::EF_LEFT_BUTTON_DOWN);
+                ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(p3);
 
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, v3->last_mouse_event_type_);
@@ -1839,7 +1865,7 @@ TEST_F(ViewTest, TransformEvent) {
 
   MouseEvent p4(ui::ET_MOUSE_PRESSED,
                 124, 125,
-                ui::EF_LEFT_BUTTON_DOWN);
+                ui::EF_LEFT_MOUSE_BUTTON);
   root->OnMousePressed(p4);
 
   EXPECT_EQ(ui::ET_MOUSE_PRESSED, v3->last_mouse_event_type_);
@@ -2473,11 +2499,44 @@ TEST_F(ViewTest, GetViewByID) {
   EXPECT_NE(views.end(), i);
 }
 
+TEST_F(ViewTest, AddExistingChild) {
+  View v1, v2, v3;
+
+  v1.AddChildView(&v2);
+  v1.AddChildView(&v3);
+  EXPECT_EQ(0, v1.GetIndexOf(&v2));
+  EXPECT_EQ(1, v1.GetIndexOf(&v3));
+
+  // Check that there's no change in order when adding at same index.
+  v1.AddChildViewAt(&v2, 0);
+  EXPECT_EQ(0, v1.GetIndexOf(&v2));
+  EXPECT_EQ(1, v1.GetIndexOf(&v3));
+  v1.AddChildViewAt(&v3, 1);
+  EXPECT_EQ(0, v1.GetIndexOf(&v2));
+  EXPECT_EQ(1, v1.GetIndexOf(&v3));
+
+  // Add it at a different index and check for change in order.
+  v1.AddChildViewAt(&v2, 1);
+  EXPECT_EQ(1, v1.GetIndexOf(&v2));
+  EXPECT_EQ(0, v1.GetIndexOf(&v3));
+  v1.AddChildViewAt(&v2, 0);
+  EXPECT_EQ(0, v1.GetIndexOf(&v2));
+  EXPECT_EQ(1, v1.GetIndexOf(&v3));
+
+  // Check that calling |AddChildView()| does not change the order.
+  v1.AddChildView(&v2);
+  EXPECT_EQ(0, v1.GetIndexOf(&v2));
+  EXPECT_EQ(1, v1.GetIndexOf(&v3));
+  v1.AddChildView(&v3);
+  EXPECT_EQ(0, v1.GetIndexOf(&v2));
+  EXPECT_EQ(1, v1.GetIndexOf(&v3));
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Layers
 ////////////////////////////////////////////////////////////////////////////////
 
-#if defined(VIEWS_COMPOSITOR)
+#if defined(USE_AURA)
 
 namespace {
 
@@ -2516,22 +2575,16 @@ class ViewLayerTest : public ViewsTestBase {
 
   // Returns the Layer used by the RootView.
   ui::Layer* GetRootLayer() {
-#if defined(USE_AURA)
     ui::Layer* root_layer = NULL;
     gfx::Point origin;
     widget()->CalculateOffsetToAncestorWithLayer(&origin, &root_layer);
     return root_layer;
-#else
-    return widget()->GetRootView()->layer();
-#endif
   }
 
   virtual void SetUp() OVERRIDE {
     ViewTest::SetUp();
     old_use_acceleration_ = View::get_use_acceleration_when_possible();
     View::set_use_acceleration_when_possible(true);
-
-    ui::TestTexture::reset_live_count();
 
     widget_ = new Widget;
     Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
@@ -2555,70 +2608,22 @@ class ViewLayerTest : public ViewsTestBase {
   bool old_use_acceleration_;
 };
 
-#if !defined(USE_AURA)
-// This test assumes a particular layer hierarchy that isn't valid for aura.
-// Ensures the RootView has a layer and its set up correctly.
-TEST_F(ViewLayerTest, RootState) {
-  ui::Layer* layer = widget()->GetRootView()->layer();
-  ASSERT_TRUE(layer);
-  EXPECT_FALSE(layer->parent());
-  EXPECT_EQ(0u, layer->children().size());
-  EXPECT_FALSE(layer->transform().HasChange());
-  EXPECT_EQ(widget()->GetRootView()->bounds(), layer->bounds());
-  EXPECT_TRUE(layer->GetCompositor() != NULL);
-}
-
-// Verifies that the complete bounds of a texture are updated if the texture
-// needs to be refreshed and paint with a clip is invoked.
-// This test invokes OnNativeWidgetPaintAccelerated, which is not used by aura.
-TEST_F(ViewLayerTest, PaintAll) {
-  View* view = widget()->GetRootView();
-  ui::Layer* layer = GetRootLayer();
-  view->SetBounds(0, 0, 200, 200);
-  widget()->OnNativeWidgetPaintAccelerated(gfx::Rect(0, 0, 1, 1));
-  ASSERT_TRUE(layer != NULL);
-  const ui::TestTexture* texture =
-      static_cast<const ui::TestTexture*>(layer->texture());
-  ASSERT_TRUE(texture != NULL);
-  EXPECT_EQ(view->GetLocalBounds(), texture->bounds_of_last_paint());
-}
-#endif
 
 TEST_F(ViewLayerTest, LayerToggling) {
   // Because we lazily create textures the calls to DrawTree are necessary to
   // ensure we trigger creation of textures.
-#if defined(USE_AURA)
   ui::Layer* root_layer = NULL;
   gfx::Point origin;
   widget()->CalculateOffsetToAncestorWithLayer(&origin, &root_layer);
-#else
-  ui::Layer* root_layer = widget()->GetRootView()->layer();
-#endif
   View* content_view = new View;
   widget()->SetContentsView(content_view);
-
-#if !defined(USE_WEBKIT_COMPOSITOR)
-  // TODO(piman): with the webkit compositor, we don't create Textures on
-  // Layers. We're not supposed to be calling Layer::DrawTree. This test needs
-  // refactoring to fully work in that case.
-  root_layer->DrawTree();
-  ui::TestTexture::reset_live_count();
-#endif
 
   // Create v1, give it a bounds and verify everything is set up correctly.
   View* v1 = new View;
   v1->SetPaintToLayer(true);
-#if !defined(USE_WEBKIT_COMPOSITOR)
-  root_layer->DrawTree();
-  EXPECT_EQ(0, ui::TestTexture::live_count());
-#endif
   EXPECT_TRUE(v1->layer() != NULL);
   v1->SetBounds(20, 30, 140, 150);
   content_view->AddChildView(v1);
-#if !defined(USE_WEBKIT_COMPOSITOR)
-  root_layer->DrawTree();
-  EXPECT_EQ(1, ui::TestTexture::live_count());
-#endif
   ASSERT_TRUE(v1->layer() != NULL);
   EXPECT_EQ(root_layer, v1->layer()->parent());
   EXPECT_EQ(gfx::Rect(20, 30, 140, 150), v1->layer()->bounds());
@@ -2629,10 +2634,6 @@ TEST_F(ViewLayerTest, LayerToggling) {
   EXPECT_TRUE(v2->layer() == NULL);
   v2->SetBounds(10, 20, 30, 40);
   v2->SetPaintToLayer(true);
-#if !defined(USE_WEBKIT_COMPOSITOR)
-  root_layer->DrawTree();
-  EXPECT_EQ(2, ui::TestTexture::live_count());
-#endif
   ASSERT_TRUE(v2->layer() != NULL);
   EXPECT_EQ(v1->layer(), v2->layer()->parent());
   EXPECT_EQ(gfx::Rect(10, 20, 30, 40), v2->layer()->bounds());
@@ -2640,10 +2641,6 @@ TEST_F(ViewLayerTest, LayerToggling) {
   // Turn off v1s layer. v2 should still have a layer but its parent should have
   // changed.
   v1->SetPaintToLayer(false);
-#if !defined(USE_WEBKIT_COMPOSITOR)
-  root_layer->DrawTree();
-  EXPECT_EQ(1, ui::TestTexture::live_count());
-#endif
   EXPECT_TRUE(v1->layer() == NULL);
   EXPECT_TRUE(v2->layer() != NULL);
   EXPECT_EQ(root_layer, v2->layer()->parent());
@@ -2657,10 +2654,6 @@ TEST_F(ViewLayerTest, LayerToggling) {
   ui::Transform transform;
   transform.SetScale(2.0f, 2.0f);
   v1->SetTransform(transform);
-#if !defined(USE_WEBKIT_COMPOSITOR)
-  root_layer->DrawTree();
-  EXPECT_EQ(2, ui::TestTexture::live_count());
-#endif
   EXPECT_TRUE(v1->layer() != NULL);
   EXPECT_TRUE(v2->layer() != NULL);
   EXPECT_EQ(root_layer, v1->layer()->parent());
@@ -2818,110 +2811,6 @@ TEST_F(ViewLayerTest, ToggleVisibilityWithLayer) {
   EXPECT_TRUE(v1->layer()->IsDrawn());
 }
 
-// Test that a hole in a layer is correctly created regardless of whether
-// the opacity attribute is set before or after the layer is created.
-TEST_F(ViewLayerTest, ToggleOpacityWithLayer) {
-  View* content_view = new View;
-  widget()->SetContentsView(content_view);
-
-  View* parent_view = new View;
-  content_view->AddChildView(parent_view);
-  parent_view->SetPaintToLayer(true);
-  parent_view->SetBounds(0, 0, 400, 400);
-
-  View* child_view = new View;
-  child_view->SetBounds(50, 50, 100, 100);
-  parent_view->AddChildView(child_view);
-
-  widget()->GetCompositor()->Draw(false);
-
-  ASSERT_TRUE(child_view->layer() == NULL);
-  child_view->SetPaintToLayer(true);
-  child_view->SetFillsBoundsOpaquely(true);
-  widget()->GetCompositor()->Draw(false);
-  ASSERT_TRUE(child_view->layer());
-  EXPECT_EQ(
-      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
-
-  child_view->SetFillsBoundsOpaquely(false);
-  widget()->GetCompositor()->Draw(false);
-  EXPECT_TRUE(parent_view->layer()->hole_rect().IsEmpty());
-}
-
-// Test that a hole in a layer always corresponds to the bounds of opaque
-// layers.
-TEST_F(ViewLayerTest, MultipleOpaqueLayers) {
-  View* content_view = new View;
-  widget()->SetContentsView(content_view);
-
-  View* parent_view = new View;
-  parent_view->SetPaintToLayer(true);
-  parent_view->SetBounds(0, 0, 400, 400);
-  content_view->AddChildView(parent_view);
-
-  View* child_view1 = new View;
-  child_view1->SetPaintToLayer(true);
-  child_view1->SetFillsBoundsOpaquely(true);
-  child_view1->SetBounds(50, 50, 100, 100);
-  parent_view->AddChildView(child_view1);
-
-  View* child_view2 = new View;
-  child_view2->SetPaintToLayer(true);
-  child_view2->SetFillsBoundsOpaquely(false);
-  child_view2->SetBounds(150, 150, 200, 200);
-  parent_view->AddChildView(child_view2);
-
-  widget()->GetCompositor()->Draw(false);
-
-  // Only child_view1 is opaque
-  EXPECT_EQ(
-      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
-
-  // Both child views are opaque
-  child_view2->SetFillsBoundsOpaquely(true);
-  widget()->GetCompositor()->Draw(false);
-  EXPECT_TRUE(
-      gfx::Rect(50, 50, 100, 100) == parent_view->layer()->hole_rect() ||
-      gfx::Rect(150, 150, 200, 200) == parent_view->layer()->hole_rect());
-
-  // Only child_view2 is opaque
-  delete child_view1;
-  EXPECT_EQ(
-      gfx::Rect(150, 150, 200, 200), parent_view->layer()->hole_rect());
-}
-
-// Makes sure that opacity of layer persists after toggling visibilty.
-TEST_F(ViewLayerTest, ToggleVisibilityWithOpaqueLayer) {
-  View* content_view = new View;
-  widget()->SetContentsView(content_view);
-
-  View* parent_view = new View;
-  parent_view->SetPaintToLayer(true);
-  parent_view->SetBounds(0, 0, 400, 400);
-  content_view->AddChildView(parent_view);
-
-  parent_view->SetPaintToLayer(true);
-  parent_view->SetBounds(0, 0, 400, 400);
-
-  View* child_view = new View;
-  child_view->SetBounds(50, 50, 100, 100);
-  child_view->SetPaintToLayer(true);
-  child_view->SetFillsBoundsOpaquely(true);
-  parent_view->AddChildView(child_view);
-  widget()->GetCompositor()->Draw(false);
-  EXPECT_EQ(
-       gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
-
-  child_view->SetVisible(false);
-  widget()->GetCompositor()->Draw(false);
-  EXPECT_TRUE(parent_view->layer()->hole_rect().IsEmpty());
-
-  child_view->SetVisible(true);
-  widget()->GetCompositor()->Draw(false);
-  EXPECT_EQ(
-      gfx::Rect(50, 50, 100, 100), parent_view->layer()->hole_rect());
-}
-
 // Tests that the layers in the subtree are orphaned after a View is removed
 // from the parent.
 TEST_F(ViewLayerTest, OrphanLayerAfterViewRemove) {
@@ -2967,33 +2856,27 @@ class PaintTrackingView : public View {
   DISALLOW_COPY_AND_ASSIGN(PaintTrackingView);
 };
 
-#if !defined(USE_WEBKIT_COMPOSITOR)
-// TODO(piman): this test relies on the way the non-webkit compositor works.
-// Layer::DrawTree should not be called with the webkit compositor. In the
-// WebKit case, it needs to go through the "real" compositor (not the test one)
-// to do the paints on the layer/views.
-
 // Makes sure child views with layers aren't painted when paint starts at an
 // ancestor.
 TEST_F(ViewLayerTest, DontPaintChildrenWithLayers) {
   PaintTrackingView* content_view = new PaintTrackingView;
   widget()->SetContentsView(content_view);
   content_view->SetPaintToLayer(true);
-  GetRootLayer()->DrawTree();
+  // TODO(piman): Compositor::Draw() won't work for the threaded compositor.
+  GetRootLayer()->GetCompositor()->Draw(false);
   GetRootLayer()->SchedulePaint(gfx::Rect(0, 0, 10, 10));
   content_view->set_painted(false);
   // content_view no longer has a dirty rect. Paint from the root and make sure
   // PaintTrackingView isn't painted.
-  GetRootLayer()->DrawTree();
+  GetRootLayer()->GetCompositor()->Draw(false);
   EXPECT_FALSE(content_view->painted());
 
   // Make content_view have a dirty rect, paint the layers and make sure
   // PaintTrackingView is painted.
   content_view->layer()->SchedulePaint(gfx::Rect(0, 0, 10, 10));
-  GetRootLayer()->DrawTree();
+  GetRootLayer()->GetCompositor()->Draw(false);
   EXPECT_TRUE(content_view->painted());
 }
-#endif
 
 // Tests that the visibility of child layers are updated correctly when a View's
 // visibility changes.
@@ -3063,6 +2946,30 @@ TEST_F(ViewLayerTest, FLAKY_ViewLayerTreesInSync) {
   EXPECT_TRUE(ViewAndLayerTreeAreConsistent(content, content->layer()));
 }
 
-#endif  // VIEWS_COMPOSITOR
+// Verifies when views are reordered the layer is also reordered. The widget is
+// providing the parent layer.
+TEST_F(ViewLayerTest, ReorderUnderWidget) {
+  View* content = new View;
+  widget()->SetContentsView(content);
+  View* c1 = new View;
+  c1->SetPaintToLayer(true);
+  content->AddChildView(c1);
+  View* c2 = new View;
+  c2->SetPaintToLayer(true);
+  content->AddChildView(c2);
+
+  ui::Layer* parent_layer = c1->layer()->parent();
+  ASSERT_TRUE(parent_layer);
+  ASSERT_EQ(2u, parent_layer->children().size());
+  EXPECT_EQ(c1->layer(), parent_layer->children()[0]);
+  EXPECT_EQ(c2->layer(), parent_layer->children()[1]);
+
+  // Move c1 to the front. The layers should have moved too.
+  content->ReorderChildView(c1, -1);
+  EXPECT_EQ(c1->layer(), parent_layer->children()[1]);
+  EXPECT_EQ(c2->layer(), parent_layer->children()[0]);
+}
+
+#endif  // USE_AURA
 
 }  // namespace views

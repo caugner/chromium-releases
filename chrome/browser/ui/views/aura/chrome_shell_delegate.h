@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,12 @@
 #define CHROME_BROWSER_UI_VIEWS_AURA_CHROME_SHELL_DELEGATE_H_
 #pragma once
 
+#include "ash/launcher/launcher_types.h"
+#include "ash/shell_delegate.h"
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
-#include "ui/aura_shell/launcher/launcher_types.h"
-#include "ui/aura_shell/shell_delegate.h"
 
-class Browser;
 class StatusAreaHostAura;
 class StatusAreaView;
 
@@ -20,28 +19,34 @@ namespace views {
 class View;
 }
 
-class ChromeShellDelegate : public aura_shell::ShellDelegate {
+class ChromeShellDelegate : public ash::ShellDelegate {
  public:
   ChromeShellDelegate();
   virtual ~ChromeShellDelegate();
 
   static ChromeShellDelegate* instance() { return instance_; }
 
+  StatusAreaHostAura* status_area_host_for_test() {
+    return status_area_host_.get();
+  }
+
   StatusAreaView* GetStatusArea();
 
-  // Returns whether a launcher item should be created for |browser|. If an item
-  // should be created |type| is set to the launcher type to create.
-  static bool ShouldCreateLauncherItemForBrowser(
-      Browser* browser,
-      aura_shell::LauncherItemType* type);
-
-  // aura_shell::ShellDelegate overrides;
-  virtual void CreateNewWindow() OVERRIDE;
+  // ash::ShellDelegate overrides;
   virtual views::Widget* CreateStatusArea() OVERRIDE;
-  virtual void RequestAppListWidget(const SetWidgetCallback& callback) OVERRIDE;
-  virtual void LauncherItemClicked(
-      const aura_shell::LauncherItem& item) OVERRIDE;
-  virtual bool ConfigureLauncherItem(aura_shell::LauncherItem* item) OVERRIDE;
+#if defined(OS_CHROMEOS)
+  virtual void LockScreen() OVERRIDE;
+#endif
+  virtual void Exit() OVERRIDE;
+  virtual void BuildAppListModel(ash::AppListModel* model) OVERRIDE;
+  virtual ash::AppListViewDelegate* CreateAppListViewDelegate() OVERRIDE;
+  virtual std::vector<aura::Window*> GetCycleWindowList(
+      CycleSource source,
+      CycleOrder order) const OVERRIDE;
+  virtual void CreateNewWindow() OVERRIDE;
+  virtual void LauncherItemClicked(const ash::LauncherItem& item) OVERRIDE;
+  virtual int GetBrowserShortcutResourceId() OVERRIDE;
+  virtual string16 GetLauncherItemTitle(const ash::LauncherItem& item) OVERRIDE;
 
  private:
   static ChromeShellDelegate* instance_;

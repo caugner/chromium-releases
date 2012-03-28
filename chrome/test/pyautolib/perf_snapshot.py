@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -37,6 +37,7 @@ import logging
 import optparse
 import simplejson
 import socket
+import sys
 import threading
 import time
 import urllib2
@@ -51,7 +52,7 @@ class _V8HeapSnapshotParser(object):
                        returns a dictionary of the summarized results.
   """
   _CHILD_TYPES = ['context', 'element', 'property', 'internal', 'hidden',
-                  'shortcut']
+                  'shortcut', 'weak']
   _NODE_TYPES = ['hidden', 'array', 'string', 'object', 'code', 'closure',
                  'regexp', 'number', 'native']
 
@@ -81,7 +82,7 @@ class _V8HeapSnapshotParser(object):
     Returns:
       A dictionary containing the summarized v8 heap snapshot data:
       {
-        'total_node_count': integer,  # Total number of nodes in the v8 heap.
+        'total_v8_node_count': integer,  # Total number of nodes in the v8 heap.
         'total_shallow_size': integer, # Total heap size, in bytes.
       }
     """
@@ -161,7 +162,7 @@ class _V8HeapSnapshotParser(object):
     # TODO(dennisjeffrey): Have this function also return more detailed v8
     # heap snapshot data when a need for it arises (e.g., using |constructors|).
     result = {}
-    result['total_node_count'] = total_node_count
+    result['total_v8_node_count'] = total_node_count
     result['total_shallow_size'] = total_shallow_size
     return result
 
@@ -187,7 +188,7 @@ class _DevToolsSocketRequest(object):
                  value is True only if all results for this request are known).
   """
   def __init__(self, method, message_id):
-    """Initializes a DevToolsSocket request.
+    """Initialize.
 
     Args:
       method: The string method name for this request.
@@ -212,7 +213,7 @@ class _DevToolsSocketRequest(object):
 class _DevToolsSocketClient(asyncore.dispatcher):
   """Client that communicates with a remote Chrome instance via sockets.
 
-  This class works in conjunction with the _PerformanceSnapshotterThread class
+  This class works in conjunction with the _RemoteInspectorBaseThread class
   to communicate with a remote Chrome instance following the remote debugging
   communication protocol in WebKit.  This class performs the lower-level work
   of socket communication.
@@ -225,12 +226,12 @@ class _DevToolsSocketClient(asyncore.dispatcher):
     handshake_done: A boolean indicating whether or not the client has completed
                     the required protocol handshake with the remote Chrome
                     instance.
-    snapshotter: An instance of the _PerformanceSnapshotterThread class that is
-                 working together with this class to communicate with a remote
-                 Chrome instance.
+    inspector_thread: An instance of the _RemoteInspectorBaseThread class that
+                      is working together with this class to communicate with a
+                      remote Chrome instance.
   """
   def __init__(self, verbose, show_socket_messages, hostname, port, path):
-    """Initializes the DevToolsSocketClient.
+    """Initialize.
 
     Args:
       verbose: A boolean indicating whether or not to use verbose logging.
@@ -251,8 +252,10 @@ class _DevToolsSocketClient(asyncore.dispatcher):
     self._read_buffer = ''
     self._write_buffer = ''
 
+    self._socket_buffer_lock = threading.Lock()
+
     self.handshake_done = False
-    self.snapshotter = None
+    self.inspector_thread = None
 
     # Connect to the remote Chrome instance and initiate the protocol handshake.
     self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -292,6 +295,7 @@ class _DevToolsSocketClient(asyncore.dispatcher):
 
   def handle_write(self):
     """Called if a writable socket can be written; overridden from asyncore."""
+    self._socket_buffer_lock.acquire()
     if self._write_buffer:
       sent = self.send(self._write_buffer)
       if self._show_socket_messages:
@@ -305,9 +309,11 @@ class _DevToolsSocketClient(asyncore.dispatcher):
                                               self._write_buffer[:sent-1])
         print msg
       self._write_buffer = self._write_buffer[sent:]
+    self._socket_buffer_lock.release()
 
   def handle_read(self):
     """Called when a socket can be read; overridden from asyncore."""
+    self._socket_buffer_lock.acquire()
     if self.handshake_done:
       # Process a message reply from the remote Chrome instance.
       self._read_buffer += self.recv(4096)
@@ -326,8 +332,8 @@ class _DevToolsSocketClient(asyncore.dispatcher):
                  '%s\n'
                  '========================') % data
           print msg
-        if self.snapshotter:
-          self.snapshotter.NotifyReply(data)
+        if self.inspector_thread:
+          self.inspector_thread.NotifyReply(data)
         pos = self._read_buffer.find('\xff')
     else:
       # Process a handshake reply from the remote Chrome instance.
@@ -345,6 +351,7 @@ class _DevToolsSocketClient(asyncore.dispatcher):
                  '%s\n'
                  '=========================') % data
           print msg
+    self._socket_buffer_lock.release()
 
   def handle_close(self):
     """Called when the socket is closed; overridden from asyncore."""
@@ -366,86 +373,64 @@ class _DevToolsSocketClient(asyncore.dispatcher):
   def handle_error(self):
     """Called when an exception is raised; overridden from asyncore."""
     self.close()
-    self.snapshotter.NotifySocketClientException()
+    self.inspector_thread.NotifySocketClientException()
     asyncore.dispatcher.handle_error(self)
 
 
-class _PerformanceSnapshotterThread(threading.Thread):
-  """Manages communication with a remote Chrome instance to take snapshots.
+class _RemoteInspectorBaseThread(threading.Thread):
+  """Manages communication using Chrome's remote inspector protocol.
 
   This class works in conjunction with the _DevToolsSocketClient class to
-  communicate with a remote Chrome instance following the remote debugging
+  communicate with a remote Chrome instance following the remote inspector
   communication protocol in WebKit.  This class performs the higher-level work
   of managing request and reply messages, whereas _DevToolsSocketClient handles
   the lower-level work of socket communication.
 
+  This base class should be subclassed for each different type of action that
+  needs to be performed using the remote inspector (e.g., take a v8 heap
+  snapshot, force a garbage collect):
+
+    * Each subclass should override the run() method to customize the work done
+      by the thread, making sure to call self._client.close() when done.
+    * If overriding __init__ in a subclass, the base class __init__ must also be
+      invoked.
+    * The HandleReply() function should be overridden if special handling needs
+      to be performed using the reply messages received from the remote Chrome
+      instance.
+
   Public Methods:
+    NotifySocketClientException: Notifies the current object that the
+                                 _DevToolsSocketClient encountered an exception.
+                                 Called by the _DevToolsSocketClient.
     NotifyReply: Notifies the current object of a reply message that has been
                  received from the remote Chrome instance (which would have been
                  sent in response to an earlier request).  Called by the
                  _DevToolsSocketClient.
-    NotifySocketClientException: Notifies the current object that the
-                                 _DevToolsSocketClient encountered an exception.
-                                 Called by the _DevToolsSocketClient.
+    HandleReply: Processes a reply message received from the remote Chrome
+                 instance.  Should be overridden by a subclass if special
+                 result handling needs to be performed.
     run: Starts the thread of execution for this object.  Invoked implicitly
-         by calling the start() method on this object.
-
-  Public Attributes:
-    collected_heap_snapshot_data: A list of dictionaries, where each dictionary
-                                  contains the information for a taken snapshot.
+         by calling the start() method on this object.  Should be overridden
+         by a subclass, and should call self._client.close() when done.
   """
-  _HEAP_SNAPSHOT_MESSAGES = [
-    'Page.getResourceTree',
-    'Debugger.enable',
-    'Profiler.clearProfiles',
-    'Profiler.takeHeapSnapshot',
-    'Profiler.getProfile',
-  ]
-
-  def __init__(
-      self, tab_index, output_file, interval, num_snapshots, verbose,
-      show_socket_messages, interactive_mode):
-    """Initializes a _PerformanceSnapshotterThread object.
+  def __init__(self, tab_index, verbose, show_socket_messages):
+    """Initialize.
 
     Args:
       tab_index: The integer index of the tab in the remote Chrome instance to
                  use for snapshotting.
-      output_file: The string name of an output file in which to write results.
-                   Use None to refrain from writing results to an output file.
-      interval: An integer number of seconds to wait after a snapshot is
-                completed, before starting the next snapshot.
-      num_snapshots: An integer number of snapshots to take before terminating.
-                     Use 0 to take snapshots indefinitely (you must manually
-                     kill the script in this case).
       verbose: A boolean indicating whether or not to use verbose logging.
       show_socket_messages: A boolean indicating whether or not to show the
                             socket messages sent/received when communicating
                             with the remote Chrome instance.
-      interactive_mode: A boolean indicating whether or not to take snapshots
-                        in interactive mode.
-
-    Raises:
-      RuntimeError: When no proper connection can be made to a remote Chrome
-                    instance.
     """
     threading.Thread.__init__(self)
-
-    self._logger = logging.getLogger('_PerformanceSnapshotterThread')
+    self._logger = logging.getLogger('_RemoteInspectorBaseThread')
     self._logger.setLevel([logging.WARNING, logging.DEBUG][verbose])
 
-    self._output_file = output_file
-    self._interval = interval
-    self._num_snapshots = num_snapshots
-    self._interactive_mode = interactive_mode
-
+    self._killed = False
     self._next_request_id = 1
     self._requests = []
-    self._current_heap_snapshot = []
-    self._url = ''
-    self.collected_heap_snapshot_data = []
-    self.last_snapshot_start_time = 0
-
-    self._killed = False
 
     # Create a DevToolsSocket client and wait for it to complete the remote
     # debugging protocol handshake with the remote Chrome instance.
@@ -453,11 +438,15 @@ class _PerformanceSnapshotterThread(threading.Thread):
     self._client = _DevToolsSocketClient(
         verbose, show_socket_messages, result['host'], result['port'],
         result['path'])
-    self._client.snapshotter = self
+    self._client.inspector_thread = self
     while asyncore.socket_map:
       if self._client.handshake_done or self._killed:
         break
       asyncore.loop(timeout=1, count=1)
+
+  def NotifySocketClientException(self):
+    """Notifies that the _DevToolsSocketClient encountered an exception."""
+    self._killed = True
 
   def NotifyReply(self, msg):
     """Notifies of a reply message received from the remote Chrome instance.
@@ -473,79 +462,99 @@ class _PerformanceSnapshotterThread(threading.Thread):
       request = self._GetRequestWithId(reply_dict['id'])
       if request:
         request.is_complete = True
-      if 'frameTree' in reply_dict['result']:
-        self._url = reply_dict['result']['frameTree']['frame']['url']
-    elif 'method' in reply_dict:
-      # This is an auxiliary message sent from the remote Chrome instance.
-      if reply_dict['method'] == 'Profiler.addProfileHeader':
-        snapshot_req = self._GetFirstIncompleteRequest(
-            'Profiler.takeHeapSnapshot')
-        if snapshot_req:
-          snapshot_req.results['uid'] = reply_dict['params']['header']['uid']
-      elif reply_dict['method'] == 'Profiler.addHeapSnapshotChunk':
-        self._current_heap_snapshot.append(reply_dict['params']['chunk'])
-      elif reply_dict['method'] == 'Profiler.finishHeapSnapshot':
-        # A heap snapshot has been completed.  Analyze and output the data.
-        self._logger.debug('Heap snapshot taken: %s', self._url)
-        self._logger.debug('Time to request snapshot raw data: %.2f sec',
-                           time.time() - self.last_snapshot_start_time)
-        # TODO(dennisjeffrey): Parse the heap snapshot on-the-fly as the data
-        # is coming in over the wire, so we can avoid storing the entire
-        # snapshot string in memory.
-        self._logger.debug('Now analyzing heap snapshot...')
-        parser = _V8HeapSnapshotParser()
-        time_start = time.time()
-        raw_snapshot_data = ''.join(self._current_heap_snapshot)
-        self._logger.debug('Raw snapshot data size: %.2f MB',
-                           len(raw_snapshot_data) / (1024.0 * 1024.0))
-        result = parser.ParseSnapshotData(raw_snapshot_data)
-        self._logger.debug('Time to parse data: %.2f sec',
-                           time.time() - time_start)
-        num_nodes = result['total_node_count']
-        total_size = result['total_shallow_size']
-        total_size_str = self._ConvertBytesToHumanReadableString(total_size)
-        timestamp = time.time()
+    self.HandleReply(reply_dict)
 
-        self.collected_heap_snapshot_data.append(
-            {'url': self._url,
-             'timestamp': timestamp,
-             'total_node_count': num_nodes,
-             'total_heap_size': total_size,})
+  def HandleReply(self, reply_dict):
+    """Processes a reply message received from the remote Chrome instance.
 
-        if self._output_file:
-          f = open(self._output_file, 'a')
-          f.write('\n')
-          now = datetime.datetime.now()
-          f.write('[%s]\nSnapshot for: %s\n' %
-                  (now.strftime('%Y-%B-%d %I:%M:%S %p'), self._url))
-          f.write('  Total node count: %d\n' % num_nodes)
-          f.write('  Total shallow size: %s\n' % total_size_str)
-          f.close()
-        self._logger.debug('Heap snapshot analysis complete (%s).',
-                           total_size_str)
-
-  def NotifySocketClientException(self):
-    """Notifies that the _DevToolsSocketClient encountered an exception."""
-    self._killed = True
-
-  @staticmethod
-  def _ConvertBytesToHumanReadableString(num_bytes):
-    """Converts an integer number of bytes into a human-readable string.
+    Override this function to specially handle reply messages from the remote
+    Chrome instance.
 
     Args:
-      num_bytes: An integer number of bytes.
+      reply_dict: A dictionary representing the reply message received from the
+                  remote Chrome instance.
+    """
+    pass
+
+  def run(self):
+    """Start _PerformanceSnapshotterThread; overridden from threading.Thread.
+
+    Should be overridden in a subclass.
+    """
+    self._client.close()
+
+  def _GetRequestWithId(self, request_id):
+    """Identifies the request with the specified id.
+
+    Args:
+      request_id: An integer request id; should be unique for each request.
 
     Returns:
-      A human-readable string representation of the given number of bytes.
+      A request object associated with the given id if found, or
+      None otherwise.
     """
-    if num_bytes < 1024:
-      return '%d B' % num_bytes
-    elif num_bytes < 1048576:
-      return '%.2f KB' % (num_bytes / 1024.0)
-    else:
-      return '%.2f MB' % (num_bytes / 1048576.0)
+    found_request = [x for x in self._requests if x.id == request_id]
+    if found_request:
+      return found_request[0]
+    return None
 
-  def _IdentifyDevToolsSocketConnectionInfo(self, tab_index):
+  def _GetFirstIncompleteRequest(self, method):
+    """Identifies the first incomplete request with the given method name.
+
+    Args:
+      method: The string method name of the request for which to search.
+
+    Returns:
+      The first request object in the request list that is not yet complete and
+      is also associated with the given method name, or
+      None if no such request object can be found.
+    """
+    for request in self._requests:
+      if not request.is_complete and request.method == method:
+        return request
+    return None
+
+  def _GetLatestRequestOfType(self, ref_req, method):
+    """Identifies the latest specified request before a reference request.
+
+    This function finds the latest request with the specified method that
+    occurs before the given reference request.
+
+    Returns:
+      The latest _DevToolsSocketRequest object with the specified method,
+      if found, or None otherwise.
+    """
+    start_looking = False
+    for request in self._requests[::-1]:
+      if request.id == ref_req.id:
+        start_looking = True
+      elif start_looking:
+        if request.method == method:
+          return request
+    return None
+
+  def _FillInParams(self, request):
+    """Fills in parameters for requests as necessary before the request is sent.
+
+    Args:
+      request: The _DevToolsSocketRequest object associated with a request
+               message that is about to be sent.
+    """
+    if request.method == 'Profiler.takeHeapSnapshot':
+      # We always want detailed v8 heap snapshot information.
+      request.params = {'detailed': True}
+    elif request.method == 'Profiler.getProfile':
+      # To actually request the snapshot data from a previously-taken snapshot,
+      # we need to specify the unique uid of the snapshot we want.
+      # The relevant uid should be contained in the last
+      # 'Profiler.takeHeapSnapshot' request object.
+      last_req = self._GetLatestRequestOfType(request,
+                                              'Profiler.takeHeapSnapshot')
+      if last_req and 'uid' in last_req.results:
+        request.params = {'type': 'HEAP', 'uid': last_req.results['uid']}
+
+  @staticmethod
+  def _IdentifyDevToolsSocketConnectionInfo(tab_index):
     """Identifies DevToolsSocket connection info from a remote Chrome instance.
 
     Args:
@@ -594,81 +603,140 @@ class _PerformanceSnapshotterThread(threading.Thread):
              'port': parsed.port,
              'path': parsed.path})
 
+
+class _PerformanceSnapshotterThread(_RemoteInspectorBaseThread):
+  """Manages communication with a remote Chrome to take v8 heap snapshots.
+
+  Public Attributes:
+    collected_heap_snapshot_data: A list of dictionaries, where each dictionary
+                                  contains the information for a taken snapshot.
+  """
+  _HEAP_SNAPSHOT_MESSAGES = [
+    'Page.getResourceTree',
+    'Debugger.enable',
+    'Profiler.clearProfiles',
+    'Profiler.takeHeapSnapshot',
+    'Profiler.getProfile',
+  ]
+
+  def __init__(
+      self, tab_index, output_file, interval, num_snapshots, verbose,
+      show_socket_messages, interactive_mode):
+    """Initialize.
+
+    Args:
+      tab_index: The integer index of the tab in the remote Chrome instance to
+                 use for snapshotting.
+      output_file: The string name of an output file in which to write results.
+                   Use None to refrain from writing results to an output file.
+      interval: An integer number of seconds to wait after a snapshot is
+                completed, before starting the next snapshot.
+      num_snapshots: An integer number of snapshots to take before terminating.
+                     Use 0 to take snapshots indefinitely (you must manually
+                     kill the script in this case).
+      verbose: A boolean indicating whether or not to use verbose logging.
+      show_socket_messages: A boolean indicating whether or not to show the
+                            socket messages sent/received when communicating
+                            with the remote Chrome instance.
+      interactive_mode: A boolean indicating whether or not to take snapshots
+                        in interactive mode.
+    """
+    _RemoteInspectorBaseThread.__init__(self, tab_index, verbose,
+                                        show_socket_messages)
+
+    self._output_file = output_file
+    self._interval = interval
+    self._num_snapshots = num_snapshots
+    self._interactive_mode = interactive_mode
+
+    self._current_heap_snapshot = []
+    self._url = ''
+    self.collected_heap_snapshot_data = []
+    self.last_snapshot_start_time = 0
+
+  def HandleReply(self, reply_dict):
+    """Processes a reply message received from the remote Chrome instance.
+
+    Args:
+      reply_dict: A dictionary object representing the reply message received
+                   from the remote inspector.
+    """
+    if 'result' in reply_dict:
+      # This is the result message associated with a previously-sent request.
+      request = self._GetRequestWithId(reply_dict['id'])
+      if 'frameTree' in reply_dict['result']:
+        self._url = reply_dict['result']['frameTree']['frame']['url']
+    elif 'method' in reply_dict:
+      # This is an auxiliary message sent from the remote Chrome instance.
+      if reply_dict['method'] == 'Profiler.addProfileHeader':
+        snapshot_req = self._GetFirstIncompleteRequest(
+            'Profiler.takeHeapSnapshot')
+        if snapshot_req:
+          snapshot_req.results['uid'] = reply_dict['params']['header']['uid']
+      elif reply_dict['method'] == 'Profiler.addHeapSnapshotChunk':
+        self._current_heap_snapshot.append(reply_dict['params']['chunk'])
+      elif reply_dict['method'] == 'Profiler.finishHeapSnapshot':
+        # A heap snapshot has been completed.  Analyze and output the data.
+        self._logger.debug('Heap snapshot taken: %s', self._url)
+        self._logger.debug('Time to request snapshot raw data: %.2f sec',
+                           time.time() - self.last_snapshot_start_time)
+        # TODO(dennisjeffrey): Parse the heap snapshot on-the-fly as the data
+        # is coming in over the wire, so we can avoid storing the entire
+        # snapshot string in memory.
+        self._logger.debug('Now analyzing heap snapshot...')
+        parser = _V8HeapSnapshotParser()
+        time_start = time.time()
+        raw_snapshot_data = ''.join(self._current_heap_snapshot)
+        self._logger.debug('Raw snapshot data size: %.2f MB',
+                           len(raw_snapshot_data) / (1024.0 * 1024.0))
+        result = parser.ParseSnapshotData(raw_snapshot_data)
+        self._logger.debug('Time to parse data: %.2f sec',
+                           time.time() - time_start)
+        num_nodes = result['total_v8_node_count']
+        total_size = result['total_shallow_size']
+        total_size_str = self._ConvertBytesToHumanReadableString(total_size)
+        timestamp = time.time()
+
+        self.collected_heap_snapshot_data.append(
+            {'url': self._url,
+             'timestamp': timestamp,
+             'total_v8_node_count': num_nodes,
+             'total_heap_size': total_size,})
+
+        if self._output_file:
+          f = open(self._output_file, 'a')
+          f.write('\n')
+          now = datetime.datetime.now()
+          f.write('[%s]\nSnapshot for: %s\n' %
+                  (now.strftime('%Y-%B-%d %I:%M:%S %p'), self._url))
+          f.write('  Total node count: %d\n' % num_nodes)
+          f.write('  Total shallow size: %s\n' % total_size_str)
+          f.close()
+        self._logger.debug('Heap snapshot analysis complete (%s).',
+                           total_size_str)
+
+  @staticmethod
+  def _ConvertBytesToHumanReadableString(num_bytes):
+    """Converts an integer number of bytes into a human-readable string.
+
+    Args:
+      num_bytes: An integer number of bytes.
+
+    Returns:
+      A human-readable string representation of the given number of bytes.
+    """
+    if num_bytes < 1024:
+      return '%d B' % num_bytes
+    elif num_bytes < 1048576:
+      return '%.2f KB' % (num_bytes / 1024.0)
+    else:
+      return '%.2f MB' % (num_bytes / 1048576.0)
+
   def _ResetRequests(self):
     """Clears snapshot-related info in preparation for a new snapshot."""
     self._requests = []
     self._current_heap_snapshot = []
     self._url = ''
-
-  def _GetRequestWithId(self, request_id):
-    """Identifies the request with the specified id.
-
-    Args:
-      request_id: An integer request id; should be unique for each request.
-
-    Returns:
-      A request object associated with the given id if found, or
-      None otherwise.
-    """
-    found_request = [x for x in self._requests if x.id == request_id]
-    if found_request:
-      return found_request[0]
-    return None
-
-  def _GetFirstIncompleteRequest(self, method):
-    """Identifies the first incomplete request with the given method name.
-
-    Args:
-      method: The string method name of the request for which to search.
-
-    Returns:
-      The first request object in the request list that is not yet complete and
-      is also associated with the given method name, or
-      None if no such request object can be found.
-    """
-    for request in self._requests:
-      if not request.is_complete and request.method == method:
-        return request
-    return None
-
-  def _GetLatestRequestOfType(self, ref_req, method):
-    """Identifies the latest specified request before a reference request.
-
-    This function finds the latest request with the specified method that
-    occurs before the given reference request.
-
-    Returns:
-      The latest request object with the specified method, if found, or
-      None otherwise.
-    """
-    start_looking = False
-    for request in self._requests[::-1]:
-      if request.id == ref_req.id:
-        start_looking = True
-      elif start_looking:
-        if request.method == method:
-          return request
-    return None
-
-  def _FillInParams(self, request):
-    """Fills in parameters for requests as necessary before the request is sent.
-
-    Args:
-      request: The request object associated with a request message that is
-               about to be sent.
-    """
-    if request.method == 'Profiler.takeHeapSnapshot':
-      # We always want detailed heap snapshot information.
-      request.params = {'detailed': True}
-    elif request.method == 'Profiler.getProfile':
-      # To actually request the snapshot data from a previously-taken snapshot,
-      # we need to specify the unique uid of the snapshot we want.
-      # The relevant uid should be contained in the last
-      # 'Profiler.takeHeapSnapshot' request object.
-      last_req = self._GetLatestRequestOfType(request,
-                                              'Profiler.takeHeapSnapshot')
-      if last_req and 'uid' in last_req.results:
-        request.params = {'type': 'HEAP', 'uid': last_req.results['uid']}
 
   def _TakeHeapSnapshot(self):
     """Takes a heap snapshot by communicating with _DevToolsSocketClient.
@@ -740,12 +808,95 @@ class _PerformanceSnapshotterThread(threading.Thread):
         self._logger.debug('Snapshotter thread finished.')
 
 
+class _GarbageCollectThread(_RemoteInspectorBaseThread):
+  """Manages communication with a remote Chrome to force a garbage collect."""
+
+  _COLLECT_GARBAGE_MESSAGES = [
+    'Profiler.collectGarbage',
+  ]
+
+  def run(self):
+    """Start _GarbageCollectThread; overridden from threading.Thread."""
+    if self._killed:
+      return
+
+    # Prepare the request list.
+    for message in self._COLLECT_GARBAGE_MESSAGES:
+      self._requests.append(
+          _DevToolsSocketRequest(message, self._next_request_id))
+      self._next_request_id += 1
+
+    # Send out each request.  Wait until each request is complete before sending
+    # the next request.
+    for request in self._requests:
+      self._FillInParams(request)
+      self._client.SendMessage(str(request))
+      while not request.is_complete:
+        if self._killed:
+          return
+        time.sleep(0.1)
+    self._client.close()
+
+
+class _MemoryCountThread(_RemoteInspectorBaseThread):
+  """Manages communication with a remote Chrome to get memory count info."""
+
+  _MEMORY_COUNT_MESSAGES = [
+    'Memory.getDOMNodeCount',
+  ]
+
+  def HandleReply(self, reply_dict):
+    """Processes a reply message received from the remote Chrome instance.
+
+    Args:
+      reply_dict: A dictionary object representing the reply message received
+                  from the remote Chrome instance.
+    """
+    if 'result' in reply_dict and 'domGroups' in reply_dict['result']:
+      dom_group_list = reply_dict['result']['domGroups']
+      for dom_group in dom_group_list:
+        listener_array = dom_group['listenerCount']
+        for listener in listener_array:
+          self.event_listener_count += listener['count']
+        dom_node_array = dom_group['nodeCount']
+        for dom_element in dom_node_array:
+          self.dom_node_count += dom_element['count']
+
+  def run(self):
+    """Start _MemoryCountThread; overridden from threading.Thread."""
+    if self._killed:
+      return
+
+    self.dom_node_count = 0
+    self.event_listener_count = 0
+
+    # Prepare the request list.
+    for message in self._MEMORY_COUNT_MESSAGES:
+      self._requests.append(
+          _DevToolsSocketRequest(message, self._next_request_id))
+      self._next_request_id += 1
+
+    # Send out each request.  Wait until each request is complete before sending
+    # the next request.
+    for request in self._requests:
+      self._FillInParams(request)
+      self._client.SendMessage(str(request))
+      while not request.is_complete:
+        if self._killed:
+          return
+        time.sleep(0.1)
+    self._client.close()
+
+
+# TODO(dennisjeffrey): The "verbose" option used in this file should re-use
+# pyauto's verbose flag.
 class PerformanceSnapshotter(object):
   """Main class for taking v8 heap snapshots.
 
   Public Methods:
     HeapSnapshot: Begins taking heap snapshots according to the initialization
                   parameters for the current object.
+    GarbageCollect: Forces a garbage collection.
     SetInteractiveMode: Sets the current object to take snapshots in interactive
                         mode. Only used by the main() function in this script
                         when the 'interactive mode' command-line flag is set.
@@ -757,7 +908,7 @@ class PerformanceSnapshotter(object):
   def __init__(
       self, tab_index=0, output_file=None, interval=DEFAULT_SNAPSHOT_INTERVAL,
       num_snapshots=1, verbose=False, show_socket_messages=False):
-    """Initializes a PerformanceSnapshotter object.
+    """Initialize.
 
     Args:
       tab_index: The integer index of the tab in the remote Chrome instance to
@@ -796,7 +947,7 @@ class PerformanceSnapshotter(object):
       {
         'url': string,  # URL of the webpage that was snapshotted.
         'timestamp': float,  # Time when snapshot taken (seconds since epoch).
-        'total_node_count': integer,  # Total number of nodes in the v8 heap.
+        'total_v8_node_count': integer,  # Total number of nodes in the v8 heap.
         'total_heap_size': integer,  # Total heap size (number of bytes).
       }
     """
@@ -815,6 +966,47 @@ class PerformanceSnapshotter(object):
     snapshotter_thread.join()
     self._logger.debug('Done taking snapshots.')
     return snapshotter_thread.collected_heap_snapshot_data
+
+  def GarbageCollect(self):
+    """Forces a garbage collection."""
+    gc_thread = _GarbageCollectThread(self._tab_index, self._verbose,
+                                      self._show_socket_messages)
+    gc_thread.start()
+    try:
+      while asyncore.socket_map:
+        if not gc_thread.is_alive():
+          break
+        asyncore.loop(timeout=1, count=1)
+    except KeyboardInterrupt:
+      pass
+    gc_thread.join()
+
+  def GetMemoryObjectCounts(self):
+    """Retrieves memory object count information.
+
+    Returns:
+      A dictionary containing the memory object count information:
+      {
+        'DOMNodeCount': integer,  # Total number of DOM nodes.
+        'EventListenerCount': integer,  # Total number of event listeners.
+      }
+    """
+    mem_count_thread = _MemoryCountThread(self._tab_index, self._verbose,
+                                          self._show_socket_messages)
+    mem_count_thread.start()
+    try:
+      while asyncore.socket_map:
+        if not mem_count_thread.is_alive():
+          break
+        asyncore.loop(timeout=1, count=1)
+    except KeyboardInterrupt:
+      pass
+    mem_count_thread.join()
+    result = {
+      'DOMNodeCount': mem_count_thread.dom_node_count,
+      'EventListenerCount': mem_count_thread.event_listener_count,
+    }
+    return result
 
   def SetInteractiveMode(self):
     """Sets the current object to take snapshots in interactive mode."""

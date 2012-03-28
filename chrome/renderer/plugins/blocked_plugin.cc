@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -102,8 +102,9 @@ void BlockedPlugin::BindWebFrame(WebFrame* frame) {
                                   base::Unretained(this)));
   BindCallback("hide", base::Bind(&BlockedPlugin::HideCallback,
                                   base::Unretained(this)));
-  BindCallback("openURL", base::Bind(&BlockedPlugin::OpenUrlCallback,
-                                     base::Unretained(this)));
+  BindCallback("openAboutPlugins",
+               base::Bind(&BlockedPlugin::OpenAboutPluginsCallback,
+                          base::Unretained(this)));
 }
 
 void BlockedPlugin::ShowContextMenu(const WebKit::WebMouseEvent& event) {
@@ -202,7 +203,9 @@ void BlockedPlugin::LoadPlugin() {
     return;
   if (!allow_loading_)
     return;
-  LoadPluginInternal(plugin_info_);
+  WebPlugin* plugin =
+      render_view()->CreatePlugin(frame(), plugin_info_, plugin_params());
+  LoadPluginInternal(plugin);
 }
 
 void BlockedPlugin::LoadCallback(const CppArgumentList& args,
@@ -217,23 +220,10 @@ void BlockedPlugin::HideCallback(const CppArgumentList& args,
   HidePlugin();
 }
 
-void BlockedPlugin::OpenUrlCallback(const CppArgumentList& args,
-                                    CppVariant* result) {
-  if (args.size() < 1) {
-    NOTREACHED();
-    return;
-  }
-  if (!args[0].isString()) {
-    NOTREACHED();
-    return;
-  }
-
-  GURL url(args[0].ToString());
-  WebURLRequest request;
-  request.initialize();
-  request.setURL(url);
-  render_view()->LoadURLExternally(
-      frame(), request, WebKit::WebNavigationPolicyNewForegroundTab);
+void BlockedPlugin::OpenAboutPluginsCallback(const CppArgumentList& args,
+                                             CppVariant* result) {
+  RenderThread::Get()->Send(
+      new ChromeViewHostMsg_OpenAboutPlugins(routing_id()));
 }
 
 void BlockedPlugin::HidePlugin() {

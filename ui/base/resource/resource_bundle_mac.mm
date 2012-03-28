@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/memory/scoped_nsobject.h"
 #include "base/synchronization/lock.h"
@@ -25,13 +26,13 @@ FilePath GetResourcesPakFilePath(NSString* name, NSString* mac_locale) {
   // as the already-running browser instead of using what NSBundle might pick
   // based on values at helper launch time.
   if ([mac_locale length]) {
-    resource_path = [base::mac::MainAppBundle() pathForResource:name
-                                                        ofType:@"pak"
-                                                   inDirectory:@""
-                                               forLocalization:mac_locale];
+    resource_path = [base::mac::FrameworkBundle() pathForResource:name
+                                                           ofType:@"pak"
+                                                      inDirectory:@""
+                                                  forLocalization:mac_locale];
   } else {
-    resource_path = [base::mac::MainAppBundle() pathForResource:name
-                                                        ofType:@"pak"];
+    resource_path = [base::mac::FrameworkBundle() pathForResource:name
+                                                           ofType:@"pak"];
   }
   if (!resource_path)
     return FilePath();
@@ -72,7 +73,7 @@ FilePath ResourceBundle::GetLocaleFilePath(const std::string& app_locale) {
 gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
   // Check to see if the image is already in the cache.
   {
-    base::AutoLock lock(*lock_);
+    base::AutoLock lock(*images_and_fonts_lock_);
     ImageMap::const_iterator found = images_.find(resource_id);
     if (found != images_.end()) {
       if (!found->second->HasRepresentation(gfx::Image::kImageRepCocoa)) {
@@ -113,7 +114,7 @@ gfx::Image& ResourceBundle::GetNativeImageNamed(int resource_id) {
       }
     }
 
-    base::AutoLock lock(*lock_);
+    base::AutoLock lock(*images_and_fonts_lock_);
 
     // Another thread raced the load and has already cached the image.
     if (images_.count(resource_id)) {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,13 +16,13 @@
 #include "chrome/browser/chromeos/login/proxy_settings_dialog.h"
 #include "chrome/browser/chromeos/login/webui_login_display.h"
 #include "chrome/browser/chromeos/status/status_area_view.h"
-#include "chrome/browser/chromeos/status/status_area_view_chromeos.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/views/dom_view.h"
 #include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/render_view_host_observer.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "ui/views/widget/widget.h"
@@ -40,6 +40,8 @@
 #include "chrome/browser/ui/views/aura/chrome_shell_delegate.h"
 #endif
 
+using content::WebContents;
+
 namespace {
 
 const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
@@ -48,12 +50,14 @@ const char kViewClassName[] = "browser/chromeos/login/WebUILoginView";
 const char kAccelNameAccessibility[] = "accessibility";
 const char kAccelNameCancel[] = "cancel";
 const char kAccelNameEnrollment[] = "enrollment";
+const char kAccelNameExit[] = "exit";
+const char kAccelNameVersion[] = "version";
 
 // Observes IPC messages from the FrameSniffer and notifies JS if error
 // appears.
 class SnifferObserver : public content::RenderViewHostObserver {
  public:
-  SnifferObserver(RenderViewHost* host, WebUI* webui)
+  SnifferObserver(RenderViewHost* host, content::WebUI* webui)
       : content::RenderViewHostObserver(host), webui_(webui) {
     DCHECK(webui_);
     Send(new ChromeViewMsg_StartFrameSniffer(routing_id(),
@@ -79,7 +83,7 @@ class SnifferObserver : public content::RenderViewHostObserver {
                                    error_value);
   }
 
-  WebUI* webui_;
+  content::WebUI* webui_;
 };
 
 // A View class which places its first child at the right most position.
@@ -128,6 +132,11 @@ WebUILoginView::WebUILoginView()
       kAccelNameCancel;
   accel_map_[ui::Accelerator(ui::VKEY_E, false, true, true)] =
       kAccelNameEnrollment;
+  // This should be kept in sync with the IDC_EXIT accelerator.
+  accel_map_[ui::Accelerator(ui::VKEY_Q, true, true, false)] =
+      kAccelNameExit;
+  accel_map_[ui::Accelerator(ui::VKEY_V, false, false, true)] =
+      kAccelNameVersion;
 
   for (AccelMap::iterator i(accel_map_.begin()); i != accel_map_.end(); ++i)
     AddAccelerator(i->first);
@@ -146,10 +155,10 @@ void WebUILoginView::Init(views::Widget* login_window) {
   webui_login_->Init(ProfileManager::GetDefaultProfile(), NULL);
   webui_login_->SetVisible(true);
 
-  TabContents* tab_contents = webui_login_->dom_contents()->tab_contents();
-  tab_contents->set_delegate(this);
+  WebContents* web_contents = webui_login_->dom_contents()->web_contents();
+  web_contents->SetDelegate(this);
 
-  tab_watcher_.reset(new TabFirstRenderWatcher(tab_contents, this));
+  tab_watcher_.reset(new TabFirstRenderWatcher(web_contents, this));
 }
 
 std::string WebUILoginView::GetClassName() const {
@@ -165,7 +174,7 @@ bool WebUILoginView::AcceleratorPressed(
   if (!webui_login_)
     return true;
 
-  WebUI* web_ui = GetWebUI();
+  content::WebUI* web_ui = GetWebUI();
   if (web_ui) {
     base::StringValue accel_name(entry->second);
     web_ui->CallJavascriptFunction("cr.ui.Oobe.handleAccelerator",
@@ -206,8 +215,16 @@ void WebUILoginView::LoadURL(const GURL & url) {
   webui_login_->RequestFocus();
 }
 
-WebUI* WebUILoginView::GetWebUI() {
-  return webui_login_->dom_contents()->tab_contents()->web_ui();
+content::WebUI* WebUILoginView::GetWebUI() {
+  return webui_login_->dom_contents()->web_contents()->GetWebUI();
+}
+
+void WebUILoginView::OpenProxySettings() {
+  if (!proxy_settings_dialog_.get()) {
+    proxy_settings_dialog_.reset(
+        new ProxySettingsDialog(NULL, GetNativeWindow()));
+  }
+  proxy_settings_dialog_->Show();
 }
 
 void WebUILoginView::SetStatusAreaEnabled(bool enable) {
@@ -251,13 +268,8 @@ bool WebUILoginView::ShouldExecuteStatusAreaCommand(
 
 void WebUILoginView::ExecuteStatusAreaCommand(
     const views::View* button_view, int command_id) {
-  if (command_id == StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS) {
-    if (proxy_settings_dialog_.get() == NULL) {
-      proxy_settings_dialog_.reset(new ProxySettingsDialog(NULL,
-                                                           GetNativeWindow()));
-    }
-    proxy_settings_dialog_->Show();
-  }
+  if (command_id == StatusAreaButton::Delegate::SHOW_NETWORK_OPTIONS)
+    OpenProxySettings();
 }
 
 gfx::Font WebUILoginView::GetStatusAreaFont(const gfx::Font& font) const {
@@ -283,8 +295,7 @@ void WebUILoginView::OnTabMainFrameLoaded() {
 
 void WebUILoginView::OnTabMainFrameFirstRender() {
   VLOG(1) << "WebUI login main frame rendered.";
-  StatusAreaViewChromeos::SetScreenMode(
-      StatusAreaViewChromeos::LOGIN_MODE_WEBUI);
+  StatusAreaViewChromeos::SetScreenMode(GetScreenMode());
   // In aura there's a global status area shown already.
 #if defined(USE_AURA)
   status_area_ = ChromeShellDelegate::instance()->GetStatusArea();
@@ -315,7 +326,7 @@ void WebUILoginView::OnTabMainFrameFirstRender() {
     chromeos::DBusThreadManager::Get()->GetSessionManagerClient()
         ->EmitLoginPromptVisible();
 
-  OobeUI* oobe_ui = static_cast<OobeUI*>(GetWebUI());
+  OobeUI* oobe_ui = static_cast<OobeUI*>(GetWebUI()->GetController());
   // Notify OOBE that the login frame has been rendered. Currently
   // this is used to start camera presence check.
   oobe_ui->OnLoginPromptVisible();
@@ -366,6 +377,10 @@ void WebUILoginView::InitStatusArea() {
   status_window_->Show();
 }
 
+StatusAreaViewChromeos::ScreenMode WebUILoginView::GetScreenMode() {
+  return StatusAreaViewChromeos::LOGIN_MODE_WEBUI;
+}
+
 views::Widget::InitParams::Type WebUILoginView::GetStatusAreaWidgetType() {
   return views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
 }
@@ -381,12 +396,12 @@ bool WebUILoginView::HandleContextMenu(const ContextMenuParams& params) {
 #endif
 }
 
-bool WebUILoginView::IsPopupOrPanel(const TabContents* source) const {
+bool WebUILoginView::IsPopupOrPanel(const WebContents* source) const {
   return true;
 }
 
 bool WebUILoginView::TakeFocus(bool reverse) {
-  if (status_area_ && status_area_->IsVisible()) {
+  if (status_area_ && status_area_->visible()) {
     // Forward the focus to the status area.
     base::Callback<void(bool)> return_focus_cb =
         base::Bind(&WebUILoginView::ReturnFocus, base::Unretained(this));
@@ -398,7 +413,7 @@ bool WebUILoginView::TakeFocus(bool reverse) {
 
 void WebUILoginView::ReturnFocus(bool reverse) {
   // Return the focus to the web contents.
-  webui_login_->dom_contents()->tab_contents()->
+  webui_login_->dom_contents()->web_contents()->
       FocusThroughTabTraversal(reverse);
   GetWidget()->Activate();
 }
@@ -411,7 +426,7 @@ void WebUILoginView::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
   // when the focus is inside an iframe. Only clear on KeyDown to prevent hiding
   // an immediate authentication error (See crbug.com/103643).
   if (event.type == WebKit::WebInputEvent::KeyDown) {
-    WebUI* web_ui = GetWebUI();
+    content::WebUI* web_ui = GetWebUI();
     if (web_ui)
       web_ui->CallJavascriptFunction("cr.ui.Oobe.clearErrors");
   }

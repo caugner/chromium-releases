@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Native Client Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib
 import urlparse
 
 from build_tools.sdk_tools import sdk_update
@@ -61,6 +62,7 @@ def GetHTTPHandler(path, length=None):
 class FakeOptions(object):
   ''' Just a place holder for options '''
   def __init__(self):
+    self.archive_id = None
     self.bundle_desc_url = None
     self.bundle_name = None
     self.bundle_version = None
@@ -73,7 +75,7 @@ class FakeOptions(object):
     self.manifest_file = os.path.join(TEST_DIR, 'naclsdk_manifest_test.json')
     self.manifest_version = None
     self.recommended = None
-    self.root_url = 'http://localhost/test_url'
+    self.root_url = 'file://%s' % urllib.pathname2url(TEST_DIR)
     self.stability = None
     self.upload = False
     self.win_arch_url = None
@@ -293,6 +295,12 @@ class TestUpdateManifest(unittest.TestCase):
     finally:
       RemoveFile(temp_filename)
 
+  def testPush(self):
+    '''Test whether the push function does the right thing'''
+    options = FakeOptions()
+    argv = ['-g', options.gsutil, 'push']
+    update_manifest.main(argv)
+
   def testHandleSDKTools(self):
     '''Test the handling of the sdk_tools bundle'''
     options = FakeOptions()
@@ -318,16 +326,36 @@ class TestUpdateManifest(unittest.TestCase):
     self.assertRaises(
         update_manifest.Error,
         update_manifest.UpdateSDKManifestFile(options).HandleBundles)
+    options.bundle_name = 'pepper'
     options.bundle_version = 1
     options.bundle_revision = None
     self.assertRaises(
         update_manifest.Error,
         update_manifest.UpdateSDKManifestFile(options).HandleBundles)
+    options.bundle_name = 'pepper'
     options.bundle_revision = 0
-    update_manifest.UpdateSDKManifestFile(options).HandleBundles()
+    manifest_object = update_manifest.UpdateSDKManifestFile(options)
+    manifest_object.HandleBundles()
+    manifest_object.UpdateWithOptions()
+
+    options = FakeOptions()
     options.bundle_name = 'pepper_1'
-    options.bundle_version = None
-    update_manifest.UpdateSDKManifestFile(options).HandleBundles()
+    options.bundle_revision = 0
+    manifest_object = update_manifest.UpdateSDKManifestFile(options)
+    manifest_object.HandleBundles()
+    manifest_object.UpdateWithOptions()
+
+    # Verify that the bundle can be found via the --archive-id option.
+    options = FakeOptions()
+    options.archive_id = 'pepper_1_0'
+    options.bundle_name = 'pepper_phony'
+    options.bundle_version = -1
+    options.bundle_revision = -1
+    options.stability = 'dev'
+    options.recommended = 'no'
+    manifest_object = update_manifest.UpdateSDKManifestFile(options)
+    manifest_object.HandleBundles()
+    manifest_object.UpdateWithOptions()
 
 
 def main():

@@ -28,7 +28,6 @@
 #include "chrome/common/pref_names.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -310,8 +309,7 @@ gfx::Canvas* BrowserActionView::GetIconWithBadge() {
   if (icon.isNull())
     icon = button_->default_icon();
 
-  gfx::Canvas* canvas = new gfx::CanvasSkia(icon.width(), icon.height(), false);
-  canvas->DrawBitmapInt(icon, 0, 0);
+  gfx::Canvas* canvas = new gfx::CanvasSkia(icon, false);
 
   if (tab_id >= 0) {
     gfx::Rect bounds(icon.width(), icon.height() + ToolbarView::kVertSpacing);
@@ -459,13 +457,8 @@ void BrowserActionsContainer::CreateBrowserActionViews() {
 }
 
 void BrowserActionsContainer::DeleteBrowserActionViews() {
-  if (!browser_action_views_.empty()) {
-    for (size_t i = 0; i < browser_action_views_.size(); ++i)
-      RemoveChildView(browser_action_views_[i]);
-    STLDeleteContainerPointers(browser_action_views_.begin(),
-                               browser_action_views_.end());
-    browser_action_views_.clear();
-  }
+  HidePopup();
+  STLDeleteElements(&browser_action_views_);
 }
 
 void BrowserActionsContainer::OnBrowserActionVisibilityChanged() {
@@ -477,7 +470,7 @@ void BrowserActionsContainer::OnBrowserActionVisibilityChanged() {
 size_t BrowserActionsContainer::VisibleBrowserActions() const {
   size_t visible_actions = 0;
   for (size_t i = 0; i < browser_action_views_.size(); ++i) {
-    if (browser_action_views_[i]->IsVisible())
+    if (browser_action_views_[i]->visible())
       ++visible_actions;
   }
   return visible_actions;
@@ -510,7 +503,7 @@ void BrowserActionsContainer::OnBrowserActionExecuted(
   // We can get the execute event for browser actions that are not visible,
   // since buttons can be activated from the overflow menu (chevron). In that
   // case we show the popup as originating from the chevron.
-  View* reference_view = button->parent()->IsVisible() ? button : chevron_;
+  View* reference_view = button->parent()->visible() ? button : chevron_;
   views::BubbleBorder::ArrowLocation arrow_location = base::i18n::IsRTL() ?
       views::BubbleBorder::TOP_LEFT : views::BubbleBorder::TOP_RIGHT;
   popup_ = ExtensionPopup::ShowPopup(button->GetPopupUrl(), browser_,
@@ -674,7 +667,7 @@ int BrowserActionsContainer::OnPerformDrop(
   size_t i = 0;
   for (; i < browser_action_views_.size(); ++i) {
     int view_x = browser_action_views_[i]->GetMirroredBounds().x();
-    if (!browser_action_views_[i]->IsVisible() ||
+    if (!browser_action_views_[i]->visible() ||
         (base::i18n::IsRTL() ? (view_x < drop_indicator_position_) :
             (view_x >= drop_indicator_position_))) {
       // We have reached the end of the visible icons or found one that has a
@@ -797,8 +790,11 @@ void BrowserActionsContainer::OnWidgetClosing(views::Widget* widget) {
   DCHECK_EQ(popup_->GetWidget(), widget);
   popup_->GetWidget()->RemoveObserver(this);
   popup_ = NULL;
-  popup_button_->SetButtonNotPushed();
-  popup_button_ = NULL;
+  // |popup_button_| is NULL if the extension has been removed.
+  if (popup_button_) {
+    popup_button_->SetButtonNotPushed();
+    popup_button_ = NULL;
+  }
 }
 
 void BrowserActionsContainer::MoveBrowserAction(const std::string& extension_id,
@@ -812,8 +808,11 @@ void BrowserActionsContainer::MoveBrowserAction(const std::string& extension_id,
 }
 
 void BrowserActionsContainer::HidePopup() {
-  if (popup_)
+  if (popup_) {
     popup_->GetWidget()->Close();
+    // NULL out popup_button_ in case it's being deleted.
+    popup_button_ = NULL;
+  }
 }
 
 void BrowserActionsContainer::TestExecuteBrowserAction(int index) {
@@ -824,7 +823,7 @@ void BrowserActionsContainer::TestExecuteBrowserAction(int index) {
 void BrowserActionsContainer::TestSetIconVisibilityCount(size_t icons) {
   model_->SetVisibleIconCount(icons);
   chevron_->SetVisible(icons < browser_action_views_.size());
-  container_width_ = IconCountToWidth(icons, chevron_->IsVisible());
+  container_width_ = IconCountToWidth(icons, chevron_->visible());
   Layout();
   SchedulePaint();
 }
@@ -938,7 +937,6 @@ void BrowserActionsContainer::BrowserActionRemoved(const Extension* extension) {
   for (BrowserActionViews::iterator iter = browser_action_views_.begin();
        iter != browser_action_views_.end(); ++iter) {
     if ((*iter)->button()->extension() == extension) {
-      RemoveChildView(*iter);
       delete *iter;
       browser_action_views_.erase(iter);
 
@@ -997,7 +995,7 @@ void BrowserActionsContainer::SetContainerWidth() {
   if (visible_actions < 0)  // All icons should be visible.
     visible_actions = model_->size();
   chevron_->SetVisible(static_cast<size_t>(visible_actions) < model_->size());
-  container_width_ = IconCountToWidth(visible_actions, chevron_->IsVisible());
+  container_width_ = IconCountToWidth(visible_actions, chevron_->visible());
 }
 
 void BrowserActionsContainer::CloseOverflowMenu() {

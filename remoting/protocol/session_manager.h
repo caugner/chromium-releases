@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,12 +18,20 @@
 // The callback function decides whether the session should be accepted or
 // rejected.
 //
+// AUTHENTICATION
+// Implementations of the Session and SessionManager interfaces
+// delegate authentication to an Authenticator implementation. For
+// incoming connections authenticators are created using an
+// AuthenticatorFactory set via the set_authenticator_factory()
+// method. For outgoing sessions authenticator must be passed to the
+// Connect() method. The Session's state changes to AUTHENTICATED once
+// authentication succeeds.
+//
 // SESSION OWNERSHIP AND SHUTDOWN
-// SessionManager owns all Sessions it creates. The manager must not
-// be closed or destroyed before all sessions created by that
-// SessionManager are destroyed. Caller owns Sessions created by a
-// SessionManager (except rejected sessions). Sessions must outlive
-// SessionManager, and SignalStrategy must outlive SessionManager.
+// The SessionManager must not be closed or destroyed before all sessions
+// created by that SessionManager are destroyed. Caller owns Sessions
+// created by a SessionManager (except rejected
+// sessions). The SignalStrategy must outlive the SessionManager.
 //
 // PROTOCOL VERSION NEGOTIATION
 // When client connects to a host it sends a session-initiate stanza with list
@@ -61,6 +69,27 @@ namespace protocol {
 class Authenticator;
 class AuthenticatorFactory;
 
+struct NetworkSettings {
+  NetworkSettings()
+      : allow_nat_traversal(false),
+        min_port(0),
+        max_port(0) {
+  }
+
+  explicit NetworkSettings(bool allow_nat_traversal_value)
+      : allow_nat_traversal(allow_nat_traversal_value),
+        min_port(0),
+        max_port(0) {
+  }
+
+  bool allow_nat_traversal;
+
+  // |min_port| and |max_port| specify range (inclusive) of ports used by
+  // P2P sessions. Any port can be used when both values are set to 0.
+  int min_port;
+  int max_port;
+};
+
 // Generic interface for Chromoting session manager.
 //
 // TODO(sergeyu): Split this into two separate interfaces: one for the
@@ -81,11 +110,10 @@ class SessionManager : public base::NonThreadSafe {
     Listener() { }
     ~Listener() { }
 
-    // Called when the session manager has finished
-    // initialization. May be called from Init() or after Init()
-    // returns. Outgoing connections can be created after this method
-    // is called.
-    virtual void OnSessionManagerInitialized() = 0;
+    // Called when the session manager is ready to create outgoing
+    // sessions. May be called from Init() or after Init()
+    // returns.
+    virtual void OnSessionManagerReady() = 0;
 
     // Called when a new session is received. If the host decides to
     // accept the session it should set the |response| to
@@ -100,35 +128,23 @@ class SessionManager : public base::NonThreadSafe {
   };
 
   // Initializes the session client. Caller retains ownership of the
-  // |signal_strategy| and |listener|. |allow_nat_traversal| must be
-  // set to true to enable NAT traversal. STUN/Relay servers are not
-  // used when NAT traversal is disabled, so P2P connection will work
-  // only when both peers are on the same network. If this object is
-  // used in server mode, then |private_key| and |certificate| are
-  // used to establish a secured communication with the client. It
-  // will also take ownership of these objects. On the client side
-  // pass in NULL for |private_key| and empty string for
-  // |certificate|.
-  virtual void Init(const std::string& local_jid,
-                    SignalStrategy* signal_strategy,
+  // |signal_strategy| and |listener|.
+  virtual void Init(SignalStrategy* signal_strategy,
                     Listener* listener,
-                    bool allow_nat_traversal) = 0;
+                    const NetworkSettings& network_settings) = 0;
 
   // Tries to create a session to the host |jid|. Must be called only
   // after initialization has finished successfully, i.e. after
   // Listener::OnInitialized() has been called.
   //
   // |host_jid| is the full jid of the host to connect to.
-  // |host_public_key| is used to for authentication.
   // |authenticator| is a client authenticator for the session.
   // |config| contains the session configurations that the client supports.
   // |state_change_callback| is called when the connection state changes.
-  //
-  // Ownership of the |config| is passed to the new session.
-  virtual Session* Connect(
+  virtual scoped_ptr<Session> Connect(
       const std::string& host_jid,
-      Authenticator* authenticator,
-      CandidateSessionConfig* config,
+      scoped_ptr<Authenticator> authenticator,
+      scoped_ptr<CandidateSessionConfig> config,
       const Session::StateChangeCallback& state_change_callback) = 0;
 
   // Close session manager. Can be called only after all corresponding
@@ -138,9 +154,11 @@ class SessionManager : public base::NonThreadSafe {
 
   // Set authenticator factory that should be used to authenticate
   // incoming connection. No connections will be accepted if
-  // authenticator factory isn't set.
+  // authenticator factory isn't set. Must not be called more than
+  // once per SessionManager because it may not be safe to delete
+  // factory before all authenticators it created are deleted.
   virtual void set_authenticator_factory(
-      AuthenticatorFactory* authenticator_factory) = 0;
+      scoped_ptr<AuthenticatorFactory> authenticator_factory) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SessionManager);

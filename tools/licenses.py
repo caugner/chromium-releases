@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -94,6 +94,8 @@ ADDITIONAL_PATHS = (
     # The directory with the word list for Chinese and Japanese segmentation
     # with different license terms than ICU.
     os.path.join('third_party','icu','source','data','brkitr'),
+    # Fake directory so we can include the strongtalk license.
+    os.path.join('v8', 'strongtalk'),
 )
 
 
@@ -137,6 +139,11 @@ SPECIAL_CASES = {
         "URL": "http://code.google.com/p/pdfsqueeze/",
         "License File": "COPYING",
     },
+    os.path.join('v8', 'strongtalk'): {
+        "Name": "Strongtalk",
+        "URL": "http://www.strongtalk.org/",
+        "License File": "/v8/LICENSE.strongtalk",
+    },
 }
 
 class LicenseError(Exception):
@@ -144,6 +151,18 @@ class LicenseError(Exception):
     fully filled out."""
     pass
 
+def AbsolutePath(path, filename):
+    """Convert a path in README.chromium to be absolute based on the source
+    root."""
+    if filename.startswith('/'):
+        # Absolute-looking paths are relative to the source root
+        # (which is the directory we're run from).
+        absolute_path = os.path.join(os.getcwd(), filename[1:])
+    else:
+        absolute_path = os.path.join(path, filename)
+    if os.path.exists(absolute_path):
+        return absolute_path
+    return None
 
 def ParseDir(path):
     """Examine a third_party/foo component and extract its metadata."""
@@ -155,6 +174,10 @@ def ParseDir(path):
         "Name": None,               # Short name (for header on about:credits).
         "URL": None,                # Project home page.
         }
+
+    # Relative path to a file containing some html we're required to place in
+    # about:credits.
+    optional_keys = ["Required Text"]
 
     if path in SPECIAL_CASES:
         metadata.update(SPECIAL_CASES[path])
@@ -168,7 +191,7 @@ def ParseDir(path):
             line = line.strip()
             if not line:
                 break
-            for key in metadata.keys():
+            for key in metadata.keys() + optional_keys:
                 field = key + ": "
                 if line.startswith(field):
                     metadata[key] = line[len(field):]
@@ -182,16 +205,10 @@ def ParseDir(path):
 
     # Check that the license file exists.
     for filename in (metadata["License File"], "COPYING"):
-        if filename.startswith('/'):
-            # Absolute-looking paths are relative to the source root
-            # (which is the directory we're run from).
-            license_path = os.path.join(os.getcwd(), filename[1:])
-        else:
-            license_path = os.path.join(path, filename)
-        if os.path.exists(license_path):
+        license_path = AbsolutePath(path, filename)
+        if license_path is not None:
             metadata["License File"] = license_path
             break
-        license_path = None
 
     if not license_path:
         raise LicenseError("License file not found. "
@@ -199,6 +216,13 @@ def ParseDir(path):
                            "import upstream's COPYING if available, "
                            "or add a 'License File:' line to README.chromium "
                            "with the appropriate path.")
+
+    if "Required Text" in metadata:
+        required_path = AbsolutePath(path, metadata["Required Text"])
+        if required_path is not None:
+            metadata["Required Text"] = required_path
+        else:
+            raise LicenseError("Required text file listed but not found.")
 
     return metadata
 
@@ -262,7 +286,7 @@ def GenerateCredits():
         """Expand a template with variables like {{foo}} using a
         dictionary of expansions."""
         for key, val in env.items():
-            if escape:
+            if escape and not key.endswith("_unescaped"):
                 val = cgi.escape(val)
             template = template.replace('{{%s}}' % key, val)
         return template
@@ -283,7 +307,11 @@ def GenerateCredits():
             'name': metadata['Name'],
             'url': metadata['URL'],
             'license': open(metadata['License File'], 'rb').read(),
+            'license_unescaped': '',
         }
+        if 'Required Text' in metadata:
+            required_text = open(metadata['Required Text'], 'rb').read()
+            env["license_unescaped"] = required_text
         entries.append(EvaluateTemplate(entry_template, env))
 
     file_template = open('chrome/browser/resources/about_credits.tmpl',

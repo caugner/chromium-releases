@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,14 +18,18 @@
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 #include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
 #include "content/common/devtools_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host_registry.h"
 #include "content/public/browser/devtools_client_host.h"
 #include "content/public/browser/devtools_http_handler_delegate.h"
 #include "content/public/browser/devtools_manager.h"
+#include "content/public/browser/favicon_status.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents_observer.h"
+#include "content/public/common/content_client.h"
 #include "googleurl/src/gurl.h"
+#include "grit/devtools_resources_map.h"
 #include "net/base/escape.h"
 #include "net/base/io_buffer.h"
 #include "net/server/http_server_request_info.h"
@@ -67,7 +71,7 @@ class DevToolsClientHostImpl : public DevToolsClientHost {
                    data));
   }
 
-  virtual void TabReplaced(TabContents* new_tab) {
+  virtual void TabReplaced(WebContents* new_tab) {
   }
 
  private:
@@ -78,61 +82,63 @@ class DevToolsClientHostImpl : public DevToolsClientHost {
 
 static int next_id = 1;
 
-class TabContentsIDHelper : public TabContentsObserver {
+class TabContentsIDHelper : public content::WebContentsObserver {
  public:
-
-  static int GetID(TabContents* tab) {
-    TabContentsToIdMap::iterator it = tabcontents_to_id_.Get().find(tab);
-    if (it != tabcontents_to_id_.Get().end())
+  static int GetID(TabContents* contents) {
+    TabContentsToIdMap::iterator it = tab_contents_to_id_.Get().find(contents);
+    if (it != tab_contents_to_id_.Get().end())
       return it->second;
-    TabContentsIDHelper* wrapper = new TabContentsIDHelper(tab);
+    TabContentsIDHelper* wrapper = new TabContentsIDHelper(contents);
     return wrapper->id_;
   }
 
   static TabContents* GetTabContents(int id) {
-    IdToTabContentsMap::iterator it = id_to_tabcontents_.Get().find(id);
-    if (it != id_to_tabcontents_.Get().end())
+    IdToTabContentsMap::iterator it = id_to_tab_contents_.Get().find(id);
+    if (it != id_to_tab_contents_.Get().end())
       return it->second;
     return NULL;
   }
 
  private:
   explicit TabContentsIDHelper(TabContents* tab)
-      : TabContentsObserver(tab),
+      : content::WebContentsObserver(tab),
         id_(next_id++) {
-    id_to_tabcontents_.Get()[id_] = tab;
-    tabcontents_to_id_.Get()[tab] = id_;
+    id_to_tab_contents_.Get()[id_] = tab;
+    tab_contents_to_id_.Get()[tab] = id_;
   }
 
   virtual ~TabContentsIDHelper() {}
 
-  virtual void TabContentsDestroyed(TabContents* tab) {
-    id_to_tabcontents_.Get().erase(id_);
-    tabcontents_to_id_.Get().erase(tab);
+  virtual void WebContentsDestroyed(WebContents* contents) OVERRIDE {
+    id_to_tab_contents_.Get().erase(id_);
+    tab_contents_to_id_.Get().erase((static_cast<TabContents*>(contents)));
     delete this;
   }
 
   int id_;
   typedef std::map<int, TabContents*> IdToTabContentsMap;
-  static base::LazyInstance<IdToTabContentsMap,
-                            base::LeakyLazyInstanceTraits<IdToTabContentsMap> >
-      id_to_tabcontents_;
+  static base::LazyInstance<IdToTabContentsMap>::Leaky
+      id_to_tab_contents_;
   typedef std::map<TabContents*, int> TabContentsToIdMap;
-  static base::LazyInstance<TabContentsToIdMap,
-                            base::LeakyLazyInstanceTraits<TabContentsToIdMap> >
-      tabcontents_to_id_;
+  static base::LazyInstance<TabContentsToIdMap>::Leaky
+      tab_contents_to_id_;
 };
 
-base::LazyInstance<
-    TabContentsIDHelper::IdToTabContentsMap,
-    base::LeakyLazyInstanceTraits<TabContentsIDHelper::IdToTabContentsMap> >
-        TabContentsIDHelper::id_to_tabcontents_ = LAZY_INSTANCE_INITIALIZER;
-base::LazyInstance<
-    TabContentsIDHelper::TabContentsToIdMap,
-    base::LeakyLazyInstanceTraits<TabContentsIDHelper::TabContentsToIdMap> >
-        TabContentsIDHelper::tabcontents_to_id_ = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<TabContentsIDHelper::IdToTabContentsMap>::Leaky
+    TabContentsIDHelper::id_to_tab_contents_ = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<TabContentsIDHelper::TabContentsToIdMap>::Leaky
+    TabContentsIDHelper::tab_contents_to_id_ = LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
+
+// static
+int DevToolsHttpHandler::GetFrontendResourceId(const std::string& name) {
+  for (size_t i = 0; i < kDevtoolsResourcesSize; ++i) {
+    if (name == kDevtoolsResources[i].name)
+      return kDevtoolsResources[i].value;
+  }
+  return -1;
+}
 
 // static
 DevToolsHttpHandler* DevToolsHttpHandler::Start(
@@ -160,14 +166,36 @@ void DevToolsHttpHandlerImpl::Start() {
 void DevToolsHttpHandlerImpl::Stop() {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
-      base::Bind(&DevToolsHttpHandlerImpl::Teardown, this));
-  protect_ptr_ = NULL;
+      base::Bind(&DevToolsHttpHandlerImpl::TeardownAndRelease, this));
+}
+
+static std::string PathWithoutParams(const std::string& path) {
+  size_t query_position = path.find("?");
+  if (query_position != std::string::npos)
+    return path.substr(0, query_position);
+  return path;
+}
+
+static std::string GetMimeType(const std::string& filename) {
+  if (EndsWith(filename, ".html", false)) {
+    return "text/html";
+  } else if (EndsWith(filename, ".css", false)) {
+    return "text/css";
+  } else if (EndsWith(filename, ".js", false)) {
+    return "application/javascript";
+  } else if (EndsWith(filename, ".png", false)) {
+    return "image/png";
+  } else if (EndsWith(filename, ".gif", false)) {
+    return "image/gif";
+  }
+  NOTREACHED();
+  return "text/plain";
 }
 
 void DevToolsHttpHandlerImpl::OnHttpRequest(
     int connection_id,
     const net::HttpServerRequestInfo& info) {
-  if (info.path == "/json") {
+  if (info.path.find("/json") == 0) {
     // Pages discovery json request.
     BrowserThread::PostTask(
         BrowserThread::UI,
@@ -179,6 +207,12 @@ void DevToolsHttpHandlerImpl::OnHttpRequest(
     return;
   }
 
+  if (info.path == "" || info.path == "/") {
+    std::string response = delegate_->GetDiscoveryPageHTML();
+    server_->Send200(connection_id, response, "text/html; charset=UTF-8");
+    return;
+  }
+
   // Proxy static files from chrome-devtools://devtools/*.
   net::URLRequestContext* request_context = delegate_->GetURLRequestContext();
   if (!request_context) {
@@ -186,16 +220,25 @@ void DevToolsHttpHandlerImpl::OnHttpRequest(
     return;
   }
 
-  if (info.path == "" || info.path == "/") {
-    std::string response = delegate_->GetDiscoveryPageHTML();
-    server_->Send200(connection_id, response, "text/html; charset=UTF-8");
-    return;
-  }
-
   net::URLRequest* request;
 
   if (info.path.find("/devtools/") == 0) {
-    request = new net::URLRequest(GURL("chrome-devtools:/" + info.path), this);
+    // Serve front-end files from resource bundle.
+    std::string filename = PathWithoutParams(info.path.substr(10));
+
+    if (delegate_->BundlesFrontendResources()) {
+      int resource_id = DevToolsHttpHandler::GetFrontendResourceId(filename);
+      if (resource_id != -1) {
+        base::StringPiece data =
+            content::GetContentClient()->GetDataResource(resource_id);
+        server_->Send200(connection_id,
+                         data.as_string(),
+                         GetMimeType(filename));
+      }
+      return;
+    }
+    std::string base_url = delegate_->GetFrontendResourcesBaseURL();
+    request = new net::URLRequest(GURL(base_url + filename), this);
   } else if (info.path.find("/thumb/") == 0) {
     request = new net::URLRequest(GURL("chrome:/" + info.path), this);
   } else {
@@ -267,8 +310,13 @@ struct PageInfo
   std::string title;
   std::string thumbnail_url;
   std::string favicon_url;
+  base::TimeTicks last_selected_time;
 };
 typedef std::vector<PageInfo> PageList;
+
+static bool SortPageListByTime(const PageInfo& info1, const PageInfo& info2) {
+  return info1.last_selected_time > info2.last_selected_time;
+}
 
 static PageList GeneratePageList(
     DevToolsHttpHandlerDelegate* delegate,
@@ -281,26 +329,29 @@ static PageList GeneratePageList(
   for (Tabs::iterator it = inspectable_tabs.begin();
        it != inspectable_tabs.end(); ++it) {
 
-    TabContents* tab_contents = *it;
-    NavigationController& controller = tab_contents->controller();
+    WebContents* web_contents = *it;
+    NavigationController& controller = web_contents->GetController();
 
     NavigationEntry* entry = controller.GetActiveEntry();
-    if (entry == NULL || !entry->url().is_valid())
+    if (entry == NULL || !entry->GetURL().is_valid())
       continue;
 
     DevToolsAgentHost* agent = DevToolsAgentHostRegistry::GetDevToolsAgentHost(
-        tab_contents->render_view_host());
+        web_contents->GetRenderViewHost());
     DevToolsClientHost* client_host = DevToolsManager::GetInstance()->
         GetDevToolsClientHostFor(agent);
     PageInfo page_info;
-    page_info.id = TabContentsIDHelper::GetID(tab_contents);
+    page_info.id = TabContentsIDHelper::GetID(
+        static_cast<TabContents*>(web_contents));
     page_info.attached = client_host != NULL;
-    page_info.url = entry->url().spec();
-    page_info.title = UTF16ToUTF8(net::EscapeForHTML(entry->title()));
-    page_info.thumbnail_url = "/thumb/" + entry->url().spec();
-    page_info.favicon_url = entry->favicon().url().spec();
+    page_info.url = entry->GetURL().spec();
+    page_info.title = UTF16ToUTF8(net::EscapeForHTML(entry->GetTitle()));
+    page_info.thumbnail_url = "/thumb/" + entry->GetURL().spec();
+    page_info.favicon_url = entry->GetFavicon().url.spec();
+    page_info.last_selected_time = web_contents->GetLastSelectedTime();
     page_list.push_back(page_info);
   }
+  std::sort(page_list.begin(), page_list.end(), SortPageListByTime);
   return page_list;
 }
 
@@ -325,11 +376,13 @@ void DevToolsHttpHandlerImpl::OnJsonRequestUI(
                            base::StringPrintf("ws://%s/devtools/page/%d",
                                               host.c_str(),
                                               i->id));
-      page_info->SetString("devtoolsFrontendUrl",
-                           base::StringPrintf("%s?host=%s&page=%d",
-                                              overridden_frontend_url_.c_str(),
-                                              host.c_str(),
-                                              i->id));
+      std::string devtools_frontend_url = base::StringPrintf(
+          "%s%shost=%s&page=%d",
+          overridden_frontend_url_.c_str(),
+          overridden_frontend_url_.find("?") == std::string::npos ? "?" : "&",
+          host.c_str(),
+          i->id);
+      page_info->SetString("devtoolsFrontendUrl", devtools_frontend_url);
     }
   }
 
@@ -354,15 +407,15 @@ void DevToolsHttpHandlerImpl::OnWebSocketRequestUI(
     return;
   }
 
-  TabContents* tab_contents = TabContentsIDHelper::GetTabContents(id);
-  if (tab_contents == NULL) {
+  TabContents* web_contents = TabContentsIDHelper::GetTabContents(id);
+  if (web_contents == NULL) {
     Send500(connection_id, "No such page id: " + page_id);
     return;
   }
 
   DevToolsManager* manager = DevToolsManager::GetInstance();
   DevToolsAgentHost* agent = DevToolsAgentHostRegistry::GetDevToolsAgentHost(
-      tab_contents->render_view_host());
+      web_contents->GetRenderViewHost());
   if (manager->GetDevToolsClientHostFor(agent)) {
     Send500(connection_id, "Page with given id is being inspected: " + page_id);
     return;
@@ -462,15 +515,16 @@ void DevToolsHttpHandlerImpl::OnReadCompleted(net::URLRequest* request,
 DevToolsHttpHandlerImpl::DevToolsHttpHandlerImpl(
     const std::string& ip,
     int port,
-    const std::string& frontend_host,
+    const std::string& frontend_url,
     DevToolsHttpHandlerDelegate* delegate)
     : ip_(ip),
       port_(port),
-      overridden_frontend_url_(frontend_host),
-      delegate_(delegate),
-      ALLOW_THIS_IN_INITIALIZER_LIST(protect_ptr_(this)) {
+      overridden_frontend_url_(frontend_url),
+      delegate_(delegate) {
   if (overridden_frontend_url_.empty())
       overridden_frontend_url_ = "/devtools/devtools.html";
+
+  AddRef();
 }
 
 void DevToolsHttpHandlerImpl::Init() {
@@ -478,8 +532,11 @@ void DevToolsHttpHandlerImpl::Init() {
 }
 
 // Run on I/O thread
-void DevToolsHttpHandlerImpl::Teardown() {
+void DevToolsHttpHandlerImpl::TeardownAndRelease() {
   server_ = NULL;
+  BrowserThread::PostTask(
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&DevToolsHttpHandlerImpl::Release, this));
 }
 
 void DevToolsHttpHandlerImpl::Bind(net::URLRequest* request,
@@ -530,7 +587,7 @@ void DevToolsHttpHandlerImpl::Send404(int connection_id) {
 }
 
 void DevToolsHttpHandlerImpl::Send500(int connection_id,
-                                          const std::string& message) {
+                                      const std::string& message) {
   BrowserThread::PostTask(
       BrowserThread::IO, FROM_HERE,
       base::Bind(&net::HttpServer::Send500, server_.get(), connection_id,

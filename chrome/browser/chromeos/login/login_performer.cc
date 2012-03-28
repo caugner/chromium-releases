@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,10 @@
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/boot_times_loader.h"
-#include "chrome/browser/chromeos/cros/cros_library.h"
-#include "chrome/browser/chromeos/cros/screen_lock_library.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/cros_settings_names.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screen_locker.h"
 #include "chrome/browser/prefs/pref_service.h"
@@ -26,10 +26,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/generated_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_store.h"
@@ -39,6 +39,7 @@
 #include "ui/base/resource/resource_bundle.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 namespace chromeos {
 
@@ -47,7 +48,8 @@ namespace chromeos {
 LoginPerformer* LoginPerformer::default_performer_ = NULL;
 
 LoginPerformer::LoginPerformer(Delegate* delegate)
-    : last_login_failure_(LoginFailure::None()),
+    : ALLOW_THIS_IN_INITIALIZER_LIST(online_attempt_host_(this)),
+      last_login_failure_(LoginFailure::None()),
       delegate_(delegate),
       password_changed_(false),
       screen_lock_requested_(false),
@@ -56,7 +58,7 @@ LoginPerformer::LoginPerformer(Delegate* delegate)
       using_oauth_(
           !CommandLine::ForCurrentProcess()->HasSwitch(
               switches::kSkipOAuthLogin)),
-      weak_factory_(this) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)) {
   DCHECK(default_performer_ == NULL)
       << "LoginPerformer should have only one instance.";
   default_performer_ = this;
@@ -72,7 +74,7 @@ LoginPerformer::~LoginPerformer() {
 // LoginPerformer, LoginStatusConsumer implementation:
 
 void LoginPerformer::OnLoginFailure(const LoginFailure& failure) {
-  UserMetrics::RecordAction(UserMetricsAction("Login_Failure"));
+  content::RecordAction(UserMetricsAction("Login_Failure"));
   UMA_HISTOGRAM_ENUMERATION("Login.FailureReason", failure.reason(),
                             LoginFailure::NUM_FAILURE_REASONS);
 
@@ -81,12 +83,6 @@ void LoginPerformer::OnLoginFailure(const LoginFailure& failure) {
 
   last_login_failure_ = failure;
   if (delegate_) {
-    captcha_.clear();
-    captcha_token_.clear();
-    if (failure.reason() == LoginFailure::NETWORK_AUTH_FAILED &&
-        failure.error().state() == GoogleServiceAuthError::CAPTCHA_REQUIRED) {
-      captcha_token_ = failure.error().captcha().token;
-    }
     delegate_->OnLoginFailure(failure);
     return;
   }
@@ -126,7 +122,7 @@ void LoginPerformer::OnLoginSuccess(
     const GaiaAuthConsumer::ClientLoginResult& credentials,
     bool pending_requests,
     bool using_oauth) {
-  UserMetrics::RecordAction(UserMetricsAction("Login_Success"));
+  content::RecordAction(UserMetricsAction("Login_Success"));
   // 0 - Login success offline and online. It's a new user. or it's an
   //     existing user and offline auth took longer than online auth.
   // 1 - Login success offline only. It's an existing user login.
@@ -181,7 +177,7 @@ void LoginPerformer::OnProfileCreated(
   if (using_oauth_)
     LoginUtils::Get()->StartTokenServices(profile);
 
-  LoginUtils::Get()->StartSync(profile, credentials_);
+  LoginUtils::Get()->StartSignedInServices(profile, credentials_);
   credentials_ = GaiaAuthConsumer::ClientLoginResult();
 
   // Don't unlock screen if it was locked while we're waiting
@@ -201,7 +197,7 @@ void LoginPerformer::OnProfileCreated(
 }
 
 void LoginPerformer::OnOffTheRecordLoginSuccess() {
-  UserMetrics::RecordAction(
+  content::RecordAction(
       UserMetricsAction("Login_GuestLoginSuccess"));
 
   if (delegate_)
@@ -223,6 +219,14 @@ void LoginPerformer::OnPasswordChangeDetected(
     DVLOG(1) << "Password change detected - locking screen.";
     RequestScreenLock();
   }
+}
+
+void LoginPerformer::OnChecked(const std::string& username, bool success) {
+  if (!delegate_) {
+    NOTREACHED();
+    return;
+  }
+  delegate_->OnOnlineChecked(username, success);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -273,22 +277,16 @@ void LoginPerformer::CompleteLogin(const std::string& username,
     }
   }
 
-  bool allow_new_user = false;
-  cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
-  if (ScreenLocker::default_screen_locker() || allow_new_user) {
+  bool is_whitelisted = LoginUtils::IsWhitelisted(
+      Authenticator::Canonicalize(username));
+  if (ScreenLocker::default_screen_locker() || is_whitelisted) {
     // Starts authentication if guest login is allowed or online auth pending.
     StartLoginCompletion();
   } else {
-    // Otherwise, do whitelist check first.
-    if (cros_settings->FindEmailInList(
-            kAccountsPrefUsers, Authenticator::Canonicalize(username))) {
-      StartLoginCompletion();
-    } else {
-      if (delegate_)
-        delegate_->WhiteListCheckFailed(username);
-      else
-        NOTREACHED();
-    }
+    if (delegate_)
+      delegate_->WhiteListCheckFailed(username);
+    else
+      NOTREACHED();
   }
 }
 
@@ -317,20 +315,15 @@ void LoginPerformer::Login(const std::string& username,
     }
   }
 
-  bool allow_new_user = false;
-  cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
-  if (ScreenLocker::default_screen_locker() || allow_new_user) {
+  bool is_whitelisted = LoginUtils::IsWhitelisted(username);
+  if (ScreenLocker::default_screen_locker() || is_whitelisted) {
     // Starts authentication if guest login is allowed or online auth pending.
     StartAuthentication();
   } else {
-    if (cros_settings->FindEmailInList(kAccountsPrefUsers, username)) {
-      StartAuthentication();
-    } else {
-      if (delegate_)
-        delegate_->WhiteListCheckFailed(username);
-      else
-        NOTREACHED();
-    }
+    if (delegate_)
+      delegate_->WhiteListCheckFailed(username);
+    else
+      NOTREACHED();
   }
 }
 
@@ -372,7 +365,7 @@ void LoginPerformer::RequestScreenLock() {
     ResolveScreenLocked();
   } else {
     screen_lock_requested_ = true;
-    chromeos::CrosLibrary::Get()->GetScreenLockLibrary()->
+    DBusThreadManager::Get()->GetPowerManagerClient()->
         NotifyScreenLockRequested();
   }
 }
@@ -380,7 +373,7 @@ void LoginPerformer::RequestScreenLock() {
 void LoginPerformer::RequestScreenUnlock() {
   DVLOG(1) << "Screen unlock requested";
   if (ScreenLocker::default_screen_locker()) {
-    chromeos::CrosLibrary::Get()->GetScreenLockLibrary()->
+    DBusThreadManager::Get()->GetPowerManagerClient()->
         NotifyScreenUnlockRequested();
     // Will unsubscribe from notifications once unlock is successful.
   } else {
@@ -414,10 +407,6 @@ void LoginPerformer::ResolveInitialNetworkAuthFailure() {
       // Access not granted. User has to sign out.
       // Request screen lock & show error message there.
     case GoogleServiceAuthError::CAPTCHA_REQUIRED:
-      // User is requested to enter CAPTCHA challenge.
-      captcha_token_ = last_login_failure_.error().captcha().token;
-      RequestScreenLock();
-      return;
     default:
       // Unless there's new GoogleServiceAuthErrors state has been added.
       NOTREACHED();
@@ -482,12 +471,6 @@ void LoginPerformer::ResolveLockNetworkAuthFailure() {
       sign_out_only = true;
       break;
     case GoogleServiceAuthError::CAPTCHA_REQUIRED:
-      // User is requested to enter CAPTCHA challenge.
-      captcha_token_ = last_login_failure_.error().captcha().token;
-      msg = l10n_util::GetStringUTF16(IDS_LOGIN_ERROR_PASSWORD_CHANGED);
-      ScreenLocker::default_screen_locker()->ShowCaptchaAndErrorMessage(
-          last_login_failure_.error().captcha().image_url, msg);
-      return;
     default:
       // Unless there's new GoogleServiceAuthError state has been added.
       NOTREACHED();
@@ -528,7 +511,14 @@ void LoginPerformer::StartLoginCompletion() {
 void LoginPerformer::StartAuthentication() {
   DVLOG(1) << "Auth started";
   BootTimesLoader::Get()->AddLoginTimeMarker("AuthStarted", false);
-  Profile* profile = g_browser_process->profile_manager()->GetDefaultProfile();
+  Profile* profile;
+  {
+    // This should be the first place where GetDefaultProfile() is called with
+    // logged_in_ = true. This will trigger a call to Profile::CreateProfile()
+    // which requires IO access.
+    base::ThreadRestrictions::ScopedAllowIO allow_io;
+    profile = g_browser_process->profile_manager()->GetDefaultProfile();
+  }
   if (delegate_) {
     authenticator_ = LoginUtils::Get()->CreateAuthenticator(this);
     BrowserThread::PostTask(
@@ -537,8 +527,11 @@ void LoginPerformer::StartAuthentication() {
                    profile,
                    username_,
                    password_,
-                   captcha_token_,
-                   captcha_));
+                   std::string(),
+                   std::string()));
+    // Make unobtrusive online check. It helps to determine password change
+    // state in the case when offline login fails.
+    online_attempt_host_.Check(profile, username_, password_);
   } else {
     DCHECK(authenticator_.get())
         << "Authenticator instance doesn't exist for login attempt retry.";
@@ -550,8 +543,8 @@ void LoginPerformer::StartAuthentication() {
                    profile,
                    username_,
                    password_,
-                   captcha_token_,
-                   captcha_));
+                   std::string(),
+                   std::string()));
   }
   password_.clear();
 }

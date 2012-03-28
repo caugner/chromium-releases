@@ -5,6 +5,7 @@
 #include "net/disk_cache/backend_impl.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -86,23 +87,10 @@ FilePath GetPrefixedName(const FilePath& path, const std::string& name,
   return path.AppendASCII(tmp);
 }
 
-// This is a simple Task to cleanup old caches.
-class CleanupTask : public Task {
- public:
-  CleanupTask(const FilePath& path, const std::string& name)
-      : path_(path), name_(name) {}
-
-  virtual void Run();
-
- private:
-  FilePath path_;
-  std::string name_;
-  DISALLOW_COPY_AND_ASSIGN(CleanupTask);
-};
-
-void CleanupTask::Run() {
+// This is a simple callback to cleanup old caches.
+void CleanupCallback(const FilePath& path, const std::string& name) {
   for (int i = 0; i < kMaxOldFolders; i++) {
-    FilePath to_delete = GetPrefixedName(path_, name_, i);
+    FilePath to_delete = GetPrefixedName(path, name, i);
     disk_cache::DeleteCache(to_delete, true);
   }
 }
@@ -147,7 +135,8 @@ bool DelayedCacheCleanup(const FilePath& full_path) {
     return false;
   }
 
-  base::WorkerPool::PostTask(FROM_HERE, new CleanupTask(path, name_str), true);
+  base::WorkerPool::PostTask(
+      FROM_HERE, base::Bind(&CleanupCallback, path, name_str), true);
   return true;
 }
 
@@ -183,7 +172,7 @@ bool InitExperiment(disk_cache::IndexHeader* header, uint32 mask) {
   }
 
   if (!header->create_time || !header->lru.filled)
-    return true;  // Wait untill we fill up the cache.
+    return true;  // Wait until we fill up the cache.
 
   int index_load = header->num_entries * 100 / (mask + 1);
   if (index_load > 25) {
@@ -217,23 +206,29 @@ class CacheCreator {
                net::CacheType type, uint32 flags,
                base::MessageLoopProxy* thread, net::NetLog* net_log,
                disk_cache::Backend** backend,
-               net::OldCompletionCallback* callback)
-      : path_(path), force_(force), retry_(false), max_bytes_(max_bytes),
-        type_(type), flags_(flags), thread_(thread), backend_(backend),
-        callback_(callback), cache_(NULL), net_log_(net_log),
-        ALLOW_THIS_IN_INITIALIZER_LIST(
-            my_callback_(this, &CacheCreator::OnIOComplete)) {
+               const net::CompletionCallback& callback)
+      : path_(path),
+        force_(force),
+        retry_(false),
+        max_bytes_(max_bytes),
+        type_(type),
+        flags_(flags),
+        thread_(thread),
+        backend_(backend),
+        callback_(callback),
+        cache_(NULL),
+        net_log_(net_log) {
   }
   ~CacheCreator() {}
 
   // Creates the backend.
   int Run();
 
-  // Callback implementation.
-  void OnIOComplete(int result);
-
  private:
   void DoCallback(int result);
+
+  // Callback implementation.
+  void OnIOComplete(int result);
 
   const FilePath& path_;
   bool force_;
@@ -243,10 +238,9 @@ class CacheCreator {
   uint32 flags_;
   scoped_refptr<base::MessageLoopProxy> thread_;
   disk_cache::Backend** backend_;
-  net::OldCompletionCallback* callback_;
+  net::CompletionCallback callback_;
   disk_cache::BackendImpl* cache_;
   net::NetLog* net_log_;
-  net::OldCompletionCallbackImpl<CacheCreator> my_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(CacheCreator);
 };
@@ -256,9 +250,23 @@ int CacheCreator::Run() {
   cache_->SetMaxSize(max_bytes_);
   cache_->SetType(type_);
   cache_->SetFlags(flags_);
-  int rv = cache_->Init(&my_callback_);
+  int rv = cache_->Init(
+      base::Bind(&CacheCreator::OnIOComplete, base::Unretained(this)));
   DCHECK_EQ(net::ERR_IO_PENDING, rv);
   return rv;
+}
+
+void CacheCreator::DoCallback(int result) {
+  DCHECK_NE(net::ERR_IO_PENDING, result);
+  if (result == net::OK) {
+    *backend_ = cache_;
+  } else {
+    LOG(ERROR) << "Unable to create cache";
+    *backend_ = NULL;
+    delete cache_;
+  }
+  callback_.Run(result);
+  delete this;
 }
 
 void CacheCreator::OnIOComplete(int result) {
@@ -279,35 +287,9 @@ void CacheCreator::OnIOComplete(int result) {
   DCHECK_EQ(net::ERR_IO_PENDING, rv);
 }
 
-void CacheCreator::DoCallback(int result) {
-  DCHECK_NE(net::ERR_IO_PENDING, result);
-  if (result == net::OK) {
-    *backend_ = cache_;
-  } else {
-    LOG(ERROR) << "Unable to create cache";
-    *backend_ = NULL;
-    delete cache_;
-  }
-  callback_->Run(result);
-  delete this;
-}
-
-// ------------------------------------------------------------------------
-
-// A task to perform final cleanup on the background thread.
-class FinalCleanup : public Task {
- public:
-  explicit FinalCleanup(disk_cache::BackendImpl* backend) : backend_(backend) {}
-  ~FinalCleanup() {}
-
-  virtual void Run();
- private:
-  disk_cache::BackendImpl* backend_;
-  DISALLOW_EVIL_CONSTRUCTORS(FinalCleanup);
-};
-
-void FinalCleanup::Run() {
-  backend_->CleanupCache();
+// A callback to perform final cleanup on the background thread.
+void FinalCleanupCallback(disk_cache::BackendImpl* backend) {
+  backend->CleanupCache();
 }
 
 }  // namespace
@@ -319,8 +301,8 @@ namespace disk_cache {
 int CreateCacheBackend(net::CacheType type, const FilePath& path, int max_bytes,
                        bool force, base::MessageLoopProxy* thread,
                        net::NetLog* net_log, Backend** backend,
-                       OldCompletionCallback* callback) {
-  DCHECK(callback);
+                       const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   if (type == net::MEMORY_CACHE) {
     *backend = MemBackendImpl::CreateBackend(max_bytes, net_log);
     return *backend ? net::OK : net::ERR_FAILED;
@@ -420,8 +402,8 @@ BackendImpl::~BackendImpl() {
     // Unit tests may use the same thread for everything.
     CleanupCache();
   } else {
-    background_queue_.background_thread()->PostTask(FROM_HERE,
-                                                    new FinalCleanup(this));
+    background_queue_.background_thread()->PostTask(
+        FROM_HERE, base::Bind(&FinalCleanupCallback, base::Unretained(this)));
     done_.Wait();
   }
 }
@@ -440,16 +422,16 @@ int BackendImpl::CreateBackend(const FilePath& full_path, bool force,
                                int max_bytes, net::CacheType type,
                                uint32 flags, base::MessageLoopProxy* thread,
                                net::NetLog* net_log, Backend** backend,
-                               OldCompletionCallback* callback) {
-  DCHECK(callback);
-  CacheCreator* creator = new CacheCreator(full_path, force, max_bytes, type,
-                                           flags, thread, net_log, backend,
-                                           callback);
+                               const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
+  CacheCreator* creator =
+      new CacheCreator(full_path, force, max_bytes, type, flags, thread,
+                       net_log, backend, callback);
   // This object will self-destroy when finished.
   return creator->Run();
 }
 
-int BackendImpl::Init(OldCompletionCallback* callback) {
+int BackendImpl::Init(const net::CompletionCallback& callback) {
   background_queue_.Init(callback);
   return net::ERR_IO_PENDING;
 }
@@ -566,6 +548,7 @@ void BackendImpl::CleanupCache() {
     }
   }
   block_files_.CloseFiles();
+  index_ = NULL;
   ptr_factory_.InvalidateWeakPtrs();
   done_.Signal();
 }
@@ -573,8 +556,8 @@ void BackendImpl::CleanupCache() {
 // ------------------------------------------------------------------------
 
 int BackendImpl::OpenPrevEntry(void** iter, Entry** prev_entry,
-                               OldCompletionCallback* callback) {
-  DCHECK(callback);
+                               const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.OpenPrevEntry(iter, prev_entry, callback);
   return net::ERR_IO_PENDING;
 }
@@ -1313,12 +1296,13 @@ void BackendImpl::ClearRefCountForTest() {
   num_refs_ = 0;
 }
 
-int BackendImpl::FlushQueueForTest(OldCompletionCallback* callback) {
+int BackendImpl::FlushQueueForTest(const net::CompletionCallback& callback) {
   background_queue_.FlushQueue(callback);
   return net::ERR_IO_PENDING;
 }
 
-int BackendImpl::RunTaskForTest(Task* task, OldCompletionCallback* callback) {
+int BackendImpl::RunTaskForTest(const base::Closure& task,
+                                const net::CompletionCallback& callback) {
   background_queue_.RunTask(task, callback);
   return net::ERR_IO_PENDING;
 }
@@ -1375,50 +1359,50 @@ int32 BackendImpl::GetEntryCount() const {
 }
 
 int BackendImpl::OpenEntry(const std::string& key, Entry** entry,
-                           OldCompletionCallback* callback) {
-  DCHECK(callback);
+                           const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.OpenEntry(key, entry, callback);
   return net::ERR_IO_PENDING;
 }
 
 int BackendImpl::CreateEntry(const std::string& key, Entry** entry,
-                             OldCompletionCallback* callback) {
-  DCHECK(callback);
+                             const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.CreateEntry(key, entry, callback);
   return net::ERR_IO_PENDING;
 }
 
 int BackendImpl::DoomEntry(const std::string& key,
-                           OldCompletionCallback* callback) {
-  DCHECK(callback);
+                           const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.DoomEntry(key, callback);
   return net::ERR_IO_PENDING;
 }
 
-int BackendImpl::DoomAllEntries(OldCompletionCallback* callback) {
-  DCHECK(callback);
+int BackendImpl::DoomAllEntries(const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.DoomAllEntries(callback);
   return net::ERR_IO_PENDING;
 }
 
 int BackendImpl::DoomEntriesBetween(const base::Time initial_time,
                                     const base::Time end_time,
-                                    OldCompletionCallback* callback) {
-  DCHECK(callback);
+                                    const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.DoomEntriesBetween(initial_time, end_time, callback);
   return net::ERR_IO_PENDING;
 }
 
 int BackendImpl::DoomEntriesSince(const base::Time initial_time,
-                                  OldCompletionCallback* callback) {
-  DCHECK(callback);
+                                  const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.DoomEntriesSince(initial_time, callback);
   return net::ERR_IO_PENDING;
 }
 
 int BackendImpl::OpenNextEntry(void** iter, Entry** next_entry,
-                               OldCompletionCallback* callback) {
-  DCHECK(callback);
+                               const net::CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
   background_queue_.OpenNextEntry(iter, next_entry, callback);
   return net::ERR_IO_PENDING;
 }

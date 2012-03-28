@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -115,12 +115,12 @@ void ChromeFrameTestWithWebServer::SetUp() {
   CFInstance_src_path = chrome_frame_source_path.AppendASCII("CFInstance.js");
   CFInstance_path_ = test_file_path_.AppendASCII("CFInstance.js");
 
-  file_util::CopyFileW(CFInstance_src_path, CFInstance_path_);
+  ASSERT_TRUE(file_util::CopyFile(CFInstance_src_path, CFInstance_path_));
 
   CFInstall_src_path = chrome_frame_source_path.AppendASCII("CFInstall.js");
   CFInstall_path_ = test_file_path_.AppendASCII("CFInstall.js");
 
-  file_util::CopyFileW(CFInstall_src_path, CFInstall_path_);
+  ASSERT_TRUE(file_util::CopyFile(CFInstall_src_path, CFInstall_path_));
 
   server_mock_.ExpectAndServeAnyRequests(CFInvocation(CFInvocation::NONE));
   server_mock_.set_expected_result("OK");
@@ -299,7 +299,7 @@ void MockWebServer::HandlePostedResponse(
   posted_result_ = request.content();
   if (posted_result_ == expected_result_) {
     MessageLoop::current()->PostDelayedTask(FROM_HERE,
-                                            new MessageLoop::QuitTask,
+                                            MessageLoop::QuitClosure(),
                                             100);
   }
   connection->Send("HTTP/1.1 200 OK\r\n", "");
@@ -778,7 +778,8 @@ TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_XHRConditionalHeaderTest) {
 const wchar_t kWindowCloseTestUrl[] =
     L"window_close.html";
 
-TEST_F(ChromeFrameTestWithWebServer, FullTabModeIE_WindowClose) {
+// http://code.google.com/p/chromium/issues/detail?id=111074
+TEST_F(ChromeFrameTestWithWebServer, FLAKY_FullTabModeIE_WindowClose) {
   SimpleBrowserTest(IE, kWindowCloseTestUrl);
 }
 

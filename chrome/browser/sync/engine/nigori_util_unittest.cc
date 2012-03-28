@@ -13,8 +13,8 @@ typedef testing::Test NigoriUtilTest;
 
 TEST(NigoriUtilTest, SpecificsNeedsEncryption) {
   ModelTypeSet encrypted_types;
-  encrypted_types.insert(BOOKMARKS);
-  encrypted_types.insert(PASSWORDS);
+  encrypted_types.Put(BOOKMARKS);
+  encrypted_types.Put(PASSWORDS);
 
   sync_pb::EntitySpecifics specifics;
   EXPECT_FALSE(SpecificsNeedsEncryption(ModelTypeSet(), specifics));

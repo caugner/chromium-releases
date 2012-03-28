@@ -10,23 +10,26 @@
 
 #include "base/basictypes.h"
 
-class TabContents;
-class TabContentsDelegate;
 class TabContentsWrapper;
 class TabGtk;
+
+namespace content {
+class WebContents;
+class WebContentsDelegate;
+}
 
 struct DraggedTabData {
  public:
   DraggedTabData();
   DraggedTabData(TabGtk* tab,
                  TabContentsWrapper* contents,
-                 TabContentsDelegate* original_delegate,
+                 content::WebContentsDelegate* original_delegate,
                  int source_model_index,
                  bool pinned,
                  bool mini);
   ~DraggedTabData();
 
-  // Resetting the delegate of |contents_->tab_contents()| to
+  // Resetting the delegate of |contents_->web_contents()| to
   // |original_delegate_|.
   void ResetDelegate();
 
@@ -36,10 +39,10 @@ struct DraggedTabData {
   // The TabContents being dragged.
   TabContentsWrapper* contents_;
 
-  // The original TabContentsDelegate of |contents|, before it was detached
-  // from the browser window. We store this so that we can forward certain
-  // delegate notifications back to it if we can't handle them locally.
-  TabContentsDelegate* original_delegate_;
+  // The original content::WebContentsDelegate of |contents|, before it was
+  // detached from the browser window. We store this so that we can forward
+  // certain delegate notifications back to it if we can't handle them locally.
+  content::WebContentsDelegate* original_delegate_;
 
   // This is the index of |contents| in |source_tabstrip_| when the drag
   // began. This is used to restore the previous state if the drag is aborted.
@@ -63,7 +66,7 @@ class DragData {
   std::vector<TabGtk*> GetDraggedTabs() const;
 
   // Returns all the |contents_| fields of the tabs in |drag_data_|.
-  std::vector<TabContents*> GetDraggedTabsContents() const;
+  std::vector<content::WebContents*> GetDraggedTabsContents() const;
 
   // Returns the correct add type for the tab in |drag_data_[i]|. See
   // TabStripModel::AddTabTypes for available types.
@@ -89,8 +92,8 @@ class DragData {
   // Convenience for |source_tab_drag_data()->contents_|.
   TabContentsWrapper* GetSourceTabContentsWrapper();
 
-  // Convenience for |source_tab_drag_data()->contents_->tab_contents()|.
-  TabContents* GetSourceTabContents();
+  // Convenience for |source_tab_drag_data()->contents_->web_contents()|.
+  content::WebContents* GetSourceWebContents();
 
   // Convenience for getting the DraggedTabData corresponding to the tab that
   // was under the mouse pointer when the user started dragging.

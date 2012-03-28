@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #import "content/browser/accessibility/browser_accessibility_cocoa.h"
+#include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/mac/closure_blocks_leopard_compat.h"
 #include "content/browser/plugin_process_host.h"
 #import "content/browser/renderer_host/accelerated_plugin_view_mac.h"
@@ -212,6 +213,12 @@ NSWindow* ApparentWindowForView(NSView* view) {
 // RenderWidgetHostView, public:
 
 // static
+RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
+    RenderWidgetHost* widget) {
+  return new RenderWidgetHostViewMac(widget);
+}
+
+// static
 void RenderWidgetHostView::GetDefaultScreenInfo(
     WebKit::WebScreenInfo* results) {
   *results = WebKit::WebScreenInfoFactory::screenInfo(NULL);
@@ -233,15 +240,16 @@ RenderWidgetHostViewMac::RenderWidgetHostViewMac(RenderWidgetHost* widget)
       accelerated_compositing_active_(false),
       needs_gpu_visibility_update_after_repaint_(false),
       compositing_surface_(gfx::kNullPluginWindow) {
-  // |cocoa_view_| owns us and we will be deleted when |cocoa_view_| goes away.
-  // Since we autorelease it, our caller must put |native_view()| into the view
-  // hierarchy right after calling us.
+  // |cocoa_view_| owns us and we will be deleted when |cocoa_view_|
+  // goes away.  Since we autorelease it, our caller must put
+  // |GetNativeView()| into the view hierarchy right after calling us.
   cocoa_view_ = [[[RenderWidgetHostViewCocoa alloc]
                   initWithRenderWidgetHostViewMac:this] autorelease];
   render_widget_host_->SetView(this);
 }
 
 RenderWidgetHostViewMac::~RenderWidgetHostViewMac() {
+  UnlockMouse();
 }
 
 void RenderWidgetHostViewMac::SetDelegate(
@@ -257,6 +265,10 @@ RenderWidgetHostView *CreateRenderWidgetHostView(RenderWidgetHost *widget) {
 
 ///////////////////////////////////////////////////////////////////////////////
 // RenderWidgetHostViewMac, RenderWidgetHostView implementation:
+
+void RenderWidgetHostViewMac::InitAsChild(
+    gfx::NativeView parent_view) {
+}
 
 void RenderWidgetHostViewMac::InitAsPopup(
     RenderWidgetHostView* parent_host_view,
@@ -373,11 +385,16 @@ void RenderWidgetHostViewMac::SetBounds(const gfx::Rect& rect) {
 }
 
 gfx::NativeView RenderWidgetHostViewMac::GetNativeView() const {
-  return native_view();
+  return cocoa_view_;
 }
 
 gfx::NativeViewId RenderWidgetHostViewMac::GetNativeViewId() const {
-  return reinterpret_cast<gfx::NativeViewId>(native_view());
+  return reinterpret_cast<gfx::NativeViewId>(GetNativeView());
+}
+
+gfx::NativeViewAccessible RenderWidgetHostViewMac::GetNativeViewAccessible() {
+  NOTIMPLEMENTED();
+  return static_cast<gfx::NativeViewAccessible>(NULL);
 }
 
 void RenderWidgetHostViewMac::MovePluginWindows(
@@ -489,7 +506,7 @@ void RenderWidgetHostViewMac::UpdateCursorIfNecessary() {
   if ([event window] != [cocoa_view_ window])
     return;
 
-  NSCursor* ns_cursor = current_cursor_.GetCursor();
+  NSCursor* ns_cursor = current_cursor_.GetNativeCursor();
   [ns_cursor set];
 }
 
@@ -877,9 +894,9 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
     last_frame_was_accelerated_ = (params.window ==
         plugin_container_manager_.root_container_handle());
     plugin_container_manager_.SetSurfaceWasPaintedTo(params.window,
-                                                     params.surface_id);
+                                                     params.surface_handle);
 
-    // The surface is hidden until its first paint, to not show gargabe.
+    // The surface is hidden until its first paint, to not show garbage.
     if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
       [view setHidden:NO];
     [view drawView];
@@ -893,11 +910,35 @@ void RenderWidgetHostViewMac::AcceleratedSurfaceBuffersSwapped(
 void RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
     int gpu_host_id) {
-  NOTIMPLEMENTED();
+  TRACE_EVENT0("browser",
+      "RenderWidgetHostViewMac::AcceleratedSurfacePostSubBuffer");
+  CHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  AcceleratedPluginView* view = ViewForPluginWindowHandle(params.window);
+  DCHECK(view);
+  if (view) {
+    last_frame_was_accelerated_ = (params.window ==
+        plugin_container_manager_.root_container_handle());
+    plugin_container_manager_.SetSurfaceWasPaintedTo(
+        params.window,
+        params.surface_handle,
+        gfx::Rect(params.x, params.y, params.width, params.height));
+
+    // The surface is hidden until its first paint, to not show garbage.
+    if (plugin_container_manager_.SurfaceShouldBeVisible(params.window))
+      [view setHidden:NO];
+    [view drawView];
+  }
+
+  if (params.route_id != 0) {
+    RenderWidgetHost::AcknowledgePostSubBuffer(params.route_id, gpu_host_id);
+  }
 }
 
 void RenderWidgetHostViewMac::UpdateRootGpuViewVisibility(
     bool show_gpu_widget) {
+  TRACE_EVENT1("renderer_host",
+      "RenderWidgetHostViewMac::UpdateRootGpuViewVisibility",
+      "show", show_gpu_widget);
   // Plugins are destroyed on page navigate. The compositor layer on the other
   // hand is created on demand and then stays alive until its renderer process
   // dies (usually on cross-domain navigation). Instead, only a flag
@@ -919,6 +960,8 @@ void RenderWidgetHostViewMac::UpdateRootGpuViewVisibility(
 }
 
 void RenderWidgetHostViewMac::HandleDelayedGpuViewHiding() {
+  TRACE_EVENT0("renderer_host",
+      "RenderWidgetHostViewMac::HandleDelayedGpuViewHiding");
   if (needs_gpu_visibility_update_after_repaint_) {
     UpdateRootGpuViewVisibility(false);
     needs_gpu_visibility_update_after_repaint_ = false;
@@ -933,6 +976,9 @@ void RenderWidgetHostViewMac::OnAcceleratedCompositingStateChange() {
   if (!changed)
     return;
 
+  TRACE_EVENT1("renderer_host",
+      "RenderWidgetHostViewMac::OnAcceleratedCompositingStateChange",
+      "active", accelerated_compositing_active_);
   if (accelerated_compositing_active_) {
     UpdateRootGpuViewVisibility(accelerated_compositing_active_);
   } else {
@@ -990,6 +1036,9 @@ void RenderWidgetHostViewMac::ForceTextureReload() {
 void RenderWidgetHostViewMac::UnhandledWheelEvent(
     const WebKit::WebMouseWheelEvent& event) {
   [cocoa_view_ gotUnhandledWheelEvent];
+}
+
+void RenderWidgetHostViewMac::ProcessTouchAck(bool processed) {
 }
 
 void RenderWidgetHostViewMac::SetHasHorizontalScrollbar(
@@ -1077,12 +1126,12 @@ void RenderWidgetHostViewMac::SetBackground(const SkBitmap& background) {
 
 void RenderWidgetHostViewMac::OnAccessibilityNotifications(
     const std::vector<ViewHostMsg_AccessibilityNotification_Params>& params) {
-  if (!browser_accessibility_manager_.get()) {
-    browser_accessibility_manager_.reset(
+  if (!GetBrowserAccessibilityManager()) {
+    SetBrowserAccessibilityManager(
         BrowserAccessibilityManager::CreateEmptyDocument(
             cocoa_view_, static_cast<WebAccessibility::State>(0), NULL));
   }
-  browser_accessibility_manager_->OnAccessibilityNotifications(params);
+  GetBrowserAccessibilityManager()->OnAccessibilityNotifications(params);
 }
 
 void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
@@ -1189,6 +1238,17 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   canBeKeyView_ = can;
 }
 
+- (BOOL)acceptsMouseEventsWhenInactive {
+  // Some types of windows (balloons, always-on-top panels) want to accept mouse
+  // clicks w/o the first click being treated as 'activation'. Same applies to
+  // mouse move events.
+  return [[self window] level] > NSNormalWindowLevel;
+}
+
+- (BOOL)acceptsFirstMouse:(NSEvent*)theEvent {
+  return [self acceptsMouseEventsWhenInactive];
+}
+
 - (void)setTakesFocusOnlyOnMouseDown:(BOOL)b {
   takesFocusOnlyOnMouseDown_ = b;
 }
@@ -1201,10 +1261,9 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
   NSWindow* window = [self window];
   // If this is a background window, don't handle mouse movement events. This
   // is the expected behavior on the Mac as evidenced by other applications.
-  // Do this only if the window level is NSNormalWindowLevel, as this
-  // does not necessarily apply in other contexts (e.g. balloons).
   if ([theEvent type] == NSMouseMoved &&
-      [window level] == NSNormalWindowLevel && ![window isKeyWindow]) {
+      ![self acceptsMouseEventsWhenInactive] &&
+      ![window isKeyWindow]) {
     return YES;
   }
 
@@ -1363,7 +1422,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
   // Command key combinations are sent via performKeyEquivalent rather than
   // keyDown:. We just forward this on and if WebCore doesn't want to handle
-  // it, we let the TabContentsView figure out how to reinject it.
+  // it, we let the WebContentsView figure out how to reinject it.
   [self keyEvent:theEvent wasKeyEquivalent:YES];
   return YES;
 }
@@ -1907,7 +1966,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
 - (id)accessibilityAttributeValue:(NSString *)attribute {
   BrowserAccessibilityManager* manager =
-      renderWidgetHostView_->browser_accessibility_manager_.get();
+      renderWidgetHostView_->GetBrowserAccessibilityManager();
 
   // Contents specifies document view of RenderWidgetHostViewCocoa provided by
   // BrowserAccessibilityManager. Children includes all subviews in addition to
@@ -1932,25 +1991,25 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 }
 
 - (id)accessibilityHitTest:(NSPoint)point {
-  if (!renderWidgetHostView_->browser_accessibility_manager_.get())
+  if (!renderWidgetHostView_->GetBrowserAccessibilityManager())
     return self;
   NSPoint pointInWindow = [[self window] convertScreenToBase:point];
   NSPoint localPoint = [self convertPoint:pointInWindow fromView:nil];
   localPoint.y = NSHeight([self bounds]) - localPoint.y;
   BrowserAccessibilityCocoa* root = renderWidgetHostView_->
-      browser_accessibility_manager_->
+      GetBrowserAccessibilityManager()->
           GetRoot()->toBrowserAccessibilityCocoa();
   id obj = [root accessibilityHitTest:localPoint];
   return obj;
 }
 
 - (BOOL)accessibilityIsIgnored {
-  return !renderWidgetHostView_->browser_accessibility_manager_.get();
+  return !renderWidgetHostView_->GetBrowserAccessibilityManager();
 }
 
 - (NSUInteger)accessibilityGetIndexOf:(id)child {
   BrowserAccessibilityManager* manager =
-      renderWidgetHostView_->browser_accessibility_manager_.get();
+      renderWidgetHostView_->GetBrowserAccessibilityManager();
   // Only child is root.
   if (manager &&
       manager->GetRoot()->toBrowserAccessibilityCocoa() == child) {
@@ -1962,7 +2021,7 @@ void RenderWidgetHostViewMac::SetTextInputActive(bool active) {
 
 - (id)accessibilityFocusedUIElement {
   BrowserAccessibilityManager* manager =
-      renderWidgetHostView_->browser_accessibility_manager_.get();
+      renderWidgetHostView_->GetBrowserAccessibilityManager();
   if (manager) {
     BrowserAccessibility* focused_item = manager->GetFocus(NULL);
     DCHECK(focused_item);

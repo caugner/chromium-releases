@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,7 @@ class LayerAnimator;
 namespace {
 
 static const base::TimeDelta kDefaultTransitionDuration =
-    base::TimeDelta::FromMilliseconds(200);
+    base::TimeDelta::FromMilliseconds(120);
 
 static const base::TimeDelta kTimerInterval =
     base::TimeDelta::FromMilliseconds(10);
@@ -39,6 +39,8 @@ LayerAnimator::LayerAnimator(base::TimeDelta transition_duration)
 }
 
 LayerAnimator::~LayerAnimator() {
+  for (size_t i = 0; i < running_animations_.size(); ++i)
+    running_animations_[i].sequence->OnAnimatorDestroyed();
   ClearAnimations();
 }
 
@@ -198,30 +200,6 @@ void LayerAnimator::RemoveObserver(LayerAnimationObserver* observer) {
        queue_iter != animation_queue_.end(); ++queue_iter) {
     (*queue_iter)->RemoveObserver(observer);
   }
-}
-
-LayerAnimator::ScopedSettings::ScopedSettings(LayerAnimator* animator)
-    : animator_(animator),
-      old_transition_duration_(animator->transition_duration_) {
-  SetTransitionDuration(kDefaultTransitionDuration);
-}
-
-LayerAnimator::ScopedSettings::~ScopedSettings() {
-  animator_->transition_duration_ = old_transition_duration_;
-  std::set<LayerAnimationObserver*>::const_iterator i = observers_.begin();
-  for (;i != observers_.end(); ++i)
-    animator_->RemoveObserver(*i);
-}
-
-void LayerAnimator::ScopedSettings::AddObserver(
-    LayerAnimationObserver* observer) {
-  observers_.insert(observer);
-  animator_->AddObserver(observer);
-}
-
-void LayerAnimator::ScopedSettings::SetTransitionDuration(
-    base::TimeDelta duration) {
-  animator_->transition_duration_ = duration;
 }
 
 // LayerAnimator private -------------------------------------------------------

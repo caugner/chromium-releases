@@ -1,20 +1,24 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/login/signed_settings_cache.h"
 
+#include <string>
+
 #include "base/base64.h"
 #include "base/bind.h"
-#include "base/values.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/login/ownership_service.h"
+#include "chrome/browser/chromeos/login/ownership_status_checker.h"
 #include "chrome/browser/chromeos/login/signed_settings_helper.h"
+#include "chrome/browser/policy/proto/device_management_backend.pb.h"
 #include "chrome/browser/prefs/pref_service.h"
-#include "chrome/browser/prefs/scoped_user_pref_update.h"
 #include "chrome/common/pref_names.h"
 
 using content::BrowserThread;
+
+namespace em = enterprise_management;
 
 namespace chromeos {
 
@@ -67,6 +71,20 @@ void FinishFinalize(PrefService* local_state,
   }
 }
 
+// Reload the initial policy blob, and if successful apply the settings from
+// temp storage, and write them back the blob in FinishFinalize.
+void ReloadSignedSettingsAndFinalize(
+    PrefService* local_state,
+    OwnershipStatusChecker* ownership_checker,
+    OwnershipService::Status status,
+    bool current_user_is_owner) {
+  if (current_user_is_owner) {
+    SignedSettingsHelper::Get()->StartRetrievePolicyOp(
+        base::Bind(FinishFinalize, local_state));
+  }
+  delete ownership_checker;
+}
+
 }  // namespace
 
 namespace signed_settings_cache {
@@ -106,10 +124,11 @@ bool Retrieve(em::PolicyData *policy, PrefService* local_state) {
 }
 
 void Finalize(PrefService* local_state) {
-  // Reload the initial policy blob, apply settings from temp storage,
-  // and write back the blob.
-  SignedSettingsHelper::Get()->StartRetrievePolicyOp(
-      base::Bind(FinishFinalize, local_state));
+  // First we have to make sure the owner is really logged in because the key
+  // notification is generated on every cloud policy key rotation too.
+  OwnershipStatusChecker* ownership_checker = new OwnershipStatusChecker();
+  ownership_checker->Check(base::Bind(&ReloadSignedSettingsAndFinalize,
+                                      local_state, ownership_checker));
 }
 
 }  // namespace signed_settings_cache

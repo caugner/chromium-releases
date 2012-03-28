@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,15 +25,19 @@ enum ProtectorError {
   kProtectorErrorCount
 };
 
-// Histogram name to report the new default search provider.
-extern const char kProtectorHistogramNewSearchProvider[];
 // Histogram name to report when user accepts new default search provider.
 extern const char kProtectorHistogramSearchProviderApplied[];
+// Histogram name to report the default search provider when the backup is
+// invalid.
+extern const char kProtectorHistogramSearchProviderCorrupt[];
 // Histogram name to report when user keeps previous default search provider.
 extern const char kProtectorHistogramSearchProviderDiscarded[];
 // Histogram name to report the fallback default search provider when the
 // backup value is invalid or doesn't match an existing provider.
 extern const char kProtectorHistogramSearchProviderFallback[];
+// Histogram name to report the new default search provider when the backup is
+// valid and a change is detected.
+extern const char kProtectorHistogramSearchProviderHijacked[];
 // Histogram name to report when the prepopulated default search provider was
 // missing and has been added for fallback.
 extern const char kProtectorHistogramSearchProviderMissing[];
@@ -45,7 +49,7 @@ extern const char kProtectorHistogramSearchProviderTimeout[];
 
 // Returns index to be used in histograms for given search provider (which may
 // be NULL, in which case a special index will be returned).
-int GetSearchProviderHistogramID(const TemplateURL* t_url);
+int GetSearchProviderHistogramID(const TemplateURL* turl);
 
 // Maximum value of search provider index in histogram enums.
 extern const int kProtectorMaxSearchProviderID;

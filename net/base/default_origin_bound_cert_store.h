@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
@@ -22,7 +22,7 @@ class Task;
 namespace net {
 
 // This class is the system for storing and retrieving origin bound certs.
-// Modelled after the CookieMonster class, it has an in-memory cert store,
+// Modeled after the CookieMonster class, it has an in-memory cert store,
 // and synchronizes origin bound certs to an optional permanent storage that
 // implements the PersistentStore interface. The use case is described in
 // http://balfanz.github.com/tls-obc-spec/draft-balfanz-tls-obc-00.html
@@ -57,14 +57,20 @@ class NET_EXPORT DefaultOriginBoundCertStore : public OriginBoundCertStore {
   virtual bool GetOriginBoundCert(
       const std::string& origin,
       SSLClientCertType* type,
+      base::Time* creation_time,
+      base::Time* expiration_time,
       std::string* private_key_result,
       std::string* cert_result) OVERRIDE;
   virtual void SetOriginBoundCert(
       const std::string& origin,
       SSLClientCertType type,
+      base::Time creation_time,
+      base::Time expiration_time,
       const std::string& private_key,
       const std::string& cert) OVERRIDE;
   virtual void DeleteOriginBoundCert(const std::string& origin) OVERRIDE;
+  virtual void DeleteAllCreatedBetween(base::Time delete_begin,
+                                       base::Time delete_end) OVERRIDE;
   virtual void DeleteAll() OVERRIDE;
   virtual void GetAllOriginBoundCerts(
       std::vector<OriginBoundCert>* origin_bound_certs) OVERRIDE;

@@ -110,6 +110,7 @@ class ChromeConfigurator : public ComponentUpdateService::Configurator {
   std::string extra_info_;
   bool fast_update_;
   bool out_of_process_;
+  GURL app_update_url_;
 };
 
 ChromeConfigurator::ChromeConfigurator(const CommandLine* cmdline,
@@ -122,6 +123,15 @@ ChromeConfigurator::ChromeConfigurator(const CommandLine* cmdline,
       ",", &debug_values);
   fast_update_ = HasDebugValue(debug_values, kDebugFastUpdate);
   out_of_process_ = HasDebugValue(debug_values, kDebugOutOfProcess);
+
+  // Allow switch to override update URL (piggyback on AppsGalleryUpdateURL).
+  if (cmdline->HasSwitch(switches::kAppsGalleryUpdateURL)) {
+    app_update_url_ =
+        GURL(cmdline->GetSwitchValueASCII(switches::kAppsGalleryUpdateURL));
+  } else {
+    app_update_url_ = GURL("http://clients2.google.com/service/update2/crx");
+  }
+
   // Make the extra request params, they are necessary so omaha does
   // not deliver components that are going to be rejected at install time.
   extra_info_ += chrome::VersionInfo().Version();
@@ -134,7 +144,7 @@ int ChromeConfigurator::InitialDelay() {
 }
 
 int ChromeConfigurator::NextCheckDelay() {
-  return fast_update_ ? 3 : (4 * kDelayOneHour);
+  return fast_update_ ? 3 : (1 * kDelayOneHour);
 }
 
 int ChromeConfigurator::StepDelay() {
@@ -142,11 +152,11 @@ int ChromeConfigurator::StepDelay() {
 }
 
 int ChromeConfigurator::MinimumReCheckWait() {
-  return fast_update_ ? 30 : (6 * kDelayOneHour);
+  return fast_update_ ? 30 : (5 * kDelayOneHour);
 }
 
 GURL ChromeConfigurator::UpdateUrl() {
-  return GURL("http://clients2.google.com/service/update2/crx");
+  return app_update_url_;
 }
 
 const char* ChromeConfigurator::ExtraRequestParams() {

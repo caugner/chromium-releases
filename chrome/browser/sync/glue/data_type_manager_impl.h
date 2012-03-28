@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "base/time.h"
 
 namespace browser_sync {
@@ -30,12 +29,12 @@ class DataTypeManagerImpl : public DataTypeManager {
   virtual ~DataTypeManagerImpl();
 
   // DataTypeManager interface.
-  virtual void Configure(const TypeSet& desired_types,
+  virtual void Configure(TypeSet desired_types,
                          sync_api::ConfigureReason reason) OVERRIDE;
 
   // Needed only for backend migration.
   virtual void ConfigureWithoutNigori(
-      const TypeSet& desired_types,
+      TypeSet desired_types,
       sync_api::ConfigureReason reason) OVERRIDE;
 
   virtual void Stop() OVERRIDE;
@@ -66,8 +65,11 @@ class DataTypeManagerImpl : public DataTypeManager {
   bool ProcessReconfigure();
 
   void Restart(sync_api::ConfigureReason reason, bool enable_nigori);
-  void DownloadReady(
-      const syncable::ModelTypeSet& failed_configuration_types);
+  void DownloadReady(syncable::ModelTypeSet failed_configuration_types);
+
+  // Notification from the SBH that download failed due to a transient
+  // error and it will be retried.
+  void OnDownloadRetry();
   void NotifyStart();
   void NotifyDone(const ConfigureResult& result);
   void SetBlockedAndNotify();
@@ -76,7 +78,7 @@ class DataTypeManagerImpl : public DataTypeManager {
   // Restart().
   void AddToConfigureTime();
 
-  virtual void ConfigureImpl(const TypeSet& desired_types,
+  virtual void ConfigureImpl(TypeSet desired_types,
                              sync_api::ConfigureReason reason,
                              bool enable_nigori);
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,9 +15,12 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/compiler_specific.h"
 #include "base/i18n/icu_encoding_detection.h"
 #include "base/i18n/icu_string_conversions.h"
 #include "base/i18n/time_formatting.h"
+#include "base/memory/scoped_vector.h"
+#include "base/memory/weak_ptr.h"
 #include "base/json/json_writer.h"  // for debug output only.
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
@@ -31,10 +34,11 @@
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/native_network_constants.h"
 #include "chrome/browser/chromeos/cros/native_network_parser.h"
-#include "chrome/browser/chromeos/cros/network_ui_data.h"
+#include "chrome/browser/chromeos/cros/onc_constants.h"
 #include "chrome/browser/chromeos/cros/onc_network_parser.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/network_login_observer.h"
+#include "chrome/browser/net/browser_url_util.h"
 #include "chrome/common/time_format.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/nss_util.h"  // crypto::GetTPMTokenInfo() for 802.1X and VPN.
@@ -118,6 +122,12 @@ const int kRecentPlanPaymentHours = 6;
 // If cellular device doesn't have SIM card, then retries are never used.
 const int kDefaultSimUnlockRetriesCount = 999;
 
+// Redirect extension url for POST-ing url parameters to mobile account status
+// sites.
+const char kRedirectExtensionPage[] =
+    "chrome-extension://iadeocfgjdjdmpenejdbfeaocpbikmab/redirect.html?"
+    "autoPost=1";
+
 // List of cellular operators names that should have data roaming always enabled
 // to be able to connect to any network.
 const char* kAlwaysInRoamingOperators[] = {
@@ -162,6 +172,20 @@ void ValidateUTF8(const std::string& str, std::string* output) {
       // Puts REPLACEMENT CHARACTER (U+FFFD) if character is not readable UTF-8
       base::WriteUnicodeCharacter(0xFFFD, output);
   }
+}
+
+NetworkProfileType GetProfileTypeForSource(NetworkUIData::ONCSource source) {
+  switch (source) {
+    case NetworkUIData::ONC_SOURCE_DEVICE_POLICY:
+      return PROFILE_SHARED;
+    case NetworkUIData::ONC_SOURCE_USER_POLICY:
+      return PROFILE_USER;
+    case NetworkUIData::ONC_SOURCE_NONE:
+    case NetworkUIData::ONC_SOURCE_USER_IMPORT:
+      return PROFILE_NONE;
+  }
+  NOTREACHED() << "Unknown ONC source " << source;
+  return PROFILE_NONE;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -558,6 +582,11 @@ void Network::SetSaveCredentials(bool save_credentials) {
       flimflam::kSaveCredentialsProperty, save_credentials, &save_credentials_);
 }
 
+void Network::ClearUIData() {
+  ui_data_.Clear();
+  ClearProperty(flimflam::kUIDataProperty);
+}
+
 void Network::SetProfilePath(const std::string& profile_path) {
   VLOG(1) << "Setting profile for: " << name_ << " to: " << profile_path;
   SetOrClearStringProperty(
@@ -762,7 +791,7 @@ bool VirtualNetwork::NeedMoreInfoToConnect() const {
 }
 
 std::string VirtualNetwork::GetProviderTypeString() const {
-  switch (this->provider_type_) {
+  switch (provider_type_) {
     case PROVIDER_TYPE_L2TP_IPSEC_PSK:
       return l10n_util::GetStringUTF8(
           IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_L2TP_IPSEC_PSK);
@@ -783,8 +812,13 @@ std::string VirtualNetwork::GetProviderTypeString() const {
 }
 
 void VirtualNetwork::SetCACertNSS(const std::string& ca_cert_nss) {
-  SetStringProperty(
-      flimflam::kL2tpIpsecCaCertNssProperty, ca_cert_nss, &ca_cert_nss_);
+  if (provider_type_ == PROVIDER_TYPE_OPEN_VPN) {
+    SetStringProperty(
+        flimflam::kOpenVPNCaCertNSSProperty, ca_cert_nss, &ca_cert_nss_);
+  } else {
+    SetStringProperty(
+        flimflam::kL2tpIpsecCaCertNssProperty, ca_cert_nss, &ca_cert_nss_);
+  }
 }
 
 void VirtualNetwork::SetL2TPIPsecPSKCredentials(
@@ -792,11 +826,15 @@ void VirtualNetwork::SetL2TPIPsecPSKCredentials(
     const std::string& username,
     const std::string& user_passphrase,
     const std::string& group_name) {
-  SetStringProperty(flimflam::kL2tpIpsecPskProperty,
-                    psk_passphrase, &psk_passphrase_);
+  if (!psk_passphrase.empty()) {
+    SetStringProperty(flimflam::kL2tpIpsecPskProperty,
+                      psk_passphrase, &psk_passphrase_);
+  }
   SetStringProperty(flimflam::kL2tpIpsecUserProperty, username, &username_);
-  SetStringProperty(flimflam::kL2tpIpsecPasswordProperty,
-                    user_passphrase, &user_passphrase_);
+  if (!user_passphrase.empty()) {
+    SetStringProperty(flimflam::kL2tpIpsecPasswordProperty,
+                      user_passphrase, &user_passphrase_);
+  }
   SetStringProperty(flimflam::kL2tpIpsecGroupNameProperty,
                     group_name, &group_name_);
 }
@@ -809,8 +847,10 @@ void VirtualNetwork::SetL2TPIPsecCertCredentials(
   SetStringProperty(flimflam::kL2tpIpsecClientCertIdProperty,
                     client_cert_id, &client_cert_id_);
   SetStringProperty(flimflam::kL2tpIpsecUserProperty, username, &username_);
-  SetStringProperty(flimflam::kL2tpIpsecPasswordProperty,
-                    user_passphrase, &user_passphrase_);
+  if (!user_passphrase.empty()) {
+    SetStringProperty(flimflam::kL2tpIpsecPasswordProperty,
+                      user_passphrase, &user_passphrase_);
+  }
   SetStringProperty(flimflam::kL2tpIpsecGroupNameProperty,
                     group_name, &group_name_);
 }
@@ -820,12 +860,13 @@ void VirtualNetwork::SetOpenVPNCredentials(
     const std::string& username,
     const std::string& user_passphrase,
     const std::string& otp) {
-  // TODO(kmixter): Are we missing setting the CaCert property?
   SetStringProperty(flimflam::kOpenVPNClientCertIdProperty,
                     client_cert_id, &client_cert_id_);
   SetStringProperty(flimflam::kOpenVPNUserProperty, username, &username_);
-  SetStringProperty(flimflam::kOpenVPNPasswordProperty,
-                    user_passphrase, &user_passphrase_);
+  if (!user_passphrase.empty()) {
+    SetStringProperty(flimflam::kOpenVPNPasswordProperty,
+                      user_passphrase, &user_passphrase_);
+  }
   SetStringProperty(flimflam::kOpenVPNOTPProperty, otp, NULL);
 }
 
@@ -1148,6 +1189,20 @@ bool CellularNetwork::SupportsActivation() const {
 bool CellularNetwork::SupportsDataPlan() const {
   // TODO(nkostylev): Are there cases when only one of this is defined?
   return !usage_url().empty() || !payment_url().empty();
+}
+
+GURL CellularNetwork::GetAccountInfoUrl() const {
+  if (!post_data_.length())
+    return GURL(payment_url());
+
+  GURL base_url(kRedirectExtensionPage);
+  GURL temp_url = chrome_browser_net::AppendQueryParameter(base_url,
+                                                           "post_data",
+                                                           post_data_);
+  GURL redir_url = chrome_browser_net::AppendQueryParameter(temp_url,
+                                                            "formUrl",
+                                                            payment_url());
+  return redir_url;
 }
 
 std::string CellularNetwork::GetNetworkTechnologyString() const {
@@ -1689,13 +1744,16 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   virtual Network* FindRememberedNetworkByUniqueId(
       const std::string& unique_id) const OVERRIDE;
 
+  virtual const base::DictionaryValue* FindOncForNetwork(
+      const std::string& unique_id) const OVERRIDE;
+
   virtual const CellularDataPlanVector* GetDataPlans(
       const std::string& path) const OVERRIDE;
   virtual const CellularDataPlan* GetSignificantDataPlan(
       const std::string& path) const OVERRIDE;
   virtual void SignalCellularPlanPayment() OVERRIDE;
   virtual bool HasRecentCellularPlanPayment() OVERRIDE;
-  virtual std::string GetCellularHomeCarrierId() const OVERRIDE;
+  virtual const std::string& GetCellularHomeCarrierId() const OVERRIDE;
 
   // virtual ChangePin implemented in derived classes.
   // virtual ChangeRequiredPin implemented in derived classes.
@@ -1745,7 +1803,9 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // virtual SetIPConfig implemented in derived classes.
   virtual void SwitchToPreferredNetwork() OVERRIDE;
   virtual bool LoadOncNetworks(const std::string& onc_blob,
-                               const std::string& passcode) OVERRIDE;
+                               const std::string& passphrase,
+                               NetworkUIData::ONCSource source,
+                               std::string* error) OVERRIDE;
   virtual bool SetActiveNetwork(ConnectionType type,
                                 const std::string& service_path) OVERRIDE;
 
@@ -1761,6 +1821,7 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   typedef std::map<std::string, int> PriorityMap;
   typedef std::map<std::string, NetworkDevice*> NetworkDeviceMap;
   typedef std::map<std::string, CellularDataPlanVector*> CellularDataPlanMap;
+  typedef std::map<std::string, const base::DictionaryValue*> NetworkOncMap;
 
   struct NetworkProfile {
     NetworkProfile(const std::string& p, NetworkProfileType t)
@@ -1970,14 +2031,17 @@ class NetworkLibraryImplBase : public NetworkLibrary  {
   // List of networks to move to the user profile once logged in.
   std::list<std::string> user_networks_;
 
-  // Delayed task to notify a network change.
-  CancelableTask* notify_task_;
+  // Weak pointer factory for cancelling a network change callback.
+  base::WeakPtrFactory<NetworkLibraryImplBase> notify_manager_weak_factory_;
 
   // Cellular plan payment time.
   base::Time cellular_plan_payment_time_;
 
   // Temporary connection data for async connect calls.
   ConnectData connect_data_;
+
+  // Holds unique id to ONC mapping.
+  NetworkOncMap network_onc_map_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkLibraryImplBase);
 };
@@ -1995,7 +2059,7 @@ NetworkLibraryImplBase::NetworkLibraryImplBase()
       offline_mode_(false),
       is_locked_(false),
       sim_operation_(SIM_OPERATION_NONE),
-      notify_task_(NULL) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(notify_manager_weak_factory_(this)) {
   network_login_observer_.reset(new NetworkLoginObserver(this));
 }
 
@@ -2010,6 +2074,7 @@ NetworkLibraryImplBase::~NetworkLibraryImplBase() {
   STLDeleteValues(&device_map_);
   STLDeleteValues(&network_device_observers_);
   STLDeleteValues(&network_observers_);
+  STLDeleteValues(&network_onc_map_);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -2354,6 +2419,12 @@ Network* NetworkLibraryImplBase::FindRememberedNetworkByUniqueId(
   return NULL;
 }
 
+const base::DictionaryValue* NetworkLibraryImplBase::FindOncForNetwork(
+    const std::string& unique_id) const {
+  NetworkOncMap::const_iterator iter = network_onc_map_.find(unique_id);
+  return iter != network_onc_map_.end() ? iter->second : NULL;
+}
+
 ////////////////////////////////////////////////////////////////////////////
 // Data Plans.
 
@@ -2458,11 +2529,11 @@ bool NetworkLibraryImplBase::HasRecentCellularPlanPayment() {
           cellular_plan_payment_time_).InHours() < kRecentPlanPaymentHours;
 }
 
-std::string NetworkLibraryImplBase::GetCellularHomeCarrierId() const {
+const std::string& NetworkLibraryImplBase::GetCellularHomeCarrierId() const {
   const NetworkDevice* cellular = FindCellularDevice();
   if (cellular)
     return cellular->home_provider_id();
-  return std::string();
+  return EmptyString();
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2627,6 +2698,7 @@ void NetworkLibraryImplBase::NetworkConnectCompleted(
       network->set_error(ERROR_CONNECT_FAILED);
     }
     NotifyNetworkManagerChanged(true);  // Forced update.
+    NotifyNetworkChanged(network);
     return;
   }
 
@@ -2643,6 +2715,7 @@ void NetworkLibraryImplBase::NetworkConnectCompleted(
   // Notify observers.
   NotifyNetworkManagerChanged(true);  // Forced update.
   NotifyUserConnectionInitiated(network);
+  NotifyNetworkChanged(network);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2755,6 +2828,22 @@ void NetworkLibraryImplBase::ConnectToVirtualNetworkUsingConnectData(
     return;
   }
 
+  // When a L2TP/IPsec certificate-based VPN is created, the VirtualNetwork
+  // instance is created by NativeNetworkParser::CreateNetworkFromInfo().
+  // At that point, the provider type is deduced based on the value of
+  // client_cert_id_ of the VirtualNetwork instance, which hasn't been
+  // updated to the value of connect_data_.client_cert_pkcs11_id. Thus,
+  // the provider type is always incorrectly set to L2TP_IPSEC_PSK when
+  // L2TP_IPSEC_USER_CERT is expected. Here we fix the provider type based
+  // on connect_data_.client_cert_pkcs11_id.
+  //
+  // TODO(benchan): This is a quick and dirty workaround, we should refactor
+  // the code to make the flow more straightforward. See crosbug.com/24636
+  if (vpn->provider_type() == PROVIDER_TYPE_L2TP_IPSEC_PSK &&
+      !connect_data_.client_cert_pkcs11_id.empty()) {
+    vpn->set_provider_type(PROVIDER_TYPE_L2TP_IPSEC_USER_CERT);
+  }
+
   vpn->set_added(true);
   if (!data.server_hostname.empty())
     vpn->set_server_hostname(data.server_hostname);
@@ -2834,26 +2923,60 @@ void NetworkLibraryImplBase::SwitchToPreferredNetwork() {
 }
 
 bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
-                                             const std::string& passcode) {
-  // TODO(gspencer): Add support for decrypting onc files. crbug.com/19397
-  OncNetworkParser parser(onc_blob);
+                                             const std::string& passphrase,
+                                             NetworkUIData::ONCSource source,
+                                             std::string* error) {
+  OncNetworkParser parser(onc_blob, passphrase, source);
+
+  if (!parser.parse_error().empty()) {
+    if (error)
+      *error = parser.parse_error();
+    return false;
+  }
 
   for (int i = 0; i < parser.GetCertificatesSize(); i++) {
     // Insert each of the available certs into the certificate DB.
     if (parser.ParseCertificate(i).get() == NULL) {
       DLOG(WARNING) << "Cannot parse certificate in ONC file";
+      if (error)
+        *error = parser.parse_error();
       return false;
     }
   }
 
+  // Parse all networks. Bail out if that fails.
+  NetworkOncMap added_onc_map;
+  ScopedVector<Network> networks;
   for (int i = 0; i < parser.GetNetworkConfigsSize(); i++) {
     // Parse Open Network Configuration blob into a temporary Network object.
-    scoped_ptr<Network> network(parser.ParseNetwork(i));
-    if (!network.get()) {
+    Network* network = parser.ParseNetwork(i);
+    if (!network) {
       DLOG(WARNING) << "Cannot parse network in ONC file";
+      if (error)
+        *error = parser.parse_error();
       return false;
     }
+    networks.push_back(network);
+    added_onc_map[network->unique_id()] = parser.GetNetworkConfig(i);
+  }
 
+  // Update the ONC map.
+  for (NetworkOncMap::iterator iter(added_onc_map.begin());
+       iter != added_onc_map.end(); ++iter) {
+    const base::DictionaryValue*& entry = network_onc_map_[iter->first];
+    delete entry;
+    entry = iter->second->DeepCopy();
+  }
+
+  // Configure the networks. While doing so, collect unique identifiers of the
+  // networks that are defined in the ONC blob in |network_ids|. They're later
+  // used to clean out any previously-existing networks that had been configured
+  // through policy but are no longer specified in the updated ONC blob.
+  std::set<std::string> network_ids;
+  std::string profile_path(GetProfilePath(GetProfileTypeForSource(source)));
+  for (std::vector<Network*>::iterator iter(networks.begin());
+       iter != networks.end(); ++iter) {
+    Network* network = *iter;
     DictionaryValue dict;
     for (Network::PropertyMap::const_iterator props =
              network->property_map_.begin();
@@ -2866,10 +2989,57 @@ bool NetworkLibraryImplBase::LoadOncNetworks(const std::string& onc_blob,
         VLOG(2) << "Property " << props->first << " will not be sent";
     }
 
+    // Set the appropriate profile for |source|.
+    if (!profile_path.empty())
+      dict.SetString(flimflam::kProfileProperty, profile_path);
+
     CallConfigureService(network->unique_id(), &dict);
+    network_ids.insert(network->unique_id());
   }
-  return (parser.GetNetworkConfigsSize() != 0 ||
-          parser.GetCertificatesSize() != 0);
+
+  if (source == NetworkUIData::ONC_SOURCE_USER_POLICY ||
+      source == NetworkUIData::ONC_SOURCE_DEVICE_POLICY) {
+    // For policy-managed networks, go through the list of existing remembered
+    // networks and clean out the ones that no longer have a definition in the
+    // ONC blob. We first collect the networks and do the actual deletion later
+    // because ForgetNetwork() changes the remembered network vectors.
+    std::vector<std::string> to_be_deleted;
+    for (WifiNetworkVector::iterator i(remembered_wifi_networks_.begin());
+         i != remembered_wifi_networks_.end(); ++i) {
+      WifiNetwork* network = *i;
+      if (NetworkUIData::GetONCSource(network->ui_data()) == source &&
+          network_ids.find(network->unique_id()) == network_ids.end()) {
+        to_be_deleted.push_back(network->service_path());
+      }
+    }
+
+    for (VirtualNetworkVector::iterator i(remembered_virtual_networks_.begin());
+         i != remembered_virtual_networks_.end(); ++i) {
+      VirtualNetwork* network = *i;
+      if (NetworkUIData::GetONCSource(network->ui_data()) == source &&
+          network_ids.find(network->unique_id()) == network_ids.end()) {
+        to_be_deleted.push_back(network->service_path());
+      }
+    }
+
+    for (std::vector<std::string>::const_iterator i(to_be_deleted.begin());
+         i != to_be_deleted.end(); ++i) {
+      ForgetNetwork(*i);
+    }
+  } else if (source == NetworkUIData::ONC_SOURCE_USER_IMPORT) {
+    // User-imported files should always contain something.
+    if (parser.GetNetworkConfigsSize() == 0 &&
+        parser.GetCertificatesSize() == 0) {
+      LOG(ERROR) << "Onc file missing networks and certs.";
+      if (error) {
+        *error = l10n_util::GetStringUTF8(
+            IDS_NETWORK_CONFIG_ERROR_NETWORK_IMPORT);
+      }
+      return false;
+    }
+  }
+
+  return true;
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -3051,6 +3221,7 @@ void NetworkLibraryImplBase::DeleteRememberedNetwork(
   if (network) {
     // Clear the stored credentials for any forgotten networks.
     network->EraseCredentials();
+    network->ClearUIData();
     SetProfileType(network, PROFILE_NONE);
     // Remove VPN from list of networks.
     if (network->type() == TYPE_VPN)
@@ -3093,6 +3264,14 @@ void NetworkLibraryImplBase::DeleteRememberedNetwork(
                                   remembered_network->service_path());
       profile.services.erase(found);
     }
+  }
+
+  // Remove the ONC blob for the network, if present.
+  NetworkOncMap::iterator onc_map_entry =
+      network_onc_map_.find(remembered_network->unique_id());
+  if (onc_map_entry != network_onc_map_.end()) {
+    delete onc_map_entry->second;
+    network_onc_map_.erase(onc_map_entry);
   }
 
   delete remembered_network;
@@ -3224,24 +3403,22 @@ std::string NetworkLibraryImplBase::GetProfilePath(NetworkProfileType type) {
 // notifications, e.g. connection state, devices, services, etc.
 void NetworkLibraryImplBase::NotifyNetworkManagerChanged(bool force_update) {
   // Cancel any pending signals.
-  if (notify_task_) {
-    notify_task_->Cancel();
-    notify_task_ = NULL;
-  }
+  notify_manager_weak_factory_.InvalidateWeakPtrs();
   if (force_update) {
     // Signal observers now.
     SignalNetworkManagerObservers();
   } else {
     // Schedule a delayed signal to limit the frequency of notifications.
-    notify_task_ = NewRunnableMethod(
-        this, &NetworkLibraryImplBase::SignalNetworkManagerObservers);
-    BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE, notify_task_,
-                                   kNetworkNotifyDelayMs);
+    BrowserThread::PostDelayedTask(
+        BrowserThread::UI,
+        FROM_HERE,
+        base::Bind(&NetworkLibraryImplBase::SignalNetworkManagerObservers,
+                   notify_manager_weak_factory_.GetWeakPtr()),
+        kNetworkNotifyDelayMs);
   }
 }
 
 void NetworkLibraryImplBase::SignalNetworkManagerObservers() {
-  notify_task_ = NULL;
   FOR_EACH_OBSERVER(NetworkManagerObserver,
                     network_manager_observers_,
                     OnNetworkManagerChanged(this));
@@ -5034,6 +5211,16 @@ void NetworkLibraryImplStub::Init() {
   cellular4_ui_data.FillDictionary(cellular4->ui_data());
   AddStubNetwork(cellular4, PROFILE_NONE);
 
+  CellularNetwork* cellular5 = new CellularNetwork("cellular5");
+  cellular5->set_name("Fake Cellular Low Data");
+  cellular5->set_strength(100);
+  cellular5->set_activation_state(ACTIVATION_STATE_ACTIVATED);
+  cellular5->set_payment_url(std::string("http://www.google.com"));
+  cellular5->set_usage_url(std::string("http://www.google.com"));
+  cellular5->set_network_technology(NETWORK_TECHNOLOGY_EVDO);
+  cellular5->set_data_left(CellularNetwork::DATA_LOW);
+  AddStubNetwork(cellular5, PROFILE_NONE);
+
   CellularDataPlan* base_plan = new CellularDataPlan();
   base_plan->plan_name = "Base plan";
   base_plan->plan_type = CELLULAR_DATA_PLAN_METERED_BASE;
@@ -5046,10 +5233,21 @@ void NetworkLibraryImplStub::Init() {
   paid_plan->plan_data_bytes = 5ll * 1024 * 1024 * 1024;
   paid_plan->data_bytes_used = paid_plan->plan_data_bytes / 2;
 
-  CellularDataPlanVector* data_plan_vector = new CellularDataPlanVector;
-  data_plan_vector->push_back(base_plan);
-  data_plan_vector->push_back(paid_plan);
-  UpdateCellularDataPlan(cellular1->service_path(), data_plan_vector);
+  CellularDataPlanVector* data_plan_vector1 = new CellularDataPlanVector;
+  data_plan_vector1->push_back(base_plan);
+  data_plan_vector1->push_back(paid_plan);
+  UpdateCellularDataPlan(cellular1->service_path(), data_plan_vector1);
+
+  CellularDataPlan* low_data_plan = new CellularDataPlan();
+  low_data_plan->plan_name = "Low Data plan";
+  low_data_plan->plan_type = CELLULAR_DATA_PLAN_METERED_PAID;
+  low_data_plan->plan_data_bytes = 5ll * 1024 * 1024 * 1024;
+  low_data_plan->data_bytes_used =
+      low_data_plan->plan_data_bytes - kCellularDataVeryLowBytes;
+
+  CellularDataPlanVector* data_plan_vector2 = new CellularDataPlanVector;
+  data_plan_vector2->push_back(low_data_plan);
+  UpdateCellularDataPlan(cellular5->service_path(), data_plan_vector2);
 
   VirtualNetwork* vpn1 = new VirtualNetwork("vpn1");
   vpn1->set_name("Fake VPN1");
@@ -5093,16 +5291,25 @@ void NetworkLibraryImplStub::Init() {
         "  \"NetworkConfigurations\": ["
         "    {"
         "      \"GUID\": \"guid\","
-        "      \"Type\": \"WiFi\","
-        "      \"WiFi\": {"
-        "        \"Security\": \"WEP\","
-        "        \"SSID\": \"MySSID\","
+        "      \"Type\": \"VPN\","
+        "      \"Name\": \"VPNtest\","
+        "      \"VPN\": {"
+        "        \"Host\": \"172.22.12.98\","
+        "        \"Type\": \"L2TP-IPsec\","
+        "        \"IPsec\": {"
+        "          \"AuthenticationType\": \"PSK\","
+        "          \"IKEVersion\": 2,"
+        "          \"PSK\": \"chromeos\","
+        "        },"
+        "        \"L2TP\": {"
+        "          \"Username\": \"vpntest\","
+        "        }"
         "      }"
         "    }"
         "  ],"
         "  \"Certificates\": []"
         "}");
-  LoadOncNetworks(test_blob, "");
+//  LoadOncNetworks(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT, NULL);
 }
 
 ////////////////////////////////////////////////////////////////////////////
@@ -5165,6 +5372,19 @@ void NetworkLibraryImplStub::AddStubRememberedNetwork(Network* network) {
 }
 
 void NetworkLibraryImplStub::ConnectToNetwork(Network* network) {
+  if (network->type() == TYPE_WIFI) {
+    WifiNetwork* wifi = static_cast<WifiNetwork*>(network);
+    if (wifi->encryption() != SECURITY_NONE) {
+      if (wifi->passphrase().find("bad") == 0) {
+        NetworkConnectCompleted(network, CONNECT_BAD_PASSPHRASE);
+        return;
+      } else if (wifi->passphrase().find("error") == 0) {
+        NetworkConnectCompleted(network, CONNECT_FAILED);
+        return;
+      }
+    }
+  }
+
   // Set connected state.
   network->set_connected(true);
   network->set_connection_started(false);
@@ -5186,6 +5406,19 @@ void NetworkLibraryImplStub::ConnectToNetwork(Network* network) {
     }
   }
 
+  // Cycle data left to trigger notifications.
+  if (network->type() == TYPE_CELLULAR) {
+    if (network->name().find("Low Data") != std::string::npos) {
+      CellularNetwork* cellular = static_cast<CellularNetwork*>(network);
+      // Simulate a transition to very low data.
+      cellular->set_data_left(CellularNetwork::DATA_LOW);
+      NotifyCellularDataPlanChanged();
+      cellular->set_data_left(CellularNetwork::DATA_VERY_LOW);
+      active_cellular_ = cellular;
+      NotifyCellularDataPlanChanged();
+    }
+  }
+
   // Remember connected network.
   if (network->profile_type() == PROFILE_NONE) {
     NetworkProfileType profile_type = PROFILE_USER;
@@ -5200,8 +5433,6 @@ void NetworkLibraryImplStub::ConnectToNetwork(Network* network) {
 
   // Call Completed and signal observers.
   NetworkConnectCompleted(network, CONNECT_SUCCESS);
-  SignalNetworkManagerObservers();
-  NotifyNetworkChanged(network);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -5213,6 +5444,8 @@ void NetworkLibraryImplStub::CallConnectToNetwork(Network* network) {
   // If a delay has been set (i.e. we are interactive), delay the call to
   // ConnectToNetwork (but signal observers since we changed connecting state).
   if (connect_delay_ms_) {
+    // This class is a Singleton and won't be deleted until this callbacks has
+    // run.
     BrowserThread::PostDelayedTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&NetworkLibraryImplStub::ConnectToNetwork,
@@ -5346,7 +5579,3 @@ NetworkLibrary* NetworkLibrary::GetImpl(bool stub) {
 /////////////////////////////////////////////////////////////////////////////
 
 }  // namespace chromeos
-
-// Allows InvokeLater without adding refcounting. This class is a Singleton and
-// won't be deleted until its last InvokeLater is run.
-DISABLE_RUNNABLE_METHOD_REFCOUNT(chromeos::NetworkLibraryImplBase);

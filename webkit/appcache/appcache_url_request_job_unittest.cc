@@ -33,7 +33,6 @@ static const char kHttpBasicBody[] = "Hello";
 
 static const int kNumBlocks = 4;
 static const int kBlockSize = 1024;
-static const int kNoSuchResponseId = 123;
 
 class AppCacheURLRequestJobTest : public testing::Test {
  public:
@@ -139,24 +138,13 @@ class AppCacheURLRequestJobTest : public testing::Test {
     }
   }
 
-  // Helper class run a test on our io_thread. The io_thread
-  // is spun up once and reused for all tests.
+  // Helper callback to run a test on our io_thread. The io_thread is spun up
+  // once and reused for all tests.
   template <class Method>
-  class WrapperTask : public Task {
-   public:
-    WrapperTask(AppCacheURLRequestJobTest* test, Method method)
-        : test_(test), method_(method) {
-    }
-
-    virtual void Run() {
-      test_->SetUpTest();
-      (test_->*method_)();
-    }
-
-   private:
-    AppCacheURLRequestJobTest* test_;
-    Method method_;
-  };
+  void MethodWrapper(Method method) {
+    SetUpTest();
+    (this->*method)();
+  }
 
   static void SetUpTestCase() {
     io_thread_.reset(new base::Thread("AppCacheURLRequestJobTest Thread"));
@@ -168,22 +156,14 @@ class AppCacheURLRequestJobTest : public testing::Test {
     io_thread_.reset(NULL);
   }
 
-  AppCacheURLRequestJobTest()
-      : ALLOW_THIS_IN_INITIALIZER_LIST(read_callback_(
-            this, &AppCacheURLRequestJobTest::OnReadComplete)),
-        ALLOW_THIS_IN_INITIALIZER_LIST(read_info_callback_(
-            this, &AppCacheURLRequestJobTest::OnReadInfoComplete)),
-        ALLOW_THIS_IN_INITIALIZER_LIST(write_callback_(
-            this, &AppCacheURLRequestJobTest::OnWriteComplete)),
-        ALLOW_THIS_IN_INITIALIZER_LIST(write_info_callback_(
-            this, &AppCacheURLRequestJobTest::OnWriteInfoComplete)) {
-  }
+  AppCacheURLRequestJobTest() {}
 
   template <class Method>
   void RunTestOnIOThread(Method method) {
     test_finished_event_ .reset(new base::WaitableEvent(false, false));
     io_thread_->message_loop()->PostTask(
-        FROM_HERE, new WrapperTask<Method>(this, method));
+        FROM_HERE, base::Bind(&AppCacheURLRequestJobTest::MethodWrapper<Method>,
+                              base::Unretained(this), method));
     test_finished_event_->Wait();
   }
 
@@ -198,12 +178,8 @@ class AppCacheURLRequestJobTest : public testing::Test {
     expected_read_result_ = 0;
     expected_write_result_ = 0;
     written_response_id_ = 0;
-    should_delete_reader_in_completion_callback_ = false;
-    should_delete_writer_in_completion_callback_ = false;
     reader_deletion_count_down_ = 0;
     writer_deletion_count_down_ = 0;
-    read_callback_was_called_ = false;
-    write_callback_was_called_ = false;
   }
 
   void TearDownTest() {
@@ -287,7 +263,10 @@ class AppCacheURLRequestJobTest : public testing::Test {
     EXPECT_FALSE(writer_->IsWritePending());
     expected_write_result_ = GetHttpResponseInfoSize(head);
     write_info_buffer_ = new HttpResponseInfoIOBuffer(head);
-    writer_->WriteInfo(write_info_buffer_, &write_info_callback_);
+    writer_->WriteInfo(
+        write_info_buffer_,
+        base::Bind(&AppCacheURLRequestJobTest::OnWriteInfoComplete,
+                   base::Unretained(this)));
   }
 
   void WriteResponseBody(scoped_refptr<IOBuffer> io_buffer, int buf_len) {
@@ -295,7 +274,9 @@ class AppCacheURLRequestJobTest : public testing::Test {
     write_buffer_ = io_buffer;
     expected_write_result_ = buf_len;
     writer_->WriteData(
-        write_buffer_, buf_len, &write_callback_);
+        write_buffer_, buf_len,
+        base::Bind(&AppCacheURLRequestJobTest::OnWriteComplete,
+                   base::Unretained(this)));
   }
 
   void ReadResponseBody(scoped_refptr<IOBuffer> io_buffer, int buf_len) {
@@ -303,7 +284,9 @@ class AppCacheURLRequestJobTest : public testing::Test {
     read_buffer_ = io_buffer;
     expected_read_result_ = buf_len;
     reader_->ReadData(
-        read_buffer_, buf_len, &read_callback_);
+        read_buffer_, buf_len,
+        base::Bind(&AppCacheURLRequestJobTest::OnReadComplete,
+                   base::Unretained(this)));
   }
 
   // AppCacheResponseReader / Writer completion callbacks
@@ -316,12 +299,7 @@ class AppCacheURLRequestJobTest : public testing::Test {
 
   void OnWriteComplete(int result) {
     EXPECT_FALSE(writer_->IsWritePending());
-    write_callback_was_called_ = true;
     EXPECT_EQ(expected_write_result_, result);
-    if (should_delete_writer_in_completion_callback_ &&
-        --writer_deletion_count_down_ == 0) {
-      writer_.reset();
-    }
     ScheduleNextTask();
   }
 
@@ -333,12 +311,7 @@ class AppCacheURLRequestJobTest : public testing::Test {
 
   void OnReadComplete(int result) {
     EXPECT_FALSE(reader_->IsReadPending());
-    read_callback_was_called_ = true;
     EXPECT_EQ(expected_read_result_, result);
-    if (should_delete_reader_in_completion_callback_ &&
-        --reader_deletion_count_down_ == 0) {
-      reader_.reset();
-    }
     ScheduleNextTask();
   }
 
@@ -764,22 +737,14 @@ class AppCacheURLRequestJobTest : public testing::Test {
   scoped_refptr<HttpResponseInfoIOBuffer> read_info_buffer_;
   scoped_refptr<IOBuffer> read_buffer_;
   int expected_read_result_;
-  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> read_callback_;
-  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> read_info_callback_;
-  bool should_delete_reader_in_completion_callback_;
   int reader_deletion_count_down_;
-  bool read_callback_was_called_;
 
   int64 written_response_id_;
   scoped_ptr<AppCacheResponseWriter> writer_;
   scoped_refptr<HttpResponseInfoIOBuffer> write_info_buffer_;
   scoped_refptr<IOBuffer> write_buffer_;
   int expected_write_result_;
-  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> write_callback_;
-  net::OldCompletionCallbackImpl<AppCacheURLRequestJobTest> write_info_callback_;
-  bool should_delete_writer_in_completion_callback_;
   int writer_deletion_count_down_;
-  bool write_callback_was_called_;
 
   net::URLRequest::ProtocolFactory* orig_http_factory_;
   scoped_ptr<net::URLRequest> request_;

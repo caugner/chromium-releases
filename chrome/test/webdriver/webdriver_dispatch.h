@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/logging.h"
 #include "chrome/test/webdriver/commands/response.h"
 #include "third_party/mongoose/mongoose.h"
 
@@ -95,8 +94,6 @@ void Dispatch(struct mg_connection* connection,
                                  &path_segments,
                                  &parameters,
                                  &response)) {
-    LOG(INFO) << "Received command, url: " << request_info->uri
-              << ", method: " << request_info->request_method;
     internal::DispatchHelper(
         new CommandType(path_segments, parameters),
         method,
@@ -105,7 +102,6 @@ void Dispatch(struct mg_connection* connection,
   internal::SendResponse(connection,
                          request_info->request_method,
                          response);
-  LOG(INFO) << "Sent command response, url: " << request_info->uri;
 }
 
 class Dispatcher {
@@ -129,10 +125,10 @@ class Dispatcher {
   void AddShutdown(const std::string& pattern,
                    base::WaitableEvent* shutdown_event);
 
-  // Registers a callback for the given pattern that will return a simple
-  // "HTTP/1.1 200 OK" message with "ok" in the body. Used for checking the
-  // status of the server.
-  void AddHealthz(const std::string& pattern);
+  // Registers a callback that responds to with this server's status
+  // information, as defined by the WebDriver wire protocol:
+  // http://code.google.com/p/selenium/wiki/JsonWireProtocol#GET_/status.
+  void AddStatus(const std::string& pattern);
 
   // Registers a callback for the given pattern that will return the current
   // WebDriver log contents.

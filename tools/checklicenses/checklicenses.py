@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -52,6 +52,8 @@ WHITELISTED_LICENSES = [
     'BSL (v1.0)',
     # TODO(phajdan.jr): Make licensecheck not print the comma after 3.1.
     'BSL (v1.0) GPL (v3.1,)',
+    'GPL (v3 or later) with Bison parser exception',
+    'GPL with Bison parser exception',
     'ISC',
     'LGPL',
     'LGPL (v2)',
@@ -83,9 +85,6 @@ WHITELISTED_LICENSES = [
 
 
 PATH_SPECIFIC_WHITELISTED_LICENSES = {
-    'base/third_party/dmg_fp': [  # http://crbug.com/98086
-        'UNKNOWN',
-    ],
     'base/third_party/icu': [  # http://crbug.com/98087
         'UNKNOWN',
     ],
@@ -160,18 +159,8 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
 
-    # http://code.google.com/p/open-vcdiff/issues/detail?id=31
-    'sdch/open-vcdiff': [
-        'UNKNOWN',
-    ],
-
     'third_party/WebKit': [
         'UNKNOWN',
-    ],
-    'third_party/WebKit/Source/ThirdParty/ANGLE/src/compiler': [
-        # http://crbug.com/105232
-        'GPL',
-        'GPL (v3 or later)',
     ],
     'third_party/WebKit/Source/JavaScriptCore/tests/mozilla': [
         'GPL',
@@ -186,14 +175,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
         'UNKNOWN',
     ],
 
-    'third_party/angle/src/compiler': [
-        # http://crbug.com/105232
-        'GPL',
-        'GPL (v3 or later)',
-    ],
-    'third_party/ashmem/ashmem.h': [  # http://crbug.com/98116
-        'UNKNOWN',
-    ],
     'third_party/bsdiff/mbsdiff.cc': [
         'UNKNOWN',
     ],
@@ -256,9 +237,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/libjpeg_turbo': [  # http://crbug.com/98314
         'UNKNOWN',
     ],
-    'third_party/libphonenumber/cpp/src': [  # http://crbug.com/98316
-        'UNKNOWN',
-    ],
     'third_party/libpng': [  # http://crbug.com/98318
         'UNKNOWN',
     ],
@@ -312,11 +290,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/protobuf': [  # http://crbug.com/98455
         'UNKNOWN',
     ],
-    # http://code.google.com/p/pyftpdlib/issues/detail?id=185
-    'third_party/pyftpdlib/src': [
-        'UNKNOWN',
-    ],
-
     'third_party/pylib': [
         'UNKNOWN',
     ],

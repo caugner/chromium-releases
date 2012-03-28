@@ -16,7 +16,8 @@
 #include "ppapi/proxy/plugin_dispatcher.h"
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/serialized_var.h"
-#include "ppapi/shared_impl/file_ref_impl.h"
+#include "ppapi/shared_impl/ppb_file_ref_shared.h"
+#include "ppapi/shared_impl/tracked_callback.h"
 #include "ppapi/thunk/resource_creation_api.h"
 #include "ppapi/thunk/thunk.h"
 
@@ -28,12 +29,15 @@ using ppapi::thunk::ResourceCreationAPI;
 namespace ppapi {
 namespace proxy {
 
-class FileRef : public FileRefImpl {
+class FileRef : public PPB_FileRef_Shared {
  public:
   explicit FileRef(const PPB_FileRef_CreateInfo& info);
   virtual ~FileRef();
 
-  // PPB_FileRef_API implementation (not provided by FileRefImpl).
+  // Resource overrides.
+  virtual void LastPluginRefWasDeleted() OVERRIDE;
+
+  // PPB_FileRef_API implementation (not provided by PPB_FileRef_Shared).
   virtual PP_Resource GetParent() OVERRIDE;
   virtual int32_t MakeDirectory(PP_Bool make_ancestors,
                                 PP_CompletionCallback callback) OVERRIDE;
@@ -65,26 +69,25 @@ class FileRef : public FileRefImpl {
   // the callback will be identified when it's passed to the host and then
   // back here.
   int next_callback_id_;
-  typedef std::map<int, PP_CompletionCallback> PendingCallbackMap;
+  typedef std::map<int, scoped_refptr<TrackedCallback> > PendingCallbackMap;
   PendingCallbackMap pending_callbacks_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(FileRef);
 };
 
 FileRef::FileRef(const PPB_FileRef_CreateInfo& info)
-    : FileRefImpl(FileRefImpl::InitAsProxy(), info),
+    : PPB_FileRef_Shared(PPB_FileRef_Shared::InitAsProxy(), info),
       next_callback_id_(1) {
 }
 
 FileRef::~FileRef() {
-  // Abort all pending callbacks. Do this by posting a task to avoid reentering
-  // the plugin's Release() call that probably deleted this object.
-  for (PendingCallbackMap::iterator i = pending_callbacks_.begin();
-       i != pending_callbacks_.end(); ++i) {
-    MessageLoop::current()->PostTask(FROM_HERE, base::Bind(
-        i->second.func, i->second.user_data,
-        static_cast<int32_t>(PP_ERROR_ABORTED)));
-  }
+  // The callbacks map should have been cleared by LastPluginRefWasDeleted.
+  DCHECK(pending_callbacks_.empty());
+}
+
+void FileRef::LastPluginRefWasDeleted() {
+  // The callback tracker will abort our callbacks for us.
+  pending_callbacks_.clear();
 }
 
 PP_Resource FileRef::GetParent() {
@@ -163,9 +166,9 @@ void FileRef::ExecuteCallback(int callback_id, int32_t result) {
   }
 
   // Executing the callback may mutate the callback list.
-  PP_CompletionCallback callback = found->second;
+  scoped_refptr<TrackedCallback> callback = found->second;
   pending_callbacks_.erase(found);
-  PP_RunCompletionCallback(&callback, result);
+  callback->Run(result);
 }
 
 int FileRef::SendCallback(PP_CompletionCallback callback) {
@@ -176,7 +179,7 @@ int FileRef::SendCallback(PP_CompletionCallback callback) {
   while (pending_callbacks_.find(next_callback_id_) != pending_callbacks_.end())
     next_callback_id_++;
 
-  pending_callbacks_[next_callback_id_] = callback;
+  pending_callbacks_[next_callback_id_] = new TrackedCallback(this, callback);
   return next_callback_id_++;
 }
 

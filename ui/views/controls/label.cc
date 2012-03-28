@@ -182,7 +182,7 @@ void Label::SetHasFocusBorder(bool has_focus_border) {
 
 gfx::Insets Label::GetInsets() const {
   gfx::Insets insets = View::GetInsets();
-  if (IsFocusable() || has_focus_border_)  {
+  if (focusable() || has_focus_border_)  {
     insets += gfx::Insets(kFocusBorderPadding, kFocusBorderPadding,
                           kFocusBorderPadding, kFocusBorderPadding);
   }
@@ -199,7 +199,7 @@ gfx::Size Label::GetPreferredSize() {
   // TODO(munjal): This logic probably belongs to the View class. But for now,
   // put it here since putting it in View class means all inheriting classes
   // need ot respect the collapse_when_hidden_ flag.
-  if (!IsVisible() && collapse_when_hidden_)
+  if (!visible() && collapse_when_hidden_)
     return gfx::Size();
 
   gfx::Size prefsize(GetTextSize());
@@ -268,7 +268,7 @@ void Label::PaintText(gfx::Canvas* canvas,
                       const gfx::Rect& text_bounds,
                       int flags) {
   canvas->DrawStringInt(text, font_,
-      IsEnabled() ? actual_enabled_color_ : actual_disabled_color_,
+      enabled() ? actual_enabled_color_ : actual_disabled_color_,
       text_bounds.x(), text_bounds.y(), text_bounds.width(),
       text_bounds.height(), flags);
 
@@ -485,8 +485,8 @@ void Label::CalculateDrawStringParams(string16* paint_text,
     *paint_text = base::i18n::GetDisplayStringInLTRDirectionality(
         *paint_text);
   } else if (elide_in_middle_) {
-    *paint_text = ui::ElideText(text_,
-        font_, GetAvailableRect().width(), true);
+    *paint_text = ui::ElideText(text_, font_, GetAvailableRect().width(),
+                                ui::ELIDE_IN_MIDDLE);
   } else {
     *paint_text = text_;
   }

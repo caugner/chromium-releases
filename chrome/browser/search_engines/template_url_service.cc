@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,13 +23,14 @@
 #include "chrome/browser/prefs/pref_set_observer.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/protector/base_setting_change.h"
-#include "chrome/browser/protector/protector.h"
+#include "chrome/browser/protector/protector_service_factory.h"
+#include "chrome/browser/protector/protector_service.h"
 #include "chrome/browser/rlz/rlz.h"
 #include "chrome/browser/search_engines/search_host_to_urls_map.h"
 #include "chrome/browser/search_engines/search_terms_data.h"
 #include "chrome/browser/search_engines/template_url.h"
-#include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/search_engines/template_url_prepopulate_data.h"
+#include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/search_engines/util.h"
 #include "chrome/browser/sync/api/sync_change.h"
 #include "chrome/browser/sync/protocol/search_engine_specifics.pb.h"
@@ -528,25 +529,20 @@ void TemplateURLService::OnWebDataServiceRequestDone(
   LoadDefaultSearchProviderFromPrefs(&default_from_prefs,
                                      &is_default_search_managed_);
 
-  // Check if the default search provider has been changed and notify
-  // Protector instance about it. Don't check if the default search is
-  // managed.
-  const TemplateURL* backup_default_search_provider = NULL;
-  if (!is_default_search_managed_ &&
-      DidDefaultSearchProviderChange(
-          *result,
-          template_urls,
-          &backup_default_search_provider) &&
-      !CommandLine::ForCurrentProcess()->HasSwitch(switches::kNoProtector)) {
-    // TODO: need to handle no default_search_provider better. Likely need to
-    // make sure the default search engine is there, and if not assume it was
-    // deleted and add it back.
-
-    // Protector will delete itself when it's needed no longer.
-    protector::Protector* protector = new protector::Protector(profile());
-    protector->ShowChange(protector::CreateDefaultSearchProviderChange(
-        default_search_provider,
-        backup_default_search_provider));
+  // Check if the default search provider has been changed in Web Data by
+  // another program. No immediate action is performed because the default
+  // search may be changed below by Sync which effectively undoes the hijacking.
+  bool is_default_search_hijacked = false;
+  const TemplateURL* hijacked_default_search_provider = NULL;
+  scoped_ptr<TemplateURL> backup_default_search_provider;
+  // No check is required if the default search is managed.
+  // |DidDefaultSearchProviderChange| must always be called because it will
+  // take care of the unowned backup default search provider instance.
+  if (DidDefaultSearchProviderChange(*result,
+                                     &backup_default_search_provider) &&
+      !is_default_search_managed_) {
+    hijacked_default_search_provider = default_search_provider;
+    is_default_search_hijacked = true;
   }
 
   // Remove entries that were created because of policy as they may have
@@ -623,6 +619,29 @@ void TemplateURLService::OnWebDataServiceRequestDone(
 
   if (new_resource_keyword_version && service_.get())
     service_->SetBuiltinKeywordVersion(new_resource_keyword_version);
+
+  // Don't do anything if the default search provider has been changed since the
+  // check at the beginning (overridden by Sync).
+  if (is_default_search_hijacked &&
+      default_search_provider_ == hijacked_default_search_provider) {
+    // The histograms should be reported even when Protector is disabled.
+    scoped_ptr<protector::BaseSettingChange> change(
+        protector::CreateDefaultSearchProviderChange(
+            hijacked_default_search_provider,
+            backup_default_search_provider.release()));
+    if (protector::IsEnabled()) {
+      protector::ProtectorService* protector_service =
+          protector::ProtectorServiceFactory::GetForProfile(profile());
+      DCHECK(protector_service);
+      protector_service->ShowChange(change.release());
+    } else {
+      // Protector is turned off: set the current default search to itself
+      // to update the backup and sign it. Otherwise, change will be reported
+      // every time when keywords are loaded until a search provider is added.
+      // Note that this saves the default search provider to prefs.
+      SetDefaultSearchProviderNoNotify(default_search_provider_);
+    }
+  }
 
   NotifyObservers();
   NotifyLoaded();
@@ -763,10 +782,12 @@ SyncError TemplateURLService::ProcessSyncChanges(
                existing_turl) {
       // Possibly resolve a keyword conflict if they have the same keywords but
       // are not the same entry.
+      TemplateURL updated_turl(*existing_turl);
+      UpdateTemplateURLWithSyncData(&updated_turl, iter->sync_data());
       if (existing_keyword_turl && existing_keyword_turl != existing_turl)
-        ResolveSyncKeywordConflict(turl.get(), &new_changes);
-      ResetTemplateURL(existing_turl, turl->short_name(), turl->keyword(),
-          turl->url() ? turl->url()->url() : std::string());
+        ResolveSyncKeywordConflict(&updated_turl, &new_changes);
+      UpdateNoNotify(existing_turl, updated_turl);
+      NotifyObservers();
     } else {
       // Something really unexpected happened. Either we received an
       // ACTION_INVALID, or Sync is in a crazy state:
@@ -839,13 +860,14 @@ SyncError TemplateURLService::MergeDataAndStartSyncing(
       // from Sync, we need to update locally or to the cloud. Note that if the
       // timestamps are equal, we touch neither.
       if (sync_turl->last_modified() > local_turl->last_modified()) {
-        // We've received an update from Sync. We should replace all existing
-        // values with the ones from sync except the local TemplateURLID. Note
-        // that this means that the TemplateURL may have to be reparsed. This
+        // We've received an update from Sync. We should replace all synced
+        // fields in the local TemplateURL. Note that this includes the
+        // TemplateURLID and the TemplateURL may have to be reparsed. This
         // also makes the local data's last_modified timestamp equal to Sync's,
         // avoiding an Update on the next MergeData call.
-        sync_turl->set_id(local_turl->id());
-        UpdateNoNotify(local_turl, *sync_turl);
+        TemplateURL updated_turl(*local_turl);
+        UpdateTemplateURLWithSyncData(&updated_turl, iter->second);
+        UpdateNoNotify(local_turl, updated_turl);
         NotifyObservers();
       } else if (sync_turl->last_modified() < local_turl->last_modified()) {
         // Otherwise, we know we have newer data, so update Sync with our
@@ -965,28 +987,8 @@ SyncData TemplateURLService::CreateSyncDataFromTemplateURL(
 // static
 TemplateURL* TemplateURLService::CreateTemplateURLFromSyncData(
     const SyncData& sync_data) {
-  sync_pb::SearchEngineSpecifics specifics =
-      sync_data.GetSpecifics().GetExtension(sync_pb::search_engine);
   TemplateURL* turl = new TemplateURL();
-  turl->set_short_name(UTF8ToUTF16(specifics.short_name()));
-  turl->set_keyword(UTF8ToUTF16(specifics.keyword()));
-  turl->SetFaviconURL(GURL(specifics.favicon_url()));
-  turl->SetURL(specifics.url(), 0, 0);
-  turl->set_safe_for_autoreplace(specifics.safe_for_autoreplace());
-  turl->set_originating_url(GURL(specifics.originating_url()));
-  turl->set_date_created(
-      base::Time::FromInternalValue(specifics.date_created()));
-  std::vector<std::string> input_encodings;
-  base::SplitString(specifics.input_encodings(), ';', &input_encodings);
-  turl->set_input_encodings(input_encodings);
-  turl->set_show_in_default_list(specifics.show_in_default_list());
-  turl->SetSuggestionsURL(specifics.suggestions_url(), 0, 0);
-  turl->SetPrepopulateId(specifics.prepopulate_id());
-  turl->set_autogenerate_keyword(specifics.autogenerate_keyword());
-  turl->SetInstantURL(specifics.instant_url(), 0, 0);
-  turl->set_last_modified(
-      base::Time::FromInternalValue(specifics.last_modified()));
-  turl->set_sync_guid(specifics.sync_guid());
+  UpdateTemplateURLWithSyncData(turl, sync_data);
   return turl;
 }
 
@@ -1200,8 +1202,6 @@ void TemplateURLService::SaveDefaultSearchProviderToPrefs(
   prefs->SetString(prefs::kDefaultSearchProviderKeyword, keyword);
   prefs->SetString(prefs::kDefaultSearchProviderID, id_string);
   prefs->SetString(prefs::kDefaultSearchProviderPrepopulateID, prepopulate_id);
-
-  prefs->ScheduleSavePersistentPrefs();
 }
 
 bool TemplateURLService::LoadDefaultSearchProviderFromPrefs(
@@ -1593,7 +1593,7 @@ void TemplateURLService::SetDefaultSearchProviderNoNotify(
 
     // If we are syncing, we want to set the synced pref that will notify other
     // instances to change their default to this new search provider.
-    if (sync_processor_ && !url->sync_guid().empty() && GetPrefs()) {
+    if (sync_processor_ && url && !url->sync_guid().empty() && GetPrefs()) {
       GetPrefs()->SetString(prefs::kSyncedDefaultSearchProviderGUID,
                             url->sync_guid());
     }
@@ -1772,8 +1772,10 @@ bool TemplateURLService::ResolveSyncKeywordConflict(
     change_list->push_back(SyncChange(SyncChange::ACTION_UPDATE, sync_data));
   } else {
     string16 new_keyword = UniquifyKeyword(*existing_turl);
-    ResetTemplateURL(existing_turl, existing_turl->short_name(), new_keyword,
-        existing_turl->url() ? existing_turl->url()->url() : std::string());
+    TemplateURL new_turl(*existing_turl);
+    new_turl.set_keyword(new_keyword);
+    UpdateNoNotify(existing_turl, new_turl);
+    NotifyObservers();
   }
   return true;
 }
@@ -1875,4 +1877,31 @@ void TemplateURLService::PatchMissingSyncGUIDs(
         service_->UpdateKeyword(*template_url);
     }
   }
+}
+
+// static
+void TemplateURLService::UpdateTemplateURLWithSyncData(
+    TemplateURL* dst,
+    const SyncData& sync_data) {
+  sync_pb::SearchEngineSpecifics specifics =
+      sync_data.GetSpecifics().GetExtension(sync_pb::search_engine);
+  dst->set_short_name(UTF8ToUTF16(specifics.short_name()));
+  dst->set_keyword(UTF8ToUTF16(specifics.keyword()));
+  dst->SetFaviconURL(GURL(specifics.favicon_url()));
+  dst->SetURL(specifics.url(), 0, 0);
+  dst->set_safe_for_autoreplace(specifics.safe_for_autoreplace());
+  dst->set_originating_url(GURL(specifics.originating_url()));
+  dst->set_date_created(
+      base::Time::FromInternalValue(specifics.date_created()));
+  std::vector<std::string> input_encodings;
+  base::SplitString(specifics.input_encodings(), ';', &input_encodings);
+  dst->set_input_encodings(input_encodings);
+  dst->set_show_in_default_list(specifics.show_in_default_list());
+  dst->SetSuggestionsURL(specifics.suggestions_url(), 0, 0);
+  dst->SetPrepopulateId(specifics.prepopulate_id());
+  dst->set_autogenerate_keyword(specifics.autogenerate_keyword());
+  dst->SetInstantURL(specifics.instant_url(), 0, 0);
+  dst->set_last_modified(
+      base::Time::FromInternalValue(specifics.last_modified()));
+  dst->set_sync_guid(specifics.sync_guid());
 }

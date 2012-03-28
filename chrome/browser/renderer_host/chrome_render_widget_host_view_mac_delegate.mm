@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,19 @@
 
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/debugger/devtools_window.h"
-#include "chrome/browser/spellchecker/spellchecker_platform_engine.h"
+#include "chrome/browser/spellchecker/spellcheck_platform_mac.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #import "chrome/browser/ui/cocoa/history_overlay_controller.h"
 #import "chrome/browser/ui/cocoa/view_id_util.h"
 #include "chrome/common/spellcheck_messages.h"
+#include "chrome/common/url_constants.h"
 #include "content/browser/mac/closure_blocks_leopard_compat.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
 #include "content/public/browser/render_view_host_observer.h"
+#include "content/public/browser/web_contents.h"
 
 // Declare things that are part of the 10.7 SDK.
 #if !defined(MAC_OS_X_VERSION_10_7) || \
@@ -136,7 +138,7 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
 }
 
 - (void)gotUnhandledWheelEvent {
-  gotUnhandledWheelEvent_ = true;
+  gotUnhandledWheelEvent_ = YES;
 }
 
 - (void)scrollOffsetPinnedToLeft:(BOOL)left toRight:(BOOL)right {
@@ -160,15 +162,26 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
   // swiping if they come back unhandled.
   if ([theEvent phase] == NSEventPhaseBegan) {
     totalScrollDelta_ = NSZeroSize;
-    gotUnhandledWheelEvent_ = false;
+    gotUnhandledWheelEvent_ = NO;
   }
 
   if (!render_widget_host_ || !render_widget_host_->IsRenderView())
     return NO;
-  bool isDevtoolsRwhv = DevToolsWindow::IsDevToolsWindow(
-      static_cast<RenderViewHost*>(render_widget_host_));
-  if (isDevtoolsRwhv)
+  if (DevToolsWindow::IsDevToolsWindow(
+      static_cast<RenderViewHost*>(render_widget_host_))) {
     return NO;
+  }
+
+  BOOL suppressWheelEvent = NO;
+  Browser* browser = BrowserList::FindBrowserWithWindow([theEvent window]);
+  if (browser && [NSEvent isSwipeTrackingFromScrollEventsEnabled]) {
+    content::WebContents* contents = browser->GetSelectedWebContents();
+    if (contents && contents->GetURL() == GURL(chrome::kChromeUINewTabURL)) {
+      // Always do history navigation on the NTP if it's enabled.
+      gotUnhandledWheelEvent_ = YES;
+      suppressWheelEvent = YES;
+    }
+  }
 
   if (gotUnhandledWheelEvent_ &&
       [NSEvent isSwipeTrackingFromScrollEventsEnabled] &&
@@ -182,7 +195,7 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
     bool isRightScroll = [theEvent scrollingDeltaX] < 0;
     bool goForward = isRightScroll;
     bool canGoBack = false, canGoForward = false;
-    if (Browser* browser = BrowserList::GetLastActive()) {
+    if (browser) {
       canGoBack = browser->CanGoBack();
       canGoForward = browser->CanGoForward();
     }
@@ -205,8 +218,8 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
       // Released by the tracking handler once the gesture is complete.
       HistoryOverlayController* historyOverlay =
           [[HistoryOverlayController alloc]
-            initForMode:goForward ? kHistoryOverlayModeForward :
-                                    kHistoryOverlayModeBack];
+              initForMode:goForward ? kHistoryOverlayModeForward :
+                                      kHistoryOverlayModeBack];
 
       // The way this API works: gestureAmount is between -1 and 1 (float).  If
       // the user does the gesture for more than about 25% (i.e. < -0.25 or >
@@ -217,7 +230,21 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
       // toward 0.  When gestureAmount has reaches its final value, i.e. the
       // track animation is done, the handler is called with |isComplete| set
       // to |YES|.
-      [theEvent trackSwipeEventWithOptions:0
+      // When starting a backwards navigation gesture (swipe from left to right,
+      // gestureAmount will go from 0 to 1), if the user swipes from left to
+      // right and then quickly back to the left, this call can send
+      // NSEventPhaseEnded and then animate to gestureAmount of -1. For a
+      // picture viewer, that makes sense, but for back/forward navigation users
+      // find it confusing. There are two ways to prevent this:
+      // 1. Set Options to NSEventSwipeTrackingLockDirection. This way,
+      //    gestureAmount will always stay > 0.
+      // 2. Pass min:0 max:1 (instead of min:-1 max:1). This way, gestureAmount
+      //    will become less than 0, but on the quick swipe back to the left,
+      //    NSEventPhaseCancelled is sent instead.
+      // The current UI looks nicer with (1) so that swiping the opposite
+      // direction after the initial swipe doesn't cause the shield to move
+      // in the wrong direction.
+      [theEvent trackSwipeEventWithOptions:NSEventSwipeTrackingLockDirection
                   dampenAmountThresholdMin:-1
                                        max:1
                               usingHandler:^(CGFloat gestureAmount,
@@ -225,15 +252,15 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
                                              BOOL isComplete,
                                              BOOL *stop) {
           if (phase == NSEventPhaseBegan) {
-            NSWindow* window =
-                [render_widget_host_->view()->GetNativeView() window];
-            [historyOverlay showPanelForWindow:window];
+            [historyOverlay showPanelForView:
+                render_widget_host_->view()->GetNativeView()];
             return;
           }
 
           // |gestureAmount| obeys -[NSEvent isDirectionInvertedFromDevice]
           // automatically.
-          Browser* browser = BrowserList::GetLastActive();
+          Browser* browser = BrowserList::FindBrowserWithWindow(
+              historyOverlay.view.window);
           if (phase == NSEventPhaseEnded && browser) {
             if (goForward)
               browser->GoForward(CURRENT_TAB);
@@ -250,7 +277,7 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
       return YES;
     }
   }
-  return NO;
+  return suppressWheelEvent;
 }
 
 - (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item
@@ -309,17 +336,17 @@ class SpellCheckRenderViewObserver : public content::RenderViewHostObserver {
 - (void)ignoreSpelling:(id)sender {
   // Ideally, we would ask the current RenderView for its tag, but that would
   // mean making a blocking IPC call from the browser. Instead,
-  // SpellCheckerPlatform::CheckSpelling remembers the last tag and
-  // SpellCheckerPlatform::IgnoreWord assumes that is the correct tag.
+  // spellcheck_mac::CheckSpelling remembers the last tag and
+  // spellcheck_mac::IgnoreWord assumes that is the correct tag.
   NSString* wordToIgnore = [sender stringValue];
   if (wordToIgnore != nil)
-    SpellCheckerPlatform::IgnoreWord(base::SysNSStringToUTF16(wordToIgnore));
+    spellcheck_mac::IgnoreWord(base::SysNSStringToUTF16(wordToIgnore));
 }
 
 - (void)showGuessPanel:(id)sender {
   render_widget_host_->Send(new SpellCheckMsg_ToggleSpellPanel(
       render_widget_host_->routing_id(),
-      SpellCheckerPlatform::SpellingPanelVisible()));
+      spellcheck_mac::SpellingPanelVisible()));
 }
 
 - (void)toggleContinuousSpellChecking:(id)sender {

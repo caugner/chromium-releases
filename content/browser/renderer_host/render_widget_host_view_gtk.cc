@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,19 +19,22 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/string_number_conversions.h"
 #include "base/time.h"
+#include "base/utf_offset_string_conversions.h"
 #include "base/utf_string_conversions.h"
 #include "content/browser/renderer_host/backing_store_gtk.h"
 #include "content/browser/renderer_host/gtk_im_context_wrapper.h"
 #include "content/browser/renderer_host/gtk_window_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host.h"
+#include "content/common/gpu/gpu_messages.h"
 #include "content/public/browser/native_web_keyboard_event.h"
+#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/common/content_switches.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebScreenInfo.h"
@@ -162,7 +165,7 @@ class RenderWidgetHostViewGtkWidget {
 
 
     // Connect after so that we are called after the handler installed by the
-    // TabContentsView which handles zoom events.
+    // WebContentsView which handles zoom events.
     g_signal_connect_after(widget, "scroll-event",
                            G_CALLBACK(OnMouseScrollEvent), host_view);
 
@@ -526,7 +529,7 @@ class RenderWidgetHostViewGtkWidget {
                                      RenderWidgetHostViewGtk* host_view) {
     // If the user is holding shift, translate it into a horizontal scroll. We
     // don't care what other modifiers the user may be holding (zooming is
-    // handled at the TabContentsView level).
+    // handled at the WebContentsView level).
     if (event->state & GDK_SHIFT_MASK) {
       if (event->direction == GDK_SCROLL_UP)
         event->direction = GDK_SCROLL_LEFT;
@@ -583,7 +586,8 @@ RenderWidgetHostViewGtk::~RenderWidgetHostViewGtk() {
   view_.Destroy();
 }
 
-void RenderWidgetHostViewGtk::InitAsChild() {
+void RenderWidgetHostViewGtk::InitAsChild(
+    gfx::NativeView parent_view) {
   DoSharedInit();
   gtk_widget_show(view_.get());
 }
@@ -727,6 +731,11 @@ gfx::NativeViewId RenderWidgetHostViewGtk::GetNativeViewId() const {
   return GtkNativeViewManager::GetInstance()->GetIdForWidget(view_.get());
 }
 
+gfx::NativeViewAccessible RenderWidgetHostViewGtk::GetNativeViewAccessible() {
+  NOTIMPLEMENTED();
+  return NULL;
+}
+
 void RenderWidgetHostViewGtk::MovePluginWindows(
     const std::vector<webkit::npapi::WebPluginGeometry>& moves) {
   for (size_t i = 0; i < moves.size(); ++i) {
@@ -803,6 +812,8 @@ void RenderWidgetHostViewGtk::ImeCancelComposition() {
 void RenderWidgetHostViewGtk::DidUpdateBackingStore(
     const gfx::Rect& scroll_rect, int scroll_dx, int scroll_dy,
     const std::vector<gfx::Rect>& copy_rects) {
+  TRACE_EVENT0("ui::gtk", "RenderWidgetHostViewGtk::DidUpdateBackingStore");
+
   if (is_hidden_)
     return;
 
@@ -897,6 +908,8 @@ void RenderWidgetHostViewGtk::SetTooltipText(const string16& tooltip_text) {
 void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
                                                size_t offset,
                                                const ui::Range& range) {
+  RenderWidgetHostView::SelectionChanged(text, offset, range);
+
   if (text.empty() || range.is_empty())
     return;
   size_t pos = range.GetMin() - offset;
@@ -907,10 +920,6 @@ void RenderWidgetHostViewGtk::SelectionChanged(const string16& text,
     NOTREACHED() << "The text can not cover range.";
     return;
   }
-
-  selection_text_ = text;
-  selection_text_offset_ = offset;
-  selection_range_ = range;
 
   std::string utf8_selection = UTF16ToUTF8(text.substr(pos, n));
   GtkClipboard* x_clipboard = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
@@ -1005,13 +1014,13 @@ BackingStore* RenderWidgetHostViewGtk::AllocBackingStore(
 void RenderWidgetHostViewGtk::AcceleratedSurfaceBuffersSwapped(
     const GpuHostMsg_AcceleratedSurfaceBuffersSwapped_Params& params,
     int gpu_host_id) {
-  NOTREACHED();
+  RenderWidgetHost::AcknowledgeSwapBuffers(params.route_id, gpu_host_id);
 }
 
 void RenderWidgetHostViewGtk::AcceleratedSurfacePostSubBuffer(
     const GpuHostMsg_AcceleratedSurfacePostSubBuffer_Params& params,
     int gpu_host_id) {
-  NOTREACHED();
+  RenderWidgetHost::AcknowledgePostSubBuffer(params.route_id, gpu_host_id);
 }
 
 void RenderWidgetHostViewGtk::SetBackground(const SkBitmap& background) {
@@ -1073,6 +1082,8 @@ void RenderWidgetHostViewGtk::ModifyEventForEdgeDragging(
 }
 
 void RenderWidgetHostViewGtk::Paint(const gfx::Rect& damage_rect) {
+  TRACE_EVENT0("ui::gtk", "RenderWidgetHostViewGtk::Paint");
+
   // If the GPU process is rendering directly into the View,
   // call the compositor directly.
   RenderWidgetHost* render_widget_host = GetRenderWidgetHost();
@@ -1164,6 +1175,9 @@ void RenderWidgetHostViewGtk::DestroyPluginContainer(
 
 void RenderWidgetHostViewGtk::UnhandledWheelEvent(
     const WebKit::WebMouseWheelEvent& event) {
+}
+
+void RenderWidgetHostViewGtk::ProcessTouchAck(bool processed) {
 }
 
 void RenderWidgetHostViewGtk::SetHasHorizontalScrollbar(
@@ -1301,6 +1315,30 @@ void RenderWidgetHostViewGtk::ForwardKeyboardEvent(
   host_->ForwardKeyboardEvent(event);
 }
 
+bool RenderWidgetHostViewGtk::RetrieveSurrounding(std::string* text,
+                                                  size_t* cursor_index) {
+  if (!selection_range_.IsValid())
+    return false;
+
+  size_t offset = selection_range_.GetMin() - selection_text_offset_;
+  DCHECK(offset <= selection_text_.length());
+
+  if (offset == selection_text_.length()) {
+    *text = UTF16ToUTF8(selection_text_);
+    *cursor_index = text->length();
+    return true;
+  }
+
+  *text = UTF16ToUTF8AndAdjustOffset(
+      base::StringPiece16(selection_text_), &offset);
+  if (offset == string16::npos) {
+    NOTREACHED() << "Invalid offset in UTF16 string.";
+    return false;
+  }
+  *cursor_index = offset;
+  return true;
+}
+
 void RenderWidgetHostViewGtk::set_last_mouse_down(GdkEventButton* event) {
   GdkEventButton* temp = NULL;
   if (event) {
@@ -1356,6 +1394,15 @@ void RenderWidgetHostViewGtk::ModifyEventMovementAndCoords(
     unlocked_mouse_position_.SetPoint(event->windowX, event->windowY);
     unlocked_global_mouse_position_.SetPoint(event->globalX, event->globalY);
   }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// RenderWidgetHostView, public:
+
+// static
+RenderWidgetHostView* RenderWidgetHostView::CreateViewForWidget(
+    RenderWidgetHost* widget) {
+  return new RenderWidgetHostViewGtk(widget);
 }
 
 // static

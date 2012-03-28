@@ -147,7 +147,12 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
 void ChromeRenderMessageFilter::OnLaunchNaCl(
     const std::wstring& url, int socket_count, IPC::Message* reply_msg) {
   NaClProcessHost* host = new NaClProcessHost(url);
-  host->Launch(this, socket_count, reply_msg);
+  if (!host->Launch(this, socket_count, reply_msg)) {
+    // On failure, the NaClProcessHost didn't send the reply which the renderer
+    // is blocked on. Unblock the renderer by sending an error.
+    reply_msg->set_reply_error();
+    Send(reply_msg);
+  }
 }
 #endif
 
@@ -216,10 +221,9 @@ void ChromeRenderMessageFilter::OnOpenChannelToExtension(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &ChromeRenderMessageFilter::OpenChannelToExtensionOnUIThread,
-          render_process_id_, routing_id, port2_id, source_extension_id,
-          target_extension_id, channel_name));
+      base::Bind(&ChromeRenderMessageFilter::OpenChannelToExtensionOnUIThread,
+                 this, render_process_id_, routing_id, port2_id,
+                 source_extension_id, target_extension_id, channel_name));
 }
 
 void ChromeRenderMessageFilter::OpenChannelToExtensionOnUIThread(
@@ -242,10 +246,9 @@ void ChromeRenderMessageFilter::OnOpenChannelToTab(
 
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE,
-      NewRunnableMethod(
-          this, &ChromeRenderMessageFilter::OpenChannelToTabOnUIThread,
-          render_process_id_, routing_id, port2_id, tab_id, extension_id,
-          channel_name));
+      base::Bind(&ChromeRenderMessageFilter::OpenChannelToTabOnUIThread, this,
+                 render_process_id_, routing_id, port2_id, tab_id, extension_id,
+                 channel_name));
 }
 
 void ChromeRenderMessageFilter::OpenChannelToTabOnUIThread(

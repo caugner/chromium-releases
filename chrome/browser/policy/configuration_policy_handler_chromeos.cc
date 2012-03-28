@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,10 @@
 namespace policy {
 
 NetworkConfigurationPolicyHandler::NetworkConfigurationPolicyHandler(
-    ConfigurationPolicyType type)
-    : TypeCheckingPolicyHandler(type, Value::TYPE_STRING) {}
+    const char* policy_name,
+    chromeos::NetworkUIData::ONCSource onc_source)
+    : TypeCheckingPolicyHandler(policy_name, Value::TYPE_STRING),
+      onc_source_(onc_source) {}
 
 NetworkConfigurationPolicyHandler::~NetworkConfigurationPolicyHandler() {}
 
@@ -33,9 +35,10 @@ bool NetworkConfigurationPolicyHandler::CheckPolicySettings(
   if (value) {
     std::string onc_blob;
     value->GetAsString(&onc_blob);
-    chromeos::OncNetworkParser parser(onc_blob);
+    // Policy-based ONC blobs cannot have a passphrase.
+    chromeos::OncNetworkParser parser(onc_blob, "", onc_source_);
     if (!parser.parse_error().empty()) {
-      errors->AddError(policy_type(),
+      errors->AddError(policy_name(),
                        IDS_POLICY_NETWORK_CONFIG_PARSE_ERROR,
                        parser.parse_error());
       return false;
@@ -54,15 +57,14 @@ void NetworkConfigurationPolicyHandler::ApplyPolicySettings(
 
 void NetworkConfigurationPolicyHandler::PrepareForDisplaying(
     PolicyMap* policies) const {
-  const Value* network_config = policies->Get(policy_type());
-  if (!network_config)
+  const PolicyMap::Entry* entry = policies->Get(policy_name());
+  if (!entry)
     return;
-
-  Value* sanitized_config = SanitizeNetworkConfig(network_config);
+  Value* sanitized_config = SanitizeNetworkConfig(entry->value);
   if (!sanitized_config)
     sanitized_config = Value::CreateNullValue();
 
-  policies->Set(policy_type(), sanitized_config);
+  policies->Set(policy_name(), entry->level, entry->scope, sanitized_config);
 }
 
 // static

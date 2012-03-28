@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,7 +65,7 @@ class OffTheRecordProfileImpl : public Profile,
   virtual PrefService* GetPrefs() OVERRIDE;
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
   virtual TemplateURLFetcher* GetTemplateURLFetcher() OVERRIDE;
-  virtual DownloadManager* GetDownloadManager() OVERRIDE;
+  virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
   virtual fileapi::FileSystemContext* GetFileSystemContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
@@ -79,24 +79,19 @@ class OffTheRecordProfileImpl : public Profile,
   virtual const content::ResourceContext& GetResourceContext() OVERRIDE;
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
-  virtual HostZoomMap* GetHostZoomMap() OVERRIDE;
-  virtual GeolocationPermissionContext*
+  virtual content::HostZoomMap* GetHostZoomMap() OVERRIDE;
+  virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
   virtual SpeechInputPreferences* GetSpeechInputPreferences() OVERRIDE;
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() OVERRIDE;
-  virtual FindBarState* GetFindBarState() OVERRIDE;
-  virtual bool HasProfileSyncService() const OVERRIDE;
+  virtual bool HasProfileSyncService() OVERRIDE;
   virtual bool DidLastSessionExitCleanly() OVERRIDE;
   virtual BookmarkModel* GetBookmarkModel() OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
   virtual TokenService* GetTokenService() OVERRIDE;
   virtual ProfileSyncService* GetProfileSyncService() OVERRIDE;
-  virtual ProfileSyncService* GetProfileSyncService(
-      const std::string& cros_user) OVERRIDE;
   virtual bool IsSameProfile(Profile* profile) OVERRIDE;
   virtual Time GetStartTime() const OVERRIDE;
-  virtual SpellCheckHost* GetSpellCheckHost() OVERRIDE;
-  virtual void ReinitializeSpellCheckHost(bool force) OVERRIDE;
   virtual WebKitContext* GetWebKitContext() OVERRIDE;
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
   virtual history::TopSites* GetTopSites() OVERRIDE;
@@ -130,7 +125,6 @@ class OffTheRecordProfileImpl : public Profile,
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
   virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
   virtual GURL GetHomePage() OVERRIDE;
-  virtual NetworkActionPredictor* GetNetworkActionPredictor() OVERRIDE;
 
   // content::NotificationObserver implementation.
   virtual void Observe(int type,
@@ -159,7 +153,7 @@ class OffTheRecordProfileImpl : public Profile,
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
 
   // Use a separate zoom map for OTR.
-  scoped_refptr<HostZoomMap> host_zoom_map_;
+  scoped_refptr<content::HostZoomMap> host_zoom_map_;
 
   // Use a special WebKit context for OTR browsing.
   scoped_refptr<WebKitContext> webkit_context_;
@@ -168,9 +162,6 @@ class OffTheRecordProfileImpl : public Profile,
   // profile because then the main profile would learn some of the host names
   // the user visited while OTR.
   scoped_ptr<SSLHostState> ssl_host_state_;
-  // Use a separate FindBarState so search terms do not leak back to the main
-  // profile.
-  scoped_ptr<FindBarState> find_bar_state_;
 
   // Time we were started.
   Time start_time_;

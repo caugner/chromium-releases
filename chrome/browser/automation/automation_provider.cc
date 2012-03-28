@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,6 @@
 #include "base/string_number_conversions.h"
 #include "base/string_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
@@ -79,20 +78,17 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/save_package.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/ssl/ssl_manager.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "net/proxy/proxy_config_service_fixed.h"
 #include "net/proxy/proxy_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFindOptions.h"
-#include "webkit/glue/password_form.h"
 
 #if defined(OS_WIN) && !defined(USE_AURA)
 #include "chrome/browser/external_tab_container_win.h"
@@ -102,9 +98,12 @@
 #include "chrome/browser/chromeos/login/user_manager.h"
 #endif  // defined(OS_CHROMEOS)
 
-using content::BrowserThread;
 using WebKit::WebFindOptions;
 using base::Time;
+using content::BrowserThread;
+using content::DownloadItem;
+using content::NavigationController;
+using content::WebContents;
 
 namespace {
 
@@ -465,19 +464,23 @@ bool AutomationProvider::OnMessageReceived(const IPC::Message& message) {
                                     OnRunUnloadHandlers)
     IPC_MESSAGE_HANDLER(AutomationMsg_SetZoomLevel, OnSetZoomLevel)
 #endif  // defined(OS_WIN)
-    IPC_MESSAGE_UNHANDLED(handled = false; OnUnhandledMessage())
+    IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP_EX()
+  if (!handled)
+    OnUnhandledMessage(message);
   if (!deserialize_success)
     OnMessageDeserializationFailure();
   return handled;
 }
 
-void AutomationProvider::OnUnhandledMessage() {
+void AutomationProvider::OnUnhandledMessage(const IPC::Message& message) {
   // We should not hang here. Print a message to indicate what's going on,
   // and disconnect the channel to notify the caller about the error
   // in a way it can't ignore, and make any further attempts to send
   // messages fail fast.
   LOG(ERROR) << "AutomationProvider received a message it can't handle. "
+             << "Message type: " << message.type()
+             << ", routing ID: " << message.routing_id() << ". "
              << "Please make sure that you use switches::kTestingChannelID "
              << "for test code (TestingAutomationProvider), and "
              << "switches::kAutomationClientChannelID for everything else "
@@ -542,9 +545,9 @@ void AutomationProvider::HandleFindRequest(
   }
 
   NavigationController* nav = tab_tracker_->GetResource(handle);
-  TabContents* tab_contents = nav->tab_contents();
+  WebContents* web_contents = nav->GetWebContents();
 
-  SendFindRequest(tab_contents,
+  SendFindRequest(web_contents,
                   false,
                   params.search_string,
                   params.forward,
@@ -554,7 +557,7 @@ void AutomationProvider::HandleFindRequest(
 }
 
 void AutomationProvider::SendFindRequest(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     bool with_json,
     const string16& search_string,
     bool forward,
@@ -564,14 +567,14 @@ void AutomationProvider::SendFindRequest(
   int request_id = FindInPageNotificationObserver::kFindInPageRequestId;
   FindInPageNotificationObserver* observer =
       new FindInPageNotificationObserver(this,
-                                         tab_contents,
+                                         web_contents,
                                          with_json,
                                          reply_message);
   if (!with_json) {
     find_in_page_observer_.reset(observer);
   }
   TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
   if (wrapper)
     wrapper->find_tab_helper()->set_current_find_request_id(request_id);
 
@@ -579,7 +582,7 @@ void AutomationProvider::SendFindRequest(
   options.forward = forward;
   options.matchCase = match_case;
   options.findNext = find_next;
-  tab_contents->render_view_host()->Find(
+  web_contents->GetRenderViewHost()->Find(
       FindInPageNotificationObserver::kFindInPageRequestId, search_string,
       options);
 }
@@ -595,13 +598,13 @@ void AutomationProvider::SetProxyConfig(const std::string& new_proxy_config) {
                  new_proxy_config));
 }
 
-TabContents* AutomationProvider::GetTabContentsForHandle(
+WebContents* AutomationProvider::GetWebContentsForHandle(
     int handle, NavigationController** tab) {
   if (tab_tracker_->ContainsHandle(handle)) {
     NavigationController* nav_controller = tab_tracker_->GetResource(handle);
     if (tab)
       *tab = nav_controller;
-    return nav_controller->tab_contents();
+    return nav_controller->GetWebContents();
   }
   return NULL;
 }
@@ -629,8 +632,8 @@ void AutomationProvider::OverrideEncoding(int tab_handle,
       }
     } else {
       // There is no UI, Chrome probably runs as Chrome-Frame mode.
-      // Try to get TabContents and call its override_encoding method.
-      TabContents* contents = nav->tab_contents();
+      // Try to get WebContents and call its override_encoding method.
+      WebContents* contents = nav->GetWebContents();
       if (!contents)
         return;
       const std::string selected_encoding =
@@ -722,11 +725,12 @@ void AutomationProvider::OnSetPageFontSize(int tab_handle,
   if (tab_tracker_->ContainsHandle(tab_handle)) {
     NavigationController* tab = tab_tracker_->GetResource(tab_handle);
     DCHECK(tab != NULL);
-    if (tab && tab->tab_contents()) {
-      DCHECK(tab->tab_contents()->browser_context() != NULL);
-      Profile* profile =
-          Profile::FromBrowserContext(tab->tab_contents()->browser_context());
-      profile->GetPrefs()->SetInteger(prefs::kWebKitDefaultFontSize, font_size);
+    if (tab && tab->GetWebContents()) {
+      DCHECK(tab->GetWebContents()->GetBrowserContext() != NULL);
+      Profile* profile = Profile::FromBrowserContext(
+          tab->GetWebContents()->GetBrowserContext());
+      profile->GetPrefs()->SetInteger(
+          prefs::kWebKitGlobalDefaultFontSize, font_size);
     }
   }
 }
@@ -796,13 +800,13 @@ RenderViewHost* AutomationProvider::GetViewForTab(int tab_handle) {
       return NULL;
     }
 
-    TabContents* tab_contents = tab->tab_contents();
-    if (!tab_contents) {
+    WebContents* web_contents = tab->GetWebContents();
+    if (!web_contents) {
       NOTREACHED();
       return NULL;
     }
 
-    RenderViewHost* view_host = tab_contents->render_view_host();
+    RenderViewHost* view_host = web_contents->GetRenderViewHost();
     return view_host;
   }
 
@@ -912,7 +916,7 @@ void AutomationProvider::ExecuteExtensionActionInActiveTabAsync(
       profile_->GetExtensionMessageService();
   Browser* browser = browser_tracker_->GetResource(browser_handle);
   if (extension && service && message_service && browser) {
-    int tab_id = ExtensionTabUtil::GetTabId(browser->GetSelectedTabContents());
+    int tab_id = ExtensionTabUtil::GetTabId(browser->GetSelectedWebContents());
     if (extension->page_action()) {
       service->browser_event_router()->PageActionExecuted(
           browser->profile(), extension->id(), "action", tab_id, "", 1);
@@ -999,7 +1003,7 @@ void AutomationProvider::GetExtensionProperty(
 
 void AutomationProvider::SaveAsAsync(int tab_handle) {
   NavigationController* tab = NULL;
-  TabContents* tab_contents = GetTabContentsForHandle(tab_handle, &tab);
-  if (tab_contents)
-    tab_contents->OnSavePage();
+  WebContents* web_contents = GetWebContentsForHandle(tab_handle, &tab);
+  if (web_contents)
+    web_contents->OnSavePage();
 }

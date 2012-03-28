@@ -1,15 +1,18 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ui/base/keycodes/keyboard_code_conversion_x.h"
 
+#define XK_3270  // for XK_3270_BackTab
 #include <X11/keysym.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/XF86keysym.h>
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/stringprintf.h"
 #include "base/utf_string_conversions.h"
 
 namespace ui {
@@ -30,9 +33,6 @@ KeyboardCode KeyboardCodeFromXKeyEvent(XEvent* xev) {
 }
 
 KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
-  // Consult GDK key translation (in WindowsKeyCodeForGdkKeyCode) for details
-  // about the following translations.
-
   // TODO(sad): Have |keysym| go through the X map list?
 
   switch (keysym) {
@@ -43,10 +43,13 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       return VKEY_DELETE;
     case XK_Tab:
     case XK_KP_Tab:
+    case XK_ISO_Left_Tab:
+    case XK_3270_BackTab:
       return VKEY_TAB;
     case XK_Linefeed:
     case XK_Return:
     case XK_KP_Enter:
+    case XK_ISO_Enter:
       return VKEY_RETURN;
     case XK_Clear:
       return VKEY_CLEAR;
@@ -79,6 +82,15 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       return VKEY_UP;
     case XK_Escape:
       return VKEY_ESCAPE;
+    case XK_Kana_Lock:
+    case XK_Kana_Shift:
+      return VKEY_KANA;
+    case XK_Hangul:
+      return VKEY_HANGUL;
+    case XK_Hangul_Hanja:
+      return VKEY_HANJA;
+    case XK_Kanji:
+      return VKEY_KANJI;
     case XK_A:
     case XK_a:
       return VKEY_A;
@@ -170,6 +182,27 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_9:
       return static_cast<KeyboardCode>(VKEY_0 + (keysym - XK_0));
 
+    case XK_parenright:
+      return VKEY_0;
+    case XK_exclam:
+      return VKEY_1;
+    case XK_at:
+      return VKEY_2;
+    case XK_numbersign:
+      return VKEY_3;
+    case XK_dollar:
+      return VKEY_4;
+    case XK_percent:
+      return VKEY_5;
+    case XK_asciicircum:
+      return VKEY_6;
+    case XK_ampersand:
+      return VKEY_7;
+    case XK_asterisk:
+      return VKEY_8;
+    case XK_parenleft:
+      return VKEY_9;
+
     case XK_KP_0:
     case XK_KP_1:
     case XK_KP_2:
@@ -256,10 +289,8 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
       return VKEY_INSERT;
     case XK_Help:
       return VKEY_HELP;
-    case XK_Meta_L:
     case XK_Super_L:
       return VKEY_LWIN;
-    case XK_Meta_R:
     case XK_Super_R:
       return VKEY_RWIN;
     case XK_Menu:
@@ -290,14 +321,34 @@ KeyboardCode KeyboardCodeFromXKeysym(unsigned int keysym) {
     case XK_F24:
       return static_cast<KeyboardCode>(VKEY_F1 + (keysym - XK_F1));
 
+#if defined(TOOLKIT_USES_GTK)
+    case XF86XK_HomePage:
+    case XF86XK_Search:
+    case XF86XK_Back:
+    case XF86XK_Forward:
+    case XF86XK_Stop:
+    case XF86XK_Refresh:
+    case XF86XK_Favorites:
+    case XF86XK_History:
+    case XF86XK_OpenURL:
+    case XF86XK_AddFavorite:
+    case XF86XK_Go:
+    case XF86XK_Reload:
+    case XF86XK_ZoomIn:
+    case XF86XK_ZoomOut:
+      // ui::AcceleratorGtk tries to convert the XF86XK_ keysyms on Chrome
+      // startup. It's safe to return VKEY_UNKNOWN here since ui::AcceleratorGtk
+      // also checks a Gdk keysym. http://crbug.com/109843
+      return VKEY_UNKNOWN;
+#endif
+
     // TODO(sad): some keycodes are still missing.
   }
-
-  DLOG(WARNING) << "Unknown keycode: " << keysym;
+  DLOG(WARNING) << "Unknown keysym: " << StringPrintf("0x%x", keysym);
   return VKEY_UNKNOWN;
 }
 
-unsigned int DefaultSymbolFromXEvent(XEvent* xev) {
+uint16 GetCharacterFromXEvent(XEvent* xev) {
   char buf[6];
   int bytes_written = XLookupString(&xev->xkey, buf, 6, NULL, NULL);
   DCHECK_LE(bytes_written, 6);
@@ -535,9 +586,9 @@ int XKeysymForWindowsKeyCode(KeyboardCode keycode, bool shift) {
       return (shift ? XK_A : XK_a) + (keycode - VKEY_A);
 
     case VKEY_LWIN:
-      return XK_Meta_L;
+      return XK_Super_L;
     case VKEY_RWIN:
-      return XK_Meta_R;
+      return XK_Super_R;
 
     case VKEY_NUMLOCK:
       return XK_Num_Lock;
@@ -595,6 +646,7 @@ int XKeysymForWindowsKeyCode(KeyboardCode keycode, bool shift) {
       return XK_F1 + (keycode - VKEY_F1);
 
     default:
+      LOG(WARNING) << "Unknown keycode:" << keycode;
       return 0;
     }
 }

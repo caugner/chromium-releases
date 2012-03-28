@@ -15,14 +15,18 @@
 #include "chrome/browser/ui/webui/html_dialog_ui.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 static base::LazyInstance<base::PropertyAccessor<ConstrainedHtmlUIDelegate*> >
     g_constrained_html_ui_property_accessor = LAZY_INSTANCE_INITIALIZER;
 
-ConstrainedHtmlUI::ConstrainedHtmlUI(TabContents* contents)
-    : ChromeWebUI(contents) {
+ConstrainedHtmlUI::ConstrainedHtmlUI(content::WebUI* web_ui)
+    : WebUIController(web_ui) {
 }
 
 ConstrainedHtmlUI::~ConstrainedHtmlUI() {
@@ -40,21 +44,18 @@ void ConstrainedHtmlUI::RenderViewCreated(RenderViewHost* render_view_host) {
                                      dialog_delegate->GetDialogArgs());
   for (std::vector<WebUIMessageHandler*>::iterator it = handlers.begin();
        it != handlers.end(); ++it) {
-    (*it)->Attach(this);
-    AddMessageHandler(*it);
+    web_ui()->AddMessageHandler(*it);
   }
 
   // Add a "DialogClose" callback which matches HTMLDialogUI behavior.
-  RegisterMessageCallback("DialogClose",
+  web_ui()->RegisterMessageCallback("DialogClose",
       base::Bind(&ConstrainedHtmlUI::OnDialogCloseMessage,
                  base::Unretained(this)));
 
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_HTML_DIALOG_SHOWN,
-      content::Source<WebUI>(this),
+      content::Source<content::WebUI>(web_ui()),
       content::Details<RenderViewHost>(render_view_host));
-
-  ChromeWebUI::RenderViewCreated(render_view_host);
 }
 
 void ConstrainedHtmlUI::OnDialogCloseMessage(const ListValue* args) {
@@ -70,8 +71,8 @@ void ConstrainedHtmlUI::OnDialogCloseMessage(const ListValue* args) {
 }
 
 ConstrainedHtmlUIDelegate* ConstrainedHtmlUI::GetConstrainedDelegate() {
-  ConstrainedHtmlUIDelegate** property =
-      GetPropertyAccessor().GetProperty(tab_contents()->property_bag());
+  ConstrainedHtmlUIDelegate** property = GetPropertyAccessor().GetProperty(
+      web_ui()->GetWebContents()->GetPropertyBag());
   return property ? *property : NULL;
 }
 

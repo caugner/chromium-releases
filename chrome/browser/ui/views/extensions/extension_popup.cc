@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,10 +14,12 @@
 #include "chrome/browser/ui/views/window.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/views/layout/fill_layout.h"
+
+using content::WebContents;
 
 // The minimum/maximum dimensions of the popup.
 // The minimum is just a little larger than the size of the button itself.
@@ -36,6 +38,8 @@ ExtensionPopup::ExtensionPopup(
     : BubbleDelegateView(anchor_view, arrow_location),
       extension_host_(host),
       inspect_with_devtools_(inspect_with_devtools) {
+  // Adjust the margin so that contents fit better.
+  set_margin(views::BubbleBorder::GetCornerRadius() / 2);
   SetLayoutManager(new views::FillLayout());
   AddChildView(host->view());
   host->view()->SetContainer(this);
@@ -46,15 +50,13 @@ ExtensionPopup::ExtensionPopup(
   set_close_on_deactivate(!inspect_with_devtools);
 #endif
 
-  // We wait to show the popup until the contained host finishes loading.
-  registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
-                 content::Source<Profile>(host->profile()));
+  // Wait to show the popup until the contained host finishes loading.
+  registrar_.Add(this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
+                 content::Source<WebContents>(host->host_contents()));
 
   // Listen for the containing view calling window.close();
   registrar_.Add(this, chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE,
                  content::Source<Profile>(host->profile()));
-
-  views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);
 }
 
 ExtensionPopup::~ExtensionPopup() {
@@ -65,21 +67,10 @@ void ExtensionPopup::Observe(int type,
                              const content::NotificationSource& source,
                              const content::NotificationDetails& details) {
   switch (type) {
-    case chrome::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
-      // Once we receive did stop loading, the content will be complete and
-      // the width will have been computed.  Now it's safe to show.
-      if (host() == content::Details<ExtensionHost>(details).ptr()) {
-        Show();
-        // Focus on the host contents when the bubble is first shown.
-        host()->host_contents()->Focus();
-        if (inspect_with_devtools_) {
-          // Listen for the the devtools window closing.
-          registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
-              content::Source<content::BrowserContext>(host()->profile()));
-          DevToolsWindow::ToggleDevToolsWindow(host()->render_view_host(),
-              DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
-        }
-      }
+    case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME:
+      DCHECK(content::Source<WebContents>(host()->host_contents()) == source);
+      // Show when the content finishes loading and its width is computed.
+      ShowBubble();
       break;
     case chrome::NOTIFICATION_EXTENSION_HOST_VIEW_SHOULD_CLOSE:
       // If we aren't the host of the popup, then disregard the notification.
@@ -118,17 +109,15 @@ void ExtensionPopup::OnNativeFocusChange(gfx::NativeView focused_before,
   // Don't close if a child of this window is activated (only needed on Win).
   // ExtensionPopups can create Javascipt dialogs; see crbug.com/106723.
   gfx::NativeView this_window = GetWidget()->GetNativeView();
-  if (!inspect_with_devtools_ && focused_before == this_window) {
-    DCHECK_NE(focused_now, this_window);
-    if (::GetWindow(focused_now, GW_OWNER) == this_window)
+  if (inspect_with_devtools_ || focused_now == this_window ||
+      ::GetWindow(focused_now, GW_OWNER) == this_window)
+    return;
+  gfx::NativeView focused_parent = focused_now;
+  while (focused_parent = ::GetParent(focused_parent)) {
+    if (this_window == focused_parent)
       return;
-    gfx::NativeView focused_parent = focused_now;
-    while (focused_parent = ::GetParent(focused_parent)) {
-      if (this_window == focused_parent)
-        return;
-    }
-    GetWidget()->Close();
   }
+  GetWidget()->Close();
 #endif
 }
 
@@ -146,16 +135,28 @@ ExtensionPopup* ExtensionPopup::ShowPopup(
       arrow_location, inspect_with_devtools);
   browser::CreateViewsBubble(popup);
 
-  // TODO(msw): Use half the corner radius as contents margins so that contents
-  // fit better in the bubble. See http://crbug.com/80416.
-
   // If the host had somehow finished loading, then we'd miss the notification
   // and not show.  This seems to happen in single-process mode.
-  if (host->did_stop_loading()) {
-    popup->Show();
-    // Focus on the host contents when the bubble is first shown.
-    host->host_contents()->Focus();
-  }
+  if (host->did_stop_loading())
+    popup->ShowBubble();
 
   return popup;
+}
+
+void ExtensionPopup::ShowBubble() {
+  Show();
+
+  // Focus on the host contents when the bubble is first shown.
+  host()->host_contents()->Focus();
+
+  // Listen for widget focus changes after showing (used for non-aura win).
+  views::WidgetFocusManager::GetInstance()->AddFocusChangeListener(this);
+
+  if (inspect_with_devtools_) {
+    // Listen for the the devtools window closing.
+    registrar_.Add(this, content::NOTIFICATION_DEVTOOLS_WINDOW_CLOSING,
+        content::Source<content::BrowserContext>(host()->profile()));
+    DevToolsWindow::ToggleDevToolsWindow(host()->render_view_host(),
+        DEVTOOLS_TOGGLE_ACTION_SHOW_CONSOLE);
+  }
 }

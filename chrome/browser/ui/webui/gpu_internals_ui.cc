@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,15 +18,18 @@
 #include "chrome/common/chrome_version_info.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/gpu/gpu_data_manager.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
+#include "content/public/browser/web_ui_message_handler.h"
 #include "grit/browser_resources.h"
 #include "grit/generated_resources.h"
 #include "third_party/angle/src/common/version.h"
 #include "ui/base/l10n/l10n_util.h"
 
 using content::BrowserThread;
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -52,7 +55,6 @@ class GpuMessageHandler
   virtual ~GpuMessageHandler();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // GpuDataManager::Observer implementation.
@@ -93,20 +95,14 @@ GpuMessageHandler::~GpuMessageHandler() {
   gpu_data_manager_->RemoveObserver(this);
 }
 
-WebUIMessageHandler* GpuMessageHandler::Attach(WebUI* web_ui) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  WebUIMessageHandler* result = WebUIMessageHandler::Attach(web_ui);
-  return result;
-}
-
 /* BrowserBridge.callAsync prepends a requestID to these messages. */
 void GpuMessageHandler::RegisterMessages() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  web_ui_->RegisterMessageCallback("browserBridgeInitialized",
+  web_ui()->RegisterMessageCallback("browserBridgeInitialized",
       base::Bind(&GpuMessageHandler::OnBrowserBridgeInitialized,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("callAsync",
+  web_ui()->RegisterMessageCallback("callAsync",
       base::Bind(&GpuMessageHandler::OnCallAsync,
                  base::Unretained(this)));
 }
@@ -148,12 +144,12 @@ void GpuMessageHandler::OnCallAsync(const ListValue* args) {
 
   // call BrowserBridge.onCallAsyncReply with result
   if (ret) {
-    web_ui_->CallJavascriptFunction("browserBridge.onCallAsyncReply",
+    web_ui()->CallJavascriptFunction("browserBridge.onCallAsyncReply",
         *requestId,
         *ret);
     delete ret;
   } else {
-    web_ui_->CallJavascriptFunction("browserBridge.onCallAsyncReply",
+    web_ui()->CallJavascriptFunction("browserBridge.onCallAsyncReply",
         *requestId);
   }
 }
@@ -210,6 +206,10 @@ Value* GpuMessageHandler::OnRequestClientInfo(const ListValue* list) {
   dict->SetString("blacklist_version",
       GpuDataManager::GetInstance()->GetBlacklistVersion());
 
+  GpuPerformanceStats stats =
+      GpuDataManager::GetInstance()->GetPerformanceStats();
+  dict->Set("performance", stats.ToValue());
+
   return dict;
 }
 
@@ -230,7 +230,7 @@ void GpuMessageHandler::OnGpuInfoUpdate() {
     gpu_info_val->Set("featureStatus", feature_status);
 
   // Send GPU Info to javascript.
-  web_ui_->CallJavascriptFunction("browserBridge.onGpuInfoUpdate",
+  web_ui()->CallJavascriptFunction("browserBridge.onGpuInfoUpdate",
       *(gpu_info_val.get()));
 }
 
@@ -243,10 +243,11 @@ void GpuMessageHandler::OnGpuInfoUpdate() {
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-GpuInternalsUI::GpuInternalsUI(TabContents* contents) : ChromeWebUI(contents) {
-  AddMessageHandler((new GpuMessageHandler())->Attach(this));
+GpuInternalsUI::GpuInternalsUI(content::WebUI* web_ui)
+    : WebUIController(web_ui) {
+  web_ui->AddMessageHandler(new GpuMessageHandler());
 
   // Set up the chrome://gpu-internals/ source.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(CreateGpuHTMLSource());
 }

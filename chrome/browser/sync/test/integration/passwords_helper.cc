@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 
 #include "base/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_form_data.h"
 #include "chrome/browser/password_manager/password_store.h"
@@ -15,7 +16,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 
-using webkit_glue::PasswordForm;
+using webkit::forms::PasswordForm;
 using sync_datatype_helper::test;
 
 const std::string kFakeSignonRealm = "http://fake-signon-realm.google.com/";
@@ -105,8 +106,10 @@ void RemoveLogins(PasswordStore* store) {
 }
 
 void SetPassphrase(int index, const std::string& passphrase) {
-  test()->GetProfile(index)->GetProfileSyncService("")->SetPassphrase(
-      passphrase, true);
+  test()->GetProfile(index)->GetProfileSyncService()->SetPassphrase(
+      passphrase,
+      ProfileSyncService::EXPLICIT,
+      ProfileSyncService::USER_PROVIDED);
 }
 
 PasswordStore* GetPasswordStore(int index) {
@@ -162,7 +165,7 @@ bool ProfilesContainSamePasswordForms(int index_a, int index_b) {
 bool AllProfilesContainSamePasswordFormsAsVerifier() {
   for (int i = 0; i < test()->num_clients(); ++i) {
     if (!ProfileContainsSamePasswordFormsAsVerifier(i)) {
-      LOG(ERROR) << "Profile " << i << " does not contain the same password "
+      LOG(ERROR) << "Profile " << i << " does not contain the same password"
                                        " forms as the verifier.";
       return false;
     }
@@ -173,7 +176,7 @@ bool AllProfilesContainSamePasswordFormsAsVerifier() {
 bool AllProfilesContainSamePasswordForms() {
   for (int i = 1; i < test()->num_clients(); ++i) {
     if (!ProfilesContainSamePasswordForms(0, i)) {
-      LOG(ERROR) << "Profile " << i << " does not contain the same password "
+      LOG(ERROR) << "Profile " << i << " does not contain the same password"
                                        " forms as Profile 0.";
       return false;
     }
@@ -199,6 +202,7 @@ PasswordForm CreateTestPasswordForm(int index) {
   form.origin = GURL(base::StringPrintf(kIndexedFakeOrigin, index));
   form.username_value = ASCIIToUTF16(base::StringPrintf("username%d", index));
   form.password_value = ASCIIToUTF16(base::StringPrintf("password%d", index));
+  form.date_created = base::Time::Now();
   return form;
 }
 

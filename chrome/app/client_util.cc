@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,7 +25,6 @@
 #include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/install_util.h"
-#include "chrome/installer/util/google_chrome_sxs_distribution.h"  // PreRead.
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/util_constants.h"
@@ -91,7 +90,7 @@ bool EnvQueryStr(const wchar_t* key_name, std::wstring* value) {
 // These constants are used by the PreRead experiment.
 const wchar_t kPreReadRegistryValue[] = L"PreReadExperimentGroup";
 const int kPreReadExpiryYear = 2012;
-const int kPreReadExpiryMonth = 1;
+const int kPreReadExpiryMonth = 7;
 const int kPreReadExpiryDay = 1;
 
 bool PreReadShouldRun() {
@@ -115,13 +114,10 @@ bool PreReadShouldRun() {
     return false;
 
   // The experiment should only run on canary and dev.
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  std::wstring channel;
-  if (!dist->GetChromeChannel(&channel))
-    return false;
-  return channel == GoogleChromeSxSDistribution::ChannelName() ||
-      channel == L"dev";
-  return true;
+  const string16 kChannel(GoogleUpdateSettings::GetChromeChannel(
+      GoogleUpdateSettings::IsSystemInstall()));
+  return kChannel == installer::kChromeChannelCanary ||
+      kChannel == installer::kChromeChannelDev;
 }
 
 // Checks to see if the experiment is running. If so, either tosses a coin

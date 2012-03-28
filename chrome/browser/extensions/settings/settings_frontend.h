@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,8 @@
 #include "chrome/browser/extensions/settings/settings_leveldb_storage.h"
 #include "chrome/browser/extensions/settings/settings_namespace.h"
 #include "chrome/browser/extensions/settings/settings_observer.h"
+#include "chrome/browser/extensions/settings/settings_storage_quota_enforcer.h"
 #include "chrome/browser/sync/api/syncable_service.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 
 class Profile;
 
@@ -31,9 +30,11 @@ class SettingsStorage;
 // All public methods must be called on the UI thread.
 class SettingsFrontend {
  public:
-  // Creates with the default factory.  Ownership of |profile| not taken.
+  // Creates with the default factory. Ownership of |profile| not taken.
   static SettingsFrontend* Create(Profile* profile);
 
+  // Creates with a specific factory |storage_factory| (presumably for tests).
+  // Ownership of |profile| not taken.
   static SettingsFrontend* Create(
       const scoped_refptr<SettingsStorageFactory>& storage_factory,
       // Owership NOT taken.
@@ -45,7 +46,7 @@ class SettingsFrontend {
   typedef base::Callback<void(SettingsStorage*)> StorageCallback;
 
   // Runs |callback| on the FILE thread with the SyncableService for
-  // |model_type|, either SETTINGS or APP_SETTINGS.
+  // |model_type|, either EXTENSION_SETTINGS or APP_SETTINGS.
   void RunWithSyncableService(
       syncable::ModelType model_type, const SyncableServiceCallback& callback);
 
@@ -68,6 +69,11 @@ class SettingsFrontend {
       const scoped_refptr<SettingsStorageFactory>& storage_factory,
       // Ownership NOT taken.
       Profile* profile);
+
+  // The quota limit configurations for the local and sync areas, taken out of
+  // the schema in chrome/common/extensions/api/experimental.storage.json.
+  const SettingsStorageQuotaEnforcer::Limits local_quota_limit_;
+  const SettingsStorageQuotaEnforcer::Limits sync_quota_limit_;
 
   // The (non-incognito) Profile this Frontend belongs to.
   Profile* const profile_;

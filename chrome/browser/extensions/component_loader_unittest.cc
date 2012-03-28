@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/test_extension_service.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension.h"
+#include "chrome/common/extensions/extension_set.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_pref_service.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,45 +21,46 @@ namespace {
 class MockExtensionService : public TestExtensionService {
  private:
   bool ready_;
-  ExtensionList extension_list_;
+  size_t unloaded_count_;
+  ExtensionSet extension_set_;
 
  public:
-  MockExtensionService() : ready_(false) {
+  MockExtensionService() : ready_(false), unloaded_count_(0) {
   }
 
   virtual void AddExtension(const Extension* extension) OVERRIDE {
+    ASSERT_FALSE(extension_set_.Contains(extension->id()));
     // ExtensionService must become the owner of the extension object.
-    extension_list_.push_back(extension);
+    extension_set_.Insert(extension);
   }
 
   virtual void UnloadExtension(
       const std::string& extension_id,
       extension_misc::UnloadedExtensionReason reason) OVERRIDE {
+    ASSERT_TRUE(extension_set_.Contains(extension_id));
     // Remove the extension with the matching id.
-    for (ExtensionList::iterator it = extension_list_.begin();
-         it != extension_list_.end();
-         ++it) {
-      if ((*it)->id() == extension_id) {
-        extension_list_.erase(it);
-        return;
-      }
-    }
+    extension_set_.Remove(extension_id);
+    unloaded_count_++;
   }
 
   virtual bool is_ready() OVERRIDE {
     return ready_;
   }
 
-  virtual const ExtensionList* extensions() const OVERRIDE {
-    return &extension_list_;
+  virtual const ExtensionSet* extensions() const OVERRIDE {
+    return &extension_set_;
   }
 
   void set_ready(bool ready) {
     ready_ = ready;
   }
 
-  void clear_extension_list() {
-    extension_list_.clear();
+  size_t unloaded_count() const {
+    return unloaded_count_;
+  }
+
+  void clear_extensions() {
+    extension_set_.Clear();
   }
 };
 
@@ -75,11 +77,8 @@ class ComponentLoaderTest : public testing::Test {
   }
 
   void SetUp() {
-    FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
     extension_path_ =
-        test_data_dir.AppendASCII("extensions")
-                     .AppendASCII("good")
+        GetBasePath().AppendASCII("good")
                      .AppendASCII("Extensions")
                      .AppendASCII("behllobkkfkfnphdnhnkndlbkcpglgmj")
                      .AppendASCII("1.0.0.0");
@@ -95,7 +94,7 @@ class ComponentLoaderTest : public testing::Test {
 
     // Register the local state prefs.
 #if defined(OS_CHROMEOS)
-    prefs_.RegisterBooleanPref(prefs::kAccessibilityEnabled, false);
+    prefs_.RegisterBooleanPref(prefs::kSpokenFeedbackEnabled, false);
 #endif
   }
 
@@ -109,6 +108,12 @@ class ComponentLoaderTest : public testing::Test {
 
   // The contents of the text extension's manifest file.
   std::string manifest_contents_;
+
+  FilePath GetBasePath() {
+    FilePath test_data_dir;
+    PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+    return test_data_dir.AppendASCII("extensions");
+  }
 };
 
 TEST_F(ComponentLoaderTest, ParseManifest) {
@@ -156,7 +161,7 @@ TEST_F(ComponentLoaderTest, ParseManifest) {
 
   std::string string_value;
   manifest.reset(component_loader_.ParseManifest(manifest_contents_));
-  ASSERT_TRUE(manifest->GetString("background_page", &string_value));
+  ASSERT_TRUE(manifest->GetString("background.page", &string_value));
   ASSERT_EQ("backgroundpage.html", string_value);
 }
 
@@ -166,7 +171,7 @@ TEST_F(ComponentLoaderTest, AddWhenNotReady) {
   extension_service_.set_ready(false);
   extension = component_loader_.Add(manifest_contents_, extension_path_);
   ASSERT_EQ((Extension*)NULL, extension.get());
-  ASSERT_EQ(0U, extension_service_.extensions()->size());
+  ASSERT_EQ(0u, extension_service_.extensions()->size());
 }
 
 // Test that it *is* loaded when the extension service *is* ready.
@@ -175,7 +180,7 @@ TEST_F(ComponentLoaderTest, AddWhenReady) {
   extension_service_.set_ready(true);
   extension = component_loader_.Add(manifest_contents_, extension_path_);
   ASSERT_NE((Extension*)NULL, extension.get());
-  ASSERT_EQ(1U, extension_service_.extensions()->size());
+  ASSERT_EQ(1u, extension_service_.extensions()->size());
 }
 
 TEST_F(ComponentLoaderTest, Remove) {
@@ -183,13 +188,13 @@ TEST_F(ComponentLoaderTest, Remove) {
 
   // Removing an extension that was never added should be ok.
   component_loader_.Remove(extension_path_);
-  ASSERT_EQ(0U, extension_service_.extensions()->size());
+  ASSERT_EQ(0u, extension_service_.extensions()->size());
 
   // Try adding and removing before LoadAll() is called.
   component_loader_.Add(manifest_contents_, extension_path_);
   component_loader_.Remove(extension_path_);
   component_loader_.LoadAll();
-  ASSERT_EQ(0U, extension_service_.extensions()->size());
+  ASSERT_EQ(0u, extension_service_.extensions()->size());
 
   // Load an extension, and check that it's unloaded when Remove() is called.
   scoped_refptr<const Extension> extension;
@@ -197,11 +202,11 @@ TEST_F(ComponentLoaderTest, Remove) {
   extension = component_loader_.Add(manifest_contents_, extension_path_);
   ASSERT_NE((Extension*)NULL, extension.get());
   component_loader_.Remove(extension_path_);
-  ASSERT_EQ(0U, extension_service_.extensions()->size());
+  ASSERT_EQ(0u, extension_service_.extensions()->size());
 
   // And after calling LoadAll(), it shouldn't get loaded.
   component_loader_.LoadAll();
-  ASSERT_EQ(0U, extension_service_.extensions()->size());
+  ASSERT_EQ(0u, extension_service_.extensions()->size());
 }
 
 TEST_F(ComponentLoaderTest, LoadAll) {
@@ -209,7 +214,7 @@ TEST_F(ComponentLoaderTest, LoadAll) {
 
   // No extensions should be loaded if none were added.
   component_loader_.LoadAll();
-  ASSERT_EQ(0U, extension_service_.extensions()->size());
+  ASSERT_EQ(0u, extension_service_.extensions()->size());
 
   // Use LoadAll() to load the default extensions.
   component_loader_.AddDefaultComponentExtensions();
@@ -217,7 +222,7 @@ TEST_F(ComponentLoaderTest, LoadAll) {
   unsigned int default_count = extension_service_.extensions()->size();
 
   // Clear the list of loaded extensions, and reload with one more.
-  extension_service_.clear_extension_list();
+  extension_service_.clear_extensions();
   component_loader_.Add(manifest_contents_, extension_path_);
   component_loader_.LoadAll();
 
@@ -237,7 +242,7 @@ TEST_F(ComponentLoaderTest, EnterpriseWebStore) {
 
   // Now that the pref is set, check if it's added by default.
   extension_service_.set_ready(false);
-  extension_service_.clear_extension_list();
+  extension_service_.clear_extensions();
   component_loader_.ClearAllRegistered();
   component_loader_.AddDefaultComponentExtensions();
   component_loader_.LoadAll();
@@ -247,6 +252,36 @@ TEST_F(ComponentLoaderTest, EnterpriseWebStore) {
   prefs_.SetUserPref(prefs::kEnterpriseWebStoreURL,
                      Value::CreateStringValue("http://www.google.de"));
   ASSERT_EQ(default_count + 1, extension_service_.extensions()->size());
+}
+
+TEST_F(ComponentLoaderTest, AddOrReplace) {
+  ASSERT_EQ(0u, component_loader_.registered_extensions_count());
+  component_loader_.AddDefaultComponentExtensions();
+  size_t const default_count = component_loader_.registered_extensions_count();
+  FilePath known_extension = GetBasePath()
+      .AppendASCII("override_component_extension");
+  FilePath unknow_extension = extension_path_;
+
+  // Replace a default component extension.
+  component_loader_.AddOrReplace(known_extension);
+  ASSERT_EQ(default_count,
+            component_loader_.registered_extensions_count());
+
+  // Add a new component extension.
+  component_loader_.AddOrReplace(unknow_extension);
+  ASSERT_EQ(default_count + 1,
+            component_loader_.registered_extensions_count());
+
+  extension_service_.set_ready(true);
+  component_loader_.LoadAll();
+
+  ASSERT_EQ(default_count + 1, extension_service_.extensions()->size());
+  ASSERT_EQ(0u, extension_service_.unloaded_count());
+
+  // replace loaded component extension.
+  component_loader_.AddOrReplace(known_extension);
+  ASSERT_EQ(default_count + 1, extension_service_.extensions()->size());
+  ASSERT_EQ(1u, extension_service_.unloaded_count());
 }
 
 }  // namespace extensions

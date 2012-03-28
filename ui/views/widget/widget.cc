@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,7 +13,6 @@
 #include "ui/gfx/compositor/compositor.h"
 #include "ui/gfx/compositor/layer.h"
 #include "ui/gfx/screen.h"
-#include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/focus/focus_manager_factory.h"
 #include "ui/views/focus/view_storage.h"
@@ -26,6 +25,10 @@
 #include "ui/views/widget/tooltip_manager.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/views/window/custom_frame_view.h"
+
+#if !defined(OS_MACOSX)
+#include "ui/views/controls/menu/menu_controller.h"
+#endif
 
 namespace {
 
@@ -133,7 +136,8 @@ Widget::InitParams::InitParams(Type type)
       transient(type == TYPE_BUBBLE || type == TYPE_POPUP || type == TYPE_MENU),
       transparent(false),
       accept_events(true),
-      can_activate(type != TYPE_POPUP && type != TYPE_MENU),
+      can_activate(
+          type != TYPE_POPUP && type != TYPE_MENU && type != TYPE_CONTROL),
       keep_on_top(type == TYPE_MENU),
       ownership(NATIVE_WIDGET_OWNS_WIDGET),
       mirror_origin_in_rtl(false),
@@ -296,7 +300,9 @@ bool Widget::IsDebugPaintEnabled() {
 
 // static
 bool Widget::RequiresNonClientView(InitParams::Type type) {
-  return type == InitParams::TYPE_WINDOW || type == InitParams::TYPE_BUBBLE;
+  return type == InitParams::TYPE_WINDOW ||
+         type == InitParams::TYPE_PANEL ||
+         type == InitParams::TYPE_BUBBLE;
 }
 
 void Widget::Init(const InitParams& params) {
@@ -364,7 +370,6 @@ void Widget::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
   if (!is_add) {
     if (child == dragged_view_)
       dragged_view_ = NULL;
-
     FocusManager* focus_manager = GetFocusManager();
     if (focus_manager)
       focus_manager->ViewRemoved(child);
@@ -440,6 +445,18 @@ void Widget::SetBoundsConstrained(const gfx::Rect& bounds) {
     work_area.Inset(10, 10, 10, 10);
     SetBounds(work_area.AdjustToFit(bounds));
   }
+}
+
+void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
+  native_widget_->SetVisibilityChangedAnimationsEnabled(value);
+}
+
+Widget::MoveLoopResult Widget::RunMoveLoop() {
+  return native_widget_->RunMoveLoop();
+}
+
+void Widget::EndMoveLoop() {
+  native_widget_->EndMoveLoop();
 }
 
 void Widget::StackAboveWidget(Widget* widget) {
@@ -736,6 +753,10 @@ NonClientFrameView* Widget::CreateNonClientFrameView() {
   NonClientFrameView* frame_view = widget_delegate_->CreateNonClientFrameView();
   if (!frame_view)
     frame_view = native_widget_->CreateNonClientFrameView();
+  if (!frame_view && ViewsDelegate::views_delegate) {
+    frame_view =
+        ViewsDelegate::views_delegate->CreateDefaultNonClientFrameView(this);
+  }
   return frame_view ? frame_view : new CustomFrameView(this);
 }
 
@@ -774,7 +795,11 @@ void Widget::CalculateOffsetToAncestorWithLayer(gfx::Point* offset,
 }
 
 void Widget::ReorderLayers() {
-  native_widget_->ReorderLayers();
+  gfx::Point point;
+  ui::Layer* layer = NULL;
+  CalculateOffsetToAncestorWithLayer(&point, &layer);
+  if (layer)
+    root_view_->ReorderChildLayers(layer);
 }
 
 void Widget::NotifyAccessibilityEvent(
@@ -795,6 +820,18 @@ const NativeWidget* Widget::native_widget() const {
 
 NativeWidget* Widget::native_widget() {
   return native_widget_;
+}
+
+void Widget::SetMouseCapture(views::View* view) {
+  is_mouse_button_pressed_ = true;
+  root_view_->SetMouseHandler(view);
+  if (!native_widget_->HasMouseCapture())
+    native_widget_->SetMouseCapture();
+}
+
+void Widget::ReleaseMouseCapture() {
+  if (native_widget_->HasMouseCapture())
+    native_widget_->ReleaseMouseCapture();
 }
 
 const Event* Widget::GetCurrentEvent() {
@@ -828,7 +865,7 @@ gfx::Rect Widget::GetWorkAreaBoundsInScreen() const {
 // Widget, NativeWidgetDelegate implementation:
 
 bool Widget::IsModal() const {
-  return widget_delegate_->IsModal();
+  return widget_delegate_->GetModalType() != ui::MODAL_TYPE_NONE;
 }
 
 bool Widget::IsDialogBox() const {
@@ -851,10 +888,12 @@ void Widget::OnNativeWidgetActivationChanged(bool active) {
   if (!active) {
     SaveWindowPlacement();
 
+#if !defined(OS_MACOSX)
     // Close any open menus.
     MenuController* menu_controller = MenuController::GetActiveInstance();
     if (menu_controller)
       menu_controller->OnWidgetActivationChanged();
+#endif  // !defined(OS_MACOSX)
   }
 
   FOR_EACH_OBSERVER(Observer, observers_,
@@ -889,11 +928,14 @@ void Widget::OnNativeWidgetCreated() {
   native_widget_->SetAccessibleState(
       widget_delegate_->GetAccessibleWindowState());
 
-  if (widget_delegate_->IsModal())
-    native_widget_->BecomeModal();
+  native_widget_->InitModalType(widget_delegate_->GetModalType());
 }
 
 void Widget::OnNativeWidgetDestroying() {
+  // Tell the focus manager (if any) that root_view is being removed
+  // in case that the focused view is under this root view.
+  if (GetFocusManager())
+    GetFocusManager()->ViewRemoved(root_view_.get());
   FOR_EACH_OBSERVER(Observer, observers_, OnWidgetClosing(this));
   if (non_client_view_)
     non_client_view_->WindowClosing();
@@ -1037,7 +1079,12 @@ void Widget::OnMouseCaptureLost() {
 
 ui::TouchStatus Widget::OnTouchEvent(const TouchEvent& event) {
   ScopedEvent scoped(this, event);
-  return static_cast<internal::RootView*>(GetRootView())->OnTouchEvent(event);
+  return GetRootView()->OnTouchEvent(event);
+}
+
+ui::GestureStatus Widget::OnGestureEvent(const GestureEvent& event) {
+  ScopedEvent scoped(this, event);
+  return GetRootView()->OnGestureEvent(event);
 }
 
 bool Widget::ExecuteCommand(int command_id) {

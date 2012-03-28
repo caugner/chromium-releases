@@ -1,15 +1,13 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/glue/session_change_processor.h"
 
-#include <sstream>
 #include <string>
 #include <vector>
 
 #include "base/logging.h"
-#include "base/memory/scoped_vector.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
@@ -17,27 +15,35 @@
 #include "chrome/browser/sync/internal_api/change_record.h"
 #include "chrome/browser/sync/internal_api/read_node.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/protocol/session_specifics.pb.h"
 #include "chrome/browser/ui/sync/tab_contents_wrapper_synced_tab_delegate.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::WebContents;
 
 namespace browser_sync {
 
 namespace {
+
+// The URL at which the set of synced tabs is displayed. We treat it differently
+// from all other URL's as accessing it triggers a sync refresh of Sessions.
+static const char kNTPOpenTabSyncURL[] = "chrome://newtab/#opentabs";
 
 // Extract the source SyncedTabDelegate from a NotificationSource originating
 // from a NavigationController, if it exists. Returns |NULL| otherwise.
 SyncedTabDelegate* ExtractSyncedTabDelegate(
     const content::NotificationSource& source) {
   TabContentsWrapper* tab = TabContentsWrapper::GetCurrentWrapperForContents(
-      content::Source<NavigationController>(source).ptr()->tab_contents());
+      content::Source<NavigationController>(source).ptr()->GetWebContents());
   if (!tab)
     return NULL;
   return tab->synced_tab_delegate();
@@ -95,7 +101,9 @@ void SessionChangeProcessor::Observe(
     }
 
     case content::NOTIFICATION_TAB_PARENTED: {
-      SyncedTabDelegate* tab = content::Source<SyncedTabDelegate>(source).ptr();
+      SyncedTabDelegate* tab =
+          content::Source<TabContentsWrapper>(source).ptr()->
+              synced_tab_delegate();
       if (!tab || tab->profile() != profile_) {
         return;
       }
@@ -107,7 +115,7 @@ void SessionChangeProcessor::Observe(
     case content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME: {
       TabContentsWrapper* tab_contents_wrapper =
           TabContentsWrapper::GetCurrentWrapperForContents(
-              content::Source<TabContents>(source).ptr());
+              content::Source<WebContents>(source).ptr());
       if (!tab_contents_wrapper) {
         return;
       }
@@ -164,7 +172,8 @@ void SessionChangeProcessor::Observe(
       ExtensionTabHelper* extension_tab_helper =
           content::Source<ExtensionTabHelper>(source).ptr();
       if (!extension_tab_helper ||
-          extension_tab_helper->tab_contents()->browser_context() != profile_) {
+          extension_tab_helper->web_contents()->GetBrowserContext() !=
+              profile_) {
         return;
       }
       if (extension_tab_helper->extension_app()) {
@@ -180,6 +189,25 @@ void SessionChangeProcessor::Observe(
       LOG(ERROR) << "Received unexpected notification of type "
                   << type;
       break;
+  }
+
+  // Check if this tab should trigger a session sync refresh. By virtue of
+  // it being a modified tab, we know the tab is active (so we won't do
+  // refreshes just because the refresh page is open in a background tab).
+  if (!modified_tabs.empty()) {
+    SyncedTabDelegate* tab = modified_tabs.front();
+    const content::NavigationEntry* entry = tab->GetActiveEntry();
+    if (!tab->IsBeingDestroyed() &&
+        entry &&
+        entry->GetVirtualURL().is_valid() &&
+        entry->GetVirtualURL().spec() == kNTPOpenTabSyncURL) {
+      DVLOG(1) << "Triggering sync refresh for sessions datatype.";
+      const syncable::ModelType type = syncable::SESSIONS;
+      content::NotificationService::current()->Notify(
+          chrome::NOTIFICATION_SYNC_REFRESH,
+          content::Source<Profile>(profile_),
+          content::Details<const syncable::ModelType>(&type));
+    }
   }
 
   // Associate tabs first so the synced session tracker is aware of them.

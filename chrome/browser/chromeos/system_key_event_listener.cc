@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,17 +8,18 @@
 #include <X11/keysymdef.h>
 #include <X11/XF86keysym.h>
 #include <X11/XKBlib.h>
+#undef Status
 
-#include "chrome/browser/accessibility/accessibility_events.h"
-#include "chrome/browser/chromeos/audio_handler.h"
-#include "chrome/browser/chromeos/brightness_bubble.h"
+#include "chrome/browser/chromeos/audio/audio_handler.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/power_manager_client.h"
 #include "chrome/browser/chromeos/input_method/hotkey_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/xkeyboard.h"
-#include "chrome/browser/chromeos/volume_bubble.h"
-#include "content/browser/user_metrics.h"
+#include "chrome/browser/chromeos/ui/brightness_bubble.h"
+#include "chrome/browser/chromeos/ui/volume_bubble.h"
+#include "chrome/browser/extensions/system/system_api.h"
+#include "content/public/browser/user_metrics.h"
 #include "third_party/cros_system_api/window_manager/chromeos_wm_ipc_enums.h"
 #include "ui/base/x/x11_util.h"
 
@@ -27,6 +28,8 @@
 #elif !defined(TOOLKIT_USES_GTK)
 #include "base/message_pump_x.h"
 #endif
+
+using content::UserMetricsAction;
 
 namespace chromeos {
 
@@ -74,10 +77,12 @@ SystemKeyEventListener* SystemKeyEventListener::GetInstance() {
 
 SystemKeyEventListener::SystemKeyEventListener()
     : stopped_(false),
-      num_lock_mask_(input_method::XKeyboard::GetNumLockMask()),
+      num_lock_mask_(0),
       xkb_event_base_(0) {
-  input_method::XKeyboard::GetLockedModifiers(
-      num_lock_mask_, &caps_lock_is_on_, &num_lock_is_on_);
+  input_method::XKeyboard* xkeyboard =
+      input_method::InputMethodManager::GetInstance()->GetXKeyboard();
+  num_lock_mask_ = xkeyboard->GetNumLockMask();
+  xkeyboard->GetLockedModifiers(&caps_lock_is_on_, &num_lock_is_on_);
 
   Display* display = ui::GetXDisplay();
   key_brightness_down_ = XKeysymToKeycode(display,
@@ -91,8 +96,6 @@ SystemKeyEventListener::SystemKeyEventListener()
   key_f8_ = XKeysymToKeycode(display, XK_F8);
   key_f9_ = XKeysymToKeycode(display, XK_F9);
   key_f10_ = XKeysymToKeycode(display, XK_F10);
-  key_left_shift_ = XKeysymToKeycode(display, XK_Shift_L);
-  key_right_shift_ = XKeysymToKeycode(display, XK_Shift_R);
 
   if (key_brightness_down_)
     GrabKey(key_brightness_down_, 0);
@@ -218,10 +221,8 @@ void SystemKeyEventListener::OnVolumeMute() {
   // http://crosbug.com/3751
   audio_handler->SetMuted(true);
 
-  SendAccessibilityVolumeNotification(
-      audio_handler->GetVolumePercent(),
-      audio_handler->IsMuted());
-
+  extensions::DispatchVolumeChangedEvent(audio_handler->GetVolumePercent(),
+                                         audio_handler->IsMuted());
   ShowVolumeBubble();
 }
 
@@ -235,10 +236,8 @@ void SystemKeyEventListener::OnVolumeDown() {
   else
     audio_handler->AdjustVolumeByPercent(-kStepPercentage);
 
-  SendAccessibilityVolumeNotification(
-      audio_handler->GetVolumePercent(),
-      audio_handler->IsMuted());
-
+  extensions::DispatchVolumeChangedEvent(audio_handler->GetVolumePercent(),
+                                         audio_handler->IsMuted());
   ShowVolumeBubble();
 }
 
@@ -255,10 +254,8 @@ void SystemKeyEventListener::OnVolumeUp() {
     audio_handler->AdjustVolumeByPercent(kStepPercentage);
   }
 
-  SendAccessibilityVolumeNotification(
-      audio_handler->GetVolumePercent(),
-      audio_handler->IsMuted());
-
+  extensions::DispatchVolumeChangedEvent(audio_handler->GetVolumePercent(),
+                                         audio_handler->IsMuted());
   ShowVolumeBubble();
 }
 
@@ -281,17 +278,31 @@ bool SystemKeyEventListener::ProcessedXEvent(XEvent* xevent) {
   input_method::InputMethodManager* input_method_manager =
       input_method::InputMethodManager::GetInstance();
 
+#if !defined(USE_AURA)
+  if (xevent->type == FocusIn) {
+    // This is a workaround for the Shift+Alt+Tab issue (crosbug.com/8855,
+    // crosbug.com/24182). Reset |hotkey_manager| on the Tab key press so that
+    // the manager will not switch current keyboard layout on the subsequent Alt
+    // or Shift key release. Note that when Aura is in use, we don't need this
+    // workaround since the environment does not have the Chrome OS Window
+    // Manager and the Tab key press/release is not consumed by the WM.
+    input_method::HotkeyManager* hotkey_manager =
+        input_method_manager->GetHotkeyManager();
+    hotkey_manager->OnFocus();
+  }
+#endif
+
   if (xevent->type == KeyPress || xevent->type == KeyRelease) {
     // Change the current keyboard layout (or input method) if xevent is one of
     // the input method hotkeys.
     input_method::HotkeyManager* hotkey_manager =
         input_method_manager->GetHotkeyManager();
-    if (hotkey_manager->FilterKeyEvent(*xevent)) {
+    if (hotkey_manager->FilterKeyEvent(*xevent))
       return true;
-    }
   }
 
   if (xevent->type == xkb_event_base_) {
+    // TODO(yusukes): Move this part to aura::RootWindowHost.
     XkbEvent* xkey_event = reinterpret_cast<XkbEvent*>(xevent);
     if (xkey_event->any.xkb_type == XkbStateNotify) {
       input_method::ModifierLockStatus new_caps_lock_state =
@@ -325,42 +336,45 @@ bool SystemKeyEventListener::ProcessedXEvent(XEvent* xevent) {
     if (keycode) {
       const unsigned int state = (xevent->xkey.state & kSupportedModifiers);
 
-      // Toggle Caps Lock if both Shift keys are pressed simultaneously.
-      if (keycode == key_left_shift_ || keycode == key_right_shift_) {
-        const bool other_shift_is_held = (state & ShiftMask);
+#if !defined(USE_AURA)
+      // Toggle Caps Lock if Shift and Search keys are pressed.
+      // When Aura is in use, the shortcut is handled in Ash.
+      if (XKeycodeToKeysym(ui::GetXDisplay(), keycode, 0) == XK_Super_L) {
+        const bool shift_is_held = (state & ShiftMask);
         const bool other_mods_are_held = (state & ~(ShiftMask | LockMask));
-        if (other_shift_is_held && !other_mods_are_held)
+        if (shift_is_held && !other_mods_are_held)
           input_method_manager->GetXKeyboard()->SetCapsLockEnabled(
               !caps_lock_is_on_);
       }
+#endif
 
       // Only doing non-Alt/Shift/Ctrl modified keys
       if (!(state & (Mod1Mask | ShiftMask | ControlMask))) {
         if (keycode == key_f6_ || keycode == key_brightness_down_) {
           if (keycode == key_f6_)
-            UserMetrics::RecordAction(
+            content::RecordAction(
                 UserMetricsAction("Accel_BrightnessDown_F6"));
           OnBrightnessDown();
           return true;
         } else if (keycode == key_f7_ || keycode == key_brightness_up_) {
           if (keycode == key_f7_)
-            UserMetrics::RecordAction(
+            content::RecordAction(
                 UserMetricsAction("Accel_BrightnessUp_F7"));
           OnBrightnessUp();
           return true;
         } else if (keycode == key_f8_ || keycode == key_volume_mute_) {
           if (keycode == key_f8_)
-            UserMetrics::RecordAction(UserMetricsAction("Accel_VolumeMute_F8"));
+            content::RecordAction(UserMetricsAction("Accel_VolumeMute_F8"));
           OnVolumeMute();
           return true;
         } else if (keycode == key_f9_ || keycode == key_volume_down_) {
           if (keycode == key_f9_)
-            UserMetrics::RecordAction(UserMetricsAction("Accel_VolumeDown_F9"));
+            content::RecordAction(UserMetricsAction("Accel_VolumeDown_F9"));
           OnVolumeDown();
           return true;
         } else if (keycode == key_f10_ || keycode == key_volume_up_) {
           if (keycode == key_f10_)
-            UserMetrics::RecordAction(UserMetricsAction("Accel_VolumeUp_F10"));
+            content::RecordAction(UserMetricsAction("Accel_VolumeUp_F10"));
           OnVolumeUp();
           return true;
         }

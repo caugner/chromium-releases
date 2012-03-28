@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,13 @@
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/site_instance.h"
+
+using content::SiteInstance;
 
 ChromeRenderViewHostObserver::ChromeRenderViewHostObserver(
     RenderViewHost* render_view_host, chrome_browser_net::Predictor* predictor)
@@ -27,7 +28,7 @@ ChromeRenderViewHostObserver::ChromeRenderViewHostObserver(
       predictor_(predictor) {
   SiteInstance* site_instance = render_view_host->site_instance();
   profile_ = Profile::FromBrowserContext(
-      site_instance->browsing_instance()->browser_context());
+      site_instance->GetBrowserContext());
 
   InitRenderViewHostForExtensions();
 }
@@ -134,7 +135,7 @@ const Extension* ChromeRenderViewHostObserver::GetExtension() {
   // (excluding bookmark apps) will have a chrome-extension:// URL for their
   // site, so we can ignore that wrinkle here.
   SiteInstance* site_instance = render_view_host()->site_instance();
-  const GURL& site = site_instance->site();
+  const GURL& site = site_instance->GetSite();
 
   if (!site.SchemeIs(chrome::kExtensionScheme))
     return NULL;
@@ -152,7 +153,7 @@ const Extension* ChromeRenderViewHostObserver::GetExtension() {
 
   // May be null if the extension doesn't exist, for example if somebody typos
   // a chrome-extension:// URL.
-  return service->GetExtensionByURL(site);
+  return service->extensions()->GetByID(site.host());
 }
 
 void ChromeRenderViewHostObserver::RemoveRenderViewHostForExtensions(

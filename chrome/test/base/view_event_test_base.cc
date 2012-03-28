@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,13 +10,19 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/compiler_specific.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
 #include "chrome/browser/automation/ui_controls.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/browser/browser_thread.h"
+#include "ui/gfx/compositor/test/compositor_test_support.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+
+#if defined(USE_AURA)
+#include "ash/shell.h"
+#include "ui/aura/root_window.h"
+#endif
 
 namespace {
 
@@ -55,13 +61,10 @@ const int kMouseMoveDelayMS = 200;
 ViewEventTestBase::ViewEventTestBase()
   : window_(NULL),
     content_view_(NULL),
-    ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)) {
+    ui_thread_(content::BrowserThread::UI, &message_loop_) {
 }
 
 void ViewEventTestBase::Done() {
-  // Cancel the pending time-out.
-  method_factory_.RevokeAll();
-
   MessageLoop::current()->Quit();
 
 #if defined(OS_WIN)
@@ -70,14 +73,21 @@ void ViewEventTestBase::Done() {
   PostMessage(window_->GetNativeWindow(), WM_USER, 0, 0);
 #endif
 
-  // If we're in a nested message loop, as is the case with menus, we need
-  // to quit twice. The second quit does that for us.
-  MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
+  // If we're in a nested message loop, as is the case with menus, we
+  // need to quit twice. The second quit does that for us. Finish all
+  // pending UI events before posting closure because events it may be
+  // executed before UI events are executed.
+  ui_controls::RunClosureAfterAllPendingUIEvents(MessageLoop::QuitClosure());
 }
 
 void ViewEventTestBase::SetUp() {
 #if defined(OS_WIN)
   OleInitialize(NULL);
+#endif
+  ui::CompositorTestSupport::Initialize();
+#if defined(USE_AURA)
+  aura::RootWindow::GetInstance();
+  ash::Shell::CreateInstance(NULL);
 #endif
   window_ = views::Widget::CreateWindow(this);
 }
@@ -92,6 +102,11 @@ void ViewEventTestBase::TearDown() {
 #endif
     window_ = NULL;
   }
+#if defined(USE_AURA)
+  ash::Shell::DeleteInstance();
+  aura::RootWindow::DeleteInstance();
+#endif
+  ui::CompositorTestSupport::Terminate();
 #if defined(OS_WIN)
   OleUninitialize();
 #endif
@@ -155,7 +170,7 @@ void ViewEventTestBase::ScheduleMouseMoveInBackground(int x, int y) {
   }
   dnd_thread_->message_loop()->PostDelayedTask(
       FROM_HERE,
-      base::IgnoreReturn<bool>(base::Bind(&ui_controls::SendMouseMove, x, y)),
+      base::Bind(base::IgnoreResult(&ui_controls::SendMouseMove), x, y),
       kMouseMoveDelayMS);
 }
 

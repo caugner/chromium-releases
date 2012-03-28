@@ -16,7 +16,7 @@
 #include "chrome/browser/intents/web_intents_registry_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/webdata/web_data_service.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -46,10 +46,10 @@ void WebIntentsSettingsHandler::GetLocalizedValues(
 }
 
 void WebIntentsSettingsHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("removeIntent",
+  web_ui()->RegisterMessageCallback("removeIntent",
       base::Bind(&WebIntentsSettingsHandler::RemoveIntent,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("loadIntents",
+  web_ui()->RegisterMessageCallback("loadIntents",
       base::Bind(&WebIntentsSettingsHandler::LoadChildren,
                  base::Unretained(this)));
 }
@@ -81,7 +81,7 @@ void WebIntentsSettingsHandler::TreeModelEndBatch(WebIntentsModel* model) {
 void WebIntentsSettingsHandler::EnsureWebIntentsModelCreated() {
   if (intents_tree_model_.get()) return;
 
-  Profile* profile = Profile::FromWebUI(web_ui_);
+  Profile* profile = Profile::FromWebUI(web_ui());
   web_intents_registry_ = WebIntentsRegistryFactory::GetForProfile(profile);
   intents_tree_model_.reset(new WebIntentsModel(web_intents_registry_));
   intents_tree_model_->AddWebIntentsTreeObserver(this);
@@ -156,5 +156,5 @@ void WebIntentsSettingsHandler::SendChildren(WebIntentsTreeNode* parent) {
       Value::CreateStringValue(intents_tree_model_->GetTreeNodeId(parent)));
   args.Append(children);
 
-  web_ui_->CallJavascriptFunction("IntentsView.loadChildren", args);
+  web_ui()->CallJavascriptFunction("IntentsView.loadChildren", args);
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,7 +41,7 @@ bool TraceEvent::SetFromJSON(const base::Value* event_value) {
     return false;
   }
 
-  phase = base::debug::TraceEvent::GetPhase(phase_str.c_str());
+  phase = *phase_str.data();
 
   bool require_origin = (phase != TRACE_EVENT_PHASE_METADATA);
   bool require_id = (phase == TRACE_EVENT_PHASE_START ||
@@ -229,7 +229,7 @@ Query Query::Bool(bool boolean) {
   return Query(boolean ? 1.0 : 0.0);
 }
 
-Query Query::Phase(base::debug::TraceEventPhase phase) {
+Query Query::Phase(char phase) {
   return Query(static_cast<double>(phase));
 }
 
@@ -268,17 +268,17 @@ bool Query::Evaluate(const TraceEvent& event) const {
     else if (CompareAsString(event, &compare_result))
       return compare_result;
     return false;
-  } else {
-    switch (operator_) {
-      case OP_AND:
-        return left().Evaluate(event) && right().Evaluate(event);
-      case OP_OR:
-        return left().Evaluate(event) || right().Evaluate(event);
-      case OP_NOT:
-        return !left().Evaluate(event);
-      default:
-        NOTREACHED();
-    }
+  }
+  // It's a logical operator.
+  switch (operator_) {
+    case OP_AND:
+      return left().Evaluate(event) && right().Evaluate(event);
+    case OP_OR:
+      return left().Evaluate(event) || right().Evaluate(event);
+    case OP_NOT:
+      return !left().Evaluate(event);
+    default:
+      NOTREACHED();
   }
 
   NOTREACHED();
@@ -393,17 +393,11 @@ bool Query::EvaluateArithmeticOperator(const TraceEvent& event,
 }
 
 bool Query::GetAsDouble(const TraceEvent& event, double* num) const {
-  base::debug::TraceValue value;
   switch (type_) {
     case QUERY_ARITHMETIC_OPERATOR:
       return EvaluateArithmeticOperator(event, num);
     case QUERY_EVENT_MEMBER:
-      value = GetMemberValue(event);
-      if (value.type() == base::debug::TraceValue::TRACE_TYPE_DOUBLE) {
-        *num = value.as_double();
-        return true;
-      }
-      return false;
+      return GetMemberValueAsDouble(event, num);
     case QUERY_NUMBER:
       *num = number_;
       return true;
@@ -413,15 +407,9 @@ bool Query::GetAsDouble(const TraceEvent& event, double* num) const {
 }
 
 bool Query::GetAsString(const TraceEvent& event, std::string* str) const {
-  base::debug::TraceValue value;
   switch (type_) {
     case QUERY_EVENT_MEMBER:
-      value = GetMemberValue(event);
-      if (value.is_string()) {
-        *str = value.as_string();
-        return true;
-      }
-      return false;
+      return GetMemberValueAsString(event, str);
     case QUERY_STRING:
       *str = string_;
       return true;
@@ -430,7 +418,8 @@ bool Query::GetAsString(const TraceEvent& event, std::string* str) const {
   }
 }
 
-base::debug::TraceValue Query::GetMemberValue(const TraceEvent& event) const {
+bool Query::GetMemberValueAsDouble(const TraceEvent& event,
+                                   double* num) const {
   DCHECK(type_ == QUERY_EVENT_MEMBER);
 
   // This could be a request for a member of |event| or a member of |event|'s
@@ -440,69 +429,96 @@ base::debug::TraceValue Query::GetMemberValue(const TraceEvent& event) const {
 
   // Request for member of associated event, but there is no associated event.
   if (!the_event)
-    return base::debug::TraceValue();
+    return false;
 
   switch (member_) {
     case EVENT_PID:
     case OTHER_PID:
-      return static_cast<double>(the_event->thread.process_id);
+      *num = static_cast<double>(the_event->thread.process_id);
+      return true;
     case EVENT_TID:
     case OTHER_TID:
-      return static_cast<double>(the_event->thread.thread_id);
+      *num = static_cast<double>(the_event->thread.thread_id);
+      return true;
     case EVENT_TIME:
     case OTHER_TIME:
-      return the_event->timestamp;
+      *num = the_event->timestamp;
+      return true;
     case EVENT_DURATION:
-      {
-        if (the_event->has_other_event())
-          return the_event->GetAbsTimeToOtherEvent();
-        else
-          return base::debug::TraceValue();
+      if (the_event->has_other_event()) {
+        *num = the_event->GetAbsTimeToOtherEvent();
+        return true;
       }
+      return false;
     case EVENT_PHASE:
     case OTHER_PHASE:
-      return static_cast<double>(the_event->phase);
-    case EVENT_CATEGORY:
-    case OTHER_CATEGORY:
-      return the_event->category;
-    case EVENT_NAME:
-    case OTHER_NAME:
-      return the_event->name;
-    case EVENT_ID:
-    case OTHER_ID:
-      return the_event->id;
+      *num = static_cast<double>(the_event->phase);
+      return true;
     case EVENT_HAS_STRING_ARG:
     case OTHER_HAS_STRING_ARG:
-      return (the_event->HasStringArg(string_) ? 1.0 : 0.0);
+      *num = (the_event->HasStringArg(string_) ? 1.0 : 0.0);
+      return true;
     case EVENT_HAS_NUMBER_ARG:
     case OTHER_HAS_NUMBER_ARG:
-      return (the_event->HasNumberArg(string_) ? 1.0 : 0.0);
+      *num = (the_event->HasNumberArg(string_) ? 1.0 : 0.0);
+      return true;
     case EVENT_ARG:
-    case OTHER_ARG:
-      {
-        // Search for the argument name and return its value if found.
-
-        std::map<std::string, std::string>::const_iterator str_i =
-            the_event->arg_strings.find(string_);
-        if (str_i != the_event->arg_strings.end())
-          return str_i->second;
-
-        std::map<std::string, double>::const_iterator num_i =
-            the_event->arg_numbers.find(string_);
-        if (num_i != the_event->arg_numbers.end())
-          return num_i->second;
-
-        return base::debug::TraceValue();
-      }
+    case OTHER_ARG: {
+      // Search for the argument name and return its value if found.
+      std::map<std::string, double>::const_iterator num_i =
+          the_event->arg_numbers.find(string_);
+      if (num_i == the_event->arg_numbers.end())
+        return false;
+      *num = num_i->second;
+      return true;
+    }
     case EVENT_HAS_OTHER:
-      {
-        // return 1.0 (true) if the other event exists
-        double result = event.other_event ? 1.0 : 0.0;
-        return result;
-      }
+      // return 1.0 (true) if the other event exists
+      *num = event.other_event ? 1.0 : 0.0;
+      return true;
     default:
-      NOTREACHED();
-      return base::debug::TraceValue();
+      return false;
+  }
+}
+
+bool Query::GetMemberValueAsString(const TraceEvent& event,
+                                   std::string* str) const {
+  DCHECK(type_ == QUERY_EVENT_MEMBER);
+
+  // This could be a request for a member of |event| or a member of |event|'s
+  // associated event. Store the target event in the_event:
+  const TraceEvent* the_event = (member_ < OTHER_PID) ?
+      &event : event.other_event;
+
+  // Request for member of associated event, but there is no associated event.
+  if (!the_event)
+    return false;
+
+  switch (member_) {
+    case EVENT_CATEGORY:
+    case OTHER_CATEGORY:
+      *str = the_event->category;
+      return true;
+    case EVENT_NAME:
+    case OTHER_NAME:
+      *str = the_event->name;
+      return true;
+    case EVENT_ID:
+    case OTHER_ID:
+      *str = the_event->id;
+      return true;
+    case EVENT_ARG:
+    case OTHER_ARG: {
+      // Search for the argument name and return its value if found.
+      std::map<std::string, std::string>::const_iterator str_i =
+          the_event->arg_strings.find(string_);
+      if (str_i == the_event->arg_strings.end())
+        return false;
+      *str = str_i->second;
+      return true;
+    }
+    default:
+      return false;
   }
 }
 
@@ -615,7 +631,7 @@ namespace {
 // Search |events| for |query| and add matches to |output|.
 size_t FindMatchingEvents(const std::vector<TraceEvent>& events,
                           const Query& query,
-                          TraceAnalyzer::TraceEventVector* output) {
+                          TraceEventVector* output) {
   for (size_t i = 0; i < events.size(); ++i) {
     if (query.Evaluate(events[i]))
       output->push_back(&events[i]);
@@ -674,26 +690,26 @@ bool TraceAnalyzer::SetEvents(const std::string& json_events) {
 }
 
 void TraceAnalyzer::AssociateBeginEndEvents() {
-  using namespace trace_analyzer;
+  using trace_analyzer::Query;
 
-  Query begin(Query(EVENT_PHASE) == Query::Phase(TRACE_EVENT_PHASE_BEGIN));
-  Query end(Query(EVENT_PHASE) == Query::Phase(TRACE_EVENT_PHASE_END));
-  Query match(Query(EVENT_NAME) == Query(OTHER_NAME) &&
-              Query(EVENT_CATEGORY) == Query(OTHER_CATEGORY) &&
-              Query(EVENT_TID) == Query(OTHER_TID) &&
-              Query(EVENT_PID) == Query(OTHER_PID));
+  Query begin(Query::EventPhase() == Query::Phase(TRACE_EVENT_PHASE_BEGIN));
+  Query end(Query::EventPhase() == Query::Phase(TRACE_EVENT_PHASE_END));
+  Query match(Query::EventName() == Query::OtherName() &&
+              Query::EventCategory() == Query::OtherCategory() &&
+              Query::EventTid() == Query::OtherTid() &&
+              Query::EventPid() == Query::OtherPid());
 
   AssociateEvents(begin, end, match);
 }
 
 void TraceAnalyzer::AssociateStartFinishEvents() {
-  using namespace trace_analyzer;
+  using trace_analyzer::Query;
 
-  Query begin(Query(EVENT_PHASE) == Query::Phase(TRACE_EVENT_PHASE_START));
-  Query end(Query(EVENT_PHASE) == Query::Phase(TRACE_EVENT_PHASE_FINISH));
-  Query match(Query(EVENT_NAME) == Query(OTHER_NAME) &&
-              Query(EVENT_CATEGORY) == Query(OTHER_CATEGORY) &&
-              Query(EVENT_ID) == Query(OTHER_ID));
+  Query begin(Query::EventPhase() == Query::Phase(TRACE_EVENT_PHASE_START));
+  Query end(Query::EventPhase() == Query::Phase(TRACE_EVENT_PHASE_FINISH));
+  Query match(Query::EventName() == Query::OtherName() &&
+              Query::EventCategory() == Query::OtherCategory() &&
+              Query::EventId() == Query::OtherId());
 
   AssociateEvents(begin, end, match);
 }
@@ -739,6 +755,19 @@ void TraceAnalyzer::AssociateEvents(const Query& first,
   }
 }
 
+void TraceAnalyzer::MergeAssociatedEventArgs() {
+  for (size_t i = 0; i < raw_events_.size(); ++i) {
+    if (raw_events_[i].other_event) {
+      raw_events_[i].arg_numbers.insert(
+          raw_events_[i].other_event->arg_numbers.begin(),
+          raw_events_[i].other_event->arg_numbers.end());
+      raw_events_[i].arg_strings.insert(
+          raw_events_[i].other_event->arg_strings.begin(),
+          raw_events_[i].other_event->arg_strings.end());
+    }
+  }
+}
+
 size_t TraceAnalyzer::FindEvents(const Query& query, TraceEventVector* output) {
   allow_assocation_changes_ = false;
   output->clear();
@@ -758,7 +787,24 @@ const std::string& TraceAnalyzer::GetThreadName(
   return thread_names_[thread];
 }
 
-bool TraceAnalyzer::GetRateStats(const TraceEventVector& events, Stats* stats) {
+void TraceAnalyzer::ParseMetadata() {
+  for (size_t i = 0; i < raw_events_.size(); ++i) {
+    TraceEvent& this_event = raw_events_[i];
+    // Check for thread name metadata.
+    if (this_event.phase != TRACE_EVENT_PHASE_METADATA ||
+        this_event.name != "thread_name")
+      continue;
+    std::map<std::string, std::string>::const_iterator string_it =
+        this_event.arg_strings.find("name");
+    if (string_it != this_event.arg_strings.end())
+      thread_names_[this_event.thread] = string_it->second;
+  }
+}
+
+// TraceEventVector utility functions.
+
+bool GetRateStats(const TraceEventVector& events, RateStats* stats) {
+  CHECK(stats);
   // Need at least 3 events to calculate rate stats.
   if (events.size() < 3) {
     LOG(ERROR) << "Not enough events: " << events.size();
@@ -769,7 +815,7 @@ bool TraceAnalyzer::GetRateStats(const TraceEventVector& events, Stats* stats) {
   double delta_sum = 0.0;
   size_t num_deltas = events.size() - 1;
   for (size_t i = 0; i < num_deltas; ++i) {
-    double delta = events[i + 1]->timestamp - events[i]->timestamp;
+    double delta = events.at(i + 1)->timestamp - events.at(i)->timestamp;
     if (delta < 0.0) {
       LOG(ERROR) << "Events are out of order";
       return false;
@@ -793,18 +839,90 @@ bool TraceAnalyzer::GetRateStats(const TraceEventVector& events, Stats* stats) {
   return true;
 }
 
-void TraceAnalyzer::ParseMetadata() {
-  for (size_t i = 0; i < raw_events_.size(); ++i) {
-    TraceEvent& this_event = raw_events_[i];
-    // Check for thread name metadata.
-    if (this_event.phase != TRACE_EVENT_PHASE_METADATA ||
-        this_event.name != "thread_name")
-      continue;
-    std::map<std::string, std::string>::const_iterator string_it =
-        this_event.arg_strings.find("name");
-    if (string_it != this_event.arg_strings.end())
-      thread_names_[this_event.thread] = string_it->second;
+bool FindFirstOf(const TraceEventVector& events,
+                 const Query& query,
+                 size_t position,
+                 size_t* return_index) {
+  CHECK(return_index);
+  for (size_t i = position; i < events.size(); ++i) {
+    if (query.Evaluate(*events.at(i))) {
+      *return_index = i;
+      return true;
+    }
   }
+  return false;
+}
+
+bool FindLastOf(const TraceEventVector& events,
+                const Query& query,
+                size_t position,
+                size_t* return_index) {
+  CHECK(return_index);
+  if (events.empty())
+    return false;
+  position = (position < events.size()) ? position : events.size() - 1;
+  for (;;) {
+    if (query.Evaluate(*events.at(position))) {
+      *return_index = position;
+      return true;
+    }
+    if (position == 0)
+      return false;
+    --position;
+  }
+  return false;
+}
+
+bool FindClosest(const TraceEventVector& events,
+                 const Query& query,
+                 size_t position,
+                 size_t* return_closest,
+                 size_t* return_second_closest) {
+  CHECK(return_closest);
+  if (events.empty() || position >= events.size())
+    return false;
+  size_t closest = events.size();
+  size_t second_closest = events.size();
+  for (size_t i = 0; i < events.size(); ++i) {
+    if (!query.Evaluate(*events.at(i)))
+      continue;
+    if (closest == events.size()) {
+      closest = i;
+      continue;
+    }
+    if (fabs(events.at(i)->timestamp - events.at(position)->timestamp) <
+        fabs(events.at(closest)->timestamp - events.at(position)->timestamp)) {
+      second_closest = closest;
+      closest = i;
+    } else if (second_closest == events.size()) {
+      second_closest = i;
+    }
+  }
+
+  if (closest < events.size() &&
+      (!return_second_closest || second_closest < events.size())) {
+    *return_closest = closest;
+    if (return_second_closest)
+      *return_second_closest = second_closest;
+    return true;
+  }
+
+  return false;
+}
+
+size_t CountMatches(const TraceEventVector& events,
+                    const Query& query,
+                    size_t begin_position,
+                    size_t end_position) {
+  if (begin_position >= events.size())
+    return 0u;
+  end_position = (end_position < events.size()) ? end_position : events.size();
+  size_t count = 0u;
+  for (size_t i = begin_position; i < end_position; ++i) {
+    if (query.Evaluate(*events.at(i)))
+      ++count;
+  }
+  return count;
 }
 
 }  // namespace trace_analyzer

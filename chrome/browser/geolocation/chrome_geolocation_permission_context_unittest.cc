@@ -19,19 +19,17 @@
 #include "chrome/browser/ui/tab_contents/test_tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/testing_profile.h"
-#include "content/browser/geolocation/arbitrator_dependency_factories_for_test.h"
-#include "content/browser/geolocation/location_arbitrator.h"
-#include "content/browser/geolocation/location_provider.h"
-#include "content/browser/geolocation/mock_location_provider.h"
 #include "content/browser/renderer_host/mock_render_process_host.h"
-#include "content/browser/tab_contents/navigation_details.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
+#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/test/mock_geolocation.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::WebContents;
 
 // ClosedDelegateTracker ------------------------------------------------------
 
@@ -99,15 +97,14 @@ class GeolocationPermissionContextTests : public TabContentsWrapperTestHarness {
   virtual ~GeolocationPermissionContextTests();
 
   int process_id() {
-    return contents()->render_view_host()->process()->GetID();
+    return contents()->GetRenderProcessHost()->GetID();
   }
   int process_id_for_tab(int tab) {
-    return extra_tabs_[tab]->tab_contents()->render_view_host()->process()->
-        GetID();
+    return extra_tabs_[tab]->web_contents()->GetRenderProcessHost()->GetID();
   }
-  int render_id() { return contents()->render_view_host()->routing_id(); }
+  int render_id() { return contents()->GetRenderViewHost()->routing_id(); }
   int render_id_for_tab(int tab) {
-    return extra_tabs_[tab]->tab_contents()->render_view_host()->routing_id();
+    return extra_tabs_[tab]->web_contents()->GetRenderViewHost()->routing_id();
   }
   int bridge_id() const { return 42; }  // Not relevant at this level.
   InfoBarTabHelper* infobar_tab_helper() {
@@ -142,7 +139,7 @@ class GeolocationPermissionContextTests : public TabContentsWrapperTestHarness {
   virtual void TearDown();
 
   content::TestBrowserThread ui_thread_;
-  scoped_refptr<GeolocationArbitratorDependencyFactory> dependency_factory_;
+  content::MockGeolocation mock_geolocation_;
 
   // A map between renderer child id and a pair represending the bridge id and
   // whether the requested permission was allowed.
@@ -151,10 +148,7 @@ class GeolocationPermissionContextTests : public TabContentsWrapperTestHarness {
 
 GeolocationPermissionContextTests::GeolocationPermissionContextTests()
     : TabContentsWrapperTestHarness(),
-      ui_thread_(BrowserThread::UI, MessageLoop::current()),
-      dependency_factory_(
-          new GeolocationArbitratorDependencyFactoryWithLocationProvider(
-              &NewAutoSuccessMockNetworkLocationProvider)) {
+      ui_thread_(BrowserThread::UI, MessageLoop::current()) {
 }
 
 GeolocationPermissionContextTests::~GeolocationPermissionContextTests() {
@@ -193,7 +187,7 @@ void GeolocationPermissionContextTests::CheckPermissionMessageSentForTab(
     int bridge_id,
     bool allowed) {
   CheckPermissionMessageSentInternal(static_cast<MockRenderProcessHost*>(
-      extra_tabs_[tab]->tab_contents()->render_view_host()->process()),
+      extra_tabs_[tab]->web_contents()->GetRenderProcessHost()),
       bridge_id, allowed);
 }
 
@@ -208,12 +202,12 @@ void GeolocationPermissionContextTests::CheckPermissionMessageSentInternal(
 }
 
 void GeolocationPermissionContextTests::AddNewTab(const GURL& url) {
-  TabContents* new_tab =
-      new TabContents(profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
-  new_tab->controller().LoadURL(url, content::Referrer(),
-                                content::PAGE_TRANSITION_TYPED, std::string());
-  static_cast<TestRenderViewHost*>(new_tab->render_manager_for_testing()->
-      current_host())->SendNavigate(extra_tabs_.size() + 1, url);
+  WebContents* new_tab =
+      WebContents::Create(profile(), NULL, MSG_ROUTING_NONE, NULL, NULL);
+  new_tab->GetController().LoadURL(
+      url, content::Referrer(), content::PAGE_TRANSITION_TYPED, std::string());
+  static_cast<TestRenderViewHost*>(new_tab->GetRenderViewHost())->
+      SendNavigate(extra_tabs_.size() + 1, url);
   extra_tabs_.push_back(new TabContentsWrapper(new_tab));
 }
 
@@ -235,14 +229,13 @@ void GeolocationPermissionContextTests::CheckTabContentsState(
 
 void GeolocationPermissionContextTests::SetUp() {
   TabContentsWrapperTestHarness::SetUp();
-  GeolocationArbitrator::SetDependencyFactoryForTest(
-      dependency_factory_.get());
+  mock_geolocation_.Setup();
   geolocation_permission_context_ =
       new ChromeGeolocationPermissionContext(profile());
 }
 
 void GeolocationPermissionContextTests::TearDown() {
-  GeolocationArbitrator::SetDependencyFactoryForTest(NULL);
+  mock_geolocation_.TearDown();
   TabContentsWrapperTestHarness::TearDown();
 }
 
@@ -580,7 +573,7 @@ TEST_F(GeolocationPermissionContextTests, InfoBarUsesCommittedEntry) {
   EXPECT_EQ(0U, infobar_tab_helper()->infobar_count());
   // Go back: navigate to a pending entry before requesting geolocation
   // permission.
-  contents()->controller().GoBack();
+  contents()->GetController().GoBack();
   // Request permission for the committed frame (not the pending one).
   RequestGeolocationPermission(
       process_id(), render_id(), bridge_id(), requesting_frame_1);
@@ -590,11 +583,11 @@ TEST_F(GeolocationPermissionContextTests, InfoBarUsesCommittedEntry) {
   ASSERT_TRUE(infobar_0);
   // Ensure the infobar is not yet expired.
   content::LoadCommittedDetails details;
-  details.entry = contents()->controller().GetLastCommittedEntry();
+  details.entry = contents()->GetController().GetLastCommittedEntry();
   ASSERT_FALSE(infobar_0->ShouldExpire(details));
   // Commit the "GoBack()" above, and ensure the infobar is now expired.
   contents()->CommitPendingNavigation();
-  details.entry = contents()->controller().GetLastCommittedEntry();
+  details.entry = contents()->GetController().GetLastCommittedEntry();
   ASSERT_TRUE(infobar_0->ShouldExpire(details));
 
   // Delete the tab contents.

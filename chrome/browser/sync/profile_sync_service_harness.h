@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -59,7 +59,7 @@ class ProfileSyncServiceHarness
 
   // Same as the above method, but enables sync only for the datatypes contained
   // in |synced_datatypes|.
-  bool SetupSync(const syncable::ModelTypeSet& synced_datatypes);
+  bool SetupSync(syncable::ModelTypeSet synced_datatypes);
 
   // ProfileSyncServiceObserver implementation.
   virtual void OnStateChanged() OVERRIDE;
@@ -102,7 +102,7 @@ class ProfileSyncServiceHarness
   bool AwaitActionableError();
 
   // Blocks until the given set of data types are migrated.
-  bool AwaitMigration(const syncable::ModelTypeSet& expected_migrated_types);
+  bool AwaitMigration(syncable::ModelTypeSet expected_migrated_types);
 
   // Blocks the caller until this harness has observed that the sync engine
   // has downloaded all the changes seen by the |partner| harness's client.
@@ -185,6 +185,14 @@ class ProfileSyncServiceHarness
 
   // Check if |type| is being synced.
   bool IsTypePreferred(syncable::ModelType type);
+
+  // Get the number of sync entries this client has. This includes all top
+  // level or permanent items, and can include recently deleted entries.
+  size_t GetNumEntries() const;
+
+  // Get the number of sync datatypes registered (ignoring whatever state
+  // they're in).
+  size_t GetNumDatatypes() const;
 
  private:
   friend class StateChangeTimeoutEvent;

@@ -13,7 +13,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/gtk/tabs/tab_gtk.h"
 #include "chrome/browser/ui/gtk/tabstrip_origin_provider.h"
@@ -29,6 +28,10 @@ class BrowserWindowGtk;
 class CustomDrawButton;
 class DraggedTabControllerGtk;
 class GtkThemeService;
+
+namespace gfx {
+class Image;
+}
 
 class TabStripGtk : public TabStripModelObserver,
                     public TabGtk::TabDelegate,
@@ -234,7 +237,7 @@ class TabStripGtk : public TabStripModelObserver,
     GtkWidget* container;
 
     // The drop indicator image.
-    GdkPixbuf* drop_arrow;
+    gfx::Image* drop_arrow;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(DropInfo);
@@ -395,7 +398,7 @@ class TabStripGtk : public TabStripModelObserver,
 
   // Returns the image to use for indicating a drop on a tab. If is_down is
   // true, this returns an arrow pointing down.
-  static GdkPixbuf* GetDropArrowImage(bool is_down);
+  static gfx::Image* GetDropArrowImage(bool is_down);
 
   // -- Animations -------------------------------------------------------------
 
@@ -408,7 +411,7 @@ class TabStripGtk : public TabStripModelObserver,
 
   // Starts various types of TabStrip animations.
   void StartInsertTabAnimation(int index);
-  void StartRemoveTabAnimation(int index, TabContents* contents);
+  void StartRemoveTabAnimation(int index, content::WebContents* contents);
   void StartMoveTabAnimation(int from_index, int to_index);
   void StartMiniTabAnimation(int index);
   void StartMiniMoveTabAnimation(int from_index,

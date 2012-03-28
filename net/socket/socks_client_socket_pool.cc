@@ -1,9 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/socket/socks_client_socket_pool.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/time.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
@@ -50,8 +52,8 @@ SOCKSConnectJob::SOCKSConnectJob(
       socks_params_(socks_params),
       transport_pool_(transport_pool),
       resolver_(host_resolver),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          callback_(this, &SOCKSConnectJob::OnIOComplete)) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(callback_(
+          base::Bind(&SOCKSConnectJob::OnIOComplete, base::Unretained(this)))) {
 }
 
 SOCKSConnectJob::~SOCKSConnectJob() {
@@ -115,12 +117,10 @@ int SOCKSConnectJob::DoLoop(int result) {
 int SOCKSConnectJob::DoTransportConnect() {
   next_state_ = STATE_TRANSPORT_CONNECT_COMPLETE;
   transport_socket_handle_.reset(new ClientSocketHandle());
-  return transport_socket_handle_->Init(group_name(),
-                                        socks_params_->transport_params(),
-                                        socks_params_->destination().priority(),
-                                        &callback_,
-                                        transport_pool_,
-                                        net_log());
+  return transport_socket_handle_->Init(
+      group_name(), socks_params_->transport_params(),
+      socks_params_->destination().priority(), callback_, transport_pool_,
+      net_log());
 }
 
 int SOCKSConnectJob::DoTransportConnectComplete(int result) {
@@ -147,7 +147,8 @@ int SOCKSConnectJob::DoSOCKSConnect() {
                                         socks_params_->destination(),
                                         resolver_));
   }
-  return socket_->Connect(&callback_);
+  return socket_->Connect(
+      base::Bind(&SOCKSConnectJob::OnIOComplete, base::Unretained(this)));
 }
 
 int SOCKSConnectJob::DoSOCKSConnectComplete(int result) {
@@ -202,12 +203,10 @@ SOCKSClientSocketPool::SOCKSClientSocketPool(
 
 SOCKSClientSocketPool::~SOCKSClientSocketPool() {}
 
-int SOCKSClientSocketPool::RequestSocket(const std::string& group_name,
-                                         const void* socket_params,
-                                         RequestPriority priority,
-                                         ClientSocketHandle* handle,
-                                         OldCompletionCallback* callback,
-                                         const BoundNetLog& net_log) {
+int SOCKSClientSocketPool::RequestSocket(
+    const std::string& group_name, const void* socket_params,
+    RequestPriority priority, ClientSocketHandle* handle,
+    const CompletionCallback& callback, const BoundNetLog& net_log) {
   const scoped_refptr<SOCKSSocketParams>* casted_socket_params =
       static_cast<const scoped_refptr<SOCKSSocketParams>*>(socket_params);
 

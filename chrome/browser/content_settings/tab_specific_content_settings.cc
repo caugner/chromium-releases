@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,13 +24,19 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
 #include "webkit/fileapi/file_system_types.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::NavigationEntry;
+using content::WebContents;
 
 namespace {
 typedef std::list<TabSpecificContentSettings*> TabSpecificList;
@@ -48,9 +54,9 @@ bool TabSpecificContentSettings::LocalSharedObjectsContainer::empty() const {
       session_storages_->empty();
 }
 
-TabSpecificContentSettings::TabSpecificContentSettings(TabContents* tab)
-    : TabContentsObserver(tab),
-      profile_(Profile::FromBrowserContext(tab->browser_context())),
+TabSpecificContentSettings::TabSpecificContentSettings(WebContents* tab)
+    : content::WebContentsObserver(tab),
+      profile_(Profile::FromBrowserContext(tab->GetBrowserContext())),
       allowed_local_shared_objects_(profile_),
       blocked_local_shared_objects_(profile_),
       geolocation_settings_state_(profile_),
@@ -80,7 +86,7 @@ TabSpecificContentSettings* TabSpecificContentSettings::Get(
   // latter will miss provisional RenderViewHosts.
   for (TabSpecificList::iterator i = g_tab_specific.Get().begin();
        i != g_tab_specific.Get().end(); ++i) {
-    if (view->delegate() == (*i)->tab_contents())
+    if (view->delegate()->GetAsWebContents() == (*i)->web_contents())
       return (*i);
   }
 
@@ -233,8 +239,8 @@ void TabSpecificContentSettings::OnContentBlocked(
     content_blocked_[type] = true;
     // TODO: it would be nice to have a way of mocking this in tests.
     content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
-        content::Source<TabContents>(tab_contents()),
+        chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+        content::Source<WebContents>(web_contents()),
         content::NotificationService::NoDetails());
   }
 }
@@ -245,8 +251,8 @@ void TabSpecificContentSettings::OnContentAccessed(ContentSettingsType type) {
   if (!content_accessed_[type]) {
     content_accessed_[type] = true;
     content::NotificationService::current()->Notify(
-        chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
-        content::Source<TabContents>(tab_contents()),
+        chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+        content::Source<WebContents>(web_contents()),
         content::NotificationService::NoDetails());
   }
 }
@@ -350,8 +356,8 @@ void TabSpecificContentSettings::OnGeolocationPermissionSet(
   geolocation_settings_state_.OnGeolocationPermissionSet(requesting_origin,
                                                          allowed);
   content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
-      content::Source<TabContents>(tab_contents()),
+      chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+      content::Source<WebContents>(web_contents()),
       content::NotificationService::NoDetails());
 }
 
@@ -366,8 +372,8 @@ void TabSpecificContentSettings::ClearBlockedContentSettingsExceptForCookies() {
   }
   load_plugins_link_enabled_ = true;
   content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
-      content::Source<TabContents>(tab_contents()),
+      chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+      content::Source<WebContents>(web_contents()),
       content::NotificationService::NoDetails());
 }
 
@@ -378,8 +384,8 @@ void TabSpecificContentSettings::ClearCookieSpecificContentSettings() {
   content_accessed_[CONTENT_SETTINGS_TYPE_COOKIES] = false;
   content_blockage_indicated_to_user_[CONTENT_SETTINGS_TYPE_COOKIES] = false;
   content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
-      content::Source<TabContents>(tab_contents()),
+      chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+      content::Source<WebContents>(web_contents()),
       content::NotificationService::NoDetails());
 }
 
@@ -387,8 +393,8 @@ void TabSpecificContentSettings::SetPopupsBlocked(bool blocked) {
   content_blocked_[CONTENT_SETTINGS_TYPE_POPUPS] = blocked;
   content_blockage_indicated_to_user_[CONTENT_SETTINGS_TYPE_POPUPS] = false;
   content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TAB_CONTENT_SETTINGS_CHANGED,
-      content::Source<TabContents>(tab_contents()),
+      chrome::NOTIFICATION_WEB_CONTENT_SETTINGS_CHANGED,
+      content::Source<WebContents>(web_contents()),
       content::NotificationService::NoDetails());
 }
 
@@ -464,17 +470,17 @@ void TabSpecificContentSettings::Observe(
   DCHECK(type == chrome::NOTIFICATION_CONTENT_SETTINGS_CHANGED);
 
   content::Details<const ContentSettingsDetails> settings_details(details);
-  const NavigationController& controller = tab_contents()->controller();
+  const NavigationController& controller = web_contents()->GetController();
   NavigationEntry* entry = controller.GetActiveEntry();
   GURL entry_url;
   if (entry)
-    entry_url = entry->url();
+    entry_url = entry->GetURL();
   if (settings_details.ptr()->update_all() ||
       // The active NavigationEntry is the URL in the URL field of a tab.
       // Currently this should be matched by the |primary_pattern|.
       settings_details.ptr()->primary_pattern().Matches(entry_url)) {
     Profile* profile =
-        Profile::FromBrowserContext(tab_contents()->browser_context());
+        Profile::FromBrowserContext(web_contents()->GetBrowserContext());
     RendererContentSettingRules rules;
     GetRendererContentSettingRules(profile->GetHostContentSettingsMap(),
                                    &rules);

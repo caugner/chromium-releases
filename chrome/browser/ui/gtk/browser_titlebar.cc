@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/command_line.h"
+#include "base/i18n/rtl.h"
 #include "base/memory/singleton.h"
 #include "base/string_piece.h"
 #include "base/string_tokenizer.h"
@@ -40,8 +41,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -53,6 +54,8 @@
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skbitmap_operations.h"
+
+using content::WebContents;
 
 namespace {
 
@@ -111,7 +114,7 @@ gboolean OnMouseMoveEvent(GtkWidget* widget, GdkEventMotion* event,
 GdkPixbuf* GetOTRAvatar() {
   static GdkPixbuf* otr_avatar = NULL;
   if (!otr_avatar) {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     otr_avatar = rb.GetRTLEnabledPixbufNamed(IDR_OTR_ICON);
   }
   return otr_avatar;
@@ -379,7 +382,7 @@ void BrowserTitlebar::Init() {
                        FALSE, 0);
     // We use the app logo as a placeholder image so the title doesn't jump
     // around.
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     app_mode_favicon_ = gtk_image_new_from_pixbuf(
         rb.GetRTLEnabledPixbufNamed(IDR_PRODUCT_LOGO_16));
     g_object_set_data(G_OBJECT(app_mode_favicon_), "left-align-popup",
@@ -390,7 +393,7 @@ void BrowserTitlebar::Init() {
       panel_wrench_button_.reset(
           BuildTitlebarButton(IDR_BALLOON_WRENCH, IDR_BALLOON_WRENCH_P,
                               IDR_BALLOON_WRENCH_H, app_mode_hbox, FALSE,
-                              IDS_NEW_TAB_APP_SETTINGS));
+                              IDS_PANEL_WINDOW_SETTINGS_BUTTON_TOOLTIP));
       g_signal_connect(panel_wrench_button_->widget(), "button-press-event",
                        G_CALLBACK(OnPanelSettingsMenuButtonPressedThunk), this);
       gtk_widget_set_no_show_all(panel_wrench_button_->widget(), TRUE);
@@ -624,10 +627,6 @@ void BrowserTitlebar::UpdateTitleAndIcon() {
         NOTREACHED() << "We should never have a tabbed app window.";
         break;
       }
-      case Browser::TYPE_SHELL: {
-        // Shell windows don't show titles and icons for now.
-        break;
-      }
       case Browser::TYPE_PANEL: {
         break;
       }
@@ -635,15 +634,15 @@ void BrowserTitlebar::UpdateTitleAndIcon() {
   }
 }
 
-void BrowserTitlebar::UpdateThrobber(TabContents* tab_contents) {
+void BrowserTitlebar::UpdateThrobber(WebContents* web_contents) {
   DCHECK(app_mode_favicon_);
 
-  if (tab_contents && tab_contents->IsLoading()) {
+  if (web_contents && web_contents->IsLoading()) {
     GdkPixbuf* icon_pixbuf =
-        throbber_.GetNextFrame(tab_contents->waiting_for_response());
+        throbber_.GetNextFrame(web_contents->IsWaitingForResponse());
     gtk_image_set_from_pixbuf(GTK_IMAGE(app_mode_favicon_), icon_pixbuf);
   } else {
-    ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
     // Note: we want to exclude the application popup window.
     if (browser_window_->browser()->is_app() &&
@@ -971,6 +970,43 @@ void BrowserTitlebar::ShowContextMenu(GdkEventButton* event) {
                                 event->time);
 }
 
+void BrowserTitlebar::SendEnterNotifyToCloseButtonIfUnderMouse() {
+  gint x;
+  gint y;
+  GtkAllocation widget_allocation = close_button_->WidgetAllocation();
+  gtk_widget_get_pointer(GTK_WIDGET(close_button_->widget()), &x, &y);
+
+  gfx::Rect button_rect(0, 0, widget_allocation.width,
+                        widget_allocation.height);
+  if (!button_rect.Contains(x, y)) {
+    // Mouse is not over the close button.
+    return;
+  }
+
+  // Create and emit an enter-notify-event on close button.
+  GValue return_value;
+  return_value.g_type = G_TYPE_BOOLEAN;
+  g_value_set_boolean(&return_value, false);
+
+  GdkEvent* event = gdk_event_new(GDK_ENTER_NOTIFY);
+  event->crossing.window = GTK_BUTTON(close_button_->widget())->event_window;
+  event->crossing.send_event = FALSE;
+  event->crossing.subwindow = close_button_->widget()->window;
+  event->crossing.time = gtk_util::XTimeNow();
+  event->crossing.x = x;
+  event->crossing.y = y;
+  event->crossing.x_root = widget_allocation.x;
+  event->crossing.y_root = widget_allocation.y;
+  event->crossing.mode = GDK_CROSSING_NORMAL;
+  event->crossing.detail = GDK_NOTIFY_ANCESTOR;
+  event->crossing.focus = true;
+  event->crossing.state = 0;
+
+  g_signal_emit_by_name(GTK_OBJECT(close_button_->widget()),
+                        "enter-notify-event", event,
+                        &return_value);
+}
+
 bool BrowserTitlebar::IsCommandIdEnabled(int command_id) const {
   if (command_id == kShowWindowDecorationsCommand)
     return true;
@@ -987,11 +1023,11 @@ bool BrowserTitlebar::IsCommandIdChecked(int command_id) const {
 
   EncodingMenuController controller;
   if (controller.DoesCommandBelongToEncodingMenu(command_id)) {
-    TabContents* tab_contents =
-        browser_window_->browser()->GetSelectedTabContents();
-    if (tab_contents) {
+    WebContents* web_contents =
+        browser_window_->browser()->GetSelectedWebContents();
+    if (web_contents) {
       return controller.IsItemChecked(browser_window_->browser()->profile(),
-                                      tab_contents->encoding(),
+                                      web_contents->GetEncoding(),
                                       command_id);
     }
     return false;
@@ -1092,7 +1128,7 @@ static std::vector<GdkPixbuf*>* g_throbber_waiting_frames = NULL;
 // square GdkPixbufs that get stored in |frames|.
 static void MakeThrobberFrames(int resource_id,
                                std::vector<GdkPixbuf*>* frames) {
-  ResourceBundle &rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle &rb = ui::ResourceBundle::GetSharedInstance();
   SkBitmap* frame_strip = rb.GetBitmapNamed(resource_id);
 
   // Each frame of the animation is a square, so we use the height as the

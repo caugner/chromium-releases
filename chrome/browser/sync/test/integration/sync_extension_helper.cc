@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "chrome/browser/extensions/pending_extension_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/string_ordinal.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -64,7 +65,7 @@ void SyncExtensionHelper::InstallExtension(
   ASSERT_TRUE(extension.get()) << "Could not get extension " << name
                                << " (profile = " << profile << ")";
   profile->GetExtensionService()->OnExtensionInstalled(
-      extension, extension->UpdatesFromGallery(), 0);
+      extension, extension->UpdatesFromGallery(), StringOrdinal());
 }
 
 void SyncExtensionHelper::UninstallExtension(
@@ -78,23 +79,10 @@ std::vector<std::string> SyncExtensionHelper::GetInstalledExtensionNames(
   std::vector<std::string> names;
   ExtensionService* extension_service = profile->GetExtensionService();
 
-  const ExtensionList* extensions = extension_service->extensions();
-  for (ExtensionList::const_iterator it = extensions->begin();
+  scoped_ptr<const ExtensionSet> extensions(
+      extension_service->GenerateInstalledExtensionsSet());
+  for (ExtensionSet::const_iterator it = extensions->begin();
        it != extensions->end(); ++it) {
-    names.push_back((*it)->name());
-  }
-
-  const ExtensionList* disabled_extensions =
-      extension_service->disabled_extensions();
-  for (ExtensionList::const_iterator it = disabled_extensions->begin();
-       it != disabled_extensions->end(); ++it) {
-    names.push_back((*it)->name());
-  }
-
-  const ExtensionList* terminated_extensions =
-      extension_service->terminated_extensions();
-  for (ExtensionList::const_iterator it = terminated_extensions->begin();
-       it != terminated_extensions->end(); ++it) {
     names.push_back((*it)->name());
   }
 
@@ -153,18 +141,20 @@ void SyncExtensionHelper::InstallExtensionsPendingForSync(
   // extension from the extensions service's copy.
   const PendingExtensionManager* pending_extension_manager =
       profile->GetExtensionService()->pending_extension_manager();
-  PendingExtensionManager::PendingExtensionMap pending_extensions(
-      pending_extension_manager->begin(),
-      pending_extension_manager->end());
-  for (PendingExtensionManager::const_iterator it = pending_extensions.begin();
-       it != pending_extensions.end(); ++it) {
-    if (!it->second.is_from_sync()) {
+
+  std::set<std::string> pending_crx_ids;
+  pending_extension_manager->GetPendingIdsForUpdateCheck(&pending_crx_ids);
+
+  std::set<std::string>::const_iterator id;
+  PendingExtensionInfo info;
+  for (id = pending_crx_ids.begin(); id != pending_crx_ids.end(); ++id) {
+    ASSERT_TRUE(pending_extension_manager->GetById(*id, &info));
+    if (!info.is_from_sync())
       continue;
-    }
-    const std::string& id = it->first;
-    StringMap::const_iterator it2 = id_to_name_.find(id);
+
+    StringMap::const_iterator it2 = id_to_name_.find(*id);
     if (it2 == id_to_name_.end()) {
-      ADD_FAILURE() << "Could not get name for id " << id
+      ADD_FAILURE() << "Could not get name for id " << *id
                     << " (profile = " << profile->GetDebugName() << ")";
       continue;
     }
@@ -180,39 +170,36 @@ SyncExtensionHelper::ExtensionStateMap
 
   ExtensionService* extension_service = profile->GetExtensionService();
 
-  const ExtensionList* extensions = extension_service->extensions();
-  for (ExtensionList::const_iterator it = extensions->begin();
+  scoped_ptr<const ExtensionSet> extensions(
+      extension_service->GenerateInstalledExtensionsSet());
+  for (ExtensionSet::const_iterator it = extensions->begin();
        it != extensions->end(); ++it) {
     const std::string& id = (*it)->id();
-    extension_state_map[id].enabled_state = ExtensionState::ENABLED;
+    extension_state_map[id].enabled_state =
+        extension_service->IsExtensionEnabled(id) ?
+        ExtensionState::ENABLED :
+        ExtensionState::DISABLED;
     extension_state_map[id].incognito_enabled =
         extension_service->IsIncognitoEnabled(id);
-    DVLOG(2) << "Extension " << (*it)->id() << " in profile "
-             << profile_debug_name << " is enabled";
-  }
 
-  const ExtensionList* disabled_extensions =
-      extension_service->disabled_extensions();
-  for (ExtensionList::const_iterator it = disabled_extensions->begin();
-       it != disabled_extensions->end(); ++it) {
-    const std::string& id = (*it)->id();
-    extension_state_map[id].enabled_state = ExtensionState::DISABLED;
-    extension_state_map[id].incognito_enabled =
-        extension_service->IsIncognitoEnabled(id);
     DVLOG(2) << "Extension " << (*it)->id() << " in profile "
-             << profile_debug_name << " is disabled";
+             << profile_debug_name << " is "
+             << (extension_service->IsExtensionEnabled(id) ?
+                 "enabled" : "disabled");
   }
 
   const PendingExtensionManager* pending_extension_manager =
       extension_service->pending_extension_manager();
-  PendingExtensionManager::const_iterator it;
-  for (it = pending_extension_manager->begin();
-       it != pending_extension_manager->end(); ++it) {
-    const std::string& id = it->first;
-    extension_state_map[id].enabled_state = ExtensionState::PENDING;
-    extension_state_map[id].incognito_enabled =
-        extension_service->IsIncognitoEnabled(id);
-    DVLOG(2) << "Extension " << it->first << " in profile "
+
+  std::set<std::string> pending_crx_ids;
+  pending_extension_manager->GetPendingIdsForUpdateCheck(&pending_crx_ids);
+
+  std::set<std::string>::const_iterator id;
+  for (id = pending_crx_ids.begin(); id != pending_crx_ids.end(); ++id) {
+    extension_state_map[*id].enabled_state = ExtensionState::PENDING;
+    extension_state_map[*id].incognito_enabled =
+        extension_service->IsIncognitoEnabled(*id);
+    DVLOG(2) << "Extension " << *id << " in profile "
              << profile_debug_name << " is pending";
   }
 

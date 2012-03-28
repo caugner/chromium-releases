@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -283,6 +283,13 @@ const PPB_MouseInputEvent* PPBMouseInputEventInterface() {
   return ppb;
 }
 
+const PPB_NetAddress_Private* PPBNetAddressPrivateInterface() {
+  static const PPB_NetAddress_Private* ppb =
+      static_cast<const PPB_NetAddress_Private*>(
+          GetBrowserInterfaceSafe(PPB_NETADDRESS_PRIVATE_INTERFACE));
+  return ppb;
+}
+
 const PPB_URLLoader* PPBURLLoaderInterface() {
   static const PPB_URLLoader* ppb =
       static_cast<const PPB_URLLoader*>(
@@ -308,6 +315,13 @@ const PPB_Var* PPBVarInterface() {
   static const PPB_Var* ppb =
       static_cast<const PPB_Var*>(
           GetBrowserInterfaceSafe(PPB_VAR_INTERFACE));
+  return ppb;
+}
+
+const PPB_VarArrayBuffer* PPBVarArrayBufferInterface() {
+  static const PPB_VarArrayBuffer* ppb =
+      static_cast<const PPB_VarArrayBuffer*>(
+          GetBrowserInterfaceSafe(PPB_VAR_ARRAY_BUFFER_INTERFACE));
   return ppb;
 }
 
@@ -368,6 +382,13 @@ const PPB_Fullscreen* PPBFullscreenInterface() {
   return ppb;
 }
 
+const PPB_Gamepad_Dev* PPBGamepadInterface() {
+  static const PPB_Gamepad_Dev* ppb =
+      static_cast<const PPB_Gamepad_Dev*>(
+          GetBrowserInterfaceSafe(PPB_GAMEPAD_DEV_INTERFACE));
+  return ppb;
+}
+
 const PPB_MouseLock* PPBMouseLockInterface() {
   static const PPB_MouseLock* ppb = static_cast<const PPB_MouseLock*>(
       GetBrowserInterfaceSafe(PPB_MOUSELOCK_INTERFACE));
@@ -385,6 +406,20 @@ const PPB_Testing_Dev* PPBTestingInterface() {
   static const PPB_Testing_Dev* ppb =
       static_cast<const PPB_Testing_Dev*>(
           GetBrowserInterfaceSafe(PPB_TESTING_DEV_INTERFACE));
+  return ppb;
+}
+
+const PPB_View* PPBViewInterface() {
+  static const PPB_View* ppb =
+      static_cast<const PPB_View*>(
+          GetBrowserInterfaceSafe(PPB_VIEW_INTERFACE));
+  return ppb;
+}
+
+const PPB_WebSocket* PPBWebSocketInterface() {
+  static const PPB_WebSocket* ppb =
+      static_cast<const PPB_WebSocket*>(
+          GetBrowserInterfaceSafe(PPB_WEBSOCKET_INTERFACE));
   return ppb;
 }
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -270,6 +270,11 @@ void AutomationProxyCacheEntry::CreateProxy(ChromeFrameLaunchParams* params,
 
     command_line->AppendSwitch(switches::kDisablePopupBlocking);
 
+#if defined(GOOGLE_CHROME_BUILD)
+    // Chrome Frame should use the native print dialog.
+    command_line->AppendSwitch(switches::kDisablePrintPreview);
+#endif
+
     // Disable the "Whoa! Chrome has crashed." dialog, because that isn't very
     // useful for Chrome Frame users.
 #ifndef NDEBUG
@@ -298,10 +303,6 @@ void AutomationProxyCacheEntry::CreateProxy(ChromeFrameLaunchParams* params,
       command_line->AppendSwitchNative(switches::kLang, params->language());
 
     command_line_string = command_line->GetCommandLineString();
-    // If there are any extra arguments, append them to the command line.
-    if (!params->extra_arguments().empty()) {
-      command_line_string += L' ' + params->extra_arguments();
-    }
   }
 
   automation_server_launch_start_time_ = base::TimeTicks::Now();
@@ -504,14 +505,8 @@ bool ProxyFactory::ReleaseAutomationServer(void* server_id,
   return true;
 }
 
-static base::LazyInstance<ProxyFactory,
-                          base::LeakyLazyInstanceTraits<ProxyFactory> >
+static base::LazyInstance<ProxyFactory>::Leaky
     g_proxy_factory = LAZY_INSTANCE_INITIALIZER;
-
-template <> struct RunnableMethodTraits<ChromeFrameAutomationClient> {
-  static void RetainCallee(ChromeFrameAutomationClient* obj) {}
-  static void ReleaseCallee(ChromeFrameAutomationClient* obj) {}
-};
 
 ChromeFrameAutomationClient::ChromeFrameAutomationClient()
     : chrome_frame_delegate_(NULL),
@@ -623,7 +618,7 @@ void ChromeFrameAutomationClient::Uninitialize() {
     tab_ = NULL;    // scoped_refptr::Release
   }
 
-  // Wait for the background thread to exit.
+  // Wait for the automation proxy's worker thread to exit.
   ReleaseAutomationServer();
 
   // We must destroy the window, since if there are pending tasks
@@ -670,7 +665,7 @@ bool ChromeFrameAutomationClient::InitiateNavigation(
       FilePath profile_path;
       chrome_launch_params_ = new ChromeFrameLaunchParams(parsed_url,
           referrer_gurl, profile_path, L"", SimpleResourceLoader::GetLanguage(),
-          L"", false, false, route_all_top_level_navigations_);
+          false, false, route_all_top_level_navigations_);
     } else {
       chrome_launch_params_->set_referrer(referrer_gurl);
       chrome_launch_params_->set_url(parsed_url);
@@ -812,10 +807,10 @@ void ChromeFrameAutomationClient::CreateExternalTab() {
       chrome_launch_params_->route_all_top_level_navigations();
 
   UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "ChromeFrame.HostNetworking", !use_chrome_network_, 0, 1, 2);
+      "ChromeFrame.HostNetworking", !use_chrome_network_, 1, 2, 3);
 
   UMA_HISTOGRAM_CUSTOM_COUNTS("ChromeFrame.HandleTopLevelRequests",
-                              handle_top_level_requests_, 0, 1, 2);
+                              handle_top_level_requests_, 1, 2, 3);
 
   IPC::SyncMessage* message =
       new AutomationMsg_CreateExternalTab(settings, NULL, NULL, 0, 0);
@@ -846,7 +841,7 @@ AutomationLaunchResult ChromeFrameAutomationClient::CreateExternalTabComplete(
   return launch_result;
 }
 
-// Invoked in launch background thread.
+// Invoked in the automation proxy's worker thread.
 void ChromeFrameAutomationClient::LaunchComplete(
     ChromeFrameAutomationProxy* proxy,
     AutomationLaunchResult result) {
@@ -889,6 +884,7 @@ void ChromeFrameAutomationClient::LaunchComplete(
   }
 }
 
+// Invoked in the automation proxy's worker thread.
 void ChromeFrameAutomationClient::AutomationServerDied() {
   // Make sure we notify our delegate.
   PostTask(
@@ -905,7 +901,6 @@ void ChromeFrameAutomationClient::InitializeComplete(
   DCHECK_EQ(base::PlatformThread::CurrentId(), ui_thread_id_);
   if (result != AUTOMATION_SUCCESS) {
     DLOG(WARNING) << "InitializeComplete: failure " << result;
-    ReleaseAutomationServer();
   } else {
     init_state_ = INITIALIZED;
 
@@ -998,9 +993,11 @@ bool ChromeFrameAutomationClient::ProcessUrlRequestMessage(TabProxy* tab,
   }
 
   PostTask(
-      FROM_HERE, base::IgnoreReturn<bool>(base::Bind(
-          &ChromeFrameAutomationClient::ProcessUrlRequestMessage,
-          base::Unretained(this), tab, msg, true)));
+      FROM_HERE,
+      base::Bind(
+          base::IgnoreResult(
+              &ChromeFrameAutomationClient::ProcessUrlRequestMessage),
+          base::Unretained(this), tab, msg, true));
   return true;
 }
 

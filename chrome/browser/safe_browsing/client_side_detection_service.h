@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -22,12 +22,12 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/callback_old.h"
+#include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
+#include "base/memory/weak_ptr.h"
 #include "base/time.h"
 #include "content/public/common/url_fetcher_delegate.h"
 #include "content/public/browser/notification_observer.h"
@@ -169,8 +169,6 @@ class ClientSideDetectionService : public content::URLFetcherDelegate,
                            SetEnabledAndRefreshState);
   FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest, IsBadIpAddress);
   FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest,
-                           IsFalsePositiveResponse);
-  FRIEND_TEST_ALL_PREFIXES(ClientSideDetectionServiceTest,
                            ModelHasValidHashIds);
 
   // CacheState holds all information necessary to respond to a caller without
@@ -198,9 +196,9 @@ class ClientSideDetectionService : public content::URLFetcherDelegate,
   static const int kMaxReportsPerInterval;
   static const int kClientModelFetchIntervalMs;
   static const int kInitialClientModelFetchDelayMs;
-  static const base::TimeDelta kReportsInterval;
-  static const base::TimeDelta kNegativeCacheInterval;
-  static const base::TimeDelta kPositiveCacheInterval;
+  static const int kReportsIntervalDays;
+  static const int kNegativeCacheIntervalDays;
+  static const int kPositiveCacheIntervalMinutes;
 
   // Starts sending the request to the client-side detection frontends.
   // This method takes ownership of both pointers.
@@ -252,12 +250,6 @@ class ClientSideDetectionService : public content::URLFetcherDelegate,
   // Returns true iff all the hash id's in the client-side model point to
   // valid hashes in the model.
   static bool ModelHasValidHashIds(const ClientSideModel& model);
-
-  // Returns true iff the response is phishing (phishy() is true) and if the
-  // given URL matches one of the whitelisted expressions in the given
-  // ClientPhishingResponse.
-  static bool IsFalsePositiveResponse(const GURL& url,
-                                      const ClientPhishingResponse& response);
 
   // Whether the service is running or not.  When the service is not running,
   // it won't download the model nor report detected phishing URLs.

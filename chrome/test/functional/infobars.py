@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -36,6 +36,11 @@ class InfobarTest(pyauto.PyUITest):
     if (self.IsChromeOS() and
         self.GetBrowserInfo()['properties']['branding'] == 'Google Chrome'):
       self._flash_plugin_type = 'Pepper Plugin'
+    # Forcibly trigger all plugins to get registered.  crbug.com/94123
+    # Sometimes flash files loaded too quickly after firing browser
+    # ends up getting downloaded, which seems to indicate that the plugin
+    # hasn't been registered yet.
+    self.GetPluginsInfo()
 
   def _GetTabInfo(self, windex=0, tab_index=0):
     """Helper to return info for the given tab in the given window.
@@ -119,17 +124,17 @@ class InfobarTest(pyauto.PyUITest):
 
   def testMultipleDownloadsInfobar(self):
     """Verify the mutiple downloads infobar."""
-    zip_file = 'a_zip_file.zip'
+    zip_files = ['a_zip_file.zip']
+    zip_files.append(zip_files[0].replace('.', ' (1).'))
     html_file = 'download-a_zip_file.html'
     assert pyauto.PyUITest.IsEnUS()
     file_url = self.GetFileURLForDataPath('downloads', html_file)
     match_text = 'This site is attempting to download multiple files. ' \
                  'Do you want to allow this?'
     self.NavigateToURL('chrome://downloads')  # trigger download manager
-    test_utils.RemoveDownloadedTestFile(self, zip_file)
+    for zip_file in zip_files:
+      test_utils.RemoveDownloadedTestFile(self, zip_file)
     self.DownloadAndWaitForStart(file_url)
-    # trigger page reload, which triggers the download infobar
-    self.GetBrowserWindow(0).GetTab(0).Reload()
     self.assertTrue(self.WaitForInfobarCount(1))
     tab_info = self._GetTabInfo(0, 0)
     infobars = tab_info['infobars']
@@ -140,16 +145,11 @@ class InfobarTest(pyauto.PyUITest):
     self.assertEqual('Allow', infobars[0]['buttons'][0])
     self.assertEqual('Deny', infobars[0]['buttons'][1])
     self.WaitForAllDownloadsToComplete()
-    test_utils.RemoveDownloadedTestFile(self, zip_file)
+    for zip_file in zip_files:
+      test_utils.RemoveDownloadedTestFile(self, zip_file)
 
   def testPluginCrashForMultiTabs(self):
     """Verify plugin crash infobar shows up only on the tabs using plugin."""
-    # Flash files loaded too quickly after firing browser end up getting
-    # downloaded, which seems to indicate that the plugin hasn't been
-    # registered yet.
-    # Hack to register Flash plugin on all platforms.  crbug.com/94123
-    self.GetPluginsInfo()
-
     non_flash_url = self.GetFileURLForDataPath('english_page.html')
     flash_url = self.GetFileURLForDataPath('plugin', 'FlashSpin.swf')
     # False = Non flash url, True = Flash url

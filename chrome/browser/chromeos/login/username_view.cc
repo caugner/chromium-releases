@@ -59,7 +59,7 @@ gfx::NativeCursor UsernameView::GetCursor(const views::MouseEvent& event) {
 
 void UsernameView::PaintUsername(const gfx::Rect& bounds) {
   margin_width_ = bounds.height() * kMarginRatio;
-  gfx::CanvasSkia canvas(bounds.width(), bounds.height(), false);
+  gfx::CanvasSkia canvas(bounds.size(), false);
   // Draw transparent background.
   canvas.sk_canvas()->drawColor(0);
 
@@ -112,7 +112,7 @@ void UsernameView::PaintUsername(const gfx::Rect& bounds) {
   // Draw the text.
   // Note, direct call of the DrawStringInt method produces the green dots
   // along the text perimeter (when the label is place on the white background).
-  SkColor text_color = IsEnabled() ? enabled_color() : disabled_color();
+  SkColor text_color = enabled() ? enabled_color() : disabled_color();
   SkColor kInvisibleHaloColor = 0x00000000;
   canvas.DrawStringWithHalo(GetText(), font(), text_color,
                             kInvisibleHaloColor, bounds.x() + margin_width_,

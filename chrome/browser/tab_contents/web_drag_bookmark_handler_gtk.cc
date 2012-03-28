@@ -10,7 +10,10 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
+
+using content::WebContents;
 
 WebDragBookmarkHandlerGtk::WebDragBookmarkHandlerGtk()
     : tab_(NULL) {
@@ -18,14 +21,14 @@ WebDragBookmarkHandlerGtk::WebDragBookmarkHandlerGtk()
 
 WebDragBookmarkHandlerGtk::~WebDragBookmarkHandlerGtk() {}
 
-void WebDragBookmarkHandlerGtk::DragInitialize(TabContents* contents) {
+void WebDragBookmarkHandlerGtk::DragInitialize(WebContents* contents) {
   bookmark_drag_data_.Clear();
 
   // Ideally we would want to initialize the the TabContentsWrapper member in
   // the constructor. We cannot do that as the WebDragDestGtk object is
   // created during the construction of the TabContents object.  The
   // TabContentsWrapper is created much later.
-  DCHECK(tab_ ? (tab_->tab_contents() == contents) : true);
+  DCHECK(tab_ ? (tab_->web_contents() == contents) : true);
   if (!tab_)
     tab_ = TabContentsWrapper::GetCurrentWrapperForContents(contents);
 }
@@ -81,7 +84,7 @@ void WebDragBookmarkHandlerGtk::OnDrop() {
 
     // Focus the target browser.
     Browser* browser = Browser::GetBrowserForController(
-        &tab_->controller(), NULL);
+        &tab_->web_contents()->GetController(), NULL);
     if (browser)
       browser->window()->Show();
   }

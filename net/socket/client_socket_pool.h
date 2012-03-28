@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -67,7 +67,7 @@ class NET_EXPORT ClientSocketPool {
                             const void* params,
                             RequestPriority priority,
                             ClientSocketHandle* handle,
-                            OldCompletionCallback* callback,
+                            const CompletionCallback& callback,
                             const BoundNetLog& net_log) = 0;
 
   // RequestSockets is used to request that |num_sockets| be connected in the
@@ -87,7 +87,7 @@ class NET_EXPORT ClientSocketPool {
 
   // Called to cancel a RequestSocket call that returned ERR_IO_PENDING.  The
   // same handle parameter must be passed to this method as was passed to the
-  // RequestSocket call being cancelled.  The associated OldCompletionCallback is
+  // RequestSocket call being cancelled.  The associated CompletionCallback is
   // not run.  However, for performance, we will let one ConnectJob complete
   // and go idle.
   virtual void CancelRequest(const std::string& group_name,

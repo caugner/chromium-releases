@@ -10,6 +10,7 @@
 
 #include "base/base_paths.h"
 #include "base/command_line.h"
+#include "base/debug/trace_event.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -41,10 +42,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -52,10 +53,15 @@
 #include "ui/base/accelerators/accelerator_gtk.h"
 #include "ui/base/dragdrop/gtk_dnd_util.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/gtk_util.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
 #include "ui/gfx/skbitmap_operations.h"
+
+using content::HostZoomMap;
+using content::UserMetricsAction;
+using content::WebContents;
 
 namespace {
 
@@ -289,7 +295,7 @@ void BrowserToolbarGtk::ShowAppMenu() {
     RebuildWrenchMenu();
 
   wrench_menu_button_->SetPaintOverride(GTK_STATE_ACTIVE);
-  UserMetrics::RecordAction(UserMetricsAction("ShowAppMenu"));
+  content::RecordAction(UserMetricsAction("ShowAppMenu"));
   wrench_menu_->PopupAsFromKeyEvent(wrench_menu_button_->widget());
 }
 
@@ -411,7 +417,7 @@ void BrowserToolbarGtk::Observe(int type,
 
 // BrowserToolbarGtk, public ---------------------------------------------------
 
-void BrowserToolbarGtk::UpdateTabContents(TabContents* contents,
+void BrowserToolbarGtk::UpdateWebContents(WebContents* contents,
                                           bool should_restore_state) {
   location_bar_->Update(should_restore_state ? contents : NULL);
 
@@ -460,6 +466,8 @@ bool BrowserToolbarGtk::UpdateRoundedness() {
 
 gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
                                               GdkEventExpose* e) {
+  TRACE_EVENT0("ui::gtk", "BrowserToolbarGtk::OnAlignmentExpose");
+
   // We may need to update the roundedness of the toolbar's top corners. In
   // this case, don't draw; we'll be called again soon enough.
   if (UpdateRoundedness())
@@ -504,9 +512,10 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
     area = area.Subtract(right).Subtract(left);
   }
 
-  gfx::CairoCachedSurface* background = theme_service_->GetSurfaceNamed(
-      IDR_THEME_TOOLBAR, widget);
-  background->SetSource(cr, widget, tabstrip_origin.x(), tabstrip_origin.y());
+  const gfx::Image* background =
+      theme_service_->GetImageNamed(IDR_THEME_TOOLBAR);
+  background->ToCairo()->SetSource(
+      cr, widget, tabstrip_origin.x(), tabstrip_origin.y());
   cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
   cairo_rectangle(cr, area.x(), area.y(), area.width(), area.height());
   cairo_fill(cr);
@@ -529,17 +538,17 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
         allocation.y + allocation.height);
     cairo_t* copy_cr = cairo_create(target);
 
+    ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+
     cairo_set_operator(copy_cr, CAIRO_OPERATOR_SOURCE);
     if (draw_left_corner) {
-      gfx::CairoCachedSurface* left_corner = theme_service_->GetSurfaceNamed(
-          IDR_CONTENT_TOP_LEFT_CORNER_MASK, widget);
-      left_corner->SetSource(copy_cr, widget, left.x(), left.y());
+      rb.GetNativeImageNamed(IDR_CONTENT_TOP_LEFT_CORNER_MASK).ToCairo()->
+          SetSource(copy_cr, widget, left.x(), left.y());
       cairo_paint(copy_cr);
     }
     if (draw_right_corner) {
-      gfx::CairoCachedSurface* right_corner = theme_service_->GetSurfaceNamed(
-          IDR_CONTENT_TOP_RIGHT_CORNER_MASK, widget);
-      right_corner->SetSource(copy_cr, widget, right.x(), right.y());
+      rb.GetNativeImageNamed(IDR_CONTENT_TOP_RIGHT_CORNER_MASK).ToCairo()->
+          SetSource(copy_cr, widget, right.x(), right.y());
       // We fill a path rather than just painting because we don't want to
       // overwrite the left corner.
       cairo_rectangle(copy_cr, right.x(), right.y(),
@@ -549,8 +558,8 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 
     // Draw the background. CAIRO_OPERATOR_IN uses the existing pixel data as
     // an alpha mask.
-    background->SetSource(copy_cr, widget,
-                          tabstrip_origin.x(), tabstrip_origin.y());
+    background->ToCairo()->SetSource(copy_cr, widget,
+                                     tabstrip_origin.x(), tabstrip_origin.y());
     cairo_set_operator(copy_cr, CAIRO_OPERATOR_IN);
     cairo_pattern_set_extend(cairo_get_source(copy_cr), CAIRO_EXTEND_REPEAT);
     cairo_paint(copy_cr);
@@ -569,6 +578,7 @@ gboolean BrowserToolbarGtk::OnAlignmentExpose(GtkWidget* widget,
 
 gboolean BrowserToolbarGtk::OnLocationHboxExpose(GtkWidget* location_hbox,
                                                  GdkEventExpose* e) {
+  TRACE_EVENT0("ui::gtk", "BrowserToolbarGtk::OnLocationHboxExpose");
   if (theme_service_->UsingNativeTheme()) {
     GtkAllocation allocation;
     gtk_widget_get_allocation(location_hbox, &allocation);
@@ -651,6 +661,7 @@ void BrowserToolbarGtk::RebuildWrenchMenu() {
 
 gboolean BrowserToolbarGtk::OnWrenchMenuButtonExpose(GtkWidget* sender,
                                                      GdkEventExpose* expose) {
+  TRACE_EVENT0("ui::gtk", "BrowserToolbarGtk::OnWrenchMenuButtonExpose");
   int resource_id = 0;
   if (UpgradeDetector::GetInstance()->notify_upgrade()) {
     resource_id = UpgradeDetector::GetInstance()->GetIconResourceID(

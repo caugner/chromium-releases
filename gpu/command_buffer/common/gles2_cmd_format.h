@@ -70,6 +70,8 @@ COMPILE_ASSERT(kTextures == 4, kTextures_is_not_4);
 // the command failed its result size will 0.
 template <typename T>
 struct SizedResult {
+  typedef T Type;
+
   T* GetData() {
     return static_cast<T*>(static_cast<void*>(&data));
   }
@@ -88,7 +90,8 @@ struct SizedResult {
 
   // Returns the maximum number of results for a given buffer size.
   static uint32 ComputeMaxResults(size_t size_of_buffer) {
-    return (size_of_buffer - sizeof(uint32)) / sizeof(T);  // NOLINT
+    return (size_of_buffer >= sizeof(uint32)) ?
+        ((size_of_buffer - sizeof(uint32)) / sizeof(T)) : 0;  // NOLINT
   }
 
   // Set the size for a given number of results.

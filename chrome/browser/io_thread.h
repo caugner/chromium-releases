@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,7 +29,6 @@ class SystemURLRequestContextGetter;
 namespace net {
 class CertVerifier;
 class CookieStore;
-class DnsRRResolver;
 class FtpTransactionFactory;
 class HostResolver;
 class HttpAuthHandlerFactory;
@@ -41,6 +40,7 @@ class ProxyConfigService;
 class ProxyService;
 class SdchManager;
 class SSLConfigService;
+class TransportSecurityState;
 class URLRequestContext;
 class URLRequestContextGetter;
 class URLSecurityManager;
@@ -48,6 +48,10 @@ class URLSecurityManager;
 
 // Contains state associated with, initialized and cleaned up on, and
 // primarily used on, the IO thread.
+//
+// If you are looking to interact with the IO thread (e.g. post tasks
+// to it or check if it is the current thread), see
+// content::BrowserThread.
 class IOThread : public content::BrowserThreadDelegate {
  public:
   struct Globals {
@@ -65,7 +69,10 @@ class IOThread : public content::BrowserThreadDelegate {
     scoped_ptr<net::NetworkDelegate> system_network_delegate;
     scoped_ptr<net::HostResolver> host_resolver;
     scoped_ptr<net::CertVerifier> cert_verifier;
-    scoped_ptr<net::DnsRRResolver> dnsrr_resolver;
+    // This TransportSecurityState doesn't load or save any state. It's only
+    // used to enforce pinning for system requests and will only use built-in
+    // pins.
+    scoped_ptr<net::TransportSecurityState> transport_security_state;
     scoped_refptr<net::SSLConfigService> ssl_config_service;
     scoped_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory;
     scoped_ptr<net::HttpServerProperties> http_server_properties;
@@ -86,8 +93,8 @@ class IOThread : public content::BrowserThreadDelegate {
     scoped_ptr<net::HttpTransactionFactory> system_http_transaction_factory;
     scoped_ptr<net::FtpTransactionFactory> system_ftp_transaction_factory;
     scoped_refptr<net::URLRequestContext> system_request_context;
-    // |cookie_store| and |origin_bound_cert_service| are shared between
-    // |proxy_script_fetcher_context| and |system_request_context|.
+    // |system_cookie_store| and |system_origin_bound_cert_service| are shared
+    // between |proxy_script_fetcher_context| and |system_request_context|.
     scoped_refptr<net::CookieStore> system_cookie_store;
     scoped_ptr<net::OriginBoundCertService> system_origin_bound_cert_service;
     scoped_refptr<ExtensionEventRouterForwarder>
@@ -105,6 +112,9 @@ class IOThread : public content::BrowserThreadDelegate {
   Globals* globals();
 
   ChromeNetLog* net_log();
+
+  // Handles changing to On The Record mode, discarding confidential data.
+  void ChangedToOnTheRecord();
 
   // Returns a getter for the URLRequestContext.  Only called on the UI thread.
   net::URLRequestContextGetter* system_url_request_context_getter();
@@ -142,6 +152,8 @@ class IOThread : public content::BrowserThreadDelegate {
 
   // Returns an SSLConfigService instance.
   net::SSLConfigService* GetSSLConfigService();
+
+  void ChangedToOnTheRecordOnIOThread();
 
   // The NetLog is owned by the browser process, to allow logging from other
   // threads during shutdown, but is used most frequently on the IOThread.

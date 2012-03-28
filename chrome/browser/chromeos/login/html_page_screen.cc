@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,28 +11,20 @@
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
 #include "chrome/browser/chromeos/login/screen_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/views/handle_web_keyboard_event.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/site_instance.h"
 #include "googleurl/src/gurl.h"
 #include "ui/views/events/event.h"
+
+using content::SiteInstance;
+using content::WebContents;
 
 namespace chromeos {
 
 ///////////////////////////////////////////////////////////////////////////////
-// HTMLPageDomView
-TabContents* HTMLPageDomView::CreateTabContents(Profile* profile,
-                                                SiteInstance* instance) {
-  return new WizardWebPageViewTabContents(profile,
-                                          instance,
-                                          page_delegate_);
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // HTMLPageView
 HTMLPageView::HTMLPageView()
-    : dom_view_(new HTMLPageDomView()) {
+    : dom_view_(new WebPageDomView()) {
 }
 
 WebPageDomView* HTMLPageView::dom_view() {
@@ -52,7 +44,6 @@ HTMLPageScreen::~HTMLPageScreen() {}
 // HTMLPageScreen, ViewScreen implementation:
 void HTMLPageScreen::CreateView() {
   ViewScreen<HTMLPageView>::CreateView();
-  view()->SetWebPageDelegate(this);
 }
 
 void HTMLPageScreen::Refresh() {
@@ -60,9 +51,8 @@ void HTMLPageScreen::Refresh() {
   StartTimeoutTimer();
   GURL url(url_);
   Profile* profile = ProfileManager::GetDefaultProfile();
-  view()->InitDOM(profile,
-                  SiteInstance::CreateSiteInstanceForURL(profile, url));
-  view()->SetTabContentsDelegate(this);
+  view()->InitDOM(profile, SiteInstance::CreateForURL(profile, url));
+  view()->SetWebContentsDelegate(this);
   view()->LoadURL(url);
 }
 
@@ -71,12 +61,15 @@ HTMLPageView* HTMLPageScreen::AllocateView() {
 }
 
 void HTMLPageScreen::HandleKeyboardEvent(const NativeWebKeyboardEvent& event) {
-  HandleWebKeyboardEvent(view()->GetWidget(), event);
+  unhandled_keyboard_handler_.HandleKeyboardEvent(event,
+                                                  view()->GetFocusManager());
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// HTMLPageScreen, WebPageDelegate implementation:
-void HTMLPageScreen::OnPageLoaded() {
+// HTMLPageScreen, WebPageScreen implementation:
+void HTMLPageScreen::OnNetworkTimeout() {
+  VLOG(1) << "HTMLPageScreen::OnNetworkTimeout";
+  // Just show what we have now. We shouldn't exit from the screen on timeout.
   StopTimeoutTimer();
   // Enable input methods (e.g. Chinese, Japanese) so that users could input
   // their first and last names.
@@ -87,19 +80,6 @@ void HTMLPageScreen::OnPageLoaded() {
     manager->EnableInputMethods(locale, input_method::kAllInputMethods, "");
   }
   view()->ShowPageContent();
-}
-
-void HTMLPageScreen::OnPageLoadFailed(const std::string& url) {
-  VLOG(1) << "HTMLPageScreen::OnPageLoadFailed: " << url;
-  CloseScreen(ScreenObserver::CONNECTION_FAILED);
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// HTMLPageScreen, WebPageScreen implementation:
-void HTMLPageScreen::OnNetworkTimeout() {
-  VLOG(1) << "HTMLPageScreen::OnNetworkTimeout";
-  // Just show what we have now. We shouldn't exit from the screen on timeout.
-  OnPageLoaded();
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -28,10 +28,12 @@
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_dispatcher_host_request_info.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_view_host_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/result_codes.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
@@ -46,6 +48,8 @@
 #endif
 
 using content::BrowserThread;
+using content::OpenURLParams;
+using content::Referrer;
 
 namespace {
 
@@ -123,6 +127,15 @@ void TaskManagerModel::RemoveObserver(TaskManagerModelObserver* observer) {
 int TaskManagerModel::GetResourceUniqueId(int index) const {
   CHECK_LT(index, ResourceCount());
   return resources_[index]->get_unique_id();
+}
+
+int TaskManagerModel::GetResourceIndexByUniqueId(const int unique_id) const {
+  for (int resource_index = 0; resource_index < ResourceCount();
+       ++resource_index) {
+    if (GetResourceUniqueId(resource_index) == unique_id)
+      return resource_index;
+  }
+  return -1;
 }
 
 string16 TaskManagerModel::GetResourceTitle(int index) const {
@@ -614,8 +627,9 @@ void TaskManagerModel::StartUpdating() {
   // it to TASK_PENDING ensures the tasks keep being posted (by Refresh()).
   if (update_state_ == IDLE) {
       MessageLoop::current()->PostDelayedTask(
-          FROM_HERE, base::Bind(&TaskManagerModel::Refresh, this),
-          kUpdateTimeMs);
+          FROM_HERE,
+          base::Bind(&TaskManagerModel::Refresh, this),
+          base::TimeDelta::FromMilliseconds(kUpdateTimeMs));
   }
   update_state_ = TASK_PENDING;
 
@@ -857,14 +871,16 @@ void TaskManagerModel::Refresh() {
 
   // Compute the new network usage values.
   displayed_network_usage_map_.clear();
+  base::TimeDelta update_time =
+      base::TimeDelta::FromMilliseconds(kUpdateTimeMs);
   for (ResourceValueMap::iterator iter = current_byte_count_map_.begin();
        iter != current_byte_count_map_.end(); ++iter) {
-    if (kUpdateTimeMs > 1000) {
-      int divider = (kUpdateTimeMs / 1000);
+    if (update_time > base::TimeDelta::FromSeconds(1)) {
+      int divider = update_time.InSeconds();
       displayed_network_usage_map_[iter->first] = iter->second / divider;
     } else {
       displayed_network_usage_map_[iter->first] = iter->second *
-          (1000 / kUpdateTimeMs);
+          (1 / update_time.InSeconds());
     }
 
     // Then we reset the current byte count.
@@ -884,7 +900,9 @@ void TaskManagerModel::Refresh() {
 
   // Schedule the next update.
   MessageLoop::current()->PostDelayedTask(
-      FROM_HERE, base::Bind(&TaskManagerModel::Refresh, this), kUpdateTimeMs);
+      FROM_HERE,
+      base::Bind(&TaskManagerModel::Refresh, this),
+      base::TimeDelta::FromMilliseconds(kUpdateTimeMs));
 }
 
 int64 TaskManagerModel::GetNetworkUsageForResource(
@@ -1025,7 +1043,7 @@ void TaskManager::ActivateProcess(int index) {
   TabContentsWrapper* chosen_tab_contents =
       model_->GetResourceTabContents(index);
   if (chosen_tab_contents) {
-    static_cast<RenderViewHostDelegate*>(chosen_tab_contents->tab_contents())->
+    chosen_tab_contents->web_contents()->GetRenderViewHost()->delegate()->
         Activate();
   }
 }
@@ -1053,6 +1071,9 @@ TaskManager* TaskManager::GetInstance() {
 
 void TaskManager::OpenAboutMemory() {
   Browser* browser = BrowserList::GetLastActive();
+  OpenURLParams params(
+      GURL(chrome::kChromeUIMemoryURL), Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK, false);
 
   if (!browser) {
     // On OS X, the task manager can be open without any open browser windows.
@@ -1063,11 +1084,9 @@ void TaskManager::OpenAboutMemory() {
     if (!profile)
       return;
     browser = Browser::Create(profile);
-    browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
-                     NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
+    browser->OpenURL(params);
   } else {
-    browser->OpenURL(GURL(chrome::kChromeUIMemoryURL), GURL(),
-                     NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
+    browser->OpenURL(params);
 
     // In case the browser window is minimized, show it. If |browser| is a
     // non-tabbed window, the call to OpenURL above will have opened a

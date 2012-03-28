@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,6 +15,7 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_value_serializer.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
@@ -25,8 +26,8 @@
 #include "base/utf_string_conversions.h"
 #include "base/version.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/component_loader.h"
+#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_creator.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -36,6 +37,7 @@
 #include "chrome/browser/extensions/external_extension_provider_impl.h"
 #include "chrome/browser/extensions/external_extension_provider_interface.h"
 #include "chrome/browser/extensions/external_pref_extension_loader.h"
+#include "chrome/browser/extensions/extension_sorting.h"
 #include "chrome/browser/extensions/installed_loader.h"
 #include "chrome/browser/extensions/pack_extension_job.cc"
 #include "chrome/browser/extensions/pending_extension_info.h"
@@ -55,17 +57,19 @@
 #include "chrome/common/extensions/extension_resource.h"
 #include "chrome/common/extensions/url_pattern.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/common/string_ordinal.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/appcache/chrome_appcache_service.h"
 #include "content/browser/file_system/browser_file_system_helper.h"
 #include "content/browser/in_process_webkit/dom_storage_context.h"
 #include "content/browser/in_process_webkit/webkit_context.h"
-#include "content/browser/plugin_service.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/plugin_service.h"
 #include "content/test/test_browser_thread.h"
 #include "googleurl/src/gurl.h"
+#include "grit/browser_resources.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_options.h"
 #include "net/url_request/url_request_context.h"
@@ -74,9 +78,11 @@
 #include "testing/platform_test.h"
 #include "webkit/database/database_tracker.h"
 #include "webkit/database/database_util.h"
+#include "webkit/plugins/npapi/mock_plugin_list.h"
 #include "webkit/quota/quota_manager.h"
 
 using content::BrowserThread;
+using content::PluginService;
 
 namespace keys = extension_manifest_keys;
 
@@ -93,6 +99,7 @@ const char* const page_action = "obcimlgaoabeegjmmpldobjndiealpln";
 const char* const theme_crx = "iamefpfkojoapidjnbafmgkgncegbkad";
 const char* const theme2_crx = "pjpgmfcmabopnnfonnhmdjglfpjjfkbf";
 const char* const permissions_crx = "eagpmdpfmaekmmcejjbmjoecnejeiiin";
+const char* const unpacked = "cbcdidchbppangcjoddlpdjlenngjldk";
 
 struct ExtensionsOrder {
   bool operator()(const Extension* a, const Extension* b) {
@@ -100,14 +107,15 @@ struct ExtensionsOrder {
   }
 };
 
-static std::vector<std::string> GetErrors() {
-  const std::vector<std::string>* errors =
+static std::vector<string16> GetErrors() {
+  const std::vector<string16>* errors =
       ExtensionErrorReporter::GetInstance()->GetErrors();
-  std::vector<std::string> ret_val;
+  std::vector<string16> ret_val;
 
-  for (std::vector<std::string>::const_iterator iter = errors->begin();
+  for (std::vector<string16>::const_iterator iter = errors->begin();
        iter != errors->end(); ++iter) {
-    if (iter->find(".svn") == std::string::npos) {
+    std::string utf8_error = UTF16ToUTF8(*iter);
+    if (utf8_error.find(".svn") == std::string::npos) {
       ret_val.push_back(*iter);
     }
   }
@@ -128,11 +136,25 @@ static void AddPattern(URLPatternSet* extent, const std::string& pattern) {
 
 class MockExtensionProvider : public ExternalExtensionProviderInterface {
  public:
-  explicit MockExtensionProvider(
+  MockExtensionProvider(
       VisitorInterface* visitor,
       Extension::Location location)
-  : location_(location), visitor_(visitor), visit_count_(0) {
+    : location_(location),
+      visitor_(visitor),
+      visit_count_(0),
+      creation_flags_(Extension::NO_FLAGS) {
   }
+
+  MockExtensionProvider(
+      VisitorInterface* visitor,
+      Extension::Location location,
+      int creation_flags)
+  : location_(location),
+    visitor_(visitor),
+    visit_count_(0),
+    creation_flags_(creation_flags) {
+  }
+
   virtual ~MockExtensionProvider() {}
 
   void UpdateOrAddExtension(const std::string& id,
@@ -146,7 +168,7 @@ class MockExtensionProvider : public ExternalExtensionProviderInterface {
   }
 
   // ExternalExtensionProvider implementation:
-  virtual void VisitRegisteredExtension() {
+  virtual void VisitRegisteredExtension() OVERRIDE {
     visit_count_++;
     for (DataMap::const_iterator i = extension_map_.begin();
          i != extension_map_.end(); ++i) {
@@ -155,18 +177,19 @@ class MockExtensionProvider : public ExternalExtensionProviderInterface {
 
       visitor_->OnExternalExtensionFileFound(
           i->first, version.get(), i->second.second, location_,
-          Extension::NO_FLAGS);
+          creation_flags_, false);
     }
     visitor_->OnExternalProviderReady(this);
   }
 
-  virtual bool HasExtension(const std::string& id) const {
+  virtual bool HasExtension(const std::string& id) const OVERRIDE {
     return extension_map_.find(id) != extension_map_.end();
   }
 
-  virtual bool GetExtensionDetails(const std::string& id,
-                                   Extension::Location* location,
-                                   scoped_ptr<Version>* version) const {
+  virtual bool GetExtensionDetails(
+      const std::string& id,
+      Extension::Location* location,
+      scoped_ptr<Version>* version) const OVERRIDE {
     DataMap::const_iterator it = extension_map_.find(id);
     if (it == extension_map_.end())
       return false;
@@ -180,11 +203,15 @@ class MockExtensionProvider : public ExternalExtensionProviderInterface {
     return true;
   }
 
-  virtual bool IsReady() const {
+  virtual bool IsReady() const OVERRIDE {
     return true;
   }
 
-  virtual void ServiceShutdown() {
+  virtual int GetCreationFlags() const OVERRIDE {
+    return creation_flags_;
+  }
+
+  virtual void ServiceShutdown() OVERRIDE {
   }
 
   int visit_count() const { return visit_count_; }
@@ -203,6 +230,8 @@ class MockExtensionProvider : public ExternalExtensionProviderInterface {
   // VisitRegisteredExtension(), which must be a const method to inherit
   // from the class being mocked.
   mutable int visit_count_;
+
+  int creation_flags_;
 
   DISALLOW_COPY_AND_ASSIGN(MockExtensionProvider);
 };
@@ -250,11 +279,12 @@ class MockProviderVisitor
     return ids_found_;
   }
 
-  virtual void OnExternalExtensionFileFound(const std::string& id,
+  virtual bool OnExternalExtensionFileFound(const std::string& id,
                                             const Version* version,
                                             const FilePath& path,
                                             Extension::Location unused,
-                                            int creation_flags) {
+                                            int creation_flags,
+                                            bool mark_acknowledged) {
     EXPECT_EQ(Extension::NO_FLAGS, creation_flags);
 
     ++ids_found_;
@@ -289,9 +319,10 @@ class MockProviderVisitor
       // Remove it so we won't count it ever again.
       prefs_->Remove(id, NULL);
     }
+    return true;
   }
 
-  virtual void OnExternalExtensionUpdateUrlFound(
+  virtual bool OnExternalExtensionUpdateUrlFound(
       const std::string& id, const GURL& update_url,
       Extension::Location location) {
     ++ids_found_;
@@ -316,6 +347,7 @@ class MockProviderVisitor
       // Remove it so we won't count it again.
       prefs_->Remove(id, NULL);
     }
+    return true;
   }
 
   virtual void OnExternalProviderReady(
@@ -384,7 +416,7 @@ ExtensionServiceTestBase::ExtensionServiceTestBase()
       expected_extensions_count_(0),
       ui_thread_(BrowserThread::UI, &loop_),
       db_thread_(BrowserThread::DB, &loop_),
-      webkit_thread_(BrowserThread::WEBKIT, &loop_),
+      webkit_thread_(BrowserThread::WEBKIT_DEPRECATED, &loop_),
       file_thread_(BrowserThread::FILE, &loop_),
       file_user_blocking_thread_(BrowserThread::FILE_USER_BLOCKING, &loop_),
       io_thread_(BrowserThread::IO, &loop_) {
@@ -574,7 +606,8 @@ class ExtensionServiceTest
     ASSERT_TRUE(creator->Run(dir_path,
                              crx_path,
                              pem_path,
-                             pem_output_path));
+                             pem_output_path,
+                             ExtensionCreator::kOverwriteCRX));
 
     ASSERT_TRUE(file_util::PathExists(crx_path));
   }
@@ -650,7 +683,7 @@ class ExtensionServiceTest
   const Extension* WaitForCrxInstall(const FilePath& path,
                                      InstallState install_state) {
     loop_.RunAllPending();
-    std::vector<std::string> errors = GetErrors();
+    std::vector<string16> errors = GetErrors();
     const Extension* extension = NULL;
     if (install_state != INSTALL_FAILED) {
       if (install_state == INSTALL_NEW)
@@ -665,7 +698,7 @@ class ExtensionServiceTest
       extension = loaded_[0];
       EXPECT_TRUE(service_->GetExtensionById(extension->id(), false)) <<
           path.value();
-      for (std::vector<std::string>::iterator err = errors.begin();
+      for (std::vector<string16>::iterator err = errors.begin();
         err != errors.end(); ++err) {
         LOG(ERROR) << *err;
       }
@@ -708,7 +741,7 @@ class ExtensionServiceTest
     service_->UpdateExtension(id, path, GURL(), NULL);
     loop_.RunAllPending();
 
-    std::vector<std::string> errors = GetErrors();
+    std::vector<string16> errors = GetErrors();
     int error_count = errors.size();
     int enabled_extension_count =
         service_->extensions()->size();
@@ -973,7 +1006,8 @@ class PackExtensionTestClient : public PackExtensionJob::Client {
                           const FilePath& expected_private_key_path);
   virtual void OnPackSuccess(const FilePath& crx_path,
                              const FilePath& private_key_path);
-  virtual void OnPackFailure(const std::string& error_message);
+  virtual void OnPackFailure(const std::string& error_message,
+                             ExtensionCreator::ErrorType type);
 
  private:
   const FilePath expected_crx_path_;
@@ -1003,8 +1037,13 @@ void PackExtensionTestClient::OnPackSuccess(const FilePath& crx_path,
 }
 
 // The tests are designed so that we never expect to see a packing error.
-void PackExtensionTestClient::OnPackFailure(const std::string& error_message) {
-  FAIL() << "Packing should not fail.";
+void PackExtensionTestClient::OnPackFailure(const std::string& error_message,
+                                            ExtensionCreator::ErrorType type) {
+  if (type == ExtensionCreator::kCRXExists)
+     FAIL() << "Packing should not fail.";
+  else
+     FAIL() << "Existing CRX should have been overwritten.";
+
 }
 
 // Test loading good extensions from the profile directory.
@@ -1085,7 +1124,7 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectorySuccess) {
   EXPECT_EQ(std::string("My extension 2"), loaded_[1]->name());
   EXPECT_EQ(std::string(""), loaded_[1]->description());
   EXPECT_EQ(loaded_[1]->GetResourceURL("background.html"),
-            loaded_[1]->background_url());
+            loaded_[1]->GetBackgroundURL());
   EXPECT_EQ(0u, loaded_[1]->content_scripts().size());
   // We don't parse the plugins section on Chrome OS.
 #if defined(OS_CHROMEOS)
@@ -1127,21 +1166,25 @@ TEST_F(ExtensionServiceTest, LoadAllExtensionsFromDirectoryFail) {
   ASSERT_EQ(4u, GetErrors().size());
   ASSERT_EQ(0u, loaded_.size());
 
-  EXPECT_TRUE(MatchPattern(GetErrors()[0],
+  EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[0]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kManifestUnreadable)) << GetErrors()[0];
+      extension_manifest_errors::kManifestUnreadable)) <<
+      UTF16ToUTF8(GetErrors()[0]);
 
-  EXPECT_TRUE(MatchPattern(GetErrors()[1],
+  EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[1]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kManifestUnreadable)) << GetErrors()[1];
+      extension_manifest_errors::kManifestUnreadable)) <<
+      UTF16ToUTF8(GetErrors()[1]);
 
-  EXPECT_TRUE(MatchPattern(GetErrors()[2],
+  EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[2]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kMissingFile)) << GetErrors()[2];
+      extension_manifest_errors::kMissingFile)) <<
+      UTF16ToUTF8(GetErrors()[2]);
 
-  EXPECT_TRUE(MatchPattern(GetErrors()[3],
+  EXPECT_TRUE(MatchPattern(UTF16ToUTF8(GetErrors()[3]),
       std::string("Could not load extension from '*'. ") +
-      extension_manifest_errors::kManifestUnreadable)) << GetErrors()[3];
+      extension_manifest_errors::kManifestUnreadable)) <<
+      UTF16ToUTF8(GetErrors()[3]);
 };
 
 // Test that partially deleted extensions are cleaned up during startup
@@ -1246,23 +1289,53 @@ TEST_F(ExtensionServiceTest, InstallExtension) {
 // Tests that flags passed to OnExternalExtensionFileFound() make it to the
 // extension object.
 TEST_F(ExtensionServiceTest, InstallingExternalExtensionWithFlags) {
+  const char kPrefFromBookmark[] = "from_bookmark";
+
   InitializeEmptyExtensionService();
 
   FilePath path = data_dir_.AppendASCII("good.crx");
   set_extensions_enabled(true);
 
-  scoped_ptr<Version> version;
-  version.reset(Version::GetVersionFromString("1.0.0.0"));
-  // Install an external extension.
-  service_->OnExternalExtensionFileFound(good_crx, version.get(),
-                                         path, Extension::EXTERNAL_PREF,
-                                         Extension::FROM_BOOKMARK);
+  // Register and install an external extension.
+  MockExtensionProvider* provider =
+      new MockExtensionProvider(service_,
+                                Extension::EXTERNAL_POLICY_DOWNLOAD,
+                                Extension::FROM_BOOKMARK);
+  AddMockExternalProvider(provider);
+  provider->UpdateOrAddExtension(good_crx, "1.0.0.0",
+                                 data_dir_.AppendASCII("good.crx"));
+  service_->CheckForExternalUpdates();
   loop_.RunAllPending();
 
   const Extension* extension = service_->GetExtensionById(good_crx, false);
   ASSERT_TRUE(extension);
-  ASSERT_EQ(Extension::FROM_BOOKMARK,
-            Extension::FROM_BOOKMARK & extension->creation_flags());
+  ASSERT_TRUE(extension->from_bookmark());
+  ValidateBooleanPref(good_crx, kPrefFromBookmark, true);
+
+  // Upgrade to version 2.0, the flag should be preserved.
+  path = data_dir_.AppendASCII("good2.crx");
+  UpdateExtension(good_crx, path, ENABLED);
+  ValidateBooleanPref(good_crx, kPrefFromBookmark, true);
+  extension = service_->GetExtensionById(good_crx, false);
+  ASSERT_TRUE(extension);
+  ASSERT_TRUE(extension->from_bookmark());
+
+  // Somehow, the "from bookmark pref" gets reset (simulating
+  // http://crbug.com/109791).
+  SetPrefBool(extension->id(), kPrefFromBookmark, false);
+  service_->ReloadExtensions();
+  extension = service_->GetExtensionById(good_crx, false);
+  ASSERT_TRUE(extension);
+  ASSERT_FALSE(extension->from_bookmark());
+  ValidateBooleanPref(good_crx, kPrefFromBookmark, false);
+
+  // If the app gets updated again, we'll reset the "from bookmark" pref if
+  // the external extension provider is still serving that extension.
+  UpdateExtension(good_crx, path, ENABLED);
+  ValidateBooleanPref(good_crx, kPrefFromBookmark, true);
+  extension = service_->GetExtensionById(good_crx, false);
+  ASSERT_TRUE(extension);
+  ASSERT_TRUE(extension->from_bookmark());
 }
 
 // Test the handling of Extension::EXTERNAL_EXTENSION_UNINSTALLED
@@ -1277,7 +1350,7 @@ TEST_F(ExtensionServiceTest, UninstallingExternalExtensions) {
   // Install an external extension.
   service_->OnExternalExtensionFileFound(good_crx, version.get(),
                                          path, Extension::EXTERNAL_PREF,
-                                         Extension::NO_FLAGS);
+                                         Extension::NO_FLAGS, false);
   loop_.RunAllPending();
   ASSERT_TRUE(service_->GetExtensionById(good_crx, false));
 
@@ -1289,7 +1362,7 @@ TEST_F(ExtensionServiceTest, UninstallingExternalExtensions) {
   // Try to re-install it externally. This should fail because of the killbit.
   service_->OnExternalExtensionFileFound(good_crx, version.get(),
                                          path, Extension::EXTERNAL_PREF,
-                                         Extension::NO_FLAGS);
+                                         Extension::NO_FLAGS, false);
   loop_.RunAllPending();
   ASSERT_TRUE(NULL == service_->GetExtensionById(good_crx, false));
   ValidateIntegerPref(good_crx, "location",
@@ -1300,17 +1373,17 @@ TEST_F(ExtensionServiceTest, UninstallingExternalExtensions) {
   path = data_dir_.AppendASCII("good2.crx");
   service_->OnExternalExtensionFileFound(good_crx, version.get(),
                                          path, Extension::EXTERNAL_PREF,
-                                         Extension::NO_FLAGS);
+                                         Extension::NO_FLAGS, false);
   loop_.RunAllPending();
   ASSERT_TRUE(NULL == service_->GetExtensionById(good_crx, false));
   ValidateIntegerPref(good_crx, "location",
                       Extension::EXTERNAL_EXTENSION_UNINSTALLED);
 
   // Try adding the same extension from an external update URL.
-  service_->pending_extension_manager()->AddFromExternalUpdateUrl(
+  ASSERT_FALSE(service_->pending_extension_manager()->AddFromExternalUpdateUrl(
       good_crx,
       GURL("http:://fake.update/url"),
-      Extension::EXTERNAL_PREF_DOWNLOAD);
+      Extension::EXTERNAL_PREF_DOWNLOAD));
 
   ASSERT_FALSE(service_->pending_extension_manager()->IsIdPending(good_crx));
 }
@@ -1360,7 +1433,7 @@ TEST_F(ExtensionServiceTest, FailOnWrongId) {
   // source that is not equal to the ID in the extension manifest.
   service_->OnExternalExtensionFileFound(
       wrong_id, version.get(), path, Extension::EXTERNAL_PREF,
-      Extension::NO_FLAGS);
+      Extension::NO_FLAGS, false);
 
   loop_.RunAllPending();
   ASSERT_FALSE(service_->GetExtensionById(good_crx, false));
@@ -1368,7 +1441,7 @@ TEST_F(ExtensionServiceTest, FailOnWrongId) {
   // Try again with the right ID. Expect success.
   service_->OnExternalExtensionFileFound(
       correct_id, version.get(), path, Extension::EXTERNAL_PREF,
-      Extension::NO_FLAGS);
+      Extension::NO_FLAGS, false);
   loop_.RunAllPending();
   ASSERT_TRUE(service_->GetExtensionById(good_crx, false));
 }
@@ -1385,7 +1458,7 @@ TEST_F(ExtensionServiceTest, FailOnWrongVersion) {
   wrong_version.reset(Version::GetVersionFromString("1.2.3.4"));
   service_->OnExternalExtensionFileFound(
       good_crx, wrong_version.get(), path, Extension::EXTERNAL_PREF,
-      Extension::NO_FLAGS);
+      Extension::NO_FLAGS, false);
 
   loop_.RunAllPending();
   ASSERT_FALSE(service_->GetExtensionById(good_crx, false));
@@ -1395,7 +1468,7 @@ TEST_F(ExtensionServiceTest, FailOnWrongVersion) {
   correct_version.reset(Version::GetVersionFromString("1.0.0.0"));
   service_->OnExternalExtensionFileFound(
       good_crx, correct_version.get(), path, Extension::EXTERNAL_PREF,
-      Extension::NO_FLAGS);
+      Extension::NO_FLAGS, false);
   loop_.RunAllPending();
   ASSERT_TRUE(service_->GetExtensionById(good_crx, false));
 }
@@ -1417,7 +1490,7 @@ TEST_F(ExtensionServiceTest, InstallUserScript) {
       GURL("http://www.aaronboodman.com/scripts/user_script_basic.user.js"));
 
   loop_.RunAllPending();
-  std::vector<std::string> errors = GetErrors();
+  std::vector<string16> errors = GetErrors();
   EXPECT_TRUE(installed_) << "Nothing was installed.";
   ASSERT_EQ(1u, loaded_.size()) << "Nothing was loaded.";
   EXPECT_EQ(0u, errors.size()) << "There were errors: "
@@ -1629,14 +1702,32 @@ TEST_F(ExtensionServiceTest, PackExtension) {
 
   scoped_ptr<ExtensionCreator> creator(new ExtensionCreator());
   ASSERT_TRUE(creator->Run(input_directory, crx_path, FilePath(),
-      privkey_path));
+      privkey_path, ExtensionCreator::kNoRunFlags));
+  ASSERT_TRUE(file_util::PathExists(crx_path));
+  ASSERT_TRUE(file_util::PathExists(privkey_path));
+
+  // Repeat the run with the pem file gone, and no special flags
+  // Should refuse to overwrite the existing crx.
+  file_util::Delete(privkey_path, false);
+  ASSERT_FALSE(creator->Run(input_directory, crx_path, FilePath(),
+      privkey_path, ExtensionCreator::kNoRunFlags));
+
+  // OK, now try it with a flag to overwrite existing crx.  Should work.
+  ASSERT_TRUE(creator->Run(input_directory, crx_path, FilePath(),
+      privkey_path, ExtensionCreator::kOverwriteCRX));
+
+  // Repeat the run allowing existing crx, but the existing pem is still
+  // an error.  Should fail.
+  ASSERT_FALSE(creator->Run(input_directory, crx_path, FilePath(),
+      privkey_path, ExtensionCreator::kOverwriteCRX));
 
   ASSERT_TRUE(file_util::PathExists(privkey_path));
   InstallCRX(crx_path, INSTALL_NEW);
 
   // Try packing with invalid paths.
   creator.reset(new ExtensionCreator());
-  ASSERT_FALSE(creator->Run(FilePath(), FilePath(), FilePath(), FilePath()));
+  ASSERT_FALSE(creator->Run(FilePath(), FilePath(), FilePath(), FilePath(),
+               ExtensionCreator::kOverwriteCRX));
 
   // Try packing an empty directory. Should fail because an empty directory is
   // not a valid extension.
@@ -1644,7 +1735,7 @@ TEST_F(ExtensionServiceTest, PackExtension) {
   ASSERT_TRUE(temp_dir2.CreateUniqueTempDir());
   creator.reset(new ExtensionCreator());
   ASSERT_FALSE(creator->Run(temp_dir2.path(), crx_path, privkey_path,
-                            FilePath()));
+                            FilePath(), ExtensionCreator::kOverwriteCRX));
 
   // Try packing with an invalid manifest.
   std::string invalid_manifest_content = "I am not a manifest.";
@@ -1653,7 +1744,7 @@ TEST_F(ExtensionServiceTest, PackExtension) {
       invalid_manifest_content.c_str(), invalid_manifest_content.size()));
   creator.reset(new ExtensionCreator());
   ASSERT_FALSE(creator->Run(temp_dir2.path(), crx_path, privkey_path,
-                            FilePath()));
+                            FilePath(), ExtensionCreator::kOverwriteCRX));
 }
 
 // Test Packaging and installing an extension whose name contains punctuation.
@@ -1708,9 +1799,9 @@ TEST_F(ExtensionServiceTest, PackPunctuatedExtension) {
         temp_dir.path().Append(expected_private_key_names[i]);
     PackExtensionTestClient pack_client(expected_crx_path,
                                         expected_private_key_path);
-    scoped_refptr<PackExtensionJob> packer(new PackExtensionJob(&pack_client,
-                                                                output_dir,
-                                                                FilePath()));
+    scoped_refptr<PackExtensionJob> packer(
+        new PackExtensionJob(&pack_client, output_dir, FilePath(),
+                             ExtensionCreator::kOverwriteCRX));
     packer->Start();
 
     // The packer will post a notification task to the current thread's message
@@ -1752,7 +1843,7 @@ TEST_F(ExtensionServiceTest, PackExtensionOpenSSLKey) {
 
   scoped_ptr<ExtensionCreator> creator(new ExtensionCreator());
   ASSERT_TRUE(creator->Run(input_directory, crx_path, privkey_path,
-      FilePath()));
+      FilePath(), ExtensionCreator::kOverwriteCRX));
 
   InstallCRX(crx_path, INSTALL_NEW);
 }
@@ -1804,6 +1895,50 @@ TEST_F(ExtensionServiceTest, LoadLocalizedTheme) {
   const Extension* theme = *service_->extensions()->begin();
   EXPECT_EQ("name", theme->name());
   EXPECT_EQ("description", theme->description());
+}
+
+// Tests that we can change the ID of an unpacked extension by adding a key
+// to its manifest.
+TEST_F(ExtensionServiceTest, UnpackedExtensionCanChangeID) {
+  InitializeEmptyExtensionService();
+
+  ScopedTempDir temp;
+  ASSERT_TRUE(temp.CreateUniqueTempDir());
+
+  FilePath extension_path = temp.path();
+  FilePath manifest_path = extension_path.Append(Extension::kManifestFilename);
+  FilePath manifest_no_key = data_dir_.
+      AppendASCII("unpacked").
+      AppendASCII("manifest_no_key.json");
+
+  FilePath manifest_with_key = data_dir_.
+      AppendASCII("unpacked").
+      AppendASCII("manifest_with_key.json");
+
+  ASSERT_TRUE(file_util::PathExists(manifest_no_key));
+  ASSERT_TRUE(file_util::PathExists(manifest_with_key));
+
+  // Load the unpacked extension with no key.
+  file_util::CopyFile(manifest_no_key, manifest_path);
+  extensions::UnpackedInstaller::Create(service_)->Load(extension_path);
+
+  loop_.RunAllPending();
+  EXPECT_EQ(0u, GetErrors().size());
+  ASSERT_EQ(1u, loaded_.size());
+  EXPECT_EQ(1u, service_->extensions()->size());
+
+  // Add the key to the manifest.
+  file_util::CopyFile(manifest_with_key, manifest_path);
+  loaded_.clear();
+
+  // Reload the extensions.
+  service_->ReloadExtensions();
+  const Extension* extension = service_->GetExtensionById(unpacked, false);
+  EXPECT_EQ(unpacked, extension->id());
+  ASSERT_EQ(1u, loaded_.size());
+
+  // TODO(jstritar): Right now this just makes sure we don't crash and burn, but
+  // we should also test that preferences are preserved.
 }
 
 TEST_F(ExtensionServiceTest, InstallLocalizedTheme) {
@@ -1872,10 +2007,56 @@ TEST_F(ExtensionServiceTest, UpdateApps) {
             service_->GetExtensionById(id, false)->version()->GetString());
 }
 
+// Verifies that the NTP page and launch ordinals are kept when updating apps.
+TEST_F(ExtensionServiceTest, UpdateAppsRetainOrdinals) {
+  InitializeEmptyExtensionService();
+  ExtensionSorting* sorting = service_->extension_prefs()->extension_sorting();
+  FilePath extensions_path = data_dir_.AppendASCII("app_update");
+
+  // First install v1 of a hosted app.
+  const Extension* extension =
+      InstallCRX(extensions_path.AppendASCII("v1.crx"), INSTALL_NEW);
+  ASSERT_EQ(1u, service_->extensions()->size());
+  std::string id = extension->id();
+  ASSERT_EQ(std::string("1"), extension->version()->GetString());
+
+  // Modify the ordinals so we can distinguish them from the defaults.
+  StringOrdinal new_page_ordinal = sorting->GetPageOrdinal(id).CreateAfter();
+  StringOrdinal new_launch_ordinal =
+      sorting->GetAppLaunchOrdinal(id).CreateBefore();
+
+  sorting->SetPageOrdinal(id, new_page_ordinal);
+  sorting->SetAppLaunchOrdinal(id, new_launch_ordinal);
+
+  // Now try updating to v2.
+  UpdateExtension(id, extensions_path.AppendASCII("v2.crx"), ENABLED);
+  ASSERT_EQ(std::string("2"),
+            service_->GetExtensionById(id, false)->version()->GetString());
+
+  // Verify that the ordinals match.
+  ASSERT_TRUE(new_page_ordinal.Equal(sorting->GetPageOrdinal(id)));
+  ASSERT_TRUE(new_launch_ordinal.Equal(sorting->GetAppLaunchOrdinal(id)));
+}
+
+// Ensures that the CWS has properly initialized ordinals.
+TEST_F(ExtensionServiceTest, EnsureCWSOrdinalsInitialized) {
+  InitializeEmptyExtensionService();
+  service_->component_loader()->Add(IDR_WEBSTORE_MANIFEST,
+                                    FilePath(FILE_PATH_LITERAL("web_store")));
+  service_->Init();
+
+
+  ExtensionSorting* sorting = service_->extension_prefs()->extension_sorting();
+  EXPECT_TRUE(
+      sorting->GetPageOrdinal(extension_misc::kWebStoreAppId).IsValid());
+  EXPECT_TRUE(
+      sorting->GetAppLaunchOrdinal(extension_misc::kWebStoreAppId).IsValid());
+}
+
 TEST_F(ExtensionServiceTest, InstallAppsWithUnlimitedStorage) {
   InitializeEmptyExtensionService();
   InitializeRequestContext();
-  EXPECT_TRUE(service_->extensions()->empty());
+  EXPECT_TRUE(service_->extensions()->is_empty());
 
   int pref_count = 0;
 
@@ -1926,7 +2107,7 @@ TEST_F(ExtensionServiceTest, InstallAppsWithUnlimitedStorage) {
 TEST_F(ExtensionServiceTest, InstallAppsAndCheckStorageProtection) {
   InitializeEmptyExtensionService();
   InitializeRequestContext();
-  EXPECT_TRUE(service_->extensions()->empty());
+  EXPECT_TRUE(service_->extensions()->is_empty());
 
   int pref_count = 0;
 
@@ -1955,7 +2136,7 @@ TEST_F(ExtensionServiceTest, InstallAppsAndCheckStorageProtection) {
 
   UninstallExtension(id2, false);
 
-  EXPECT_TRUE(service_->extensions()->empty());
+  EXPECT_TRUE(service_->extensions()->is_empty());
   EXPECT_FALSE(profile_->GetExtensionSpecialStoragePolicy()->
       IsStorageProtected(origin1));
   EXPECT_FALSE(profile_->GetExtensionSpecialStoragePolicy()->
@@ -2168,6 +2349,7 @@ TEST_F(ExtensionServiceTest, LoadExtensionsCanDowngrade) {
   DictionaryValue manifest;
   manifest.SetString("version", "2.0");
   manifest.SetString("name", "LOAD Downgrade Test");
+  manifest.SetInteger("manifest_version", 2);
 
   JSONFileValueSerializer serializer(manifest_path);
   ASSERT_TRUE(serializer.Serialize(manifest));
@@ -2195,6 +2377,86 @@ TEST_F(ExtensionServiceTest, LoadExtensionsCanDowngrade) {
   EXPECT_EQ(1u, service_->extensions()->size());
   EXPECT_EQ("1.0", loaded_[0]->VersionString());
 }
+
+#if !defined(OS_CHROMEOS)
+// LOAD extensions with plugins require approval.
+TEST_F(ExtensionServiceTest, LoadExtensionsWithPlugins) {
+  FilePath extension_with_plugin_path = data_dir_
+      .AppendASCII("good")
+      .AppendASCII("Extensions")
+      .AppendASCII(good1)
+      .AppendASCII("2");
+  FilePath extension_no_plugin_path = data_dir_
+      .AppendASCII("good")
+      .AppendASCII("Extensions")
+      .AppendASCII(good2)
+      .AppendASCII("1.0");
+
+  PluginService::GetInstance()->Init();
+  InitializeEmptyExtensionService();
+  InitializeExtensionProcessManager();
+  service_->set_show_extensions_prompts(true);
+
+  // Start by canceling any install prompts.
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests,
+      "cancel");
+
+  // The extension that has a plugin should not install.
+  extensions::UnpackedInstaller::Create(service_)->Load(
+      extension_with_plugin_path);
+  loop_.RunAllPending();
+  EXPECT_EQ(0u, GetErrors().size());
+  EXPECT_EQ(0u, loaded_.size());
+  EXPECT_EQ(0u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+
+  // But the extension with no plugin should since there's no prompt.
+  extensions::UnpackedInstaller::Create(service_)->Load(
+      extension_no_plugin_path);
+  loop_.RunAllPending();
+  EXPECT_EQ(0u, GetErrors().size());
+  EXPECT_EQ(1u, loaded_.size());
+  EXPECT_EQ(1u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+  EXPECT_TRUE(service_->extensions()->Contains(good2));
+
+  // The plugin extension should install if we accept the dialog.
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests,
+      "accept");
+
+  extensions::UnpackedInstaller::Create(service_)->Load(
+      extension_with_plugin_path);
+  loop_.RunAllPending();
+  EXPECT_EQ(0u, GetErrors().size());
+  EXPECT_EQ(2u, loaded_.size());
+  EXPECT_EQ(2u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+  EXPECT_TRUE(service_->extensions()->Contains(good1));
+  EXPECT_TRUE(service_->extensions()->Contains(good2));
+
+  // Make sure the granted permissions have been setup.
+  scoped_refptr<ExtensionPermissionSet> permissions(
+      service_->extension_prefs()->GetGrantedPermissions(good1));
+  EXPECT_FALSE(permissions->IsEmpty());
+  EXPECT_TRUE(permissions->HasEffectiveFullAccess());
+  EXPECT_FALSE(permissions->apis().empty());
+  EXPECT_TRUE(permissions->HasAPIPermission(ExtensionAPIPermission::kPlugin));
+
+  // We should be able to reload the extension without getting another prompt.
+  loaded_.clear();
+  CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+      switches::kAppsGalleryInstallAutoConfirmForTests,
+      "cancel");
+
+  service_->ReloadExtension(good1);
+  loop_.RunAllPending();
+  EXPECT_EQ(1u, loaded_.size());
+  EXPECT_EQ(2u, service_->extensions()->size());
+  EXPECT_EQ(0u, service_->disabled_extensions()->size());
+}
+#endif
 
 namespace {
 
@@ -2257,7 +2519,8 @@ bool IsTheme(const Extension& extension) {
 }  // namespace
 
 // Test updating a pending theme.
-TEST_F(ExtensionServiceTest, UpdatePendingTheme) {
+// Disabled due to ASAN failure. http://crbug.com/108320
+TEST_F(ExtensionServiceTest, DISABLED_UpdatePendingTheme) {
   InitializeEmptyExtensionService();
   EXPECT_TRUE(service_->pending_extension_manager()->AddFromSync(
       theme_crx, GURL(), &IsTheme, false));
@@ -2287,8 +2550,8 @@ TEST_F(ExtensionServiceTest, UpdatePendingTheme) {
 // or not.
 TEST_F(ExtensionServiceTest, MAYBE_UpdatePendingExternalCrx) {
   InitializeEmptyExtensionService();
-  service_->pending_extension_manager()->AddFromExternalUpdateUrl(
-      theme_crx, GURL(), Extension::EXTERNAL_PREF_DOWNLOAD);
+  EXPECT_TRUE(service_->pending_extension_manager()->AddFromExternalUpdateUrl(
+      theme_crx, GURL(), Extension::EXTERNAL_PREF_DOWNLOAD));
 
   EXPECT_TRUE(service_->pending_extension_manager()->IsIdPending(theme_crx));
 
@@ -2324,8 +2587,8 @@ TEST_F(ExtensionServiceTest, UpdatePendingExternalCrxWinsOverSync) {
   EXPECT_TRUE(pending_extension_info.is_from_sync());
 
   // Add a crx to be updated, with the same ID, from a non-sync source.
-  service_->pending_extension_manager()->AddFromExternalUpdateUrl(
-      kGoodId, GURL(kGoodUpdateURL), Extension::EXTERNAL_PREF_DOWNLOAD);
+  EXPECT_TRUE(service_->pending_extension_manager()->AddFromExternalUpdateUrl(
+      kGoodId, GURL(kGoodUpdateURL), Extension::EXTERNAL_PREF_DOWNLOAD));
 
   // Check that there is a pending crx, with is_from_sync set to false.
   ASSERT_TRUE(service_->pending_extension_manager()->GetById(
@@ -2520,8 +2783,8 @@ TEST_F(ExtensionServiceTest, WillNotLoadBlacklistedExtensionsFromDirectory) {
   // Load extensions.
   service_->Init();
 
-  std::vector<std::string> errors = GetErrors();
-  for (std::vector<std::string>::iterator err = errors.begin();
+  std::vector<string16> errors = GetErrors();
+  for (std::vector<string16>::iterator err = errors.begin();
     err != errors.end(); ++err) {
     LOG(ERROR) << *err;
   }
@@ -2577,7 +2840,6 @@ TEST_F(ExtensionServiceTest, BlacklistedByPolicyRemovedIfRunning) {
 
     // Blacklist this extension.
     blacklist->Append(Value::CreateStringValue(good_crx));
-    prefs->ScheduleSavePersistentPrefs();
   }
 
   // Extension should not be running now.
@@ -2676,18 +2938,18 @@ TEST_F(ExtensionServiceTest, DisableExtension) {
   InitializeEmptyExtensionService();
 
   InstallCRX(data_dir_.AppendASCII("good.crx"), INSTALL_NEW);
-  EXPECT_FALSE(service_->extensions()->empty());
+  EXPECT_FALSE(service_->extensions()->is_empty());
   EXPECT_TRUE(service_->GetExtensionById(good_crx, true));
   EXPECT_TRUE(service_->GetExtensionById(good_crx, false));
-  EXPECT_TRUE(service_->disabled_extensions()->empty());
+  EXPECT_TRUE(service_->disabled_extensions()->is_empty());
 
   // Disable it.
   service_->DisableExtension(good_crx);
 
-  EXPECT_TRUE(service_->extensions()->empty());
+  EXPECT_TRUE(service_->extensions()->is_empty());
   EXPECT_TRUE(service_->GetExtensionById(good_crx, true));
   EXPECT_FALSE(service_->GetExtensionById(good_crx, false));
-  EXPECT_FALSE(service_->disabled_extensions()->empty());
+  EXPECT_FALSE(service_->disabled_extensions()->is_empty());
 }
 
 TEST_F(ExtensionServiceTest, DisableTerminatedExtension) {
@@ -2702,7 +2964,7 @@ TEST_F(ExtensionServiceTest, DisableTerminatedExtension) {
 
   EXPECT_FALSE(service_->GetTerminatedExtension(good_crx));
   EXPECT_TRUE(service_->GetExtensionById(good_crx, true));
-  EXPECT_FALSE(service_->disabled_extensions()->empty());
+  EXPECT_FALSE(service_->disabled_extensions()->is_empty());
 }
 
 // Tests disabling all extensions (simulating --disable-extensions flag).
@@ -2805,24 +3067,22 @@ class ExtensionCookieCallback {
  public:
   ExtensionCookieCallback()
     : result_(false),
-      message_loop_factory_(MessageLoop::current()) {}
+      weak_factory_(MessageLoop::current()) {}
 
   void SetCookieCallback(bool result) {
     MessageLoop::current()->PostTask(
-        FROM_HERE,
-        message_loop_factory_.NewRunnableMethod(&MessageLoop::Quit));
+        FROM_HERE, base::Bind(&MessageLoop::Quit, weak_factory_.GetWeakPtr()));
     result_ = result;
   }
 
   void GetAllCookiesCallback(const net::CookieList& list) {
     MessageLoop::current()->PostTask(
-        FROM_HERE,
-        message_loop_factory_.NewRunnableMethod(&MessageLoop::Quit));
+        FROM_HERE, base::Bind(&MessageLoop::Quit, weak_factory_.GetWeakPtr()));
     list_ = list;
   }
   net::CookieList list_;
   bool result_;
-  ScopedRunnableMethodFactory<MessageLoop> message_loop_factory_;
+  base::WeakPtrFactory<MessageLoop> weak_factory_;
 };
 
 // Verifies extension state is removed upon uninstall.
@@ -3175,7 +3435,6 @@ void ExtensionServiceTest::TestExternalProvider(
 
     // Now clear the preference and reinstall.
     SetPrefInteg(good_crx, "state", Extension::ENABLED);
-    profile_->GetPrefs()->ScheduleSavePersistentPrefs();
 
     loaded_.clear();
     service_->CheckForExternalUpdates();
@@ -3599,6 +3858,8 @@ TEST(ExtensionServiceTestSimple, Enabledness) {
   scoped_ptr<CommandLine> command_line;
   FilePath install_dir = profile->GetPath()
       .AppendASCII(ExtensionService::kInstallDirectoryName);
+  webkit::npapi::MockPluginList plugin_list(NULL, 0);
+  PluginService::GetInstance()->SetPluginListForTesting(&plugin_list);
 
   // By default, we are enabled.
   command_line.reset(new CommandLine(CommandLine::NO_PROGRAM));
@@ -3795,7 +4056,7 @@ TEST_F(ExtensionServiceTest, GetSyncDataFilter) {
   ASSERT_EQ(list.size(), 0U);
 }
 
-TEST_F(ExtensionServiceTest, GetSyncDataUserSettings) {
+TEST_F(ExtensionServiceTest, GetSyncExtensionDataUserSettings) {
   InitializeEmptyExtensionService();
   InstallCRX(data_dir_.AppendASCII("good.crx"), INSTALL_NEW);
   const Extension* extension = service_->GetInstalledExtension(good_crx);
@@ -3838,6 +4099,85 @@ TEST_F(ExtensionServiceTest, GetSyncDataUserSettings) {
     ExtensionSyncData data(list[0]);
     EXPECT_TRUE(data.enabled());
     EXPECT_TRUE(data.incognito_enabled());
+  }
+}
+
+TEST_F(ExtensionServiceTest, GetSyncAppDataUserSettings) {
+  InitializeEmptyExtensionService();
+  const Extension* app =
+      PackAndInstallCRX(data_dir_.AppendASCII("app"), INSTALL_NEW);
+  ASSERT_TRUE(app);
+  ASSERT_TRUE(app->is_app());
+
+  TestSyncProcessorStub processor;
+  service_->MergeDataAndStartSyncing(syncable::APPS, SyncDataList(),
+      &processor);
+
+  StringOrdinal initial_ordinal = StringOrdinal::CreateInitialOrdinal();
+  {
+    SyncDataList list = service_->GetAllSyncData(syncable::APPS);
+    ASSERT_EQ(list.size(), 1U);
+    ExtensionSyncData data(list[0]);
+    EXPECT_TRUE(initial_ordinal.Equal(data.app_launch_ordinal()));
+    EXPECT_TRUE(initial_ordinal.Equal(data.page_ordinal()));
+  }
+
+  service_->SetAppLaunchOrdinal(app->id(), initial_ordinal.CreateAfter());
+  {
+    SyncDataList list = service_->GetAllSyncData(syncable::APPS);
+    ASSERT_EQ(list.size(), 1U);
+    ExtensionSyncData data(list[0]);
+    EXPECT_TRUE(initial_ordinal.LessThan(data.app_launch_ordinal()));
+    EXPECT_TRUE(initial_ordinal.Equal(data.page_ordinal()));
+  }
+
+  service_->SetPageOrdinal(app->id(), initial_ordinal.CreateAfter());
+  {
+    SyncDataList list = service_->GetAllSyncData(syncable::APPS);
+    ASSERT_EQ(list.size(), 1U);
+    ExtensionSyncData data(list[0]);
+    EXPECT_TRUE(initial_ordinal.LessThan(data.app_launch_ordinal()));
+    EXPECT_TRUE(initial_ordinal.LessThan(data.page_ordinal()));
+  }
+}
+
+TEST_F(ExtensionServiceTest, GetSyncAppDataUserSettingsOnExtensionMoved) {
+  InitializeEmptyExtensionService();
+  const size_t kAppCount = 3;
+  const Extension* apps[kAppCount];
+  apps[0] = PackAndInstallCRX(data_dir_.AppendASCII("app1"), INSTALL_NEW);
+  apps[1] = PackAndInstallCRX(data_dir_.AppendASCII("app2"), INSTALL_NEW);
+  apps[2] = PackAndInstallCRX(data_dir_.AppendASCII("app4"), INSTALL_NEW);
+  for (size_t i = 0; i < kAppCount; ++i) {
+    ASSERT_TRUE(apps[i]);
+    ASSERT_TRUE(apps[i]->is_app());
+  }
+
+  TestSyncProcessorStub processor;
+  service_->MergeDataAndStartSyncing(syncable::APPS, SyncDataList(),
+      &processor);
+
+  service_->OnExtensionMoved(apps[0]->id(), apps[1]->id(), apps[2]->id());
+  {
+    SyncDataList list = service_->GetAllSyncData(syncable::APPS);
+    ASSERT_EQ(list.size(), 3U);
+    ExtensionSyncData data[kAppCount];
+    for (size_t i = 0; i < kAppCount; ++i)
+      data[i] = ExtensionSyncData(list[i]);
+
+    // The sync data is not always in the same order our apps were installed in,
+    // so we do that sorting here so we can make sure the values are changed as
+    // expected.
+    StringOrdinal app_launch_ordinals[kAppCount];
+    for (size_t i = 0; i < kAppCount; ++i) {
+      for (size_t j = 0; j < kAppCount; ++j) {
+        if (apps[i]->id() == data[j].id())
+          app_launch_ordinals[i] = data[j].app_launch_ordinal();
+      }
+    }
+
+    EXPECT_TRUE(app_launch_ordinals[1].LessThan(app_launch_ordinals[0]));
+    EXPECT_TRUE(app_launch_ordinals[0].LessThan(app_launch_ordinals[2]));
   }
 }
 
@@ -4118,7 +4458,7 @@ TEST_F(ExtensionServiceTest, ProcessSyncDataNotInstalled) {
   // TODO(akalin): Figure out a way to test |info.ShouldAllowInstall()|.
 }
 
-TEST_F(ExtensionServiceTest, HigherPriorityInstall) {
+TEST_F(ExtensionServiceTest, InstallPriorityExternalUpdateUrl) {
   InitializeEmptyExtensionService();
 
   FilePath path = data_dir_.AppendASCII("good.crx");
@@ -4131,18 +4471,192 @@ TEST_F(ExtensionServiceTest, HigherPriorityInstall) {
   EXPECT_FALSE(pending->IsIdPending(kGoodId));
 
   // Skip install when the location is the same.
-  service_->OnExternalExtensionUpdateUrlFound(kGoodId, GURL(kGoodUpdateURL),
-      Extension::INTERNAL);
+  EXPECT_FALSE(
+      service_->OnExternalExtensionUpdateUrlFound(
+          kGoodId, GURL(kGoodUpdateURL), Extension::INTERNAL));
   EXPECT_FALSE(pending->IsIdPending(kGoodId));
-  // Force install when the location has higher priority.
-  service_->OnExternalExtensionUpdateUrlFound(kGoodId, GURL(kGoodUpdateURL),
-      Extension::EXTERNAL_POLICY_DOWNLOAD);
+
+  // Install when the location has higher priority.
+  EXPECT_TRUE(
+      service_->OnExternalExtensionUpdateUrlFound(
+          kGoodId, GURL(kGoodUpdateURL), Extension::EXTERNAL_POLICY_DOWNLOAD));
   EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  // Try the low priority again.  Should be rejected.
+  EXPECT_FALSE(
+      service_->OnExternalExtensionUpdateUrlFound(
+          kGoodId, GURL(kGoodUpdateURL), Extension::EXTERNAL_PREF_DOWNLOAD));
+  // The existing record should still be present in the pending extension
+  // manager.
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
   pending->Remove(kGoodId);
-  // Skip install when the location has lower priority.
-  service_->OnExternalExtensionUpdateUrlFound(kGoodId, GURL(kGoodUpdateURL),
-      Extension::INTERNAL);
+
+  // Skip install when the location has the same priority as the installed
+  // location.
+  EXPECT_FALSE(service_->OnExternalExtensionUpdateUrlFound(
+      kGoodId, GURL(kGoodUpdateURL), Extension::INTERNAL));
+
   EXPECT_FALSE(pending->IsIdPending(kGoodId));
+}
+
+TEST_F(ExtensionServiceTest, InstallPriorityExternalLocalFile) {
+  scoped_ptr<Version> older_version;
+  older_version.reset(Version::GetVersionFromString("0.1.0.0"));
+
+  scoped_ptr<Version> newer_version;
+  newer_version.reset(Version::GetVersionFromString("2.0.0.0"));
+
+  // We don't want the extension to be installed.  A path that doesn't
+  // point to a valid CRX ensures this.
+  const FilePath kInvalidPathToCrx = FilePath();
+
+  const int kCreationFlags = 0;
+  const bool kDontMarkAcknowledged = false;
+
+  InitializeEmptyExtensionService();
+
+  // The test below uses install source constants to test that
+  // priority is enforced.  It assumes a specific ranking of install
+  // sources: Registry (EXTERNAL_REGISTRY) overrides external pref
+  // (EXTERNAL_PREF), and external pref overrides user install (INTERNAL).
+  // The following assertions verify these assumptions:
+  ASSERT_EQ(Extension::EXTERNAL_REGISTRY,
+            Extension::GetHigherPriorityLocation(Extension::EXTERNAL_REGISTRY,
+                                                 Extension::EXTERNAL_PREF));
+  ASSERT_EQ(Extension::EXTERNAL_REGISTRY,
+            Extension::GetHigherPriorityLocation(Extension::EXTERNAL_REGISTRY,
+                                                 Extension::INTERNAL));
+  ASSERT_EQ(Extension::EXTERNAL_PREF,
+            Extension::GetHigherPriorityLocation(Extension::EXTERNAL_PREF,
+                                                 Extension::INTERNAL));
+
+  PendingExtensionManager* pending = service_->pending_extension_manager();
+  EXPECT_FALSE(pending->IsIdPending(kGoodId));
+
+  // Simulate an external source adding the extension as INTERNAL.
+  EXPECT_TRUE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::INTERNAL, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+  WaitForCrxInstall(kInvalidPathToCrx, INSTALL_FAILED);
+
+  // Simulate an external source adding the extension as EXTERNAL_PREF.
+  EXPECT_TRUE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_PREF, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+  WaitForCrxInstall(kInvalidPathToCrx, INSTALL_FAILED);
+
+  // Simulate an external source adding as EXTERNAL_PREF again.
+  EXPECT_TRUE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_PREF, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+  WaitForCrxInstall(kInvalidPathToCrx, INSTALL_FAILED);
+
+  // Try INTERNAL again.  Should fail.
+  EXPECT_FALSE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::INTERNAL, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  // Now the registry adds the extension.
+  EXPECT_TRUE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_REGISTRY, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+  WaitForCrxInstall(kInvalidPathToCrx, INSTALL_FAILED);
+
+  // Registry outranks both external pref and internal, so both fail.
+  EXPECT_FALSE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_PREF, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  EXPECT_FALSE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::INTERNAL, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  pending->Remove(kGoodId);
+
+  // Install the extension.
+  FilePath path = data_dir_.AppendASCII("good.crx");
+  const Extension* ext = InstallCRX(path, INSTALL_NEW);
+  ValidatePrefKeyCount(1u);
+  ValidateIntegerPref(good_crx, "state", Extension::ENABLED);
+  ValidateIntegerPref(good_crx, "location", Extension::INTERNAL);
+
+  // Now test the logic of OnExternalExtensionFileFound() when the extension
+  // being added is already installed.
+
+  // Tests assume |older_version| is less than the installed version, and
+  // |newer_version| is greater.  Verify this:
+  ASSERT_TRUE(older_version->IsOlderThan(ext->VersionString()));
+  ASSERT_TRUE(ext->version()->IsOlderThan(newer_version->GetString()));
+
+  // An external install for the same location should fail if the version is
+  // older, or the same, and succeed if the version is newer.
+
+  // Older than the installed version...
+  EXPECT_FALSE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::INTERNAL, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_FALSE(pending->IsIdPending(kGoodId));
+
+  // Same version as the installed version...
+  EXPECT_FALSE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, ext->version(), kInvalidPathToCrx,
+          Extension::INTERNAL, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_FALSE(pending->IsIdPending(kGoodId));
+
+  // Newer than the installed version...
+  EXPECT_TRUE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, newer_version.get(), kInvalidPathToCrx,
+          Extension::INTERNAL, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  // An external install for a higher priority install source should succeed
+  // if the version is greater.  |older_version| is not...
+  EXPECT_FALSE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, older_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_PREF, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  // |newer_version| is newer.
+  EXPECT_TRUE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, newer_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_PREF, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  // An external install for an even higher priority install source should
+  // succeed if the version is greater.
+  EXPECT_TRUE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, newer_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_REGISTRY, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
+
+  // Because EXTERNAL_PREF is a lower priority source than EXTERNAL_REGISTRY,
+  // adding from external pref will now fail.
+  EXPECT_FALSE(
+      service_->OnExternalExtensionFileFound(
+          kGoodId, newer_version.get(), kInvalidPathToCrx,
+          Extension::EXTERNAL_PREF, kCreationFlags, kDontMarkAcknowledged));
+  EXPECT_TRUE(pending->IsIdPending(kGoodId));
 }
 
 // Test that when multiple sources try to install an extension,
@@ -4161,19 +4675,19 @@ class ExtensionSourcePriorityTest : public ExtensionServiceTest {
   }
 
   // Fake an external source adding a URL to fetch an extension from.
-  void AddPendingExternalPrefUrl() {
-    service_->pending_extension_manager()->AddFromExternalUpdateUrl(
+  bool AddPendingExternalPrefUrl() {
+    return service_->pending_extension_manager()->AddFromExternalUpdateUrl(
         crx_id_, GURL(), Extension::EXTERNAL_PREF_DOWNLOAD);
   }
 
   // Fake an external file from external_extensions.json.
-  void AddPendingExternalPrefFileInstall() {
+  bool AddPendingExternalPrefFileInstall() {
     scoped_ptr<Version> version;
     version.reset(Version::GetVersionFromString("1.0.0.0"));
 
-    service_->OnExternalExtensionFileFound(
+    return service_->OnExternalExtensionFileFound(
         crx_id_, version.get(), crx_path_, Extension::EXTERNAL_PREF,
-        Extension::NO_FLAGS);
+        Extension::NO_FLAGS, false);
   }
 
   // Fake a request from sync to install an extension.
@@ -4183,12 +4697,12 @@ class ExtensionSourcePriorityTest : public ExtensionServiceTest {
   }
 
   // Fake a policy install.
-  void AddPendingPolicyInstall() {
+  bool AddPendingPolicyInstall() {
     scoped_ptr<Version> version;
     version.reset(Version::GetVersionFromString("1.0.0.0"));
 
     // Get path to the CRX with id |kGoodId|.
-    service_->OnExternalExtensionUpdateUrlFound(
+    return service_->OnExternalExtensionUpdateUrlFound(
         crx_id_, GURL(), Extension::EXTERNAL_POLICY_DOWNLOAD);
   }
 
@@ -4262,7 +4776,7 @@ TEST_F(ExtensionSourcePriorityTest, PendingExternalUrlOverSync) {
   EXPECT_TRUE(GetPendingIsFromSync());
   ASSERT_FALSE(IsCrxInstalled());
 
-  AddPendingExternalPrefUrl();
+  ASSERT_TRUE(AddPendingExternalPrefUrl());
   ASSERT_EQ(Extension::EXTERNAL_PREF_DOWNLOAD, GetPendingLocation());
   EXPECT_FALSE(GetPendingIsFromSync());
   ASSERT_FALSE(IsCrxInstalled());

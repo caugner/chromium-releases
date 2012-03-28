@@ -37,7 +37,7 @@ class PepperStreamChannel : public PepperChannel,
   // PepperChannel implementation.
   virtual void Connect(pp::Instance* pp_instance,
                        const TransportConfig& transport_config,
-                       ChannelAuthenticator* authenticator) OVERRIDE;
+                       scoped_ptr<ChannelAuthenticator> authenticator) OVERRIDE;
   virtual void AddRemoveCandidate(const cricket::Candidate& candidate) OVERRIDE;
   virtual const std::string& name() const OVERRIDE;
   virtual bool is_connected() const OVERRIDE;
@@ -66,9 +66,6 @@ class PepperStreamChannel : public PepperChannel,
 
   // Indicates that we've finished connecting.
   bool connected_;
-
-  // Callback called by the TCP layer.
-  net::OldCompletionCallbackImpl<PepperStreamChannel> p2p_connect_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(PepperStreamChannel);
 };

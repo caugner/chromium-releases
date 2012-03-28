@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,21 +17,11 @@ namespace policy {
 
 class PolicyNotifier;
 
-namespace em = enterprise_management;
-
 // Caches policy information, as set by calls to |SetPolicy()|, persists
 // it to disk or session_manager (depending on subclass implementation),
 // and makes it available via policy providers.
 class CloudPolicyCacheBase : public base::NonThreadSafe {
  public:
-  // Used to distinguish mandatory from recommended policies.
-  enum PolicyLevel {
-    // Policy is forced upon the user and should always take effect.
-    POLICY_LEVEL_MANDATORY,
-    // The value is just a recommendation that the user may override.
-    POLICY_LEVEL_RECOMMENDED,
-  };
-
   class Observer {
    public:
     virtual ~Observer() {}
@@ -50,7 +40,8 @@ class CloudPolicyCacheBase : public base::NonThreadSafe {
   virtual void Load() = 0;
 
   // Resets the policy information.
-  virtual void SetPolicy(const em::PolicyFetchResponse& policy) = 0;
+  virtual void SetPolicy(
+      const enterprise_management::PolicyFetchResponse& policy) = 0;
 
   virtual void SetUnmanaged() = 0;
 
@@ -68,6 +59,10 @@ class CloudPolicyCacheBase : public base::NonThreadSafe {
     return last_policy_refresh_time_;
   }
 
+  bool machine_id_missing() const {
+    return machine_id_missing_;
+  }
+
   // Get the version of the encryption key currently used for decoding policy.
   // Returns true if the version is available, in which case |version| is filled
   // in.
@@ -76,8 +71,8 @@ class CloudPolicyCacheBase : public base::NonThreadSafe {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // Accessor for the underlying PolicyMaps.
-  const PolicyMap* policy(PolicyLevel level);
+  // Accessor for the underlying PolicyMap.
+  const PolicyMap* policy() { return &policies_; }
 
   // Resets the cache, clearing the policy currently stored in memory and the
   // last refresh time.
@@ -98,14 +93,15 @@ class CloudPolicyCacheBase : public base::NonThreadSafe {
   };
 
   // Decodes the given |policy| using |DecodePolicyResponse()|, applies the
-  // contents to |{mandatory,recommended}_policy_|, and notifies observers.
+  // contents to |policies_|, and notifies observers.
   // |timestamp| returns the timestamp embedded in |policy|, callers can pass
   // NULL if they don't care. |check_for_timestamp_validity| tells this method
   // to discard policy data with a timestamp from the future.
   // Returns true upon success.
-  bool SetPolicyInternal(const em::PolicyFetchResponse& policy,
-                         base::Time* timestamp,
-                         bool check_for_timestamp_validity);
+  bool SetPolicyInternal(
+      const enterprise_management::PolicyFetchResponse& policy,
+      base::Time* timestamp,
+      bool check_for_timestamp_validity);
 
   void SetUnmanagedInternal(const base::Time& timestamp);
 
@@ -114,17 +110,17 @@ class CloudPolicyCacheBase : public base::NonThreadSafe {
 
   // Decodes |policy_data|, populating |mandatory| and |recommended| with
   // the results.
-  virtual bool DecodePolicyData(const em::PolicyData& policy_data,
-                                PolicyMap* mandatory,
-                                PolicyMap* recommended) = 0;
+  virtual bool DecodePolicyData(
+      const enterprise_management::PolicyData& policy_data,
+      PolicyMap* policies) = 0;
 
   // Decodes a PolicyFetchResponse into two PolicyMaps and a timestamp.
   // Also performs verification, returns NULL if any check fails.
-  bool DecodePolicyResponse(const em::PolicyFetchResponse& policy_response,
-                            PolicyMap* mandatory,
-                            PolicyMap* recommended,
-                            base::Time* timestamp,
-                            PublicKeyVersion* public_key_version);
+  bool DecodePolicyResponse(
+      const enterprise_management::PolicyFetchResponse& policy_response,
+      PolicyMap* policies,
+      base::Time* timestamp,
+      PublicKeyVersion* public_key_version);
 
   // Notifies observers if the cache IsReady().
   void NotifyObservers();
@@ -142,8 +138,7 @@ class CloudPolicyCacheBase : public base::NonThreadSafe {
   friend class MockCloudPolicyCache;
 
   // Policy key-value information.
-  PolicyMap mandatory_policy_;
-  PolicyMap recommended_policy_;
+  PolicyMap policies_;
 
   PolicyNotifier* notifier_;
 
@@ -158,6 +153,10 @@ class CloudPolicyCacheBase : public base::NonThreadSafe {
 
   // Whether the the server has indicated this device is unmanaged.
   bool is_unmanaged_;
+
+  // Flag indicating whether the server claims that a valid machine identifier
+  // is missing on the server side. Read directly from the policy blob.
+  bool machine_id_missing_;
 
   // Currently used public key version, if available.
   PublicKeyVersion public_key_version_;

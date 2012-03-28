@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,14 +29,16 @@
 #include "chrome/common/chrome_view_type.h"
 #include "chrome/common/extensions/extension.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_store.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserThread;
+using content::WebContents;
 
 namespace {
 
@@ -136,36 +138,36 @@ Browser* GetBrowserAt(int index) {
   return *(BrowserList::begin() + index);
 }
 
-TabContents* GetTabContentsAt(int browser_index, int tab_index) {
+WebContents* GetWebContentsAt(int browser_index, int tab_index) {
   if (tab_index < 0)
     return NULL;
   Browser* browser = GetBrowserAt(browser_index);
   if (!browser || tab_index >= browser->tab_count())
     return NULL;
-  return browser->GetTabContentsAt(tab_index);
+  return browser->GetWebContentsAt(tab_index);
 }
 
-Browser* GetBrowserForTab(TabContents* tab) {
+Browser* GetBrowserForTab(WebContents* tab) {
   BrowserList::const_iterator browser_iter = BrowserList::begin();
   for (; browser_iter != BrowserList::end(); ++browser_iter) {
     Browser* browser = *browser_iter;
     for (int tab_index = 0; tab_index < browser->tab_count(); ++tab_index) {
-      if (browser->GetTabContentsAt(tab_index) == tab)
+      if (browser->GetWebContentsAt(tab_index) == tab)
         return browser;
     }
   }
   return NULL;
 }
 
-net::URLRequestContextGetter* GetRequestContext(TabContents* contents) {
+net::URLRequestContextGetter* GetRequestContext(WebContents* contents) {
   // Since we may be on the UI thread don't call GetURLRequestContext().
-  // Get the request context specific to the current TabContents and app.
-  return contents->browser_context()->GetRequestContextForRenderProcess(
-      contents->render_view_host()->process()->GetID());
+  // Get the request context specific to the current WebContents and app.
+  return contents->GetBrowserContext()->GetRequestContextForRenderProcess(
+      contents->GetRenderProcessHost()->GetID());
 }
 
 void GetCookies(const GURL& url,
-                TabContents* contents,
+                WebContents* contents,
                 int* value_size,
                 std::string* value) {
   *value_size = -1;
@@ -185,7 +187,7 @@ void GetCookies(const GURL& url,
 
 void SetCookie(const GURL& url,
                const std::string& value,
-               TabContents* contents,
+               WebContents* contents,
                int* response_value) {
   *response_value = -1;
 
@@ -207,7 +209,7 @@ void SetCookie(const GURL& url,
 
 void DeleteCookie(const GURL& url,
                   const std::string& cookie_name,
-                  TabContents* contents,
+                  WebContents* contents,
                   bool* success) {
   *success = false;
   if (url.is_valid() && contents) {
@@ -397,8 +399,8 @@ bool SendErrorIfModalDialogActive(AutomationProvider* provider,
                                   IPC::Message* message) {
   bool active = AppModalDialogQueue::GetInstance()->HasActiveDialog();
   if (active) {
-    AutomationJSONReply(provider, message).SendError(
-        "Command cannot be performed because a modal dialog is active");
+    AutomationJSONReply(provider, message).SendErrorCode(
+        automation::kBlockedByModalDialog);
   }
   return active;
 }
@@ -437,7 +439,7 @@ AutomationId GetIdForExtension(const Extension* extension) {
   return AutomationId(AutomationId::kTypeExtension, extension->id());
 }
 
-bool GetTabForId(const AutomationId& id, TabContents** tab) {
+bool GetTabForId(const AutomationId& id, WebContents** tab) {
   if (id.type() != AutomationId::kTypeTab)
     return false;
 
@@ -448,7 +450,7 @@ bool GetTabForId(const AutomationId& id, TabContents** tab) {
       TabContentsWrapper* wrapper = browser->GetTabContentsWrapperAt(tab_index);
       if (base::IntToString(wrapper->restore_tab_helper()->session_id().id()) ==
               id.id()) {
-        *tab = wrapper->tab_contents();
+        *tab = wrapper->web_contents();
         return true;
       }
     }
@@ -462,21 +464,6 @@ bool GetExtensionRenderViewForId(
     const AutomationId& id,
     Profile* profile,
     RenderViewHost** rvh) {
-  content::ViewType view_type;
-  switch (id.type()) {
-    case AutomationId::kTypeExtensionPopup:
-      view_type = chrome::VIEW_TYPE_EXTENSION_POPUP;
-      break;
-    case AutomationId::kTypeExtensionBgPage:
-      view_type = chrome::VIEW_TYPE_EXTENSION_BACKGROUND_PAGE;
-      break;
-    case AutomationId::kTypeExtensionInfobar:
-      view_type = chrome::VIEW_TYPE_EXTENSION_INFOBAR;
-      break;
-    default:
-      return false;
-  }
-
   ExtensionProcessManager* extension_mgr =
       profile->GetExtensionProcessManager();
   ExtensionProcessManager::const_iterator iter;
@@ -500,10 +487,10 @@ bool GetRenderViewForId(
     RenderViewHost** rvh) {
   switch (id.type()) {
     case AutomationId::kTypeTab: {
-      TabContents* tab;
+      WebContents* tab;
       if (!GetTabForId(id, &tab))
         return false;
-      *rvh = tab->render_view_host();
+      *rvh = tab->GetRenderViewHost();
       break;
     }
     case AutomationId::kTypeExtensionPopup:
@@ -535,7 +522,7 @@ bool GetExtensionForId(
 bool DoesObjectWithIdExist(const AutomationId& id, Profile* profile) {
   switch (id.type()) {
     case AutomationId::kTypeTab: {
-      TabContents* tab;
+      WebContents* tab;
       return GetTabForId(id, &tab);
     }
     case AutomationId::kTypeExtensionPopup:

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,8 +16,10 @@
 #include "chrome/browser/sync/protocol/bookmark_specifics.pb.h"
 #include "chrome/browser/sync/protocol/password_specifics.pb.h"
 #include "chrome/browser/sync/protocol/sync.pb.h"
+#include "chrome/browser/sync/protocol/sync_enums.pb.h"
 #include "chrome/browser/sync/syncable/blob.h"
 #include "chrome/browser/sync/syncable/directory_manager.h"
+#include "chrome/browser/sync/syncable/model_type_test_util.h"
 #include "chrome/browser/sync/syncable/syncable.h"
 #include "chrome/browser/sync/test/engine/mock_connection_manager.h"
 #include "chrome/browser/sync/test/engine/test_directory_setter_upper.h"
@@ -26,7 +28,6 @@
 
 using syncable::Blob;
 using syncable::ScopedDirLookup;
-using syncable::ModelTypeSet;
 using ::testing::_;
 
 namespace browser_sync {
@@ -36,7 +37,7 @@ class MockSyncSessionContext : public SyncSessionContext {
  public:
   MockSyncSessionContext() {}
   ~MockSyncSessionContext() {}
-  MOCK_METHOD2(SetUnthrottleTime, void(const ModelTypeSet&,
+  MOCK_METHOD2(SetUnthrottleTime, void(syncable::ModelTypeSet,
                                        const base::TimeTicks&));
 };
 
@@ -196,7 +197,7 @@ TEST_F(SyncerProtoUtilTest, VerifyResponseBirthday) {
   response.set_store_birthday("meat");
   EXPECT_FALSE(SyncerProtoUtil::VerifyResponseBirthday(lookup, &response));
 
-  response.set_error_code(ClientToServerResponse::CLEAR_PENDING);
+  response.set_error_code(sync_pb::SyncEnums::CLEAR_PENDING);
   EXPECT_FALSE(SyncerProtoUtil::VerifyResponseBirthday(lookup, &response));
 }
 
@@ -231,7 +232,7 @@ class DummyConnectionManager : public browser_sync::ServerConnectionManager {
 
     ClientToServerResponse response;
     if (access_denied_) {
-      response.set_error_code(ClientToServerResponse::ACCESS_DENIED);
+      response.set_error_code(sync_pb::SyncEnums::ACCESS_DENIED);
     }
     response.SerializeToString(&params->buffer_out);
 
@@ -276,13 +277,13 @@ TEST_F(SyncerProtoUtilTest, HandleThrottlingWithDatatypes) {
   SyncProtocolError error;
   error.error_type = browser_sync::THROTTLED;
   syncable::ModelTypeSet types;
-  types.insert(syncable::BOOKMARKS);
-  types.insert(syncable::PASSWORDS);
+  types.Put(syncable::BOOKMARKS);
+  types.Put(syncable::PASSWORDS);
   error.error_data_types = types;
 
   base::TimeTicks ticks = base::TimeTicks::Now();
 
-  EXPECT_CALL(context, SetUnthrottleTime(types, ticks));
+  EXPECT_CALL(context, SetUnthrottleTime(HasModelTypes(types), ticks));
 
   SyncerProtoUtil::HandleThrottleError(error, ticks, &context, NULL);
 }

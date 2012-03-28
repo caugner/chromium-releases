@@ -22,8 +22,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/navigation_details.h"
 #include "content/public/browser/browser_shutdown.h"
+#include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -43,6 +43,8 @@
 #include "chrome/browser/chromeos/legacy_window_manager/wm_ipc.h"
 #endif
 #endif
+
+using content::WebContents;
 
 namespace {
 
@@ -494,7 +496,7 @@ void BrowserList::AttemptUserExit() {
         state->GetString(prefs::kApplicationLocale) != owner_locale &&
         !state->IsManagedPreference(prefs::kApplicationLocale)) {
       state->SetString(prefs::kApplicationLocale, owner_locale);
-      state->SavePersistentPrefs();
+      state->CommitPendingWrite();
     }
   }
   g_session_manager_requested_shutdown = false;
@@ -520,7 +522,6 @@ void BrowserList::AttemptRestart() {
 
   PrefService* pref_service = g_browser_process->local_state();
   pref_service->SetBoolean(prefs::kWasRestarted, true);
-  pref_service->ScheduleSavePersistentPrefs();
 
 #if defined(OS_CHROMEOS)
   // For CrOS instead of browser restart (which is not supported) perform a full
@@ -754,10 +755,10 @@ Browser* BrowserList::FindBrowserWithWindow(gfx::NativeWindow window) {
 }
 
 // static
-Browser* BrowserList::FindBrowserWithTabContents(TabContents* tab_contents) {
-  DCHECK(tab_contents);
+Browser* BrowserList::FindBrowserWithWebContents(WebContents* web_contents) {
+  DCHECK(web_contents);
   for (TabContentsIterator it; !it.done(); ++it) {
-    if (it->tab_contents() == tab_contents)
+    if (it->web_contents() == web_contents)
       return it.browser();
   }
   return NULL;

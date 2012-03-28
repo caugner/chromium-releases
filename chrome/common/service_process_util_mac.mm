@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/foundation_util.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
@@ -36,7 +37,7 @@ namespace {
 
 CFStringRef CopyServiceProcessLaunchDName() {
   base::mac::ScopedNSAutoreleasePool pool;
-  NSBundle* bundle = base::mac::MainAppBundle();
+  NSBundle* bundle = base::mac::FrameworkBundle();
   return CFStringCreateCopy(kCFAllocatorDefault,
                             base::mac::NSToCFCast([bundle bundleIdentifier]));
 }
@@ -57,15 +58,6 @@ NSString* GetServiceProcessLaunchDLabel() {
 
 NSString* GetServiceProcessLaunchDSocketKey() {
   return @"ServiceProcessSocket";
-}
-
-NSString* GetServiceProcessLaunchDSocketEnvVar() {
-  NSString *label = GetServiceProcessLaunchDLabel();
-  NSString *env_var = [label stringByReplacingOccurrencesOfString:@"."
-                                                       withString:@"_"];
-  env_var = [env_var stringByAppendingString:@"_SOCKET"];
-  env_var = [env_var uppercaseString];
-  return env_var;
 }
 
 bool GetParentFSRef(const FSRef& child, FSRef* parent) {
@@ -94,6 +86,15 @@ class ExecFilePathWatcherDelegate : public FilePathWatcher::Delegate {
 };
 
 }  // namespace
+
+NSString* GetServiceProcessLaunchDSocketEnvVar() {
+  NSString *label = GetServiceProcessLaunchDLabel();
+  NSString *env_var = [label stringByReplacingOccurrencesOfString:@"."
+                                                       withString:@"_"];
+  env_var = [env_var stringByAppendingString:@"_SOCKET"];
+  env_var = [env_var uppercaseString];
+  return env_var;
+}
 
 // Gets the name of the service process IPC channel.
 IPC::ChannelHandle GetServiceProcessChannel() {

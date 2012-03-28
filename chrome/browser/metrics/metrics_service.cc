@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -173,12 +173,13 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/guid.h"
-#include "chrome/common/metrics_log_manager.h"
+#include "chrome/common/metrics/metrics_log_manager.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/render_messages.h"
 #include "content/browser/load_notification_details.h"
-#include "content/browser/plugin_service.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/url_fetcher.h"
 #include "webkit/plugins/webplugininfo.h"
@@ -196,6 +197,8 @@
 
 using base::Time;
 using content::BrowserThread;
+using content::ChildProcessData;
+using content::PluginService;
 
 // Check to see that we're being called on only one thread.
 static bool IsSingleThreaded();
@@ -219,8 +222,8 @@ static const int kEventLimit = 2400;
 // limit is exceeded.
 static const int kUploadLogAvoidRetransmitSize = 50000;
 
-// Interval, in seconds, between state saves.
-static const int kSaveStateInterval = 5 * 60;  // five minutes
+// Interval, in minutes, between state saves.
+static const int kSaveStateIntervalMinutes = 5;
 
 // static
 MetricsService::ShutdownCleanliness MetricsService::clean_shutdown_status_ =
@@ -404,6 +407,22 @@ std::string MetricsService::GetClientId() {
   return client_id_;
 }
 
+void MetricsService::ForceClientIdCreation() {
+  if (!client_id_.empty())
+    return;
+  PrefService* pref = g_browser_process->local_state();
+  client_id_ = pref->GetString(prefs::kMetricsClientID);
+  if (!client_id_.empty())
+    return;
+
+  client_id_ = GenerateClientID();
+  pref->SetString(prefs::kMetricsClientID, client_id_);
+
+  // Might as well make a note of how long this ID has existed
+  pref->SetString(prefs::kMetricsClientIDTimestamp,
+                  base::Int64ToString(Time::Now().ToTimeT()));
+}
+
 void MetricsService::SetRecording(bool enabled) {
   DCHECK(IsSingleThreaded());
 
@@ -411,19 +430,7 @@ void MetricsService::SetRecording(bool enabled) {
     return;
 
   if (enabled) {
-    if (client_id_.empty()) {
-      PrefService* pref = g_browser_process->local_state();
-      DCHECK(pref);
-      client_id_ = pref->GetString(prefs::kMetricsClientID);
-      if (client_id_.empty()) {
-        client_id_ = GenerateClientID();
-        pref->SetString(prefs::kMetricsClientID, client_id_);
-
-        // Might as well make a note of how long this ID has existed
-        pref->SetString(prefs::kMetricsClientIDTimestamp,
-                        base::Int64ToString(Time::Now().ToTimeT()));
-      }
-    }
+    ForceClientIdCreation();
     child_process_logging::SetClientId(client_id_);
     StartRecording();
 
@@ -552,7 +559,8 @@ void MetricsService::Observe(int type,
       break;
 
     case chrome::NOTIFICATION_OMNIBOX_OPENED_URL: {
-      MetricsLog* current_log = log_manager_.current_log()->AsMetricsLog();
+      MetricsLog* current_log =
+          static_cast<MetricsLog*>(log_manager_.current_log());
       DCHECK(current_log);
       current_log->RecordOmniboxOpenedURL(
           *content::Details<AutocompleteLog>(details).ptr());
@@ -621,8 +629,7 @@ void MetricsService::RecordBreakpadHasDebugger(bool has_debugger) {
 void MetricsService::InitializeMetricsState() {
 #if defined(OS_POSIX)
   server_url_ = L"https://clients4.google.com/firefox/metrics/collect";
-  // TODO(rtenneti): Return the network stats server name.
-  network_stats_server_ = "";
+  network_stats_server_ = "chrome.googleechotest.com";
 #else
   BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   server_url_ = dist->GetStatsServerURL();
@@ -766,7 +773,7 @@ void MetricsService::ScheduleNextStateSave() {
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&MetricsService::SaveLocalState,
                  state_saver_factory_.GetWeakPtr()),
-      kSaveStateInterval * 1000);
+      base::TimeDelta::FromMinutes(kSaveStateIntervalMinutes));
 }
 
 void MetricsService::SaveLocalState() {
@@ -777,9 +784,8 @@ void MetricsService::SaveLocalState() {
   }
 
   RecordCurrentState(pref);
-  pref->ScheduleSavePersistentPrefs();
 
-  // TODO(jar): Does this run down the batteries????
+  // TODO(jar):110021 Does this run down the batteries????
   ScheduleNextStateSave();
 }
 
@@ -800,11 +806,13 @@ void MetricsService::StartRecording() {
     // initialization steps (such as plugin list generation) necessary
     // for sending the initial log.  This avoids blocking the main UI
     // thread.
-    g_browser_process->file_thread()->message_loop()->PostDelayedTask(FROM_HERE,
+    BrowserThread::PostDelayedTask(
+        BrowserThread::FILE,
+        FROM_HERE,
         base::Bind(&MetricsService::InitTaskGetHardwareClass,
             base::Unretained(this),
             MessageLoop::current()->message_loop_proxy()),
-        kInitializationDelaySeconds * 1000);
+        kInitializationDelaySeconds);
   }
 }
 
@@ -828,7 +836,8 @@ void MetricsService::StopRecording() {
   // end of all log transmissions (initial log handles this separately).
   // RecordIncrementalStabilityElements only exists on the derived
   // MetricsLog class.
-  MetricsLog* current_log = log_manager_.current_log()->AsMetricsLog();
+  MetricsLog* current_log =
+      static_cast<MetricsLog*>(log_manager_.current_log());
   DCHECK(current_log);
   current_log->RecordIncrementalStabilityElements();
   RecordCurrentHistograms();
@@ -1130,11 +1139,6 @@ void MetricsService::OnURLFetchComplete(const content::URLFetcher* source) {
     }
 
     log_manager_.DiscardStagedLog();
-    // Since we sent a log, make sure our in-memory state is recorded to disk.
-    PrefService* local_state = g_browser_process->local_state();
-    DCHECK(local_state);
-    if (local_state)
-      local_state->ScheduleSavePersistentPrefs();
 
     if (log_manager_.has_unsent_logs())
       DCHECK(state_ < SENDING_CURRENT_LOGS);
@@ -1302,7 +1306,7 @@ void MetricsService::LogCleanShutdown() {
   // Redundant hack to write pref ASAP.
   PrefService* pref = g_browser_process->local_state();
   pref->SetBoolean(prefs::kStabilityExitedCleanly, true);
-  pref->SavePersistentPrefs();
+  pref->CommitPendingWrite();
   // Hack: TBD: Remove this wait.
   // We are so concerned that the pref gets written, we are now willing to stall
   // the UI thread until we get assurance that a pref-writing task has
@@ -1339,7 +1343,7 @@ void MetricsService::LogChildProcessChange(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
-  content::Details<content::ChildProcessData> child_details(details);
+  content::Details<ChildProcessData> child_details(details);
   const string16& child_name = child_details->name;
 
   if (child_process_stats_buffer_.find(child_name) ==

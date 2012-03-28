@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,10 +55,11 @@ DataTypeManager::ConfigureStatus GetStatus(
 }
 
 void DoConfigureDataTypes(
-    const syncable::ModelTypeSet& types_to_add,
-    const syncable::ModelTypeSet& types_to_remove,
+    syncable::ModelTypeSet types_to_add,
+    syncable::ModelTypeSet types_to_remove,
     sync_api::ConfigureReason reason,
-    base::Callback<void(const syncable::ModelTypeSet&)> ready_task,
+    base::Callback<void(syncable::ModelTypeSet)> ready_task,
+    base::Callback<void()> retry_task,
     bool enable_nigori) {
   ready_task.Run(syncable::ModelTypeSet());
 }
@@ -178,9 +179,9 @@ class DataTypeManagerImplTest : public testing::Test {
     SetStartStopExpectations(bookmark_dtc);
     controllers_[syncable::BOOKMARKS] = bookmark_dtc;
     EXPECT_CALL(backend_,
-                ConfigureDataTypes(_, _, _, _, enable_nigori)).Times(1);
+                ConfigureDataTypes(_, _, _, _, _, enable_nigori)).Times(1);
     DataTypeManagerImpl dtm(&backend_, &controllers_);
-    types_.insert(syncable::BOOKMARKS);
+    types_.Put(syncable::BOOKMARKS);
     SetConfigureStartExpectation();
     SetConfigureDoneExpectation(DataTypeManager::OK);
     Configure(&dtm, types_, sync_api::CONFIGURE_REASON_RECONFIGURATION,
@@ -193,7 +194,7 @@ class DataTypeManagerImplTest : public testing::Test {
   void RunConfigureWhileOneInFlightTest(bool enable_nigori) {
     DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
     // Save the callback here so we can interrupt startup.
-    DataTypeController::StartCallback* callback;
+    DataTypeController::StartCallback callback;
     {
       InSequence seq;
       EXPECT_CALL(*bookmark_dtc, state()).
@@ -213,12 +214,12 @@ class DataTypeManagerImplTest : public testing::Test {
     controllers_[syncable::PREFERENCES] = preference_dtc;
 
     DataTypeManagerImpl dtm(&backend_, &controllers_);
-    EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, enable_nigori))
+    EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, enable_nigori))
         .WillOnce(Invoke(DoConfigureDataTypes))
         .WillOnce(DoAll(Invoke(DoConfigureDataTypes),
                         InvokeWithoutArgs(QuitMessageLoop)));
 
-    types_.insert(syncable::BOOKMARKS);
+    types_.Put(syncable::BOOKMARKS);
 
     SetConfigureStartExpectation();
     SetConfigureDoneExpectation(DataTypeManager::OK);
@@ -227,11 +228,10 @@ class DataTypeManagerImplTest : public testing::Test {
 
     // At this point, the bookmarks dtc should be in flight.  Add
     // preferences and continue starting bookmarks.
-    types_.insert(syncable::PREFERENCES);
+    types_.Put(syncable::PREFERENCES);
     Configure(&dtm, types_, sync_api::CONFIGURE_REASON_RECONFIGURATION,
               enable_nigori);
-    callback->Run(DataTypeController::OK, SyncError());
-    delete callback;
+    callback.Run(DataTypeController::OK, SyncError());
 
     MessageLoop::current()->Run();
 
@@ -243,7 +243,7 @@ class DataTypeManagerImplTest : public testing::Test {
 
   void RunConfigureWhileDownloadPendingTest(
       bool enable_nigori,
-      const syncable::ModelTypeSet& first_configure_result) {
+      syncable::ModelTypeSet first_configure_result) {
     DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
     SetStartStopExpectations(bookmark_dtc);
     controllers_[syncable::BOOKMARKS] = bookmark_dtc;
@@ -255,21 +255,21 @@ class DataTypeManagerImplTest : public testing::Test {
     DataTypeManagerImpl dtm(&backend_, &controllers_);
     SetConfigureStartExpectation();
     SetConfigureDoneExpectation(DataTypeManager::OK);
-    base::Callback<void(const syncable::ModelTypeSet&)> task;
+    base::Callback<void(syncable::ModelTypeSet)> task;
     // Grab the task the first time this is called so we can configure
     // before it is finished.
-    EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, enable_nigori)).
+    EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, enable_nigori)).
         WillOnce(SaveArg<3>(&task)).
         WillOnce(DoDefault());
 
-    types_.insert(syncable::BOOKMARKS);
+    types_.Put(syncable::BOOKMARKS);
     Configure(&dtm, types_, sync_api::CONFIGURE_REASON_RECONFIGURATION,
               enable_nigori);
     // Configure should stop in the DOWNLOAD_PENDING state because we
     // are waiting for the download ready task to be run.
     EXPECT_EQ(DataTypeManager::DOWNLOAD_PENDING, dtm.state());
 
-    types_.insert(syncable::PREFERENCES);
+    types_.Put(syncable::PREFERENCES);
     Configure(&dtm, types_, sync_api::CONFIGURE_REASON_RECONFIGURATION,
               enable_nigori);
 
@@ -289,7 +289,7 @@ class DataTypeManagerImplTest : public testing::Test {
   NiceMock<SyncBackendHostMock> backend_;
   content::NotificationObserverMock observer_;
   content::NotificationRegistrar registrar_;
-  std::set<syncable::ModelType> types_;
+  syncable::ModelTypeSet types_;
 };
 
 TEST_F(DataTypeManagerImplTest, NoControllers) {
@@ -315,9 +315,9 @@ TEST_F(DataTypeManagerImplTest, ConfigureOneStopWhileStarting) {
   SetBusyStartStopExpectations(bookmark_dtc,
                                DataTypeController::MODEL_STARTING);
   controllers_[syncable::BOOKMARKS] = bookmark_dtc;
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
   DataTypeManagerImpl dtm(&backend_, &controllers_);
-  types_.insert(syncable::BOOKMARKS);
+  types_.Put(syncable::BOOKMARKS);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
@@ -330,9 +330,9 @@ TEST_F(DataTypeManagerImplTest, ConfigureOneStopWhileAssociating) {
   DataTypeControllerMock* bookmark_dtc = MakeBookmarkDTC();
   SetBusyStartStopExpectations(bookmark_dtc, DataTypeController::ASSOCIATING);
   controllers_[syncable::BOOKMARKS] = bookmark_dtc;
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
   DataTypeManagerImpl dtm(&backend_, &controllers_);
-  types_.insert(syncable::BOOKMARKS);
+  types_.Put(syncable::BOOKMARKS);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
@@ -350,10 +350,10 @@ TEST_F(DataTypeManagerImplTest, OneWaitingForCrypto) {
                               DataTypeController::NEEDS_CRYPTO));
 
   controllers_[syncable::PASSWORDS] = password_dtc;
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
 
   DataTypeManagerImpl dtm(&backend_, &controllers_);
-  types_.insert(syncable::PASSWORDS);
+  types_.Put(syncable::PASSWORDS);
   SetConfigureStartExpectation();
 
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
@@ -371,7 +371,7 @@ TEST_F(DataTypeManagerImplTest, OneWaitingForCrypto) {
   EXPECT_CALL(*password_dtc, Start(_)).
       WillOnce(InvokeCallback(syncable::PASSWORDS,
                               DataTypeController::OK));
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
 
   EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
@@ -388,16 +388,16 @@ TEST_F(DataTypeManagerImplTest, ConfigureOneThenAnother) {
   SetStartStopExpectations(preference_dtc);
   controllers_[syncable::PREFERENCES] = preference_dtc;
 
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(2);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(2);
   DataTypeManagerImpl dtm(&backend_, &controllers_);
-  types_.insert(syncable::BOOKMARKS);
+  types_.Put(syncable::BOOKMARKS);
 
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
   EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
 
-  types_.insert(syncable::PREFERENCES);
+  types_.Put(syncable::PREFERENCES);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
@@ -415,17 +415,17 @@ TEST_F(DataTypeManagerImplTest, ConfigureOneThenSwitch) {
   SetStartStopExpectations(preference_dtc);
   controllers_[syncable::PREFERENCES] = preference_dtc;
 
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(2);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(2);
   DataTypeManagerImpl dtm(&backend_, &controllers_);
-  types_.insert(syncable::BOOKMARKS);
+  types_.Put(syncable::BOOKMARKS);
 
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
   EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
 
-  types_.clear();
-  types_.insert(syncable::PREFERENCES);
+  types_.Clear();
+  types_.Put(syncable::PREFERENCES);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::OK);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
@@ -456,9 +456,9 @@ TEST_F(DataTypeManagerImplTest, OneFailingController) {
   DataTypeManagerImpl dtm(&backend_, &controllers_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::UNRECOVERABLE_ERROR);
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
 
-  types_.insert(syncable::BOOKMARKS);
+  types_.Put(syncable::BOOKMARKS);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
   EXPECT_EQ(DataTypeManager::STOPPED, dtm.state());
 }
@@ -470,7 +470,7 @@ TEST_F(DataTypeManagerImplTest, StopWhileInFlight) {
 
   DataTypeControllerMock* preference_dtc = MakePreferenceDTC();
   // Save the callback here so we can interrupt startup.
-  DataTypeController::StartCallback* callback;
+  DataTypeController::StartCallback callback;
   EXPECT_CALL(*preference_dtc, Start(_)).
       WillOnce(SaveArg<0>(&callback));
   EXPECT_CALL(*preference_dtc, state()).
@@ -480,10 +480,10 @@ TEST_F(DataTypeManagerImplTest, StopWhileInFlight) {
   DataTypeManagerImpl dtm(&backend_, &controllers_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::ABORTED);
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
 
-  types_.insert(syncable::BOOKMARKS);
-  types_.insert(syncable::PREFERENCES);
+  types_.Put(syncable::BOOKMARKS);
+  types_.Put(syncable::PREFERENCES);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
   // Configure should stop in the CONFIGURING state because we are
   // waiting for the preferences callback to be invoked.
@@ -514,10 +514,10 @@ TEST_F(DataTypeManagerImplTest, SecondControllerFails) {
   DataTypeManagerImpl dtm(&backend_, &controllers_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::UNRECOVERABLE_ERROR);
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
 
-  types_.insert(syncable::BOOKMARKS);
-  types_.insert(syncable::PREFERENCES);
+  types_.Put(syncable::BOOKMARKS);
+  types_.Put(syncable::PREFERENCES);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
   EXPECT_EQ(DataTypeManager::STOPPED, dtm.state());
 }
@@ -550,10 +550,10 @@ TEST_F(DataTypeManagerImplTest, OneControllerFailsAssociation) {
   DataTypeManagerImpl dtm(&backend_, &controllers_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::PARTIAL_SUCCESS);
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).Times(1);
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).Times(1);
 
-  types_.insert(syncable::BOOKMARKS);
-  types_.insert(syncable::PREFERENCES);
+  types_.Put(syncable::BOOKMARKS);
+  types_.Put(syncable::PREFERENCES);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
   EXPECT_EQ(DataTypeManager::CONFIGURED, dtm.state());
 
@@ -575,18 +575,18 @@ TEST_F(DataTypeManagerImplTest, ConfigureWhileDownloadPendingWithoutNigori) {
 }
 
 TEST_F(DataTypeManagerImplTest, ConfigureWhileDownloadPendingFail) {
-  syncable::ModelTypeSet first_configure_result;
-  first_configure_result.insert(syncable::BOOKMARKS);
   RunConfigureWhileDownloadPendingTest(
-      true /* enable_nigori */, first_configure_result);
+      true /* enable_nigori */,
+      /* first_configure_result */
+      syncable::ModelTypeSet(syncable::BOOKMARKS));
 }
 
 TEST_F(DataTypeManagerImplTest,
        ConfigureWhileDownloadPendingFailWithoutNigori) {
-  syncable::ModelTypeSet first_configure_result;
-  first_configure_result.insert(syncable::BOOKMARKS);
   RunConfigureWhileDownloadPendingTest(
-      false /* enable_nigori */, first_configure_result);
+      false /* enable_nigori */,
+      /* first_configure_result */
+      syncable::ModelTypeSet(syncable::BOOKMARKS));
 }
 
 TEST_F(DataTypeManagerImplTest, StopWhileDownloadPending) {
@@ -597,13 +597,13 @@ TEST_F(DataTypeManagerImplTest, StopWhileDownloadPending) {
   DataTypeManagerImpl dtm(&backend_, &controllers_);
   SetConfigureStartExpectation();
   SetConfigureDoneExpectation(DataTypeManager::ABORTED);
-  base::Callback<void(const syncable::ModelTypeSet&)> task;
+  base::Callback<void(syncable::ModelTypeSet)> task;
   // Grab the task the first time this is called so we can stop
   // before it is finished.
-  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, true)).
+  EXPECT_CALL(backend_, ConfigureDataTypes(_, _, _, _, _, true)).
       WillOnce(SaveArg<3>(&task));
 
-  types_.insert(syncable::BOOKMARKS);
+  types_.Put(syncable::BOOKMARKS);
   dtm.Configure(types_, sync_api::CONFIGURE_REASON_RECONFIGURATION);
   // Configure should stop in the DOWNLOAD_PENDING state because we
   // are waiting for the download ready task to be run.

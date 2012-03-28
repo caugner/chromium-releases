@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,6 +18,8 @@
 #include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_types.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/sync_backend_host.h"
 #include "chrome/browser/sync/glue/sync_backend_host_mock.h"
@@ -81,9 +83,15 @@ using testing::Return;
 using testing::SetArgumentPointee;
 using testing::WithArgs;
 
+// Visits with this timestamp are treated as expired.
+static const int EXPIRED_VISIT = -1;
+
 class HistoryBackendMock : public HistoryBackend {
  public:
   HistoryBackendMock() : HistoryBackend(FilePath(), 0, NULL, NULL) {}
+  virtual bool IsExpiredVisitTime(const base::Time& time) OVERRIDE {
+    return time.ToInternalValue() == EXPIRED_VISIT;
+  }
   MOCK_METHOD1(GetAllTypedURLs, bool(std::vector<history::URLRow>* entries));
   MOCK_METHOD3(GetMostRecentVisitsForURL, bool(history::URLID id,
                                                int max_visits,
@@ -173,21 +181,30 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
 
   void StartSyncService(const base::Closure& callback) {
     if (!service_.get()) {
+      SigninManager* signin = SigninManagerFactory::GetForProfile(&profile_);
+      signin->SetAuthenticatedUsername("test");
+      ProfileSyncComponentsFactoryMock* factory =
+          new ProfileSyncComponentsFactoryMock();
       service_.reset(
-          new TestProfileSyncService(&factory_, &profile_, "test", false,
+          new TestProfileSyncService(factory,
+                                     &profile_,
+                                     signin,
+                                     ProfileSyncService::AUTO_START,
+                                     false,
                                      callback));
       EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
           Return(service_.get()));
       TypedUrlDataTypeController* data_type_controller =
-          new TypedUrlDataTypeController(&factory_,
-                                         &profile_);
+          new TypedUrlDataTypeController(factory,
+                                         &profile_,
+                                         service_.get());
 
-      EXPECT_CALL(factory_, CreateTypedUrlSyncComponents(_, _, _)).
+      EXPECT_CALL(*factory, CreateTypedUrlSyncComponents(_, _, _)).
           WillOnce(MakeTypedUrlSyncComponents(&profile_,
                                               service_.get(),
                                               history_backend_.get(),
                                               data_type_controller));
-      EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
+      EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
           WillOnce(ReturnNewDataTypeManager());
 
       EXPECT_CALL(profile_, GetHistoryServiceWithoutCreating()).
@@ -284,7 +301,6 @@ class ProfileSyncServiceTypedUrlTest : public AbstractProfileSyncServiceTest {
   scoped_refptr<ThreadNotificationService> notification_service_;
 
   ProfileMock profile_;
-  ProfileSyncComponentsFactoryMock factory_;
   scoped_refptr<HistoryBackendMock> history_backend_;
   scoped_refptr<HistoryServiceMock> history_service_;
 };
@@ -331,6 +347,7 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeEmptySync) {
   EXPECT_TRUE(URLsEqual(entries[0], sync_entries[0]));
 }
 
+
 TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncNoMerge) {
   history::VisitVector native_visits;
   history::VisitVector sync_visits;
@@ -367,6 +384,23 @@ TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncNoMerge) {
        entry != new_sync_entries.end(); ++entry) {
     EXPECT_TRUE(URLsEqual(expected[entry->url().spec()], *entry));
   }
+}
+
+TEST_F(ProfileSyncServiceTypedUrlTest, EmptyNativeExpiredSync) {
+  history::VisitVector sync_visits;
+  history::URLRow sync_entry(MakeTypedUrlEntry("http://sync.com", "entry",
+                                               3, EXPIRED_VISIT, false,
+                                               &sync_visits));
+  std::vector<history::URLRow> sync_entries;
+  sync_entries.push_back(sync_entry);
+
+  // Since all our URLs are expired, no backend calls to add new URLs will be
+  // made.
+  EXPECT_CALL((*history_backend_.get()), GetAllTypedURLs(_)).
+      WillOnce(Return(true));
+  SetIdleChangeProcessorExpectations();
+
+  StartSyncService(base::Bind(&AddTypedUrlEntries, this, sync_entries));
 }
 
 TEST_F(ProfileSyncServiceTypedUrlTest, HasNativeHasSyncMerge) {
@@ -702,8 +736,8 @@ TEST_F(ProfileSyncServiceTypedUrlTest, FailWriteToHistoryBackend) {
       WillRepeatedly(Return(false));
   StartSyncService(base::Bind(&AddTypedUrlEntries, this, sync_entries));
   ASSERT_TRUE(
-      service_->failed_datatypes_handler().GetFailedTypes().count(
-          syncable::TYPED_URLS) != 0);
-  ASSERT_TRUE(
-      service_->failed_datatypes_handler().GetFailedTypes().size() == 1);
+      service_->failed_datatypes_handler().GetFailedTypes().Has(
+          syncable::TYPED_URLS));
+  ASSERT_EQ(
+      1u, service_->failed_datatypes_handler().GetFailedTypes().Size());
 }

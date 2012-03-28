@@ -7,7 +7,10 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/values.h"
+#include "content/public/browser/web_ui.h"
 #include "testing/gmock/include/gmock/gmock.h"
+
+using content::WebUIMessageHandler;
 
 ChromeSendWebUITest::ChromeSendWebUITest() {}
 
@@ -20,7 +23,7 @@ ChromeSendWebUITest::ChromeSendWebUIMessageHandler::
     ~ChromeSendWebUIMessageHandler() {}
 
 void ChromeSendWebUITest::ChromeSendWebUIMessageHandler::RegisterMessages() {
-  web_ui_->RegisterMessageCallback(
+  web_ui()->RegisterMessageCallback(
       "checkSend",
       base::Bind(&ChromeSendWebUIMessageHandler::HandleCheckSend,
                  base::Unretained(this)));

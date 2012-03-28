@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,12 +22,13 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/download/download_item.h"
 #include "content/browser/net/url_request_slow_download_job.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/download_item.h"
 #include "content/public/common/page_transition_types.h"
 
 using content::BrowserThread;
+using content::DownloadItem;
+using content::DownloadManager;
 
 class BrowserCloseTest : public InProcessBrowserTest {
  public:
@@ -171,7 +172,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
     new_browser->AddSelectedTabWithURL(GURL(chrome::kAboutBlankURL),
                                        content::PAGE_TRANSITION_START_PAGE);
     ui_test_utils::WaitForLoadStop(
-        new_browser->GetSelectedTabContents());
+        new_browser->GetSelectedWebContents());
     new_browser->window()->Show();
     return new_browser;
   }
@@ -318,12 +319,7 @@ class BrowserCloseTest : public InProcessBrowserTest {
 
 #if defined(OS_CHROMEOS)
     // Get rid of downloads panel on ChromeOS
-    Browser* panel = NULL;
-#if defined(TOUCH_UI)
-    ActiveDownloadsUI::GetPopup(&panel);
-#else
-    panel = ActiveDownloadsUI::GetPopup();
-#endif
+    Browser* panel = ActiveDownloadsUI::GetPopup();
     if (panel)
       panel->CloseWindow();
     ui_test_utils::RunAllPendingInMessageLoop();
@@ -520,7 +516,14 @@ IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_1) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_2) {
+// Timing out on XP debug. http://crbug.com/111914
+#if defined(OS_WIN)
+#define MAYBE_DownloadsCloseCheck_2 FLAKY_DownloadsCloseCheck_2
+#else
+#define MAYBE_DownloadsCloseCheck_2 DownloadsCloseCheck_2
+#endif
+
+IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_2) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());
   for (size_t i = 2 * arraysize(download_close_check_cases) / 6;
        i < 3 * arraysize(download_close_check_cases) / 6; ++i) {
@@ -544,7 +547,14 @@ IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_4) {
   }
 }
 
-IN_PROC_BROWSER_TEST_F(BrowserCloseTest, DownloadsCloseCheck_5) {
+// Timing out on XP debug. http://crbug.com/111914
+#if defined(OS_WIN)
+#define MAYBE_DownloadsCloseCheck_5 FLAKY_DownloadsCloseCheck_5
+#else
+#define MAYBE_DownloadsCloseCheck_5 DownloadsCloseCheck_5
+#endif
+
+IN_PROC_BROWSER_TEST_F(BrowserCloseTest, MAYBE_DownloadsCloseCheck_5) {
   ASSERT_TRUE(SetupForDownloadCloseCheck());
   for (size_t i = 5 * arraysize(download_close_check_cases) / 6;
        i < 6 * arraysize(download_close_check_cases) / 6; ++i) {

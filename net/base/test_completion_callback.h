@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #define NET_BASE_TEST_COMPLETION_CALLBACK_H_
 #pragma once
 
-#include "base/callback_old.h"
 #include "base/compiler_specific.h"
 #include "base/tuple.h"
 #include "net/base/completion_callback.h"
@@ -22,45 +21,39 @@
 // there could be other side-effects resulting from WaitForResult.  For this
 // reason, this class is probably not ideal for a general application.
 //
-class TestOldCompletionCallback : public CallbackRunner< Tuple1<int> > {
+
+// Base class overridden by custom implementations of TestCompletionCallback.
+class TestCompletionCallbackBase {
  public:
-  TestOldCompletionCallback();
-  virtual ~TestOldCompletionCallback();
-
+  void SetResult(int result);
   int WaitForResult();
-
   int GetResult(int result);
-
   bool have_result() const { return have_result_; }
 
-  virtual void RunWithParams(const Tuple1<int>& params) OVERRIDE;
+ protected:
+  TestCompletionCallbackBase();
 
- private:
   int result_;
   bool have_result_;
   bool waiting_for_result_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallbackBase);
 };
 
 namespace net {
 
-class TestCompletionCallback {
+class TestCompletionCallback : public TestCompletionCallbackBase {
  public:
   TestCompletionCallback();
   ~TestCompletionCallback();
 
-  int WaitForResult() { return old_callback_impl_.WaitForResult(); }
-
-  int GetResult(int result) { return old_callback_impl_.GetResult(result); }
-
-  bool have_result() const { return old_callback_impl_.have_result(); }
-
   const CompletionCallback& callback() const { return callback_; }
 
  private:
-  void OnComplete(int result);
-
   const CompletionCallback callback_;
-  TestOldCompletionCallback old_callback_impl_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestCompletionCallback);
 };
 
 }  // namespace net

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 
+#include "base/basictypes.h"
 #include "base/file_path.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -107,8 +108,6 @@ GdkFilterReturn SelectionChangeObserver::OnXEvent(GdkXEvent* xevent,
 const char kMimeTypeBitmap[] = "image/bmp";
 const char kMimeTypeMozillaURL[] = "text/x-moz-url";
 const char kMimeTypeWebkitSmartPaste[] = "chromium/x-webkit-paste";
-// TODO(dcheng): This name is temporary. See crbug.com/106449
-const char kMimeTypeWebCustomData[] = "chromium/x-web-custom-data";
 
 std::string GdkAtomToString(const GdkAtom& atom) {
   gchar* name = gdk_atom_name(atom);
@@ -130,7 +129,8 @@ void GetData(GtkClipboard* clipboard,
   Clipboard::TargetMap* data_map =
       reinterpret_cast<Clipboard::TargetMap*>(user_data);
 
-  std::string target_string = GdkAtomToString(selection_data->target);
+  std::string target_string = GdkAtomToString(
+      gtk_selection_data_get_target(selection_data));
   Clipboard::TargetMap::iterator iter = data_map->find(target_string);
 
   if (iter == data_map->end())
@@ -140,7 +140,8 @@ void GetData(GtkClipboard* clipboard,
     gtk_selection_data_set_pixbuf(selection_data,
         reinterpret_cast<GdkPixbuf*>(iter->second.first));
   } else {
-    gtk_selection_data_set(selection_data, selection_data->target, 8,
+    gtk_selection_data_set(selection_data,
+                           gtk_selection_data_get_target(selection_data), 8,
                            reinterpret_cast<guchar*>(iter->second.first),
                            iter->second.second);
   }
@@ -180,11 +181,37 @@ void GdkPixbufFree(guchar* pixels, gpointer data) {
 
 }  // namespace
 
+Clipboard::FormatType::FormatType() {
+}
+
+Clipboard::FormatType::FormatType(const std::string& format_string)
+    : data_(StringToGdkAtom(format_string)) {
+}
+
+Clipboard::FormatType::FormatType(const GdkAtom& native_format)
+    : data_(native_format) {
+}
+
+Clipboard::FormatType::~FormatType() {
+}
+
+std::string Clipboard::FormatType::Serialize() const {
+  return GdkAtomToString(data_);
+}
+
+// static
+Clipboard::FormatType Clipboard::FormatType::Deserialize(
+    const std::string& serialization) {
+  return FormatType(serialization);
+}
+
+bool Clipboard::FormatType::Equals(const FormatType& other) const {
+  return data_ == other.data_;
+}
+
 Clipboard::Clipboard() : clipboard_data_(NULL) {
-#if !defined(USE_AURA)
   clipboard_ = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
   primary_selection_ = gtk_clipboard_get(GDK_SELECTION_PRIMARY);
-#endif
 }
 
 Clipboard::~Clipboard() {
@@ -302,16 +329,17 @@ void Clipboard::WriteBookmark(const char* title_data, size_t title_len,
   InsertMapping(kMimeTypeMozillaURL, data, data_len);
 }
 
-void Clipboard::WriteData(const char* format_name, size_t format_len,
-                          const char* data_data, size_t data_len) {
-  std::string format(format_name, format_len);
+void Clipboard::WriteData(const FormatType& format,
+                          const char* data_data,
+                          size_t data_len) {
   // We assume that certain mapping types are only written by trusted code.
   // Therefore we must upkeep their integrity.
-  if (format == kMimeTypeBitmap)
+  if (format.Equals(GetBitmapFormatType()))
     return;
   char* data = new char[data_len];
   memcpy(data, data_data, data_len);
-  InsertMapping(format.c_str(), data, data_len);
+  // TODO(dcheng): Maybe this map should use GdkAtoms...
+  InsertMapping(GdkAtomToString(format.ToGdkAtom()).c_str(), data, data_len);
 }
 
 // We do not use gtk_clipboard_wait_is_target_available because of
@@ -323,58 +351,46 @@ bool Clipboard::IsFormatAvailable(const Clipboard::FormatType& format,
   if (clipboard == NULL)
     return false;
 
-  bool format_is_plain_text = GetPlainTextFormatType() == format;
+  bool retval = false;
+  GtkSelectionData* data = gtk_clipboard_wait_for_contents(
+      clipboard, gdk_atom_intern_static_string("TARGETS"));
+
+  bool format_is_plain_text = GetPlainTextFormatType().Equals(format);
   if (format_is_plain_text) {
     // This tries a number of common text targets.
-    if (gtk_clipboard_wait_is_text_available(clipboard))
-      return true;
-  }
-
-  bool retval = false;
-  GdkAtom* targets = NULL;
-  GtkSelectionData* data =
-      gtk_clipboard_wait_for_contents(clipboard,
-                                      gdk_atom_intern("TARGETS", false));
-
-  if (!data)
-    return false;
-
-  int num = 0;
-  gtk_selection_data_get_targets(data, &targets, &num);
-
-  // Some programs post data to the clipboard without any targets. If this is
-  // the case we attempt to make sense of the contents as text. This is pretty
-  // unfortunate since it means we have to actually copy the data to see if it
-  // is available, but at least this path shouldn't be hit for conforming
-  // programs.
-  if (num <= 0) {
-    if (format_is_plain_text) {
+    if (data) {
+      retval = gtk_selection_data_targets_include_text(data);
+    } else {
+      // Some programs post data to the clipboard without any targets. If this
+      // is the case we attempt to make sense of the contents as text. This is
+      // pretty unfortunate since it means we have to actually copy the data to
+      // see if it is available, but at least this path shouldn't be hit for
+      // conforming programs.
       gchar* text = gtk_clipboard_wait_for_text(clipboard);
       if (text) {
         g_free(text);
         retval = true;
       }
     }
-  }
+  } else if (data) {
+    GdkAtom* targets = NULL;
+    int num = 0;
+    gtk_selection_data_get_targets(data, &targets, &num);
 
-  GdkAtom format_atom = StringToGdkAtom(format);
-
-  for (int i = 0; i < num; i++) {
-    if (targets[i] == format_atom) {
-      retval = true;
-      break;
+    for (int i = 0; i < num; i++) {
+      if (targets[i] == format.ToGdkAtom()) {
+        retval = true;
+        break;
+      }
     }
+
+    g_free(targets);
   }
 
-  g_free(targets);
-  gtk_selection_data_free(data);
+  if (data)
+    gtk_selection_data_free(data);
 
   return retval;
-}
-
-bool Clipboard::IsFormatAvailableByString(const std::string& format,
-                                          Clipboard::Buffer buffer) const {
-  return IsFormatAvailable(format, buffer);
 }
 
 void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
@@ -399,10 +415,12 @@ void Clipboard::ReadAvailableTypes(Clipboard::Buffer buffer,
     return;
 
   GtkSelectionData* data = gtk_clipboard_wait_for_contents(
-      clipboard, StringToGdkAtom(GetWebCustomDataFormatType()));
+      clipboard, GetWebCustomDataFormatType().ToGdkAtom());
   if (!data)
     return;
-  ReadCustomDataTypes(data->data, data->length, types);
+  ReadCustomDataTypes(gtk_selection_data_get_data(data),
+                      gtk_selection_data_get_length(data),
+                      types);
   gtk_selection_data_free(data);
 }
 
@@ -458,19 +476,22 @@ void Clipboard::ReadHTML(Clipboard::Buffer buffer, string16* markup,
   if (clipboard == NULL)
     return;
   GtkSelectionData* data = gtk_clipboard_wait_for_contents(clipboard,
-      StringToGdkAtom(GetHtmlFormatType()));
+      GetHtmlFormatType().ToGdkAtom());
 
   if (!data)
     return;
 
   // If the data starts with 0xFEFF, i.e., Byte Order Mark, assume it is
   // UTF-16, otherwise assume UTF-8.
-  if (data->length >= 2 &&
-      reinterpret_cast<uint16_t*>(data->data)[0] == 0xFEFF) {
-    markup->assign(reinterpret_cast<uint16_t*>(data->data) + 1,
-                   (data->length / 2) - 1);
+  gint data_length = gtk_selection_data_get_length(data);
+  const guchar* raw_data = gtk_selection_data_get_data(data);
+
+  if (data_length >= 2 &&
+      reinterpret_cast<const uint16_t*>(raw_data)[0] == 0xFEFF) {
+    markup->assign(reinterpret_cast<const uint16_t*>(raw_data) + 1,
+                   (data_length / 2) - 1);
   } else {
-    UTF8ToUTF16(reinterpret_cast<char*>(data->data), data->length, markup);
+    UTF8ToUTF16(reinterpret_cast<const char*>(raw_data), data_length, markup);
   }
 
   // If there is a terminating NULL, drop it.
@@ -490,8 +511,8 @@ SkBitmap Clipboard::ReadImage(Buffer buffer) const {
   if (!pixbuf.get())
     return SkBitmap();
 
-  gfx::CanvasSkia canvas(gdk_pixbuf_get_width(pixbuf.get()),
-                         gdk_pixbuf_get_height(pixbuf.get()),
+  gfx::CanvasSkia canvas(gfx::Size(gdk_pixbuf_get_width(pixbuf.get()),
+                                   gdk_pixbuf_get_height(pixbuf.get())),
                          false);
   {
     skia::ScopedPlatformPaint scoped_platform_paint(canvas.sk_canvas());
@@ -510,10 +531,12 @@ void Clipboard::ReadCustomData(Buffer buffer,
     return;
 
   GtkSelectionData* data = gtk_clipboard_wait_for_contents(
-      clipboard, StringToGdkAtom(GetWebCustomDataFormatType()));
+      clipboard, GetWebCustomDataFormatType().ToGdkAtom());
   if (!data)
     return;
-  ReadCustomDataForType(data->data, data->length, type, result);
+  ReadCustomDataForType(gtk_selection_data_get_data(data),
+                        gtk_selection_data_get_length(data),
+                        type, result);
   gtk_selection_data_free(data);
 }
 
@@ -522,12 +545,14 @@ void Clipboard::ReadBookmark(string16* title, std::string* url) const {
   NOTIMPLEMENTED();
 }
 
-void Clipboard::ReadData(const std::string& format, std::string* result) const {
+void Clipboard::ReadData(const FormatType& format, std::string* result) const {
   GtkSelectionData* data =
-      gtk_clipboard_wait_for_contents(clipboard_, StringToGdkAtom(format));
+      gtk_clipboard_wait_for_contents(clipboard_, format.ToGdkAtom());
   if (!data)
     return;
-  result->assign(reinterpret_cast<char*>(data->data), data->length);
+  result->assign(reinterpret_cast<const char*>(
+                     gtk_selection_data_get_data(data)),
+                 gtk_selection_data_get_length(data));
   gtk_selection_data_free(data);
 }
 
@@ -538,34 +563,46 @@ uint64 Clipboard::GetSequenceNumber(Buffer buffer) {
     return SelectionChangeObserver::GetInstance()->primary_sequence_number();
 }
 
-// static
-Clipboard::FormatType Clipboard::GetPlainTextFormatType() {
-  return GdkAtomToString(GDK_TARGET_STRING);
+//static
+Clipboard::FormatType Clipboard::GetFormatType(
+    const std::string& format_string) {
+  return FormatType::Deserialize(format_string);
 }
 
 // static
-Clipboard::FormatType Clipboard::GetPlainTextWFormatType() {
+const Clipboard::FormatType& Clipboard::GetPlainTextFormatType() {
+  CR_DEFINE_STATIC_LOCAL(
+      FormatType, type, (GDK_TARGET_STRING));
+  return type;
+}
+
+// static
+const Clipboard::FormatType& Clipboard::GetPlainTextWFormatType() {
   return GetPlainTextFormatType();
 }
 
 // static
-Clipboard::FormatType Clipboard::GetHtmlFormatType() {
-  return std::string(kMimeTypeHTML);
+const Clipboard::FormatType& Clipboard::GetHtmlFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypeHTML));
+  return type;
 }
 
 // static
-Clipboard::FormatType Clipboard::GetBitmapFormatType() {
-  return std::string(kMimeTypeBitmap);
+const Clipboard::FormatType& Clipboard::GetBitmapFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypeBitmap));
+  return type;
 }
 
 // static
-Clipboard::FormatType Clipboard::GetWebKitSmartPasteFormatType() {
-  return std::string(kMimeTypeWebkitSmartPaste);
+const Clipboard::FormatType& Clipboard::GetWebKitSmartPasteFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypeWebkitSmartPaste));
+  return type;
 }
 
 // static
-Clipboard::FormatType Clipboard::GetWebCustomDataFormatType() {
-  return std::string(kMimeTypeWebCustomData);
+const Clipboard::FormatType& Clipboard::GetWebCustomDataFormatType() {
+  CR_DEFINE_STATIC_LOCAL(FormatType, type, (kMimeTypeWebCustomData));
+  return type;
 }
 
 void Clipboard::InsertMapping(const char* key,

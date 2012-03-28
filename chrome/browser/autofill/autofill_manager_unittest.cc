@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -39,13 +39,13 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/rect.h"
-#include "webkit/glue/form_data.h"
-#include "webkit/glue/form_field.h"
+#include "webkit/forms/form_data.h"
+#include "webkit/forms/form_field.h"
 
 using content::BrowserThread;
 using testing::_;
-using webkit_glue::FormData;
-using webkit_glue::FormField;
+using webkit::forms::FormData;
+using webkit::forms::FormField;
 
 namespace {
 
@@ -269,7 +269,7 @@ void ExpectFilledField(const char* expected_label,
                        const char* expected_name,
                        const char* expected_value,
                        const char* expected_form_control_type,
-                       const webkit_glue::FormField& field) {
+                       const webkit::forms::FormField& field) {
   SCOPED_TRACE(expected_label);
   EXPECT_EQ(UTF8ToUTF16(expected_label), field.label);
   EXPECT_EQ(UTF8ToUTF16(expected_name), field.name);
@@ -566,8 +566,8 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   }
 
   void GetAutofillSuggestions(int query_id,
-                              const webkit_glue::FormData& form,
-                              const webkit_glue::FormField& field) {
+                              const webkit::forms::FormData& form,
+                              const webkit::forms::FormField& field) {
     autofill_manager_->OnQueryFormFieldAutofill(query_id,
                                                 form,
                                                 field,
@@ -575,8 +575,8 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
                                                 false);
   }
 
-  void GetAutofillSuggestions(const webkit_glue::FormData& form,
-                              const webkit_glue::FormField& field) {
+  void GetAutofillSuggestions(const webkit::forms::FormData& form,
+                              const webkit::forms::FormField& field) {
     GetAutofillSuggestions(kDefaultPageID, form, field);
   }
 
@@ -585,7 +585,7 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
         SendSuggestions(&result);
   }
 
-  void FormsSeen(const std::vector<webkit_glue::FormData>& forms) {
+  void FormsSeen(const std::vector<webkit::forms::FormData>& forms) {
     autofill_manager_->OnFormsSeen(forms, base::TimeTicks());
   }
 
@@ -595,8 +595,8 @@ class AutofillManagerTest : public TabContentsWrapperTestHarness {
   }
 
   void FillAutofillFormData(int query_id,
-                            const webkit_glue::FormData& form,
-                            const webkit_glue::FormField& field,
+                            const webkit::forms::FormData& form,
+                            const webkit::forms::FormField& field,
                             int unique_id) {
     autofill_manager_->OnFillAutofillFormData(query_id, form, field, unique_id);
   }
@@ -2864,13 +2864,14 @@ namespace {
 
 class MockAutofillExternalDelegate : public AutofillExternalDelegate {
  public:
-  explicit MockAutofillExternalDelegate(TabContentsWrapper* wrapper)
-      : AutofillExternalDelegate(wrapper) {}
+  explicit MockAutofillExternalDelegate(TabContentsWrapper* wrapper,
+                                        AutofillManager* autofill_manager)
+      : AutofillExternalDelegate(wrapper, autofill_manager) {}
   virtual ~MockAutofillExternalDelegate() {}
 
   MOCK_METHOD5(OnQuery, void(int query_id,
-                             const webkit_glue::FormData& form,
-                             const webkit_glue::FormField& field,
+                             const webkit::forms::FormData& form,
+                             const webkit::forms::FormField& field,
                              const gfx::Rect& bounds,
                              bool display_warning));
 
@@ -2883,10 +2884,10 @@ class MockAutofillExternalDelegate : public AutofillExternalDelegate {
       const std::vector<int>& autofill_unique_ids,
       int separator_index) OVERRIDE {}
 
-  virtual void OnQueryPlatformSpecific(
-      int query_id,
-      const webkit_glue::FormData& form,
-      const webkit_glue::FormField& field) OVERRIDE {}
+  virtual void OnQueryPlatformSpecific(int query_id,
+                                       const webkit::forms::FormData& form,
+                                       const webkit::forms::FormField& field,
+                                       const gfx::Rect& bounds) OVERRIDE {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAutofillExternalDelegate);
@@ -2896,7 +2897,8 @@ class MockAutofillExternalDelegate : public AutofillExternalDelegate {
 
 // Test our external delegate is called at the right time.
 TEST_F(AutofillManagerTest, TestExternalDelegate) {
-  MockAutofillExternalDelegate external_delegate(contents_wrapper());
+  MockAutofillExternalDelegate external_delegate(contents_wrapper(),
+                                                 autofill_manager_);
   EXPECT_CALL(external_delegate, OnQuery(_, _, _, _, _));
   autofill_manager_->SetExternalDelegate(&external_delegate);
 
@@ -2910,8 +2912,8 @@ TEST_F(AutofillManagerTest, TestExternalDelegate) {
   autofill_manager_->SetExternalDelegate(NULL);
 }
 
-#if defined(OS_ANDROID)
-// Only OS_ANDROID defines an external delegate, but prerequisites for
+#if defined(OS_ANDROID) || defined(TOOLKIT_GTK)
+// OS_ANDROID defines an external delegate, but prerequisites for
 // landing autofill_external_delegate_android.cc in the Chromium tree
 // have not themselves landed.
 

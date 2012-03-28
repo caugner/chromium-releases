@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,21 +9,20 @@
 
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
-#include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_var.h"
 #include "ppapi/shared_impl/ppapi_shared_export.h"
 
 namespace ppapi {
 
+class ArrayBufferVar;
 class NPObjectVar;
 class ProxyObjectVar;
 class StringVar;
+class VarTracker;
 
 // Var -------------------------------------------------------------------------
 
-// Represents a non-POD var. This is derived from a resource even though it
-// isn't a resource from the plugin's perspective. This allows us to re-use
-// the refcounting and the association with the module from the resource code.
+// Represents a non-POD var.
 class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
  public:
   virtual ~Var();
@@ -32,12 +31,13 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
   static std::string PPVarToLogString(PP_Var var);
 
   virtual StringVar* AsStringVar();
+  virtual ArrayBufferVar* AsArrayBufferVar();
   virtual NPObjectVar* AsNPObjectVar();
   virtual ProxyObjectVar* AsProxyObjectVar();
 
   // Creates a PP_Var corresponding to this object. The return value will have
   // one reference addrefed on behalf of the caller.
-  virtual PP_Var GetPPVar() = 0;
+  PP_Var GetPPVar();
 
   // Returns the type of this var.
   virtual PP_VarType GetType() const = 0;
@@ -50,11 +50,10 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
   // the plugin.
   int32 GetExistingVarID() const;
 
-  PP_Module pp_module() const { return pp_module_; }
-
  protected:
-  // This can only be constructed as a StringVar or an ObjectVar.
-  explicit Var(PP_Module module);
+  friend class VarTracker;
+
+  Var();
 
   // Returns the unique ID associated with this string or object, creating it
   // if necessary. The return value will be 0 if the string or object is
@@ -68,9 +67,10 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
   // before. This is used in cases where the ID is generated externally.
   void AssignVarID(int32 id);
 
- private:
-  PP_Module pp_module_;
+  // Reset the assigned object ID.
+  void ResetVarID() { var_id_ = 0; }
 
+ private:
   // This will be 0 if no ID has been assigned (this happens lazily).
   int32 var_id_;
 
@@ -82,7 +82,7 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
 // Represents a string-based Var.
 //
 // Returning a given string as a PP_Var:
-//   return StringVar::StringToPPVar(module, my_string);
+//   return StringVar::StringToPPVar(my_string);
 //
 // Converting a PP_Var to a string:
 //   StringVar* string = StringVar::FromPPVar(var);
@@ -91,15 +91,14 @@ class PPAPI_SHARED_EXPORT Var : public base::RefCounted<Var> {
 //   DoSomethingWithTheString(string->value());
 class PPAPI_SHARED_EXPORT StringVar : public Var {
  public:
-  StringVar(PP_Module module, const std::string& str);
-  StringVar(PP_Module module, const char* str, uint32 len);
+  StringVar(const std::string& str);
+  StringVar(const char* str, uint32 len);
   virtual ~StringVar();
 
   const std::string& value() const { return value_; }
 
   // Var override.
   virtual StringVar* AsStringVar() OVERRIDE;
-  virtual PP_Var GetPPVar() OVERRIDE;
   virtual PP_VarType GetType() const OVERRIDE;
 
   // Helper function to create a PP_Var of type string that contains a copy of
@@ -107,10 +106,9 @@ class PPAPI_SHARED_EXPORT StringVar : public Var {
   // is not valid UTF-8, a NULL var will be returned.
   //
   // The return value will have a reference count of 1. Internally, this will
-  // create a StringVar, associate it with a module, and return the reference
-  // to it in the var.
-  static PP_Var StringToPPVar(PP_Module module, const std::string& str);
-  static PP_Var StringToPPVar(PP_Module module, const char* str, uint32 len);
+  // create a StringVar and return the reference to it in the var.
+  static PP_Var StringToPPVar(const std::string& str);
+  static PP_Var StringToPPVar(const char* str, uint32 len);
 
   // Helper function that converts a PP_Var to a string. This will return NULL
   // if the PP_Var is not of string type or the string is invalid.
@@ -120,6 +118,41 @@ class PPAPI_SHARED_EXPORT StringVar : public Var {
   std::string value_;
 
   DISALLOW_COPY_AND_ASSIGN(StringVar);
+};
+
+// ArrayBufferVar --------------------------------------------------------------
+
+// Represents an array buffer Var.
+//
+// Note this is an abstract class. To create an appropriate concrete one, you
+// need to use the VarTracker:
+//   VarArrayBuffer* buf =
+//       PpapiGlobals::Get()->GetVarTracker()->CreateArrayBuffer(size);
+//
+// Converting a PP_Var to an ArrayBufferVar:
+//   ArrayBufferVar* array = ArrayBufferVar::FromPPVar(var);
+//   if (!array)
+//     return false;  // Not an ArrayBuffer or an invalid var.
+//   DoSomethingWithTheBuffer(array);
+class PPAPI_SHARED_EXPORT ArrayBufferVar : public Var {
+ public:
+  ArrayBufferVar();
+  virtual ~ArrayBufferVar();
+
+  virtual void* Map() = 0;
+  virtual void Unmap() = 0;
+  virtual uint32 ByteLength() = 0;
+
+  // Var override.
+  virtual ArrayBufferVar* AsArrayBufferVar() OVERRIDE;
+  virtual PP_VarType GetType() const OVERRIDE;
+
+  // Helper function that converts a PP_Var to an ArrayBufferVar. This will
+  // return NULL if the PP_Var is not of ArrayBuffer type.
+  static ArrayBufferVar* FromPPVar(PP_Var var);
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ArrayBufferVar);
 };
 
 }  // namespace ppapi

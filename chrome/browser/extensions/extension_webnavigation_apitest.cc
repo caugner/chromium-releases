@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,22 +9,25 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/tab_contents/render_view_context_menu.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_list.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/web_contents.h"
 #include "net/base/mock_host_resolver.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
 #include "webkit/glue/context_menu.h"
 
+using content::WebContents;
+
 namespace {
 
 class TestRenderViewContextMenu : public RenderViewContextMenu {
  public:
-  TestRenderViewContextMenu(TabContents* tab_contents,
+  TestRenderViewContextMenu(WebContents* web_contents,
                             const ContextMenuParams& params)
-      : RenderViewContextMenu(tab_contents, params) {
+      : RenderViewContextMenu(web_contents, params) {
   }
   virtual ~TestRenderViewContextMenu() {}
 
@@ -42,6 +45,9 @@ class TestRenderViewContextMenu : public RenderViewContextMenu {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigation) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_api.html")) << message_;
 }
@@ -49,12 +55,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigation) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationGetFrame) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_getFrame.html")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationClientRedirect) {
   FrameNavigationState::set_allow_extension_scheme(true);
+
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
 
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_clientRedirect.html"))
@@ -66,6 +78,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationServerRedirect) {
   host_resolver()->AddRule("*", "127.0.0.1");
   ASSERT_TRUE(StartTestServer());
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_serverRedirect.html"))
           << message_;
@@ -73,6 +88,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationServerRedirect) {
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationForwardBack) {
   FrameNavigationState::set_allow_extension_scheme(true);
+
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
 
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_forwardBack.html"))
@@ -82,6 +100,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationForwardBack) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationIFrame) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_iframe.html")) << message_;
 }
@@ -89,12 +110,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationIFrame) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationOpenTab) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_openTab.html")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationReferenceFragment) {
   FrameNavigationState::set_allow_extension_scheme(true);
+
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
 
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_referenceFragment.html"))
@@ -104,12 +131,18 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationReferenceFragment) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationSimpleLoad) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_simpleLoad.html")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationFailures) {
   FrameNavigationState::set_allow_extension_scheme(true);
+
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
 
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_failures.html")) << message_;
@@ -118,11 +151,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationFailures) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationUserAction) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(
       RunExtensionSubtest("webnavigation", "test_userAction.html")) << message_;
 
-  TabContents* tab = browser()->GetSelectedTabContents();
+  WebContents* tab = browser()->GetSelectedWebContents();
   ui_test_utils::WaitForLoadStop(tab);
 
   ResultCatcher catcher;
@@ -154,11 +190,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationUserAction) {
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationRequestOpenTab) {
   FrameNavigationState::set_allow_extension_scheme(true);
 
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
   // Wait for the extension to set itself up and return control to us.
   ASSERT_TRUE(RunExtensionSubtest("webnavigation", "test_requestOpenTab.html"))
       << message_;
 
-  TabContents* tab = browser()->GetSelectedTabContents();
+  WebContents* tab = browser()->GetSelectedWebContents();
   ui_test_utils::WaitForLoadStop(tab);
 
   ResultCatcher catcher;
@@ -177,9 +216,82 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationRequestOpenTab) {
   mouse_event.x = 7;
   mouse_event.y = 7;
   mouse_event.clickCount = 1;
-  tab->render_view_host()->ForwardMouseEvent(mouse_event);
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
   mouse_event.type = WebKit::WebInputEvent::MouseUp;
-  tab->render_view_host()->ForwardMouseEvent(mouse_event);
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationTargetBlank) {
+  FrameNavigationState::set_allow_extension_scheme(true);
+  ASSERT_TRUE(StartTestServer());
+
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
+  // Wait for the extension to set itself up and return control to us.
+  ASSERT_TRUE(RunExtensionSubtest("webnavigation", "test_targetBlank.html"))
+      << message_;
+
+  WebContents* tab = browser()->GetSelectedWebContents();
+  ui_test_utils::WaitForLoadStop(tab);
+
+  ResultCatcher catcher;
+
+  GURL url = test_server()->GetURL(
+      "files/extensions/api_test/webnavigation/targetBlank/a.html");
+
+  browser::NavigateParams params(browser(), url, content::PAGE_TRANSITION_LINK);
+  ui_test_utils::NavigateToURL(&params);
+
+  // There's a link with target=_blank on a.html. Click on it to open it in a
+  // new tab.
+  WebKit::WebMouseEvent mouse_event;
+  mouse_event.type = WebKit::WebInputEvent::MouseDown;
+  mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  mouse_event.x = 7;
+  mouse_event.y = 7;
+  mouse_event.clickCount = 1;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+  mouse_event.type = WebKit::WebInputEvent::MouseUp;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, WebNavigationTargetBlankIncognito) {
+  FrameNavigationState::set_allow_extension_scheme(true);
+  ASSERT_TRUE(StartTestServer());
+
+  CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kAllowLegacyExtensionManifests);
+
+  // Wait for the extension to set itself up and return control to us.
+  ASSERT_TRUE(RunExtensionSubtestIncognito(
+      "webnavigation", "test_targetBlank.html")) << message_;
+
+  ResultCatcher catcher;
+
+  GURL url = test_server()->GetURL(
+      "files/extensions/api_test/webnavigation/targetBlank/a.html");
+
+  ui_test_utils::OpenURLOffTheRecord(browser()->profile(), url);
+  WebContents* tab = BrowserList::FindTabbedBrowser(
+      browser()->profile()->GetOffTheRecordProfile(), false)->
+          GetSelectedWebContents();
+
+  // There's a link with target=_blank on a.html. Click on it to open it in a
+  // new tab.
+  WebKit::WebMouseEvent mouse_event;
+  mouse_event.type = WebKit::WebInputEvent::MouseDown;
+  mouse_event.button = WebKit::WebMouseEvent::ButtonLeft;
+  mouse_event.x = 7;
+  mouse_event.y = 7;
+  mouse_event.clickCount = 1;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
+  mouse_event.type = WebKit::WebInputEvent::MouseUp;
+  tab->GetRenderViewHost()->ForwardMouseEvent(mouse_event);
 
   ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }

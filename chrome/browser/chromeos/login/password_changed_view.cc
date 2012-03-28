@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,16 +54,12 @@ int PasswordChangedView::GetDialogButtons() const {
 }
 
 views::View* PasswordChangedView::GetInitiallyFocusedView() {
-  if (!full_sync_disabled_) {
-    return views::DialogDelegate::GetInitiallyFocusedView();
-  } else {
-    DCHECK(old_password_field_);
-    return old_password_field_;
-  }
+  DCHECK(old_password_field_);
+  return old_password_field_;
 }
 
-bool PasswordChangedView::IsModal() const {
-  return true;
+ui::ModalType PasswordChangedView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 views::View* PasswordChangedView::GetContentsView() {
@@ -118,7 +114,7 @@ void PasswordChangedView::Init() {
   delta_sync_radio_->set_listener(this);
   delta_sync_radio_->SetMultiLine(true);
 
-  old_password_field_ = new TextfieldWithMargin(Textfield::STYLE_PASSWORD);
+  old_password_field_ = new TextfieldWithMargin(Textfield::STYLE_OBSCURED);
   old_password_field_->set_text_to_display_when_empty(
       l10n_util::GetStringUTF16(IDS_LOGIN_PREVIOUS_PASSWORD));
   old_password_field_->set_default_width_in_chars(kPasswordFieldWidthChars);
@@ -146,10 +142,6 @@ void PasswordChangedView::Init() {
   layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
   layout->StartRow(0, 0);
-  layout->AddView(full_sync_radio_);
-  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
-
-  layout->StartRow(0, 0);
   layout->AddView(delta_sync_radio_);
   layout->AddPaddingRow(0, views::kRelatedControlSmallVerticalSpacing);
 
@@ -159,17 +151,13 @@ void PasswordChangedView::Init() {
   layout->AddPaddingRow(0, views::kUnrelatedControlVerticalSpacing);
 
   layout->StartRow(0, 0);
-  layout->AddView(old_password_field_);
+  layout->AddView(full_sync_radio_);
+  layout->AddPaddingRow(0, views::kRelatedControlVerticalSpacing);
 
+  delta_sync_radio_->SetChecked(true);
   // Disable options if needed.
-  if (!full_sync_disabled_) {
-    full_sync_radio_->SetChecked(true);
-    old_password_field_->SetEnabled(false);
-  } else {
+  if (full_sync_disabled_)
     full_sync_radio_->SetEnabled(false);
-    delta_sync_radio_->SetChecked(true);
-    old_password_field_->SetEnabled(true);
-  }
 }
 
 bool PasswordChangedView::ExitDialog() {

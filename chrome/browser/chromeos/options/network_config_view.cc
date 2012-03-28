@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,8 +100,8 @@ views::View* NetworkConfigView::GetExtraView() {
   return advanced_button_container_;
 }
 
-bool NetworkConfigView::IsModal() const {
-  return true;
+ui::ModalType NetworkConfigView::GetModalType() const {
+  return ui::MODAL_TYPE_SYSTEM;
 }
 
 views::View* NetworkConfigView::GetContentsView() {
@@ -217,14 +217,8 @@ void ControlledSettingIndicatorView::Update(
 }
 
 gfx::Size ControlledSettingIndicatorView::GetPreferredSize() {
-  if (!IsVisible())
-    return gfx::Size();
-
-  return image_view_->GetPreferredSize();
-}
-
-bool ControlledSettingIndicatorView::IsVisible() const {
-  return managed_ && views::View::IsVisible();
+  return (managed_ && visible()) ? image_view_->GetPreferredSize()
+                                 : gfx::Size();
 }
 
 void ControlledSettingIndicatorView::Layout() {

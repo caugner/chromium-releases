@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history_types.h"
-#include "content/browser/cancelable_request.h"
-#include "content/browser/webui/web_ui.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/web_ui_message_handler.h"
 
 class GURL;
 class PageUsageData;
@@ -30,7 +30,7 @@ class Value;
 // - The URL blacklist: URLs we do not want to show in the thumbnails list.  It
 //   is a dictionary for quick access (it associates a dummy boolean to the URL
 //   string).
-class MostVisitedHandler : public WebUIMessageHandler,
+class MostVisitedHandler : public content::WebUIMessageHandler,
                            public content::NotificationObserver {
  public:
 
@@ -38,7 +38,6 @@ class MostVisitedHandler : public WebUIMessageHandler,
   virtual ~MostVisitedHandler();
 
   // WebUIMessageHandler override and implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // Callback for the "getMostVisited" message.

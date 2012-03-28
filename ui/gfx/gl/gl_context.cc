@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,10 +17,8 @@
 namespace gfx {
 
 namespace {
-base::LazyInstance<
-    base::ThreadLocalPointer<GLContext>,
-    base::LeakyLazyInstanceTraits<base::ThreadLocalPointer<GLContext> > >
-        current_context_ = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::ThreadLocalPointer<GLContext> >::Leaky
+    current_context_ = LAZY_INSTANCE_INITIALIZER;
 }  // namespace
 
 GLContext::GLContext(GLShareGroup* share_group) : share_group_(share_group) {
@@ -76,6 +74,7 @@ bool GLContext::LosesAllContextsOnContextLost() {
     case kGLImplementationEGLGLES2:
       return true;
     case kGLImplementationOSMesaGL:
+    case kGLImplementationAppleGL:
       return false;
     case kGLImplementationMockGL:
       return false;

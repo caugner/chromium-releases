@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -15,6 +15,7 @@
 #include "base/i18n/rtl.h"
 #include "base/i18n/time_formatting.h"
 #include "base/lazy_instance.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/string16.h"
 #include "base/string_number_conversions.h"
@@ -33,14 +34,12 @@
 #include "chrome/common/time_format.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
-#include "content/browser/download/download_state_info.h"
 #include "content/browser/download/download_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/renderer_host/resource_dispatcher_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
+#include "content/public/common/url_constants.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "grit/theme_resources.h"
@@ -83,19 +82,22 @@
 // the same value on all platforms.
 static const double PI = 3.141592653589793;
 
+using content::DownloadFile;
+using content::DownloadItem;
+
 namespace {
 
 // Returns a string constant to be used as the |danger_type| value in
 // CreateDownloadItemValue().  We only return strings for DANGEROUS_FILE,
 // DANGEROUS_URL and DANGEROUS_CONTENT because the |danger_type| value is only
 // defined if the value of |state| is |DANGEROUS|.
-const char* GetDangerTypeString(DownloadStateInfo::DangerType danger_type) {
+const char* GetDangerTypeString(content::DownloadDangerType danger_type) {
   switch (danger_type) {
-    case DownloadStateInfo::DANGEROUS_FILE:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE:
       return "DANGEROUS_FILE";
-    case DownloadStateInfo::DANGEROUS_URL:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL:
       return "DANGEROUS_URL";
-    case DownloadStateInfo::DANGEROUS_CONTENT:
+    case content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT:
       return "DANGEROUS_CONTENT";
     default:
       // We shouldn't be returning a danger type string if it is
@@ -385,7 +387,7 @@ void DragDownload(const DownloadItem* download,
   if (mime_type.empty())
     net::GetMimeTypeFromFile(full_path, &mime_type);
 
-  // Add URL so that we can load supported files when dragged to TabContents.
+  // Add URL so that we can load supported files when dragged to WebContents.
   if (net::IsSupportedMimeType(mime_type)) {
     data.SetURL(net::FilePathToFileURL(full_path),
                 download->GetFileNameToReportUser().LossyDisplayName());
@@ -454,9 +456,12 @@ DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id) {
       file_value->SetString("state", "DANGEROUS");
       // These are the only danger states we expect to see (and the UI is
       // equipped to handle):
-      DCHECK(download->GetDangerType() == DownloadStateInfo::DANGEROUS_FILE ||
-             download->GetDangerType() == DownloadStateInfo::DANGEROUS_URL ||
-             download->GetDangerType() == DownloadStateInfo::DANGEROUS_CONTENT);
+      DCHECK(download->GetDangerType() ==
+                 content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE ||
+             download->GetDangerType() ==
+                 content::DOWNLOAD_DANGER_TYPE_DANGEROUS_URL ||
+             download->GetDangerType() ==
+                 content::DOWNLOAD_DANGER_TYPE_DANGEROUS_CONTENT);
       const char* danger_type_value =
           GetDangerTypeString(download->GetDangerType());
       file_value->SetString("danger_type", danger_type_value);
@@ -595,6 +600,39 @@ int GetUniquePathNumberWithCrDownload(const FilePath& path) {
 FilePath GetCrDownloadPath(const FilePath& suggested_path) {
   return DownloadFile::AppendSuffixToPath(
       suggested_path, FILE_PATH_LITERAL(".crdownload"));
+}
+
+bool IsSavableURL(const GURL& url) {
+  for (int i = 0; chrome::GetSavableSchemes()[i] != NULL; ++i) {
+    if (url.SchemeIs(chrome::GetSavableSchemes()[i])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void RecordShelfClose(int size, int in_progress, bool autoclose) {
+  static const int kMaxShelfSize = 16;
+  if (autoclose) {
+    UMA_HISTOGRAM_ENUMERATION("Download.ShelfSizeOnAutoClose",
+                              size,
+                              kMaxShelfSize);
+    UMA_HISTOGRAM_ENUMERATION("Download.ShelfInProgressSizeOnAutoClose",
+                              in_progress,
+                              kMaxShelfSize);
+  } else {
+    UMA_HISTOGRAM_ENUMERATION("Download.ShelfSizeOnUserClose",
+                              size,
+                              kMaxShelfSize);
+    UMA_HISTOGRAM_ENUMERATION("Download.ShelfInProgressSizeOnUserClose",
+                              in_progress,
+                              kMaxShelfSize);
+  }
+}
+
+void RecordDownloadCount(ChromeDownloadCountTypes type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "Download.CountsChrome", type, DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
 }
 
 }  // namespace download_util

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -29,10 +29,10 @@ bool InMemoryDatabase::InitDB() {
   }
 
   // No reason to leave data behind in memory when rows are removed.
-  db_.Execute("PRAGMA auto_vacuum=1");
+  ignore_result(db_.Execute("PRAGMA auto_vacuum=1"));
 
   // Ensure this is really an in-memory-only cache.
-  db_.Execute("PRAGMA temp_store=MEMORY");
+  ignore_result(db_.Execute("PRAGMA temp_store=MEMORY"));
 
   // Create the URL table, but leave it empty for now.
   if (!CreateURLTable(false)) {
@@ -69,19 +69,13 @@ bool InMemoryDatabase::InitFromDisk(const FilePath& history_name) {
   // Attach to the history database on disk.  (We can't ATTACH in the middle of
   // a transaction.)
   sql::Statement attach(GetDB().GetUniqueStatement("ATTACH ? AS history"));
-  if (!attach) {
-    NOTREACHED() << "Unable to attach to history database.";
-    return false;
-  }
 #if defined(OS_POSIX)
   attach.BindString(0, history_name.value());
 #else
   attach.BindString(0, WideToUTF8(history_name.value()));
 #endif
-  if (!attach.Run()) {
-    NOTREACHED() << GetDB().GetErrorMessage();
+  if (!attach.Run())
     return false;
-  }
 
   // Copy URL data to memory.
   base::TimeTicks begin_load = base::TimeTicks::Now();
@@ -100,7 +94,7 @@ bool InMemoryDatabase::InitFromDisk(const FilePath& history_name) {
     // an average of only 35 rows).
     sql::Statement visit_count(db_.GetUniqueStatement(
         "SELECT sum(visit_count) FROM urls"));
-    if (visit_count && visit_count.Step()) {
+    if (visit_count.Step()) {
       UMA_HISTOGRAM_COUNTS("History.InMemoryTypedUrlVisitCount",
                            visit_count.ColumnInt(0));
     }

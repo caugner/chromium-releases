@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -170,6 +170,27 @@ var util = {
     reader.readEntries(onReadSome, onError);
   },
 
+  readDirectory: function(root, path, callback) {
+    function onError(e) {
+      callback([], e);
+    }
+    root.getDirectory(path, {create: false}, function(entry) {
+      var reader = entry.createReader();
+      var r = [];
+      function readNext() {
+        reader.readEntries(function(results) {
+          if (results.length == 0) {
+            callback(r, null);
+            return;
+          }
+          r.push.apply(r, results);
+          readNext();
+        }, onError);
+      }
+      readNext();
+    }, onError);
+  },
+
   /**
    * Utility function to resolve multiple directories with a single call.
    *
@@ -324,7 +345,7 @@ var util = {
       var rounded = Math.round(bytes / s * 10) / 10;
       // TODO(rginda): Switch to v8Locale's number formatter when it's
       // available.
-      return rounded.toLocaleString() + u;
+      return rounded.toLocaleString() + ' ' + u;
     }
 
     // This loop index is used outside the loop if it turns out |bytes|

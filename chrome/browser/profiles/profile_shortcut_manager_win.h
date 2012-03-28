@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,22 +18,22 @@ class ProfileShortcutManagerWin : public ProfileInfoCacheObserver {
   ProfileShortcutManagerWin();
   virtual ~ProfileShortcutManagerWin();
 
+  // Create a profile shortcut for the profile with path |profile_path|, plus
+  // update the original profile shortcut if |profile_path| is the second
+  // profile created.
+  virtual void AddProfileShortcut(const FilePath& profile_path);
+
   // ProfileInfoCacheObserver:
-  virtual void OnProfileAdded(
-      const string16& profile_name,
-      const string16& profile_base_dir,
+  virtual void OnProfileAdded(const FilePath& profile_path) OVERRIDE;
+  virtual void OnProfileWillBeRemoved(
+      const FilePath& profile_path) OVERRIDE;
+  virtual void OnProfileWasRemoved(
       const FilePath& profile_path,
-      const gfx::Image* avatar_image) OVERRIDE;
-  virtual void OnProfileRemoved(
       const string16& profile_name) OVERRIDE;
   virtual void OnProfileNameChanged(
-      const string16& old_profile_name,
-      const string16& new_profile_name) OVERRIDE;
-  virtual void OnProfileAvatarChanged(
-      const string16& profile_name,
-      const string16& profile_base_dir,
       const FilePath& profile_path,
-      const gfx::Image* avatar_image) OVERRIDE;
+      const string16& old_profile_name) OVERRIDE;
+  virtual void OnProfileAvatarChanged(const FilePath& profile_path) OVERRIDE;
 
   // Takes a vector of profile names (for example: "Sparky") and generates a
   // vector of shortcut link names (for example: "Chromium (Sparky).lnk").

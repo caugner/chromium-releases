@@ -11,18 +11,26 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/icon_messages.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/webui/web_ui.h"
+#include "content/public/browser/favicon_status.h"
+#include "content/public/browser/invalidate_type.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_ui.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image.h"
 
-FaviconTabHelper::FaviconTabHelper(TabContents* tab_contents)
-    : TabContentsObserver(tab_contents),
-      profile_(Profile::FromBrowserContext(tab_contents->browser_context())) {
+using content::FaviconStatus;
+using content::NavigationController;
+using content::NavigationEntry;
+using content::WebContents;
+
+FaviconTabHelper::FaviconTabHelper(WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
+      profile_(Profile::FromBrowserContext(web_contents->GetBrowserContext())) {
   favicon_handler_.reset(new FaviconHandler(profile_, this,
                                             FaviconHandler::FAVICON));
   if (chrome::kEnableTouchIcon)
@@ -42,45 +50,45 @@ void FaviconTabHelper::FetchFavicon(const GURL& url) {
 SkBitmap FaviconTabHelper::GetFavicon() const {
   // Like GetTitle(), we also want to use the favicon for the last committed
   // entry rather than a pending navigation entry.
-  const NavigationController& controller = tab_contents()->controller();
+  const NavigationController& controller = web_contents()->GetController();
   NavigationEntry* entry = controller.GetTransientEntry();
   if (entry)
-    return entry->favicon().bitmap();
+    return entry->GetFavicon().bitmap;
 
   entry = controller.GetLastCommittedEntry();
   if (entry)
-    return entry->favicon().bitmap();
+    return entry->GetFavicon().bitmap;
   return SkBitmap();
 }
 
 bool FaviconTabHelper::FaviconIsValid() const {
-  const NavigationController& controller = tab_contents()->controller();
+  const NavigationController& controller = web_contents()->GetController();
   NavigationEntry* entry = controller.GetTransientEntry();
   if (entry)
-    return entry->favicon().is_valid();
+    return entry->GetFavicon().valid;
 
   entry = controller.GetLastCommittedEntry();
   if (entry)
-    return entry->favicon().is_valid();
+    return entry->GetFavicon().valid;
 
   return false;
 }
 
 bool FaviconTabHelper::ShouldDisplayFavicon() {
   // Always display a throbber during pending loads.
-  const NavigationController& controller = tab_contents()->controller();
-  if (controller.GetLastCommittedEntry() && controller.pending_entry())
+  const NavigationController& controller = web_contents()->GetController();
+  if (controller.GetLastCommittedEntry() && controller.GetPendingEntry())
     return true;
 
-  WebUI* web_ui = tab_contents()->GetWebUIForCurrentState();
+  content::WebUI* web_ui = web_contents()->GetWebUIForCurrentState();
   if (web_ui)
-    return !web_ui->hide_favicon();
+    return !web_ui->ShouldHideFavicon();
   return true;
 }
 
 void FaviconTabHelper::SaveFavicon() {
-  NavigationEntry* entry = tab_contents()->controller().GetActiveEntry();
-  if (!entry || entry->url().is_empty())
+  NavigationEntry* entry = web_contents()->GetController().GetActiveEntry();
+  if (!entry || entry->GetURL().is_empty())
     return;
 
   // Make sure the page is in history, otherwise adding the favicon does
@@ -89,21 +97,21 @@ void FaviconTabHelper::SaveFavicon() {
       GetOriginalProfile()->GetHistoryService(Profile::IMPLICIT_ACCESS);
   if (!history)
     return;
-  history->AddPageNoVisitForBookmark(entry->url());
+  history->AddPageNoVisitForBookmark(entry->GetURL());
 
   FaviconService* service = profile_->
       GetOriginalProfile()->GetFaviconService(Profile::IMPLICIT_ACCESS);
   if (!service)
     return;
-  const NavigationEntry::FaviconStatus& favicon(entry->favicon());
-  if (!favicon.is_valid() || favicon.url().is_empty() ||
-      favicon.bitmap().empty()) {
+  const FaviconStatus& favicon(entry->GetFavicon());
+  if (!favicon.valid || favicon.url.is_empty() ||
+      favicon.bitmap.empty()) {
     return;
   }
   std::vector<unsigned char> image_data;
-  gfx::PNGCodec::EncodeBGRASkBitmap(favicon.bitmap(), false, &image_data);
+  gfx::PNGCodec::EncodeBGRASkBitmap(favicon.bitmap, false, &image_data);
   service->SetFavicon(
-      entry->url(), favicon.url(), image_data, history::FAVICON);
+      entry->GetURL(), favicon.url, image_data, history::FAVICON);
 }
 
 int FaviconTabHelper::DownloadImage(const GURL& image_url,
@@ -128,11 +136,11 @@ void FaviconTabHelper::OnUpdateFaviconURL(
 }
 
 NavigationEntry* FaviconTabHelper::GetActiveEntry() {
-  return tab_contents()->controller().GetActiveEntry();
+  return web_contents()->GetController().GetActiveEntry();
 }
 
 void FaviconTabHelper::StartDownload(int id, const GURL& url, int image_size) {
-  RenderViewHost* host = tab_contents()->render_view_host();
+  RenderViewHost* host = web_contents()->GetRenderViewHost();
   host->Send(new IconMsg_DownloadFavicon(
                  host->routing_id(), id, url, image_size));
 }
@@ -140,9 +148,9 @@ void FaviconTabHelper::StartDownload(int id, const GURL& url, int image_size) {
 void FaviconTabHelper::NotifyFaviconUpdated() {
   content::NotificationService::current()->Notify(
       chrome::NOTIFICATION_FAVICON_UPDATED,
-      content::Source<TabContents>(tab_contents()),
+      content::Source<WebContents>(web_contents()),
       content::NotificationService::NoDetails());
-  tab_contents()->NotifyNavigationStateChanged(TabContents::INVALIDATE_TAB);
+  web_contents()->NotifyNavigationStateChanged(content::INVALIDATE_TYPE_TAB);
 }
 
 void FaviconTabHelper::NavigateToPendingEntry(
@@ -161,7 +169,7 @@ void FaviconTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
   // Get the favicon, either from history or request it from the net.
-  FetchFavicon(details.entry->url());
+  FetchFavicon(details.entry->GetURL());
 }
 
 bool FaviconTabHelper::OnMessageReceived(const IPC::Message& message) {

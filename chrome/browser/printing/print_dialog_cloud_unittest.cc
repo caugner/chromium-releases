@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/memory/weak_ptr.h"
@@ -29,6 +30,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::WebContents;
+using content::WebUIMessageHandler;
 using testing::A;
 using testing::AtLeast;
 using testing::Eq;
@@ -89,9 +92,12 @@ class MockCloudPrintFlowHandler
   MockCloudPrintFlowHandler(const FilePath& path,
                             const string16& title,
                             const string16& print_ticket,
-                            const std::string& file_type
+                            const std::string& file_type,
+                            bool close_after_signin,
+                            const base::Closure& callback
                             )
-      : CloudPrintFlowHandler(path, title, print_ticket, file_type) {}
+      : CloudPrintFlowHandler(path, title, print_ticket, file_type,
+                              close_after_signin, callback) {}
   MOCK_METHOD0(DestructorCalled, void());
   MOCK_METHOD0(RegisterMessages, void());
   MOCK_METHOD3(Observe,
@@ -106,8 +112,8 @@ class MockCloudPrintFlowHandler
 
 class MockCloudPrintHtmlDialogDelegate : public CloudPrintHtmlDialogDelegate {
  public:
-  MOCK_CONST_METHOD0(IsDialogModal,
-      bool());
+  MOCK_CONST_METHOD0(GetDialogModalType,
+      ui::ModalType());
   MOCK_CONST_METHOD0(GetDialogTitle,
       string16());
   MOCK_CONST_METHOD0(GetDialogContentURL,
@@ -121,7 +127,7 @@ class MockCloudPrintHtmlDialogDelegate : public CloudPrintHtmlDialogDelegate {
   MOCK_METHOD1(OnDialogClosed,
       void(const std::string& json_retval));
   MOCK_METHOD2(OnCloseContents,
-      void(TabContents* source, bool *out_close_dialog));
+      void(WebContents* source, bool *out_close_dialog));
 };
 
 }  // namespace internal_cloud_print_helpers
@@ -305,7 +311,8 @@ class CloudPrintHtmlDialogDelegateTest : public testing::Test {
     std::string mock_file_type;
     MockCloudPrintFlowHandler* handler =
         new MockCloudPrintFlowHandler(mock_path, mock_print_ticket,
-                                      mock_title, mock_file_type);
+                                      mock_title, mock_file_type,
+                                      false, base::Closure());
     mock_flow_handler_ = handler->AsWeakPtr();
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(_));
     EXPECT_CALL(*mock_flow_handler_.get(), SetDialogDelegate(NULL));
@@ -326,7 +333,7 @@ class CloudPrintHtmlDialogDelegateTest : public testing::Test {
 };
 
 TEST_F(CloudPrintHtmlDialogDelegateTest, BasicChecks) {
-  EXPECT_TRUE(delegate_->IsDialogModal());
+  EXPECT_EQ(ui::MODAL_TYPE_WINDOW, delegate_->GetDialogModalType());
   EXPECT_THAT(delegate_->GetDialogContentURL().spec(),
               StrEq(chrome::kChromeUICloudPrintResourcesURL));
   EXPECT_TRUE(delegate_->GetDialogTitle().empty());

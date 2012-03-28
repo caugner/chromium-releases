@@ -38,37 +38,8 @@ TEST_F(ModelTypeTest, ModelTypeFromValue) {
   }
 }
 
-TEST_F(ModelTypeTest, ModelTypeBitSetToValue) {
-  ModelTypeBitSet model_types;
-  model_types.set(syncable::BOOKMARKS);
-  model_types.set(syncable::APPS);
-
-  scoped_ptr<ListValue> value(ModelTypeBitSetToValue(model_types));
-  EXPECT_EQ(2u, value->GetSize());
-  std::string types[2];
-  EXPECT_TRUE(value->GetString(0, &types[0]));
-  EXPECT_TRUE(value->GetString(1, &types[1]));
-  EXPECT_EQ("Bookmarks", types[0]);
-  EXPECT_EQ("Apps", types[1]);
-}
-
-TEST_F(ModelTypeTest, ModelTypeBitSetFromValue) {
-  // Try empty set first.
-  ModelTypeBitSet model_types;
-  scoped_ptr<ListValue> value(ModelTypeBitSetToValue(model_types));
-  EXPECT_EQ(model_types, ModelTypeBitSetFromValue(*value));
-
-  // Now try with a few random types.
-  model_types.set(syncable::BOOKMARKS);
-  model_types.set(syncable::APPS);
-  value.reset(ModelTypeBitSetToValue(model_types));
-  EXPECT_EQ(model_types, ModelTypeBitSetFromValue(*value));
-}
-
 TEST_F(ModelTypeTest, ModelTypeSetToValue) {
-  ModelTypeSet model_types;
-  model_types.insert(syncable::BOOKMARKS);
-  model_types.insert(syncable::APPS);
+  const ModelTypeSet model_types(syncable::BOOKMARKS, syncable::APPS);
 
   scoped_ptr<ListValue> value(ModelTypeSetToValue(model_types));
   EXPECT_EQ(2u, value->GetSize());
@@ -83,22 +54,13 @@ TEST_F(ModelTypeTest, ModelTypeSetFromValue) {
   // Try empty set first.
   ModelTypeSet model_types;
   scoped_ptr<ListValue> value(ModelTypeSetToValue(model_types));
-  EXPECT_EQ(model_types, ModelTypeSetFromValue(*value));
+  EXPECT_TRUE(model_types.Equals(ModelTypeSetFromValue(*value)));
 
   // Now try with a few random types.
-  model_types.insert(BOOKMARKS);
-  model_types.insert(APPS);
+  model_types.Put(BOOKMARKS);
+  model_types.Put(APPS);
   value.reset(ModelTypeSetToValue(model_types));
-  EXPECT_EQ(model_types, ModelTypeSetFromValue(*value));
-}
-
-TEST_F(ModelTypeTest, GetAllRealModelTypes) {
-  const ModelTypeSet& all_types = GetAllRealModelTypes();
-  for (int i = 0; i < MODEL_TYPE_COUNT; ++i) {
-    ModelType type = ModelTypeFromInt(i);
-    EXPECT_EQ(IsRealDataType(type), all_types.count(type) > 0u);
-  }
-  EXPECT_EQ(0u, all_types.count(MODEL_TYPE_COUNT));
+  EXPECT_TRUE(model_types.Equals(ModelTypeSetFromValue(*value)));
 }
 
 TEST_F(ModelTypeTest, IsRealDataType) {

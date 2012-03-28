@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -34,8 +34,6 @@ class ExtensionPrefs;
 class ExtensionPrefValueMap;
 class ExtensionSpecialStoragePolicy;
 class FaviconService;
-class FindBarState;
-class GeolocationPermissionContext;
 class HistoryService;
 class HostContentSettingsMap;
 class PrefService;
@@ -197,7 +195,7 @@ class TestingProfile : public Profile {
   virtual TemplateURLFetcher* GetTemplateURLFetcher() OVERRIDE;
   virtual history::TopSites* GetTopSites() OVERRIDE;
   virtual history::TopSites* GetTopSitesWithoutCreating() OVERRIDE;
-  virtual DownloadManager* GetDownloadManager() OVERRIDE;
+  virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
   virtual fileapi::FileSystemContext* GetFileSystemContext() OVERRIDE;
   virtual void SetQuotaManager(quota::QuotaManager* manager);
   virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
@@ -228,13 +226,12 @@ class TestingProfile : public Profile {
 
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() OVERRIDE;
-  virtual FindBarState* GetFindBarState() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
-  virtual GeolocationPermissionContext*
+  virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
   virtual SpeechInputPreferences* GetSpeechInputPreferences() OVERRIDE;
-  virtual HostZoomMap* GetHostZoomMap() OVERRIDE;
-  virtual bool HasProfileSyncService() const OVERRIDE;
+  virtual content::HostZoomMap* GetHostZoomMap() OVERRIDE;
+  virtual bool HasProfileSyncService() OVERRIDE;
   virtual std::wstring GetName();
   virtual void SetName(const std::wstring& name) {}
   virtual std::wstring GetID();
@@ -251,8 +248,6 @@ class TestingProfile : public Profile {
   virtual bool IsSameProfile(Profile *p) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
-  virtual SpellCheckHost* GetSpellCheckHost() OVERRIDE;
-  virtual void ReinitializeSpellCheckHost(bool force) OVERRIDE { }
   virtual WebKitContext* GetWebKitContext() OVERRIDE;
   virtual WebKitContext* GetOffTheRecordWebKitContext();
   virtual void MarkAsCleanShutdown() OVERRIDE {}
@@ -281,11 +276,9 @@ class TestingProfile : public Profile {
   // history service processes all pending requests.
   void BlockUntilHistoryProcessesPendingRequests();
 
-  // Creates and initializes a profile sync service if the tests require one.
   virtual TokenService* GetTokenService() OVERRIDE;
+  // Creates and initializes a profile sync service if the tests require one.
   virtual ProfileSyncService* GetProfileSyncService() OVERRIDE;
-  virtual ProfileSyncService* GetProfileSyncService(
-      const std::string& cros_notes) OVERRIDE;
   virtual ChromeBlobStorageContext* GetBlobStorageContext() OVERRIDE;
   virtual ExtensionInfoMap* GetExtensionInfoMap() OVERRIDE;
   virtual PromoCounter* GetInstantPromoCounter() OVERRIDE;
@@ -293,7 +286,6 @@ class TestingProfile : public Profile {
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
   virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
   virtual GURL GetHomePage() OVERRIDE;
-  virtual NetworkActionPredictor* GetNetworkActionPredictor() OVERRIDE;
 
   virtual PrefService* GetOffTheRecordPrefs() OVERRIDE;
 
@@ -379,12 +371,10 @@ class TestingProfile : public Profile {
   scoped_refptr<webkit_database::DatabaseTracker> db_tracker_;
 
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
-  scoped_refptr<GeolocationPermissionContext> geolocation_permission_context_;
+  scoped_refptr<content::GeolocationPermissionContext>
+      geolocation_permission_context_;
 
   scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
-
-  // Find bar state.  Created lazily by GetFindBarState().
-  scoped_ptr<FindBarState> find_bar_state_;
 
   FilePath last_selected_directory_;
   scoped_refptr<history::TopSites> top_sites_;  // For history and thumbnails.

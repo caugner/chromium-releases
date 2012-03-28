@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -141,7 +141,7 @@ class FetcherClient {
   }
 
   void RunTest() {
-    fetcher_->Fetch("adapter name", &callback_);
+    fetcher_->Fetch("adapter name", callback_.callback());
   }
 
   void FinishTestAllowCleanup() {
@@ -149,7 +149,7 @@ class FetcherClient {
     MessageLoop::current()->RunAllPending();
   }
 
-  TestOldCompletionCallback callback_;
+  TestCompletionCallback callback_;
   scoped_refptr<URLRequestContext> url_request_context_;
   scoped_ptr<MockDhcpProxyScriptAdapterFetcher> fetcher_;
   string16 pac_text_;
@@ -220,7 +220,7 @@ TEST(DhcpProxyScriptAdapterFetcher, CancelWhileFetcher) {
   client.RunTest();
   int max_loops = 4;
   while (!client.fetcher_->IsWaitingForFetcher() && max_loops--) {
-    base::PlatformThread::Sleep(10);
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(10));
     MessageLoop::current()->RunAllPending();
   }
   client.fetcher_->Cancel();

@@ -22,16 +22,19 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/download/download_item.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_persistent_store_info.h"
 #include "content/browser/net/url_request_mock_http_job.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/download_item.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
+using content::DownloadItem;
+using content::DownloadManager;
+using content::WebContents;
 
 namespace {
 
@@ -73,8 +76,8 @@ class SavePageBrowserTest : public InProcessBrowserTest {
     *dir = save_dir_.path().AppendASCII(prefix + "_files");
   }
 
-  TabContents* GetCurrentTab() const {
-    TabContents* current_tab = browser()->GetSelectedTabContents();
+  WebContents* GetCurrentTab() const {
+    WebContents* current_tab = browser()->GetSelectedWebContents();
     EXPECT_TRUE(current_tab);
     return current_tab;
   }
@@ -94,7 +97,7 @@ class SavePageBrowserTest : public InProcessBrowserTest {
     Browser* popup = ActiveDownloadsUI::GetPopup();
     EXPECT_TRUE(popup);
     ActiveDownloadsUI* downloads_ui = static_cast<ActiveDownloadsUI*>(
-        popup->GetSelectedTabContents()->web_ui());
+        popup->GetSelectedWebContents()->GetWebUI()->GetController());
     EXPECT_TRUE(downloads_ui);
     return downloads_ui->GetDownloads();
   }
@@ -198,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveHTMLOnly) {
   FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   ASSERT_TRUE(GetCurrentTab()->SavePage(full_file_name, dir,
-                                        SavePackage::SAVE_AS_ONLY_HTML));
+                                        content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
 
   EXPECT_EQ(url, WaitForSavePackageToFinish());
 
@@ -223,7 +226,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveViewSourceHTMLOnly) {
   FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   ASSERT_TRUE(GetCurrentTab()->SavePage(full_file_name, dir,
-                                        SavePackage::SAVE_AS_ONLY_HTML));
+                                        content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
 
   EXPECT_EQ(actual_page_url, WaitForSavePackageToFinish());
 
@@ -242,8 +245,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, SaveCompleteHTML) {
 
   FilePath full_file_name, dir;
   GetDestinationPaths("b", &full_file_name, &dir);
-  ASSERT_TRUE(GetCurrentTab()->SavePage(full_file_name, dir,
-                                        SavePackage::SAVE_AS_COMPLETE_HTML));
+  ASSERT_TRUE(GetCurrentTab()->SavePage(
+      full_file_name, dir, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML));
 
   EXPECT_EQ(url, WaitForSavePackageToFinish());
 
@@ -276,8 +279,8 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, FileNameFromPageTitle) {
       std::string("Test page for saving page feature") + kAppendedExtension);
   FilePath dir = save_dir_.path().AppendASCII(
       "Test page for saving page feature_files");
-  ASSERT_TRUE(GetCurrentTab()->SavePage(full_file_name, dir,
-                                        SavePackage::SAVE_AS_COMPLETE_HTML));
+  ASSERT_TRUE(GetCurrentTab()->SavePage(
+      full_file_name, dir, content::SAVE_PAGE_TYPE_AS_COMPLETE_HTML));
 
   EXPECT_EQ(url, WaitForSavePackageToFinish());
 
@@ -303,7 +306,7 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, RemoveFromList) {
   FilePath full_file_name, dir;
   GetDestinationPaths("a", &full_file_name, &dir);
   ASSERT_TRUE(GetCurrentTab()->SavePage(full_file_name, dir,
-                                        SavePackage::SAVE_AS_ONLY_HTML));
+                                        content::SAVE_PAGE_TYPE_AS_ONLY_HTML));
 
   EXPECT_EQ(url, WaitForSavePackageToFinish());
 
@@ -327,27 +330,6 @@ IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, RemoveFromList) {
   EXPECT_TRUE(file_util::ContentsEqual(
       test_dir_.Append(FilePath(kTestDir)).Append(FILE_PATH_LITERAL("a.htm")),
       full_file_name));
-}
-
-// Create a SavePackage and delete it without calling Init.
-// SavePackage dtor has various asserts/checks that should not fire.
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, ImplicitCancel) {
-  GURL url = NavigateToMockURL("a");
-  FilePath full_file_name, dir;
-  GetDestinationPaths("a", &full_file_name, &dir);
-  scoped_refptr<SavePackage> save_package(new SavePackage(GetCurrentTab(),
-      SavePackage::SAVE_AS_ONLY_HTML, full_file_name, dir));
-}
-
-// Create a SavePackage, call Cancel, then delete it.
-// SavePackage dtor has various asserts/checks that should not fire.
-IN_PROC_BROWSER_TEST_F(SavePageBrowserTest, ExplicitCancel) {
-  GURL url = NavigateToMockURL("a");
-  FilePath full_file_name, dir;
-  GetDestinationPaths("a", &full_file_name, &dir);
-  scoped_refptr<SavePackage> save_package(new SavePackage(GetCurrentTab(),
-      SavePackage::SAVE_AS_ONLY_HTML, full_file_name, dir));
-  save_package->Cancel(true);
 }
 
 }  // namespace

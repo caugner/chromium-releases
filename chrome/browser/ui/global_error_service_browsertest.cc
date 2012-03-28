@@ -1,13 +1,16 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/global_error_service.h"
 
+#include "base/memory/scoped_ptr.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/global_error.h"
+#include "chrome/browser/ui/global_error_bubble_view_base.h"
 #include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 
 namespace {
 
@@ -52,9 +55,12 @@ class BubbleViewError : public GlobalError {
   virtual string16 GetBubbleViewCancelButtonLabel() OVERRIDE {
     return string16();
   }
-  virtual void BubbleViewDidClose() OVERRIDE {}
-  virtual void BubbleViewAcceptButtonPressed() OVERRIDE {}
-  virtual void BubbleViewCancelButtonPressed() OVERRIDE {}
+  virtual void OnBubbleViewDidClose(Browser* browser) OVERRIDE {
+    EXPECT_TRUE(browser);
+    ++bubble_view_close_count_;
+  }
+  virtual void BubbleViewAcceptButtonPressed(Browser* browser) OVERRIDE {}
+  virtual void BubbleViewCancelButtonPressed(Browser* browser) OVERRIDE {}
 
  private:
   int bubble_view_close_count_;
@@ -85,4 +91,55 @@ IN_PROC_BROWSER_TEST_F(GlobalErrorServiceBrowserTest, ShowBubbleView) {
   EXPECT_EQ(NULL, service->GetFirstGlobalErrorWithBubbleView());
   EXPECT_TRUE(error->HasShownBubbleView());
   EXPECT_EQ(0, error->bubble_view_close_count());
+}
+
+// Test that GlobalErrorBubbleViewBase::CloseBubbleView correctly closes the
+// bubble view.
+IN_PROC_BROWSER_TEST_F(GlobalErrorServiceBrowserTest, CloseBubbleView) {
+  // This will be deleted by the GlobalErrorService.
+  BubbleViewError* error = new BubbleViewError;
+
+  GlobalErrorService* service =
+      GlobalErrorServiceFactory::GetForProfile(browser()->profile());
+  service->AddGlobalError(error);
+
+  EXPECT_EQ(error, service->GetFirstGlobalErrorWithBubbleView());
+  EXPECT_FALSE(error->HasShownBubbleView());
+  EXPECT_EQ(0, error->bubble_view_close_count());
+
+  // Creating a second browser window should show the bubble view.
+  CreateBrowser(browser()->profile());
+  EXPECT_EQ(NULL, service->GetFirstGlobalErrorWithBubbleView());
+  EXPECT_TRUE(error->HasShownBubbleView());
+  EXPECT_EQ(0, error->bubble_view_close_count());
+
+  // Explicitly close the bubble view.
+  EXPECT_TRUE(error->GetBubbleView());
+  error->GetBubbleView()->CloseBubbleView();
+  ui_test_utils::RunAllPendingInMessageLoop();
+  EXPECT_EQ(1, error->bubble_view_close_count());
+}
+
+// Test that bubble is silently dismissed if it is showing when the GlobalError
+// instance is removed from the profile.
+IN_PROC_BROWSER_TEST_F(GlobalErrorServiceBrowserTest,
+                       BubbleViewDismissedOnRemove) {
+  scoped_ptr<BubbleViewError> error(new BubbleViewError);
+
+  GlobalErrorService* service =
+      GlobalErrorServiceFactory::GetForProfile(browser()->profile());
+  service->AddGlobalError(error.get());
+
+  EXPECT_EQ(error.get(), service->GetFirstGlobalErrorWithBubbleView());
+  error->ShowBubbleView(browser());
+  ui_test_utils::RunAllPendingInMessageLoop();
+  EXPECT_TRUE(error->HasShownBubbleView());
+  EXPECT_EQ(0, error->bubble_view_close_count());
+
+  // Removing |error| from profile should dismiss the bubble view without
+  // calling |error->BubbleViewDidClose|.
+  service->RemoveGlobalError(error.get());
+  ui_test_utils::RunAllPendingInMessageLoop();
+  EXPECT_EQ(1, error->bubble_view_close_count());
+  // |error| is no longer owned by service and will be deleted.
 }

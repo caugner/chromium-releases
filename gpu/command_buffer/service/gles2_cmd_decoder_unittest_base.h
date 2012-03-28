@@ -307,6 +307,7 @@ class GLES2DecoderTestBase : public testing::Test {
       GLenum target, GLint offset, GLsizei size, const void* data);
 
   void SetupVertexBuffer();
+  void SetupAllNeededVertexBuffers();
 
   void SetupIndexBuffer();
 
@@ -429,6 +430,11 @@ class GLES2DecoderTestBase : public testing::Test {
 
     virtual void set_token(int32 token) OVERRIDE {
       DCHECK(false);
+    }
+
+    virtual bool SetGetBuffer(int32 /* transfer_buffer_id */) OVERRIDE {
+      DCHECK(false);
+      return false;
     }
 
     // Overridden from CommandBufferEngine.

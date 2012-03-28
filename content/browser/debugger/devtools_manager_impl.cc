@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/message_loop.h"
-#include "content/browser/browsing_instance.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/debugger/devtools_netlog_observer.h"
 #include "content/browser/debugger/render_view_devtools_agent_host.h"
@@ -51,6 +50,14 @@ DevToolsClientHost* DevToolsManagerImpl::GetDevToolsClientHostFor(
   return NULL;
 }
 
+DevToolsAgentHost* DevToolsManagerImpl::GetDevToolsAgentHostFor(
+    DevToolsClientHost* client_host) {
+  ClientToAgentHostMap::iterator it = client_to_agent_host_.find(client_host);
+  if (it != client_to_agent_host_.end())
+    return it->second;
+  return NULL;
+}
+
 void DevToolsManagerImpl::RegisterDevToolsClientHostFor(
     DevToolsAgentHost* agent_host,
     DevToolsClientHost* client_host) {
@@ -61,7 +68,7 @@ void DevToolsManagerImpl::RegisterDevToolsClientHostFor(
 bool DevToolsManagerImpl::DispatchOnInspectorBackend(
     DevToolsClientHost* from,
     const std::string& message) {
-  DevToolsAgentHost* agent_host = GetAgentHost(from);
+  DevToolsAgentHost* agent_host = GetDevToolsAgentHostFor(from);
   if (!agent_host)
     return false;
 
@@ -92,7 +99,7 @@ void DevToolsManagerImpl::InspectElement(DevToolsAgentHost* agent_host,
 }
 
 void DevToolsManagerImpl::ClientHostClosing(DevToolsClientHost* client_host) {
-  DevToolsAgentHost* agent_host = GetAgentHost(client_host);
+  DevToolsAgentHost* agent_host = GetDevToolsAgentHostFor(client_host);
   if (!agent_host) {
     // It might be in the list of orphan client hosts, remove it from there.
     for (OrphanClientHosts::iterator it = orphan_client_hosts_.begin();
@@ -112,15 +119,6 @@ void DevToolsManagerImpl::ClientHostClosing(DevToolsClientHost* client_host) {
 
 void DevToolsManagerImpl::AgentHostClosing(DevToolsAgentHost* agent_host) {
   UnregisterDevToolsClientHostFor(agent_host);
-}
-
-DevToolsAgentHost* DevToolsManagerImpl::GetAgentHost(
-    DevToolsClientHost* client_host) {
-  ClientHostToInspectedRvhMap::iterator it =
-      client_to_agent_host_.find(client_host);
-  if (it != client_to_agent_host_.end())
-    return it->second;
-  return NULL;
 }
 
 void DevToolsManagerImpl::UnregisterDevToolsClientHostFor(
@@ -160,9 +158,9 @@ void DevToolsManagerImpl::OnCancelPendingNavigation(RenderViewHost* pending,
   }
 }
 
-void DevToolsManagerImpl::TabReplaced(TabContents* old_tab,
-                                      TabContents* new_tab) {
-  RenderViewHost* old_rvh = old_tab->render_view_host();
+void DevToolsManagerImpl::TabReplaced(WebContents* old_tab,
+                                      WebContents* new_tab) {
+  RenderViewHost* old_rvh = old_tab->GetRenderViewHost();
   if (!DevToolsAgentHostRegistry::HasDevToolsAgentHost(old_rvh))
     return;
 
@@ -176,7 +174,7 @@ void DevToolsManagerImpl::TabReplaced(TabContents* old_tab,
     return;  // Didn't know about old_tab.
 
   client_host->TabReplaced(new_tab);
-  AttachClientHost(cookie, new_tab->render_view_host());
+  AttachClientHost(cookie, new_tab->GetRenderViewHost());
 }
 
 int DevToolsManagerImpl::DetachClientHost(RenderViewHost* from_rvh) {

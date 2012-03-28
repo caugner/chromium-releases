@@ -1,13 +1,12 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "examples/tumbler/cube.h"
-
 #include <algorithm>
 
-#include "examples/tumbler/shader_util.h"
-#include "examples/tumbler/transforms.h"
+#include "cube.h"
+#include "shader_util.h"
+#include "transforms.h"
 
 namespace tumbler {
 

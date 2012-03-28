@@ -1,9 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "ppapi/c/pp_errors.h"
-#include "ppapi/shared_impl/url_util_impl.h"
+#include "ppapi/shared_impl/ppb_url_util_shared.h"
 #include "ppapi/thunk/enter.h"
 #include "ppapi/thunk/ppb_instance_api.h"
 #include "ppapi/thunk/thunk.h"
@@ -54,10 +54,10 @@ PP_Var GetPluginInstanceURL(PP_Instance instance,
 }
 
 const PPB_URLUtil_Dev g_ppb_url_util = {
-  &URLUtilImpl::Canonicalize,
-  &URLUtilImpl::ResolveRelativeToURL,
+  &PPB_URLUtil_Shared::Canonicalize,
+  &PPB_URLUtil_Shared::ResolveRelativeToURL,
   &ResolveRelativeToDocument,
-  &URLUtilImpl::IsSameSecurityOrigin,
+  &PPB_URLUtil_Shared::IsSameSecurityOrigin,
   &DocumentCanRequest,
   &DocumentCanAccessDocument,
   &GetDocumentURL,
@@ -66,7 +66,7 @@ const PPB_URLUtil_Dev g_ppb_url_util = {
 
 }  // namespace
 
-const PPB_URLUtil_Dev* GetPPB_URLUtil_Dev_Thunk() {
+const PPB_URLUtil_Dev_0_6* GetPPB_URLUtil_Dev_0_6_Thunk() {
   return &g_ppb_url_util;
 }
 

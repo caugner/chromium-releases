@@ -39,7 +39,7 @@ class SyncBackendRegistrar : public ModelSafeWorkerRegistrar,
   // (initially put in the passive group).  |name| is used for
   // debugging.  Does not take ownership of |profile| or |sync_loop|.
   // Must be created on the UI thread.
-  SyncBackendRegistrar(const syncable::ModelTypeSet& initial_types,
+  SyncBackendRegistrar(syncable::ModelTypeSet initial_types,
                        const std::string& name,
                        Profile* profile,
                        MessageLoop* sync_loop);
@@ -67,8 +67,8 @@ class SyncBackendRegistrar : public ModelSafeWorkerRegistrar,
   // |types_to_remove| and |types_to_add| must be disjoint.  Returns
   // the set of newly-added types.  Must be called on the UI thread.
   syncable::ModelTypeSet ConfigureDataTypes(
-      const syncable::ModelTypeSet& types_to_add,
-      const syncable::ModelTypeSet& types_to_remove);
+      syncable::ModelTypeSet types_to_add,
+      syncable::ModelTypeSet types_to_remove);
 
   // Must be called from the UI thread. (See destructor comment.)
   void StopOnUIThread();

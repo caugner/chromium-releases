@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,8 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/gtk_util.h"
+
+using content::OpenURLParams;
 
 namespace {
 
@@ -76,7 +78,7 @@ ExtensionInstallDialog::ExtensionInstallDialog(
 
   // Build the dialog.
   dialog_ = gtk_dialog_new_with_buttons(
-      UTF16ToUTF8(prompt.GetDialogTitle()).c_str(),
+      UTF16ToUTF8(prompt.GetDialogTitle(extension)).c_str(),
       parent,
       GTK_DIALOG_MODAL,
       NULL);
@@ -89,7 +91,9 @@ ExtensionInstallDialog::ExtensionInstallDialog(
       GTK_DIALOG(dialog_),
       UTF16ToUTF8(prompt.GetAcceptButtonLabel()).c_str(),
       GTK_RESPONSE_ACCEPT);
+#if !GTK_CHECK_VERSION(2, 22, 0)
   gtk_dialog_set_has_separator(GTK_DIALOG(dialog_), FALSE);
+#endif
 
   GtkWidget* content_area = gtk_dialog_get_content_area(GTK_DIALOG(dialog_));
   gtk_box_set_spacing(GTK_BOX(content_area), ui::kContentAreaSpacing);

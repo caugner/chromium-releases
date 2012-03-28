@@ -1,8 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -10,12 +11,11 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/sync/glue/ui_model_worker.h"
-#include "chrome/browser/sync/util/unrecoverable_error_info.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using browser_sync::UIModelWorker;
-using browser_sync::UnrecoverableErrorInfo;
+using browser_sync::SyncerError;
 using content::BrowserThread;
 
 // Various boilerplate, primarily for the StopWithPendingWork test.
@@ -28,12 +28,12 @@ class UIModelWorkerVisitor {
        was_run_(was_run) { }
   virtual ~UIModelWorkerVisitor() { }
 
-  virtual UnrecoverableErrorInfo DoWork() {
+  virtual SyncerError DoWork() {
     EXPECT_TRUE(BrowserThread::CurrentlyOn(BrowserThread::UI));
     was_run_->Signal();
     if (quit_loop_when_run_)
       MessageLoop::current()->Quit();
-    return UnrecoverableErrorInfo();
+    return browser_sync::SYNCER_OK;
   }
 
  private:
@@ -59,53 +59,26 @@ class Syncer {
   DISALLOW_COPY_AND_ASSIGN(Syncer);
 };
 
-// A task run from the SyncerThread to "sync share", ie tell the Syncer to
-// ask its ModelSafeWorker to do something.
-class FakeSyncShareTask : public Task {
- public:
-  FakeSyncShareTask(Syncer* syncer, UIModelWorkerVisitor* visitor)
-      : syncer_(syncer), visitor_(visitor) {
-  }
-  virtual void Run() {
-    syncer_->SyncShare(visitor_);
-  }
- private:
-  Syncer* syncer_;
-  UIModelWorkerVisitor* visitor_;
-  DISALLOW_COPY_AND_ASSIGN(FakeSyncShareTask);
-};
+// A callback run from the CoreThread to simulate terminating syncapi.
+void FakeSyncapiShutdownCallback(base::Thread* syncer_thread,
+                                 UIModelWorker* worker,
+                                 base::WaitableEvent** jobs,
+                                 size_t job_count) {
+  base::WaitableEvent all_jobs_done(false, false);
 
-// A task run from the CoreThread to simulate terminating syncapi.
-class FakeSyncapiShutdownTask : public Task {
- public:
-  FakeSyncapiShutdownTask(base::Thread* syncer_thread,
-                          UIModelWorker* worker,
-                          base::WaitableEvent** jobs,
-                          size_t job_count)
-      : syncer_thread_(syncer_thread), worker_(worker), jobs_(jobs),
-        job_count_(job_count), all_jobs_done_(false, false) { }
-  virtual void Run() {
-    // In real life, we would try and close a sync directory, which would
-    // result in the syncer calling it's own destructor, which results in
-    // the SyncerThread::HaltSyncer being called, which sets the
-    // syncer in RequestEarlyExit mode and waits until the Syncer finishes
-    // SyncShare to remove the syncer from it's watch. Here we just manually
-    // wait until all outstanding jobs are done to simulate what happens in
-    // SyncerThread::HaltSyncer.
-    all_jobs_done_.WaitMany(jobs_, job_count_);
+  // In real life, we would try and close a sync directory, which would
+  // result in the syncer calling it's own destructor, which results in
+  // the SyncerThread::HaltSyncer being called, which sets the
+  // syncer in RequestEarlyExit mode and waits until the Syncer finishes
+  // SyncShare to remove the syncer from it's watch. Here we just manually
+  // wait until all outstanding jobs are done to simulate what happens in
+  // SyncerThread::HaltSyncer.
+  all_jobs_done.WaitMany(jobs, job_count);
 
-    // These two calls are made from SyncBackendHost::Core::DoShutdown.
-    syncer_thread_->Stop();
-    worker_->OnSyncerShutdownComplete();
-  }
- private:
-  base::Thread* syncer_thread_;
-  scoped_refptr<UIModelWorker> worker_;
-  base::WaitableEvent** jobs_;
-  size_t job_count_;
-  base::WaitableEvent all_jobs_done_;
-  DISALLOW_COPY_AND_ASSIGN(FakeSyncapiShutdownTask);
-};
+  // These two calls are made from SyncBackendHost::Core::DoShutdown.
+  syncer_thread->Stop();
+  worker->OnSyncerShutdownComplete();
+}
 
 class UIModelWorkerTest : public testing::Test {
  public:
@@ -139,7 +112,7 @@ TEST_F(UIModelWorkerTest, ScheduledWorkRunsOnUILoop) {
       new UIModelWorkerVisitor(&v_was_run, true));
 
   syncer_thread()->message_loop()->PostTask(FROM_HERE,
-      new FakeSyncShareTask(syncer(), v.get()));
+      base::Bind(&Syncer::SyncShare, base::Unretained(syncer()), v.get()));
 
   // We are on the UI thread, so run our loop to process the
   // (hopefully) scheduled task from a SyncShare invocation.
@@ -175,14 +148,17 @@ TEST_F(UIModelWorkerTest, StopWithPendingWork) {
   // The current message loop is not running, so queue a task to cause
   // UIModelWorker::Stop() to play a crucial role. See comment below.
   syncer_thread()->message_loop()->PostTask(FROM_HERE,
-      new FakeSyncShareTask(syncer(), v.get()));
+      base::Bind(&Syncer::SyncShare, base::Unretained(syncer()), v.get()));
 
   // This is what gets the core_thread blocked on the syncer_thread.
   core_thread()->message_loop()->PostTask(FROM_HERE,
-      new FakeSyncapiShutdownTask(syncer_thread(), bmw(), jobs, 1));
+      base::Bind(&FakeSyncapiShutdownCallback, syncer_thread(),
+                 base::Unretained(bmw()),
+                 static_cast<base::WaitableEvent**>(jobs), 1));
 
   // This is what gets the UI thread blocked until NotifyExitRequested,
-  // which is called when FakeSyncapiShutdownTask runs and deletes the syncer.
+  // which is called when FakeSyncapiShutdownCallback runs and deletes the
+  // syncer.
   bmw()->Stop();
 
   EXPECT_FALSE(syncer_thread()->IsRunning());
@@ -213,18 +189,21 @@ TEST_F(UIModelWorkerTest, HypotheticalManualPumpFlooding) {
   // The current message loop is not running, so queue a task to cause
   // UIModelWorker::Stop() to play a crucial role. See comment below.
   syncer_thread()->message_loop()->PostTask(FROM_HERE,
-      new FakeSyncShareTask(syncer(), fox1.get()));
+      base::Bind(&Syncer::SyncShare, base::Unretained(syncer()), fox1.get()));
   syncer_thread()->message_loop()->PostTask(FROM_HERE,
-      new FakeSyncShareTask(syncer(), fox2.get()));
+      base::Bind(&Syncer::SyncShare, base::Unretained(syncer()), fox2.get()));
 
   // This is what gets the core_thread blocked on the syncer_thread.
   core_thread()->message_loop()->PostTask(FROM_HERE,
-      new FakeSyncapiShutdownTask(syncer_thread(), bmw(), jobs, 3));
+      base::Bind(&FakeSyncapiShutdownCallback, syncer_thread(),
+                 base::Unretained(bmw()),
+                 static_cast<base::WaitableEvent**>(jobs), 3));
   syncer_thread()->message_loop()->PostTask(FROM_HERE,
-      new FakeSyncShareTask(syncer(), fox3.get()));
+      base::Bind(&Syncer::SyncShare, base::Unretained(syncer()), fox3.get()));
 
   // This is what gets the UI thread blocked until NotifyExitRequested,
-  // which is called when FakeSyncapiShutdownTask runs and deletes the syncer.
+  // which is called when FakeSyncapiShutdownCallback runs and deletes the
+  // syncer.
   bmw()->Stop();
 
   // Was the thread killed?

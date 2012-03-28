@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,6 +24,13 @@ class ProfileManager : public ::ProfileManager {
   virtual Profile* CreateProfileHelper(const FilePath& file_path) OVERRIDE {
     return new TestingProfile(file_path);
   }
+
+#if defined(OS_WIN)
+  virtual ProfileShortcutManagerWin* CreateShortcutManager() OVERRIDE {
+    // We should avoid creating shortcuts in these tests.
+    return NULL;
+  }
+#endif
 };
 
 }  // namespace testing
@@ -87,6 +94,14 @@ void TestingProfileManager::DeleteTestingProfile(const std::string& name) {
   profile_manager_->profiles_info_.erase(profile->GetPath());
 }
 
+void TestingProfileManager::DeleteProfileInfoCache() {
+  profile_manager_->profile_info_cache_.reset(NULL);
+}
+
+void TestingProfileManager::SetLoggedIn(bool logged_in) {
+  profile_manager_->logged_in_ = logged_in;
+}
+
 ProfileManager* TestingProfileManager::profile_manager() {
   DCHECK(called_set_up_);
   return profile_manager_;
@@ -95,10 +110,6 @@ ProfileManager* TestingProfileManager::profile_manager() {
 ProfileInfoCache* TestingProfileManager::profile_info_cache() {
   DCHECK(called_set_up_);
   return &profile_manager_->GetProfileInfoCache();
-}
-
-void TestingProfileManager::DeleteProfileInfoCache() {
-  profile_manager_->profile_info_cache_.reset(NULL);
 }
 
 void TestingProfileManager::SetUpInternal() {

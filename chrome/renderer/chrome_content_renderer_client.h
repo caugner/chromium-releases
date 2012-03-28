@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,6 +23,8 @@ class RendererNetPredictor;
 class SpellCheck;
 class SpellCheckProvider;
 class VisitedLinkSlave;
+
+struct ChromeViewHostMsg_GetPluginInfo_Status;
 
 namespace safe_browsing {
 class PhishingClassifierFilter;
@@ -59,6 +61,16 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
       const WebKit::WebURLError& error,
       std::string* error_html,
       string16* error_description) OVERRIDE;
+  virtual webkit_media::WebMediaPlayerImpl* OverrideCreateWebMediaPlayer(
+      content::RenderView* render_view,
+      WebKit::WebFrame* frame,
+      WebKit::WebMediaPlayerClient* client,
+      base::WeakPtr<webkit_media::WebMediaPlayerDelegate> delegate,
+      media::FilterCollection* collection,
+      WebKit::WebAudioSourceProvider* audio_source_provider,
+      media::MessageLoopFactory* message_loop_factory,
+      webkit_media::MediaStreamClient* media_stream_client,
+      media::MediaLog* media_log) OVERRIDE;
   virtual bool RunIdleHandlerWhenWidgetsHidden() OVERRIDE;
   virtual bool AllowPopup(const GURL& creator) OVERRIDE;
   virtual bool ShouldFork(WebKit::WebFrame* frame,
@@ -110,19 +122,17 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   virtual void RegisterPPAPIInterfaceFactories(
       webkit::ppapi::PpapiInterfaceFactoryManager* factory_manager) OVERRIDE;
 
-  virtual bool AllowSocketAPI(const GURL& url) OVERRIDE;
+  SpellCheck* spellcheck() const { return spellcheck_.get(); }
 
- private:
   WebKit::WebPlugin* CreatePlugin(
       content::RenderView* render_view,
       WebKit::WebFrame* frame,
-      const WebKit::WebPluginParams& params);
+      const WebKit::WebPluginParams& params,
+      const ChromeViewHostMsg_GetPluginInfo_Status& status,
+      const webkit::WebPluginInfo& plugin,
+      const std::string& actual_mime_type);
 
-  // Returns the extension for the given URL.  Excludes extension objects for
-  // bookmark apps, which do not use the app process model.
-  const Extension* GetNonBookmarkAppExtension(const ExtensionSet* extensions,
-                                              const GURL& url);
-
+ private:
   // Returns true if the frame is navigating to an URL either into or out of an
   // extension app's extent.
   bool CrossesExtensionExtents(WebKit::WebFrame* frame,
@@ -143,14 +153,8 @@ class ChromeContentRendererClient : public content::ContentRendererClient {
   scoped_ptr<RendererHistogramSnapshots> histogram_snapshots_;
   scoped_ptr<RendererNetPredictor> net_predictor_;
   scoped_ptr<SpellCheck> spellcheck_;
-  // The SpellCheckProvider is a RenderViewObserver, and handles its own
-  // destruction.
-  SpellCheckProvider* spellcheck_provider_;
   scoped_ptr<VisitedLinkSlave> visited_link_slave_;
   scoped_ptr<safe_browsing::PhishingClassifierFilter> phishing_classifier_;
-
-  // Set of origins that can use TCP/UDP private APIs from NaCl.
-  std::set<std::string> allowed_socket_origins_;
 };
 
 }  // namespace chrome

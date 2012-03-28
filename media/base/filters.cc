@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,9 +7,6 @@
 #include "base/logging.h"
 
 namespace media {
-
-// static
-const size_t DataSource::kReadError = static_cast<size_t>(-1);
 
 void ResetAndRunCB(FilterStatusCB* cb, PipelineStatus status) {
   DCHECK(!cb->is_null());
@@ -28,6 +25,11 @@ void ResetAndRunCB(base::Closure* cb) {
 Filter::Filter() : host_(NULL) {}
 
 Filter::~Filter() {}
+
+void Filter::clear_host() {
+  DCHECK(host_);
+  host_ = NULL;
+}
 
 void Filter::set_host(FilterHost* host) {
   DCHECK(host);
@@ -73,12 +75,14 @@ VideoDecoder::VideoDecoder() {}
 
 VideoDecoder::~VideoDecoder() {}
 
+bool VideoDecoder::HasAlpha() const {
+  return false;
+}
+
+void VideoDecoder::PrepareForShutdownHack() {}
+
 AudioDecoder::AudioDecoder() {}
 
 AudioDecoder::~AudioDecoder() {}
-
-void AudioDecoder::ConsumeAudioSamples(scoped_refptr<Buffer> buffer) {
-  consume_audio_samples_callback_.Run(buffer);
-}
 
 }  // namespace media

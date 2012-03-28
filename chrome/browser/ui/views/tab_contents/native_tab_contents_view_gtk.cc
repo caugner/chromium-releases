@@ -1,20 +1,20 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_gtk.h"
 
 #include "base/utf_string_conversions.h"
-#include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/tab_contents/web_drag_bookmark_handler_gtk.h"
+#include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "chrome/browser/ui/views/tab_contents/native_tab_contents_view_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
 #include "content/browser/tab_contents/web_drag_dest_gtk.h"
 #include "content/browser/tab_contents/web_drag_source_gtk.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebDragData.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebInputEvent.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebDragData.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/user_manager.h"
@@ -23,6 +23,7 @@
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebInputEvent;
+using content::WebContents;
 
 namespace {
 
@@ -32,7 +33,7 @@ namespace {
 // FocusThroughTabTraversal(bool) forwards the "move focus forward" effect to
 // webkit.
 gboolean OnFocus(GtkWidget* widget, GtkDirectionType focus,
-                 TabContents* tab_contents) {
+                 WebContents* web_contents) {
   // If we already have focus, let the next widget have a shot at it. We will
   // reach this situation after the call to gtk_widget_child_focus() in
   // TakeFocus().
@@ -41,7 +42,7 @@ gboolean OnFocus(GtkWidget* widget, GtkDirectionType focus,
 
   gtk_widget_grab_focus(widget);
   bool reverse = focus == GTK_DIR_TAB_BACKWARD;
-  tab_contents->FocusThroughTabTraversal(reverse);
+  web_contents->FocusThroughTabTraversal(reverse);
   return TRUE;
 }
 
@@ -85,7 +86,7 @@ NativeTabContentsViewGtk::NativeTabContentsViewGtk(
       delegate_(delegate),
       ignore_next_char_event_(false),
       ALLOW_THIS_IN_INITIALIZER_LIST(drag_source_(
-          new content::WebDragSourceGtk(delegate->GetTabContents()))) {
+          new content::WebDragSourceGtk(delegate->GetWebContents()))) {
 }
 
 NativeTabContentsViewGtk::~NativeTabContentsViewGtk() {
@@ -134,27 +135,28 @@ void NativeTabContentsViewGtk::Unparent() {
 
 RenderWidgetHostView* NativeTabContentsViewGtk::CreateRenderWidgetHostView(
     RenderWidgetHost* render_widget_host) {
-  RenderWidgetHostViewGtk* view =
-      new RenderWidgetHostViewGtk(render_widget_host);
-  view->InitAsChild();
-  g_signal_connect(view->native_view(), "focus",
-                   G_CALLBACK(OnFocus), delegate_->GetTabContents());
-  g_signal_connect(view->native_view(), "scroll-event",
+  RenderWidgetHostView* view =
+      RenderWidgetHostView::CreateViewForWidget(render_widget_host);
+  view->InitAsChild(NULL);
+  g_signal_connect(view->GetNativeView(), "focus",
+                   G_CALLBACK(OnFocus), delegate_->GetWebContents());
+  g_signal_connect(view->GetNativeView(), "scroll-event",
                    G_CALLBACK(OnMouseScroll), delegate_);
 
   // Let widget know that the tab contents has been painted.
-  views::NativeWidgetGtk::RegisterChildExposeHandler(view->native_view());
+  views::NativeWidgetGtk::RegisterChildExposeHandler(view->GetNativeView());
 
   // Renderer target DnD.
-  if (delegate_->GetTabContents()->ShouldAcceptDragAndDrop()) {
-    drag_dest_.reset(new content::WebDragDestGtk(delegate_->GetTabContents(),
-                                                 view->native_view()));
+  if (delegate_->GetWebContents()->ShouldAcceptDragAndDrop()) {
+    drag_dest_.reset(new content::WebDragDestGtk(delegate_->GetWebContents(),
+                                                 view->GetNativeView()));
     bookmark_handler_gtk_.reset(new WebDragBookmarkHandlerGtk);
     drag_dest_->set_delegate(bookmark_handler_gtk_.get());
   }
 
-  gtk_fixed_put(GTK_FIXED(GetWidget()->GetNativeView()), view->native_view(), 0,
-                0);
+  gtk_fixed_put(GTK_FIXED(GetWidget()->GetNativeView()),
+                view->GetNativeView(),
+                0, 0);
   return view;
 }
 

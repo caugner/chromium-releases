@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,8 +19,8 @@ function showInlineBlock(node, isShow) {
 
 /**
  * Creates an element of a specified type with a specified class name.
- * @param {String} type The node type.
- * @param {String} className The class name to use.
+ * @param {string} type The node type.
+ * @param {string} className The class name to use.
  */
 function createElementWithClassName(type, className) {
   var elm = document.createElement(type);
@@ -30,8 +30,8 @@ function createElementWithClassName(type, className) {
 
 /**
  * Creates a link with a specified onclick handler and content
- * @param {String} onclick The onclick handler
- * @param {String} value The link text
+ * @param {function()} onclick The onclick handler
+ * @param {string} value The link text
  */
 function createLink(onclick, value) {
   var link = document.createElement('a');
@@ -44,8 +44,8 @@ function createLink(onclick, value) {
 
 /**
  * Creates a button with a specified onclick handler and content
- * @param {String} onclick The onclick handler
- * @param {String} value The button text
+ * @param {function()} onclick The onclick handler
+ * @param {string} value The button text
  */
 function createButton(onclick, value) {
   var button = document.createElement('input');
@@ -69,6 +69,10 @@ function Downloads() {
   // Keep track of the dates of the newest and oldest downloads so that we
   // know where to insert them.
   this.newestTime_ = -1;
+
+  // Icon load request queue.
+  this.iconLoadQueue_ = [];
+  this.isIconLoading_ = false;
 }
 
 /**
@@ -97,7 +101,7 @@ Downloads.prototype.updated = function(download) {
 
 /**
  * Set our display search text.
- * @param {String} searchText The string we're searching for.
+ * @param {string} searchText The string we're searching for.
  */
 Downloads.prototype.setSearchText = function(searchText) {
   this.searchText_ = searchText;
@@ -145,7 +149,7 @@ Downloads.prototype.updateDateDisplay_ = function() {
 
 /**
  * Remove a download.
- * @param {Number} id The id of the download to remove.
+ * @param {number} id The id of the download to remove.
  */
 Downloads.prototype.remove = function(id) {
   this.node_.removeChild(this.downloads_[id].node);
@@ -161,6 +165,39 @@ Downloads.prototype.clear = function() {
     this.downloads_[id].clear();
     this.remove(id);
   }
+}
+
+/**
+ * Schedule icon load.
+ * @param {HTMLImageElement} elem Image element that should contain the icon.
+ * @param {string} iconURL URL to the icon.
+ */
+Downloads.prototype.scheduleIconLoad = function(elem, iconURL) {
+  var self = this;
+
+  // Sends request to the next icon in the queue and schedules
+  // call to itself when the icon is loaded.
+  function loadNext() {
+    self.isIconLoading_ = true;
+    while (self.iconLoadQueue_.length > 0) {
+      var request = self.iconLoadQueue_.shift();
+      var oldSrc = request.element.src;
+      request.element.onabort = request.element.onerror =
+          request.element.onload = loadNext;
+      request.element.src = request.url;
+      if (oldSrc != request.element.src)
+        return;
+    }
+    self.isIconLoading_ = false;
+  }
+
+  // Create new request
+  var loadRequest = {element: elem, url: iconURL};
+  this.iconLoadQueue_.push(loadRequest);
+
+  // Start loading if none scheduled yet
+  if (!this.isIconLoading_)
+    loadNext();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -356,7 +393,8 @@ Download.prototype.update = function(download) {
     this.danger_.style.display = 'block';
     this.safe_.style.display = 'none';
   } else {
-    this.nodeImg_.src = 'chrome://fileicon/' + this.filePath_;
+    downloads.scheduleIconLoad(this.nodeImg_,
+                               'chrome://fileicon/' + this.filePath_);
 
     if (this.state_ == Download.States.COMPLETE &&
         !this.fileExternallyRemoved_) {
@@ -455,7 +493,7 @@ Download.prototype.clear = function() {
 }
 
 /**
- * @return {String} User-visible status update text.
+ * @return {string} User-visible status update text.
  */
 Download.prototype.getStatusText_ = function() {
   switch (this.state_) {
@@ -548,6 +586,10 @@ Download.prototype.cancel_ = function() {
 ///////////////////////////////////////////////////////////////////////////////
 // Page:
 var downloads, localStrings, resultsTimeout;
+
+// TODO(benjhayden): Rename Downloads to DownloadManager, downloads to
+// downloadManager or theDownloadManager or DownloadManager.get() to prevent
+// confusing Downloads with Download.
 
 /**
  * The FIFO array that stores updates of download files to be appeared

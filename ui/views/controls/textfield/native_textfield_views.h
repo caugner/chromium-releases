@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -101,7 +101,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void UpdateBackgroundColor() OVERRIDE;
   virtual void UpdateReadOnly() OVERRIDE;
   virtual void UpdateFont() OVERRIDE;
-  virtual void UpdateIsPassword() OVERRIDE;
+  virtual void UpdateIsObscured() OVERRIDE;
   virtual void UpdateEnabled() OVERRIDE;
   virtual gfx::Insets CalculateInsets() OVERRIDE;
   virtual void UpdateHorizontalMargins() OVERRIDE;
@@ -123,6 +123,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void ApplyStyleRange(const gfx::StyleRange& style) OVERRIDE;
   virtual void ApplyDefaultStyle() OVERRIDE;
   virtual void ClearEditHistory() OVERRIDE;
+  virtual int GetFontHeight() OVERRIDE;
 
   // ui::SimpleMenuModel::Delegate overrides
   virtual bool IsCommandIdChecked(int command_id) const OVERRIDE;
@@ -151,6 +152,7 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   virtual void InsertText(const string16& text) OVERRIDE;
   virtual void InsertChar(char16 ch, int flags) OVERRIDE;
   virtual ui::TextInputType GetTextInputType() const OVERRIDE;
+  virtual bool CanComposeInline() const OVERRIDE;
   virtual gfx::Rect GetCaretBounds() OVERRIDE;
   virtual bool HasCompositionText() OVERRIDE;
   virtual bool GetTextRange(ui::Range* range) OVERRIDE;
@@ -210,6 +212,12 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
   // Convenience method to call TextfieldController::OnAfterUserAction();
   void OnAfterUserAction();
 
+  // Calls |model_->Cut()| and notifies TextfieldController on success.
+  bool Cut();
+
+  // Calls |model_->Copy()| and notifies TextfieldController on success.
+  bool Copy();
+
   // Calls |model_->Paste()| and calls TextfieldController::ContentsChanged()
   // explicitly if paste succeeded.
   bool Paste();
@@ -219,6 +227,9 @@ class VIEWS_EXPORT NativeTextfieldViews : public TouchSelectionClientView,
 
   // Handles mouse press events.
   void HandleMousePressEvent(const MouseEvent& event);
+
+  // Returns true if the current text input type allows access by the IME.
+  bool ImeEditingAllowed() const;
 
   // Checks if a char is ok to be inserted into the textfield. The |ch| is a
   // modified character, i.e., modifiers took effect when generating this char.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ class NativeTextfieldGtk : public NativeControlGtk,
   virtual void UpdateBackgroundColor() OVERRIDE;
   virtual void UpdateReadOnly() OVERRIDE;
   virtual void UpdateFont() OVERRIDE;
-  virtual void UpdateIsPassword() OVERRIDE;
+  virtual void UpdateIsObscured() OVERRIDE;
   virtual void UpdateEnabled() OVERRIDE;
   virtual gfx::Insets CalculateInsets() OVERRIDE;
   virtual void UpdateHorizontalMargins() OVERRIDE;
@@ -66,13 +66,14 @@ class NativeTextfieldGtk : public NativeControlGtk,
   virtual void ApplyStyleRange(const gfx::StyleRange& style) OVERRIDE;
   virtual void ApplyDefaultStyle() OVERRIDE;
   virtual void ClearEditHistory() OVERRIDE;
+  virtual int GetFontHeight() OVERRIDE;
 
   // Overridden from NativeControlGtk:
   virtual void CreateNativeControl() OVERRIDE;
   virtual void NativeControlCreated(GtkWidget* widget) OVERRIDE;
 
-  // Returns true if the textfield is for password.
-  bool IsPassword();
+  // Returns true if the textfield is obscured (shown as *****).
+  bool IsObscured();
 
  private:
   // Gtk signal callbacks.

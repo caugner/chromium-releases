@@ -9,10 +9,10 @@
 #include "base/file_util.h"
 #include "base/platform_file.h"
 #include "base/process_util.h"
-#include "content/browser/browser_context.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/common/pepper_file_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "ipc/ipc_platform_file.h"
 #include "webkit/plugins/ppapi/file_path.h"
@@ -39,7 +39,8 @@ const int kWritePermissions = base::PLATFORM_FILE_OPEN |
 
 PepperFileMessageFilter::PepperFileMessageFilter(
     int child_id, content::BrowserContext* browser_context)
-        : child_id_(child_id) {
+        : child_id_(child_id),
+          channel_(NULL) {
   pepper_path_ =
       browser_context->GetPath().Append(FILE_PATH_LITERAL("Pepper Data"));
 }

@@ -8,22 +8,24 @@
 #include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/render_messages.h"
-#include "content/browser/tab_contents/navigation_details.h"
-#include "content/browser/tab_contents/navigation_entry.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_delegate.h"
 #include "content/browser/tab_contents/title_updated_details.h"
+#include "content/public/browser/navigation_details.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
-#include "content/public/browser/notification_details.h"
+#include "content/public/browser/web_contents_delegate.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
 
-HistoryTabHelper::HistoryTabHelper(TabContents* tab_contents)
-    : TabContentsObserver(tab_contents),
+using content::NavigationEntry;
+using content::WebContents;
+
+HistoryTabHelper::HistoryTabHelper(WebContents* web_contents)
+    : content::WebContentsObserver(web_contents),
       received_page_title_(false) {
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED,
-                 content::Source<TabContents>(tab_contents));
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED,
+                 content::Source<WebContents>(web_contents));
 }
 
 HistoryTabHelper::~HistoryTabHelper() {
@@ -39,7 +41,7 @@ void HistoryTabHelper::UpdateHistoryForNavigation(
 void HistoryTabHelper::UpdateHistoryPageTitle(const NavigationEntry& entry) {
   HistoryService* hs = GetHistoryService();
   if (hs)
-    hs->SetPageTitle(entry.virtual_url(), entry.GetTitleForDisplay(""));
+    hs->SetPageTitle(entry.GetVirtualURL(), entry.GetTitleForDisplay(""));
 }
 
 scoped_refptr<history::HistoryAddPageArgs>
@@ -49,7 +51,7 @@ HistoryTabHelper::CreateHistoryAddPageArgs(
     const content::FrameNavigateParams& params) {
   scoped_refptr<history::HistoryAddPageArgs> add_page_args(
       new history::HistoryAddPageArgs(
-          params.url, base::Time::Now(), tab_contents(), params.page_id,
+          params.url, base::Time::Now(), web_contents(), params.page_id,
           params.referrer.url, params.redirects, params.transition,
           history::SOURCE_BROWSED, details.did_replace_entry));
   if (content::PageTransitionIsMainFrame(params.transition) &&
@@ -98,9 +100,9 @@ void HistoryTabHelper::DidNavigateAnyFrame(
   // about: URL to the history db and keep the data: URL hidden. This is what
   // the TabContents' URL getter does.
   scoped_refptr<history::HistoryAddPageArgs> add_page_args(
-      CreateHistoryAddPageArgs(tab_contents()->GetURL(), details, params));
-  if (!tab_contents()->delegate() ||
-      !tab_contents()->delegate()->ShouldAddNavigationToHistory(
+      CreateHistoryAddPageArgs(web_contents()->GetURL(), details, params));
+  if (!web_contents()->GetDelegate() ||
+      !web_contents()->GetDelegate()->ShouldAddNavigationToHistory(
           *add_page_args, details.type))
     return;
 
@@ -110,7 +112,7 @@ void HistoryTabHelper::DidNavigateAnyFrame(
 void HistoryTabHelper::Observe(int type,
                                const content::NotificationSource& source,
                                const content::NotificationDetails& details) {
-  DCHECK(type == content::NOTIFICATION_TAB_CONTENTS_TITLE_UPDATED);
+  DCHECK(type == content::NOTIFICATION_WEB_CONTENTS_TITLE_UPDATED);
   TitleUpdatedDetails* title =
       content::Details<TitleUpdatedDetails>(details).ptr();
 
@@ -148,7 +150,7 @@ void HistoryTabHelper::OnThumbnail(const GURL& url,
                                    const ThumbnailScore& score,
                                    const SkBitmap& bitmap) {
   Profile* profile =
-      Profile::FromBrowserContext(tab_contents()->browser_context());
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   if (profile->IsOffTheRecord())
     return;
 
@@ -162,7 +164,7 @@ void HistoryTabHelper::OnThumbnail(const GURL& url,
 
 HistoryService* HistoryTabHelper::GetHistoryService() {
   Profile* profile =
-      Profile::FromBrowserContext(tab_contents()->browser_context());
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   if (profile->IsOffTheRecord())
     return NULL;
 

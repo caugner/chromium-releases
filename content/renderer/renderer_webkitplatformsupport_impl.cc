@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,12 +22,13 @@
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/gamepad_shared_memory_reader.h"
 #include "content/renderer/gpu/webgraphicscontext3d_command_buffer_impl.h"
+#include "content/renderer/indexed_db/renderer_webidbfactory_impl.h"
 #include "content/renderer/media/audio_device.h"
 #include "content/renderer/media/audio_hardware.h"
+#include "content/renderer/media/renderer_webaudiodevice_impl.h"
 #include "content/renderer/render_thread_impl.h"
+#include "content/renderer/render_view_impl.h"
 #include "content/renderer/renderer_clipboard_client.h"
-#include "content/renderer/renderer_webaudiodevice_impl.h"
-#include "content/renderer/renderer_webidbfactory_impl.h"
 #include "content/renderer/renderer_webstoragenamespace_impl.h"
 #include "content/renderer/websharedworkerrepository_impl.h"
 #include "googleurl/src/gurl.h"
@@ -39,6 +40,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBFactory.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKey.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebIDBKeyPath.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPeerConnectionHandler.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebPeerConnectionHandlerClient.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebRuntimeFeatures.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebSerializedScriptValue.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebStorageEventDispatcher.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURL.h"
@@ -416,7 +420,8 @@ bool RendererWebKitPlatformSupportImpl::FileUtilities::getFileSize(
 void RendererWebKitPlatformSupportImpl::FileUtilities::revealFolderInOS(
     const WebString& path) {
   FilePath file_path(webkit_glue::WebStringToFilePath(path));
-  file_util::AbsolutePath(&file_path);
+  bool res = file_util::AbsolutePath(&file_path);
+  DCHECK(res);
   RenderThreadImpl::current()->Send(
       new ViewHostMsg_RevealFolderInOS(file_path));
 }
@@ -576,6 +581,28 @@ RendererWebKitPlatformSupportImpl::createGraphicsContext3D() {
   }
 }
 
+WebKit::WebGraphicsContext3D*
+RendererWebKitPlatformSupportImpl::createOffscreenGraphicsContext3D(
+    const WebGraphicsContext3D::Attributes& attributes) {
+  // The WebGraphicsContext3DInProcessImpl code path is used for
+  // layout tests (though not through this code) as well as for
+  // debugging and bringing up new ports.
+  scoped_ptr<WebGraphicsContext3D> context;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kInProcessWebGL)) {
+    context.reset(new webkit::gpu::WebGraphicsContext3DInProcessImpl(
+        gfx::kNullPluginWindow, NULL));
+  } else {
+#if defined(ENABLE_GPU)
+    context.reset(new WebGraphicsContext3DCommandBufferImpl());
+#else
+    return NULL;
+#endif
+  }
+  if (!context->initialize(attributes, NULL, false))
+    return NULL;
+  return context.release();
+}
+
 double RendererWebKitPlatformSupportImpl::audioHardwareSampleRate() {
   return audio_hardware::GetOutputSampleRate();
 }
@@ -641,4 +668,18 @@ void RendererWebKitPlatformSupportImpl::GetPlugins(
     refresh = false;
   RenderThreadImpl::current()->Send(
       new ViewHostMsg_GetPlugins(refresh, plugins));
+}
+
+//------------------------------------------------------------------------------
+
+WebKit::WebPeerConnectionHandler*
+RendererWebKitPlatformSupportImpl::createPeerConnectionHandler(
+    WebKit::WebPeerConnectionHandlerClient* client) {
+  WebFrame* web_frame = WebFrame::frameForCurrentContext();
+  if (!web_frame)
+    return NULL;
+  RenderViewImpl* render_view = RenderViewImpl::FromWebView(web_frame->view());
+  if (!render_view)
+    return NULL;
+  return render_view->CreatePeerConnectionHandler(client);
 }

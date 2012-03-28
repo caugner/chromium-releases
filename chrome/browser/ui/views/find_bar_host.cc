@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,8 +13,8 @@
 #include "chrome/browser/ui/views/find_bar_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
 #include "ui/base/keycodes/keyboard_codes.h"
 #include "ui/views/focus/external_focus_tracker.h"
 #include "ui/views/focus/view_storage.h"
@@ -69,12 +69,13 @@ bool FindBarHost::MaybeForwardKeyEventToWebpage(
   if (!contents)
     return false;
 
-  RenderViewHost* render_view_host = contents->render_view_host();
+  RenderViewHost* render_view_host =
+      contents->web_contents()->GetRenderViewHost();
 
   // Make sure we don't have a text field element interfering with keyboard
   // input. Otherwise Up and Down arrow key strokes get eaten. "Nom Nom Nom".
   render_view_host->ClearFocusedNode();
-  NativeWebKeyboardEvent event = GetKeyboardEvent(contents->tab_contents(),
+  NativeWebKeyboardEvent event = GetKeyboardEvent(contents->web_contents(),
                                                   key_event);
   render_view_host->ForwardKeyboardEvent(event);
   return true;
@@ -156,8 +157,8 @@ bool FindBarHost::IsFindBarVisible() {
 
 void FindBarHost::RestoreSavedFocus() {
   if (focus_tracker() == NULL) {
-    // TODO(brettw) Focus() should be on TabContentsView.
-    find_bar_controller_->tab_contents()->tab_contents()->Focus();
+    // TODO(brettw) Focus() should be on WebContentsView.
+    find_bar_controller_->tab_contents()->web_contents()->Focus();
   } else {
     focus_tracker()->FocusLastFocusedExternalView();
   }
@@ -184,6 +185,10 @@ bool FindBarHost::AcceleratorPressed(const ui::Accelerator& accelerator) {
     NOTREACHED() << "Unknown accelerator";
   }
 
+  return true;
+}
+
+bool FindBarHost::CanHandleAccelerators() const {
   return true;
 }
 
@@ -319,7 +324,8 @@ void FindBarHost::UnregisterAccelerators() {
 
 void FindBarHost::GetWidgetPositionNative(gfx::Rect* avoid_overlapping_rect) {
   gfx::Rect frame_rect = host()->GetTopLevelWidget()->GetWindowScreenBounds();
-  TabContentsView* tab_view = find_bar_controller_->tab_contents()->view();
+  content::WebContentsView* tab_view =
+      find_bar_controller_->tab_contents()->web_contents()->GetView();
   gfx::Rect webcontents_rect;
   tab_view->GetViewBounds(&webcontents_rect);
   avoid_overlapping_rect->Offset(0, webcontents_rect.y() - frame_rect.y());

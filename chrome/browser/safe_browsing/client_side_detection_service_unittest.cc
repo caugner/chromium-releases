@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/common/safe_browsing/client_model.pb.h"
@@ -123,24 +122,32 @@ class ClientSideDetectionServiceTest : public testing::Test {
   void TestCache() {
     ClientSideDetectionService::PhishingCache& cache = csd_service_->cache_;
     base::Time now = base::Time::Now();
-    base::Time time = now - ClientSideDetectionService::kNegativeCacheInterval +
+    base::Time time =
+        now - base::TimeDelta::FromDays(
+            ClientSideDetectionService::kNegativeCacheIntervalDays) +
         base::TimeDelta::FromMinutes(5);
     cache[GURL("http://first.url.com/")] =
         make_linked_ptr(new ClientSideDetectionService::CacheState(false,
                                                                    time));
 
-    time = now - ClientSideDetectionService::kNegativeCacheInterval -
+    time =
+        now - base::TimeDelta::FromDays(
+            ClientSideDetectionService::kNegativeCacheIntervalDays) -
         base::TimeDelta::FromHours(1);
     cache[GURL("http://second.url.com/")] =
         make_linked_ptr(new ClientSideDetectionService::CacheState(false,
                                                                    time));
 
-    time = now - ClientSideDetectionService::kPositiveCacheInterval -
+    time =
+        now - base::TimeDelta::FromMinutes(
+            ClientSideDetectionService::kPositiveCacheIntervalMinutes) -
         base::TimeDelta::FromMinutes(5);
     cache[GURL("http://third.url.com/")] =
         make_linked_ptr(new ClientSideDetectionService::CacheState(true, time));
 
-    time = now - ClientSideDetectionService::kPositiveCacheInterval +
+    time =
+        now - base::TimeDelta::FromMinutes(
+            ClientSideDetectionService::kPositiveCacheIntervalMinutes) +
         base::TimeDelta::FromMinutes(5);
     cache[GURL("http://fourth.url.com/")] =
         make_linked_ptr(new ClientSideDetectionService::CacheState(true, time));
@@ -354,19 +361,11 @@ TEST_F(ClientSideDetectionServiceTest, SendClientReportPhishingRequest) {
                                   false /* success */);
   EXPECT_FALSE(SendClientReportPhishingRequest(second_url, score));
 
-  // This is a false positive.
-  response.set_phishy(true);
-  response.add_whitelist_expression("c.com/a.html");
-  SetClientReportPhishingResponse(response.SerializeAsString(),
-                                  true /* success */);
-  GURL third_url("http://c.com/");
-  EXPECT_FALSE(SendClientReportPhishingRequest(third_url, score));
-
   base::Time after = base::Time::Now();
 
-  // Check that we have recorded all 4 requests within the correct time range.
+  // Check that we have recorded all 3 requests within the correct time range.
   std::queue<base::Time>& report_times = GetPhishingReportTimes();
-  EXPECT_EQ(4U, report_times.size());
+  EXPECT_EQ(3U, report_times.size());
   while (!report_times.empty()) {
     base::Time time = report_times.back();
     report_times.pop();
@@ -662,38 +661,5 @@ TEST_F(ClientSideDetectionServiceTest, SetEnabledAndRefreshState) {
   csd_service_->SetEnabledAndRefreshState(true);
   EXPECT_FALSE(SendClientReportPhishingRequest(GURL("http://a.com/"), 0.4f));
   Mock::VerifyAndClearExpectations(service);
-}
-
-TEST_F(ClientSideDetectionServiceTest, IsFalsePositiveResponse) {
-  GURL url("http://www.google.com/");
-  ClientPhishingResponse response;
-
-  // If the response is not phishing is should never be a false positive.
-  response.set_phishy(false);
-  response.add_whitelist_expression("www.google.com/");
-  EXPECT_FALSE(ClientSideDetectionService::IsFalsePositiveResponse(
-      url, response));
-
-  // If there are no entries in the whitelist it should always return false.
-  response.clear_whitelist_expression();
-  response.set_phishy(true);
-  EXPECT_FALSE(ClientSideDetectionService::IsFalsePositiveResponse(
-      url, response));
-
-  // If the URL doesn't match any whitelist entries it whould return false.
-  response.add_whitelist_expression("www.yahoo.com/");
-  EXPECT_FALSE(ClientSideDetectionService::IsFalsePositiveResponse(
-      url, response));
-
-  // If the URL matches the whitelist it should return true.
-  response.add_whitelist_expression("google.com/");
-  EXPECT_TRUE(ClientSideDetectionService::IsFalsePositiveResponse(
-      url, response));
-
-  // If an entry in the whitelist matches the URL it should return true.
-  response.clear_whitelist_expression();
-  response.add_whitelist_expression("www.google.com/a/b.html");
-  EXPECT_TRUE(ClientSideDetectionService::IsFalsePositiveResponse(
-      url, response));
 }
 }  // namespace safe_browsing

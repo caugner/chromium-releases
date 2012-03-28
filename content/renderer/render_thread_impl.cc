@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 #include "base/metrics/stats_table.h"
 #include "base/shared_memory.h"
 #include "base/string_number_conversions.h"  // Temporary
-#include "base/task.h"
 #include "base/threading/thread_local.h"
 #include "base/values.h"
 #include "base/win/scoped_com_initializer.h"
@@ -42,7 +41,9 @@
 #include "content/renderer/devtools_agent_filter.h"
 #include "content/renderer/gpu/compositor_thread.h"
 #include "content/renderer/gpu/gpu_channel_host.h"
-#include "content/renderer/indexed_db_dispatcher.h"
+#include "content/renderer/indexed_db/indexed_db_dispatcher.h"
+#include "content/renderer/indexed_db/indexed_db_message_filter.h"
+#include "content/renderer/indexed_db/renderer_webidbfactory_impl.h"
 #include "content/renderer/media/audio_input_message_filter.h"
 #include "content/renderer/media/audio_message_filter.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
@@ -50,7 +51,6 @@
 #include "content/renderer/plugin_channel_host.h"
 #include "content/renderer/render_process_impl.h"
 #include "content/renderer/render_view_impl.h"
-#include "content/renderer/renderer_webidbfactory_impl.h"
 #include "content/renderer/renderer_webkitplatformsupport_impl.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_platform_file.h"
@@ -101,21 +101,21 @@ using WebKit::WebView;
 using content::RenderProcessObserver;
 
 namespace {
-static const int64 kInitialIdleHandlerDelayMs = 1000;
-static const int64 kShortIdleHandlerDelayMs = 1000;
-static const int64 kLongIdleHandlerDelayMs = 30*1000;
-static const int kIdleCPUUsageThresholdInPercents = 3;
+
+const int64 kInitialIdleHandlerDelayMs = 1000;
+const int64 kShortIdleHandlerDelayMs = 1000;
+const int64 kLongIdleHandlerDelayMs = 30*1000;
+const int kIdleCPUUsageThresholdInPercents = 3;
 
 // Keep the global RenderThreadImpl in a TLS slot so it is impossible to access
 // incorrectly from the wrong thread.
-static base::LazyInstance<base::ThreadLocalPointer<RenderThreadImpl> >
+base::LazyInstance<base::ThreadLocalPointer<RenderThreadImpl> >
     lazy_tls = LAZY_INSTANCE_INITIALIZER;
 
 class RenderViewZoomer : public content::RenderViewVisitor {
  public:
-  RenderViewZoomer(const GURL& url, double zoom_level)
-      : zoom_level_(zoom_level) {
-    host_ = net::GetHostOrSpecFromURL(url);
+  RenderViewZoomer(const std::string& host, double zoom_level)
+      : host_(host), zoom_level_(zoom_level) {
   }
 
   virtual bool Visit(content::RenderView* render_view) {
@@ -195,10 +195,10 @@ void RenderThreadImpl::Init() {
   idle_notification_delay_in_ms_ = kInitialIdleHandlerDelayMs;
   idle_notifications_to_skip_ = 0;
   compositor_initialized_ = false;
-  task_factory_.reset(new ScopedRunnableMethodFactory<RenderThreadImpl>(this));
 
   appcache_dispatcher_.reset(new AppCacheDispatcher(Get()));
-  indexed_db_dispatcher_.reset(new IndexedDBDispatcher());
+  main_thread_indexed_db_dispatcher_.reset(
+      IndexedDBDispatcher::ThreadSpecificInstance());
 
   db_message_filter_ = new DBMessageFilter();
   AddFilter(db_message_filter_.get());
@@ -214,6 +214,8 @@ void RenderThreadImpl::Init() {
 
   devtools_agent_message_filter_ = new DevToolsAgentFilter();
   AddFilter(devtools_agent_message_filter_.get());
+
+  AddFilter(new IndexedDBMessageFilter);
 
   content::GetContentClient()->renderer()->RenderThreadStarted();
 
@@ -359,6 +361,10 @@ std::string RenderThreadImpl::GetLocale() {
   return lang;
 }
 
+IPC::SyncMessageFilter* RenderThreadImpl::GetSyncMessageFilter() {
+  return sync_message_filter();
+}
+
 void RenderThreadImpl::AddRoute(int32 routing_id,
                                 IPC::Channel::Listener* listener) {
   widget_count_++;
@@ -489,8 +495,7 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
   WebRuntimeFeatures::enableSessionStorage(
       !command_line.HasSwitch(switches::kDisableSessionStorage));
 
-  WebRuntimeFeatures::enableIndexedDatabase(
-      !command_line.HasSwitch(switches::kDisableIndexedDatabase));
+  WebRuntimeFeatures::enableIndexedDatabase(true);
 
   WebRuntimeFeatures::enableGeolocation(
       !command_line.HasSwitch(switches::kDisableGeolocation));
@@ -541,6 +546,9 @@ void RenderThreadImpl::EnsureWebKitInitialized() {
       command_line.HasSwitch(switches::kEnableGamepad));
 
   WebRuntimeFeatures::enableQuota(true);
+
+  WebRuntimeFeatures::enableShadowDOM(
+      command_line.HasSwitch(switches::kEnableShadowDOM));
 
   FOR_EACH_OBSERVER(RenderProcessObserver, observers_, WebKitInitialized());
 
@@ -622,7 +630,7 @@ void RenderThreadImpl::IdleHandlerInForegroundTab() {
   if (idle_notifications_to_skip_ > 0) {
     idle_notifications_to_skip_--;
   } else  {
-    int cpu_usage;
+    int cpu_usage = 0;
     Send(new ViewHostMsg_GetCPUUsage(&cpu_usage));
     if (cpu_usage < kIdleCPUUsageThresholdInPercents &&
         v8::V8::IdleNotification()) {
@@ -680,9 +688,9 @@ void RenderThreadImpl::DoNotNotifyWebKitOfModalLoop() {
   notify_webkit_of_modal_loop_ = false;
 }
 
-void RenderThreadImpl::OnSetZoomLevelForCurrentURL(const GURL& url,
+void RenderThreadImpl::OnSetZoomLevelForCurrentURL(const std::string& host,
                                                    double zoom_level) {
-  RenderViewZoomer zoomer(url, zoom_level);
+  RenderViewZoomer zoomer(host, zoom_level);
   content::RenderView::ForEach(&zoomer);
 }
 
@@ -708,14 +716,11 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
   // Some messages are handled by delegates.
   if (appcache_dispatcher_->OnMessageReceived(msg))
     return true;
-  if (indexed_db_dispatcher_->OnMessageReceived(msg))
-    return true;
 
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(RenderThreadImpl, msg)
     IPC_MESSAGE_HANDLER(ViewMsg_SetZoomLevelForCurrentURL,
                         OnSetZoomLevelForCurrentURL)
-    IPC_MESSAGE_HANDLER(ViewMsg_SetNextPageID, OnSetNextPageID)
     IPC_MESSAGE_HANDLER(ViewMsg_SetCSSColors, OnSetCSSColors)
     // TODO(port): removed from render_messages_internal.h;
     // is there a new non-windows message I should add here?
@@ -727,14 +732,6 @@ bool RenderThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
-}
-
-void RenderThreadImpl::OnSetNextPageID(int32 next_page_id) {
-  // This is called at process initialization time or when this process is
-  // being re-used for a new RenderView.  It is ok if another RenderView
-  // has identical page_ids or inflates next_page_id_ just before this arrives,
-  // as long as we ensure next_page_id_ is at least this large.
-  RenderViewImpl::SetNextPageID(next_page_id);
 }
 
 // Called when to register CSS Color name->system color mappings.
@@ -768,8 +765,10 @@ void RenderThreadImpl::OnCreateNewView(const ViewMsg_New_Params& params) {
       params.web_preferences,
       new SharedRenderViewCounter(0),
       params.view_id,
+      params.surface_id,
       params.session_storage_namespace_id,
-      params.frame_name);
+      params.frame_name,
+      params.next_page_id);
 }
 
 GpuChannelHost* RenderThreadImpl::EstablishGpuChannelSync(
@@ -838,6 +837,8 @@ void RenderThreadImpl::OnPurgePluginListCache(bool reload_pages) {
   plugin_refresh_allowed_ = false;
   WebKit::resetPluginCache(reload_pages);
   plugin_refresh_allowed_ = true;
+
+  FOR_EACH_OBSERVER(RenderProcessObserver, observers_, PluginListChanged());
 }
 
 void RenderThreadImpl::OnNetworkStateChanged(bool online) {
@@ -846,12 +847,7 @@ void RenderThreadImpl::OnNetworkStateChanged(bool online) {
 }
 
 void RenderThreadImpl::OnTempCrashWithData(const GURL& data) {
-  // Append next_page_id_ to the data from the browser.
-  std::string temp = data.spec();
-  temp.append("#next");
-  temp.append(base::IntToString(RenderViewImpl::next_page_id()));
-
-  content::GetContentClient()->SetActiveURL(GURL(temp));
+  content::GetContentClient()->SetActiveURL(data);
   CHECK(false);
 }
 

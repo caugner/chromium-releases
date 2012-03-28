@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -547,7 +547,7 @@ int X509Certificate::VerifyInternal(const std::string& hostname,
       break;
     case android::VERIFY_INVOCATION_ERROR:
     default:
-      verify_result->cert_status |= ERR_CERT_INVALID;
+      verify_result->cert_status |= CERT_STATUS_INVALID;
       break;
   }
   if (IsCertStatusError(verify_result->cert_status))
@@ -660,6 +660,39 @@ bool X509Certificate::WriteOSCertHandleToPickle(OSCertHandle cert_handle,
   return pickle->WriteData(
       reinterpret_cast<const char*>(der_cache.data),
       der_cache.data_length);
+}
+
+// static
+void X509Certificate::GetPublicKeyInfo(OSCertHandle cert_handle,
+                                       size_t* size_bits,
+                                       PublicKeyType* type) {
+  crypto::ScopedOpenSSL<EVP_PKEY, EVP_PKEY_free> scoped_key(
+      X509_get_pubkey(cert_handle));
+  CHECK(scoped_key.get());
+  EVP_PKEY* key = scoped_key.get();
+
+  switch (key->type) {
+    case EVP_PKEY_RSA:
+      *type = kPublicKeyTypeRSA;
+      *size_bits = EVP_PKEY_size(key) * 8;
+      break;
+    case EVP_PKEY_DSA:
+      *type = kPublicKeyTypeDSA;
+      *size_bits = EVP_PKEY_size(key) * 8;
+      break;
+    case EVP_PKEY_EC:
+      *type = kPublicKeyTypeECDSA;
+      *size_bits = EVP_PKEY_size(key);
+      break;
+    case EVP_PKEY_DH:
+      *type = kPublicKeyTypeDH;
+      *size_bits = EVP_PKEY_size(key) * 8;
+      break;
+    default:
+      *type = kPublicKeyTypeUnknown;
+      *size_bits = 0;
+      break;
+  }
 }
 
 #if defined(OS_ANDROID)

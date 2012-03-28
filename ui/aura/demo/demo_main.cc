@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,12 +8,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "third_party/skia/include/core/SkXfermode.h"
-#include "ui/aura/desktop.h"
 #include "ui/aura/event.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/aura/root_window.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/gfx/canvas_skia.h"
 #include "ui/gfx/compositor/test/compositor_test_support.h"
@@ -53,10 +53,10 @@ class DemoWindowDelegate : public aura::WindowDelegate {
   virtual ui::TouchStatus OnTouchEvent(aura::TouchEvent* event) OVERRIDE {
     return ui::TOUCH_STATUS_END;
   }
+  virtual ui::GestureStatus OnGestureEvent(aura::GestureEvent* event) OVERRIDE {
+    return ui::GESTURE_STATUS_UNKNOWN;
+  }
   virtual bool CanFocus() OVERRIDE { return true; }
-  virtual bool ShouldActivate(aura::Event* event) OVERRIDE { return true; }
-  virtual void OnActivated() OVERRIDE {}
-  virtual void OnLostActive() OVERRIDE {}
   virtual void OnCaptureLost() OVERRIDE {}
   virtual void OnPaint(gfx::Canvas* canvas) OVERRIDE {
     canvas->GetSkCanvas()->drawColor(color_, SkXfermode::kSrc_Mode);
@@ -82,19 +82,19 @@ int main(int argc, char** argv) {
 
   ui::RegisterPathProvider();
   icu_util::Initialize();
-  ResourceBundle::InitSharedInstance("en-US");
+  ResourceBundle::InitSharedInstanceWithLocale("en-US");
 
-  // Create the message-loop here before creating the desktop.
+  // Create the message-loop here before creating the root window.
   MessageLoop message_loop(MessageLoop::TYPE_UI);
   ui::CompositorTestSupport::Initialize();
 
-  aura::Desktop::GetInstance();
+  aura::RootWindow::GetInstance();
 
   // Create a hierarchy of test windows.
   DemoWindowDelegate window_delegate1(SK_ColorBLUE);
   aura::Window window1(&window_delegate1);
   window1.set_id(1);
-  window1.Init(ui::Layer::LAYER_HAS_TEXTURE);
+  window1.Init(ui::Layer::LAYER_TEXTURED);
   window1.SetBounds(gfx::Rect(100, 100, 400, 400));
   window1.Show();
   window1.SetParent(NULL);
@@ -102,7 +102,7 @@ int main(int argc, char** argv) {
   DemoWindowDelegate window_delegate2(SK_ColorRED);
   aura::Window window2(&window_delegate2);
   window2.set_id(2);
-  window2.Init(ui::Layer::LAYER_HAS_TEXTURE);
+  window2.Init(ui::Layer::LAYER_TEXTURED);
   window2.SetBounds(gfx::Rect(200, 200, 350, 350));
   window2.Show();
   window2.SetParent(NULL);
@@ -110,12 +110,12 @@ int main(int argc, char** argv) {
   DemoWindowDelegate window_delegate3(SK_ColorGREEN);
   aura::Window window3(&window_delegate3);
   window3.set_id(3);
-  window3.Init(ui::Layer::LAYER_HAS_TEXTURE);
+  window3.Init(ui::Layer::LAYER_TEXTURED);
   window3.SetBounds(gfx::Rect(10, 10, 50, 50));
   window3.Show();
   window3.SetParent(&window2);
 
-  aura::Desktop::GetInstance()->Run();
+  aura::RootWindow::GetInstance()->Run();
 
   ui::CompositorTestSupport::Terminate();
 

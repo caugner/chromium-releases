@@ -2,7 +2,8 @@ Name: Mongoose webserver
 Short Name: mongoose
 URL: http://code.google.com/p/mongoose/
 LICENSE: MIT
-Version: Revision 55cf8bf30cd9 (between 3.0 and 3.1)
+Version: 55cf8bf30cd9
+Release: between 3.0 and 3.1
 Security Critical: no
 
 Description:
@@ -14,10 +15,13 @@ bindings to multiple languages.  The server is only used to serve custom
 URLs from the JSON over HTTP webdriver protocol.
 
 Note:  There is no make file for this project, it's compiled directly in
-the chrome versoin of webdriver found under the directory:
+the chrome version of webdriver found under the directory:
   src/chrome/test/webdriver
 
 Local modifications (all detailed in chrome-mongoose-modifications.diff,
 pending upstreaming by danielwh):
 * Fixed a couple of Windows/VS2010 compiler warnings/errors
 * Fixed linger code to apply to sockets from bind, rather than shutdown
+* Don't ignore SIGCHLD, since the proxy launcher depends on it for determining
+  chrome's exit code.
+* Removed a "set but never used" variable, to fix build for gcc 4.6.

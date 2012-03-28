@@ -12,8 +12,8 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/string16.h"
-#include "base/task.h"
 #include "base/time.h"
 #include "net/proxy/proxy_script_fetcher.h"
 #include "net/url_request/url_request.h"
@@ -47,7 +47,7 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
 
   // ProxyScriptFetcher methods:
   virtual int Fetch(const GURL& url, string16* text,
-                    OldCompletionCallback* callback) OVERRIDE;
+                    const net::CompletionCallback& callback) OVERRIDE;
   virtual void Cancel() OVERRIDE;
   virtual URLRequestContext* GetRequestContext() const OVERRIDE;
 
@@ -82,7 +82,7 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
 
   // Factory for creating the time-out task. This takes care of revoking
   // outstanding tasks when |this| is deleted.
-  ScopedRunnableMethodFactory<ProxyScriptFetcherImpl> task_factory_;
+  base::WeakPtrFactory<ProxyScriptFetcherImpl> weak_factory_;
 
   // The context used for making network requests.
   URLRequestContext* url_request_context_;
@@ -102,7 +102,7 @@ class NET_EXPORT ProxyScriptFetcherImpl : public ProxyScriptFetcher,
   int cur_request_id_;
 
   // Callback to invoke on completion of the fetch.
-  OldCompletionCallback* callback_;
+  net::CompletionCallback callback_;
 
   // Holds the error condition that was hit on the current request, or OK.
   int result_code_;

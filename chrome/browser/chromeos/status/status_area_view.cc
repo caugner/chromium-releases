@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,12 +13,12 @@
 #include "ui/gfx/canvas.h"
 #include "ui/views/border.h"
 
-// Number of pixels to separate each icon.
-#if defined(TOUCH_UI)
-const int kSeparation = 25;
-#else
-const int kSeparation = 0;
+#if defined(USE_AURA)
+#include "ui/views/widget/widget.h"
 #endif
+
+// Number of pixels to separate each icon.
+const int kSeparation = 0;
 
 StatusAreaView::StatusAreaView()
     : need_return_focus_(false) {
@@ -55,7 +55,7 @@ gfx::Size StatusAreaView::GetPreferredSize() {
   for (int i = 0; i < child_count(); i++) {
     views::View* cur = child_at(i);
     gfx::Size cur_size = cur->GetPreferredSize();
-    if (cur->IsVisible() && !cur_size.IsEmpty()) {
+    if (cur->visible() && !cur_size.IsEmpty()) {
       if (result_w == 0)
         result_w = kSeparation;
 
@@ -73,7 +73,7 @@ void StatusAreaView::Layout() {
   for (int i = 0; i < child_count(); i++) {
     views::View* cur = child_at(i);
     gfx::Size cur_size = cur->GetPreferredSize();
-    if (cur->IsVisible() && !cur_size.IsEmpty()) {
+    if (cur->visible() && !cur_size.IsEmpty()) {
       int cur_y = (height() - cur_size.height()) / 2;
 
       // Handle odd number of pixels.
@@ -84,6 +84,14 @@ void StatusAreaView::Layout() {
       cur_x += cur_size.width() + kSeparation;
     }
   }
+}
+
+void StatusAreaView::PreferredSizeChanged() {
+#if defined(USE_AURA)
+  if (GetWidget())
+    GetWidget()->SetSize(GetPreferredSize());
+#endif
+  views::AccessiblePaneView::PreferredSizeChanged();
 }
 
 void StatusAreaView::ChildPreferredSizeChanged(View* child) {
@@ -97,13 +105,21 @@ void StatusAreaView::ChildPreferredSizeChanged(View* child) {
 void StatusAreaView::MakeButtonsActive(bool active) {
   for (std::list<StatusAreaButton*>::iterator iter = buttons_.begin();
        iter != buttons_.end(); ++iter) {
-    (*iter)->set_menu_active(active);
+    (*iter)->SetMenuActive(active);
   }
 }
 
 void StatusAreaView::UpdateButtonVisibility() {
   Layout();
   PreferredSizeChanged();
+}
+
+void StatusAreaView::UpdateButtonTextStyle() {
+  for (std::list<StatusAreaButton*>::const_iterator it = buttons_.begin();
+       it != buttons_.end(); ++it) {
+    StatusAreaButton* button = *it;
+    button->UpdateTextStyle();
+  }
 }
 
 void StatusAreaView::TakeFocus(

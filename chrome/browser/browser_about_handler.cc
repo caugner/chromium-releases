@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,12 +6,14 @@
 
 #include <string>
 
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/string_util.h"
 #include "chrome/browser/net/url_fixer_upper.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/about_handler.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/gpu/gpu_process_host_ui_shim.h"
 #include "content/browser/sensors/sensors_provider.h"
@@ -44,8 +46,10 @@ const char* const kChromePaths[] = {
   chrome::kChromeUIMediaInternalsHost,
   chrome::kChromeUIMemoryHost,
   chrome::kChromeUINetInternalsHost,
+  chrome::kChromeUINetworkActionPredictorHost,
   chrome::kChromeUINetworkViewCacheHost,
   chrome::kChromeUINewTabHost,
+  chrome::kChromeUIOmniboxHost,
   chrome::kChromeUIPluginsHost,
   chrome::kChromeUIPrintHost,
   chrome::kChromeUIProfilerHost,
@@ -104,6 +108,9 @@ bool WillHandleBrowserAboutURL(GURL* url,
   if (chrome_about_handler::WillHandle(*url))
     return false;
 
+  CommandLine* cl = CommandLine::ForCurrentProcess();
+  bool enableUberPage = cl->HasSwitch(switches::kEnableUberPage);
+
   std::string host(url->host());
   std::string path;
   // Replace about with chrome-urls.
@@ -118,10 +125,26 @@ bool WillHandleBrowserAboutURL(GURL* url,
   // Replace sync with sync-internals (for legacy reasons).
   } else if (host == chrome::kChromeUISyncHost) {
     host = chrome::kChromeUISyncInternalsHost;
-  // Redirect chrome://extensions to chrome://settings/extensions.
+  // Redirect chrome://extensions.
   } else if (host == chrome::kChromeUIExtensionsHost) {
-    host = chrome::kChromeUISettingsHost;
-    path = chrome::kExtensionsSubPage;
+    if (enableUberPage) {
+      host = chrome::kChromeUIUberHost;
+      path = chrome::kChromeUIExtensionsHost + url->path();
+    } else {
+      host = chrome::kChromeUISettingsHost;
+      path = chrome::kExtensionsSubPage;
+    }
+  // Redirect chrome://settings/extensions.
+  // TODO(csilv): Fix all code paths for this page once Uber page is enabled
+  // permanently.
+  } else if (enableUberPage && host == chrome::kChromeUISettingsHost &&
+      url->path() == std::string("/") + chrome::kExtensionsSubPage) {
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUIExtensionsHost;
+  // Redirect chrome://settings
+  } else if (enableUberPage && host == chrome::kChromeUISettingsHost) {
+    host = chrome::kChromeUIUberHost;
+    path = chrome::kChromeUISettingsHost + url->path();
   }
   GURL::Replacements replacements;
   replacements.SetHostStr(host);

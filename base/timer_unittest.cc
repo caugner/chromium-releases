@@ -4,7 +4,6 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/timer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -267,7 +266,7 @@ void RunTest_DelayTimer_Deleted(MessageLoop::Type message_loop_type) {
 
   // When the timer is deleted, the DelayTimerFatalTarget should never be
   // called.
-  base::PlatformThread::Sleep(100);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(100));
 }
 
 }  // namespace

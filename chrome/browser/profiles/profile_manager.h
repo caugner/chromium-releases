@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -86,12 +86,23 @@ class ProfileManager : public base::NonThreadSafe,
   // relative to the user data directory currently in use..
   FilePath GetInitialProfileDir();
 
-  // Get the Profile last used with this Chrome build. If no signed profile has
-  // been stored in Local State, hand back the Default profile.
+  // Get the Profile last used (the Profile to which owns the most recently
+  // focused window) with this Chrome build. If no signed profile has been
+  // stored in Local State, hand back the Default profile.
   Profile* GetLastUsedProfile(const FilePath& user_data_dir);
 
   // Same as instance method but provides the default user_data_dir as well.
   static Profile* GetLastUsedProfile();
+
+  // Get the Profiles which are currently open, i.e., have open browsers, or
+  // were open the last time Chrome was running. The Profiles appear in the
+  // order they were opened. The last used profile will be on the list, but its
+  // index on the list will depend on when it was opened (it is not necessarily
+  // the last one).
+  std::vector<Profile*> GetLastOpenedProfiles(const FilePath& user_data_dir);
+
+  // Same as instance method but provides the default user_data_dir as well.
+  static std::vector<Profile*> GetLastOpenedProfiles();
 
   // Returns created profiles. Note, profiles order is NOT guaranteed to be
   // related with the creation order.
@@ -172,11 +183,6 @@ class ProfileManager : public base::NonThreadSafe,
   // for testing. If |addToCache|, add to ProfileInfoCache as well.
   void RegisterTestingProfile(Profile* profile, bool addToCache);
 
-#if defined(OS_WIN)
-  // Remove the shortcut manager for testing.
-  void RemoveProfileShortcutManagerForTesting();
-#endif
-
   const FilePath& user_data_dir() const { return user_data_dir_; }
 
  protected:
@@ -195,6 +201,12 @@ class ProfileManager : public base::NonThreadSafe,
   // a TestingProfile instead of the Profile's result.
   virtual Profile* CreateProfileAsyncHelper(const FilePath& path,
                                             Delegate* delegate);
+
+#if defined(OS_WIN)
+  // Creates a shortcut manager. Override this to return a different shortcut
+  // manager or NULL to avoid creating shortcuts.
+  virtual ProfileShortcutManagerWin* CreateShortcutManager();
+#endif
 
  private:
   friend class TestingProfileManager;
@@ -241,6 +253,16 @@ class ProfileManager : public base::NonThreadSafe,
   // Adds |profile| to the profile info cache if it hasn't been added yet.
   void AddProfileToCache(Profile* profile);
 
+#if defined(OS_WIN)
+  // Creates a profile desktop shortcut for |profile| if we are in multi
+  // profile mode and the shortcut has not been created before.
+  void CreateDesktopShortcut(Profile* profile);
+#endif
+
+  // Initializes user prefs of |profile|. This includes profile name and
+  // avatar values
+  void InitProfileUserPrefs(Profile* profile);
+
   // For ChromeOS, determines if profile should be otr.
   bool ShouldGoOffTheRecord();
 
@@ -284,6 +306,11 @@ class ProfileManager : public base::NonThreadSafe,
   // observing the ProfileInfoCache.
   scoped_ptr<ProfileShortcutManagerWin> profile_shortcut_manager_;
 #endif
+
+  // For keeping track of the last active profiles.
+  std::map<Profile*, int> browser_counts_;
+  std::vector<Profile*> active_profiles_;
+  bool shutdown_started_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileManager);
 };

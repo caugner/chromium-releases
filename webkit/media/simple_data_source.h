@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,8 +15,8 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
-#include "media/base/filter_factories.h"
-#include "media/base/filters.h"
+#include "googleurl/src/gurl.h"
+#include "media/base/data_source.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebFrame.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoader.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebURLLoaderClient.h"
@@ -36,21 +36,12 @@ class SimpleDataSource
     : public WebDataSource,
       public WebKit::WebURLLoaderClient {
  public:
-  // Creates a DataSourceFactory for building SimpleDataSource objects.
-  static media::DataSourceFactory* CreateFactory(
-      MessageLoop* render_loop,
-      WebKit::WebFrame* frame,
-      media::MediaLog* media_log,
-      const WebDataSourceBuildObserverHack& build_observer);
-
   SimpleDataSource(MessageLoop* render_loop, WebKit::WebFrame* frame);
   virtual ~SimpleDataSource();
 
-  // media::Filter implementation.
-  virtual void set_host(media::FilterHost* host) OVERRIDE;
-  virtual void Stop(const base::Closure& callback) OVERRIDE;
-
   // media::DataSource implementation.
+  virtual void set_host(media::DataSourceHost* host) OVERRIDE;
+  virtual void Stop(const base::Closure& callback) OVERRIDE;
   virtual void Read(int64 position,
                     size_t size,
                     uint8* data,
@@ -94,18 +85,15 @@ class SimpleDataSource
       const WebKit::WebURLError&);
 
   // webkit_glue::WebDataSource implementation.
-  virtual void Initialize(const std::string& url,
+  virtual void Initialize(const GURL& url,
                           const media::PipelineStatusCB& callback) OVERRIDE;
-  virtual void CancelInitialize() OVERRIDE;
   virtual bool HasSingleOrigin() OVERRIDE;
   virtual void Abort() OVERRIDE;
 
  private:
-  // Creates and starts the resource loading on the render thread.
-  void StartTask();
-
   // Cancels and deletes the resource loading on the render thread.
   void CancelTask();
+  void CancelTask_Locked();
 
   // Perform initialization completion tasks under a lock.
   void DoneInitialization_Locked(bool success);

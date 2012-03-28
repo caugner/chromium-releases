@@ -12,9 +12,14 @@
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/site_instance.h"
+#include "content/public/browser/notification_service.h"
+#include "content/public/browser/site_instance.h"
+#include "content/public/browser/web_contents.h"
 #include "testing/gtest_mac.h"
 #include "ui/base/accelerators/accelerator_cocoa.h"
+
+using content::SiteInstance;
+using content::WebContents;
 
 @interface FullscreenExitBubbleController(JustForTesting)
 // Already defined.
@@ -43,7 +48,7 @@ class FullscreenExitBubbleControllerTest : public CocoaProfileTest {
     CocoaProfileTest::SetUp();
     ASSERT_TRUE(profile());
 
-    site_instance_ = SiteInstance::CreateSiteInstance(profile());
+    site_instance_ = SiteInstance::Create(profile());
     controller_.reset(
         [[FullscreenExitBubbleController alloc] initWithOwner:nil
                                                       browser:browser()
@@ -76,7 +81,7 @@ TEST_F(FullscreenExitBubbleControllerTest, DenyExitsFullscreen) {
 
   CreateBrowserWindow();
   AppendTabToStrip();
-  TabContents* fullscreen_tab = browser()->GetSelectedTabContents();
+  WebContents* fullscreen_tab = browser()->GetSelectedWebContents();
   {
     base::mac::ScopedNSAutoreleasePool pool;
     ui_test_utils::WindowedNotificationObserver fullscreen_observer(

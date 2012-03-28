@@ -14,6 +14,9 @@
       <!-- KEEP THESE IN ALPHABETICAL ORDER AND SYNCHRONIZED WITH
            theme_resources_large.grd. THIS MEANS THAT EACH ICON IN THIS FILE
            MUST HAVE AN EQUIVALENT ICON IN THE OTHER FILE.-->
+      <include name="IDR_APP_NOTIFICATION_NUB" file="nub.png" type="BINDATA" />
+      <include name="IDR_APP_NOTIFICATION_NUB_MASK" file="nub_mask.png" type="BINDATA" />
+      <include name="IDR_APP_NOTIFICATION_SMALL_BUBBLE" file="small_bubble.png" type="BINDATA" />
       <include name="IDR_BACK" file="back.png" type="BINDATA" />
       <include name="IDR_BACK_D" file="back_d.png" type="BINDATA" />
       <include name="IDR_BACK_H" file="back_h.png" type="BINDATA" />
@@ -40,10 +43,6 @@
         <include name="IDR_BROWSER_ACTIONS_OVERFLOW_H" file="browser_actions_overflow_win_h.png" type="BINDATA" />
         <include name="IDR_BROWSER_ACTIONS_OVERFLOW_P" file="browser_actions_overflow_win_p.png" type="BINDATA" />
       </if>
-      <include name="IDR_CLOSE_BAR" file="close_bar.png" type="BINDATA" />
-      <include name="IDR_CLOSE_BAR_H" file="close_bar_h.png" type="BINDATA" />
-      <include name="IDR_CLOSE_BAR_MASK" file="close_bar_mask.png" type="BINDATA" />
-      <include name="IDR_CLOSE_BAR_P" file="close_bar_p.png" type="BINDATA" />
       <if expr="is_win">
         <include name="IDR_CONFLICT_FAVICON" file="about_conflicts_favicon.png" type="BINDATA" />
       </if>
@@ -91,10 +90,16 @@
       <include name="IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_C" file="keyword_search_bubble_c.png" type="BINDATA" />
       <include name="IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_L" file="keyword_search_bubble_l.png" type="BINDATA" />
       <include name="IDR_LOCATION_BAR_SELECTED_KEYWORD_BACKGROUND_R" file="keyword_search_bubble_r.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON" file="newtab.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_H" file="newtab_h.png" type="BINDATA" />
+      <if expr="pp_ifdef('toolkit_views')">
+        <include name="IDR_NEWTAB_BUTTON" file="newtab_views.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_P" file="newtab_p_views.png" type="BINDATA" />
+      </if>
+      <if expr="not pp_ifdef('toolkit_views')">
+        <include name="IDR_NEWTAB_BUTTON" file="newtab.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_H" file="newtab_h.png" type="BINDATA" />
+        <include name="IDR_NEWTAB_BUTTON_P" file="newtab_p.png" type="BINDATA" />
+      </if>
       <include name="IDR_NEWTAB_BUTTON_MASK" file="newtab_button_mask.png" type="BINDATA" />
-      <include name="IDR_NEWTAB_BUTTON_P" file="newtab_p.png" type="BINDATA" />
       <include name="IDR_SETTINGS_FAVICON" file="settings_favicon.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_EV_BUBBLE_BACKGROUND_C" file="ev_bubble_c.png" type="BINDATA" />
       <include name="IDR_OMNIBOX_EV_BUBBLE_BACKGROUND_L" file="ev_bubble_l.png" type="BINDATA" />
@@ -129,6 +134,8 @@
         <include name="IDR_THEME_FRAME_INACTIVE" file="theme_frame_default_inactive_aura.png" type="BINDATA" />
         <include name="IDR_THEME_FRAME_INCOGNITO" file="theme_frame_default_incognito_aura.png" type="BINDATA" />
         <include name="IDR_THEME_FRAME_INCOGNITO_INACTIVE" file="theme_frame_default_incognito_aura.png" type="BINDATA" />
+        <include name="IDR_THEME_FRAME_COMPACT" file="theme_frame_default2.png" type="BINDATA" />
+        <include name="IDR_THEME_FRAME_INCOGNITO_COMPACT" file="theme_frame_default2_incognito.png" type="BINDATA" />
       </if>
       <if expr="pp_ifdef('chromeos') and not pp_ifdef('use_aura')">
         <include name="IDR_THEME_FRAME" file="theme_frame_default2.png" type="BINDATA" />
@@ -142,7 +149,7 @@
         <include name="IDR_THEME_FRAME_INCOGNITO" file="theme_frame_default_incognito.png" type="BINDATA" />
         <include name="IDR_THEME_FRAME_INCOGNITO_INACTIVE" file="theme_frame_default_incognito_inactive.png" type="BINDATA" />
       </if>
-      <if expr="pp_ifdef('chromeos')">
+      <if expr="pp_ifdef('chromeos') or pp_ifdef('use_aura')">
         <include name="IDR_THEME_FRAME_LEFT" file="theme_frame_default2_upper_left.png" type="BINDATA" />
         <include name="IDR_THEME_FRAME_RIGHT" file="theme_frame_default2_upper_right.png" type="BINDATA" />
         <include name="IDR_THEME_FRAME_INCOGNITO_LEFT" file="theme_frame_default2_incognito_upper_left.png" type="BINDATA" />

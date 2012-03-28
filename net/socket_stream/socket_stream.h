@@ -13,7 +13,6 @@
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/task.h"
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
@@ -336,10 +335,7 @@ class NET_EXPORT SocketStream
   SSLConfig server_ssl_config_;
   SSLConfig proxy_ssl_config_;
 
-  const CompletionCallback io_callback_;
-  OldCompletionCallbackImpl<SocketStream> io_callback_old_;
-  OldCompletionCallbackImpl<SocketStream> read_callback_old_;
-  OldCompletionCallbackImpl<SocketStream> write_callback_old_;
+  CompletionCallback io_callback_;
 
   scoped_refptr<IOBuffer> read_buf_;
   int read_buf_size_;

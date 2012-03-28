@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,11 @@
 
 #include "chrome/browser/sessions/session_id.h"
 
-class NavigationEntry;
 class Profile;
+
+namespace content {
+class NavigationEntry;
+}
 
 namespace browser_sync {
 
@@ -19,6 +22,8 @@ namespace browser_sync {
 // directly on TabContents, TabContentsWrapper and NavigationController.
 class SyncedTabDelegate {
  public:
+  virtual ~SyncedTabDelegate() {}
+
   // Method from TabContentsWrapper.
 
   virtual SessionID::id_type GetWindowId() const = 0;
@@ -36,12 +41,9 @@ class SyncedTabDelegate {
   virtual int GetCurrentEntryIndex() const = 0;
   virtual int GetEntryCount() const = 0;
   virtual int GetPendingEntryIndex() const = 0;
-  virtual NavigationEntry* GetPendingEntry() const = 0;
-  virtual NavigationEntry* GetEntryAtIndex(int i) const = 0;
-  virtual NavigationEntry* GetActiveEntry() const = 0;
-
- protected:
-  virtual ~SyncedTabDelegate() {}
+  virtual content::NavigationEntry* GetPendingEntry() const = 0;
+  virtual content::NavigationEntry* GetEntryAtIndex(int i) const = 0;
+  virtual content::NavigationEntry* GetActiveEntry() const = 0;
 };
 
 }  // namespace browser_sync

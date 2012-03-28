@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,17 +9,28 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
+
+#if defined(OS_WIN)
+#include "base/win/windows_version.h"
+#endif  // OS_WIN
+
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_message_utils.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
 #include "content/common/gpu/gpu_messages.h"
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
+
+#if (defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)) || defined(OS_WIN)
+#if defined(OS_WIN)
+#include "content/common/gpu/media/dxva_video_decode_accelerator.h"
+#else  // OS_WIN
 #include "content/common/gpu/media/omx_video_decode_accelerator.h"
+#endif  // OS_WIN
 #include "ui/gfx/gl/gl_context.h"
 #include "ui/gfx/gl/gl_surface_egl.h"
 #endif
+
 #include "gpu/command_buffer/service/texture_manager.h"
 #include "ui/gfx/size.h"
 
@@ -86,17 +97,14 @@ void GpuVideoDecodeAccelerator::PictureReady(
   }
 }
 
-void GpuVideoDecodeAccelerator::NotifyEndOfStream() {
-  Send(new AcceleratedVideoDecoderHostMsg_EndOfStream(host_route_id_));
-}
-
 void GpuVideoDecodeAccelerator::NotifyError(
     media::VideoDecodeAccelerator::Error error) {
   if (init_done_msg_) {
     // If we get an error while we're initializing, NotifyInitializeDone won't
     // be called, so we need to send the reply (with an error) here.
     init_done_msg_->set_reply_error();
-    Send(init_done_msg_);
+    if (!Send(init_done_msg_))
+      DLOG(ERROR) << "Send(init_done_msg_) failed";
     init_done_msg_ = NULL;
   }
   if (!Send(new AcceleratedVideoDecoderHostMsg_ErrorNotification(
@@ -108,20 +116,35 @@ void GpuVideoDecodeAccelerator::NotifyError(
 
 void GpuVideoDecodeAccelerator::Initialize(
     const media::VideoDecodeAccelerator::Profile profile,
-    IPC::Message* init_done_msg) {
+    IPC::Message* init_done_msg,
+    base::ProcessHandle renderer_process) {
   DCHECK(!video_decode_accelerator_.get());
   DCHECK(!init_done_msg_);
   DCHECK(init_done_msg);
-#if defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
-  DCHECK(stub_ && stub_->decoder());
   init_done_msg_ = init_done_msg;
-  OmxVideoDecodeAccelerator* omx_decoder = new OmxVideoDecodeAccelerator(this);
-  omx_decoder->SetEglState(
+
+#if (defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)) || defined(OS_WIN)
+  DCHECK(stub_ && stub_->decoder());
+#if defined(OS_WIN)
+  if (base::win::GetVersion() < base::win::VERSION_WIN7) {
+    NOTIMPLEMENTED() << "HW video decode acceleration not available.";
+    NotifyError(media::VideoDecodeAccelerator::PLATFORM_FAILURE);
+    return;
+  }
+  DLOG(INFO) << "Initializing DXVA HW decoder for windows.";
+  DXVAVideoDecodeAccelerator* video_decoder =
+      new DXVAVideoDecodeAccelerator(this, renderer_process);
+#else  // OS_WIN
+  OmxVideoDecodeAccelerator* video_decoder =
+      new OmxVideoDecodeAccelerator(this);
+  video_decoder->SetEglState(
       gfx::GLSurfaceEGL::GetHardwareDisplay(),
       stub_->decoder()->GetGLContext()->GetHandle());
-  video_decode_accelerator_ = omx_decoder;
-  video_decode_accelerator_->Initialize(profile);
-#else
+#endif  // OS_WIN
+  video_decode_accelerator_ = video_decoder;
+  if (!video_decode_accelerator_->Initialize(profile))
+    NotifyError(media::VideoDecodeAccelerator::PLATFORM_FAILURE);
+#else  // Update RenderViewImpl::createMediaPlayer when adding clauses.
   NOTIMPLEMENTED() << "HW video decode acceleration not available.";
   NotifyError(media::VideoDecodeAccelerator::PLATFORM_FAILURE);
 #endif  // defined(OS_CHROMEOS) && defined(ARCH_CPU_ARMEL)
@@ -146,17 +169,21 @@ void GpuVideoDecodeAccelerator::OnAssignPictureBuffers(
   for (uint32 i = 0; i < buffer_ids.size(); ++i) {
     gpu::gles2::TextureManager::TextureInfo* info =
         texture_manager->GetTextureInfo(texture_ids[i]);
-    if (!info ||
-        !texture_manager->ClearRenderableLevels(command_decoder, info)) {
-      // TODO(fischman): send an error for invalid textures.
-      DLOG(DFATAL) << "Failed to Clear texture!";
+    if (!info) {
+      DLOG(FATAL) << "Failed to find texture id " << texture_ids[i];
+      NotifyError(media::VideoDecodeAccelerator::INVALID_ARGUMENT);
+      return;
+    }
+    if (!texture_manager->ClearRenderableLevels(command_decoder, info)) {
+      DLOG(FATAL) << "Failed to Clear texture id " << texture_ids[i];
+      NotifyError(media::VideoDecodeAccelerator::PLATFORM_FAILURE);
       return;
     }
     uint32 service_texture_id;
     if (!command_decoder->GetServiceTextureId(
             texture_ids[i], &service_texture_id)) {
-      // TODO(vrk): Send an error for invalid GLES buffers.
-      DLOG(DFATAL) << "Failed to translate texture!";
+      DLOG(FATAL) << "Failed to translate texture!";
+      NotifyError(media::VideoDecodeAccelerator::PLATFORM_FAILURE);
       return;
     }
     buffers.push_back(media::PictureBuffer(

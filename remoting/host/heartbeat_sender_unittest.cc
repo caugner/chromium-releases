@@ -1,8 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "remoting/host/heartbeat_sender.h"
+
+#include <set>
 
 #include "base/memory/ref_counted.h"
 #include "base/message_loop.h"
@@ -10,7 +12,6 @@
 #include "base/string_number_conversions.h"
 #include "remoting/base/constants.h"
 #include "remoting/host/host_key_pair.h"
-#include "remoting/host/in_memory_host_config.h"
 #include "remoting/host/test_key_pair.h"
 #include "remoting/jingle_glue/iq_sender.h"
 #include "remoting/jingle_glue/mock_objects.h"
@@ -39,37 +40,56 @@ const int64 kTestTime = 123123123;
 const char kStanzaId[] = "123";
 }  // namespace
 
+ACTION_P(AddListener, list) {
+  list->insert(arg0);
+}
+ACTION_P(RemoveListener, list) {
+  EXPECT_TRUE(list->find(arg0) != list->end());
+  list->erase(arg0);
+}
+
 class HeartbeatSenderTest : public testing::Test {
  protected:
-  virtual void SetUp() {
-    config_ = new InMemoryHostConfig();
-    config_->SetString(kHostIdConfigPath, kHostId);
-    config_->SetString(kPrivateKeyConfigPath, kTestHostKeyPair);
+  virtual void SetUp() OVERRIDE {
+    ASSERT_TRUE(key_pair_.LoadFromString(kTestHostKeyPair));
+
+    EXPECT_CALL(signal_strategy_, GetState())
+        .WillOnce(Return(SignalStrategy::DISCONNECTED));
+    EXPECT_CALL(signal_strategy_, AddListener(NotNull()))
+        .WillRepeatedly(AddListener(&signal_strategy_listeners_));
+    EXPECT_CALL(signal_strategy_, RemoveListener(NotNull()))
+        .WillRepeatedly(RemoveListener(&signal_strategy_listeners_));
+    EXPECT_CALL(signal_strategy_, GetLocalJid())
+        .WillRepeatedly(Return(kTestJid));
+
+    heartbeat_sender_.reset(
+        new HeartbeatSender(kHostId, &signal_strategy_, &key_pair_));
   }
 
-  MockSignalStrategy signal_strategy_;
+  virtual void TearDown() OVERRIDE {
+    heartbeat_sender_.reset();
+    EXPECT_TRUE(signal_strategy_listeners_.empty());
+  }
+
   MessageLoop message_loop_;
-  scoped_refptr<InMemoryHostConfig> config_;
+  MockSignalStrategy signal_strategy_;
+  std::set<SignalStrategy::Listener*> signal_strategy_listeners_;
+  HostKeyPair key_pair_;
+  scoped_ptr<HeartbeatSender> heartbeat_sender_;
 };
 
 // Call Start() followed by Stop(), and makes sure an Iq stanza is
 // being sent.
 TEST_F(HeartbeatSenderTest, DoSendStanza) {
-  SignalStrategy::Listener* listener;
-  EXPECT_CALL(signal_strategy_, AddListener(NotNull()))
-      .WillOnce(SaveArg<0>(&listener));
-
-  scoped_ptr<HeartbeatSender> heartbeat_sender(
-      new HeartbeatSender(base::MessageLoopProxy::current(), config_));
-  ASSERT_TRUE(heartbeat_sender->Init());
-
   XmlElement* sent_iq = NULL;
+  EXPECT_CALL(signal_strategy_, GetLocalJid())
+      .WillRepeatedly(Return(kTestJid));
   EXPECT_CALL(signal_strategy_, GetNextId())
       .WillOnce(Return(kStanzaId));
   EXPECT_CALL(signal_strategy_, SendStanza(NotNull()))
       .WillOnce(DoAll(SaveArg<0>(&sent_iq), Return(true)));
 
-  heartbeat_sender->OnSignallingConnected(&signal_strategy_, kTestJid);
+  heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::CONNECTED);
   message_loop_.RunAllPending();
 
   scoped_ptr<XmlElement> stanza(sent_iq);
@@ -79,23 +99,15 @@ TEST_F(HeartbeatSenderTest, DoSendStanza) {
             std::string(kChromotingBotJid));
   EXPECT_EQ(stanza->Attr(buzz::QName("", "type")), "set");
 
-  EXPECT_CALL(signal_strategy_, RemoveListener(listener));
-
-  heartbeat_sender->OnSignallingDisconnected();
+  heartbeat_sender_->OnSignalStrategyStateChange(SignalStrategy::DISCONNECTED);
   message_loop_.RunAllPending();
 }
 
 // Validate format of the heartbeat stanza.
 TEST_F(HeartbeatSenderTest, CreateHeartbeatMessage) {
-  scoped_ptr<HeartbeatSender> heartbeat_sender(
-      new HeartbeatSender(base::MessageLoopProxy::current(),
-                          config_));
-  ASSERT_TRUE(heartbeat_sender->Init());
-
   int64 start_time = static_cast<int64>(base::Time::Now().ToDoubleT());
 
-  heartbeat_sender->full_jid_ = kTestJid;
-  scoped_ptr<XmlElement> stanza(heartbeat_sender->CreateHeartbeatMessage());
+  scoped_ptr<XmlElement> stanza(heartbeat_sender_->CreateHeartbeatMessage());
   ASSERT_TRUE(stanza.get() != NULL);
 
   EXPECT_TRUE(QName(kChromotingXmlNamespace, "heartbeat") ==
@@ -139,12 +151,9 @@ TEST_F(HeartbeatSenderTest, ProcessResponse) {
   const int kTestInterval = 123;
   set_interval->AddText(base::IntToString(kTestInterval));
 
-  scoped_ptr<HeartbeatSender> heartbeat_sender(
-      new HeartbeatSender(base::MessageLoopProxy::current(),
-                          config_));
-  heartbeat_sender->ProcessResponse(response.get());
+  heartbeat_sender_->ProcessResponse(response.get());
 
-  EXPECT_EQ(kTestInterval * 1000, heartbeat_sender->interval_ms_);
+  EXPECT_EQ(kTestInterval * 1000, heartbeat_sender_->interval_ms_);
 }
 
 }  // namespace remoting

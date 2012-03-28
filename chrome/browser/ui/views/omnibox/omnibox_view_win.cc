@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,9 +16,11 @@
 #include "base/i18n/rtl.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
+#include "base/property_bag.h"
 #include "base/string_util.h"
 #include "base/utf_string_conversions.h"
 #include "base/win/iat_patch_function.h"
+#include "base/win/windows_version.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/autocomplete_match.h"
 #include "chrome/browser/autocomplete/autocomplete_popup_model.h"
@@ -31,8 +33,8 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_view_views.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "googleurl/src/url_util.h"
 #include "grit/generated_resources.h"
 #include "net/base/escape.h"
@@ -58,6 +60,9 @@
 
 #pragma comment(lib, "oleacc.lib")  // Needed for accessibility support.
 #pragma comment(lib, "riched20.lib")  // Needed for the richedit control.
+
+using content::UserMetricsAction;
+using content::WebContents;
 
 ///////////////////////////////////////////////////////////////////////////////
 // AutocompleteEditModel
@@ -470,16 +475,26 @@ OmniboxViewWin::OmniboxViewWin(AutocompleteEditController* controller,
   SetReadOnly(popup_window_mode_);
   SetFont(font_.GetNativeFont());
 
+  if (base::win::GetVersion() >= base::win::VERSION_WIN8) {
+    // Locally define CLSID_TextInputPanel to avoid issues with multiply defined
+    // or undefined symbols if we include peninputpanel_i.c.
+    const GUID CLSID_TextInputPanel = {0xf9b189d7, 0x228b, 0x4f2b, 0x86, 0x50,\
+                0xb9, 0x7f, 0x59, 0xe0, 0x2c, 0x8c};
+    keyboard_.CreateInstance(CLSID_TextInputPanel, NULL, CLSCTX_INPROC);
+    if (keyboard_ != NULL)
+      keyboard_->put_AttachedEditWindow(m_hWnd);
+  }
+
   // NOTE: Do not use SetWordBreakProcEx() here, that is no longer supported as
   // of Rich Edit 2.0 onward.
   SendMessage(m_hWnd, EM_SETWORDBREAKPROC, 0,
               reinterpret_cast<LPARAM>(&WordBreakProc));
 
   // Get the metrics for the font.
-  HDC dc = ::GetDC(NULL);
-  SelectObject(dc, font_.GetNativeFont());
+  HDC hdc = ::GetDC(NULL);
+  HGDIOBJ old_font = SelectObject(hdc, font_.GetNativeFont());
   TEXTMETRIC tm = {0};
-  GetTextMetrics(dc, &tm);
+  GetTextMetrics(hdc, &tm);
   const float kXHeightRatio = 0.7f;  // The ratio of a font's x-height to its
                                      // cap height.  Sadly, Windows doesn't
                                      // provide a true value for a font's
@@ -494,8 +509,11 @@ OmniboxViewWin::OmniboxViewWin(AutocompleteEditController* controller,
 
   // Get the number of twips per pixel, which we need below to offset our text
   // by the desired number of pixels.
-  const long kTwipsPerPixel = kTwipsPerInch / GetDeviceCaps(dc, LOGPIXELSY);
-  ::ReleaseDC(NULL, dc);
+  const long kTwipsPerPixel = kTwipsPerInch / GetDeviceCaps(hdc, LOGPIXELSY);
+  // It's unsafe to delete a DC with a non-stock object selected, so restore the
+  // original font.
+  SelectObject(hdc, old_font);
+  ::ReleaseDC(NULL, hdc);
 
   // Set the default character style -- adjust to our desired baseline.
   CHARFORMAT cf = {0};
@@ -544,7 +562,7 @@ gfx::Font OmniboxViewWin::GetFont() {
   return font_;
 }
 
-void OmniboxViewWin::SaveStateToTab(TabContents* tab) {
+void OmniboxViewWin::SaveStateToTab(WebContents* tab) {
   DCHECK(tab);
 
   const AutocompleteEditModel::State model_state(
@@ -552,13 +570,13 @@ void OmniboxViewWin::SaveStateToTab(TabContents* tab) {
 
   CHARRANGE selection;
   GetSelection(selection);
-  GetStateAccessor()->SetProperty(tab->property_bag(),
+  GetStateAccessor()->SetProperty(tab->GetPropertyBag(),
       AutocompleteEditState(
           model_state,
           State(selection, saved_selection_for_focus_change_)));
 }
 
-void OmniboxViewWin::Update(const TabContents* tab_for_state_restoring) {
+void OmniboxViewWin::Update(const WebContents* tab_for_state_restoring) {
   const bool visibly_changed_permanent_text =
       model_->UpdatePermanentText(toolbar_model_->GetText());
 
@@ -585,7 +603,7 @@ void OmniboxViewWin::Update(const TabContents* tab_for_state_restoring) {
     RevertAll();
 
     const AutocompleteEditState* state = GetStateAccessor()->GetProperty(
-        tab_for_state_restoring->property_bag());
+        tab_for_state_restoring->GetPropertyBag());
     if (state) {
       model_->RestoreState(state->model_state);
 
@@ -999,8 +1017,7 @@ int OmniboxViewWin::OnPerformDropImpl(const views::DropTargetEvent& event,
     if (data.GetURLAndTitle(&url, &title)) {
       string16 text(StripJavascriptSchemas(UTF8ToUTF16(url.spec())));
       SetUserText(text);
-      if (url.spec().length() == text.length())
-        model()->AcceptInput(CURRENT_TAB, true);
+      model()->AcceptInput(CURRENT_TAB, true);
       return CopyOrLinkDragOperation(event.source_operations());
     }
   } else if (data.HasString()) {
@@ -1408,11 +1425,29 @@ LRESULT OmniboxViewWin::OnImeNotify(UINT message,
       break;
     case IMN_CLOSECANDIDATE:
       ime_candidate_window_open_ = false;
-      UpdatePopup();
+
+      // UpdatePopup assumes user input is in progress, so only call it if
+      // that's the case. Otherwise, autocomplete may run on an empty user
+      // text. For example, Baidu Japanese IME sends IMN_CLOSECANDIDATE when
+      // composition mode is entered, but the user may not have input anything
+      // yet.
+      if (model_->user_input_in_progress())
+        UpdatePopup();
+
       break;
     default:
       break;
   }
+  return DefWindowProc(message, wparam, lparam);
+}
+
+LRESULT OmniboxViewWin::OnPointerDown(UINT message,
+                                      WPARAM wparam,
+                                      LPARAM lparam) {
+  SetFocus();
+  // ITextInputPanel is not supported on all platforms.  NULL is fine.
+  if (keyboard_ != NULL)
+    keyboard_->SetInPlaceVisibility(true);
   return DefWindowProc(message, wparam, lparam);
 }
 
@@ -2330,7 +2365,8 @@ void OmniboxViewWin::DrawSlashForInsecureScheme(HDC hdc,
   // Create a canvas as large as |scheme_rect| to do our drawing, and initialize
   // it to fully transparent so any antialiasing will look nice when painted
   // atop the edit.
-  gfx::CanvasSkia canvas(scheme_rect.Width(), scheme_rect.Height(), false);
+  gfx::CanvasSkia canvas(gfx::Size(scheme_rect.Width(), scheme_rect.Height()),
+                         false);
   SkCanvas* sk_canvas = canvas.sk_canvas();
   sk_canvas->getDevice()->accessBitmap(true).eraseARGB(0, 0, 0, 0);
 
@@ -2509,10 +2545,10 @@ void OmniboxViewWin::StartDragIfNecessary(const CPoint& point) {
       model_->GetDataForURLExport(&url, &title, &favicon);
     drag_utils::SetURLAndDragImage(url, title, favicon, &data);
     supported_modes |= DROPEFFECT_LINK;
-    UserMetrics::RecordAction(UserMetricsAction("Omnibox_DragURL"));
+    content::RecordAction(UserMetricsAction("Omnibox_DragURL"));
   } else {
     supported_modes |= DROPEFFECT_MOVE;
-    UserMetrics::RecordAction(UserMetricsAction("Omnibox_DragString"));
+    content::RecordAction(UserMetricsAction("Omnibox_DragString"));
   }
 
   data.SetString(text_to_write);

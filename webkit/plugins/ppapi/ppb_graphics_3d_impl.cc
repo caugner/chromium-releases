@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/message_loop.h"
 #include "gpu/command_buffer/client/gles2_implementation.h"
+#include "ppapi/c/ppp_graphics_3d.h"
 #include "webkit/plugins/ppapi/plugin_module.h"
 #include "webkit/plugins/ppapi/ppapi_plugin_instance.h"
 #include "webkit/plugins/ppapi/resource_helper.h"
@@ -52,7 +53,7 @@ PP_Graphics3DTrustedState PPStateFromGPUState(
 }  // namespace.
 
 PPB_Graphics3D_Impl::PPB_Graphics3D_Impl(PP_Instance instance)
-    : Resource(instance),
+    : PPB_Graphics3D_Shared(instance),
       bound_to_instance_(false),
       commit_pending_(false),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
@@ -83,18 +84,13 @@ PP_Resource PPB_Graphics3D_Impl::CreateRaw(PP_Instance instance,
   return graphics_3d->GetReference();
 }
 
-PPB_Graphics3D_API* PPB_Graphics3D_Impl::AsPPB_Graphics3D_API() {
-  return this;
+PP_Bool PPB_Graphics3D_Impl::InitCommandBuffer() {
+  return PP_FromBool(GetCommandBuffer()->Initialize());
 }
 
-PP_Bool PPB_Graphics3D_Impl::InitCommandBuffer(int32_t size) {
-  return PP_FromBool(GetCommandBuffer()->Initialize(size));
-}
-
-PP_Bool PPB_Graphics3D_Impl::GetRingBuffer(int* shm_handle,
-                                           uint32_t* shm_size) {
-  gpu::Buffer buffer = GetCommandBuffer()->GetRingBuffer();
-  return ShmToHandle(buffer.shared_memory, buffer.size, shm_handle, shm_size);
+PP_Bool PPB_Graphics3D_Impl::SetGetBuffer(int32_t transfer_buffer_id) {
+  GetCommandBuffer()->SetGetBuffer(transfer_buffer_id);
+  return PP_TRUE;
 }
 
 PP_Graphics3DTrustedState PPB_Graphics3D_Impl::GetState() {
@@ -144,14 +140,17 @@ unsigned int PPB_Graphics3D_Impl::GetBackingTextureId() {
   return platform_context_->GetBackingTextureId();
 }
 
-void PPB_Graphics3D_Impl::ViewInitiatedPaint() {
+void PPB_Graphics3D_Impl::ViewWillInitiatePaint() {
 }
 
-void PPB_Graphics3D_Impl::ViewFlushedPaint() {
+void PPB_Graphics3D_Impl::ViewInitiatedPaint() {
   commit_pending_ = false;
 
   if (HasPendingSwap())
     SwapBuffersACK(PP_OK);
+}
+
+void PPB_Graphics3D_Impl::ViewFlushedPaint() {
 }
 
 gpu::CommandBuffer* PPB_Graphics3D_Impl::GetCommandBuffer() {
@@ -191,7 +190,7 @@ bool PPB_Graphics3D_Impl::Init(PP_Resource share_context,
     return false;
 
   gpu::CommandBuffer* command_buffer = GetCommandBuffer();
-  if (!command_buffer->Initialize(kCommandBufferSize))
+  if (!command_buffer->Initialize())
     return false;
 
   return CreateGLES2Impl(kCommandBufferSize, kTransferBufferSize);

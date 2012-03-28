@@ -1,11 +1,14 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "net/http/http_pipelined_connection_impl.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop.h"
 #include "base/stl_util.h"
+#include "base/values.h"
 #include "net/base/io_buffer.h"
 #include "net/http/http_pipelined_stream.h"
 #include "net/http/http_request_info.h"
@@ -15,37 +18,83 @@
 #include "net/http/http_version.h"
 #include "net/socket/client_socket_handle.h"
 
+using base::DictionaryValue;
+using base::Value;
+
 namespace net {
+
+namespace {
+
+class ReceivedHeadersParameters : public NetLog::EventParameters {
+ public:
+  ReceivedHeadersParameters(const NetLog::Source& source,
+                            const std::string& feedback)
+      : source_(source), feedback_(feedback) {}
+
+  virtual Value* ToValue() const OVERRIDE {
+    DictionaryValue* dict = new DictionaryValue;
+    dict->Set("source_dependency", source_.ToValue());
+    dict->SetString("feedback", feedback_);
+    return dict;
+  }
+
+ private:
+  const NetLog::Source source_;
+  const std::string feedback_;
+};
+
+class StreamClosedParameters : public NetLog::EventParameters {
+ public:
+  StreamClosedParameters(const NetLog::Source& source, bool not_reusable)
+      : source_(source), not_reusable_(not_reusable) {}
+
+  virtual Value* ToValue() const OVERRIDE {
+    DictionaryValue* dict = new DictionaryValue;
+    dict->Set("source_dependency", source_.ToValue());
+    dict->SetBoolean("not_reusable", not_reusable_);
+    return dict;
+  }
+
+ private:
+  const NetLog::Source source_;
+  const bool not_reusable_;
+};
+
+}  // anonymous namespace
 
 HttpPipelinedConnectionImpl::HttpPipelinedConnectionImpl(
     ClientSocketHandle* connection,
     HttpPipelinedConnection::Delegate* delegate,
+    const HostPortPair& origin,
     const SSLConfig& used_ssl_config,
     const ProxyInfo& used_proxy_info,
     const BoundNetLog& net_log,
-    bool was_npn_negotiated)
+    bool was_npn_negotiated,
+    SSLClientSocket::NextProto protocol_negotiated)
     : delegate_(delegate),
       connection_(connection),
       used_ssl_config_(used_ssl_config),
       used_proxy_info_(used_proxy_info),
-      net_log_(net_log),
+      net_log_(BoundNetLog::Make(net_log.net_log(),
+                                 NetLog::SOURCE_HTTP_PIPELINED_CONNECTION)),
       was_npn_negotiated_(was_npn_negotiated),
+      protocol_negotiated_(protocol_negotiated),
       read_buf_(new GrowableIOBuffer()),
       next_pipeline_id_(1),
       active_(false),
       usable_(true),
       completed_one_request_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(method_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
       send_next_state_(SEND_STATE_NONE),
       send_still_on_call_stack_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(send_io_callback_(
-          this, &HttpPipelinedConnectionImpl::OnSendIOCallback)),
       read_next_state_(READ_STATE_NONE),
       active_read_id_(0),
-      read_still_on_call_stack_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(read_io_callback_(
-          this, &HttpPipelinedConnectionImpl::OnReadIOCallback)) {
+      read_still_on_call_stack_(false) {
   CHECK(connection_.get());
+  net_log_.BeginEvent(
+      NetLog::TYPE_HTTP_PIPELINED_CONNECTION,
+      make_scoped_refptr(new NetLogStringParameter(
+          "host_and_port", origin.ToString())));
 }
 
 HttpPipelinedConnectionImpl::~HttpPipelinedConnectionImpl() {
@@ -61,6 +110,7 @@ HttpPipelinedConnectionImpl::~HttpPipelinedConnectionImpl() {
     connection_->socket()->Disconnect();
   }
   connection_->Reset();
+  net_log_.EndEvent(NetLog::TYPE_HTTP_PIPELINED_CONNECTION, NULL);
 }
 
 HttpPipelinedStream* HttpPipelinedConnectionImpl::CreateNewStream() {
@@ -79,15 +129,16 @@ void HttpPipelinedConnectionImpl::InitializeParser(
   CHECK(!stream_info_map_[pipeline_id].parser.get());
   stream_info_map_[pipeline_id].state = STREAM_BOUND;
   stream_info_map_[pipeline_id].parser.reset(new HttpStreamParser(
-      connection_.get(), request, read_buf_.get(), net_log));
+      connection_.get(), request, read_buf_.get(), net_log_));
+  stream_info_map_[pipeline_id].source = net_log.source();
 
   // In case our first stream doesn't SendRequest() immediately, we should still
   // allow others to use this pipeline.
   if (pipeline_id == 1) {
     MessageLoop::current()->PostTask(
         FROM_HERE,
-        method_factory_.NewRunnableMethod(
-            &HttpPipelinedConnectionImpl::ActivatePipeline));
+        base::Bind(&HttpPipelinedConnectionImpl::ActivatePipeline,
+                   weak_factory_.GetWeakPtr()));
   }
 }
 
@@ -114,12 +165,10 @@ void HttpPipelinedConnectionImpl::OnStreamDeleted(int pipeline_id) {
   delegate_->OnPipelineHasCapacity(this);
 }
 
-int HttpPipelinedConnectionImpl::SendRequest(int pipeline_id,
-                                             const std::string& request_line,
-                                             const HttpRequestHeaders& headers,
-                                             UploadDataStream* request_body,
-                                             HttpResponseInfo* response,
-                                             OldCompletionCallback* callback) {
+int HttpPipelinedConnectionImpl::SendRequest(
+    int pipeline_id, const std::string& request_line,
+    const HttpRequestHeaders& headers, UploadDataStream* request_body,
+    HttpResponseInfo* response, const CompletionCallback& callback) {
   CHECK(ContainsKey(stream_info_map_, pipeline_id));
   CHECK_EQ(stream_info_map_[pipeline_id].state, STREAM_BOUND);
   if (!usable_) {
@@ -222,7 +271,8 @@ int HttpPipelinedConnectionImpl::DoSendActiveRequest(int result) {
                   active_send_request_->headers,
                   active_send_request_->request_body,
                   active_send_request_->response,
-                  &send_io_callback_);
+                  base::Bind(&HttpPipelinedConnectionImpl::OnSendIOCallback,
+                             base::Unretained(this)));
   stream_info_map_[active_send_request_->pipeline_id].state = STREAM_SENDING;
   send_next_state_ = SEND_STATE_COMPLETE;
   return rv;
@@ -235,6 +285,11 @@ int HttpPipelinedConnectionImpl::DoSendComplete(int result) {
 
   request_order_.push(active_send_request_->pipeline_id);
   stream_info_map_[active_send_request_->pipeline_id].state = STREAM_SENT;
+  net_log_.AddEvent(
+      NetLog::TYPE_HTTP_PIPELINED_CONNECTION_SENT_REQUEST,
+      make_scoped_refptr(new NetLogSourceParameter(
+          "source_dependency",
+          stream_info_map_[active_send_request_->pipeline_id].source)));
 
   if (result == ERR_SOCKET_NOT_CONNECTED && completed_one_request_) {
     result = ERR_PIPELINE_EVICTION;
@@ -269,24 +324,21 @@ int HttpPipelinedConnectionImpl::DoEvictPendingSendRequests(int result) {
     scoped_ptr<PendingSendRequest> evicted_send(
         pending_send_request_queue_.front());
     pending_send_request_queue_.pop();
-    if (stream_info_map_[evicted_send->pipeline_id].state != STREAM_CLOSED) {
-      evicted_send->callback->Run(ERR_PIPELINE_EVICTION);
-    }
+    if (stream_info_map_[evicted_send->pipeline_id].state != STREAM_CLOSED)
+      evicted_send->callback.Run(ERR_PIPELINE_EVICTION);
   }
   send_next_state_ = SEND_STATE_NONE;
   return result;
 }
 
 int HttpPipelinedConnectionImpl::ReadResponseHeaders(
-    int pipeline_id,
-    OldCompletionCallback* callback) {
+    int pipeline_id, const CompletionCallback& callback) {
   CHECK(ContainsKey(stream_info_map_, pipeline_id));
   CHECK_EQ(STREAM_SENT, stream_info_map_[pipeline_id].state);
-  CHECK(!stream_info_map_[pipeline_id].read_headers_callback);
+  CHECK(stream_info_map_[pipeline_id].read_headers_callback.is_null());
 
-  if (!usable_) {
+  if (!usable_)
     return ERR_PIPELINE_EVICTION;
-  }
 
   stream_info_map_[pipeline_id].state = STREAM_READ_PENDING;
   stream_info_map_[pipeline_id].read_headers_callback = callback;
@@ -408,7 +460,8 @@ int HttpPipelinedConnectionImpl::DoReadHeaders(int result) {
   CHECK_EQ(STREAM_READ_PENDING, stream_info_map_[active_read_id_].state);
   stream_info_map_[active_read_id_].state = STREAM_ACTIVE;
   int rv = stream_info_map_[active_read_id_].parser->ReadResponseHeaders(
-      &read_io_callback_);
+      base::Bind(&HttpPipelinedConnectionImpl::OnReadIOCallback,
+                 base::Unretained(this)));
   read_next_state_ = READ_STATE_READ_HEADERS_COMPLETE;
   return rv;
 }
@@ -420,13 +473,18 @@ int HttpPipelinedConnectionImpl::DoReadHeadersComplete(int result) {
 
   read_next_state_ = READ_STATE_WAITING_FOR_CLOSE;
   if (result < OK) {
-    if (result == ERR_SOCKET_NOT_CONNECTED && completed_one_request_) {
+    if (completed_one_request_ &&
+        (result == ERR_CONNECTION_CLOSED ||
+         result == ERR_EMPTY_RESPONSE ||
+         result == ERR_SOCKET_NOT_CONNECTED)) {
+      // These usually indicate that pipelining failed on the server side. In
+      // that case, we should retry without pipelining.
       result = ERR_PIPELINE_EVICTION;
     }
     usable_ = false;
   }
 
-  CheckHeadersForPipelineCompatibility(result, active_read_id_);
+  CheckHeadersForPipelineCompatibility(active_read_id_, result);
 
   if (!read_still_on_call_stack_) {
     QueueUserCallback(active_read_id_,
@@ -455,8 +513,8 @@ int HttpPipelinedConnectionImpl::DoReadStreamClosed() {
   completed_one_request_ = true;
   MessageLoop::current()->PostTask(
       FROM_HERE,
-      method_factory_.NewRunnableMethod(
-          &HttpPipelinedConnectionImpl::StartNextDeferredRead));
+      base::Bind(&HttpPipelinedConnectionImpl::StartNextDeferredRead,
+                 weak_factory_.GetWeakPtr()));
   read_next_state_ = READ_STATE_NONE;
   return OK;
 }
@@ -470,10 +528,8 @@ int HttpPipelinedConnectionImpl::DoEvictPendingReadHeaders(int result) {
     }
     if (stream_info_map_[evicted_id].state == STREAM_READ_PENDING) {
       stream_info_map_[evicted_id].state = STREAM_READ_EVICTED;
-      QueueUserCallback(evicted_id,
-                        stream_info_map_[evicted_id].read_headers_callback,
-                        ERR_PIPELINE_EVICTION,
-                        FROM_HERE);
+      stream_info_map_[evicted_id].read_headers_callback.Run(
+          ERR_PIPELINE_EVICTION);
     }
   }
   read_next_state_ = READ_STATE_NONE;
@@ -483,6 +539,10 @@ int HttpPipelinedConnectionImpl::DoEvictPendingReadHeaders(int result) {
 void HttpPipelinedConnectionImpl::Close(int pipeline_id,
                                         bool not_reusable) {
   CHECK(ContainsKey(stream_info_map_, pipeline_id));
+  net_log_.AddEvent(
+      NetLog::TYPE_HTTP_PIPELINED_CONNECTION_STREAM_CLOSED,
+      make_scoped_refptr(new StreamClosedParameters(
+          stream_info_map_[pipeline_id].source, not_reusable)));
   switch (stream_info_map_[pipeline_id].state) {
     case STREAM_CREATED:
       stream_info_map_[pipeline_id].state = STREAM_UNUSED;
@@ -537,10 +597,8 @@ void HttpPipelinedConnectionImpl::Close(int pipeline_id,
 }
 
 int HttpPipelinedConnectionImpl::ReadResponseBody(
-    int pipeline_id,
-    IOBuffer* buf,
-    int buf_len,
-    OldCompletionCallback* callback) {
+    int pipeline_id, IOBuffer* buf, int buf_len,
+    const CompletionCallback& callback) {
   CHECK(ContainsKey(stream_info_map_, pipeline_id));
   CHECK_EQ(active_read_id_, pipeline_id);
   CHECK(stream_info_map_[pipeline_id].parser.get());
@@ -600,7 +658,7 @@ void HttpPipelinedConnectionImpl::GetSSLInfo(int pipeline_id,
                                              SSLInfo* ssl_info) {
   CHECK(ContainsKey(stream_info_map_, pipeline_id));
   CHECK(stream_info_map_[pipeline_id].parser.get());
-  return stream_info_map_[pipeline_id].parser->GetSSLInfo(ssl_info);
+  stream_info_map_[pipeline_id].parser->GetSSLInfo(ssl_info);
 }
 
 void HttpPipelinedConnectionImpl::GetSSLCertRequestInfo(
@@ -608,7 +666,7 @@ void HttpPipelinedConnectionImpl::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
   CHECK(ContainsKey(stream_info_map_, pipeline_id));
   CHECK(stream_info_map_[pipeline_id].parser.get());
-  return stream_info_map_[pipeline_id].parser->GetSSLCertRequestInfo(
+  stream_info_map_[pipeline_id].parser->GetSSLCertRequestInfo(
       cert_request_info);
 }
 
@@ -629,8 +687,8 @@ void HttpPipelinedConnectionImpl::Drain(HttpPipelinedStream* stream,
 }
 
 void HttpPipelinedConnectionImpl::CheckHeadersForPipelineCompatibility(
-    int result,
-    int pipeline_id) {
+    int pipeline_id,
+    int result) {
   if (result < OK) {
     switch (result) {
       // TODO(simonjam): Ignoring specific errors like this may not work.
@@ -641,48 +699,85 @@ void HttpPipelinedConnectionImpl::CheckHeadersForPipelineCompatibility(
         break;
 
       default:
-        delegate_->OnPipelineFeedback(this, PIPELINE_SOCKET_ERROR);
-        return;
+        ReportPipelineFeedback(pipeline_id, PIPELINE_SOCKET_ERROR);
+        break;
     }
+    return;
   }
   HttpResponseInfo* info = GetResponseInfo(pipeline_id);
   const HttpVersion required_version(1, 1);
   if (info->headers->GetParsedHttpVersion() < required_version) {
-    delegate_->OnPipelineFeedback(this, OLD_HTTP_VERSION);
+    ReportPipelineFeedback(pipeline_id, OLD_HTTP_VERSION);
     return;
   }
   if (!info->headers->IsKeepAlive() || !CanFindEndOfResponse(pipeline_id)) {
     usable_ = false;
-    delegate_->OnPipelineFeedback(this, MUST_CLOSE_CONNECTION);
+    ReportPipelineFeedback(pipeline_id, MUST_CLOSE_CONNECTION);
     return;
   }
-  // TODO(simonjam): We should also check for, and work around, authentication.
-  delegate_->OnPipelineFeedback(this, OK);
+  if (info->headers->HasHeader(
+      HttpAuth::GetChallengeHeaderName(HttpAuth::AUTH_SERVER))) {
+    ReportPipelineFeedback(pipeline_id, AUTHENTICATION_REQUIRED);
+    return;
+  }
+  ReportPipelineFeedback(pipeline_id, OK);
+}
+
+void HttpPipelinedConnectionImpl::ReportPipelineFeedback(int pipeline_id,
+                                                         Feedback feedback) {
+  std::string feedback_str;
+  switch (feedback) {
+    case OK:
+      feedback_str = "OK";
+      break;
+
+    case PIPELINE_SOCKET_ERROR:
+      feedback_str = "PIPELINE_SOCKET_ERROR";
+      break;
+
+    case OLD_HTTP_VERSION:
+      feedback_str = "OLD_HTTP_VERSION";
+      break;
+
+    case MUST_CLOSE_CONNECTION:
+      feedback_str = "MUST_CLOSE_CONNECTION";
+      break;
+
+    case AUTHENTICATION_REQUIRED:
+      feedback_str = "AUTHENTICATION_REQUIRED";
+      break;
+
+    default:
+      NOTREACHED();
+      feedback_str = "UNKNOWN";
+      break;
+  }
+  net_log_.AddEvent(
+      NetLog::TYPE_HTTP_PIPELINED_CONNECTION_RECEIVED_HEADERS,
+      make_scoped_refptr(new ReceivedHeadersParameters(
+          stream_info_map_[pipeline_id].source, feedback_str)));
+  delegate_->OnPipelineFeedback(this, feedback);
 }
 
 void HttpPipelinedConnectionImpl::QueueUserCallback(
-    int pipeline_id,
-    OldCompletionCallback* callback,
-    int rv,
+    int pipeline_id, const CompletionCallback& callback, int rv,
     const tracked_objects::Location& from_here) {
-  CHECK(!stream_info_map_[pipeline_id].pending_user_callback);
+  CHECK(stream_info_map_[pipeline_id].pending_user_callback.is_null());
   stream_info_map_[pipeline_id].pending_user_callback = callback;
   MessageLoop::current()->PostTask(
       from_here,
-      method_factory_.NewRunnableMethod(
-          &HttpPipelinedConnectionImpl::FireUserCallback,
-          pipeline_id,
-          rv));
+      base::Bind(&HttpPipelinedConnectionImpl::FireUserCallback,
+                 weak_factory_.GetWeakPtr(), pipeline_id, rv));
 }
 
 void HttpPipelinedConnectionImpl::FireUserCallback(int pipeline_id,
                                                    int result) {
   if (ContainsKey(stream_info_map_, pipeline_id)) {
-    CHECK(stream_info_map_[pipeline_id].pending_user_callback);
-    OldCompletionCallback* callback =
+    CHECK(!stream_info_map_[pipeline_id].pending_user_callback.is_null());
+    CompletionCallback callback =
         stream_info_map_[pipeline_id].pending_user_callback;
-    stream_info_map_[pipeline_id].pending_user_callback = NULL;
-    callback->Run(result);
+    stream_info_map_[pipeline_id].pending_user_callback.Reset();
+    callback.Run(result);
   }
 }
 
@@ -706,24 +801,30 @@ const ProxyInfo& HttpPipelinedConnectionImpl::used_proxy_info() const {
   return used_proxy_info_;
 }
 
-const NetLog::Source& HttpPipelinedConnectionImpl::source() const {
-  return net_log_.source();
+const BoundNetLog& HttpPipelinedConnectionImpl::net_log() const {
+  return net_log_;
 }
 
 bool HttpPipelinedConnectionImpl::was_npn_negotiated() const {
   return was_npn_negotiated_;
 }
 
-HttpPipelinedConnectionImpl::PendingSendRequest::PendingSendRequest() {
+SSLClientSocket::NextProto HttpPipelinedConnectionImpl::protocol_negotiated()
+    const {
+  return protocol_negotiated_;
+}
+
+HttpPipelinedConnectionImpl::PendingSendRequest::PendingSendRequest()
+    : pipeline_id(0),
+      request_body(NULL),
+      response(NULL) {
 }
 
 HttpPipelinedConnectionImpl::PendingSendRequest::~PendingSendRequest() {
 }
 
 HttpPipelinedConnectionImpl::StreamInfo::StreamInfo()
-    : read_headers_callback(NULL),
-      pending_user_callback(NULL),
-      state(STREAM_CREATED) {
+    : state(STREAM_CREATED) {
 }
 
 HttpPipelinedConnectionImpl::StreamInfo::~StreamInfo() {

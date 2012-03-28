@@ -15,18 +15,13 @@ class GURL;
 // subset of URL syntax:
 //
 // <url-pattern> := <scheme>://<host><port><path> | '<all_urls>'
-// <scheme> := '*' | 'http' | 'https' | 'file' | 'ftp' | 'chrome'
+// <scheme> := '*' | 'http' | 'https' | 'file' | 'ftp' | 'chrome' |
+//             'chrome-extension' | 'filesystem'
 // <host> := '*' | '*.' <anychar except '/' and '*'>+
 // <port> := [':' ('*' | <port number between 0 and 65535>)]
 // <path> := '/' <any chars>
 //
 // * Host is not used when the scheme is 'file'.
-// * The port is only used if the pattern is parsed with the USE_PORTS option.
-//   If the patterns is parsed with the ERROR_ON_PORTS option, the port is not
-//   allowed, and the resulting pattern matches any port. If it is parsed with
-//   the IGNORE_PORTS option, the port (including colon) is kept as part of the
-//   host to maintain backwards compatibility with previous versions, which
-//   makes the pattern effectively never match any URL.
 // * The path can have embedded '*' characters which act as glob wildcards.
 // * '<all_urls>' is a special pattern that matches any URL that contains a
 //   valid scheme (as specified by valid_schemes_).
@@ -46,40 +41,6 @@ class GURL;
 // - http:/bar -- scheme separator not found
 // - foo://* -- invalid scheme
 // - chrome:// -- we don't support chrome internal URLs
-//
-// Design rationale:
-// * We need to be able to tell users what 'sites' a given URLPattern will
-//   affect. For example "This extension will interact with the site
-//   'www.google.com'.
-// * We'd like to be able to convert as many existing Greasemonkey @include
-//   patterns to URLPatterns as possible. Greasemonkey @include patterns are
-//   simple globs, so this won't be perfect.
-// * Although we would like to support any scheme, it isn't clear what to tell
-//   users about URLPatterns that affect data or javascript URLs, so those are
-//   left out for now.
-//
-// From a 2008-ish crawl of userscripts.org, the following patterns were found
-// in @include lines:
-// - total lines                    : 24471
-// - @include *                     :   919
-// - @include http://[^\*]+?/       : 11128 (no star in host)
-// - @include http://\*\.[^\*]+?/   :  2325 (host prefixed by *.)
-// - @include http://\*[^\.][^\*]+?/:  1524 (host prefixed by *, no dot -- many
-//                                           appear to only need subdomain
-//                                           matching, not real prefix matching)
-// - @include http://[^\*/]+\*/     :   320 (host suffixed by *)
-// - @include contains .tld         :   297 (host suffixed by .tld -- a special
-//                                           Greasemonkey domain component that
-//                                           tries to match all valid registry-
-//                                           controlled suffixes)
-// - @include http://\*/            :   228 (host is * exactly, but there is
-//                                           more to the pattern)
-//
-// So, we can support at least half of current @include lines without supporting
-// subdomain matching. We can pick up at least another 10% by supporting
-// subdomain matching. It is probably possible to coerce more of the existing
-// patterns to URLPattern, but the resulting pattern will be more restrictive
-// than the original glob, which is probably better than nothing.
 class URLPattern {
  public:
   // A collection of scheme bitmasks for use with valid_schemes.
@@ -90,20 +51,16 @@ class URLPattern {
     SCHEME_FILE       = 1 << 2,
     SCHEME_FTP        = 1 << 3,
     SCHEME_CHROMEUI   = 1 << 4,
-    SCHEME_FILESYSTEM = 1 << 5,
+    SCHEME_EXTENSION  = 1 << 5,
+    SCHEME_FILESYSTEM = 1 << 6,
+
+    // IMPORTANT!
     // SCHEME_ALL will match every scheme, including chrome://, chrome-
     // extension://, about:, etc. Because this has lots of security
-    // implications, third-party extensions should never be able to get access
-    // to URL patterns initialized this way. It should only be used for internal
-    // Chrome code.
+    // implications, third-party extensions should usually not be able to get
+    // access to URL patterns initialized this way. If there is a reason
+    // for violating this general rule, document why this it safe.
     SCHEME_ALL      = -1,
-  };
-
-  // Options for URLPattern::Parse().
-  enum ParseOption {
-    ERROR_ON_PORTS,
-    IGNORE_PORTS,
-    USE_PORTS,
   };
 
   // Error codes returned from Parse().
@@ -115,25 +72,19 @@ class URLPattern {
     PARSE_ERROR_EMPTY_HOST,
     PARSE_ERROR_INVALID_HOST_WILDCARD,
     PARSE_ERROR_EMPTY_PATH,
-    PARSE_ERROR_HAS_COLON,     // Only checked when parsing with ERROR_ON_PORTS.
-    PARSE_ERROR_INVALID_PORT,  // Only checked when parsing with USE_PORTS.
+    PARSE_ERROR_INVALID_PORT,
     NUM_PARSE_RESULTS
   };
 
   // The <all_urls> string pattern.
   static const char kAllUrlsPattern[];
 
-  // Construct an URLPattern with the given set of allowable schemes. See
-  // valid_schemes_ for more info.
   explicit URLPattern(int valid_schemes);
 
-  // Convenience to construct a URLPattern from a string. The string is expected
-  // to be a valid pattern. If the string is not known ahead of time, use
-  // Parse() instead, which returns success or failure.
+  // Convenience to construct a URLPattern from a string. If the string is not
+  // known ahead of time, use Parse() instead, which returns success or failure.
   URLPattern(int valid_schemes, const std::string& pattern);
 
-  // Note: don't use this directly. This exists so URLPattern can be used
-  // with STL containers.
   URLPattern();
   ~URLPattern();
 
@@ -143,16 +94,8 @@ class URLPattern {
   // Initializes this instance by parsing the provided string. Returns
   // URLPattern::PARSE_SUCCESS on success, or an error code otherwise. On
   // failure, this instance will have some intermediate values and is in an
-  // invalid state.  Adding error checks to URLPattern::Parse() can cause
-  // patterns in installed extensions to fail.  If an installed extension
-  // uses a pattern that was valid but fails a new error check, the
-  // extension will fail to load when chrome is auto-updated.  To avoid
-  // this, new parse checks are enabled only when |strictness| is
-  // OPTION_STRICT.  OPTION_STRICT should be used when loading in developer
-  // mode, or when an extension's patterns are controlled by chrome (such
-  // as component extensions).
-  ParseResult Parse(const std::string& pattern_str,
-                    ParseOption strictness);
+  // invalid state.
+  ParseResult Parse(const std::string& pattern_str);
 
   // Gets the bitmask of valid schemes.
   int valid_schemes() const { return valid_schemes_; }
@@ -271,8 +214,7 @@ class URLPattern {
   // component of the pattern's host was "*".
   bool match_subdomains_;
 
-  // The port. URL patterns only support specific ports if they are parsed with
-  // the |USE_PORTS| option.
+  // The port.
   std::string port_;
 
   // The path to match. This is everything after the host of the URL, or

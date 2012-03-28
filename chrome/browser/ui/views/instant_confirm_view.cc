@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,6 +10,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/url_constants.h"
+#include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -19,6 +21,9 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/layout/layout_constants.h"
 #include "ui/views/widget/widget.h"
+
+using content::OpenURLParams;
+using content::Referrer;
 
 InstantConfirmView::InstantConfirmView(Profile* profile) : profile_(profile) {
   views::Label* description_label = new views::Label(
@@ -74,14 +79,16 @@ gfx::Size InstantConfirmView::GetPreferredSize() {
   return gfx::Size(pref_width, pref_height);
 }
 
-bool InstantConfirmView::IsModal() const {
-  return true;
+ui::ModalType InstantConfirmView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 void InstantConfirmView::LinkClicked(views::Link* source, int event_flags) {
   Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
-  browser->OpenURL(browser::InstantLearnMoreURL(), GURL(),
-                   NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_TYPED);
+  OpenURLParams params(
+      GURL(chrome::kInstantLearnMoreURL), Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_TYPED, false);
+  browser->OpenURL(params);
 }
 
 namespace browser {

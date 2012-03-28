@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -9,9 +9,13 @@ for more details about the presubmit API built into gcl.
 """
 
 
+import re
+
+
 _EXCLUDED_PATHS = (
     r"^breakpad[\\\/].*",
-    r"^net/tools/spdyshark/[\\\/].*",
+    r"^native_client_sdk[\\\/].*",
+    r"^net[\\\/]tools[\\\/]spdyshark[\\\/].*",
     r"^skia[\\\/].*",
     r"^v8[\\\/].*",
     r".*MakeFile$",
@@ -59,7 +63,7 @@ def _CheckNoProductionCodeUsingTestOnlyFunctions(input_api, output_api):
   source_extensions = r'\.(cc|cpp|cxx|mm)$'
   file_inclusion_pattern = r'.+%s' % source_extensions
   file_exclusion_patterns = (
-      r'.*/(test_|mock_).+%s' % source_extensions,
+      r'.*[/\\](test_|mock_).+%s' % source_extensions,
       r'.+_test_(support|base)%s' % source_extensions,
       r'.+_(api|browser|perf|unit|ui)?test%s' % source_extensions,
       r'.+profile_sync_service_harness%s' % source_extensions,
@@ -186,7 +190,6 @@ def _CheckNoNewOldCallback(input_api, output_api):
     of the old callback system.
     """
     return ('NewRunnableMethod' in line or
-            'NewRunnableFunction' in line or
             'NewCallback' in line or
             input_api.re.search(r'\bCallback\d<', line) or
             input_api.re.search(r'\bpublic Task\b', line) or
@@ -317,8 +320,8 @@ def CheckChangeOnCommit(input_api, output_api):
       output_api,
       json_url='http://chromium-status.appspot.com/current?format=json'))
   results.extend(input_api.canned_checks.CheckRietveldTryJobExecution(input_api,
-      output_api, 'http://codereview.chromium.org', ('win', 'linux', 'mac'),
-      'tryserver@chromium.org'))
+      output_api, 'http://codereview.chromium.org',
+      ('win_rel', 'linux_rel', 'mac_rel'), 'tryserver@chromium.org'))
 
   results.extend(input_api.canned_checks.CheckChangeHasBugField(
       input_api, output_api))
@@ -334,5 +337,9 @@ def GetPreferredTrySlaves(project, change):
   only_objc_files = all(
       f.LocalPath().endswith(('.mm', '.m')) for f in change.AffectedFiles())
   if only_objc_files:
-    return ['mac']
-  return ['win', 'linux', 'mac']
+    return ['mac_rel']
+  preferred = ['win_rel', 'linux_rel', 'mac_rel']
+  aura_re = '_aura[^/]*[.][^/]*'
+  if any(re.search(aura_re, f.LocalPath()) for f in change.AffectedFiles()):
+    preferred.append('linux_chromeos_aura:compile')
+  return preferred

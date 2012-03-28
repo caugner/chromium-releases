@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -44,7 +44,7 @@ PP_Var PluginVarSerializationRules::BeginReceiveCallerOwned(
     const std::string* str_val,
     Dispatcher* dispatcher) {
   if (var.type == PP_VARTYPE_STRING)
-    return StringVar::StringToPPVar(0, *str_val);
+    return StringVar::StringToPPVar(*str_val);
 
   if (var.type == PP_VARTYPE_OBJECT) {
     DCHECK(dispatcher->IsPlugin());
@@ -68,7 +68,7 @@ PP_Var PluginVarSerializationRules::ReceivePassRef(const PP_Var& var,
                                                    const std::string& str_val,
                                                    Dispatcher* dispatcher) {
   if (var.type == PP_VARTYPE_STRING)
-    return StringVar::StringToPPVar(0, str_val);
+    return StringVar::StringToPPVar(str_val);
 
   // Overview of sending an object with "pass ref" from the browser to the
   // plugin:
@@ -85,7 +85,7 @@ PP_Var PluginVarSerializationRules::ReceivePassRef(const PP_Var& var,
   // plugin code started to return a value, which means it gets another ref
   // on behalf of the caller. This needs to be transferred to the plugin and
   // folded in to its set of refs it maintains (with one ref representing all
-  // fo them in the browser).
+  // of them in the browser).
   if (var.type == PP_VARTYPE_OBJECT) {
     DCHECK(dispatcher->IsPlugin());
     return var_tracker_->ReceiveObjectPassRef(
@@ -136,6 +136,8 @@ void PluginVarSerializationRules::EndSendPassRef(const PP_Var& var,
   if (var.type == PP_VARTYPE_OBJECT) {
     var_tracker_->ReleaseHostObject(
         static_cast<PluginDispatcher*>(dispatcher), var);
+  } else if (var.type == PP_VARTYPE_STRING) {
+    var_tracker_->ReleaseVar(var);
   }
 }
 

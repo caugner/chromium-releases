@@ -1,11 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/tools/test_shell/simple_file_system.h"
 
 #include "base/file_path.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/message_loop.h"
 #include "base/message_loop_proxy.h"
 #include "base/time.h"
@@ -21,9 +20,9 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/platform/WebVector.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
 #include "webkit/fileapi/file_system_context.h"
-#include "webkit/fileapi/file_system_operation.h"
-#include "webkit/fileapi/file_system_path_manager.h"
+#include "webkit/fileapi/file_system_operation_interface.h"
 #include "webkit/fileapi/file_system_types.h"
+#include "webkit/fileapi/mock_file_system_options.h"
 #include "webkit/glue/webkit_glue.h"
 #include "webkit/tools/test_shell/simple_file_writer.h"
 
@@ -43,18 +42,20 @@ using WebKit::WebVector;
 
 using fileapi::FileSystemCallbackDispatcher;
 using fileapi::FileSystemContext;
-using fileapi::FileSystemOperation;
+using fileapi::FileSystemOperationInterface;
 
 namespace {
 
 class SimpleFileSystemCallbackDispatcher
     : public FileSystemCallbackDispatcher {
  public:
-  SimpleFileSystemCallbackDispatcher(
+  // An instance of this class must be created by Create()
+  // (so that we do not leak ownerships).
+  static scoped_ptr<FileSystemCallbackDispatcher> Create(
       const WeakPtr<SimpleFileSystem>& file_system,
-      WebFileSystemCallbacks* callbacks)
-      : file_system_(file_system),
-        callbacks_(callbacks) {
+      WebFileSystemCallbacks* callbacks) {
+    return scoped_ptr<FileSystemCallbackDispatcher>(
+        new SimpleFileSystemCallbackDispatcher(file_system, callbacks));
   }
 
   ~SimpleFileSystemCallbackDispatcher() {
@@ -115,6 +116,13 @@ class SimpleFileSystemCallbackDispatcher
   }
 
  private:
+  SimpleFileSystemCallbackDispatcher(
+      const WeakPtr<SimpleFileSystem>& file_system,
+      WebFileSystemCallbacks* callbacks)
+      : file_system_(file_system),
+        callbacks_(callbacks) {
+  }
+
   WeakPtr<SimpleFileSystem> file_system_;
   WebFileSystemCallbacks* callbacks_;
 };
@@ -129,9 +137,7 @@ SimpleFileSystem::SimpleFileSystem() {
         NULL /* special storage policy */,
         NULL /* quota manager */,
         file_system_dir_.path(),
-        false /* incognito */,
-        true /* allow_file_access */,
-        NULL);
+        fileapi::CreateAllowFileAccessOptions());
   } else {
     LOG(WARNING) << "Failed to create a temp dir for the filesystem."
                     "FileSystem feature will be disabled.";
@@ -165,59 +171,61 @@ void SimpleFileSystem::OpenFileSystem(
   }
 
   GURL origin_url(frame->document().securityOrigin().toString());
-  GetNewOperation(callbacks)->OpenFileSystem(origin_url, type, create);
+  file_system_context_->OpenFileSystem(
+      origin_url, type, create,
+      SimpleFileSystemCallbackDispatcher::Create(AsWeakPtr(), callbacks));
 }
 
 void SimpleFileSystem::move(
     const WebURL& src_path,
     const WebURL& dest_path, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->Move(GURL(src_path), GURL(dest_path));
+  GetNewOperation(src_path, callbacks)->Move(GURL(src_path), GURL(dest_path));
 }
 
 void SimpleFileSystem::copy(
     const WebURL& src_path, const WebURL& dest_path,
     WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->Copy(GURL(src_path), GURL(dest_path));
+  GetNewOperation(src_path, callbacks)->Copy(GURL(src_path), GURL(dest_path));
 }
 
 void SimpleFileSystem::remove(
     const WebURL& path, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->Remove(path, false /* recursive */);
+  GetNewOperation(path, callbacks)->Remove(path, false /* recursive */);
 }
 
 void SimpleFileSystem::removeRecursively(
     const WebURL& path, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->Remove(path, true /* recursive */);
+  GetNewOperation(path, callbacks)->Remove(path, true /* recursive */);
 }
 
 void SimpleFileSystem::readMetadata(
     const WebURL& path, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->GetMetadata(path);
+  GetNewOperation(path, callbacks)->GetMetadata(path);
 }
 
 void SimpleFileSystem::createFile(
     const WebURL& path, bool exclusive, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->CreateFile(path, exclusive);
+  GetNewOperation(path, callbacks)->CreateFile(path, exclusive);
 }
 
 void SimpleFileSystem::createDirectory(
     const WebURL& path, bool exclusive, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->CreateDirectory(path, exclusive, false);
+  GetNewOperation(path, callbacks)->CreateDirectory(path, exclusive, false);
 }
 
 void SimpleFileSystem::fileExists(
     const WebURL& path, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->FileExists(path);
+  GetNewOperation(path, callbacks)->FileExists(path);
 }
 
 void SimpleFileSystem::directoryExists(
     const WebURL& path, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->DirectoryExists(path);
+  GetNewOperation(path, callbacks)->DirectoryExists(path);
 }
 
 void SimpleFileSystem::readDirectory(
     const WebURL& path, WebFileSystemCallbacks* callbacks) {
-  GetNewOperation(callbacks)->ReadDirectory(path);
+  GetNewOperation(path, callbacks)->ReadDirectory(path);
 }
 
 WebFileWriter* SimpleFileSystem::createFileWriter(
@@ -225,12 +233,10 @@ WebFileWriter* SimpleFileSystem::createFileWriter(
   return new SimpleFileWriter(path, client, file_system_context_.get());
 }
 
-FileSystemOperation* SimpleFileSystem::GetNewOperation(
-    WebFileSystemCallbacks* callbacks) {
-  SimpleFileSystemCallbackDispatcher* dispatcher =
-      new SimpleFileSystemCallbackDispatcher(AsWeakPtr(), callbacks);
-  FileSystemOperation* operation = new FileSystemOperation(
-      dispatcher, base::MessageLoopProxy::current(),
-      file_system_context_.get());
-  return operation;
+FileSystemOperationInterface* SimpleFileSystem::GetNewOperation(
+    const WebURL& url, WebFileSystemCallbacks* callbacks) {
+  return file_system_context_->CreateFileSystemOperation(
+      GURL(url),
+      SimpleFileSystemCallbackDispatcher::Create(AsWeakPtr(), callbacks),
+      base::MessageLoopProxy::current());
 }

@@ -10,9 +10,8 @@
 
 namespace switches {
 
+// Please keep alphabetized.
 AURA_EXPORT extern const char kAuraHostWindowSize[];
-AURA_EXPORT extern const char kAuraNoShadows[];
-AURA_EXPORT extern const char kAuraWindows[];
 
 }  // namespace switches
 

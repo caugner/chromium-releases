@@ -63,7 +63,7 @@ AudioOutputStream* AudioManagerOpenBSD::MakeAudioOutputStream(
   AudioOutputStream* stream;
 #if defined(USE_PULSEAUDIO)
   if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kUsePulseAudio)) {
-    stream = new PulseAudioOutputStream(params, this, GetMessageLoop());
+    stream = new PulseAudioOutputStream(params, this);
     active_streams_.insert(stream);
     return stream;
   }
@@ -118,6 +118,6 @@ void AudioManagerOpenBSD::ReleaseOutputStream(AudioOutputStream* stream) {
 }
 
 // static
-AudioManager* AudioManager::CreateAudioManager() {
+AudioManager* CreateAudioManager() {
   return new AudioManagerOpenBSD();
 }

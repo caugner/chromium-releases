@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -27,7 +27,31 @@
 
 namespace {
 
+// TODO: Obtain the correct colors using GetSysColor.
+// Theme colors returned by GetSystemColor().
 const SkColor kInvalidColorIdColor = SkColorSetRGB(255, 0, 128);
+// Dialogs:
+const SkColor kDialogBackgroundColor = SkColorSetRGB(200, 200, 200);
+// FocusableBorder (should be unused on Win):
+const SkColor kFocusedBorderColor= SkColorSetRGB(0x4D, 0x90, 0xFE);
+const SkColor kUnfocusedBorderColor = SkColorSetRGB(0xD9, 0xD9, 0xD9);
+// TextButton:
+const SkColor kTextButtonBackgroundColor = SkColorSetRGB(0xde, 0xde, 0xde);
+const SkColor kTextButtonEnabledColor = SkColorSetRGB(6, 45, 117);
+const SkColor kTextButtonDisabledColor = SkColorSetRGB(161, 161, 146);
+const SkColor kTextButtonHighlightColor = SkColorSetARGB(200, 255, 255, 255);
+const SkColor kTextButtonHoverColor = kTextButtonEnabledColor;
+// MenuItem:
+const SkColor kEnabledMenuItemForegroundColor = kTextButtonEnabledColor;
+const SkColor kDisabledMenuItemForegroundColor = kTextButtonDisabledColor;
+const SkColor kFocusedMenuItemBackgroundColor = SkColorSetRGB(246, 249, 253);
+// Textfield:
+const SkColor kTextfieldDefaultColor = SK_ColorBLACK;
+const SkColor kTextfieldDefaultBackground = SK_ColorWHITE;
+const SkColor kTextfieldSelectionColor = SK_ColorWHITE;
+const SkColor kTextfieldSelectionBackgroundFocused =
+    SkColorSetRGB(0x1D, 0x90, 0xFF);
+const SkColor kTextfieldSelectionBackgroundUnfocused = SK_ColorLTGRAY;
 
 SkColor WinColorToSkColor(COLORREF color) {
   return SkColorSetRGB(GetRValue(color), GetGValue(color), GetBValue(color));
@@ -348,10 +372,45 @@ void NativeThemeWin::Paint(SkCanvas* canvas,
 
 SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
   switch (color_id) {
+
+    // Dialogs
     case kColorId_DialogBackground:
       // TODO(benrg): Should this use the new Windows theme functions? The old
       // code in DialogClientView::OnPaint used GetSysColor(COLOR_3DFACE).
       return WinColorToSkColor(GetSysColor(COLOR_3DFACE));
+
+    // TextButton
+    case kColorId_TextButtonBackgroundColor:
+      return kTextButtonBackgroundColor;
+    case kColorId_TextButtonEnabledColor:
+      return kTextButtonEnabledColor;
+    case kColorId_TextButtonDisabledColor:
+      return kTextButtonDisabledColor;
+    case kColorId_TextButtonHighlightColor:
+      return kTextButtonHighlightColor;
+    case kColorId_TextButtonHoverColor:
+      return kTextButtonHoverColor;
+
+    // MenuItem
+    case kColorId_EnabledMenuItemForegroundColor:
+      return kEnabledMenuItemForegroundColor;
+    case kColorId_DisabledMenuItemForegroundColor:
+      return kDisabledMenuItemForegroundColor;
+    case kColorId_FocusedMenuItemBackgroundColor:
+      return kFocusedMenuItemBackgroundColor;
+
+    // Textfield
+    case kColorId_TextfieldDefaultColor:
+      return kTextfieldDefaultColor;
+    case kColorId_TextfieldDefaultBackground:
+      return kTextfieldDefaultBackground;
+    case kColorId_TextfieldSelectionColor:
+      return kTextfieldSelectionColor;
+    case kColorId_TextfieldSelectionBackgroundFocused:
+      return kTextfieldSelectionBackgroundFocused;
+    case kColorId_TextfieldSelectionBackgroundUnfocused:
+      return kTextfieldSelectionBackgroundUnfocused;
+
     default:
       NOTREACHED() << "Invalid color_id: " << color_id;
       break;

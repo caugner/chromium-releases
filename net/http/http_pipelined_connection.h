@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,11 +8,13 @@
 
 #include "net/base/net_export.h"
 #include "net/base/net_log.h"
+#include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
 class BoundNetLog;
 class ClientSocketHandle;
+class HostPortPair;
 class HttpPipelinedStream;
 class ProxyInfo;
 struct SSLConfig;
@@ -24,6 +26,7 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnection {
     PIPELINE_SOCKET_ERROR,
     OLD_HTTP_VERSION,
     MUST_CLOSE_CONNECTION,
+    AUTHENTICATION_REQUIRED,
   };
 
   class Delegate {
@@ -46,10 +49,12 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnection {
     virtual HttpPipelinedConnection* CreateNewPipeline(
         ClientSocketHandle* connection,
         Delegate* delegate,
+        const HostPortPair& origin,
         const SSLConfig& used_ssl_config,
         const ProxyInfo& used_proxy_info,
         const BoundNetLog& net_log,
-        bool was_npn_negotiated) = 0;
+        bool was_npn_negotiated,
+        SSLClientSocket::NextProto protocol_negotiated) = 0;
   };
 
   virtual ~HttpPipelinedConnection() {}
@@ -74,11 +79,14 @@ class NET_EXPORT_PRIVATE HttpPipelinedConnection {
   // The ProxyInfo used to establish this connection.
   virtual const ProxyInfo& used_proxy_info() const = 0;
 
-  // The source of this pipelined connection.
-  virtual const NetLog::Source& source() const = 0;
+  // The BoundNetLog of this pipelined connection.
+  virtual const BoundNetLog& net_log() const = 0;
 
   // True if this connection was NPN negotiated.
   virtual bool was_npn_negotiated() const = 0;
+
+  // Protocol negotiated with the server.
+  virtual SSLClientSocket::NextProto protocol_negotiated() const = 0;
 };
 
 }  // namespace net

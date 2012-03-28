@@ -1,11 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include <string>
 
 #include "base/file_path.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/message_loop_proxy.h"
 #include "base/platform_file.h"
 #include "base/scoped_temp_dir.h"
@@ -15,7 +14,6 @@
 #include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_file_util.h"
 #include "webkit/fileapi/file_system_operation_context.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_test_helper.h"
 #include "webkit/fileapi/file_system_types.h"
 #include "webkit/fileapi/local_file_util.h"
@@ -27,8 +25,7 @@ namespace fileapi {
 class LocalFileUtilTest : public testing::Test {
  public:
   LocalFileUtilTest()
-      : local_file_util_(new LocalFileUtil(new NativeFileUtil())),
-        callback_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
+      : local_file_util_(new LocalFileUtil(new NativeFileUtil())) {
   }
 
   void SetUp() {
@@ -97,8 +94,6 @@ class LocalFileUtilTest : public testing::Test {
   scoped_ptr<LocalFileUtil> local_file_util_;
   ScopedTempDir data_dir_;
   FileSystemTestOriginHelper test_helper_;
-
-  base::ScopedCallbackFactory<LocalFileUtilTest> callback_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(LocalFileUtilTest);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,10 +10,8 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/task.h"
 #include "chrome/browser/autocomplete/autocomplete_edit.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
-#include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/search_engines/template_url_service_observer.h"
 #include "chrome/browser/ui/omnibox/location_bar.h"
@@ -45,7 +43,6 @@ class LocationIconView;
 class PageActionWithBadgeView;
 class SelectedKeywordView;
 class StarView;
-class TabContents;
 class TabContentsWrapper;
 class TemplateURLService;
 
@@ -134,7 +131,7 @@ class LocationBarView : public LocationBar,
   // Updates the location bar.  We also reset the bar's permanent text and
   // security style, and, if |tab_for_state_restoring| is non-NULL, also restore
   // saved state that the tab holds.
-  void Update(const TabContents* tab_for_state_restoring);
+  void Update(const content::WebContents* tab_for_state_restoring);
 
   Browser* browser() const { return browser_; }
 
@@ -167,6 +164,13 @@ class LocationBarView : public LocationBar,
   // Returns the current instant suggestion text.
   string16 GetInstantSuggestion() const;
 #endif
+
+  // Sets whether the location entry can accept focus.
+  void SetLocationEntryFocusable(bool focusable);
+
+  // Returns true if the location entry is focusable and visible in
+  // the root view.
+  bool IsLocationEntryFocusableInRootView() const;
 
   // Sizing functions
   virtual gfx::Size GetPreferredSize() OVERRIDE;
@@ -236,7 +240,7 @@ class LocationBarView : public LocationBar,
                                    const gfx::Point& p) OVERRIDE;
 
   // Overridden from LocationBar:
-  virtual void ShowFirstRunBubble(FirstRun::BubbleType bubble_type) OVERRIDE;
+  virtual void ShowFirstRunBubble() OVERRIDE;
   virtual void SetSuggestedText(const string16& text,
                                 InstantCompleteBehavior behavior) OVERRIDE;
   virtual string16 GetInputString() const OVERRIDE;
@@ -248,7 +252,7 @@ class LocationBarView : public LocationBar,
   virtual void UpdateContentSettingsIcons() OVERRIDE;
   virtual void UpdatePageActions() OVERRIDE;
   virtual void InvalidatePageActions() OVERRIDE;
-  virtual void SaveStateToContents(TabContents* contents) OVERRIDE;
+  virtual void SaveStateToContents(content::WebContents* contents) OVERRIDE;
   virtual void Revert() OVERRIDE;
   virtual const OmniboxView* location_entry() const OVERRIDE;
   virtual OmniboxView* location_entry() OVERRIDE;
@@ -339,7 +343,7 @@ class LocationBarView : public LocationBar,
 #endif
 
   // Helper to show the first run info bubble.
-  void ShowFirstRunBubbleInternal(FirstRun::BubbleType bubble_type);
+  void ShowFirstRunBubbleInternal();
 
   // The Autocomplete Edit field.
   scoped_ptr<OmniboxView> location_entry_;
@@ -411,9 +415,6 @@ class LocationBarView : public LocationBar,
   // True if we should show a focus rect while the location entry field is
   // focused. Used when the toolbar is in full keyboard accessibility mode.
   bool show_focus_rect_;
-
-  // Whether bubble text is short or long.
-  FirstRun::BubbleType bubble_type_;
 
   // This is in case we're destroyed before the model loads. We need to make
   // Add/RemoveObserver calls.

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -92,14 +92,14 @@ void InvalidationNotifier::UpdateCredentials(
 }
 
 void InvalidationNotifier::UpdateEnabledTypes(
-    const syncable::ModelTypeSet& enabled_types) {
+    syncable::ModelTypeSet enabled_types) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   CHECK(!invalidation_client_id_.empty());
   invalidation_client_.RegisterTypes(enabled_types);
 }
 
 void InvalidationNotifier::SendNotification(
-    const syncable::ModelTypeSet& changed_types) {
+    syncable::ModelTypeSet changed_types) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   // Do nothing.
 }
@@ -133,7 +133,8 @@ void InvalidationNotifier::OnInvalidate(
     const syncable::ModelTypePayloadMap& type_payloads) {
   DCHECK(non_thread_safe_.CalledOnValidThread());
   FOR_EACH_OBSERVER(SyncNotifierObserver, observers_,
-                    OnIncomingNotification(type_payloads));
+                    OnIncomingNotification(type_payloads,
+                                           sync_notifier::REMOTE_NOTIFICATION));
 }
 
 void InvalidationNotifier::OnSessionStatusChanged(bool has_session) {

@@ -16,9 +16,18 @@
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebView.h"
 
 JavaBridgeDispatcher::JavaBridgeDispatcher(
-    content::RenderView* render_view,
-    const IPC::ChannelHandle& channel_handle)
+    content::RenderView* render_view)
     : RenderViewObserver(render_view) {
+}
+
+void JavaBridgeDispatcher::EnsureChannelIsSetUp() {
+  if (channel_.get()) {
+    return;
+  }
+
+  IPC::ChannelHandle channel_handle;
+  Send(new JavaBridgeHostMsg_GetChannelHandle(routing_id(), &channel_handle));
+
   channel_.reset(JavaBridgeChannel::GetJavaBridgeChannel(
       channel_handle, ChildProcess::current()->io_message_loop_proxy()));
 }
@@ -62,8 +71,14 @@ void JavaBridgeDispatcher::OnAddNamedObject(
     const string16& name,
     const NPVariant_Param& variant_param) {
   DCHECK_EQ(variant_param.type, NPVARIANT_PARAM_SENDER_OBJECT_ROUTING_ID);
-  // This creates an NPObject, wrapped as an NPVariant. We don't need the
-  // containing window or the page URL, as we don't do re-entrant sync IPC.
+
+  EnsureChannelIsSetUp();
+
+  // This creates an NPObject, wrapped as an NPVariant. Pass 0 for the for
+  // containing window, as this is only used by plugins to pump the window
+  // message queue when a method on a renderer-side object causes a dialog to
+  // be displayed, and the Java Bridge does not need this functionality. The
+  // page URL is also not required.
   NPVariant variant;
   bool created =
       CreateNPVariant(variant_param, channel_.get(), &variant, 0, GURL());

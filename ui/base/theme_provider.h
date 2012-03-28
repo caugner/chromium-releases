@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -72,7 +72,7 @@ class UI_EXPORT ThemeProvider {
   // implementations of ThemeProvider. Returns NULL on error.
   virtual RefCountedMemory* GetRawData(int id) const = 0;
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(TOOLKIT_VIEWS)
   // Gets the NSImage with the specified |id|.
   //
   // The bitmap is not assumed to exist. If a theme does not provide an image,
@@ -109,7 +109,6 @@ class UI_EXPORT ThemeProvider {
   // assert in debug mode if it does not. On failure, this will return a
   // pointer to a shared empty placeholder bitmap so it will be visible what
   // is missing.
-  virtual GdkPixbuf* GetPixbufNamed(int id) const = 0;
 
   // As above, but flips it in RTL locales.
   virtual GdkPixbuf* GetRTLEnabledPixbufNamed(int id) const = 0;

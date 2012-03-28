@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,12 +10,13 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/gtest_prod_util.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/sys_byteorder.h"
 #include "net/base/net_export.h"
-#include "net/base/sys_byteorder.h"
 #include "net/spdy/spdy_protocol.h"
 
 typedef struct z_stream_s z_stream;  // Forward declaration for zlib.
@@ -51,9 +52,39 @@ typedef std::map<std::string, std::string> SpdyHeaderBlock;
 typedef std::pair<spdy::SettingsFlagsAndId, uint32> SpdySetting;
 typedef std::list<SpdySetting> SpdySettings;
 
+// A datastrcture for holding the contents of a CREDENTIAL frame.
+struct NET_EXPORT_PRIVATE SpdyCredential {
+  SpdyCredential();
+  ~SpdyCredential();
+
+  uint16 slot;
+  std::string origin;
+  std::vector<std::string> certs;
+  std::string proof;
+};
+
 // SpdyFramerVisitorInterface is a set of callbacks for the SpdyFramer.
 // Implement this interface to receive event callbacks as frames are
 // decoded from the framer.
+//
+// Control frames that contain SPDY header blocks (SYN_STREAM, SYN_REPLY, and
+// HEADER) are processed in fashion that allows the decompressed header block
+// to be delivered in chunks to the visitor. The following steps are followed:
+//   1. OnControl is called, with either a SpdySynStreamControlFrame,
+//      SpdySynReplyControlFrame, or a SpdyHeaderControlFrame argument.
+//   2. Repeated: OnControlFrameHeaderData is called with chunks of the
+//      decompressed header block. In each call the len parameter is greater
+//      than zero.
+//   3. OnControlFrameHeaderData is called with len set to zero, indicating
+//      that the full header block has been delivered for the control frame.
+// During step 2 the visitor may return false, indicating that the chunk of
+// header data could not be handled by the visitor (typically this indicates
+// resource exhaustion). If this occurs the framer will discontinue
+// delivering chunks to the visitor, set a SPDY_CONTROL_PAYLOAD_TOO_LARGE
+// error, and clean up appropriately. Note that this will cause the header
+// decompressor to lose synchronization with the sender's header compressor,
+// making the SPDY session unusable for future work. The visitor's OnError
+// function should deal with this condition by closing the SPDY connection.
 class NET_EXPORT_PRIVATE SpdyFramerVisitorInterface {
  public:
   virtual ~SpdyFramerVisitorInterface() {}
@@ -69,16 +100,28 @@ class NET_EXPORT_PRIVATE SpdyFramerVisitorInterface {
   // Called when a chunk of header data is available. This is called
   // after OnControl() is called with the control frame associated with the
   // header data being delivered here.
-  // |stream_id| The stream receiving the header data.
+  // |control_frame| header control frame.
   // |header_data| A buffer containing the header data chunk received.
   // |len| The length of the header data buffer. A length of zero indicates
   //       that the header data block has been completely sent.
   // When this function returns true the visitor indicates that it accepted
   // all of the data. Returning false indicates that that an unrecoverable
   // error has occurred, such as bad header data or resource exhaustion.
-  virtual bool OnControlFrameHeaderData(SpdyStreamId stream_id,
+  virtual bool OnControlFrameHeaderData(const SpdyControlFrame* control_frame,
                                         const char* header_data,
                                         size_t len) = 0;
+
+  // Called when a chunk of payload data for a credential frame is available.
+  // This is called after OnControl() is called with the credential frame
+  // associated with the payload being delivered here.
+  // |frame_data| A buffer containing the header data chunk received.
+  // |len| The length of the header data buffer. A length of zero indicates
+  //       that the header data block has been completely sent.
+  // When this function returns true the visitor indicates that it accepted
+  // all of the data. Returning false indicates that that an unrecoverable
+  // error has occurred, such as bad header data or resource exhaustion.
+  virtual bool OnCredentialFrameData(const char* frame_data,
+                                     size_t len) = 0;
 
   // Called when a data frame header is received. The frame's data
   // payload will be provided via subsequent calls to
@@ -107,12 +150,12 @@ class NET_EXPORT_PRIVATE SpdyFramer {
     SPDY_RESET,
     SPDY_AUTO_RESET,
     SPDY_READING_COMMON_HEADER,
-    SPDY_INTERPRET_CONTROL_FRAME_COMMON_HEADER,
     SPDY_CONTROL_FRAME_PAYLOAD,
     SPDY_IGNORE_REMAINING_PAYLOAD,
     SPDY_FORWARD_STREAM_FRAME,
     SPDY_CONTROL_FRAME_BEFORE_HEADER_BLOCK,
     SPDY_CONTROL_FRAME_HEADER_BLOCK,
+    SPDY_CREDENTIAL_FRAME_PAYLOAD,
   };
 
   // SPDY error codes.
@@ -124,6 +167,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
     SPDY_UNSUPPORTED_VERSION,        // Control frame has unsupported version.
     SPDY_DECOMPRESS_FAILURE,         // There was an error decompressing.
     SPDY_COMPRESS_FAILURE,           // There was an error compressing.
+    SPDY_CREDENTIAL_FRAME_CORRUPT,   // CREDENTIAL frame could not be parsed.
 
     LAST_ERROR,  // Must be the last entry in the enum.
   };
@@ -241,10 +285,23 @@ class NET_EXPORT_PRIVATE SpdyFramer {
       SpdyStreamId stream_id,
       uint32 delta_window_size);
 
+  // Creates an instance of SpdyCredentialControlFrame.  The CREDENTIAL
+  // frame is used to send a client certificate to the server when
+  // request more than one origin are sent over the same SPDY session.
+  static SpdyCredentialControlFrame* CreateCredentialFrame(
+      const SpdyCredential& credential);
+
   // Given a SpdySettingsControlFrame, extract the settings.
   // Returns true on successful parse, false otherwise.
   static bool ParseSettings(const SpdySettingsControlFrame* frame,
-      SpdySettings* settings);
+                            SpdySettings* settings);
+
+  // Given a SpdyCredentialControlFrame's payload, extract the credential.
+  // Returns true on successful parse, false otherwise.
+  // TODO(hkhalil): Implement CREDENTIAL frame parsing in SpdyFramer
+  // and eliminate this method.
+  static bool ParseCredentialData(const char* data, size_t len,
+                                  SpdyCredential* credential);
 
   // Create a data frame.
   // |stream_id| is the stream  for this frame
@@ -325,7 +382,7 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   static const int kDictionarySize;
 
  protected:
-  FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, DataCompression);
+  FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, HeaderCompression);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, ExpandBuffer_HeapSmash);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, HugeHeaderBlock);
   FRIEND_TEST_ALL_PREFIXES(SpdyFramerTest, UnclosedStreamDataCompressors);
@@ -351,8 +408,8 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   size_t ProcessCommonHeader(const char* data, size_t len);
   void ProcessControlFrameHeader();
   size_t ProcessControlFramePayload(const char* data, size_t len);
+  size_t ProcessCredentialFramePayload(const char* data, size_t len);
   size_t ProcessControlFrameBeforeHeaderBlock(const char* data, size_t len);
-  size_t NewProcessControlFrameHeaderBlock(const char* data, size_t len);
   size_t ProcessControlFrameHeaderBlock(const char* data, size_t len);
   size_t ProcessDataFramePayload(const char* data, size_t len);
 
@@ -382,12 +439,6 @@ class NET_EXPORT_PRIVATE SpdyFramer {
   // in decompressed form, in chunks. Returns true if the visitor has
   // accepted all of the chunks.
   bool IncrementallyDecompressControlFrameHeaderData(
-      const SpdyControlFrame* frame);
-
-  // Deliver the given control frame's compressed headers block to the visitor
-  // in decompressed form, in chunks. Returns true if the visitor has
-  // accepted all of the chunks.
-  bool NewIncrementallyDecompressControlFrameHeaderData(
       const SpdyControlFrame* frame,
       const char* data,
       size_t len);

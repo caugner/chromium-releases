@@ -20,10 +20,14 @@
 #include "ui/views/view.h"
 #endif
 
-class DownloadItem;
+class GURL;
 
 namespace base {
 class DictionaryValue;
+}
+
+namespace content {
+class DownloadItem;
 }
 
 namespace gfx {
@@ -44,7 +48,7 @@ bool DownloadPathIsDangerous(const FilePath& download_path);
 // Generate a filename based on the response from the server.  Similar
 // in operation to net::GenerateFileName(), but uses a localized
 // default name.
-void GenerateFileNameFromRequest(const DownloadItem& download_item,
+void GenerateFileNameFromRequest(const content::DownloadItem& download_item,
                                  FilePath* generated_name);
 
 // Download progress animations ------------------------------------------------
@@ -127,7 +131,7 @@ void PaintDownloadInterrupted(gfx::Canvas* canvas,
 // Helper function for download views to use when acting as a drag source for a
 // DownloadItem. If |icon| is NULL, no image will be accompany the drag. |view|
 // is only required for Mac OS X, elsewhere it can be NULL.
-void DragDownload(const DownloadItem* download,
+void DragDownload(const content::DownloadItem* download,
                   gfx::Image* icon,
                   gfx::NativeView view);
 
@@ -135,10 +139,11 @@ void DragDownload(const DownloadItem* download,
 
 // Creates a representation of a download in a format that the downloads
 // HTML page can understand.
-base::DictionaryValue* CreateDownloadItemValue(DownloadItem* download, int id);
+base::DictionaryValue* CreateDownloadItemValue(content::DownloadItem* download,
+                                               int id);
 
 // Get the localized status text for an in-progress download.
-string16 GetProgressStatusText(DownloadItem* download);
+string16 GetProgressStatusText(content::DownloadItem* download);
 
 // Update the application icon to indicate overall download progress.
 // |download_count| is the number of downloads currently in progress. If
@@ -157,6 +162,34 @@ int GetUniquePathNumberWithCrDownload(const FilePath& path);
 
 // Returns a .crdownload intermediate path for the |suggested_path|.
 FilePath GetCrDownloadPath(const FilePath& suggested_path);
+
+// Check whether we can do the saving page operation for the specified URL.
+bool IsSavableURL(const GURL& url);
+
+// Record the total number of items and the number of in-progress items showing
+// in the shelf when it closes.  Set |autoclose| to true when the shelf is
+// closing itself, false when the user explicitly closed it.
+void RecordShelfClose(int size, int in_progress, bool autoclose);
+
+// Used for counting UMA stats. Similar to content's
+// download_stats::DownloadCountTypes but from the chrome layer.
+enum ChromeDownloadCountTypes {
+  // The download was initiated by navigating to a URL (e.g. by user click).
+  INITIATED_BY_NAVIGATION_COUNT = 0,
+
+  // The download was initiated by invoking a context menu within a page.
+  INITIATED_BY_CONTEXT_MENU_COUNT,
+
+  // The download was initiated by the WebStore installer.
+  INITIATED_BY_WEBSTORE_INSTALLER_COUNT,
+
+  // The download was initiated by the ImageBurner (cros).
+  INITIATED_BY_IMAGE_BURNER_COUNT,
+
+  DOWNLOAD_COUNT_TYPES_LAST_ENTRY,
+};
+
+void RecordDownloadCount(ChromeDownloadCountTypes type);
 
 }  // namespace download_util
 

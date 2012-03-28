@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,14 +15,13 @@
 #include "chrome/browser/notifications/desktop_notification_service.h"
 #include "chrome/browser/notifications/notification.h"
 #include "chrome/browser/notifications/notification_options_menu_model.h"
-#include "chrome/browser/ui/views/notifications/balloon_view_host.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -42,6 +41,12 @@
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/painter.h"
 #include "ui/views/widget/widget.h"
+
+#if defined(OS_CHROMEOS) && defined(USE_AURA)
+#include "chrome/browser/chromeos/notifications/balloon_view_host.h"
+#else
+#include "chrome/browser/ui/views/notifications/balloon_view_host.h"
+#endif
 
 using views::Widget;
 
@@ -103,7 +108,8 @@ BalloonViewImpl::BalloonViewImpl(BalloonCollection* collection)
       close_button_(NULL),
       animation_(NULL),
       options_menu_model_(NULL),
-      options_menu_button_(NULL) {
+      options_menu_button_(NULL),
+      enable_web_ui_(false) {
   // This object is not to be deleted by the views hierarchy,
   // as it is owned by the balloon.
   set_parent_owned(false);
@@ -214,7 +220,7 @@ void BalloonViewImpl::RepositionToBalloon() {
     html_container_->SetBounds(contents_rect);
     html_contents_->SetPreferredSize(contents_rect.size());
     RenderWidgetHostView* view =
-        html_contents_->tab_contents()->GetRenderWidgetHostView();
+        html_contents_->web_contents()->GetRenderWidgetHostView();
     if (view)
       view->SetSize(contents_rect.size());
     return;
@@ -230,9 +236,9 @@ void BalloonViewImpl::RepositionToBalloon() {
 
 void BalloonViewImpl::Update() {
   DCHECK(html_contents_.get()) << "BalloonView::Update called before Show";
-  if (!html_contents_->tab_contents())
+  if (!html_contents_->web_contents())
     return;
-  html_contents_->tab_contents()->controller().LoadURL(
+  html_contents_->web_contents()->GetController().LoadURL(
       balloon_->notification().content_url(), content::Referrer(),
       content::PAGE_TRANSITION_LINK, std::string());
 }
@@ -263,7 +269,7 @@ void BalloonViewImpl::AnimationProgressed(const ui::Animation* animation) {
 
   html_contents_->SetPreferredSize(contents_rect.size());
   RenderWidgetHostView* view =
-      html_contents_->tab_contents()->GetRenderWidgetHostView();
+      html_contents_->web_contents()->GetRenderWidgetHostView();
   if (view)
     view->SetSize(contents_rect.size());
 }
@@ -333,8 +339,15 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   // We don't let the OS manage the RTL layout of these widgets, because
   // this code is already taking care of correctly reversing the layout.
   gfx::Rect contents_rect = GetContentsRectangle();
+#if defined(OS_CHROMEOS) && defined(USE_AURA)
+  html_contents_.reset(new chromeos::BalloonViewHost(balloon));
+#else
   html_contents_.reset(new BalloonViewHost(balloon));
+#endif
   html_contents_->SetPreferredSize(gfx::Size(10000, 10000));
+  if (enable_web_ui_)
+    html_contents_->EnableWebUI();
+
   html_container_ = new Widget;
   Widget::InitParams params(Widget::InitParams::TYPE_POPUP);
   params.bounds = contents_rect;

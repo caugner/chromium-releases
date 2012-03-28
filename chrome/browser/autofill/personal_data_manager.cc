@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/webdata/web_data_service.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
@@ -190,7 +191,8 @@ void PersonalDataManager::OnStateChanged() {
     return;
   }
 
-  ProfileSyncService* sync_service = profile_->GetProfileSyncService();
+  ProfileSyncService* sync_service =
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_);
   if (!sync_service)
     return;
 
@@ -228,7 +230,6 @@ bool PersonalDataManager::ImportFormData(
   // Parse the form and construct a profile based on the information that is
   // possible to import.
   int importable_credit_card_fields = 0;
-  std::vector<const FormStructure*>::const_iterator iter;
 
   // Detect and discard forms with multiple fields of the same type.
   std::set<AutofillFieldType> types_seen;
@@ -890,7 +891,8 @@ void PersonalDataManager::EmptyMigrationTrash() {
     return;
   }
 
-  ProfileSyncService* sync_service = profile_->GetProfileSyncService();
+  ProfileSyncService* sync_service =
+      ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile_);
   if (!sync_service)
     return;
 

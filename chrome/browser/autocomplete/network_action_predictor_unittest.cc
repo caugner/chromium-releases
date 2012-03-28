@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,6 @@ using content::BrowserThread;
 
 namespace {
 
-// TODO(dominich): Set hits/misses to match expected action if the test switches
-// to the Exact Algorithm.
 struct TestUrlInfo {
   GURL url;
   string16 title;
@@ -91,9 +89,6 @@ class NetworkActionPredictorTest : public testing::Test {
         switches::kPrerenderFromOmnibox,
         switches::kPrerenderFromOmniboxSwitchValueEnabled);
 
-    ASSERT_TRUE(prerender::GetOmniboxHeuristicToUse() ==
-          prerender::OMNIBOX_HEURISTIC_EXACT)
-        << "The heuristic has changed so the expectations need to be updated.";
     profile_.CreateHistoryService(true, false);
     profile_.BlockUntilHistoryProcessesPendingRequests();
 
@@ -104,6 +99,7 @@ class NetworkActionPredictorTest : public testing::Test {
 
   void TearDown() {
     profile_.DestroyHistoryService();
+    predictor_->Shutdown();
   }
 
  protected:
@@ -356,13 +352,7 @@ TEST_F(NetworkActionPredictorTest, RecommendActionSearch) {
 
   for (size_t i = 0; i < arraysize(test_url_db); ++i) {
     match.destination_url = GURL(test_url_db[i].url);
-    const NetworkActionPredictor::Action expected =
-        (test_url_db[i].expected_action ==
-         NetworkActionPredictor::ACTION_PRERENDER) ?
-            NetworkActionPredictor::ACTION_PRECONNECT :
-            test_url_db[i].expected_action;
-
-    EXPECT_EQ(expected,
+    EXPECT_EQ(test_url_db[i].expected_action,
               predictor()->RecommendAction(test_url_db[i].user_text, match))
         << "Unexpected action for " << match.destination_url;
   }

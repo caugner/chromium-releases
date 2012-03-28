@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,9 @@
 #include "base/logging.h"
 #include "base/message_loop.h"
 #include "base/threading/thread.h"
+#include "net/base/default_origin_bound_cert_store.h"
 #include "net/base/host_port_pair.h"
+#include "net/base/origin_bound_cert_service.h"
 #include "net/http/http_network_session.h"
 #include "net/http/http_server_properties_impl.h"
 #include "net/url_request/url_request_job_factory.h"
@@ -140,6 +142,12 @@ void TestURLRequestContext::Init() {
   // In-memory cookie store.
   if (!cookie_store())
     context_storage_.set_cookie_store(new net::CookieMonster(NULL, NULL));
+  // In-memory origin bound cert service.
+  if (!origin_bound_cert_service()) {
+    context_storage_.set_origin_bound_cert_service(
+        new net::OriginBoundCertService(
+            new net::DefaultOriginBoundCertStore(NULL)));
+  }
   if (accept_language().empty())
     set_accept_language("en-us,fr");
   if (accept_charset().empty())
@@ -174,7 +182,7 @@ TestDelegate::TestDelegate()
       received_data_before_response_(false),
       request_failed_(false),
       have_certificate_errors_(false),
-      is_hsts_host_(false),
+      certificate_errors_are_fatal_(false),
       auth_required_(false),
       buf_(new net::IOBuffer(kBufferSize)) {
 }
@@ -187,7 +195,7 @@ void TestDelegate::OnReceivedRedirect(net::URLRequest* request,
   received_redirect_count_++;
   if (quit_on_redirect_) {
     *defer_redirect = true;
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   } else if (cancel_in_rr_) {
     request->Cancel();
   }
@@ -205,12 +213,12 @@ void TestDelegate::OnAuthRequired(net::URLRequest* request,
 
 void TestDelegate::OnSSLCertificateError(net::URLRequest* request,
                                          const net::SSLInfo& ssl_info,
-                                         bool is_hsts_host) {
+                                         bool fatal) {
   // The caller can control whether it needs all SSL requests to go through,
   // independent of any possible errors, or whether it wants SSL errors to
   // cancel the request.
   have_certificate_errors_ = true;
-  is_hsts_host_ = is_hsts_host;
+  certificate_errors_are_fatal_ = fatal;
   if (allow_certificate_errors_)
     request->ContinueDespiteLastError();
   else
@@ -311,7 +319,7 @@ void TestDelegate::OnReadCompleted(net::URLRequest* request, int bytes_read) {
 
 void TestDelegate::OnResponseCompleted(net::URLRequest* request) {
   if (quit_on_complete_)
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 TestNetworkDelegate::TestNetworkDelegate()
@@ -443,7 +451,7 @@ void TestNetworkDelegate::OnRawBytesRead(const net::URLRequest& request,
                                          int bytes_read) {
 }
 
-void TestNetworkDelegate::OnCompleted(net::URLRequest* request) {
+void TestNetworkDelegate::OnCompleted(net::URLRequest* request, bool started) {
   int req_id = request->identifier();
   InitRequestStatesIfNew(req_id);
   event_order_[req_id] += "OnCompleted\n";

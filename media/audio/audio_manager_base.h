@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,11 +7,17 @@
 
 #include <map>
 
+#include "base/atomic_ref_count.h"
 #include "base/compiler_specific.h"
-#include "base/threading/thread.h"
+#include "base/memory/scoped_ptr.h"
+#include "base/synchronization/lock.h"
 #include "media/audio/audio_manager.h"
 
 class AudioOutputDispatcher;
+
+namespace base {
+class Thread;
+}
 
 // AudioManagerBase provides AudioManager functions common for all platforms.
 class MEDIA_EXPORT AudioManagerBase : public AudioManager {
@@ -23,10 +29,17 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
 
   AudioManagerBase();
 
-  virtual void Init() OVERRIDE;
-  virtual void Cleanup() OVERRIDE;
+#ifndef NDEBUG
+  // Overridden to make sure we don't accidentally get added reference counts on
+  // the audio thread.  The AudioManagerBase instance must always be deleted
+  // from outside the audio thread.
+  virtual void AddRef() const OVERRIDE;
+  virtual void Release() const OVERRIDE;
+#endif
 
-  virtual MessageLoop* GetMessageLoop() OVERRIDE;
+  virtual void Init() OVERRIDE;
+
+  virtual scoped_refptr<base::MessageLoopProxy> GetMessageLoop() OVERRIDE;
 
   virtual string16 GetAudioInputDeviceModel() OVERRIDE;
 
@@ -44,6 +57,11 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
   void IncreaseActiveInputStreamCount();
   void DecreaseActiveInputStreamCount();
 
+  // Shuts down the audio thread and releases all the audio output dispatchers
+  // on the audio thread.  All AudioOutputProxy instances should be freed before
+  // Shutdown is called.
+  void Shutdown();
+
  protected:
   virtual ~AudioManagerBase();
 
@@ -51,24 +69,20 @@ class MEDIA_EXPORT AudioManagerBase : public AudioManager {
                    AudioParameters::Compare>
       AudioOutputDispatchersMap;
 
-  bool initialized() { return initialized_; }
+  void ShutdownOnAudioThread();
 
   // Thread used to interact with AudioOutputStreams created by this
   // audio manger.
-  base::Thread audio_thread_;
+  scoped_ptr<base::Thread> audio_thread_;
+  mutable base::Lock audio_thread_lock_;
 
-  bool initialized_;
-
+  // Map of cached AudioOutputDispatcher instances.  Must only be touched
+  // from the audio thread (no locking).
   AudioOutputDispatchersMap output_dispatchers_;
 
   // Counts the number of active input streams to find out if something else
   // is currently recording in Chrome.
-  int num_active_input_streams_;
-
-  // Lock used to synchronize the access to num_active_input_streams_.
-  // Do not use for anything else and try to avoid using other locks
-  // in this code whenever possible.
-  base::Lock active_input_streams_lock_;
+  base::AtomicRefCount num_active_input_streams_;
 
   DISALLOW_COPY_AND_ASSIGN(AudioManagerBase);
 };

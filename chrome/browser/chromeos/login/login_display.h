@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -69,7 +69,12 @@ class LoginDisplay : public RemoveUserDelegate {
   // guest, new user pods if those are enabled.
   virtual void Init(const UserList& users,
                     bool show_guest,
+                    bool show_users,
                     bool show_new_user) = 0;
+
+  // Notifies the login UI that the preferences defining how to visualize it to
+  // the user have changed and it needs to refresh.
+  virtual void OnPreferencesChanged() = 0;
 
   // Called when user image has been changed.
   // |user| contains updated user.
@@ -95,6 +100,9 @@ class LoginDisplay : public RemoveUserDelegate {
   virtual void ShowError(int error_msg_id,
                          int login_attempts,
                          HelpAppLauncher::HelpTopic help_topic_id) = 0;
+
+  // Proceed with Gaia flow because password has changed.
+  virtual void ShowGaiaPasswordChanged(const std::string& username) = 0;
 
   gfx::Rect background_bounds() const { return background_bounds_; }
   void set_background_bounds(const gfx::Rect background_bounds){

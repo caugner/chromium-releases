@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,19 +11,27 @@
 #include "base/synchronization/lock.h"
 #include "media/base/pipeline.h"
 #include "media/filters/chunk_demuxer_client.h"
+#include "webkit/media/skcanvas_video_renderer.h"
 #include "webkit/media/web_data_source.h"
 
-class MessageLoop;
 class SkCanvas;
+
+namespace base {
+class MessageLoopProxy;
+}
 
 namespace gfx {
 class Rect;
 }
 
+namespace media {
+class VideoFrame;
+class VideoRendererBase;
+}
+
 namespace webkit_media {
 
 class WebMediaPlayerImpl;
-class VideoRendererImpl;
 
 // Acts as a thread proxy between the various threads used for multimedia and
 // the render thread that WebMediaPlayerImpl is running on.
@@ -31,13 +39,24 @@ class WebMediaPlayerProxy
     : public base::RefCountedThreadSafe<WebMediaPlayerProxy>,
       public media::ChunkDemuxerClient {
  public:
-  WebMediaPlayerProxy(MessageLoop* render_loop,
+  WebMediaPlayerProxy(const scoped_refptr<base::MessageLoopProxy>& render_loop,
                       WebMediaPlayerImpl* webmediaplayer);
+  const scoped_refptr<WebDataSource>& data_source() {
+    return data_source_;
+  }
+  void set_data_source(const scoped_refptr<WebDataSource>& data_source) {
+    data_source_ = data_source;
+  }
+
+  // TODO(scherkus): remove this once VideoRendererBase::PaintCB passes
+  // ownership of the VideoFrame http://crbug.com/108435
+  void set_frame_provider(media::VideoRendererBase* frame_provider) {
+    frame_provider_ = frame_provider;
+  }
 
   // Methods for Filter -> WebMediaPlayerImpl communication.
   void Repaint();
-  void SetVideoRenderer(const scoped_refptr<VideoRendererImpl>& video_renderer);
-  WebDataSourceBuildObserverHack GetBuildObserver();
+  void SetOpaque(bool opaque);
 
   // Methods for WebMediaPlayerImpl -> Filter communication.
   void Paint(SkCanvas* canvas, const gfx::Rect& dest_rect);
@@ -45,9 +64,9 @@ class WebMediaPlayerProxy
   void GetCurrentFrame(scoped_refptr<media::VideoFrame>* frame_out);
   void PutCurrentFrame(scoped_refptr<media::VideoFrame> frame);
   bool HasSingleOrigin();
-  void AbortDataSources();
+  void AbortDataSource();
 
-  // Methods for PipelineImpl -> WebMediaPlayerImpl communication.
+  // Methods for Pipeline -> WebMediaPlayerImpl communication.
   void PipelineInitializationCallback(media::PipelineStatus status);
   void PipelineSeekCallback(media::PipelineStatus status);
   void PipelineEndedCallback(media::PipelineStatus status);
@@ -67,15 +86,9 @@ class WebMediaPlayerProxy
   void DemuxerOpenedTask(const scoped_refptr<media::ChunkDemuxer>& demuxer);
   void DemuxerClosedTask();
 
-  // Returns the message loop used by the proxy.
-  MessageLoop* message_loop() { return render_loop_; }
-
  private:
   friend class base::RefCountedThreadSafe<WebMediaPlayerProxy>;
   virtual ~WebMediaPlayerProxy();
-
-  // Adds a data source to data_sources_.
-  void AddDataSource(WebDataSource* data_source);
 
   // Invoke |webmediaplayer_| to perform a repaint.
   void RepaintTask();
@@ -96,15 +109,16 @@ class WebMediaPlayerProxy
   // Notify |webmediaplayer_| that there's a network event.
   void NetworkEventTask(media::NetworkEvent type);
 
+  // Inform |webmediaplayer_| whether the video content is opaque.
+  void SetOpaqueTask(bool opaque);
+
   // The render message loop where WebKit lives.
-  MessageLoop* render_loop_;
+  scoped_refptr<base::MessageLoopProxy> render_loop_;
   WebMediaPlayerImpl* webmediaplayer_;
 
-  base::Lock data_sources_lock_;
-  typedef std::list<scoped_refptr<WebDataSource> > DataSourceList;
-  DataSourceList data_sources_;
-
-  scoped_refptr<VideoRendererImpl> video_renderer_;
+  scoped_refptr<WebDataSource> data_source_;
+  scoped_refptr<media::VideoRendererBase> frame_provider_;
+  SkCanvasVideoRenderer video_renderer_;
 
   base::Lock lock_;
   int outstanding_repaints_;

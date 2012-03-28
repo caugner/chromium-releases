@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,8 +18,10 @@
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/sync/sync_ui_util.h"
+#include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/sync_global_error.h"
+#include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/browser.h"
@@ -33,14 +35,15 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/profiling.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/button_menu_item_model.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -54,6 +57,10 @@
 #if defined(OS_WIN)
 #include "chrome/browser/enumerate_modules_model_win.h"
 #endif
+
+using content::HostZoomMap;
+using content::UserMetricsAction;
+using content::WebContents;
 
 ////////////////////////////////////////////////////////////////////////////////
 // EncodingMenuModel
@@ -95,12 +102,12 @@ void EncodingMenuModel::Build() {
 }
 
 bool EncodingMenuModel::IsCommandIdChecked(int command_id) const {
-  TabContents* current_tab = browser_->GetSelectedTabContents();
+  WebContents* current_tab = browser_->GetSelectedWebContents();
   if (!current_tab)
     return false;
   EncodingMenuController controller;
   return controller.IsItemChecked(browser_->profile(),
-                                  current_tab->encoding(), command_id);
+                                  current_tab->GetEncoding(), command_id);
 }
 
 bool EncodingMenuModel::IsCommandIdEnabled(int command_id) const {
@@ -252,19 +259,12 @@ string16 WrenchMenuModel::GetLabelForCommandId(int command_id) const {
       return l10n_util::GetStringFUTF16(IDS_VIEW_BACKGROUND_PAGES,
                                         num_background_pages);
     }
-    case IDC_UPGRADE_DIALOG: {
-#if defined(OS_CHROMEOS)
-      const string16 product_name =
-          l10n_util::GetStringUTF16(IDS_PRODUCT_OS_NAME);
-#else
-      const string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-#endif
-
-      return l10n_util::GetStringFUTF16(IDS_UPDATE_NOW, product_name);
-    }
+    case IDC_UPGRADE_DIALOG:
+      return l10n_util::GetStringUTF16(IDS_UPDATE_NOW);
     case IDC_SHOW_SYNC_SETUP: {
       ProfileSyncService* service =
-          browser_->GetProfile()->GetOriginalProfile()->GetProfileSyncService();
+          ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+              browser_->GetProfile()->GetOriginalProfile());
       SyncGlobalError* error = service->sync_global_error();
       if (error && error->HasCustomizedSyncMenuItem())
         return error->MenuItemLabel();
@@ -300,7 +300,8 @@ bool WrenchMenuModel::GetIconForCommandId(int command_id,
     }
     case IDC_SHOW_SYNC_SETUP: {
       ProfileSyncService* service =
-          browser_->GetProfile()->GetOriginalProfile()->GetProfileSyncService();
+          ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+              browser_->GetProfile()->GetOriginalProfile());
       SyncGlobalError* error = service->sync_global_error();
       if (error && error->HasCustomizedSyncMenuItem()) {
         int icon_id = error->MenuItemIconResourceID();
@@ -327,7 +328,8 @@ void WrenchMenuModel::ExecuteCommand(int command_id) {
 
   if (command_id == IDC_SHOW_SYNC_SETUP) {
     ProfileSyncService* service =
-        browser_->GetProfile()->GetOriginalProfile()->GetProfileSyncService();
+        ProfileSyncServiceFactory::GetInstance()->GetForProfile(
+            browser_->GetProfile()->GetOriginalProfile());
     SyncGlobalError* error = service->sync_global_error();
     if (error && error->HasCustomizedSyncMenuItem()) {
       error->ExecuteMenuItem(browser_);
@@ -336,7 +338,7 @@ void WrenchMenuModel::ExecuteCommand(int command_id) {
   }
 
   if (command_id == IDC_HELP_PAGE)
-    UserMetrics::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
+    content::RecordAction(UserMetricsAction("ShowHelpTabViaWrenchMenu"));
 
   browser_->ExecuteCommand(command_id);
 }
@@ -498,32 +500,13 @@ void WrenchMenuModel::Build() {
     AddSeparator();
   }
 
-#if defined(USE_AURA)
-#if defined(OS_WIN)
-  AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
-#else
-  AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
-#endif
-#elif defined(OS_MACOSX)
-  AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
-#elif defined(TOOLKIT_USES_GTK)
-  string16 preferences = gtk_util::GetStockPreferencesMenuLabel();
-  if (!preferences.empty())
-    AddItem(IDC_OPTIONS, preferences);
-  else
-    AddItemWithStringId(IDC_OPTIONS, IDS_PREFERENCES);
-#else
-  AddItemWithStringId(IDC_OPTIONS, IDS_OPTIONS);
-#endif
-
-  const string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-  AddItem(IDC_ABOUT, l10n_util::GetStringFUTF16(IDS_ABOUT, product_name));
+  AddItemWithStringId(IDC_OPTIONS, IDS_SETTINGS);
+  AddItem(IDC_ABOUT, l10n_util::GetStringUTF16(IDS_ABOUT));
   string16 num_background_pages = base::FormatNumber(
       TaskManager::GetBackgroundPageCount());
   AddItem(IDC_VIEW_BACKGROUND_PAGES, l10n_util::GetStringFUTF16(
       IDS_VIEW_BACKGROUND_PAGES, num_background_pages));
-  AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringFUTF16(
-      IDS_UPDATE_NOW, product_name));
+  AddItem(IDC_UPGRADE_DIALOG, l10n_util::GetStringUTF16(IDS_UPDATE_NOW));
   AddItem(IDC_VIEW_INCOMPATIBILITIES, l10n_util::GetStringUTF16(
       IDS_VIEW_INCOMPATIBILITIES));
 
@@ -550,9 +533,9 @@ void WrenchMenuModel::AddGlobalErrorMenuItems() {
   // it won't show in the existing wrench menu. To fix this we need to some
   // how update the menu if new errors are added.
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
-  const std::vector<GlobalError*>& errors =
+  const GlobalErrorService::GlobalErrorList& errors =
       GlobalErrorServiceFactory::GetForProfile(browser_->profile())->errors();
-  for (std::vector<GlobalError*>::const_iterator
+  for (GlobalErrorService::GlobalErrorList::const_iterator
        it = errors.begin(); it != errors.end(); ++it) {
     GlobalError* error = *it;
     if (error->HasMenuItem()) {
@@ -587,8 +570,8 @@ void WrenchMenuModel::UpdateZoomControls() {
   bool enable_increment = false;
   bool enable_decrement = false;
   int zoom_percent = 100;
-  if (browser_->GetSelectedTabContents()) {
-    zoom_percent = browser_->GetSelectedTabContents()->GetZoomPercent(
+  if (browser_->GetSelectedWebContents()) {
+    zoom_percent = browser_->GetSelectedWebContents()->GetZoomPercent(
         &enable_increment, &enable_decrement);
   }
   zoom_label_ = l10n_util::GetStringFUTF16(
@@ -596,6 +579,6 @@ void WrenchMenuModel::UpdateZoomControls() {
 }
 
 string16 WrenchMenuModel::GetSyncMenuLabel() const {
-  return sync_ui_util::GetSyncMenuLabel(
-      browser_->profile()->GetOriginalProfile()->GetProfileSyncService());
+  return sync_ui_util::GetSyncMenuLabel(ProfileSyncServiceFactory::
+      GetInstance()->GetForProfile(browser_->profile()->GetOriginalProfile()));
 }

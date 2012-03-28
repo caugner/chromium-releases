@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -76,8 +76,7 @@ size_t g_fatZombieSize = 0;
 BOOL g_zombieAllObjects = NO;
 
 // Protects |g_zombieCount|, |g_zombieIndex|, and |g_zombies|.
-base::LazyInstance<base::Lock, base::LeakyLazyInstanceTraits<base::Lock> >
-    g_lock = LAZY_INSTANCE_INITIALIZER;
+base::LazyInstance<base::Lock>::Leaky g_lock = LAZY_INSTANCE_INITIALIZER;
 
 // How many zombies to keep before freeing, and the current head of
 // the circular buffer.
@@ -200,12 +199,15 @@ void ZombieDealloc(id self, SEL _cmd) {
   // |_internal_object_dispose()| (in objc-class.m) does this, so it
   // should be safe (messaging free'd objects shouldn't be expected to
   // be thread-safe in the first place).
+#pragma clang diagnostic push  // clang warns about direct access to isa.
+#pragma clang diagnostic ignored "-Wdeprecated-objc-isa-usage"
   if (size >= g_fatZombieSize) {
     self->isa = g_fatZombieClass;
     static_cast<CrFatZombie*>(self)->wasa = wasa;
   } else {
     self->isa = g_zombieClass;
   }
+#pragma clang diagnostic pop
 
   // The new record to swap into |g_zombies|.  If |g_zombieCount| is
   // zero, then |self| will be freed immediately.

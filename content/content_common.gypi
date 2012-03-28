@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -30,6 +30,7 @@
   'sources': [
     'public/common/bindings_policy.h',
     'public/common/child_process_host.h',
+    'public/common/child_process_host_delegate.cc',
     'public/common/child_process_host_delegate.h',
     'public/common/child_process_sandbox_support_linux.h',
     'public/common/content_constants.cc',
@@ -89,13 +90,13 @@
     'common/child_process_messages.h',
     'common/child_process_sandbox_support_impl_linux.cc',
     'common/child_process_sandbox_support_impl_linux.h',
+    'common/child_process_sandbox_support_impl_shm_linux.cc',
     'common/child_thread.cc',
     'common/child_thread.h',
     'common/child_trace_message_filter.cc',
     'common/child_trace_message_filter.h',
-    'common/chrome_application_mac.h',
-    'common/chrome_application_mac.mm',
     'common/chrome_descriptors.h',
+    'common/clipboard_messages.cc',
     'common/clipboard_messages.h',
     'common/content_message_generator.cc',
     'common/content_message_generator.h',
@@ -162,18 +163,18 @@
     'common/gpu/image_transport_surface_win.cc',
     'common/gpu/media/gpu_video_decode_accelerator.cc',
     'common/gpu/media/gpu_video_decode_accelerator.h',
-    'common/gpu/transport_texture.cc',
-    'common/gpu/transport_texture.h',
     'common/handle_enumerator_win.cc',
     'common/handle_enumerator_win.h',
     'common/hi_res_timer_manager_posix.cc',
     'common/hi_res_timer_manager_win.cc',
     'common/hi_res_timer_manager.h',
-    'common/indexed_db_key.cc',
-    'common/indexed_db_key.h',
-    'common/indexed_db_messages.h',
-    'common/indexed_db_param_traits.cc',
-    'common/indexed_db_param_traits.h',
+    'common/indexed_db/indexed_db_key.cc',
+    'common/indexed_db/indexed_db_key.h',
+    'common/indexed_db/indexed_db_messages.h',
+    'common/indexed_db/indexed_db_param_traits.cc',
+    'common/indexed_db/indexed_db_param_traits.h',
+    'common/inter_process_time_ticks_converter.cc',
+    'common/inter_process_time_ticks_converter.h',
     'common/intents_messages.h',
     'common/java_bridge_messages.h',
     'common/mac/attributed_string_coder.h',
@@ -293,7 +294,7 @@
         ],
       },
     }],
-    ['use_x11 == 1 and target_arch != "arm"', {
+    ['use_x11 == 1 and (target_arch != "arm" or chromeos == 0)', {
       'sources': [
         'common/gpu/x_util.cc',
         'common/gpu/x_util.h',
@@ -304,7 +305,7 @@
         '../gpu/gpu.gyp:command_buffer_service',
       ],
     }],
-    ['target_arch=="arm"', {
+    ['target_arch=="arm" and chromeos == 1', {
       'dependencies': [
         '../media/media.gyp:media',
       ],
@@ -325,5 +326,64 @@
         ],
       },
     }],
+    ['OS=="win"', {
+      'dependencies': [
+        '../media/media.gyp:media',
+        '../ui/gfx/gl/gl.gyp:gl',        
+      ],
+      'link_settings': {
+        'libraries': [
+           '-ld3d9.lib',
+           '-ld3dx9.lib',
+           '-ldxva2.lib',
+           '-lstrmiids.lib',
+           '-lmf.lib',
+           '-lmfplat.lib',
+           '-lmfuuid.lib',
+        ],
+        'msvs_settings': {
+          'VCLinkerTool': {
+            'DelayLoadDLLs': [
+              'd3d9.dll',
+              'd3dx9_43.dll',
+              'dxva2.dll',
+              'mf.dll',
+              'mfplat.dll',
+            ],
+          },
+        },
+      },
+      'sources': [
+        'common/gpu/media/dxva_video_decode_accelerator.cc',
+        'common/gpu/media/dxva_video_decode_accelerator.h',
+      ],
+      'include_dirs': [
+        '<(DEPTH)/third_party/angle/include',
+      ],
+    }],
+    ['OS=="win" and directxsdk_exists=="True"', {
+      'actions': [
+      {
+        'action_name': 'extract_xinput',
+        'variables': {
+          'input': 'APR2007_xinput_x86.cab',
+          'output': 'xinput1_3.dll',
+        },
+        'inputs': [
+          '../third_party/directxsdk/files/Redist/<(input)',
+        ],
+        'outputs': [
+          '<(PRODUCT_DIR)/<(output)',
+        ],
+        'action': [
+          'python',
+        '../build/extract_from_cab.py',
+        '..\\third_party\\directxsdk\\files\\Redist\\<(input)',
+        '<(output)',
+        '<(PRODUCT_DIR)',
+        ],
+      },
+     ]
+    }]
   ],
 }

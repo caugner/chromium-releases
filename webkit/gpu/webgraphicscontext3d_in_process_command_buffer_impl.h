@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -68,8 +68,6 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
   virtual bool setParentContext(WebGraphicsContext3D* parent_context);
 
   virtual void reshape(int width, int height);
-
-  virtual void setVisibility(bool visible);
 
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size);
   virtual bool readBackFramebuffer(unsigned char* pixels, size_t buffer_size,
@@ -457,6 +455,10 @@ class WebGraphicsContext3DInProcessCommandBufferImpl
   virtual void texImageIOSurface2DCHROMIUM(
       WGC3Denum target, WGC3Dint width, WGC3Dint height,
       WGC3Duint ioSurfaceId, WGC3Duint plane);
+
+  virtual void texStorage2DEXT(
+      WGC3Denum target, WGC3Dint levels, WGC3Duint internalformat,
+      WGC3Dint width, WGC3Dint height);
 
  protected:
 #if WEBKIT_USING_SKIA

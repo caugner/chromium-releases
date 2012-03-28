@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "net/http/http_pipelined_host_pool.h"
 #include "net/http/http_stream_factory.h"
 #include "net/proxy/proxy_server.h"
+#include "net/socket/ssl_client_socket.h"
 
 namespace net {
 
@@ -39,10 +40,10 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl :
   virtual void PreconnectStreams(int num_streams,
                                  const HttpRequestInfo& info,
                                  const SSLConfig& server_ssl_config,
-                                 const SSLConfig& proxy_ssl_config,
-                                 const BoundNetLog& net_log) OVERRIDE;
+                                 const SSLConfig& proxy_ssl_config) OVERRIDE;
   virtual void AddTLSIntolerantServer(const HostPortPair& server) OVERRIDE;
   virtual bool IsTLSIntolerantServer(const HostPortPair& server) const OVERRIDE;
+  virtual base::Value* PipelineInfoToValue() const OVERRIDE;
 
   // HttpPipelinedHostPool::Delegate interface
   virtual void OnHttpPipelinedHostHasAdditionalCapacity(
@@ -70,8 +71,9 @@ class NET_EXPORT_PRIVATE HttpStreamFactoryImpl :
                           const SSLConfig& used_ssl_config,
                           const ProxyInfo& used_proxy_info,
                           bool was_npn_negotiated,
+                          SSLClientSocket::NextProto protocol_negotiated,
                           bool using_spdy,
-                          const NetLog::Source& source);
+                          const BoundNetLog& net_log);
 
   // Called when the Job detects that the endpoint indicated by the
   // Alternate-Protocol does not work. Lets the factory update

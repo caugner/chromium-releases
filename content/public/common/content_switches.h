@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,6 +22,7 @@ CONTENT_EXPORT extern const char kBrowserCrashTest[];
 CONTENT_EXPORT extern const char kBrowserSubprocessPath[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kChromeFrame[];
+extern const char kDartFlags[];
 CONTENT_EXPORT extern const char kDisable3DAPIs[];
 CONTENT_EXPORT extern const char kDisableAccelerated2dCanvas[];
 CONTENT_EXPORT extern const char kDisableAcceleratedCompositing[];
@@ -37,15 +38,18 @@ extern const char kDisableDataTransferItems[];
 extern const char kDisableDesktopNotifications[];
 CONTENT_EXPORT extern const char kDisableDeviceOrientation[];
 CONTENT_EXPORT extern const char kDisableExperimentalWebGL[];
+CONTENT_EXPORT extern const char kBlacklistAcceleratedCompositing[];
+CONTENT_EXPORT extern const char kBlacklistWebGL[];
 extern const char kDisableFileSystem[];
 extern const char kDisableGeolocation[];
 CONTENT_EXPORT extern const char kDisableGLMultisampling[];
 extern const char kDisableGLSLTranslator[];
 extern const char kDisableGpuDriverBugWorkarounds[];
 extern const char kDisableGpuSandbox[];
+extern const char kReduceGpuSandbox[];
 extern const char kDisableGpuWatchdog[];
 CONTENT_EXPORT extern const char kDisableHangMonitor[];
-extern const char kDisableIndexedDatabase[];
+extern const char kDisableImageTransportSurface[];
 CONTENT_EXPORT extern const char kDisableJava[];
 CONTENT_EXPORT extern const char kDisableJavaScript[];
 extern const char kDisableJavaScriptI18NAPI[];
@@ -64,7 +68,8 @@ extern const char kDisableSpellcheckAPI[];
 CONTENT_EXPORT extern const char kDisableWebAudio[];
 extern const char kDisableWebSockets[];
 extern const char kEnableAccelerated2dCanvas[];
-CONTENT_EXPORT extern const char kEnableAcceleratedDrawing[];
+CONTENT_EXPORT extern const char kEnableAcceleratedPainting[];
+CONTENT_EXPORT extern const char kEnableAcceleratedFilters[];
 extern const char kEnableAccessibility[];
 extern const char kEnableAccessibilityLogging[];
 CONTENT_EXPORT extern const char kEnableCompositingForFixedPosition[];
@@ -84,6 +89,7 @@ CONTENT_EXPORT extern const char kEnablePrivilegedWebGLExtensions[];
 extern const char kEnableSSLCachedInfo[];
 extern const char kEnableSandboxLogging[];
 extern const char kEnableSeccompSandbox[];
+extern const char kEnableShadowDOM[];
 CONTENT_EXPORT extern const char kEnableStatsTable[];
 extern const char kEnableStrictSiteIsolation[];
 CONTENT_EXPORT extern const char kEnableThreadedCompositing[];
@@ -136,6 +142,7 @@ CONTENT_EXPORT extern const char kProcessPerTab[];
 CONTENT_EXPORT extern const char kProcessType[];
 CONTENT_EXPORT extern const char kRecordMode[];
 CONTENT_EXPORT extern const char kRegisterPepperPlugins[];
+CONTENT_EXPORT extern const char kRemoteDebuggingPort[];
 CONTENT_EXPORT extern const char kRendererAssertTest[];
 extern const char kRendererCmdPrefix[];
 CONTENT_EXPORT extern const char kRendererCrashTest[];
@@ -144,10 +151,10 @@ extern const char kRendererStartupDialog[];
 // TODO(jam): this doesn't belong in content.
 CONTENT_EXPORT extern const char kServiceProcess[];
 extern const char kShowPaintRects[];
-extern const char kSimpleDataSource[];
 CONTENT_EXPORT extern const char kSingleProcess[];
 CONTENT_EXPORT extern const char kSkipGpuDataLoading[];
 CONTENT_EXPORT extern const char kTestSandbox[];
+extern const char kTouchOptimizedUI[];
 extern const char kTraceStartup[];
 extern const char kTraceStartupFile[];
 extern const char kTraceStartupDuration[];
@@ -163,6 +170,7 @@ extern const char kWebWorkerShareProcesses[];
 CONTENT_EXPORT extern const char kWorkerProcess[];
 CONTENT_EXPORT extern const char kZygoteCmdPrefix[];
 CONTENT_EXPORT extern const char kZygoteProcess[];
+CONTENT_EXPORT extern const char kDisableSoftwareRasterizer[];
 
 extern const char kEnableVisualWordMovement[];
 
@@ -177,6 +185,8 @@ extern const char kUseSystemSSL[];
 #if !defined(OFFICIAL_BUILD)
 CONTENT_EXPORT extern const char kRendererCheckFalseTest[];
 #endif
+
+extern const char kEnablePerTilePainting[];
 
 }  // namespace switches
 

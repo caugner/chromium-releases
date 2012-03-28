@@ -20,6 +20,7 @@
 #include "chrome/browser/sync/test/engine/fake_model_worker.h"
 #include "chrome/browser/sync/test/engine/syncer_command_test.h"
 #include "chrome/browser/sync/test/engine/test_id_factory.h"
+#include "chrome/browser/sync/util/cryptographer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace browser_sync {
@@ -27,7 +28,6 @@ namespace browser_sync {
 using sessions::SyncSession;
 using std::string;
 using syncable::Entry;
-using syncable::GetAllRealModelTypes;
 using syncable::Id;
 using syncable::MutableEntry;
 using syncable::ReadTransaction;
@@ -428,15 +428,15 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdate) {
   // know it's safe.
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
-  encrypted_types.insert(syncable::PASSWORDS);
-  encrypted_types.insert(syncable::NIGORI);
+  encrypted_types.Put(syncable::PASSWORDS);
+  encrypted_types.Put(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
     ReadTransaction trans(FROM_HERE, dir);
     cryptographer =
         session()->context()->directory_manager()->GetCryptographer(&trans);
-    EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
+    EXPECT_TRUE(cryptographer->GetEncryptedTypes().Equals(encrypted_types));
   }
 
   // Nigori node updates should update the Cryptographer.
@@ -449,7 +449,7 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdate) {
       specifics.MutableExtension(sync_pb::nigori);
   other_cryptographer.GetKeys(nigori->mutable_encrypted());
   nigori->set_encrypt_bookmarks(true);
-  encrypted_types.insert(syncable::BOOKMARKS);
+  encrypted_types.Put(syncable::BOOKMARKS);
   CreateUnappliedNewItem(syncable::ModelTypeToRootTag(syncable::NIGORI),
                          specifics, true);
   EXPECT_FALSE(cryptographer->has_pending_keys());
@@ -470,7 +470,9 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdate) {
 
   EXPECT_FALSE(cryptographer->is_ready());
   EXPECT_TRUE(cryptographer->has_pending_keys());
-  EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
+  EXPECT_TRUE(
+      cryptographer->GetEncryptedTypes()
+          .Equals(syncable::ModelTypeSet::All()));
 }
 
 TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
@@ -478,15 +480,15 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
   // know it's safe.
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
-  encrypted_types.insert(syncable::PASSWORDS);
-  encrypted_types.insert(syncable::NIGORI);
+  encrypted_types.Put(syncable::PASSWORDS);
+  encrypted_types.Put(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
     ReadTransaction trans(FROM_HERE, dir);
     cryptographer =
         session()->context()->directory_manager()->GetCryptographer(&trans);
-    EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
+    EXPECT_TRUE(cryptographer->GetEncryptedTypes().Equals(encrypted_types));
   }
 
   // Nigori node updates should update the Cryptographer.
@@ -500,8 +502,8 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
   other_cryptographer.GetKeys(nigori->mutable_encrypted());
   nigori->set_encrypt_sessions(true);
   nigori->set_encrypt_themes(true);
-  encrypted_types.insert(syncable::SESSIONS);
-  encrypted_types.insert(syncable::THEMES);
+  encrypted_types.Put(syncable::SESSIONS);
+  encrypted_types.Put(syncable::THEMES);
   CreateUnappliedNewItem(syncable::ModelTypeToRootTag(syncable::NIGORI),
                          specifics, true);
   EXPECT_FALSE(cryptographer->has_pending_keys());
@@ -522,7 +524,9 @@ TEST_F(ApplyUpdatesCommandTest, NigoriUpdateForDisabledTypes) {
 
   EXPECT_FALSE(cryptographer->is_ready());
   EXPECT_TRUE(cryptographer->has_pending_keys());
-  EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
+  EXPECT_TRUE(
+      cryptographer->GetEncryptedTypes()
+          .Equals(syncable::ModelTypeSet::All()));
 }
 
 TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
@@ -530,15 +534,15 @@ TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
   // know it's safe.
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
-  encrypted_types.insert(syncable::PASSWORDS);
-  encrypted_types.insert(syncable::NIGORI);
+  encrypted_types.Put(syncable::PASSWORDS);
+  encrypted_types.Put(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
     ReadTransaction trans(FROM_HERE, dir);
     cryptographer =
         session()->context()->directory_manager()->GetCryptographer(&trans);
-    EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
+    EXPECT_TRUE(cryptographer->GetEncryptedTypes().Equals(encrypted_types));
 
 
     // With default encrypted_types, this should be true.
@@ -576,7 +580,7 @@ TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
       specifics.MutableExtension(sync_pb::nigori);
   cryptographer->GetKeys(nigori->mutable_encrypted());
   nigori->set_encrypt_bookmarks(true);
-  encrypted_types.insert(syncable::BOOKMARKS);
+  encrypted_types.Put(syncable::BOOKMARKS);
   CreateUnappliedNewItem(syncable::ModelTypeToRootTag(syncable::NIGORI),
                          specifics, true);
   EXPECT_FALSE(cryptographer->has_pending_keys());
@@ -618,7 +622,8 @@ TEST_F(ApplyUpdatesCommandTest, EncryptUnsyncedChanges) {
 
     // If ProcessUnsyncedChangesForEncryption worked, all our unsynced changes
     // should be encrypted now.
-    EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
+    EXPECT_TRUE(syncable::ModelTypeSet::All().Equals(
+        cryptographer->GetEncryptedTypes()));
     EXPECT_TRUE(VerifyUnsyncedChangesAreEncrypted(&trans, encrypted_types));
 
     Syncer::UnsyncedMetaHandles handles;
@@ -632,16 +637,15 @@ TEST_F(ApplyUpdatesCommandTest, CannotEncryptUnsyncedChanges) {
   // know it's safe.
   Cryptographer* cryptographer;
   syncable::ModelTypeSet encrypted_types;
-  encrypted_types.insert(syncable::PASSWORDS);
-  encrypted_types.insert(syncable::NIGORI);
+  encrypted_types.Put(syncable::PASSWORDS);
+  encrypted_types.Put(syncable::NIGORI);
   {
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
     ReadTransaction trans(FROM_HERE, dir);
     cryptographer =
         session()->context()->directory_manager()->GetCryptographer(&trans);
-    EXPECT_EQ(encrypted_types, cryptographer->GetEncryptedTypes());
-
+    EXPECT_TRUE(cryptographer->GetEncryptedTypes().Equals(encrypted_types));
 
     // With default encrypted_types, this should be true.
     EXPECT_TRUE(VerifyUnsyncedChangesAreEncrypted(&trans, encrypted_types));
@@ -681,7 +685,7 @@ TEST_F(ApplyUpdatesCommandTest, CannotEncryptUnsyncedChanges) {
       specifics.MutableExtension(sync_pb::nigori);
   other_cryptographer.GetKeys(nigori->mutable_encrypted());
   nigori->set_encrypt_bookmarks(true);
-  encrypted_types.insert(syncable::BOOKMARKS);
+  encrypted_types.Put(syncable::BOOKMARKS);
   CreateUnappliedNewItem(syncable::ModelTypeToRootTag(syncable::NIGORI),
                          specifics, true);
   EXPECT_FALSE(cryptographer->has_pending_keys());
@@ -709,26 +713,25 @@ TEST_F(ApplyUpdatesCommandTest, CannotEncryptUnsyncedChanges) {
   EXPECT_EQ(0, status->conflict_progress()->ConflictingItemsSize())
       << "The unsynced changes don't trigger a blocking conflict with the "
       << "nigori update.";
-  EXPECT_EQ(1, status->conflict_progress()->NonblockingConflictingItemsSize())
-      << "The unsynced changes trigger a non-blocking conflict with the "
+  EXPECT_EQ(0, status->conflict_progress()->NonblockingConflictingItemsSize())
+      << "The unsynced changes don't trigger a non-blocking conflict with the "
       << "nigori update.";
-  EXPECT_EQ(0, status->update_progress()->SuccessfullyAppliedUpdateCount())
-      << "The nigori update should not be applied";
+  EXPECT_EQ(1, status->update_progress()->SuccessfullyAppliedUpdateCount())
+      << "The nigori update should be applied";
   EXPECT_FALSE(cryptographer->is_ready());
   EXPECT_TRUE(cryptographer->has_pending_keys());
   {
-    // Ensure the unsynced nodes are still not encrypted.
     ScopedDirLookup dir(syncdb()->manager(), syncdb()->name());
     ASSERT_TRUE(dir.good());
     ReadTransaction trans(FROM_HERE, dir);
 
-    // Since we're in conflict, the specifics don't reflect the unapplied
-    // changes.
+    // Since we have pending keys, we would have failed to encrypt, but the
+    // cryptographer should be updated.
     EXPECT_FALSE(VerifyUnsyncedChangesAreEncrypted(&trans, encrypted_types));
-    encrypted_types.clear();
-    encrypted_types.insert(syncable::PASSWORDS);
-    encrypted_types.insert(syncable::BOOKMARKS);
-    EXPECT_EQ(GetAllRealModelTypes(), cryptographer->GetEncryptedTypes());
+    EXPECT_TRUE(cryptographer->GetEncryptedTypes().Equals(
+        syncable::ModelTypeSet().All()));
+    EXPECT_FALSE(cryptographer->is_ready());
+    EXPECT_TRUE(cryptographer->has_pending_keys());
 
     Syncer::UnsyncedMetaHandles handles;
     SyncerUtil::GetUnsyncedEntries(&trans, &handles);

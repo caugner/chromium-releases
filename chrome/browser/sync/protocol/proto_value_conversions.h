@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,13 +13,14 @@ class DictionaryValue;
 }
 
 namespace sync_pb {
+class AppNotification;
 class AppNotificationSettings;
-class AppNotificationSpecifics;
 class AppSettingSpecifics;
 class AppSpecifics;
 class AutofillProfileSpecifics;
 class AutofillSpecifics;
 class BookmarkSpecifics;
+class DeviceInformation;
 class EncryptedData;
 class EntitySpecifics;
 class ExtensionSettingSpecifics;
@@ -79,10 +80,15 @@ base::DictionaryValue* TabNavigationToValue(
 base::DictionaryValue* PasswordSpecificsDataToValue(
     const sync_pb::PasswordSpecificsData& password_specifics_data);
 
+// Sub-protocol of NigoriSpecifics.
+
+base::DictionaryValue* DeviceInformationToValue(
+    const sync_pb::DeviceInformation& device_information);
+
 // Main *SpecificsToValue functions.
 
-base::DictionaryValue* AppNotificationSpecificsToValue(
-    const sync_pb::AppNotificationSpecifics& app_notification_specifics);
+base::DictionaryValue* AppNotificationToValue(
+    const sync_pb::AppNotification& app_notification_specifics);
 
 base::DictionaryValue* AppSettingSpecificsToValue(
     const sync_pb::AppSettingSpecifics& app_setting_specifics);

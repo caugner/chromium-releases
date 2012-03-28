@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -38,7 +38,9 @@ bool WriteNode::UpdateEntryWithEncryption(
     syncable::MutableEntry* entry) {
   syncable::ModelType type = syncable::GetModelTypeFromSpecifics(new_specifics);
   DCHECK_GE(type, syncable::FIRST_REAL_MODEL_TYPE);
-  syncable::ModelTypeSet encrypted_types = cryptographer->GetEncryptedTypes();
+  const sync_pb::EntitySpecifics& old_specifics = entry->Get(SPECIFICS);
+  const syncable::ModelTypeSet encrypted_types =
+      cryptographer->GetEncryptedTypes();
   sync_pb::EntitySpecifics generated_specifics;
   if (!SpecificsNeedsEncryption(encrypted_types, new_specifics) ||
       !cryptographer->is_initialized()) {
@@ -55,7 +57,18 @@ bool WriteNode::UpdateEntryWithEncryption(
                << " with content: "
                << info;
     }
-    syncable::AddDefaultExtensionValue(type, &generated_specifics);
+    // Only copy over the old specifics if it is of the right type and already
+    // encrypted. The first time we encrypt a node we start from scratch, hence
+    // removing all the unencrypted data, but from then on we only want to
+    // update the node if the data changes or the encryption key changes.
+    if (syncable::GetModelTypeFromSpecifics(old_specifics) == type &&
+        old_specifics.has_encrypted()) {
+      generated_specifics.CopyFrom(old_specifics);
+    } else {
+      syncable::AddDefaultExtensionValue(type, &generated_specifics);
+    }
+    // Does not change anything if underlying encrypted blob was already up
+    // to date and encrypted with the default key.
     if (!cryptographer->Encrypt(new_specifics,
                                 generated_specifics.mutable_encrypted())) {
       NOTREACHED() << "Could not encrypt data for node of type "
@@ -64,21 +77,19 @@ bool WriteNode::UpdateEntryWithEncryption(
     }
   }
 
-  const sync_pb::EntitySpecifics& old_specifics = entry->Get(SPECIFICS);
-  if (AreSpecificsEqual(cryptographer, old_specifics, generated_specifics) &&
-      (entry->Get(syncable::NON_UNIQUE_NAME) == kEncryptedString ||
-       !generated_specifics.has_encrypted())) {
-    // Even if the data is the same but the old specifics are encrypted with an
-    // old key, we should go ahead and re-encrypt with the new key.
-    if ((!old_specifics.has_encrypted() &&
-         !generated_specifics.has_encrypted()) ||
-         cryptographer->CanDecryptUsingDefaultKey(old_specifics.encrypted())) {
-      DVLOG(2) << "Specifics of type " << syncable::ModelTypeToString(type)
-               << " already match, dropping change.";
-      return true;
-    }
-    // TODO(zea): Add some way to keep track of how often we're reencrypting
-    // because of a passphrase change.
+  // It's possible this entry was encrypted but didn't properly overwrite the
+  // non_unique_name (see crbug.com/96314).
+  bool encrypted_without_overwriting_name = (old_specifics.has_encrypted() &&
+      entry->Get(syncable::NON_UNIQUE_NAME) != kEncryptedString);
+
+  // If we're encrypted but the name wasn't overwritten properly we still want
+  // to rewrite the entry, irrespective of whether the specifics match.
+  if (!encrypted_without_overwriting_name &&
+      old_specifics.SerializeAsString() ==
+          generated_specifics.SerializeAsString()) {
+    DVLOG(2) << "Specifics of type " << syncable::ModelTypeToString(type)
+             << " already match, dropping change.";
+    return true;
   }
 
   if (generated_specifics.has_encrypted()) {
@@ -95,6 +106,9 @@ bool WriteNode::UpdateEntryWithEncryption(
     }
   }
   entry->Put(syncable::SPECIFICS, generated_specifics);
+  DVLOG(1) << "Overwriting specifics of type "
+           << syncable::ModelTypeToString(type)
+           << " and marking for syncing.";
   syncable::MarkForSyncing(entry);
   return true;
 }
@@ -108,31 +122,65 @@ void WriteNode::SetIsFolder(bool folder) {
 }
 
 void WriteNode::SetTitle(const std::wstring& title) {
-  sync_pb::EntitySpecifics specifics = GetEntitySpecifics();
-  std::string server_legal_name;
-  SyncAPINameToServerName(WideToUTF8(title), &server_legal_name);
-
-  string old_name = entry_->Get(syncable::NON_UNIQUE_NAME);
-
-  if (server_legal_name == old_name)
-    return;  // Skip redundant changes.
-
-  // Only set NON_UNIQUE_NAME to the title if we're not encrypted.
+  DCHECK_NE(GetModelType(), syncable::UNSPECIFIED);
+  syncable::ModelType type = GetModelType();
   Cryptographer* cryptographer = GetTransaction()->GetCryptographer();
-  if (cryptographer->GetEncryptedTypes().count(GetModelType()) > 0) {
-    if (old_name != kEncryptedString)
-      entry_->Put(syncable::NON_UNIQUE_NAME, kEncryptedString);
+  bool needs_encryption = cryptographer->GetEncryptedTypes().Has(type);
+
+  // If this datatype is encrypted and is not a bookmark, we disregard the
+  // specified title in favor of kEncryptedString. For encrypted bookmarks the
+  // NON_UNIQUE_NAME will still be kEncryptedString, but we store the real title
+  // into the specifics. All strings compared are server legal strings.
+  std::string new_legal_title;
+  if (type != syncable::BOOKMARKS && needs_encryption) {
+    new_legal_title = kEncryptedString;
   } else {
-    entry_->Put(syncable::NON_UNIQUE_NAME, server_legal_name);
+    SyncAPINameToServerName(WideToUTF8(title), &new_legal_title);
+  }
+
+  std::string current_legal_title;
+  if (syncable::BOOKMARKS == type &&
+      entry_->Get(syncable::SPECIFICS).has_encrypted()) {
+    // Encrypted bookmarks only have their title in the unencrypted specifics.
+    current_legal_title = GetBookmarkSpecifics().title();
+  } else {
+    // Non-bookmarks and legacy bookmarks (those with no title in their
+    // specifics) store their title in NON_UNIQUE_NAME. Non-legacy bookmarks
+    // store their title in specifics as well as NON_UNIQUE_NAME.
+    current_legal_title = entry_->Get(syncable::NON_UNIQUE_NAME);
+  }
+
+  bool title_matches = (current_legal_title == new_legal_title);
+  bool encrypted_without_overwriting_name = (needs_encryption &&
+      entry_->Get(syncable::NON_UNIQUE_NAME) != kEncryptedString);
+
+  // If the title matches and the NON_UNIQUE_NAME is properly overwritten as
+  // necessary, nothing needs to change.
+  if (title_matches && !encrypted_without_overwriting_name) {
+    DVLOG(2) << "Title matches, dropping change.";
+    return;
   }
 
   // For bookmarks, we also set the title field in the specifics.
   // TODO(zea): refactor bookmarks to not need this functionality.
   if (GetModelType() == syncable::BOOKMARKS) {
-    specifics.MutableExtension(sync_pb::bookmark)->set_title(server_legal_name);
+    sync_pb::EntitySpecifics specifics = GetEntitySpecifics();
+    specifics.MutableExtension(sync_pb::bookmark)->set_title(new_legal_title);
     SetEntitySpecifics(specifics);  // Does it's own encryption checking.
   }
 
+  // For bookmarks, this has to happen after we set the title in the specifics,
+  // because the presence of a title in the NON_UNIQUE_NAME is what controls
+  // the logic deciding whether this is an empty node or a legacy bookmark.
+  // See BaseNode::GetUnencryptedSpecific(..).
+  if (needs_encryption)
+    entry_->Put(syncable::NON_UNIQUE_NAME, kEncryptedString);
+  else
+    entry_->Put(syncable::NON_UNIQUE_NAME, new_legal_title);
+
+  DVLOG(1) << "Overwriting title of type "
+           << syncable::ModelTypeToString(type)
+           << " and marking for syncing.";
   MarkForSyncing();
 }
 
@@ -184,29 +232,28 @@ void WriteNode::SetPasswordSpecifics(
 
   Cryptographer* cryptographer = GetTransaction()->GetCryptographer();
 
-  // Idempotency check to prevent unnecessary syncing: if the plaintexts match
-  // and the old ciphertext is encrypted with the most current key, there's
-  // nothing to do here.  Because each encryption is seeded with a different
-  // random value, checking for equivalence post-encryption doesn't suffice.
-  const sync_pb::EncryptedData& old_ciphertext =
-      GetEntry()->Get(SPECIFICS).GetExtension(sync_pb::password).encrypted();
-  scoped_ptr<sync_pb::PasswordSpecificsData> old_plaintext(
-      DecryptPasswordSpecifics(GetEntry()->Get(SPECIFICS), cryptographer));
-  if (old_plaintext.get() &&
-      old_plaintext->SerializeAsString() == data.SerializeAsString() &&
-      cryptographer->CanDecryptUsingDefaultKey(old_ciphertext)) {
-    return;
+  // We have to do the idempotency check here (vs in UpdateEntryWithEncryption)
+  // because Passwords have their encrypted data within the PasswordSpecifics,
+  // vs within the EntitySpecifics like all the other types.
+  const sync_pb::EntitySpecifics& old_specifics = GetEntry()->Get(SPECIFICS);
+  sync_pb::EntitySpecifics entity_specifics;
+  // Copy over the old specifics if they exist.
+  if (syncable::GetModelTypeFromSpecifics(old_specifics) ==
+          syncable::PASSWORDS) {
+    entity_specifics.CopyFrom(old_specifics);
+  } else {
+    syncable::AddDefaultExtensionValue(syncable::PASSWORDS,
+                                       &entity_specifics);
   }
-
-  sync_pb::PasswordSpecifics new_value;
-  if (!cryptographer->Encrypt(data, new_value.mutable_encrypted())) {
+  sync_pb::PasswordSpecifics* password_specifics =
+      entity_specifics.MutableExtension(sync_pb::password);
+  // This will only update password_specifics if the underlying unencrypted blob
+  // was different from |data| or was not encrypted with the proper passphrase.
+  if (!cryptographer->Encrypt(data, password_specifics->mutable_encrypted())) {
     NOTREACHED() << "Failed to encrypt password, possibly due to sync node "
                  << "corruption";
     return;
   }
-
-  sync_pb::EntitySpecifics entity_specifics;
-  entity_specifics.MutableExtension(sync_pb::password)->CopyFrom(new_value);
   SetEntitySpecifics(entity_specifics);
 }
 

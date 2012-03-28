@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -100,7 +100,7 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
     did_load_library_ = !!LoadLibrary(L"riched20.dll");
 
   DWORD style = kDefaultEditStyle | ES_AUTOHSCROLL;
-  if (textfield_->style() & Textfield::STYLE_PASSWORD)
+  if (textfield_->style() & Textfield::STYLE_OBSCURED)
     style |= ES_PASSWORD;
 
   if (textfield_->read_only())
@@ -113,7 +113,7 @@ NativeTextfieldWin::NativeTextfieldWin(Textfield* textfield)
   Create(textfield_->GetWidget()->GetNativeView(), r, NULL, style, ex_style);
 
   if (textfield_->style() & Textfield::STYLE_LOWERCASE) {
-    DCHECK((textfield_->style() & Textfield::STYLE_PASSWORD) == 0);
+    DCHECK((textfield_->style() & Textfield::STYLE_OBSCURED) == 0);
     SetEditStyle(SES_LOWERCASE, SES_LOWERCASE);
   }
 
@@ -260,14 +260,14 @@ void NativeTextfieldWin::UpdateFont() {
   UpdateTextColor();
 }
 
-void NativeTextfieldWin::UpdateIsPassword() {
+void NativeTextfieldWin::UpdateIsObscured() {
   // TODO: Need to implement for Windows.
-  UpdateAccessibleState(STATE_SYSTEM_PROTECTED, textfield_->IsPassword());
+  UpdateAccessibleState(STATE_SYSTEM_PROTECTED, textfield_->IsObscured());
 }
 
 void NativeTextfieldWin::UpdateEnabled() {
-  SendMessage(m_hWnd, WM_ENABLE, textfield_->IsEnabled(), 0);
-  UpdateAccessibleState(STATE_SYSTEM_UNAVAILABLE, !textfield_->IsEnabled());
+  SendMessage(m_hWnd, WM_ENABLE, textfield_->enabled(), 0);
+  UpdateAccessibleState(STATE_SYSTEM_UNAVAILABLE, !textfield_->enabled());
 }
 
 gfx::Insets NativeTextfieldWin::CalculateInsets() {
@@ -384,6 +384,10 @@ void NativeTextfieldWin::ClearEditHistory() {
   NOTREACHED();
 }
 
+int NativeTextfieldWin::GetFontHeight() {
+  return textfield_->font().GetHeight();
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTextfieldWin, ui::SimpleMenuModel::Delegate implementation:
 
@@ -395,8 +399,8 @@ bool NativeTextfieldWin::IsCommandIdEnabled(int command_id) const {
   switch (command_id) {
     case IDS_APP_UNDO:       return !textfield_->read_only() && !!CanUndo();
     case IDS_APP_CUT:        return !textfield_->read_only() &&
-                                    !textfield_->IsPassword() && !!CanCut();
-    case IDS_APP_COPY:       return !!CanCopy() && !textfield_->IsPassword();
+                                    !textfield_->IsObscured() && !!CanCut();
+    case IDS_APP_COPY:       return !!CanCopy() && !textfield_->IsObscured();
     case IDS_APP_PASTE:      return !textfield_->read_only() && !!CanPaste();
     case IDS_APP_SELECT_ALL: return !!CanSelectAll();
     default:                 NOTREACHED();
@@ -522,7 +526,7 @@ void NativeTextfieldWin::OnContextMenu(HWND window, const POINT& point) {
 }
 
 void NativeTextfieldWin::OnCopy() {
-  if (textfield_->IsPassword())
+  if (textfield_->IsObscured())
     return;
 
   const string16 text(GetSelectedText());
@@ -534,7 +538,7 @@ void NativeTextfieldWin::OnCopy() {
 }
 
 void NativeTextfieldWin::OnCut() {
-  if (textfield_->read_only() || textfield_->IsPassword())
+  if (textfield_->read_only() || textfield_->IsObscured())
     return;
 
   OnCopy();
@@ -860,7 +864,7 @@ void NativeTextfieldWin::OnNCPaint(HRGN region) {
   if (base::win::GetVersion() < base::win::VERSION_VISTA) {
     part = EP_EDITTEXT;
 
-    if (!textfield_->IsEnabled())
+    if (!textfield_->enabled())
       state = ETS_DISABLED;
     else if (textfield_->read_only())
       state = ETS_READONLY;
@@ -871,7 +875,7 @@ void NativeTextfieldWin::OnNCPaint(HRGN region) {
   } else {
     part = EP_EDITBORDER_HVSCROLL;
 
-    if (!textfield_->IsEnabled())
+    if (!textfield_->enabled())
       state = EPSHV_DISABLED;
     else if (GetFocus() == m_hWnd)
       state = EPSHV_FOCUSED;
@@ -883,7 +887,7 @@ void NativeTextfieldWin::OnNCPaint(HRGN region) {
   }
 
   int classic_state =
-      (!textfield_->IsEnabled() || textfield_->read_only()) ? DFCS_INACTIVE : 0;
+      (!textfield_->enabled() || textfield_->read_only()) ? DFCS_INACTIVE : 0;
 
   gfx::NativeThemeWin::instance()->PaintTextField(hdc, part, state,
                                                   classic_state, &window_rect,

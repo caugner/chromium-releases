@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "ui/gfx/compositor/layer.h"
 #include "ui/views/focus/view_storage.h"
 #include "ui/views/layout/fill_layout.h"
-#include "ui/views/touchui/gesture_manager.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -38,8 +37,8 @@ RootView::RootView(Widget* widget)
       last_mouse_event_flags_(0),
       last_mouse_event_x_(-1),
       last_mouse_event_y_(-1),
-      gesture_manager_(GestureManager::GetInstance()),
       touch_pressed_handler_(NULL),
+      gesture_handling_view_(NULL),
       ALLOW_THIS_IN_INITIALIZER_LIST(focus_search_(this, false, false)),
       focus_traversable_parent_(NULL),
       focus_traversable_parent_view_(NULL) {
@@ -88,7 +87,7 @@ bool RootView::OnKeyEvent(const KeyEvent& event) {
   View* v = GetFocusManager()->GetFocusedView();
   // Special case to handle right-click context menus triggered by the
   // keyboard.
-  if (v && v->IsEnabled() && ((event.key_code() == ui::VKEY_APPS) ||
+  if (v && v->enabled() && ((event.key_code() == ui::VKEY_APPS) ||
      (event.key_code() == ui::VKEY_F10 && event.IsShiftDown()))) {
     v->ShowContextMenu(v->GetKeyboardContextMenuLocation(), false);
     return true;
@@ -147,8 +146,8 @@ Widget* RootView::GetWidget() {
   return const_cast<Widget*>(const_cast<const RootView*>(this)->GetWidget());
 }
 
-bool RootView::IsVisibleInRootView() const {
-  return IsVisible();
+bool RootView::IsDrawn() const {
+  return visible();
 }
 
 std::string RootView::GetClassName() const {
@@ -176,9 +175,9 @@ bool RootView::OnMousePressed(const MouseEvent& event) {
   // event to mouse_pressed_handler_
   if (mouse_pressed_handler_) {
     MouseEvent mouse_pressed_event(e, this, mouse_pressed_handler_);
-    drag_info.Reset();
+    drag_info_.Reset();
     mouse_pressed_handler_->ProcessMousePressed(mouse_pressed_event,
-                                                &drag_info);
+                                                &drag_info_);
     return true;
   }
   DCHECK(!explicit_mouse_handler_);
@@ -188,7 +187,7 @@ bool RootView::OnMousePressed(const MouseEvent& event) {
   for (mouse_pressed_handler_ = GetEventHandlerForPoint(e.location());
        mouse_pressed_handler_ && (mouse_pressed_handler_ != this);
        mouse_pressed_handler_ = mouse_pressed_handler_->parent()) {
-    if (!mouse_pressed_handler_->IsEnabled()) {
+    if (!mouse_pressed_handler_->enabled()) {
       // Disabled views should eat events instead of propagating them upwards.
       hit_disabled_view = true;
       break;
@@ -202,9 +201,9 @@ bool RootView::OnMousePressed(const MouseEvent& event) {
     if (mouse_pressed_handler_ != last_click_handler_)
       mouse_pressed_event.set_flags(e.flags() & ~ui::EF_IS_DOUBLE_CLICK);
 
-    drag_info.Reset();
+    drag_info_.Reset();
     bool handled = mouse_pressed_handler_->ProcessMousePressed(
-        mouse_pressed_event, &drag_info);
+        mouse_pressed_event, &drag_info_);
 
     // The view could have removed itself from the tree when handling
     // OnMousePressed().  In this case, the removal notification will have
@@ -247,7 +246,8 @@ bool RootView::OnMouseDragged(const MouseEvent& event) {
     SetMouseLocationAndFlags(e);
 
     MouseEvent mouse_event(e, this, mouse_pressed_handler_);
-    return mouse_pressed_handler_->ProcessMouseDragged(mouse_event, &drag_info);
+    return mouse_pressed_handler_->ProcessMouseDragged(mouse_event,
+                                                       &drag_info_);
   }
   return false;
 }
@@ -289,7 +289,7 @@ void RootView::OnMouseMoved(const MouseEvent& event) {
   // first.  The check for the existing handler is because if a view becomes
   // disabled while handling moves, it's wrong to suddenly send ET_MOUSE_EXITED
   // and ET_MOUSE_ENTERED events, because the mouse hasn't actually exited yet.
-  while (v && !v->IsEnabled() && (v != mouse_move_handler_))
+  while (v && !v->enabled() && (v != mouse_move_handler_))
     v = v->parent();
   if (v && v != this) {
     if (v != mouse_move_handler_) {
@@ -336,8 +336,6 @@ ui::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
   if (touch_pressed_handler_) {
     TouchEvent touch_event(e, this, touch_pressed_handler_);
     status = touch_pressed_handler_->ProcessTouchEvent(touch_event);
-    if (gesture_manager_->ProcessTouchEventForGesture(e, this, status))
-      status = ui::TOUCH_STATUS_SYNTH_MOUSE;
     if (status == ui::TOUCH_STATUS_END)
       touch_pressed_handler_ = NULL;
     return status;
@@ -347,9 +345,8 @@ ui::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
   for (touch_pressed_handler_ = GetEventHandlerForPoint(e.location());
        touch_pressed_handler_ && (touch_pressed_handler_ != this);
        touch_pressed_handler_ = touch_pressed_handler_->parent()) {
-    if (!touch_pressed_handler_->IsEnabled()) {
-      // Disabled views eat events but are treated as not handled by the
-      // the GestureManager.
+    if (!touch_pressed_handler_->enabled()) {
+      // Disabled views eat events but are treated as not handled.
       status = ui::TOUCH_STATUS_UNKNOWN;
       break;
     }
@@ -375,17 +372,47 @@ ui::TouchStatus RootView::OnTouchEvent(const TouchEvent& event) {
     if (status != ui::TOUCH_STATUS_START)
       touch_pressed_handler_ = NULL;
 
-    if (gesture_manager_->ProcessTouchEventForGesture(e, this, status))
-      status = ui::TOUCH_STATUS_SYNTH_MOUSE;
     return status;
   }
 
   // Reset touch_pressed_handler_ to indicate that no processing is occurring.
   touch_pressed_handler_ = NULL;
 
-  // Give the touch event to the gesture manager.
-  if (gesture_manager_->ProcessTouchEventForGesture(e, this, status))
-    status = ui::TOUCH_STATUS_SYNTH_MOUSE;
+  return status;
+}
+
+ui::GestureStatus RootView::OnGestureEvent(const GestureEvent& event) {
+  GestureEvent e(event, this);
+  ui::GestureStatus status = ui::GESTURE_STATUS_UNKNOWN;
+
+  // Walk up the tree until we find a view that wants the gesture event.
+  for (gesture_handling_view_ = GetEventHandlerForPoint(e.location());
+      gesture_handling_view_ && (gesture_handling_view_ != this);
+      gesture_handling_view_ = gesture_handling_view_->parent()) {
+    if (!gesture_handling_view_->enabled()) {
+      // Disabled views eat events but are treated as not handled.
+      return ui::GESTURE_STATUS_UNKNOWN;
+    }
+
+    // See if this view wants to handle the Gesture.
+    GestureEvent gesture_event(e, this, gesture_handling_view_);
+    status = gesture_handling_view_->ProcessGestureEvent(gesture_event);
+
+    // The view could have removed itself from the tree when handling
+    // OnGestureEvent(). So handle as per OnMousePressed. NB: we
+    // assume that the RootView itself cannot be so removed.
+    if (!gesture_handling_view_)
+      return ui::GESTURE_STATUS_UNKNOWN;
+
+    // The gesture event wasn't processed. Go up the view hierarchy and
+    // dispatch the gesture event.
+    if (status == ui::GESTURE_STATUS_UNKNOWN)
+      continue;
+    else if (status == ui::GESTURE_STATUS_CONSUMED)
+      return status;
+    else
+      return ui::GESTURE_STATUS_UNKNOWN;
+  }
   return status;
 }
 
@@ -393,10 +420,15 @@ void RootView::SetMouseHandler(View *new_mh) {
   // If we're clearing the mouse handler, clear explicit_mouse_handler_ as well.
   explicit_mouse_handler_ = (new_mh != NULL);
   mouse_pressed_handler_ = new_mh;
+  drag_info_.Reset();
 }
 
 void RootView::GetAccessibleState(ui::AccessibleViewState* state) {
   state->role = ui::AccessibilityTypes::ROLE_APPLICATION;
+}
+
+void RootView::ReorderChildLayers(ui::Layer* parent_layer) {
+  View::ReorderChildLayers(parent_layer);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -412,6 +444,8 @@ void RootView::ViewHierarchyChanged(bool is_add, View* parent, View* child) {
       mouse_move_handler_ = NULL;
     if (touch_pressed_handler_ == child)
       touch_pressed_handler_ = NULL;
+    if (gesture_handling_view_ == child)
+      gesture_handling_view_ = NULL;
   }
 }
 

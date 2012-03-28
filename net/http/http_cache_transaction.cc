@@ -12,6 +12,7 @@
 
 #include <string>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/field_trial.h"
@@ -19,6 +20,7 @@
 #include "base/string_util.h"
 #include "base/time.h"
 #include "net/base/cert_status_flags.h"
+#include "net/base/completion_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -105,7 +107,6 @@ HttpCache::Transaction::Transaction(HttpCache* cache)
       entry_(NULL),
       new_entry_(NULL),
       network_trans_(NULL),
-      callback_(NULL),
       new_response_(NULL),
       mode_(NONE),
       target_state_(STATE_NONE),
@@ -121,14 +122,10 @@ HttpCache::Transaction::Transaction(HttpCache* cache)
       effective_load_flags_(0),
       write_len_(0),
       final_upload_progress_(0),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          io_callback_(this, &Transaction::OnIOComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          cache_callback_(new CancelableOldCompletionCallback<Transaction>(
-              this, &Transaction::OnIOComplete))),
-      ALLOW_THIS_IN_INITIALIZER_LIST(
-          write_headers_callback_(new CancelableOldCompletionCallback<Transaction>(
-              this, &Transaction::OnIOComplete))) {
+      ALLOW_THIS_IN_INITIALIZER_LIST(weak_factory_(this)),
+      ALLOW_THIS_IN_INITIALIZER_LIST(io_callback_(
+          base::Bind(&Transaction::OnIOComplete,
+                     weak_factory_.GetWeakPtr()))) {
   COMPILE_ASSERT(HttpCache::Transaction::kNumValidationHeaders ==
                  arraysize(kValidationHeaders),
                  Invalid_number_of_validation_headers);
@@ -137,7 +134,7 @@ HttpCache::Transaction::Transaction(HttpCache* cache)
 HttpCache::Transaction::~Transaction() {
   // We may have to issue another IO, but we should never invoke the callback_
   // after this point.
-  callback_ = NULL;
+  callback_.Reset();
 
   if (cache_) {
     if (entry_) {
@@ -156,10 +153,9 @@ HttpCache::Transaction::~Transaction() {
     }
   }
 
-  // If there is an outstanding callback, mark it as cancelled so running it
-  // does nothing.
-  cache_callback_->Cancel();
-  write_headers_callback_->Cancel();
+  // Cancel any outstanding callbacks before we drop our reference to the
+  // HttpCache.  This probably isn't strictly necessary, but might as well.
+  weak_factory_.InvalidateWeakPtrs();
 
   // We could still have a cache read or write in progress, so we just null the
   // cache_ pointer to signal that we are dead.  See DoCacheReadCompleted.
@@ -167,10 +163,10 @@ HttpCache::Transaction::~Transaction() {
 }
 
 int HttpCache::Transaction::WriteMetadata(IOBuffer* buf, int buf_len,
-                                          OldCompletionCallback* callback) {
+                                          const CompletionCallback& callback) {
   DCHECK(buf);
   DCHECK_GT(buf_len, 0);
-  DCHECK(callback);
+  DCHECK(!callback.is_null());
   if (!cache_ || !entry_)
     return ERR_UNEXPECTED;
 
@@ -216,13 +212,13 @@ const BoundNetLog& HttpCache::Transaction::net_log() const {
 }
 
 int HttpCache::Transaction::Start(const HttpRequestInfo* request,
-                                  OldCompletionCallback* callback,
+                                  const CompletionCallback& callback,
                                   const BoundNetLog& net_log) {
   DCHECK(request);
-  DCHECK(callback);
+  DCHECK(!callback.is_null());
 
   // Ensure that we only have one asynchronous call at a time.
-  DCHECK(!callback_);
+  DCHECK(callback_.is_null());
   DCHECK(!reading_);
   DCHECK(!network_trans_.get());
   DCHECK(!entry_);
@@ -245,11 +241,11 @@ int HttpCache::Transaction::Start(const HttpRequestInfo* request,
 }
 
 int HttpCache::Transaction::RestartIgnoringLastError(
-    OldCompletionCallback* callback) {
-  DCHECK(callback);
+    const CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
 
   // Ensure that we only have one asynchronous call at a time.
-  DCHECK(!callback_);
+  DCHECK(callback_.is_null());
 
   if (!cache_)
     return ERR_UNEXPECTED;
@@ -264,11 +260,11 @@ int HttpCache::Transaction::RestartIgnoringLastError(
 
 int HttpCache::Transaction::RestartWithCertificate(
     X509Certificate* client_cert,
-    OldCompletionCallback* callback) {
-  DCHECK(callback);
+    const CompletionCallback& callback) {
+  DCHECK(!callback.is_null());
 
   // Ensure that we only have one asynchronous call at a time.
-  DCHECK(!callback_);
+  DCHECK(callback_.is_null());
 
   if (!cache_)
     return ERR_UNEXPECTED;
@@ -283,12 +279,12 @@ int HttpCache::Transaction::RestartWithCertificate(
 
 int HttpCache::Transaction::RestartWithAuth(
     const AuthCredentials& credentials,
-    OldCompletionCallback* callback) {
+    const CompletionCallback& callback) {
   DCHECK(auth_response_.headers);
-  DCHECK(callback);
+  DCHECK(!callback.is_null());
 
   // Ensure that we only have one asynchronous call at a time.
-  DCHECK(!callback_);
+  DCHECK(callback_.is_null());
 
   if (!cache_)
     return ERR_UNEXPECTED;
@@ -311,12 +307,12 @@ bool HttpCache::Transaction::IsReadyToRestartForAuth() {
 }
 
 int HttpCache::Transaction::Read(IOBuffer* buf, int buf_len,
-                                 OldCompletionCallback* callback) {
+                                 const CompletionCallback& callback) {
   DCHECK(buf);
   DCHECK_GT(buf_len, 0);
-  DCHECK(callback);
+  DCHECK(!callback.is_null());
 
-  DCHECK(!callback_);
+  DCHECK(callback_.is_null());
 
   if (!cache_)
     return ERR_UNEXPECTED;
@@ -355,7 +351,7 @@ int HttpCache::Transaction::Read(IOBuffer* buf, int buf_len,
   }
 
   if (rv == ERR_IO_PENDING) {
-    DCHECK(!callback_);
+    DCHECK(callback_.is_null());
     callback_ = callback;
   }
   return rv;
@@ -413,18 +409,19 @@ uint64 HttpCache::Transaction::GetUploadProgress() const {
 
 void HttpCache::Transaction::DoCallback(int rv) {
   DCHECK(rv != ERR_IO_PENDING);
-  DCHECK(callback_);
+  DCHECK(!callback_.is_null());
 
   // Since Run may result in Read being called, clear callback_ up front.
-  OldCompletionCallback* c = callback_;
-  callback_ = NULL;
-  c->Run(rv);
+  CompletionCallback c = callback_;
+  callback_.Reset();
+  c.Run(rv);
 }
 
 int HttpCache::Transaction::HandleResult(int rv) {
   DCHECK(rv != ERR_IO_PENDING);
-  if (callback_)
+  if (!callback_.is_null())
     DoCallback(rv);
+
   return rv;
 }
 
@@ -720,7 +717,7 @@ int HttpCache::Transaction::DoSendRequest() {
     return rv;
 
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
-  rv = network_trans_->Start(request_, &io_callback_, net_log_);
+  rv = network_trans_->Start(request_, io_callback_, net_log_);
   return rv;
 }
 
@@ -796,7 +793,7 @@ int HttpCache::Transaction::DoSuccessfulSendRequest() {
 
 int HttpCache::Transaction::DoNetworkRead() {
   next_state_ = STATE_NETWORK_READ_COMPLETE;
-  return network_trans_->Read(read_buf_, io_buf_len_, &io_callback_);
+  return network_trans_->Read(read_buf_, io_buf_len_, io_callback_);
 }
 
 int HttpCache::Transaction::DoNetworkReadComplete(int result) {
@@ -949,6 +946,13 @@ int HttpCache::Transaction::DoAddToEntryComplete(int result) {
         base::FieldTrial::MakeName("HttpCache.EntryLockWait", "Prefetch"),
         entry_lock_wait);
   }
+  static const bool prerendering_fieldtrial =
+      base::FieldTrialList::TrialExists("Prerender");
+  if (prerendering_fieldtrial) {
+    UMA_HISTOGRAM_TIMES(
+        base::FieldTrial::MakeName("HttpCache.EntryLockWait", "Prerender"),
+        entry_lock_wait);
+  }
 
   entry_lock_waiting_since_ = base::TimeTicks();
   DCHECK(new_entry_);
@@ -988,7 +992,7 @@ int HttpCache::Transaction::DoStartPartialCacheValidation() {
     return OK;
 
   next_state_ = STATE_COMPLETE_PARTIAL_CACHE_VALIDATION;
-  return partial_->ShouldValidateCache(entry_->disk_entry, &io_callback_);
+  return partial_->ShouldValidateCache(entry_->disk_entry, io_callback_);
 }
 
 int HttpCache::Transaction::DoCompletePartialCacheValidation(int result) {
@@ -1104,14 +1108,13 @@ int HttpCache::Transaction::DoOverwriteCachedResponse() {
 
 int HttpCache::Transaction::DoTruncateCachedData() {
   next_state_ = STATE_TRUNCATE_CACHED_DATA_COMPLETE;
-  cache_callback_->AddRef();  // Balanced in DoTruncateCachedDataComplete.
   if (!entry_)
     return OK;
   if (net_log_.IsLoggingAllEvents())
     net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_WRITE_DATA, NULL);
 
   // Truncate the stream.
-  return WriteToEntry(kResponseContentIndex, 0, NULL, 0, cache_callback_);
+  return WriteToEntry(kResponseContentIndex, 0, NULL, 0, io_callback_);
 }
 
 int HttpCache::Transaction::DoTruncateCachedDataComplete(int result) {
@@ -1120,21 +1123,18 @@ int HttpCache::Transaction::DoTruncateCachedDataComplete(int result) {
                                       result);
   }
 
-  // Balance the AddRef from DoTruncateCachedData.
-  cache_callback_->Release();
   next_state_ = STATE_TRUNCATE_CACHED_METADATA;
   return OK;
 }
 
 int HttpCache::Transaction::DoTruncateCachedMetadata() {
   next_state_ = STATE_TRUNCATE_CACHED_METADATA_COMPLETE;
-  cache_callback_->AddRef();  // Balanced in DoTruncateCachedMetadataComplete.
   if (!entry_)
     return OK;
 
   if (net_log_.IsLoggingAllEvents())
     net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_WRITE_INFO, NULL);
-  return WriteToEntry(kMetadataIndex, 0, NULL, 0, cache_callback_);
+  return WriteToEntry(kMetadataIndex, 0, NULL, 0, io_callback_);
 }
 
 int HttpCache::Transaction::DoTruncateCachedMetadataComplete(int result) {
@@ -1142,9 +1142,6 @@ int HttpCache::Transaction::DoTruncateCachedMetadataComplete(int result) {
     net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_WRITE_INFO,
                                       result);
   }
-
-  // Balance the AddRef from DoTruncateCachedMetadata.
-  cache_callback_->Release();
 
   // If this response is a redirect, then we can stop writing now.  (We don't
   // need to cache the response body of a redirect.)
@@ -1185,14 +1182,11 @@ int HttpCache::Transaction::DoCacheReadResponse() {
   read_buf_ = new IOBuffer(io_buf_len_);
 
   net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_READ_INFO, NULL);
-  cache_callback_->AddRef();  // Balanced in DoCacheReadResponseComplete.
   return entry_->disk_entry->ReadData(kResponseInfoIndex, 0, read_buf_,
-                                      io_buf_len_, cache_callback_);
+                                      io_buf_len_, io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheReadResponseComplete(int result) {
-  cache_callback_->Release();  // Balance the AddRef from DoCacheReadResponse.
-
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_READ_INFO, result);
   if (result != io_buf_len_ ||
       !HttpCache::ParseResponseInfo(read_buf_->data(), io_buf_len_,
@@ -1260,7 +1254,6 @@ int HttpCache::Transaction::DoCacheWriteResponseComplete(int result) {
   }
 
   // Balance the AddRef from WriteResponseInfoToEntry.
-  write_headers_callback_->Release();
   if (result != io_buf_len_) {
     DLOG(ERROR) << "failed to write response info to cache";
     DoneWritingToEntry(false);
@@ -1277,14 +1270,12 @@ int HttpCache::Transaction::DoCacheReadMetadata() {
       new IOBufferWithSize(entry_->disk_entry->GetDataSize(kMetadataIndex));
 
   net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_READ_INFO, NULL);
-  cache_callback_->AddRef();  // Balanced in DoCacheReadMetadataComplete.
   return entry_->disk_entry->ReadData(kMetadataIndex, 0, response_.metadata,
                                       response_.metadata->size(),
-                                      cache_callback_);
+                                      io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheReadMetadataComplete(int result) {
-  cache_callback_->Release();  // Balance the AddRef from DoCacheReadMetadata.
   net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_READ_INFO, result);
   if (result != response_.metadata->size()) {
     DLOG(ERROR) << "ReadData failed: " << result;
@@ -1298,14 +1289,11 @@ int HttpCache::Transaction::DoCacheQueryData() {
   next_state_ = STATE_CACHE_QUERY_DATA_COMPLETE;
 
   // Balanced in DoCacheQueryDataComplete.
-  cache_callback_->AddRef();
-  return entry_->disk_entry->ReadyForSparseIO(cache_callback_);
+  return entry_->disk_entry->ReadyForSparseIO(io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheQueryDataComplete(int result) {
   DCHECK_EQ(OK, result);
-  // Balance the AddRef from DoCacheQueryData.
-  cache_callback_->Release();
   if (!cache_)
     return ERR_UNEXPECTED;
 
@@ -1315,21 +1303,19 @@ int HttpCache::Transaction::DoCacheQueryDataComplete(int result) {
 int HttpCache::Transaction::DoCacheReadData() {
   DCHECK(entry_);
   next_state_ = STATE_CACHE_READ_DATA_COMPLETE;
-  cache_callback_->AddRef();  // Balanced in DoCacheReadDataComplete.
 
   if (net_log_.IsLoggingAllEvents())
     net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_READ_DATA, NULL);
   if (partial_.get()) {
     return partial_->CacheRead(entry_->disk_entry, read_buf_, io_buf_len_,
-                               cache_callback_);
+                               io_callback_);
   }
 
   return entry_->disk_entry->ReadData(kResponseContentIndex, read_offset_,
-                                      read_buf_, io_buf_len_, cache_callback_);
+                                      read_buf_, io_buf_len_, io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheReadDataComplete(int result) {
-  cache_callback_->Release();  // Balance the AddRef from DoCacheReadData.
   if (net_log_.IsLoggingAllEvents()) {
     net_log_.EndEventWithNetErrorCode(NetLog::TYPE_HTTP_CACHE_READ_DATA,
                                       result);
@@ -1355,9 +1341,8 @@ int HttpCache::Transaction::DoCacheWriteData(int num_bytes) {
   write_len_ = num_bytes;
   if (net_log_.IsLoggingAllEvents() && entry_)
     net_log_.BeginEvent(NetLog::TYPE_HTTP_CACHE_WRITE_DATA, NULL);
-  cache_callback_->AddRef();  // Balanced in DoCacheWriteDataComplete.
 
-  return AppendResponseDataToEntry(read_buf_, num_bytes, cache_callback_);
+  return AppendResponseDataToEntry(read_buf_, num_bytes, io_callback_);
 }
 
 int HttpCache::Transaction::DoCacheWriteDataComplete(int result) {
@@ -1366,7 +1351,6 @@ int HttpCache::Transaction::DoCacheWriteDataComplete(int result) {
                                       result);
   }
   // Balance the AddRef from DoCacheWriteData.
-  cache_callback_->Release();
   if (!cache_)
     return ERR_UNEXPECTED;
 
@@ -1670,7 +1654,7 @@ int HttpCache::Transaction::RestartNetworkRequest() {
   DCHECK_EQ(STATE_NONE, next_state_);
 
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
-  int rv = network_trans_->RestartIgnoringLastError(&io_callback_);
+  int rv = network_trans_->RestartIgnoringLastError(io_callback_);
   if (rv != ERR_IO_PENDING)
     return DoLoop(rv);
   return rv;
@@ -1683,7 +1667,7 @@ int HttpCache::Transaction::RestartNetworkRequestWithCertificate(
   DCHECK_EQ(STATE_NONE, next_state_);
 
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
-  int rv = network_trans_->RestartWithCertificate(client_cert, &io_callback_);
+  int rv = network_trans_->RestartWithCertificate(client_cert, io_callback_);
   if (rv != ERR_IO_PENDING)
     return DoLoop(rv);
   return rv;
@@ -1696,7 +1680,7 @@ int HttpCache::Transaction::RestartNetworkRequestWithAuth(
   DCHECK_EQ(STATE_NONE, next_state_);
 
   next_state_ = STATE_SEND_REQUEST_COMPLETE;
-  int rv = network_trans_->RestartWithAuth(credentials, &io_callback_);
+  int rv = network_trans_->RestartWithAuth(credentials, io_callback_);
   if (rv != ERR_IO_PENDING)
     return DoLoop(rv);
   return rv;
@@ -1932,7 +1916,7 @@ int HttpCache::Transaction::ReadFromEntry(IOBuffer* data, int data_len) {
 
 int HttpCache::Transaction::WriteToEntry(int index, int offset,
                                          IOBuffer* data, int data_len,
-                                         OldCompletionCallback* callback) {
+                                         const CompletionCallback& callback) {
   if (!entry_)
     return data_len;
 
@@ -1979,16 +1963,13 @@ int HttpCache::Transaction::WriteResponseInfoToEntry(bool truncated) {
   response_.Persist(data->pickle(), skip_transient_headers, truncated);
   data->Done();
 
-  // Balanced in DoCacheWriteResponseComplete.  We may be running from the
-  // destructor of this object so cache_callback_ may be currently in use.
-  write_headers_callback_->AddRef();
   io_buf_len_ = data->pickle()->size();
-  return entry_->disk_entry->WriteData(kResponseInfoIndex, 0, data, io_buf_len_,
-                                       write_headers_callback_, true);
+  return entry_->disk_entry->WriteData(kResponseInfoIndex, 0, data,
+                                       io_buf_len_, io_callback_, true);
 }
 
 int HttpCache::Transaction::AppendResponseDataToEntry(
-    IOBuffer* data, int data_len, OldCompletionCallback* callback) {
+    IOBuffer* data, int data_len, const CompletionCallback& callback) {
   if (!entry_ || !data_len)
     return data_len;
 

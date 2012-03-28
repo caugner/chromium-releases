@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,11 +11,14 @@
 #include "ppapi/c/dev/ppb_console_dev.h"
 #include "ppapi/c/dev/ppb_crypto_dev.h"
 #include "ppapi/c/dev/ppb_cursor_control_dev.h"
+#include "ppapi/c/dev/ppb_device_ref_dev.h"
 #include "ppapi/c/dev/ppb_font_dev.h"
 #include "ppapi/c/dev/ppb_fullscreen_dev.h"
 #include "ppapi/c/dev/ppb_gles_chromium_texture_mapping_dev.h"
 #include "ppapi/c/dev/ppb_ime_input_event_dev.h"
 #include "ppapi/c/dev/ppb_memory_dev.h"
+#include "ppapi/c/dev/ppb_message_loop_dev.h"
+#include "ppapi/c/dev/ppb_resource_array_dev.h"
 #include "ppapi/c/dev/ppb_testing_dev.h"
 #include "ppapi/c/dev/ppb_text_input_dev.h"
 #include "ppapi/c/dev/ppb_url_util_dev.h"
@@ -24,6 +27,7 @@
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/c/ppb_core.h"
+#include "ppapi/c/ppb_file_io.h"
 #include "ppapi/c/ppb_file_ref.h"
 #include "ppapi/c/ppb_file_system.h"
 #include "ppapi/c/ppb_fullscreen.h"
@@ -38,6 +42,7 @@
 #include "ppapi/c/ppb_url_request_info.h"
 #include "ppapi/c/ppb_url_response_info.h"
 #include "ppapi/c/ppb_var.h"
+#include "ppapi/c/ppb_view.h"
 #include "ppapi/c/pp_errors.h"
 #include "ppapi/c/ppp_instance.h"
 #include "ppapi/c/private/ppb_file_ref_private.h"
@@ -53,6 +58,7 @@
 #include "ppapi/c/private/ppb_tcp_socket_private.h"
 #include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/trusted/ppb_broker_trusted.h"
+#include "ppapi/c/trusted/ppb_file_io_trusted.h"
 #include "ppapi/c/trusted/ppb_url_loader_trusted.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/proxy/ppb_audio_input_proxy.h"
@@ -62,6 +68,7 @@
 #include "ppapi/proxy/ppb_core_proxy.h"
 #include "ppapi/proxy/ppb_cursor_control_proxy.h"
 #include "ppapi/proxy/ppb_file_chooser_proxy.h"
+#include "ppapi/proxy/ppb_file_io_proxy.h"
 #include "ppapi/proxy/ppb_file_ref_proxy.h"
 #include "ppapi/proxy/ppb_file_system_proxy.h"
 #include "ppapi/proxy/ppb_flash_clipboard_proxy.h"
@@ -74,6 +81,7 @@
 #include "ppapi/proxy/ppb_graphics_3d_proxy.h"
 #include "ppapi/proxy/ppb_image_data_proxy.h"
 #include "ppapi/proxy/ppb_instance_proxy.h"
+#include "ppapi/proxy/ppb_message_loop_proxy.h"
 #include "ppapi/proxy/ppb_pdf_proxy.h"
 #include "ppapi/proxy/ppb_tcp_socket_private_proxy.h"
 #include "ppapi/proxy/ppb_testing_proxy.h"
@@ -82,7 +90,6 @@
 #include "ppapi/proxy/ppb_url_loader_proxy.h"
 #include "ppapi/proxy/ppb_url_response_info_proxy.h"
 #include "ppapi/proxy/ppb_var_deprecated_proxy.h"
-#include "ppapi/proxy/ppb_var_proxy.h"
 #include "ppapi/proxy/ppb_video_capture_proxy.h"
 #include "ppapi/proxy/ppb_video_decoder_proxy.h"
 #include "ppapi/proxy/ppp_class_proxy.h"
@@ -94,7 +101,8 @@
 #include "ppapi/proxy/ppp_mouse_lock_proxy.h"
 #include "ppapi/proxy/ppp_video_decoder_proxy.h"
 #include "ppapi/proxy/resource_creation_proxy.h"
-#include "ppapi/shared_impl/opengles2_impl.h"
+#include "ppapi/shared_impl/ppb_opengles2_shared.h"
+#include "ppapi/shared_impl/ppb_var_shared.h"
 #include "ppapi/thunk/thunk.h"
 
 // Helper to get the proxy name PPB_Foo_Proxy given the API name PPB_Foo.
@@ -161,12 +169,16 @@ InterfaceList::InterfaceList() {
   // proxy and the impl and there's no obvious message routing.
   AddProxy(API_ID_RESOURCE_CREATION, &ResourceCreationProxy::Create);
   AddProxy(API_ID_PPP_CLASS, &PPP_Class_Proxy::Create);
-  AddPPB(PPB_CORE_INTERFACE, API_ID_PPB_CORE,
+  AddPPB(PPB_CORE_INTERFACE_1_0, API_ID_PPB_CORE,
          PPB_Core_Proxy::GetPPB_Core_Interface());
-  AddPPB(PPB_OPENGLES2_INTERFACE, API_ID_NONE,
-         OpenGLES2Impl::GetInterface());
-  AddPPB(PPB_VAR_INTERFACE, API_ID_NONE,
-         GetPPB_Var_Interface());
+  AddPPB(PPB_MESSAGELOOP_DEV_INTERFACE_0_1, API_ID_NONE,
+         PPB_MessageLoop_Proxy::GetInterface());
+  AddPPB(PPB_OPENGLES2_INTERFACE_1_0, API_ID_NONE,
+         PPB_OpenGLES2_Shared::GetInterface());
+  AddPPB(PPB_VAR_INTERFACE_1_1, API_ID_NONE,
+         PPB_Var_Shared::GetVarInterface1_1());
+  AddPPB(PPB_VAR_INTERFACE_1_0, API_ID_NONE,
+         PPB_Var_Shared::GetVarInterface1_0());
 
   AddFlashInterfaces();
 
@@ -181,12 +193,17 @@ InterfaceList::InterfaceList() {
   AddPPB(PPB_Var_Deprecated_Proxy::GetInfo());
 
   // PPP (plugin) interfaces.
+  // TODO(brettw) move these to interface_list*.h
+  AddProxy(API_ID_PPP_INSTANCE, &ProxyFactory<PPP_Instance_Proxy>);
+  AddPPP(PPP_INSTANCE_INTERFACE_1_1, API_ID_PPP_INSTANCE,
+         PPP_Instance_Proxy::GetInstanceInterface());
+
+  // Old-style GetInfo PPP interfaces.
   // Do not add more stuff here, they should be added to interface_list*.h
   // TODO(brettw) remove these.
   AddPPP(PPP_Graphics3D_Proxy::GetInfo());
   AddPPP(PPP_InputEvent_Proxy::GetInfo());
   AddPPP(PPP_Instance_Private_Proxy::GetInfo());
-  AddPPP(PPP_Instance_Proxy::GetInfo1_0());
   AddPPP(PPP_Messaging_Proxy::GetInfo());
   AddPPP(PPP_MouseLock_Proxy::GetInfo());
   AddPPP(PPP_VideoCapture_Proxy::GetInfo());
@@ -243,15 +260,17 @@ const void* InterfaceList::GetInterfaceForPPP(const std::string& name) const {
 
 void InterfaceList::AddFlashInterfaces() {
   AddProxy(API_ID_PPB_FLASH, &ProxyFactory<PPB_Flash_Proxy>);
-  AddPPB(PPB_FLASH_INTERFACE, API_ID_PPB_FLASH,
-         PPB_Flash_Proxy::GetInterface());
+  AddPPB(PPB_FLASH_INTERFACE_11_0, API_ID_PPB_FLASH,
+         PPB_Flash_Proxy::GetInterface11());
+  AddPPB(PPB_FLASH_INTERFACE_12_0, API_ID_PPB_FLASH,
+         PPB_Flash_Proxy::GetInterface12_0());
 
   AddProxy(API_ID_PPB_FLASH_CLIPBOARD,
            &ProxyFactory<PPB_Flash_Clipboard_Proxy>);
-  AddPPB(PPB_FLASH_CLIPBOARD_INTERFACE, API_ID_PPB_FLASH_CLIPBOARD,
-         thunk::GetPPB_Flash_Clipboard_Thunk());
+  AddPPB(PPB_FLASH_CLIPBOARD_INTERFACE_3_0, API_ID_PPB_FLASH_CLIPBOARD,
+         thunk::GetPPB_Flash_Clipboard_3_0_Thunk());
   AddPPB(PPB_FLASH_CLIPBOARD_INTERFACE_3_LEGACY, API_ID_PPB_FLASH_CLIPBOARD,
-         thunk::GetPPB_Flash_Clipboard_Thunk());
+         thunk::GetPPB_Flash_Clipboard_3_0_Thunk());
 
   AddProxy(API_ID_PPB_FLASH_FILE_FILEREF,
            &ProxyFactory<PPB_Flash_File_FileRef_Proxy>);
@@ -265,18 +284,18 @@ void InterfaceList::AddFlashInterfaces() {
          PPB_Flash_File_ModuleLocal_Proxy::GetInterface());
 
   AddProxy(API_ID_PPB_FLASH_MENU, &ProxyFactory<PPB_Flash_Menu_Proxy>);
-  AddPPB(PPB_FLASH_MENU_INTERFACE, API_ID_PPB_FLASH_MENU,
-         thunk::GetPPB_Flash_Menu_Thunk());
+  AddPPB(PPB_FLASH_MENU_INTERFACE_0_2, API_ID_PPB_FLASH_MENU,
+         thunk::GetPPB_Flash_Menu_0_2_Thunk());
 
-  // Only add PPB because proxy for the this API ID was already added.
-  AddPPB(PPB_FLASH_TCPSOCKET_INTERFACE, API_ID_PPB_TCPSOCKET_PRIVATE,
-         thunk::GetPPB_TCPSocket_Private_Thunk());
+  // Only add the interface; PPB_TCPSocket_Private provides the API ID's proxy.
+  AddPPB(PPB_FLASH_TCPSOCKET_INTERFACE_0_2, API_ID_PPB_TCPSOCKET_PRIVATE,
+         thunk::GetPPB_TCPSocket_Private_0_3_Thunk());
 
 #ifdef ENABLE_FLAPPER_HACKS
   AddProxy(API_ID_PPB_FLASH_NETCONNECTOR,
            &ProxyFactory<PPB_Flash_NetConnector_Proxy>);
-  AddPPB(PPB_FLASH_NETCONNECTOR_INTERFACE, API_ID_PPB_FLASH_NETCONNECTOR,
-         thunk::GetPPB_Flash_NetConnector_Thunk());
+  AddPPB(PPB_FLASH_NETCONNECTOR_INTERFACE_0_2, API_ID_PPB_FLASH_NETCONNECTOR,
+         thunk::GetPPB_Flash_NetConnector_0_2_Thunk());
 #endif
 }
 

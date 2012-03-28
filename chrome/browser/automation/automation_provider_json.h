@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include <string>
 
 #include "base/compiler_specific.h"
+#include "chrome/common/automation_constants.h"
 
 class AutomationId;
 class AutomationProvider;
@@ -18,11 +19,14 @@ class Browser;
 class Extension;
 class Profile;
 class RenderViewHost;
-class TabContents;
 
 namespace base {
 class DictionaryValue;
 class Value;
+}
+
+namespace content {
+class WebContents;
 }
 
 namespace IPC {
@@ -47,6 +51,13 @@ class AutomationJSONReply {
   // Send an error reply along with error message |error_message|.
   void SendError(const std::string& error_message);
 
+  // Send an error reply along with the specified error code and its
+  // associated error message.
+  void SendErrorCode(automation::ErrorCode code);
+
+  // Send an automation error.
+  void SendError(const automation::Error& error);
+
  private:
   AutomationProvider* provider_;
   IPC::Message* message_;
@@ -64,7 +75,7 @@ bool GetBrowserFromJSONArgs(base::DictionaryValue* args,
 // and a key 'tab_index' which refers to the index of the tab in that browser.
 // Returns true on success and sets |tab|. Otherwise, |error| will be set.
 bool GetTabFromJSONArgs(base::DictionaryValue* args,
-                        TabContents** tab,
+                        content::WebContents** tab,
                         std::string* error) WARN_UNUSED_RESULT;
 
 // Gets the browser and tab specified by the given dictionary |args|. |args|
@@ -74,7 +85,7 @@ bool GetTabFromJSONArgs(base::DictionaryValue* args,
 // will be set.
 bool GetBrowserAndTabFromJSONArgs(base::DictionaryValue* args,
                                   Browser** browser,
-                                  TabContents** tab,
+                                  content::WebContents** tab,
                                   std::string* error) WARN_UNUSED_RESULT;
 
 // Gets an automation ID from the given value in the given dicitionary |args|.

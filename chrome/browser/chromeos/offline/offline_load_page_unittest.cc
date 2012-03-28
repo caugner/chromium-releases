@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,6 @@
 #include "chrome/browser/chromeos/offline/offline_load_page.h"
 #include "chrome/browser/renderer_host/offline_resource_handler.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/test/test_browser_thread.h"
 
@@ -27,12 +26,12 @@ class TestOfflineLoadPage :  public chromeos::OfflineLoadPage {
   TestOfflineLoadPage(TabContents* tab_contents,
                       const GURL& url,
                       OfflineLoadPageTest* test_page)
-    : chromeos::OfflineLoadPage(tab_contents, url, NULL),
+    : chromeos::OfflineLoadPage(tab_contents, url, CompletionCallback()),
       test_page_(test_page) {
   }
 
   // Overriden from InterstitialPage.  Don't create a view.
-  virtual TabContentsView* CreateTabContentsView() OVERRIDE {
+  virtual content::WebContentsView* CreateWebContentsView() OVERRIDE {
     return NULL;
   }
 
@@ -75,7 +74,7 @@ class OfflineLoadPageTest : public ChromeRenderViewHostTestHarness {
 
   void Navigate(const char* url, int page_id) {
     contents()->TestDidNavigate(
-        contents()->render_view_host(), page_id, GURL(url),
+        contents()->GetRenderViewHost(), page_id, GURL(url),
         content::PAGE_TRANSITION_TYPED);
   }
 
@@ -155,7 +154,7 @@ TEST_F(OfflineLoadPageTest, OfflinePageDontProceed) {
   EXPECT_EQ(CANCEL, user_response());
   EXPECT_FALSE(GetOfflineLoadPage());
   // We did not proceed, the pending entry should be gone.
-  EXPECT_FALSE(controller().pending_entry());
+  EXPECT_FALSE(controller().GetPendingEntry());
   // the URL is set back to kURL1.
   EXPECT_EQ(kURL1, contents()->GetURL().spec());
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -728,11 +728,11 @@ ProxyResolverV8::ProxyResolverV8(
 
 ProxyResolverV8::~ProxyResolverV8() {}
 
-int ProxyResolverV8::GetProxyForURL(const GURL& query_url,
-                                    ProxyInfo* results,
-                                    OldCompletionCallback* /*callback*/,
-                                    RequestHandle* /*request*/,
-                                    const BoundNetLog& net_log) {
+int ProxyResolverV8::GetProxyForURL(
+    const GURL& query_url, ProxyInfo* results,
+    const CompletionCallback& /*callback*/,
+    RequestHandle* /*request*/,
+    const BoundNetLog& net_log) {
   // If the V8 instance has not been initialized (either because
   // SetPacScript() wasn't called yet, or because it failed.
   if (!context_.get())
@@ -742,12 +742,10 @@ int ProxyResolverV8::GetProxyForURL(const GURL& query_url,
   // available to any of the javascript "bindings" that are subsequently invoked
   // from the javascript.
   //
-  // In particular, we create a HostCache that is aggressive about caching
-  // failed DNS resolves.
-  HostCache host_cache(
-      50,
-      base::TimeDelta::FromMinutes(5),
-      base::TimeDelta::FromMinutes(5));
+  // In particular, we create a HostCache to aggressively cache failed DNS
+  // resolves.
+  const unsigned kMaxCacheEntries = 50;
+  HostCache host_cache(kMaxCacheEntries);
 
   ProxyResolverRequestContext request_context(&net_log, &host_cache);
 
@@ -789,7 +787,7 @@ void ProxyResolverV8::Shutdown() {
 
 int ProxyResolverV8::SetPacScript(
     const scoped_refptr<ProxyResolverScriptData>& script_data,
-    OldCompletionCallback* /*callback*/) {
+    const CompletionCallback& /*callback*/) {
   DCHECK(script_data.get());
   context_.reset();
   if (script_data->utf16().empty())

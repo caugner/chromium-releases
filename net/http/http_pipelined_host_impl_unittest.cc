@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -32,18 +32,20 @@ class MockHostDelegate : public HttpPipelinedHost::Delegate {
   MOCK_METHOD1(OnHostHasAdditionalCapacity, void(HttpPipelinedHost* host));
   MOCK_METHOD2(OnHostDeterminedCapability,
                void(HttpPipelinedHost* host,
-                    HttpPipelinedHost::Capability capability));
+                    HttpPipelinedHostCapability capability));
 };
 
 class MockPipelineFactory : public HttpPipelinedConnection::Factory {
  public:
-  MOCK_METHOD6(CreateNewPipeline, HttpPipelinedConnection*(
+  MOCK_METHOD8(CreateNewPipeline, HttpPipelinedConnection*(
       ClientSocketHandle* connection,
       HttpPipelinedConnection::Delegate* delegate,
+      const HostPortPair& origin,
       const SSLConfig& used_ssl_config,
       const ProxyInfo& used_proxy_info,
       const BoundNetLog& net_log,
-      bool was_npn_negotiated));
+      bool was_npn_negotiated,
+      SSLClientSocket::NextProto protocol_negotiated));
 };
 
 class MockPipeline : public HttpPipelinedConnection {
@@ -68,8 +70,9 @@ class MockPipeline : public HttpPipelinedConnection {
   MOCK_METHOD1(OnStreamDeleted, void(int pipeline_id));
   MOCK_CONST_METHOD0(used_ssl_config, const SSLConfig&());
   MOCK_CONST_METHOD0(used_proxy_info, const ProxyInfo&());
-  MOCK_CONST_METHOD0(source, const NetLog::Source&());
+  MOCK_CONST_METHOD0(net_log, const BoundNetLog&());
   MOCK_CONST_METHOD0(was_npn_negotiated, bool());
+  MOCK_CONST_METHOD0(protocol_negotiated, SSLClientSocket::NextProto());
 
  private:
   int depth_;
@@ -77,16 +80,18 @@ class MockPipeline : public HttpPipelinedConnection {
   bool active_;
 };
 
+MATCHER_P(MatchesOrigin, expected, "") { return expected.Equals(arg); }
+
 class HttpPipelinedHostImplTest : public testing::Test {
  public:
   HttpPipelinedHostImplTest()
       : origin_("host", 123),
         factory_(new MockPipelineFactory),  // Owned by host_.
         host_(new HttpPipelinedHostImpl(&delegate_, origin_, factory_,
-                                        HttpPipelinedHost::CAPABLE)) {
+                                        PIPELINE_CAPABLE)) {
   }
 
-  void SetCapability(HttpPipelinedHost::Capability capability) {
+  void SetCapability(HttpPipelinedHostCapability capability) {
     factory_ = new MockPipelineFactory;
     host_.reset(new HttpPipelinedHostImpl(
         &delegate_, origin_, factory_, capability));
@@ -95,15 +100,18 @@ class HttpPipelinedHostImplTest : public testing::Test {
   MockPipeline* AddTestPipeline(int depth, bool usable, bool active) {
     MockPipeline* pipeline = new MockPipeline(depth, usable, active);
     EXPECT_CALL(*factory_, CreateNewPipeline(kDummyConnection, host_.get(),
+                                             MatchesOrigin(origin_),
                                              Ref(ssl_config_), Ref(proxy_info_),
-                                             Ref(net_log_), true))
+                                             Ref(net_log_), true,
+                                             SSLClientSocket::kProtoSPDY21))
         .Times(1)
         .WillOnce(Return(pipeline));
     EXPECT_CALL(*pipeline, CreateNewStream())
         .Times(1)
         .WillOnce(Return(kDummyStream));
     EXPECT_EQ(kDummyStream, host_->CreateStreamOnNewPipeline(
-        kDummyConnection, ssl_config_, proxy_info_, net_log_, true));
+        kDummyConnection, ssl_config_, proxy_info_, net_log_, true,
+        SSLClientSocket::kProtoSPDY21));
     return pipeline;
   }
 
@@ -200,7 +208,7 @@ TEST_F(HttpPipelinedHostImplTest, PicksLeastLoadedPipeline) {
 }
 
 TEST_F(HttpPipelinedHostImplTest, OpensUpOnPipelineSuccess) {
-  SetCapability(HttpPipelinedHost::UNKNOWN);
+  SetCapability(PIPELINE_UNKNOWN);
   MockPipeline* pipeline = AddTestPipeline(1, true, true);
 
   EXPECT_EQ(NULL, host_->CreateStreamOnExistingPipeline());
@@ -219,7 +227,7 @@ TEST_F(HttpPipelinedHostImplTest, OpensUpOnPipelineSuccess) {
 }
 
 TEST_F(HttpPipelinedHostImplTest, OpensAllPipelinesOnPipelineSuccess) {
-  SetCapability(HttpPipelinedHost::UNKNOWN);
+  SetCapability(PIPELINE_UNKNOWN);
   MockPipeline* pipeline1 = AddTestPipeline(1, false, true);
   MockPipeline* pipeline2 = AddTestPipeline(1, true, true);
 
@@ -240,26 +248,45 @@ TEST_F(HttpPipelinedHostImplTest, OpensAllPipelinesOnPipelineSuccess) {
 }
 
 TEST_F(HttpPipelinedHostImplTest, ShutsDownOnOldVersion) {
-  SetCapability(HttpPipelinedHost::UNKNOWN);
+  SetCapability(PIPELINE_UNKNOWN);
   MockPipeline* pipeline = AddTestPipeline(1, true, true);
 
   EXPECT_EQ(NULL, host_->CreateStreamOnExistingPipeline());
   EXPECT_CALL(delegate_, OnHostHasAdditionalCapacity(host_.get()))
       .Times(0);
   EXPECT_CALL(delegate_,
-              OnHostDeterminedCapability(host_.get(),
-                                         HttpPipelinedHost::INCAPABLE))
+              OnHostDeterminedCapability(host_.get(), PIPELINE_INCAPABLE))
       .Times(1);
   host_->OnPipelineFeedback(pipeline,
                             HttpPipelinedConnection::OLD_HTTP_VERSION);
 
   ClearTestPipeline(pipeline);
   EXPECT_EQ(NULL, host_->CreateStreamOnNewPipeline(
-      kDummyConnection, ssl_config_, proxy_info_, net_log_, true));
+      kDummyConnection, ssl_config_, proxy_info_, net_log_, true,
+      SSLClientSocket::kProtoSPDY21));
+}
+
+TEST_F(HttpPipelinedHostImplTest, ShutsDownOnAuthenticationRequired) {
+  SetCapability(PIPELINE_UNKNOWN);
+  MockPipeline* pipeline = AddTestPipeline(1, true, true);
+
+  EXPECT_EQ(NULL, host_->CreateStreamOnExistingPipeline());
+  EXPECT_CALL(delegate_, OnHostHasAdditionalCapacity(host_.get()))
+      .Times(0);
+  EXPECT_CALL(delegate_,
+              OnHostDeterminedCapability(host_.get(), PIPELINE_INCAPABLE))
+      .Times(1);
+  host_->OnPipelineFeedback(pipeline,
+                            HttpPipelinedConnection::AUTHENTICATION_REQUIRED);
+
+  ClearTestPipeline(pipeline);
+  EXPECT_EQ(NULL, host_->CreateStreamOnNewPipeline(
+      kDummyConnection, ssl_config_, proxy_info_, net_log_, true,
+      SSLClientSocket::kProtoSPDY2));
 }
 
 TEST_F(HttpPipelinedHostImplTest, ConnectionCloseHasNoEffect) {
-  SetCapability(HttpPipelinedHost::UNKNOWN);
+  SetCapability(PIPELINE_UNKNOWN);
   MockPipeline* pipeline = AddTestPipeline(1, true, true);
 
   EXPECT_CALL(delegate_, OnHostHasAdditionalCapacity(host_.get()))
@@ -276,14 +303,13 @@ TEST_F(HttpPipelinedHostImplTest, ConnectionCloseHasNoEffect) {
 }
 
 TEST_F(HttpPipelinedHostImplTest, SuccessesLeadToCapable) {
-  SetCapability(HttpPipelinedHost::UNKNOWN);
+  SetCapability(PIPELINE_UNKNOWN);
   MockPipeline* pipeline = AddTestPipeline(1, true, true);
 
   EXPECT_CALL(delegate_, OnHostHasAdditionalCapacity(host_.get()))
       .Times(1);
   EXPECT_CALL(delegate_,
-              OnHostDeterminedCapability(host_.get(),
-                                         HttpPipelinedHost::CAPABLE))
+              OnHostDeterminedCapability(host_.get(), PIPELINE_CAPABLE))
       .Times(1);
   host_->OnPipelineFeedback(pipeline, HttpPipelinedConnection::OK);
 
@@ -293,6 +319,42 @@ TEST_F(HttpPipelinedHostImplTest, SuccessesLeadToCapable) {
 
   EXPECT_CALL(delegate_, OnHostHasAdditionalCapacity(host_.get()))
       .Times(1);
+  ClearTestPipeline(pipeline);
+}
+
+TEST_F(HttpPipelinedHostImplTest, IgnoresSocketErrorOnFirstRequest) {
+  SetCapability(PIPELINE_UNKNOWN);
+  MockPipeline* pipeline = AddTestPipeline(1, true, true);
+
+  EXPECT_CALL(delegate_, OnHostDeterminedCapability(host_.get(), _))
+      .Times(0);
+  host_->OnPipelineFeedback(pipeline,
+                            HttpPipelinedConnection::PIPELINE_SOCKET_ERROR);
+
+  EXPECT_CALL(delegate_, OnHostHasAdditionalCapacity(host_.get()))
+      .Times(1);
+  host_->OnPipelineFeedback(pipeline,
+                            HttpPipelinedConnection::OK);
+
+  EXPECT_CALL(delegate_,
+              OnHostDeterminedCapability(host_.get(), PIPELINE_INCAPABLE))
+      .Times(1);
+  host_->OnPipelineFeedback(pipeline,
+                            HttpPipelinedConnection::PIPELINE_SOCKET_ERROR);
+
+  ClearTestPipeline(pipeline);
+}
+
+TEST_F(HttpPipelinedHostImplTest, HeedsSocketErrorOnFirstRequestWithPipeline) {
+  SetCapability(PIPELINE_UNKNOWN);
+  MockPipeline* pipeline = AddTestPipeline(2, true, true);
+
+  EXPECT_CALL(delegate_,
+              OnHostDeterminedCapability(host_.get(), PIPELINE_INCAPABLE))
+      .Times(1);
+  host_->OnPipelineFeedback(pipeline,
+                            HttpPipelinedConnection::PIPELINE_SOCKET_ERROR);
+
   ClearTestPipeline(pipeline);
 }
 

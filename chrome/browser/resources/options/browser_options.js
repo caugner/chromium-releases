@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -113,6 +113,9 @@ cr.define('options', function() {
         $('defaultBrowserUseAsDefaultButton').onclick = function(event) {
           chrome.send('becomeDefaultBrowser');
         };
+
+        $('autoLaunch').addEventListener('click',
+                                         this.handleAutoLaunchChanged_);
       }
 
       var startupPagesList = $('startupPagesList');
@@ -120,7 +123,7 @@ cr.define('options', function() {
       startupPagesList.autoExpands = true;
 
       // Check if we are in the guest mode.
-      if (cr.commandLine.options['--bwsi']) {
+      if (cr.commandLine && cr.commandLine.options['--bwsi']) {
         // Hide the startup section.
         $('startupSection').hidden = true;
       } else {
@@ -134,7 +137,7 @@ cr.define('options', function() {
         this.updateCustomStartupPageControlStates_();
       }
 
-      var suggestionList = new options.AutocompleteList();
+      var suggestionList = new cr.ui.AutocompleteList();
       suggestionList.autoExpands = true;
       suggestionList.suggestionUpdateRequestCallback =
           this.requestAutocompleteSuggestions_.bind(this);
@@ -273,6 +276,7 @@ cr.define('options', function() {
       var disable = !this.shouldEnableCustomStartupPageControls();
       var startupPagesList = $('startupPagesList');
       startupPagesList.disabled = disable;
+      startupPagesList.setAttribute('tabindex', disable ? -1 : 0);
       // Explicitly set disabled state for input text elements.
       var inputs = startupPagesList.querySelectorAll("input[type='text']");
       for (var i = 0; i < inputs.length; i++)
@@ -281,7 +285,7 @@ cr.define('options', function() {
     },
 
     /**
-     * Handle change events of the preference
+     * Handles change events of the preference
      * 'session.urls_to_restore_on_startup'.
      * @param {event} preference changed event.
      * @private
@@ -292,7 +296,7 @@ cr.define('options', function() {
     },
 
     /**
-     * Set the default search engine based on the popup selection.
+     * Sets the default search engine based on the popup selection.
      */
     setDefaultSearchEngine_: function() {
       var engineSelect = $('defaultSearchEngine');
@@ -301,6 +305,13 @@ cr.define('options', function() {
         var selection = engineSelect.options[selectedIndex];
         chrome.send('setDefaultSearchEngine', [String(selection.value)]);
       }
+    },
+
+    /**
+     * Sets or clear whether Chrome should Auto-launch on computer startup.
+     */
+    handleAutoLaunchChanged_: function() {
+      chrome.send('toggleAutoLaunch', [Boolean($('autoLaunch').checked)]);
     },
 
     /**
@@ -328,6 +339,14 @@ cr.define('options', function() {
         return;
       list.suggestions = suggestions;
     },
+
+    /**
+      * Shows the autoLaunch preference and initializes its checkbox value.
+      */
+    updateAutoLaunchState_: function(enabled) {
+      $('autoLaunchOption').hidden = false;
+      $('autoLaunch').checked = enabled;
+    },
   };
 
   BrowserOptions.updateDefaultBrowserState = function(statusString, isDefault,
@@ -351,6 +370,10 @@ cr.define('options', function() {
 
   BrowserOptions.updateAutocompleteSuggestions = function(suggestions) {
     BrowserOptions.getInstance().updateAutocompleteSuggestions_(suggestions);
+  };
+
+  BrowserOptions.updateAutoLaunchState = function(enabled) {
+    BrowserOptions.getInstance().updateAutoLaunchState_(enabled);
   };
 
   BrowserOptions.setInstantFieldTrialStatus = function(enabled) {

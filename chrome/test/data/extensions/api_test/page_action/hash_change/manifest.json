@@ -1,5 +1,7 @@
 {
-   "background_page": "background.html",
+   "background": {
+     "scripts": ["background.js"]
+   },
    "content_scripts": [ {
       "js": [ "script.js" ],
       "matches": [ "http://*/*", "https://*/*" ]

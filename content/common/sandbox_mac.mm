@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,6 +20,7 @@ extern "C" {
 #include "base/rand_util_c.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
+#include "base/memory/scoped_nsobject.h"
 #include "base/string16.h"
 #include "base/string_piece.h"
 #include "base/string_util.h"
@@ -27,7 +28,6 @@ extern "C" {
 #include "base/sys_info.h"
 #include "base/sys_string_conversions.h"
 #include "base/utf_string_conversions.h"
-#include "content/common/chrome_application_mac.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "grit/content_resources.h"
@@ -377,15 +377,15 @@ NSString* LoadSandboxTemplate(int sandbox_type) {
     return nil;
   }
 
-  NSString* common_sandbox_prefix_data =
+  scoped_nsobject<NSString> common_sandbox_prefix_data(
       [[NSString alloc] initWithBytes:common_sandbox_definition.data()
                                length:common_sandbox_definition.length()
-                             encoding:NSUTF8StringEncoding];
+                             encoding:NSUTF8StringEncoding]);
 
-  NSString* sandbox_data =
+  scoped_nsobject<NSString> sandbox_data(
       [[NSString alloc] initWithBytes:sandbox_definition.data()
                                length:sandbox_definition.length()
-                             encoding:NSUTF8StringEncoding];
+                             encoding:NSUTF8StringEncoding]);
 
   // Prefix sandbox_data with common_sandbox_prefix_data.
   return [common_sandbox_prefix_data stringByAppendingString:sandbox_data];

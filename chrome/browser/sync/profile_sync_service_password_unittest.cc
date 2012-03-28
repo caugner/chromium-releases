@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,13 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task.h"
 #include "base/test/test_timeouts.h"
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/prefs/pref_service.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/abstract_profile_sync_service_test.h"
 #include "chrome/browser/sync/glue/password_change_processor.h"
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
@@ -40,7 +41,7 @@
 #include "content/test/notification_observer_mock.h"
 #include "content/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "webkit/glue/password_form.h"
+#include "webkit/forms/password_form.h"
 
 using base::Time;
 using browser_sync::PasswordChangeProcessor;
@@ -77,7 +78,7 @@ using testing::InvokeWithoutArgs;
 using testing::Return;
 using testing::SaveArg;
 using testing::SetArgumentPointee;
-using webkit_glue::PasswordForm;
+using webkit::forms::PasswordForm;
 
 ACTION_P3(MakePasswordSyncComponents, service, ps, dtc) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::DB));
@@ -128,11 +129,14 @@ class PasswordTestProfileSyncService : public TestProfileSyncService {
   PasswordTestProfileSyncService(
       ProfileSyncComponentsFactory* factory,
       Profile* profile,
-      const std::string& test_user,
+      SigninManager* signin,
       bool synchronous_backend_initialization,
       const base::Closure& initial_condition_setup_cb,
       const base::Closure& passphrase_accept_cb)
-      : TestProfileSyncService(factory, profile, test_user,
+      : TestProfileSyncService(factory,
+                               profile,
+                               signin,
+                               ProfileSyncService::AUTO_START,
                                synchronous_backend_initialization,
                                initial_condition_setup_cb),
         callback_(passphrase_accept_cb) {}
@@ -212,25 +216,30 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
   void StartSyncService(const base::Closure& root_callback,
                         const base::Closure& node_callback) {
     if (!service_.get()) {
+      SigninManager* signin = SigninManagerFactory::GetForProfile(&profile_);
+      signin->SetAuthenticatedUsername("test_user");
+      ProfileSyncComponentsFactoryMock* factory =
+          new ProfileSyncComponentsFactoryMock();
       service_.reset(new PasswordTestProfileSyncService(
-          &factory_, &profile_, "test_user", false,
+          factory, &profile_, signin, false,
           root_callback, node_callback));
-      syncable::ModelTypeSet preferred_types;
-      service_->GetPreferredDataTypes(&preferred_types);
-      preferred_types.insert(syncable::PASSWORDS);
+      syncable::ModelTypeSet preferred_types =
+          service_->GetPreferredDataTypes();
+      preferred_types.Put(syncable::PASSWORDS);
       service_->ChangePreferredDataTypes(preferred_types);
       EXPECT_CALL(profile_, GetProfileSyncService()).WillRepeatedly(
           Return(service_.get()));
       PasswordDataTypeController* data_type_controller =
-          new PasswordDataTypeController(&factory_,
-                                         &profile_);
+          new PasswordDataTypeController(factory,
+                                         &profile_,
+                                         service_.get());
 
-      EXPECT_CALL(factory_, CreatePasswordSyncComponents(_, _, _)).
+      EXPECT_CALL(*factory, CreatePasswordSyncComponents(_, _, _)).
           Times(AtLeast(1)).  // Can be more if we hit NEEDS_CRYPTO.
           WillRepeatedly(MakePasswordSyncComponents(service_.get(),
                                                     password_store_.get(),
                                                     data_type_controller));
-      EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
+      EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
           WillOnce(ReturnNewDataTypeManager());
 
       // We need tokens to get the tests going
@@ -258,7 +267,9 @@ class ProfileSyncServicePasswordTest : public AbstractProfileSyncServiceTest {
       MessageLoop::current()->Run();
       FlushLastDBTask();
 
-      service_->SetPassphrase("foo", false);
+      service_->SetPassphrase("foo",
+                              ProfileSyncService::IMPLICIT,
+                              ProfileSyncService::INTERNAL);
       MessageLoop::current()->Run();
     }
   }

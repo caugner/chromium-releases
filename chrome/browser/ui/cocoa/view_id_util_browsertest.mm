@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,15 +10,18 @@
 #include "chrome/browser/download/download_shelf.h"
 #include "chrome/browser/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sidebar/sidebar_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/cocoa/view_id_util.h"
+#include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+
+using content::OpenURLParams;
+using content::Referrer;
 
 // Basic sanity check of ViewID use on the mac.
 class ViewIDTest : public InProcessBrowserTest {
@@ -41,13 +44,6 @@ class ViewIDTest : public InProcessBrowserTest {
     // Make sure FindBar is created to test
     // VIEW_ID_FIND_IN_PAGE_TEXT_FIELD and VIEW_ID_FIND_IN_PAGE.
     browser()->ShowFindBar();
-
-    // Make sure sidebar is created to test VIEW_ID_SIDE_BAR_CONTAINER.
-    const char sidebar_content_id[] = "test_content_id";
-    SidebarManager::GetInstance()->ShowSidebar(
-        browser()->GetSelectedTabContents(), sidebar_content_id);
-    SidebarManager::GetInstance()->ExpandSidebar(
-        browser()->GetSelectedTabContents(), sidebar_content_id);
 
     // Make sure docked devtools is created to test VIEW_ID_DEV_TOOLS_DOCKED
     browser()->profile()->GetPrefs()->SetBoolean(prefs::kDevToolsOpenDocked,
@@ -72,8 +68,8 @@ class ViewIDTest : public InProcessBrowserTest {
       if (i == VIEW_ID_STAR_BUTTON ||
           i == VIEW_ID_AUTOCOMPLETE ||
           i == VIEW_ID_CONTENTS_SPLIT ||
-          i == VIEW_ID_SIDE_BAR_SPLIT ||
-          i == VIEW_ID_FEEDBACK_BUTTON) {
+          i == VIEW_ID_FEEDBACK_BUTTON ||
+          i == VIEW_ID_OMNIBOX) {
         continue;
       }
 
@@ -107,15 +103,17 @@ IN_PROC_BROWSER_TEST_F(ViewIDTest, Tab) {
   // Open 9 new tabs.
   for (int i = 1; i <= 9; ++i) {
     CheckViewID(static_cast<ViewID>(VIEW_ID_TAB_0 + i), false);
-    browser()->OpenURL(GURL(chrome::kAboutBlankURL), GURL(),
-                       NEW_BACKGROUND_TAB, content::PAGE_TRANSITION_TYPED);
+    browser()->OpenURL(OpenURLParams(
+        GURL(chrome::kAboutBlankURL), Referrer(), NEW_BACKGROUND_TAB,
+         content::PAGE_TRANSITION_TYPED, false));
     CheckViewID(static_cast<ViewID>(VIEW_ID_TAB_0 + i), true);
     // VIEW_ID_TAB_LAST should always be available.
     CheckViewID(VIEW_ID_TAB_LAST, true);
   }
 
   // Open the 11th tab.
-  browser()->OpenURL(GURL(chrome::kAboutBlankURL), GURL(),
-                     NEW_BACKGROUND_TAB, content::PAGE_TRANSITION_TYPED);
+  browser()->OpenURL(OpenURLParams(
+      GURL(chrome::kAboutBlankURL), Referrer(), NEW_BACKGROUND_TAB,
+      content::PAGE_TRANSITION_TYPED, false));
   CheckViewID(VIEW_ID_TAB_LAST, true);
 }

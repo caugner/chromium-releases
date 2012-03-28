@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -90,6 +90,8 @@ class PrintWebViewHelper
   explicit PrintWebViewHelper(content::RenderView* render_view);
   virtual ~PrintWebViewHelper();
 
+  void PrintNode(const WebKit::WebNode& node);
+
  protected:
   // WebKit::WebViewClient override:
   virtual void didStopLoading();
@@ -105,6 +107,31 @@ class PrintWebViewHelper
   FRIEND_TEST_ALL_PREFIXES(PrintWebViewHelperTest, PrintWithIframe);
 #endif  // defined(OS_WIN) || defined(OS_MACOSX)
 
+  enum PrintingResult {
+    OK,
+    FAIL_PRINT,
+    FAIL_PREVIEW,
+  };
+
+  enum PrintPreviewErrorBuckets {
+    PREVIEW_ERROR_NONE,  // Always first.
+    PREVIEW_ERROR_BAD_SETTING,
+    PREVIEW_ERROR_METAFILE_COPY_FAILED,
+    PREVIEW_ERROR_METAFILE_INIT_FAILED,
+    PREVIEW_ERROR_ZERO_PAGES,
+    PREVIEW_ERROR_MAC_DRAFT_METAFILE_INIT_FAILED,
+    PREVIEW_ERROR_PAGE_RENDERED_WITHOUT_METAFILE,
+    PREVIEW_ERROR_UPDATING_PRINT_SETTINGS,
+    PREVIEW_ERROR_INVALID_PRINTER_SETTINGS,
+    PREVIEW_ERROR_LAST_ENUM  // Always last.
+  };
+
+  enum PrintPreviewRequestType {
+    PRINT_PREVIEW_USER_INITIATED_ENTIRE_FRAME,
+    PRINT_PREVIEW_USER_INITIATED_CONTEXT_NODE,
+    PRINT_PREVIEW_SCRIPTED  // triggered by window.print().
+  };
+
   // RenderViewObserver implementation.
   virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
   virtual void PrintPage(WebKit::WebFrame* frame) OVERRIDE;
@@ -116,6 +143,19 @@ class PrintWebViewHelper
 
   // Print the document with the print preview frame/node.
   void OnPrintForSystemDialog();
+
+  // Get |page_size| and |content_area| information from
+  // |page_layout_in_points|.
+  void GetPageSizeAndContentAreaFromPageLayout(
+      const printing::PageSizeMargins& page_layout_in_points,
+      gfx::Size* page_size,
+      gfx::Rect* content_area);
+
+  // Update |ignore_css_margins_| based on settings.
+  void UpdateFrameMarginsCssInfo(const base::DictionaryValue& settings);
+
+  // Returns true if the current destination printer is PRINT_TO_PDF.
+  bool IsPrintToPdfRequested(const base::DictionaryValue& settings);
 
   // Initiate print preview.
   void OnInitiatePrintPreview();
@@ -145,12 +185,6 @@ class PrintWebViewHelper
   // Main printing code -------------------------------------------------------
 
   void Print(WebKit::WebFrame* frame, const WebKit::WebNode& node);
-
-  enum PrintingResult {
-    OK,
-    FAIL_PRINT,
-    FAIL_PREVIEW,
-  };
 
   // Notification when printing is done - signal tear-down/free resources.
   void DidFinishPrinting(PrintingResult result);
@@ -216,14 +250,18 @@ class PrintWebViewHelper
   // |metafile| or a new one.  In either case, the caller owns both |metafile|
   // and the result.
   printing::Metafile* RenderPage(const PrintMsg_Print_Params& params,
-                                 float* scale_factor, int page_number,
-                                 bool is_preview, WebKit::WebFrame* frame,
-                                 printing::Metafile* metafile);
+                                 int page_number,
+                                 WebKit::WebFrame* frame,
+                                 bool is_preview,
+                                 printing::Metafile* metafile,
+                                 double* scale_factor,
+                                 gfx::Size* page_size_in_dpi,
+                                 gfx::Rect* content_area_in_dpi);
 #elif defined(OS_MACOSX)
-  void RenderPage(const gfx::Size& page_size, const gfx::Rect& content_area,
-                  const float& scale_factor, int page_number,
+  void RenderPage(const PrintMsg_Print_Params& params, int page_number,
                   WebKit::WebFrame* frame, bool is_preview,
-                  printing::Metafile* metafile);
+                  printing::Metafile* metafile, gfx::Size* page_size,
+                  gfx::Rect* content_rect);
 #elif defined(OS_POSIX)
   bool RenderPages(const PrintMsg_PrintPages_Params& params,
                    WebKit::WebFrame* frame, const WebKit::WebNode& node,
@@ -238,17 +276,25 @@ class PrintWebViewHelper
   bool CopyMetafileDataToSharedMem(printing::Metafile* metafile,
                                    base::SharedMemoryHandle* shared_mem_handle);
 
-  static void GetPageSizeAndMarginsInPoints(
+  // Helper method to get page layout in points and fit to page if needed.
+  static void ComputePageLayoutInPointsForCss(
       WebKit::WebFrame* frame,
       int page_index,
       const PrintMsg_Print_Params& default_params,
+      bool ignore_css_margins,
+      bool fit_to_page,
+      double* scale_factor,
       printing::PageSizeMargins* page_layout_in_points);
 
-  static void UpdatePrintableSizeInPrintParameters(
+  // Prepare the frame and view for print and then call this function to honor
+  // the CSS page layout information.
+  static void UpdateFrameAndViewFromCssPageLayout(
       WebKit::WebFrame* frame,
       const WebKit::WebNode& node,
       PrepareFrameAndViewForPrint* prepare,
-      PrintMsg_Print_Params* params);
+      const PrintMsg_Print_Params& params,
+      bool ignore_css_margins,
+      bool fit_to_page);
 
   // Given the |device| and |canvas| to draw on, prints the appropriate headers
   // and footers using strings from |header_footer_info| on to the canvas.
@@ -281,7 +327,7 @@ class PrintWebViewHelper
   // Displays the print job error message to the user.
   void DisplayPrintJobError();
 
-  void RequestPrintPreview();
+  void RequestPrintPreview(PrintPreviewRequestType type);
 
   // Checks whether print preview should continue or not.
   // Returns true if cancelling, false if continuing.
@@ -299,6 +345,11 @@ class PrintWebViewHelper
   scoped_ptr<PrintMsg_PrintPages_Params> print_pages_params_;
   bool is_preview_enabled_;
   bool is_print_ready_metafile_sent_;
+  bool ignore_css_margins_;
+
+  // True if we need to auto fit to page else false.
+  // NOTE: When we print to pdf, we don't fit to page.
+  bool fit_to_page_;
 
   // Used for scripted initiated printing blocking.
   base::Time last_cancelled_script_print_;
@@ -313,19 +364,6 @@ class PrintWebViewHelper
   // Strings generated by the browser process to be printed as headers and
   // footers if requested by the user.
   scoped_ptr<base::DictionaryValue> header_footer_info_;
-
-  enum PrintPreviewErrorBuckets {
-    PREVIEW_ERROR_NONE,  // Always first.
-    PREVIEW_ERROR_BAD_SETTING,
-    PREVIEW_ERROR_METAFILE_COPY_FAILED,
-    PREVIEW_ERROR_METAFILE_INIT_FAILED,
-    PREVIEW_ERROR_ZERO_PAGES,
-    PREVIEW_ERROR_MAC_DRAFT_METAFILE_INIT_FAILED,
-    PREVIEW_ERROR_PAGE_RENDERED_WITHOUT_METAFILE,
-    PREVIEW_ERROR_UPDATING_PRINT_SETTINGS,
-    PREVIEW_ERROR_INVALID_PRINTER_SETTINGS,
-    PREVIEW_ERROR_LAST_ENUM  // Always last.
-  };
 
   // Keeps track of the state of print preview between messages.
   class PrintPreviewContext {
@@ -343,7 +381,9 @@ class PrintWebViewHelper
 
     // Create the print preview document. |pages| is empty to print all pages.
     bool CreatePreviewDocument(PrintMsg_Print_Params* params,
-                               const std::vector<int>& pages);
+                               const std::vector<int>& pages,
+                               bool ignore_css_margins,
+                               bool fit_to_page);
 
     // Called after a page gets rendered. |page_time| is how long the
     // rendering took.

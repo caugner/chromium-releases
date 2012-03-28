@@ -1,9 +1,9 @@
-/* Copyright (c) 2011 The Chromium Authors. All rights reserved.
+/* Copyright (c) 2012 The Chromium Authors. All rights reserved.
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
 
-/* From ppb_var.idl modified Wed Aug 24 20:49:04 2011. */
+/* From ppb_var.idl modified Wed Dec 14 18:08:00 2011. */
 
 #ifndef PPAPI_C_PPB_VAR_H_
 #define PPAPI_C_PPB_VAR_H_
@@ -15,7 +15,8 @@
 #include "ppapi/c/pp_var.h"
 
 #define PPB_VAR_INTERFACE_1_0 "PPB_Var;1.0"
-#define PPB_VAR_INTERFACE PPB_VAR_INTERFACE_1_0
+#define PPB_VAR_INTERFACE_1_1 "PPB_Var;1.1"
+#define PPB_VAR_INTERFACE PPB_VAR_INTERFACE_1_1
 
 /**
  * @file
@@ -30,7 +31,7 @@
 /**
  * PPB_Var API
  */
-struct PPB_Var {
+struct PPB_Var_1_1 {
   /**
    * AddRef() adds a reference to the given var. If this is not a refcounted
    * object, this function will do nothing so you can always call it no matter
@@ -66,16 +67,13 @@ struct PPB_Var {
    * On error (basically out of memory to allocate the string, or input that
    * is not valid UTF-8), this function will return a Null var.
    *
-   * @param[in] module A PP_Module uniquely identifying the module or .nexe.
    * @param[in] data A string
    * @param[in] len The length of the string.
    *
    * @return A <code>PP_Var</code> structure containing a reference counted
    * string object.
    */
-  struct PP_Var (*VarFromUtf8)(PP_Module module,
-                               const char* data,
-                               uint32_t len);
+  struct PP_Var (*VarFromUtf8)(const char* data, uint32_t len);
   /**
    * VarToUtf8() converts a string-type var to a char* encoded in UTF-8. This
    * string is NOT NULL-terminated. The length will be placed in
@@ -94,6 +92,17 @@ struct PPB_Var {
    *
    * @return A char* encoded in UTF-8.
    */
+  const char* (*VarToUtf8)(struct PP_Var var, uint32_t* len);
+};
+
+typedef struct PPB_Var_1_1 PPB_Var;
+
+struct PPB_Var_1_0 {
+  void (*AddRef)(struct PP_Var var);
+  void (*Release)(struct PP_Var var);
+  struct PP_Var (*VarFromUtf8)(PP_Module module,
+                               const char* data,
+                               uint32_t len);
   const char* (*VarToUtf8)(struct PP_Var var, uint32_t* len);
 };
 /**

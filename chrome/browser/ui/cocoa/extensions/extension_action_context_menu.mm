@@ -1,11 +1,10 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "chrome/browser/ui/cocoa/extensions/extension_action_context_menu.h"
 
 #include "base/sys_string_conversions.h"
-#include "base/task.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
@@ -29,8 +28,15 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
+#include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::WebContents;
 
 // A class that loads the extension icon on the I/O thread before showing the
 // confirmation dialog to uninstall the given extension.
@@ -147,7 +153,7 @@ int CurrentTabId() {
   Browser* browser = BrowserList::GetLastActive();
   if(!browser)
     return -1;
-  TabContents* contents = browser->GetSelectedTabContents();
+  WebContents* contents = browser->GetSelectedWebContents();
   if (!contents)
     return -1;
   return ExtensionTabUtil::GetTabId(contents);
@@ -166,7 +172,7 @@ int CurrentTabId() {
     NSArray* menuItems = [NSArray arrayWithObjects:
         base::SysUTF8ToNSString(extension->name()),
         [NSMenuItem separatorItem],
-        l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_OPTIONS),
+        l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_OPTIONS_MENU_ITEM),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_DISABLE),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_UNINSTALL),
         l10n_util::GetNSStringWithFixup(IDS_EXTENSIONS_HIDE_BUTTON),
@@ -240,8 +246,10 @@ int CurrentTabId() {
     case kExtensionContextName: {
       GURL url(std::string(extension_urls::kGalleryBrowsePrefix) +
                std::string("/detail/") + extension_->id());
-      browser->OpenURL(
-          url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
+      OpenURLParams params(
+          url, Referrer(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK,
+           false);
+      browser->OpenURL(params);
       break;
     }
     case kExtensionContextOptions: {

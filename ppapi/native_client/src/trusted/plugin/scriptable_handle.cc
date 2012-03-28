@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -55,7 +55,7 @@ void RememberValidHandle(const ScriptableHandle* handle) {
   g_ValidHandles->insert(handle);
 }
 
-pp::Var Error(nacl::string call_name, const char* caller,
+pp::Var Error(const nacl::string& call_name, const char* caller,
               const char* error, pp::Var* exception) {
   nacl::stringstream error_stream;
   error_stream << call_name << ": " << error;
@@ -74,7 +74,7 @@ pp::Var Error(nacl::string call_name, const char* caller,
 // Helper functionality common to HasProperty and HasMethod.
 bool HasCallType(Plugin* plugin,
                  CallType call_type,
-                 nacl::string call_name,
+                 const nacl::string& call_name,
                  const char* caller) {
   uintptr_t id = plugin->browser_interface()->StringToIdentifier(call_name);
   PLUGIN_PRINTF(("ScriptableHandle::%s (id=%"NACL_PRIxPTR")\n",
@@ -88,7 +88,7 @@ bool HasCallType(Plugin* plugin,
 // Sets |exception| on failure.
 pp::Var Invoke(Plugin* plugin,
                CallType call_type,
-               nacl::string call_name,
+               const nacl::string& call_name,
                const char* caller,
                const std::vector<pp::Var>& args,
                pp::Var* exception) {
@@ -105,7 +105,7 @@ pp::Var Invoke(Plugin* plugin,
   uint32_t input_length = params.InputLength();
   int32_t output_length = params.OutputLength();
   PLUGIN_PRINTF(("ScriptableHandle::%s (initialized %"NACL_PRIu32" ins, %"
-                 NACL_PRIu32" outs)\n", caller, input_length, output_length));
+                 NACL_PRId32" outs)\n", caller, input_length, output_length));
 
   // Verify input/output parameter list length.
   if (args.size() != params.SignatureLength()) {
@@ -356,7 +356,7 @@ void ScriptableHandle::SetProperty(const pp::Var& name,
          args,
          exception);
   std::string exception_string("NULL");
-  if (exception != NULL) {
+  if (!exception->is_undefined()) {
     exception_string = exception->DebugString();
   }
   PLUGIN_PRINTF(("ScriptableHandle::SetProperty (exception=%s)\n",
@@ -406,7 +406,7 @@ pp::Var ScriptableHandle::Call(const pp::Var& name,
   PLUGIN_PRINTF(("ScriptableHandle::Call (name=%s, %"NACL_PRIuS
                  " args)\n", name.DebugString().c_str(), args.size()));
   if (plugin_ == NULL) {
-    pp::Var();
+    return pp::Var();
   }
   if (name.is_undefined())  // invoke default
     return pp::Var();

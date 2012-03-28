@@ -247,8 +247,8 @@ png_inflate(png_structp png_ptr, const png_byte *data, png_size_t size,
       {
          if (output != 0 && output_size > count)
          {
-            int copy = output_size - count;
-            if (avail < copy) copy = avail;
+            png_size_t copy = output_size - count;
+            if ((png_size_t) avail < copy) copy = (png_size_t) avail;
             png_memcpy(output + count, png_ptr->zbuf, copy);
          }
          count += avail;
@@ -363,8 +363,15 @@ png_decompress_chunk(png_structp png_ptr, int comp_type,
       {
          /* Success (maybe) - really uncompress the chunk. */
          png_size_t new_size = 0;
-         png_charp text = png_malloc_warn(png_ptr,
-                        prefix_size + expanded_size + 1);
+         png_charp text = NULL;
+         /* Need to check for both truncation (64-bit platforms) and integer
+          * overflow.
+          */
+         if (prefix_size + expanded_size > prefix_size &&
+             prefix_size + expanded_size < 0xffffffffU)
+         {
+            text = png_malloc_warn(png_ptr, prefix_size + expanded_size + 1);
+         }
 
          if (text != NULL)
          {

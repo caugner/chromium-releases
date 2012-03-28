@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -28,6 +28,7 @@
         'common_constants',
         'common_net',
         'common_version',
+        'metrics_proto',
         '<(DEPTH)/base/base.gyp:base',
         '<(DEPTH)/base/base.gyp:base_i18n',
         '<(DEPTH)/base/base.gyp:base_static',
@@ -81,6 +82,7 @@
         'common/chrome_sandbox_type_mac.h',
         'common/chrome_utility_messages.h',
         'common/chrome_version_info.cc',
+        'common/chrome_version_info_chromeos.cc',
         'common/chrome_version_info_linux.cc',
         'common/chrome_version_info_mac.mm',
         'common/chrome_version_info_win.cc',
@@ -129,13 +131,12 @@
         'common/extensions/extension_messages.h',
         'common/extensions/extension_permission_set.cc',
         'common/extensions/extension_permission_set.h',
+        'common/extensions/extension_process_policy.cc',
+        'common/extensions/extension_process_policy.h',
         'common/extensions/extension_resource.cc',
         'common/extensions/extension_resource.h',
         'common/extensions/extension_set.cc',
         'common/extensions/extension_set.h',
-        'common/extensions/extension_sidebar_defaults.h',
-        'common/extensions/extension_sidebar_utils.cc',
-        'common/extensions/extension_sidebar_utils.h',
         'common/extensions/extension_unpacker.cc',
         'common/extensions/extension_unpacker.h',
         'common/extensions/file_browser_handler.cc',
@@ -182,10 +183,14 @@
         'common/mac/objc_method_swizzle.mm',
         'common/mac/objc_zombie.h',
         'common/mac/objc_zombie.mm',
-        'common/metrics_helpers.cc',
-        'common/metrics_helpers.h',
-        'common/metrics_log_manager.cc',
-        'common/metrics_log_manager.h',
+        'common/metrics/histogram_sender.cc',
+        'common/metrics/histogram_sender.h',
+        'common/metrics/metrics_log_base.cc',
+        'common/metrics/metrics_log_base.h',
+        'common/metrics/metrics_log_manager.cc',
+        'common/metrics/metrics_log_manager.h',
+        'common/metrics/metrics_service_base.cc',
+        'common/metrics/metrics_service_base.h',
         'common/multi_process_lock.h',
         'common/multi_process_lock_linux.cc',
         'common/multi_process_lock_mac.cc',
@@ -255,11 +260,6 @@
             '<(DEPTH)/third_party/wtl/include',
           ]
         }],
-        ['OS=="win" and use_aura==0', {
-          'dependencies': [
-            '<(DEPTH)/chrome/default_plugin/default_plugin.gyp:default_plugin',
-          ]
-        }],
         ['toolkit_uses_gtk == 1', {
           'dependencies': [
             '../build/linux/system.gyp:gtk',
@@ -279,6 +279,15 @@
         ['OS=="linux" and selinux==1', {
           'dependencies': [
             '../build/linux/system.gyp:selinux',
+          ],
+        }],
+        ['chromeos==0', {
+          'sources!': [
+            'common/chrome_version_info_chromeos.cc',
+          ],
+        }, {
+          'sources!': [
+            'common/chrome_version_info_linux.cc',
           ],
         }],
         ['OS=="mac"', {
@@ -404,7 +413,7 @@
         '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
       ],
       'conditions': [
-        ['os_posix == 1 and OS != "mac"', {
+        ['os_posix == 1 and OS != "mac" and OS != "android"', {
             'dependencies': [
               '../build/linux/system.gyp:ssl',
             ],
@@ -442,6 +451,23 @@
       'variables': {
         'proto_in_dir': 'common/safe_browsing',
         'proto_out_dir': 'chrome/common/safe_browsing',
+      },
+      'includes': [ '../build/protoc.gypi' ],
+    },
+    {
+      # Protobuf compiler / generator for UMA (User Metrics Analysis).
+      'target_name': 'metrics_proto',
+      'type': 'static_library',
+      'sources': [
+        'common/metrics/proto/chrome_user_metrics_extension.proto',
+        'common/metrics/proto/histogram_event.proto',
+        'common/metrics/proto/omnibox_event.proto',
+        'common/metrics/proto/system_profile.proto',
+        'common/metrics/proto/user_action_event.proto',
+      ],
+      'variables': {
+        'proto_in_dir': 'common/metrics/proto',
+        'proto_out_dir': 'chrome/common/metrics/proto',
       },
       'includes': [ '../build/protoc.gypi' ],
     },

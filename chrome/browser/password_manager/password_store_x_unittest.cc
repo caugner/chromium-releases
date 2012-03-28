@@ -40,7 +40,7 @@ using testing::ElementsAreArray;
 using testing::Pointee;
 using testing::Property;
 using testing::WithArg;
-using webkit_glue::PasswordForm;
+using webkit::forms::PasswordForm;
 
 typedef std::vector<PasswordForm*> VectorOfForms;
 
@@ -220,31 +220,18 @@ class MockLoginDatabaseReturn {
                void(const std::vector<PasswordForm*>&));
 };
 
-class LoginDatabaseQueryTask : public Task {
- public:
-  LoginDatabaseQueryTask(LoginDatabase* login_db,
-                         bool autofillable,
-                         MockLoginDatabaseReturn* mock_return)
-      : login_db_(login_db), autofillable_(autofillable),
-        mock_return_(mock_return) {
-  }
+void LoginDatabaseQueryCallback(LoginDatabase* login_db,
+                                bool autofillable,
+                                MockLoginDatabaseReturn* mock_return) {
+  std::vector<PasswordForm*> forms;
+  if (autofillable)
+    login_db->GetAutofillableLogins(&forms);
+  else
+    login_db->GetBlacklistLogins(&forms);
+  mock_return->OnLoginDatabaseQueryDone(forms);
+}
 
-  virtual void Run() {
-    std::vector<PasswordForm*> forms;
-    if (autofillable_)
-      login_db_->GetAutofillableLogins(&forms);
-    else
-      login_db_->GetBlacklistLogins(&forms);
-    mock_return_->OnLoginDatabaseQueryDone(forms);
-  }
-
- private:
-  LoginDatabase* login_db_;
-  bool autofillable_;
-  MockLoginDatabaseReturn* mock_return_;
-};
-
-// Generate |count| expected logins, either autofillable or blacklisted.
+// Generate |count| expected logins, either auto-fillable or blacklisted.
 void InitExpectedForms(bool autofillable, size_t count, VectorOfForms* forms) {
   const char* domain = autofillable ? "example" : "blacklisted";
   for (size_t i = 0; i < count; ++i) {
@@ -298,7 +285,7 @@ class PasswordStoreXTest : public testing::TestWithParam<BackendType> {
 
   virtual void TearDown() {
     wds_->Shutdown();
-    MessageLoop::current()->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    MessageLoop::current()->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     MessageLoop::current()->Run();
     db_thread_.Stop();
   }
@@ -632,16 +619,16 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
   for (VectorOfForms::iterator it = expected_autofillable.begin();
        it != expected_autofillable.end(); ++it) {
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-                            base::IgnoreReturn<bool>(base::Bind(
-                                &LoginDatabase::AddLogin,
-                                base::Unretained(login_db), **it)));
+                            base::Bind(
+                                base::IgnoreResult(&LoginDatabase::AddLogin),
+                                base::Unretained(login_db), **it));
   }
   for (VectorOfForms::iterator it = expected_blacklisted.begin();
        it != expected_blacklisted.end(); ++it) {
     BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-                            base::IgnoreReturn<bool>(base::Bind(
-                                &LoginDatabase::AddLogin,
-                                base::Unretained(login_db), **it)));
+                            base::Bind(
+                                base::IgnoreResult(&LoginDatabase::AddLogin),
+                                base::Unretained(login_db), **it));
   }
 
   // Schedule another task on the DB thread to notify us that it's safe to
@@ -708,8 +695,9 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
         .WillOnce(WithArg<0>(STLDeleteElements0()));
   }
 
-  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new LoginDatabaseQueryTask(login_db, true, &ld_return));
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(&LoginDatabaseQueryCallback, login_db, true, &ld_return));
 
   // Wait for the login DB methods to execute on the DB thread.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
@@ -728,8 +716,9 @@ TEST_P(PasswordStoreXTest, NativeMigration) {
         .WillOnce(WithArg<0>(STLDeleteElements0()));
   }
 
-  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
-      new LoginDatabaseQueryTask(login_db, false, &ld_return));
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(&LoginDatabaseQueryCallback, login_db, false, &ld_return));
 
   // Wait for the login DB methods to execute on the DB thread.
   BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -97,6 +97,14 @@ class ClearSettingsFunction : public SettingsFunction {
 
   virtual void GetQuotaLimitHeuristics(
       QuotaLimitHeuristics* heuristics) const OVERRIDE;
+};
+
+class GetBytesInUseSettingsFunction : public SettingsFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION_NAME("experimental.storage.getBytesInUse");
+
+ protected:
+  virtual bool RunWithStorage(SettingsStorage* storage) OVERRIDE;
 };
 
 }  // namespace extensions

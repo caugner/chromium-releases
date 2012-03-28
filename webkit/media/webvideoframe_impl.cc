@@ -43,6 +43,8 @@ COMPILE_ASSERT_MATCHING_ENUM(FormatYV16, YV16);
 COMPILE_ASSERT_MATCHING_ENUM(FormatNV12, NV12);
 COMPILE_ASSERT_MATCHING_ENUM(FormatEmpty, EMPTY);
 COMPILE_ASSERT_MATCHING_ENUM(FormatASCII, ASCII);
+COMPILE_ASSERT_MATCHING_ENUM(FormatI420, I420);
+COMPILE_ASSERT_MATCHING_ENUM(FormatNativeTexture, NATIVE_TEXTURE);
 
 WebVideoFrame::Format WebVideoFrameImpl::format() const {
   if (video_frame_.get())
@@ -63,8 +65,28 @@ unsigned WebVideoFrameImpl::height() const {
 }
 
 unsigned WebVideoFrameImpl::planes() const {
-  if (video_frame_.get())
-    return video_frame_->planes();
+  if (!video_frame_.get())
+    return 0;
+  switch (video_frame_->format()) {
+    case media::VideoFrame::RGB555:
+    case media::VideoFrame::RGB565:
+    case media::VideoFrame::RGB24:
+    case media::VideoFrame::RGB32:
+    case media::VideoFrame::RGBA:
+      return 1;
+    case media::VideoFrame::YV12:
+    case media::VideoFrame::YV16:
+      return 3;
+    case media::VideoFrame::INVALID:
+    case media::VideoFrame::NV12:
+    case media::VideoFrame::EMPTY:
+    case media::VideoFrame::ASCII:
+    case media::VideoFrame::I420:
+      break;
+    case media::VideoFrame::NATIVE_TEXTURE:
+      return 0;
+  }
+  NOTREACHED();
   return 0;
 }
 
@@ -75,9 +97,15 @@ int WebVideoFrameImpl::stride(unsigned plane) const {
 }
 
 const void* WebVideoFrameImpl::data(unsigned plane) const {
-  if (video_frame_.get())
-    return static_cast<const void*>(video_frame_->data(plane));
-  return NULL;
+  if (!video_frame_.get() || format() == FormatNativeTexture)
+    return NULL;
+  return static_cast<const void*>(video_frame_->data(plane));
+}
+
+unsigned WebVideoFrameImpl::textureId() const {
+  if (!video_frame_.get() || format() != FormatNativeTexture)
+    return 0;
+  return video_frame_->texture_id();
 }
 
 }  // namespace webkit_media

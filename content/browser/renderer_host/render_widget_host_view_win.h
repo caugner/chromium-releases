@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 #include <atlapp.h>
 #include <atlcrack.h>
 #include <atlmisc.h>
-
+#include <peninputpanel.h>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -89,15 +89,11 @@ class RenderWidgetHostViewWin
       public content::NotificationObserver,
       public BrowserAccessibilityDelegate {
  public:
-  // The view will associate itself with the given widget.
-  CONTENT_EXPORT explicit RenderWidgetHostViewWin(RenderWidgetHost* widget);
   virtual ~RenderWidgetHostViewWin();
 
   CONTENT_EXPORT void CreateWnd(HWND parent);
 
   void ScheduleComposite();
-
-  CONTENT_EXPORT IAccessible* GetIAccessible();
 
   DECLARE_WND_CLASS_EX(kRenderWidgetHostHWNDClass, CS_DBLCLKS, 0);
 
@@ -153,6 +149,7 @@ class RenderWidgetHostViewWin
   END_MSG_MAP()
 
   // Implementation of RenderWidgetHostView:
+  virtual void InitAsChild(gfx::NativeView parent_view) OVERRIDE;
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
                            const gfx::Rect& pos) OVERRIDE;
   virtual void InitAsFullscreen(
@@ -164,6 +161,7 @@ class RenderWidgetHostViewWin
   virtual void SetBounds(const gfx::Rect& rect) OVERRIDE;
   virtual gfx::NativeView GetNativeView() const OVERRIDE;
   virtual gfx::NativeViewId GetNativeViewId() const OVERRIDE;
+  virtual gfx::NativeViewAccessible GetNativeViewAccessible() OVERRIDE;
   virtual void MovePluginWindows(
       const std::vector<webkit::npapi::WebPluginGeometry>& moves) OVERRIDE;
   virtual void Focus() OVERRIDE;
@@ -195,6 +193,7 @@ class RenderWidgetHostViewWin
   virtual void SetBackground(const SkBitmap& background) OVERRIDE;
   virtual void UnhandledWheelEvent(
       const WebKit::WebMouseWheelEvent& event) OVERRIDE;
+  virtual void ProcessTouchAck(bool processed) OVERRIDE;
   virtual void SetHasHorizontalScrollbar(
       bool has_horizontal_scrollbar) OVERRIDE;
   virtual void SetScrollOffsetPinning(
@@ -220,12 +219,21 @@ class RenderWidgetHostViewWin
   // Implementation of BrowserAccessibilityDelegate:
   virtual void SetAccessibilityFocus(int acc_obj_id) OVERRIDE;
   virtual void AccessibilityDoDefaultAction(int acc_obj_id) OVERRIDE;
-  virtual void AccessibilityChangeScrollPosition(
-      int acc_obj_id, int scroll_x, int scroll_y) OVERRIDE;
+  virtual void AccessibilityScrollToMakeVisible(
+      int acc_obj_id, gfx::Rect subfocus) OVERRIDE;
+  virtual void AccessibilityScrollToPoint(
+      int acc_obj_id, gfx::Point point) OVERRIDE;
   virtual void AccessibilitySetTextSelection(
       int acc_obj_id, int start_offset, int end_offset) OVERRIDE;
 
  protected:
+  friend class RenderWidgetHostView;
+
+  // Should construct only via RenderWidgetHostView::CreateViewForWidget.
+  //
+  // The view will associate itself with the given widget.
+  explicit RenderWidgetHostViewWin(RenderWidgetHost* widget);
+
   // Windows Message Handlers
   LRESULT OnCreate(CREATESTRUCT* create_struct);
   void OnActivate(UINT, BOOL, HWND);
@@ -346,6 +354,13 @@ class RenderWidgetHostViewWin
   LRESULT OnDocumentFeed(RECONVERTSTRING* reconv);
   LRESULT OnReconvertString(RECONVERTSTRING* reconv);
 
+  // Displays the on screen keyboard for editable fields.
+  void DisplayOnScreenKeyboardIfNeeded();
+
+  // Invoked in a delayed task to reset the fact that we are in the context of
+  // a WM_POINTERDOWN message.
+  void ResetPointerDownContext();
+
   // The associated Model.  While |this| is being Destroyed,
   // |render_widget_host_| is NULL and the Windows message loop is run one last
   // time. Message handlers must check for a NULL |render_widget_host_|.
@@ -356,7 +371,7 @@ class RenderWidgetHostViewWin
 
   // Presents a texture received from another process to the compositing
   // window.
-  scoped_refptr<AcceleratedSurface> accelerated_surface_;
+  scoped_ptr<AcceleratedSurface> accelerated_surface_;
 
   // true if the compositor host window must be hidden after the
   // software renderered view is updated.
@@ -454,10 +469,6 @@ class RenderWidgetHostViewWin
   // when shown again.
   HWND parent_hwnd_;
 
-  // Instance of accessibility information for the root of the MSAA
-  // tree representation of the WebKit render tree.
-  scoped_ptr<BrowserAccessibilityManager> browser_accessibility_manager_;
-
   // The time at which this view started displaying white pixels as a result of
   // not having anything to paint (empty backing store from renderer). This
   // value returns true for is_null() if we are not recording whiteout times.
@@ -510,9 +521,29 @@ class RenderWidgetHostViewWin
   // WM_POINTERXX handler. We do this to ensure that we don't send out
   // duplicate lbutton down messages to the renderer.
   bool ignore_next_lbutton_message_at_same_location;
+
+  // TODO(ananta)
+  // The WM_POINTERDOWN and on screen keyboard handling related members should
+  // be moved to an independent class to reduce the clutter. This includes all
+  // members starting from last_pointer_down_location_ to the
+  // received_focus_change_after_pointer_down_.
+
   // The location of the last WM_POINTERDOWN message. We ignore the subsequent
   // lbutton down only if the locations match.
   LPARAM last_pointer_down_location_;
+
+  // IPenInputPanel to allow us to show the Windows virtual keyboard when a
+  // user touches an editable field on the page.
+  base::win::ScopedComPtr<IPenInputPanel> virtual_keyboard_;
+
+  // Set to true if we are in the context of a WM_POINTERDOWN message
+  bool pointer_down_context_;
+
+  // Set to true if the focus is currently on an editable field on the page.
+  bool focus_on_editable_field_;
+
+  // Set to true if we received a focus change after a WM_POINTERDOWN message.
+  bool received_focus_change_after_pointer_down_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewWin);
 };

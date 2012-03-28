@@ -12,15 +12,19 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebContextMenuData.h"
+
+using content::WebContents;
 
 namespace {
 
 class TestRenderViewContextMenu : public RenderViewContextMenu {
  public:
-  TestRenderViewContextMenu(TabContents* tab_contents, ContextMenuParams params)
-      : RenderViewContextMenu(tab_contents, params) { }
+  TestRenderViewContextMenu(WebContents* web_contents, ContextMenuParams params)
+      : RenderViewContextMenu(web_contents, params) { }
 
   virtual void PlatformInit() { }
   virtual bool GetAcceleratorForCommandId(
@@ -42,15 +46,16 @@ class RegisterProtocolHandlerBrowserTest : public InProcessBrowserTest {
     ContextMenuParams params;
     params.media_type = WebKit::WebContextMenuData::MediaTypeNone;
     params.link_url = url;
-    TabContents* tab_contents = browser()->GetSelectedTabContents();
-    params.page_url = tab_contents->controller().GetActiveEntry()->url();
+    params.unfiltered_link_url = url;
+    WebContents* web_contents = browser()->GetSelectedWebContents();
+    params.page_url = web_contents->GetController().GetActiveEntry()->GetURL();
 #if defined(OS_MACOSX)
     params.writing_direction_default = 0;
     params.writing_direction_left_to_right = 0;
     params.writing_direction_right_to_left = 0;
 #endif  // OS_MACOSX
     TestRenderViewContextMenu* menu = new TestRenderViewContextMenu(
-        browser()->GetSelectedTabContents(), params);
+        browser()->GetSelectedWebContents(), params);
     menu->Init();
     return menu;
   }

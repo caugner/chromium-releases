@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -120,7 +120,9 @@ class TestDelegate : public net::URLRequest::Delegate {
   }
   bool request_failed() const { return request_failed_; }
   bool have_certificate_errors() const { return have_certificate_errors_; }
-  bool is_hsts_host() const { return is_hsts_host_; }
+  bool certificate_errors_are_fatal() const {
+    return certificate_errors_are_fatal_;
+  }
   bool auth_required_called() const { return auth_required_; }
 
   // net::URLRequest::Delegate:
@@ -128,9 +130,12 @@ class TestDelegate : public net::URLRequest::Delegate {
                                   bool* defer_redirect) OVERRIDE;
   virtual void OnAuthRequired(net::URLRequest* request,
                               net::AuthChallengeInfo* auth_info) OVERRIDE;
+  // NOTE: |fatal| causes |certificate_errors_are_fatal_| to be set to true.
+  // (Unit tests use this as a post-condition.) But for policy, this method
+  // consults |allow_certificate_errors_|.
   virtual void OnSSLCertificateError(net::URLRequest* request,
                                      const net::SSLInfo& ssl_info,
-                                     bool is_hsts_host) OVERRIDE;
+                                     bool fatal) OVERRIDE;
   virtual bool CanGetCookies(const net::URLRequest* request,
                              const net::CookieList& cookie_list) const OVERRIDE;
   virtual bool CanSetCookie(const net::URLRequest* request,
@@ -166,7 +171,7 @@ class TestDelegate : public net::URLRequest::Delegate {
   bool received_data_before_response_;
   bool request_failed_;
   bool have_certificate_errors_;
-  bool is_hsts_host_;
+  bool certificate_errors_are_fatal_;
   bool auth_required_;
   std::string data_received_;
 
@@ -208,7 +213,7 @@ class TestNetworkDelegate : public net::NetworkDelegate {
   virtual void OnResponseStarted(net::URLRequest* request) OVERRIDE;
   virtual void OnRawBytesRead(const net::URLRequest& request,
                               int bytes_read) OVERRIDE;
-  virtual void OnCompleted(net::URLRequest* request) OVERRIDE;
+  virtual void OnCompleted(net::URLRequest* request, bool started) OVERRIDE;
   virtual void OnURLRequestDestroyed(net::URLRequest* request) OVERRIDE;
   virtual void OnPACScriptError(int line_number,
                                 const string16& error) OVERRIDE;

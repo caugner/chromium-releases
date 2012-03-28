@@ -237,19 +237,19 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
   };
 
   // Specialization of SourceTracker for handling
-  // SOURCE_INIT_PROXY_RESOLVER.
-  class InitProxyResolverTracker : public SourceTracker {
+  // SOURCE_PROXY_SCRIPT_DECIDER.
+  class ProxyScriptDeciderTracker : public SourceTracker {
    public:
     static const size_t kMaxNumSources;
     static const size_t kMaxGraveyardSize;
 
-    InitProxyResolverTracker();
+    ProxyScriptDeciderTracker();
 
    private:
     virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
                               SourceInfo* out_info) OVERRIDE;
 
-    DISALLOW_COPY_AND_ASSIGN(InitProxyResolverTracker);
+    DISALLOW_COPY_AND_ASSIGN(ProxyScriptDeciderTracker);
   };
 
   // Tracks the log entries for the last seen SOURCE_SPDY_SESSION.
@@ -400,7 +400,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
     DISALLOW_COPY_AND_ASSIGN(UDPSocketTracker);
   };
 
-  // Tracks the log entries for the last seen SOURCE_CERT_VERIFIER_JOB
+  // Tracks the log entries for the last seen SOURCE_CERT_VERIFIER_JOB.
   class CertVerifierJobTracker : public SourceTracker {
    public:
     static const size_t kMaxNumSources;
@@ -413,6 +413,21 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
                               SourceInfo* out_info) OVERRIDE;
 
     DISALLOW_COPY_AND_ASSIGN(CertVerifierJobTracker);
+  };
+
+  // Tracks the log entries for the last seen SOURCE_HTTP_PIPELINED_CONNECTION.
+  class HttpPipelinedConnectionTracker : public SourceTracker {
+   public:
+    static const size_t kMaxNumSources;
+    static const size_t kMaxGraveyardSize;
+
+    HttpPipelinedConnectionTracker();
+
+   private:
+    virtual Action DoAddEntry(const ChromeNetLog::Entry& entry,
+                              SourceInfo* out_info) OVERRIDE;
+
+    DISALLOW_COPY_AND_ASSIGN(HttpPipelinedConnectionTracker);
   };
 
   PassiveLogCollector();
@@ -447,7 +462,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
   SocketTracker socket_tracker_;
   RequestTracker url_request_tracker_;
   RequestTracker socket_stream_tracker_;
-  InitProxyResolverTracker init_proxy_resolver_tracker_;
+  ProxyScriptDeciderTracker proxy_script_decider_tracker_;
   SpdySessionTracker spdy_session_tracker_;
   DNSRequestTracker dns_request_tracker_;
   DNSJobTracker dns_job_tracker_;
@@ -459,6 +474,7 @@ class PassiveLogCollector : public ChromeNetLog::ThreadSafeObserverImpl {
   AsyncHostResolverRequestTracker async_host_resolver_request_tracker_;
   UDPSocketTracker udp_socket_tracker_;
   CertVerifierJobTracker cert_verifier_job_tracker_;
+  HttpPipelinedConnectionTracker http_pipelined_connection_tracker_;
 
   // This array maps each NetLog::SourceType to one of the tracker instances
   // defined above. Use of this array avoid duplicating the list of trackers

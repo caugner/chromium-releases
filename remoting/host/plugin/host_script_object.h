@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,7 @@
 #include "base/time.h"
 #include "remoting/base/plugin_message_loop_proxy.h"
 #include "remoting/host/chromoting_host_context.h"
+#include "remoting/host/host_key_pair.h"
 #include "remoting/host/host_status_observer.h"
 #include "remoting/host/log_to_server.h"
 #include "remoting/host/plugin/host_plugin_utils.h"
@@ -68,10 +69,7 @@ class HostNPScriptObject : public HostStatusObserver {
   bool Enumerate(std::vector<std::string>* values);
 
   // remoting::HostStatusObserver implementation.
-  virtual void OnSignallingConnected(remoting::SignalStrategy* signal_strategy,
-                                     const std::string& full_jid) OVERRIDE;
-  virtual void OnSignallingDisconnected() OVERRIDE;
-  virtual void OnAccessDenied() OVERRIDE;
+  virtual void OnAccessDenied(const std::string& jid) OVERRIDE;
   virtual void OnClientAuthenticated(const std::string& jid) OVERRIDE;
   virtual void OnClientDisconnected(const std::string& jid) OVERRIDE;
   virtual void OnShutdown() OVERRIDE;
@@ -122,16 +120,18 @@ class HostNPScriptObject : public HostStatusObserver {
   void OnReceivedSupportID(bool success,
                            const std::string& support_id,
                            const base::TimeDelta& lifetime);
-  void NotifyAccessCode(bool success);
 
   // Helper functions that run on main thread. Can be called on any
   // other thread.
   void ReadPolicyAndConnect(const std::string& uid,
                             const std::string& auth_token,
                             const std::string& auth_service);
-  void FinishConnect(const std::string& uid,
-                       const std::string& auth_token,
-                       const std::string& auth_service);
+  void FinishConnectMainThread(const std::string& uid,
+                               const std::string& auth_token,
+                               const std::string& auth_service);
+  void FinishConnectNetworkThread(const std::string& uid,
+                                  const std::string& auth_token,
+                                  const std::string& auth_service);
   void DisconnectInternal();
 
   // Callback for ChromotingHost::Shutdown().
@@ -164,6 +164,7 @@ class HostNPScriptObject : public HostStatusObserver {
 
   NPP plugin_;
   NPObject* parent_;
+
   State state_;
 
   base::Lock access_code_lock_;
@@ -177,10 +178,11 @@ class HostNPScriptObject : public HostStatusObserver {
   base::PlatformThreadId np_thread_id_;
   scoped_refptr<PluginMessageLoopProxy> plugin_message_loop_proxy_;
 
+  ChromotingHostContext host_context_;
+  HostKeyPair host_key_pair_;
+  scoped_ptr<SignalStrategy> signal_strategy_;
   scoped_ptr<RegisterSupportHostRequest> register_request_;
   scoped_ptr<LogToServer> log_to_server_;
-  scoped_refptr<MutableHostConfig> host_config_;
-  ChromotingHostContext host_context_;
   scoped_ptr<DesktopEnvironment> desktop_environment_;
   scoped_ptr<It2MeHostUserInterface> it2me_host_user_interface_;
 
@@ -207,9 +209,6 @@ class HostNPScriptObject : public HostStatusObserver {
   // queried our policy restrictions.
   bool policy_received_;
 
-  // Whether logging to a server is enabled.
-  bool enable_log_to_server_;
-
   // On startup, it is possible to have Connect() called before the policy read
   // is completed.  Rather than just failing, we thunk the connection call so
   // it can be executed after at least one successful policy read. This
@@ -218,7 +217,5 @@ class HostNPScriptObject : public HostStatusObserver {
 };
 
 }  // namespace remoting
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(remoting::HostNPScriptObject);
 
 #endif  // REMOTING_HOST_PLUGIN_HOST_SCRIPT_OBJECT_H_

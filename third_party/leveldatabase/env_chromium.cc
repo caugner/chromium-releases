@@ -16,7 +16,6 @@
 #include "base/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/sys_info.h"
-#include "base/task.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
@@ -444,12 +443,12 @@ class ChromiumEnv : public Env {
   }
 
   virtual uint64_t NowMicros() {
-    return ::base::TimeTicks::HighResNow().ToInternalValue();
+    return ::base::TimeTicks::Now().ToInternalValue();
   }
 
   virtual void SleepForMicroseconds(int micros) {
     // Round up to the next millisecond.
-    ::base::PlatformThread::Sleep((micros + 999) / 1000);
+    ::base::PlatformThread::Sleep(::base::TimeDelta::FromMicroseconds(micros));
   }
 
  private:
@@ -545,7 +544,7 @@ void ChromiumEnv::StartThread(void (*function)(void* arg), void* arg) {
   new Thread(function, arg); // Will self-delete.
 }
 
-::base::LazyInstance<ChromiumEnv, ::base::LeakyLazyInstanceTraits<ChromiumEnv> >
+::base::LazyInstance<ChromiumEnv>::Leaky
     default_env = LAZY_INSTANCE_INITIALIZER;
 
 }

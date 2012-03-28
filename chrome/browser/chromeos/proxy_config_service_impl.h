@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
 #include "chrome/browser/prefs/pref_member.h"
-#include "content/public/browser/notification_registrar.h"
 
 namespace chromeos {
 
@@ -107,6 +106,11 @@ class ProxyConfigServiceImpl
     // persisted as string property in flimflam for a network.
     bool SerializeForNetwork(std::string* output);
 
+    // Encodes the proxy server as "<url-scheme>=<proxy-scheme>://<proxy>"
+    static void EncodeAndAppendProxyServer(const std::string& scheme,
+                                           const net::ProxyServer& server,
+                                           std::string* spec);
+
     Mode mode;
 
     ProxyPrefs::ConfigState state;
@@ -132,12 +136,6 @@ class ProxyConfigServiceImpl
 
     // Exceptions for when not to use a proxy.
     net::ProxyBypassRules  bypass_rules;
-
-   private:
-    // Encodes the proxy server as "<url-scheme>=<proxy-scheme>://<proxy>"
-    static void EncodeAndAppendProxyServer(const std::string& scheme,
-                                           const net::ProxyServer& server,
-                                           std::string* spec);
   };
 
   // Constructor.
@@ -288,8 +286,6 @@ class ProxyConfigServiceImpl
 
   // Track changes in UseSharedProxies user preference.
   BooleanPrefMember use_shared_proxies_;
-
-  content::NotificationRegistrar registrar_;
 
   // Callbacks for notification when network to be viewed has been changed from
   // the UI.

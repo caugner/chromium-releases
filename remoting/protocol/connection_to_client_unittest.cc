@@ -37,6 +37,8 @@ class ConnectionToClientTest : public testing::Test {
     EXPECT_CALL(handler_, OnConnectionOpened(viewer_.get()));
     session_->state_change_callback().Run(
         protocol::Session::CONNECTED);
+    session_->state_change_callback().Run(
+        protocol::Session::AUTHENTICATED);
     message_loop_.RunAllPending();
   }
 
@@ -62,7 +64,7 @@ TEST_F(ConnectionToClientTest, SendUpdateStream) {
   // Then send the actual data.
   VideoPacket* packet = new VideoPacket();
   viewer_->video_stub()->ProcessVideoPacket(
-      packet, base::Bind(&DeletePointer<VideoPacket>, packet));
+      packet, base::Bind(&base::DeletePointer<VideoPacket>, packet));
 
   message_loop_.RunAllPending();
 
@@ -82,7 +84,7 @@ TEST_F(ConnectionToClientTest, NoWriteAfterDisconnect) {
   // Then send the actual data.
   VideoPacket* packet = new VideoPacket();
   viewer_->video_stub()->ProcessVideoPacket(
-      packet, base::Bind(&DeletePointer<VideoPacket>, packet));
+      packet, base::Bind(&base::DeletePointer<VideoPacket>, packet));
 
   // And then close the connection to ConnectionToClient.
   viewer_->Disconnect();

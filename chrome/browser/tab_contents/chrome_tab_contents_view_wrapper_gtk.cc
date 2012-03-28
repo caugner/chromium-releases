@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,13 +6,14 @@
 
 #include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/tab_contents/render_view_context_menu_gtk.h"
-#include "chrome/browser/tab_contents/tab_contents_view_gtk.h"
 #include "chrome/browser/tab_contents/web_drag_bookmark_handler_gtk.h"
 #include "chrome/browser/ui/gtk/constrained_window_gtk.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view_gtk.h"
 #include "content/browser/tab_contents/interstitial_page.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/browser/tab_contents/tab_contents_view_gtk.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/base/gtk/gtk_floating_container.h"
 
 ChromeTabContentsViewWrapperGtk::ChromeTabContentsViewWrapperGtk()
@@ -46,7 +47,8 @@ void ChromeTabContentsViewWrapperGtk::RemoveConstrainedWindow(
                        constrained_window->widget());
 }
 
-void ChromeTabContentsViewWrapperGtk::WrapView(TabContentsViewGtk* view) {
+void ChromeTabContentsViewWrapperGtk::WrapView(
+    content::TabContentsViewGtk* view) {
   view_ = view;
 
   gtk_container_add(GTK_CONTAINER(floating_.get()),
@@ -105,7 +107,7 @@ void ChromeTabContentsViewWrapperGtk::ShowContextMenu(
   if (params.custom_context.render_widget_id !=
       webkit_glue::CustomContextMenuContext::kCurrentRenderWidget) {
     IPC::Channel::Listener* listener =
-        view_->tab_contents()->render_view_host()->process()->GetListenerByID(
+        view_->web_contents()->GetRenderProcessHost()->GetListenerByID(
             params.custom_context.render_widget_id);
     if (!listener) {
       NOTREACHED();
@@ -113,7 +115,7 @@ void ChromeTabContentsViewWrapperGtk::ShowContextMenu(
     }
     view = static_cast<RenderWidgetHost*>(listener)->view();
   } else {
-    view = view_->tab_contents()->GetRenderWidgetHostView();
+    view = view_->web_contents()->GetRenderWidgetHostView();
   }
   RenderWidgetHostViewGtk* view_gtk =
       static_cast<RenderWidgetHostViewGtk*>(view);
@@ -121,7 +123,7 @@ void ChromeTabContentsViewWrapperGtk::ShowContextMenu(
     return;
 
   context_menu_.reset(new RenderViewContextMenuGtk(
-      view_->tab_contents(), params, view_gtk->last_mouse_down() ?
+      view_->web_contents(), params, view_gtk->last_mouse_down() ?
       view_gtk->last_mouse_down()->time : GDK_CURRENT_TIME));
   context_menu_->Init();
 
@@ -139,7 +141,7 @@ void ChromeTabContentsViewWrapperGtk::OnSetFloatingPosition(
 
   // Place each ConstrainedWindow in the center of the view.
   GtkWidget* widget = constrained_window_->widget();
-  DCHECK(widget->parent == floating_.get());
+  DCHECK(gtk_widget_get_parent(widget) == floating_.get());
 
   GtkRequisition requisition;
   gtk_widget_size_request(widget, &requisition);

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,6 +66,7 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/build_time.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
@@ -84,7 +85,6 @@
 #include "net/base/cert_verifier.h"
 #include "net/base/connection_type_histograms.h"
 #include "net/base/dns_util.h"
-#include "net/base/dnsrr_resolver.h"
 #include "net/base/dnssec_chain_verifier.h"
 #include "net/base/transport_security_state.h"
 #include "net/base/io_buffer.h"
@@ -97,7 +97,6 @@
 #include "net/base/x509_certificate_net_log_param.h"
 #include "net/ocsp/nss_ocsp.h"
 #include "net/socket/client_socket_handle.h"
-#include "net/socket/dns_cert_provenance_checker.h"
 #include "net/socket/nss_ssl_util.h"
 #include "net/socket/ssl_error_params.h"
 #include "net/socket/ssl_host_info.h"
@@ -109,6 +108,7 @@
 #include <Security/SecBase.h>
 #include <Security/SecCertificate.h>
 #include <Security/SecIdentity.h>
+#include "base/mac/mac_logging.h"
 #elif defined(USE_NSS)
 #include <dlfcn.h>
 #endif
@@ -433,22 +433,12 @@ SSLClientSocketNSS::SSLClientSocketNSS(ClientSocketHandle* transport_socket,
                                        const SSLConfig& ssl_config,
                                        SSLHostInfo* ssl_host_info,
                                        const SSLClientSocketContext& context)
-    : ALLOW_THIS_IN_INITIALIZER_LIST(buffer_send_callback_(
-          this, &SSLClientSocketNSS::BufferSendComplete)),
-      ALLOW_THIS_IN_INITIALIZER_LIST(buffer_recv_callback_(
-          this, &SSLClientSocketNSS::BufferRecvComplete)),
-      transport_send_busy_(false),
+    : transport_send_busy_(false),
       transport_recv_busy_(false),
       corked_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(handshake_io_callback_(
-          base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
-                     base::Unretained(this)))),
       transport_(transport_socket),
       host_and_port_(host_and_port),
       ssl_config_(ssl_config),
-      user_connect_callback_(NULL),
-      user_read_callback_(NULL),
-      user_write_callback_(NULL),
       user_read_buf_len_(0),
       user_write_buf_len_(0),
       server_cert_nss_(NULL),
@@ -458,9 +448,11 @@ SSLClientSocketNSS::SSLClientSocketNSS(ClientSocketHandle* transport_socket,
       cert_verifier_(context.cert_verifier),
       ob_cert_xtn_negotiated_(false),
       origin_bound_cert_service_(context.origin_bound_cert_service),
+      ob_cert_type_(CLIENT_CERT_INVALID_TYPE),
       ob_cert_request_handle_(NULL),
       handshake_callback_called_(false),
       completed_handshake_(false),
+      ssl_session_cache_shard_(context.ssl_session_cache_shard),
       eset_mitm_detected_(false),
       kaspersky_mitm_detected_(false),
       predicted_cert_chain_correct_(false),
@@ -469,7 +461,7 @@ SSLClientSocketNSS::SSLClientSocketNSS(ClientSocketHandle* transport_socket,
       nss_bufs_(NULL),
       net_log_(transport_socket->socket()->NetLog()),
       ssl_host_info_(ssl_host_info),
-      dns_cert_checker_(context.dns_cert_checker),
+      transport_security_state_(context.transport_security_state),
       next_proto_status_(kNextProtoUnsupported),
       valid_thread_id_(base::kInvalidThreadId) {
   EnterFunction("");
@@ -482,7 +474,7 @@ SSLClientSocketNSS::~SSLClientSocketNSS() {
 }
 
 // static
-void SSLClientSocketNSS::ClearSessionCache() {
+void SSLClientSocket::ClearSessionCache() {
   // SSL_ClearSessionCache can't be called before NSS is initialized.  Don't
   // bother initializing NSS just to clear an empty SSL session cache.
   if (!NSS_IsInitialized())
@@ -508,8 +500,8 @@ void SSLClientSocketNSS::GetSSLInfo(SSLInfo* ssl_info) {
   }
   ssl_info->is_issued_by_known_root =
       server_cert_verify_result_->is_issued_by_known_root;
-  ssl_info->client_cert_sent =
-      ssl_config_.send_client_cert && ssl_config_.client_cert;
+  ssl_info->client_cert_sent = was_origin_bound_cert_sent() ||
+      (ssl_config_.send_client_cert && ssl_config_.client_cert);
 
   PRUint16 cipher_suite =
       SSLConnectionStatusToCipherSuite(ssl_connection_status_);
@@ -571,13 +563,13 @@ SSLClientSocketNSS::GetNextProto(std::string* proto,
   return next_proto_status_;
 }
 
-int SSLClientSocketNSS::Connect(OldCompletionCallback* callback) {
+int SSLClientSocketNSS::Connect(const CompletionCallback& callback) {
   EnterFunction("");
   DCHECK(transport_.get());
   DCHECK(next_handshake_state_ == STATE_NONE);
-  DCHECK(!user_read_callback_);
-  DCHECK(!user_write_callback_);
-  DCHECK(!user_connect_callback_);
+  DCHECK(user_read_callback_.is_null());
+  DCHECK(user_write_callback_.is_null());
+  DCHECK(user_connect_callback_.is_null());
   DCHECK(!user_read_buf_);
   DCHECK(!user_write_buf_);
 
@@ -625,8 +617,7 @@ void SSLClientSocketNSS::Disconnect() {
 
   CHECK(CalledOnValidThread());
 
-  // Shut down anything that may call us back (through buffer_send_callback_,
-  // buffer_recv_callback, or handshake_io_callback_).
+  // Shut down anything that may call us back.
   verifier_.reset();
   transport_->socket()->Disconnect();
 
@@ -641,12 +632,12 @@ void SSLClientSocketNSS::Disconnect() {
     nss_fd_ = NULL;
   }
 
-  // Reset object state
+  // Reset object state.
+  user_connect_callback_.Reset();
+  user_read_callback_.Reset();
+  user_write_callback_.Reset();
   transport_send_busy_   = false;
   transport_recv_busy_   = false;
-  user_connect_callback_ = NULL;
-  user_read_callback_    = NULL;
-  user_write_callback_   = NULL;
   user_read_buf_         = NULL;
   user_read_buf_len_     = 0;
   user_write_buf_        = NULL;
@@ -761,12 +752,12 @@ base::TimeDelta SSLClientSocketNSS::GetConnectTimeMicros() const {
 }
 
 int SSLClientSocketNSS::Read(IOBuffer* buf, int buf_len,
-                             OldCompletionCallback* callback) {
+                             const CompletionCallback& callback) {
   EnterFunction(buf_len);
   DCHECK(completed_handshake_);
   DCHECK(next_handshake_state_ == STATE_NONE);
-  DCHECK(!user_read_callback_);
-  DCHECK(!user_connect_callback_);
+  DCHECK(user_read_callback_.is_null());
+  DCHECK(user_connect_callback_.is_null());
   DCHECK(!user_read_buf_);
   DCHECK(nss_bufs_);
 
@@ -786,12 +777,12 @@ int SSLClientSocketNSS::Read(IOBuffer* buf, int buf_len,
 }
 
 int SSLClientSocketNSS::Write(IOBuffer* buf, int buf_len,
-                              OldCompletionCallback* callback) {
+                              const CompletionCallback& callback) {
   EnterFunction(buf_len);
   DCHECK(completed_handshake_);
   DCHECK(next_handshake_state_ == STATE_NONE);
-  DCHECK(!user_write_callback_);
-  DCHECK(!user_connect_callback_);
+  DCHECK(user_write_callback_.is_null());
+  DCHECK(user_connect_callback_.is_null());
   DCHECK(!user_write_buf_);
   DCHECK(nss_bufs_);
 
@@ -1056,6 +1047,13 @@ int SSLClientSocketNSS::InitializeSSLPeerName() {
   // SSL tunnel through a proxy -- GetPeerName returns the proxy's address
   // rather than the destination server's address in that case.
   std::string peer_id = host_and_port_.ToString();
+  // If the ssl_session_cache_shard_ is non-empty, we append it to the peer id.
+  // This will cause session cache misses between sockets with different values
+  // of ssl_session_cache_shard_ and this is used to partition the session cache
+  // for incognito mode.
+  if (!ssl_session_cache_shard_.empty()) {
+    peer_id += "/" + ssl_session_cache_shard_;
+  }
   SECStatus rv = SSL_SetSockPeerID(nss_fd_, const_cast<char*>(peer_id.c_str()));
   if (rv != SECSuccess)
     LogFailedNSSFunction(net_log_, "SSL_SetSockPeerID", peer_id.c_str());
@@ -1150,30 +1148,30 @@ void SSLClientSocketNSS::UpdateConnectionStatus() {
 void SSLClientSocketNSS::DoReadCallback(int rv) {
   EnterFunction(rv);
   DCHECK(rv != ERR_IO_PENDING);
-  DCHECK(user_read_callback_);
+  DCHECK(!user_read_callback_.is_null());
 
   // Since Run may result in Read being called, clear |user_read_callback_|
   // up front.
-  OldCompletionCallback* c = user_read_callback_;
-  user_read_callback_ = NULL;
+  CompletionCallback c = user_read_callback_;
+  user_read_callback_.Reset();
   user_read_buf_ = NULL;
   user_read_buf_len_ = 0;
-  c->Run(rv);
+  c.Run(rv);
   LeaveFunction("");
 }
 
 void SSLClientSocketNSS::DoWriteCallback(int rv) {
   EnterFunction(rv);
   DCHECK(rv != ERR_IO_PENDING);
-  DCHECK(user_write_callback_);
+  DCHECK(!user_write_callback_.is_null());
 
   // Since Run may result in Write being called, clear |user_write_callback_|
   // up front.
-  OldCompletionCallback* c = user_write_callback_;
-  user_write_callback_ = NULL;
+  CompletionCallback c = user_write_callback_;
+  user_write_callback_.Reset();
   user_write_buf_ = NULL;
   user_write_buf_len_ = 0;
-  c->Run(rv);
+  c.Run(rv);
   LeaveFunction("");
 }
 
@@ -1187,11 +1185,11 @@ void SSLClientSocketNSS::DoWriteCallback(int rv) {
 void SSLClientSocketNSS::DoConnectCallback(int rv) {
   EnterFunction(rv);
   DCHECK_NE(rv, ERR_IO_PENDING);
-  DCHECK(user_connect_callback_);
+  DCHECK(!user_connect_callback_.is_null());
 
-  OldCompletionCallback* c = user_connect_callback_;
-  user_connect_callback_ = NULL;
-  c->Run(rv > OK ? OK : rv);
+  CompletionCallback c = user_connect_callback_;
+  user_connect_callback_.Reset();
+  c.Run(rv > OK ? OK : rv);
   LeaveFunction("");
 }
 
@@ -1261,7 +1259,6 @@ void SSLClientSocketNSS::OnRecvComplete(int result) {
 
 int SSLClientSocketNSS::DoHandshakeLoop(int last_io_result) {
   EnterFunction(last_io_result);
-  bool network_moved;
   int rv = last_io_result;
   do {
     // Default to STATE_NONE for next state.
@@ -1272,10 +1269,8 @@ int SSLClientSocketNSS::DoHandshakeLoop(int last_io_result) {
     State state = next_handshake_state_;
     GotoState(STATE_NONE);
     switch (state) {
-      case STATE_NONE:
-        // we're just pumping data between the buffer and the network
-        break;
       case STATE_LOAD_SSL_HOST_INFO:
+        DCHECK(rv == OK || rv == ERR_IO_PENDING);
         rv = DoLoadSSLHostInfo();
         break;
       case STATE_HANDSHAKE:
@@ -1294,6 +1289,7 @@ int SSLClientSocketNSS::DoHandshakeLoop(int last_io_result) {
       case STATE_VERIFY_CERT_COMPLETE:
         rv = DoVerifyCertComplete(rv);
         break;
+      case STATE_NONE:
       default:
         rv = ERR_UNEXPECTED;
         LOG(DFATAL) << "unexpected state " << state;
@@ -1301,9 +1297,15 @@ int SSLClientSocketNSS::DoHandshakeLoop(int last_io_result) {
     }
 
     // Do the actual network I/O
-    network_moved = DoTransportIO();
-  } while ((rv != ERR_IO_PENDING || network_moved) &&
-           next_handshake_state_ != STATE_NONE);
+    bool network_moved = DoTransportIO();
+    if (network_moved && next_handshake_state_ == STATE_HANDSHAKE) {
+      // In general we exit the loop if rv is ERR_IO_PENDING.  In this
+      // special case we keep looping even if rv is ERR_IO_PENDING because
+      // the transport IO may allow DoHandshake to make progress.
+      DCHECK(rv == OK || rv == ERR_IO_PENDING);
+      rv = OK;  // This causes us to stay in the loop.
+    }
+  } while (rv != ERR_IO_PENDING && next_handshake_state_ != STATE_NONE);
   LeaveFunction("");
   return rv;
 }
@@ -1396,7 +1398,9 @@ bool SSLClientSocketNSS::LoadSSLHostInfo() {
 
 int SSLClientSocketNSS::DoLoadSSLHostInfo() {
   EnterFunction("");
-  int rv = ssl_host_info_->WaitForDataReady(handshake_io_callback_);
+  int rv = ssl_host_info_->WaitForDataReady(
+      base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
+                 base::Unretained(this)));
   GotoState(STATE_HANDSHAKE);
 
   if (rv == OK) {
@@ -1629,17 +1633,11 @@ int SSLClientSocketNSS::DoGetOBCertComplete(int result) {
     return MapNSSError(PORT_GetError());
 
   GotoState(STATE_HANDSHAKE);
+  set_was_origin_bound_cert_sent(true);
   return OK;
 }
 
 int SSLClientSocketNSS::DoVerifyDNSSEC(int result) {
-  if (ssl_config_.dns_cert_provenance_checking_enabled &&
-      dns_cert_checker_) {
-    PeerCertificateChain certs(nss_fd_);
-    dns_cert_checker_->DoAsyncVerification(
-        host_and_port_.host(), certs.AsStringPieceVector());
-  }
-
   DNSValidationResult r = CheckDNSSECChain(host_and_port_.host(),
                                            server_cert_nss_,
                                            host_and_port_.port());
@@ -1705,7 +1703,9 @@ int SSLClientSocketNSS::DoVerifyCert(int result) {
     UMA_HISTOGRAM_TIMES("Net.SSLVerificationMergedMsSaved",
                         end_time - ssl_host_info_->verification_start_time());
     server_cert_verify_result_ = &ssl_host_info_->cert_verify_result();
-    return ssl_host_info_->WaitForCertVerification(handshake_io_callback_);
+    return ssl_host_info_->WaitForCertVerification(
+        base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
+                   base::Unretained(this)));
   } else {
     UMA_HISTOGRAM_ENUMERATION("Net.SSLVerificationMerged", 0 /* false */, 2);
   }
@@ -1719,7 +1719,7 @@ int SSLClientSocketNSS::DoVerifyCert(int result) {
   server_cert_verify_result_ = &local_server_cert_verify_result_;
   return verifier_->Verify(
       server_cert_, host_and_port_.host(), flags,
-      ssl_config_.crl_set,
+      SSLConfigService::GetCRLSet(),
       &local_server_cert_verify_result_,
       base::Bind(&SSLClientSocketNSS::OnHandshakeIOComplete,
                  base::Unretained(this)),
@@ -1801,18 +1801,59 @@ int SSLClientSocketNSS::DoVerifyCertComplete(int result) {
   // http://crbug.com/15630 for more info.
 
   // TODO(hclam): Skip logging if server cert was expected to be bad because
-  // |server_cert_verify_results_| doesn't contain all the information about
+  // |server_cert_verify_result_| doesn't contain all the information about
   // the cert.
   if (result == OK)
     LogConnectionTypeMetrics();
 
   completed_handshake_ = true;
 
-  if (user_read_callback_) {
+  if (!user_read_callback_.is_null()) {
     int rv = DoReadLoop(OK);
     if (rv != ERR_IO_PENDING)
       DoReadCallback(rv);
   }
+
+#if defined(OFFICIAL_BUILD) && !defined(OS_ANDROID)
+  // Take care of any mandates for public key pinning.
+  //
+  // Pinning is only enabled for official builds to make sure that others don't
+  // end up with pins that cannot be easily updated.
+  //
+  // TODO(agl): we might have an issue here where a request for foo.example.com
+  // merges into a SPDY connection to www.example.com, and gets a different
+  // certificate.
+
+  const CertStatus cert_status = server_cert_verify_result_->cert_status;
+  if ((result == OK || (IsCertificateError(result) &&
+                        IsCertStatusMinorError(cert_status))) &&
+      server_cert_verify_result_->is_issued_by_known_root &&
+      transport_security_state_) {
+    bool sni_available = ssl_config_.tls1_enabled || ssl_config_.ssl3_fallback;
+    const std::string& host = host_and_port_.host();
+
+    TransportSecurityState::DomainState domain_state;
+    if (transport_security_state_->HasPinsForHost(
+            &domain_state, host, sni_available)) {
+      if (!domain_state.IsChainOfPublicKeysPermitted(
+               server_cert_verify_result_->public_key_hashes)) {
+        const base::Time build_time = base::GetBuildTime();
+        // Pins are not enforced if the build is sufficiently old. Chrome
+        // users should get updates every six weeks or so, but it's possible
+        // that some users will stop getting updates for some reason. We
+        // don't want those users building up as a pool of people with bad
+        // pins.
+        if ((base::Time::Now() - build_time).InDays() < 70 /* 10 weeks */) {
+          result = ERR_SSL_PINNED_KEY_NOT_IN_CERT_CHAIN;
+          UMA_HISTOGRAM_BOOLEAN("Net.PublicKeyPinSuccess", false);
+          TransportSecurityState::ReportUMAOnPinFailure(host);
+        }
+      } else {
+        UMA_HISTOGRAM_BOOLEAN("Net.PublicKeyPinSuccess", true);
+      }
+    }
+  }
+#endif
 
   // Exit DoHandshakeLoop and return the result to the caller to Connect.
   DCHECK(next_handshake_state_ == STATE_NONE);
@@ -1984,8 +2025,10 @@ int SSLClientSocketNSS::BufferSend(void) {
     scoped_refptr<IOBuffer> send_buffer(new IOBuffer(len));
     memcpy(send_buffer->data(), buf1, len1);
     memcpy(send_buffer->data() + len1, buf2, len2);
-    rv = transport_->socket()->Write(send_buffer, len,
-                                     &buffer_send_callback_);
+    rv = transport_->socket()->Write(
+        send_buffer, len,
+        base::Bind(&SSLClientSocketNSS::BufferSendComplete,
+                   base::Unretained(this)));
     if (rv == ERR_IO_PENDING) {
       transport_send_busy_ = true;
     } else {
@@ -2017,7 +2060,10 @@ int SSLClientSocketNSS::BufferRecv(void) {
     rv = ERR_IO_PENDING;
   } else {
     recv_buffer_ = new IOBuffer(nb);
-    rv = transport_->socket()->Read(recv_buffer_, nb, &buffer_recv_callback_);
+    rv = transport_->socket()->Read(
+        recv_buffer_, nb,
+        base::Bind(&SSLClientSocketNSS::BufferRecvComplete,
+                   base::Unretained(this)));
     if (rv == ERR_IO_PENDING) {
       transport_recv_busy_ = true;
     } else {
@@ -2184,8 +2230,11 @@ SECStatus SSLClientSocketNSS::OriginBoundClientAuthHandler(
     // Synchronous success.
     int result = ImportOBCertAndKey(result_certificate,
                                     result_private_key);
-    if (result != OK)
+    if (result == OK) {
+      set_was_origin_bound_cert_sent(true);
+    } else {
       rv = SECFailure;
+    }
   } else {
     rv = SECFailure;  // Synchronous failure.
   }
@@ -2458,8 +2507,8 @@ SECStatus SSLClientSocketNSS::PlatformClientAuthHandler(
                                                           cert_count)));
         return SECSuccess;
       }
-      LOG(WARNING) << "Client cert found, but could not be used: "
-                   << os_error;
+      OSSTATUS_LOG(WARNING, os_error)
+          << "Client cert found, but could not be used";
       if (*result_certs) {
         CERT_DestroyCertList(*result_certs);
         *result_certs = NULL;

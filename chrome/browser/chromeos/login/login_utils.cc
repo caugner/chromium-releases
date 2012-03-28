@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,11 +26,12 @@
 #include "chrome/browser/chromeos/boot_times_loader.h"
 #include "chrome/browser/chromeos/cros/cert_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/cros_settings.h"
+#include "chrome/browser/chromeos/cros_settings_names.h"
 #include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
 #include "chrome/browser/chromeos/dbus/session_manager_client.h"
 #include "chrome/browser/chromeos/input_method/input_method_manager.h"
 #include "chrome/browser/chromeos/input_method/input_method_util.h"
-#include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/cookie_fetcher.h"
 #include "chrome/browser/chromeos/login/language_switch_menu.h"
 #include "chrome/browser/chromeos/login/login_display_host.h"
@@ -44,14 +45,18 @@
 #include "chrome/browser/net/chrome_url_request_context.h"
 #include "chrome/browser/net/gaia/gaia_oauth_consumer.h"
 #include "chrome/browser/net/gaia/gaia_oauth_fetcher.h"
-#include "chrome/browser/net/gaia/token_service.h"
 #include "chrome/browser/net/preconnect.h"
 #include "chrome/browser/policy/browser_policy_connector.h"
 #include "chrome/browser/prefs/pref_member.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/sync/profile_sync_service.h"
+#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_init.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
@@ -62,6 +67,7 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/cookie_monster.h"
 #include "net/base/cookie_store.h"
@@ -71,6 +77,10 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "ui/gfx/gl/gl_switches.h"
+
+#if defined(USE_AURA)
+#include "ui/gfx/compositor/compositor_switches.h"
+#endif
 
 using content::BrowserThread;
 
@@ -527,8 +537,7 @@ class LoginUtilsImpl : public LoginUtils,
                        public base::SupportsWeakPtr<LoginUtilsImpl> {
  public:
   LoginUtilsImpl()
-      : background_view_(NULL),
-        pending_requests_(false),
+      : pending_requests_(false),
         using_oauth_(false),
         has_cookies_(false),
         delegate_(NULL),
@@ -558,16 +567,14 @@ class LoginUtilsImpl : public LoginUtils,
   virtual void PrewarmAuthentication() OVERRIDE;
   virtual void RestoreAuthenticationSession(Profile* profile) OVERRIDE;
   virtual void StartTokenServices(Profile* user_profile) OVERRIDE;
-  virtual void StartSync(
+  virtual void StartSignedInServices(
       Profile* profile,
       const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE;
-  virtual void SetBackgroundView(
-      chromeos::BackgroundView* background_view) OVERRIDE;
-  virtual chromeos::BackgroundView* GetBackgroundView() OVERRIDE;
   virtual void TransferDefaultCookies(Profile* default_profile,
                                       Profile* new_profile) OVERRIDE;
   virtual void TransferDefaultAuthCache(Profile* default_profile,
                                         Profile* new_profile) OVERRIDE;
+  virtual void StopBackgroundFetchers() OVERRIDE;
 
   // GaiaOAuthConsumer overrides.
   virtual void OnGetOAuthTokenSuccess(const std::string& oauth_token) OVERRIDE;
@@ -639,9 +646,6 @@ class LoginUtilsImpl : public LoginUtils,
   // Callback for asynchronous profile creation.
   void OnProfileCreated(Profile* profile,
                         Profile::CreateStatus status);
-
-  // The current background view.
-  chromeos::BackgroundView* background_view_;
 
   std::string password_;
   GaiaAuthConsumer::ClientLoginResult credentials_;
@@ -742,7 +746,7 @@ void LoginUtilsImpl::PrepareProfile(
       using_oauth_ &&
       authenticator_.get() &&
       (connector->GetUserAffiliation(username) ==
-          policy::CloudPolicyDataStore::USER_AFFILIATION_MANAGED);
+           policy::USER_AFFILIATION_MANAGED);
 
   // Initialize user policy before the profile is created so the profile
   // initialization code sees the cached policy settings.
@@ -775,11 +779,26 @@ void LoginUtilsImpl::OnProfileCreated(
   switch (status) {
     case Profile::CREATE_STATUS_INITIALIZED:
       break;
-    case Profile::CREATE_STATUS_CREATED:
+    case Profile::CREATE_STATUS_CREATED: {
       if (UserManager::Get()->current_user_is_new())
         SetFirstLoginPrefs(user_profile->GetPrefs());
+      // Make sure that the google service username is properly set (we do this
+      // on every sign in, not just the first login, to deal with existing
+      // profiles that might not have it set yet).
+      StringPrefMember google_services_username;
+      google_services_username.Init(prefs::kGoogleServicesUsername,
+                                    user_profile->GetPrefs(), NULL);
+      google_services_username.SetValue(
+          UserManager::Get()->logged_in_user().display_email());
+      // Make sure we flip every profile to not share proxies if the user hasn't
+      // specified so explicitly.
+      const PrefService::Preference* use_shared_proxies_pref =
+          user_profile->GetPrefs()->FindPreference(prefs::kUseSharedProxies);
+      if (use_shared_proxies_pref->IsDefaultValue())
+        user_profile->GetPrefs()->SetBoolean(prefs::kUseSharedProxies, false);
       RespectLocalePreference(user_profile);
       return;
+    }
     case Profile::CREATE_STATUS_FAIL:
     default:
       NOTREACHED();
@@ -879,29 +898,38 @@ void LoginUtilsImpl::StartTokenServices(Profile* user_profile) {
   if (!ReadOAuth1AccessToken(user_profile, &oauth1_token, &oauth1_secret))
     return;
 
-  FetchSecondaryTokens(user_profile->GetOffTheRecordProfile(), oauth1_token,
-                       oauth1_secret);
+  FetchSecondaryTokens(user_profile->GetOffTheRecordProfile(),
+                       oauth1_token, oauth1_secret);
 }
 
-void LoginUtilsImpl::StartSync(
+void LoginUtilsImpl::StartSignedInServices(
     Profile* user_profile,
     const GaiaAuthConsumer::ClientLoginResult& credentials) {
-  TokenService* token_service = user_profile->GetTokenService();
+  // Fetch/Create the SigninManager - this will cause the TokenService to load
+  // tokens for the currently signed-in user if the SigninManager hasn't already
+  // been initialized.
+  SigninManager* signin = SigninManagerFactory::GetForProfile(user_profile);
+  DCHECK(signin);
+  // Make sure SigninManager is connected to our current user (this should
+  // happen automatically because we set kGoogleServicesUsername in
+  // OnProfileCreated()).
+  DCHECK_EQ(UserManager::Get()->logged_in_user().display_email(),
+            signin->GetAuthenticatedUsername());
   static bool initialized = false;
   if (!initialized) {
     initialized = true;
-
-    // Set the CrOS user by getting this constructor run with the
-    // user's email on first retrieval.
-    std::string email = UserManager::Get()->logged_in_user().email();
-    // TODO(tim): Tidy this up once cros_user is gone (part of bug 93922).
-    user_profile->GetPrefs()->SetString(prefs::kGoogleServicesUsername, email);
-    user_profile->GetProfileSyncService(email)->SetPassphrase(password_, false);
-    password_ = "";
-
-    token_service->Initialize(GaiaConstants::kChromeOSSource, user_profile);
-    token_service->LoadTokensFromDB();
+    // Pass the updated passphrase to the sync service for use in decrypting
+    // data encrypted with the user's GAIA password.
+    ProfileSyncService* sync_service =
+        ProfileSyncServiceFactory::GetInstance()->GetForProfile(user_profile);
+    if (sync_service) {
+      sync_service->SetPassphrase(password_,
+          ProfileSyncService::IMPLICIT,
+          ProfileSyncService::INTERNAL);
+    }
   }
+  password_.clear();
+  TokenService* token_service = user_profile->GetTokenService();
   token_service->UpdateCredentials(credentials);
   if (token_service->AreCredentialsValid())
     token_service->StartFetchingTokens();
@@ -961,24 +989,30 @@ std::string LoginUtilsImpl::GetOffTheRecordCommandLine(
     const CommandLine& base_command_line,
     CommandLine* command_line) {
   static const char* kForwardSwitches[] = {
-      switches::kEnableLogging,
-      switches::kDisableAcceleratedPlugins,
-      switches::kUseGL,
-      switches::kUserDataDir,
-      switches::kScrollPixels,
-      switches::kEnableGView,
-      switches::kEnableSensors,
-      switches::kNoFirstRun,
-      switches::kLoginProfile,
       switches::kCompressSystemFeedback,
+      switches::kDisableAcceleratedPlugins,
       switches::kDisableSeccompSandbox,
+      switches::kEnableGView,
+      switches::kEnableLogging,
+      switches::kEnablePartialSwap,
+      switches::kEnableSensors,
+      switches::kForceCompositingMode,
+      switches::kLoginProfile,
+      switches::kScrollPixels,
+      switches::kNoFirstRun,
+      switches::kPpapiFlashArgs,
       switches::kPpapiFlashInProcess,
       switches::kPpapiFlashPath,
       switches::kPpapiFlashVersion,
       switches::kTouchDevices,
-#if defined(TOUCH_UI)
-      // The virtual keyboard extension for TOUCH_UI (chrome://keyboard) highly
-      // relies on experimental APIs.
+#if defined(USE_AURA)
+      switches::kUIEnablePartialSwap,
+#endif
+      switches::kUseGL,
+      switches::kUserDataDir,
+#if defined(USE_VIRTUAL_KEYBOARD)
+      // The virtual keyboard extension (chrome://keyboard) highly relies on
+      // experimental APIs.
       switches::kEnableExperimentalExtensionApis,
 #endif
   };
@@ -1060,7 +1094,6 @@ void LoginUtilsImpl::SetFirstLoginPrefs(PrefService* prefs) {
   language_preferred_languages.Init(prefs::kLanguagePreferredLanguages,
                                     prefs, NULL);
   language_preferred_languages.SetValue(JoinString(language_codes, ','));
-  prefs->ScheduleSavePersistentPrefs();
 }
 
 scoped_refptr<Authenticator> LoginUtilsImpl::CreateAuthenticator(
@@ -1099,7 +1132,9 @@ class WarmingObserver : public NetworkLibrary::NetworkManagerObserver {
       chrome_browser_net::PreconnectOnUIThread(
           GURL(GaiaUrls::GetInstance()->client_login_url()),
           chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
-          kConnectionsNeeded);
+          kConnectionsNeeded,
+          make_scoped_refptr(
+              ProfileManager::GetDefaultProfile()->GetRequestContext()));
       netlib->RemoveNetworkManagerObserver(this);
       delete this;
     }
@@ -1113,7 +1148,9 @@ void LoginUtilsImpl::PrewarmAuthentication() {
     chrome_browser_net::PreconnectOnUIThread(
         GURL(GaiaUrls::GetInstance()->client_login_url()),
         chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED,
-        kConnectionsNeeded);
+        kConnectionsNeeded,
+        make_scoped_refptr(
+            ProfileManager::GetDefaultProfile()->GetRequestContext()));
   } else {
     new WarmingObserver();
   }
@@ -1128,14 +1165,6 @@ void LoginUtilsImpl::KickStartAuthentication(Profile* user_profile) {
   std::string oauth1_secret;
   if (ReadOAuth1AccessToken(user_profile, &oauth1_token, &oauth1_secret))
     VerifyOAuth1AccessToken(user_profile, oauth1_token, oauth1_secret);
-}
-
-void LoginUtilsImpl::SetBackgroundView(BackgroundView* background_view) {
-  background_view_ = background_view;
-}
-
-BackgroundView* LoginUtilsImpl::GetBackgroundView() {
-  return background_view_;
 }
 
 void LoginUtilsImpl::TransferDefaultCookies(Profile* default_profile,
@@ -1154,6 +1183,12 @@ void LoginUtilsImpl::TransferDefaultAuthCache(Profile* default_profile,
       base::Bind(&TransferDefaultAuthCacheOnIOThread,
                  make_scoped_refptr(default_profile->GetRequestContext()),
                  make_scoped_refptr(profile->GetRequestContext())));
+}
+
+void LoginUtilsImpl::StopBackgroundFetchers() {
+  oauth_fetcher_.reset();
+  policy_oauth_fetcher_.reset();
+  oauth_login_verifier_.reset();
 }
 
 void LoginUtilsImpl::OnGetOAuthTokenSuccess(const std::string& oauth_token) {
@@ -1261,10 +1296,21 @@ void LoginUtilsImpl::FetchPolicyToken(Profile* offrecord_profile,
                                       const std::string& secret) {
   // Fetch dm service token now, if it hasn't been fetched yet.
   if (!policy_oauth_fetcher_.get() || policy_oauth_fetcher_->failed()) {
+    // Get the default system profile to use with the policy fetching. If there
+    // is no |authenticator_|, manually load default system profile. Otherwise,
+    // just use |authenticator_|'s profile.
+    Profile* profile = NULL;
+    if (!authenticator_) {
+      FilePath user_data_dir;
+      PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+      ProfileManager* profile_manager = g_browser_process->profile_manager();
+      profile = profile_manager->GetProfile(user_data_dir)->
+          GetOffTheRecordProfile();
+    } else {
+      profile = authenticator_->authentication_profile();
+    }
     // Trigger oauth token fetch for user policy.
-    policy_oauth_fetcher_.reset(new PolicyOAuthFetcher(offrecord_profile,
-                                                       token,
-                                                       secret));
+    policy_oauth_fetcher_.reset(new PolicyOAuthFetcher(profile, token, secret));
     policy_oauth_fetcher_->Start();
   }
 
@@ -1290,7 +1336,7 @@ void LoginUtilsImpl::OnOAuthVerificationSucceeded(
   // Kick off sync engine.
   GaiaAuthConsumer::ClientLoginResult credentials(sid, lsid, auth,
                                                   std::string());
-  StartSync(ProfileManager::GetDefaultProfile(), credentials);
+  StartSignedInServices(ProfileManager::GetDefaultProfile(), credentials);
 }
 
 
@@ -1304,27 +1350,39 @@ void LoginUtilsImpl::OnOnlineStateChanged(bool online) {
   }
 }
 
+// static
 LoginUtils* LoginUtils::Get() {
   return LoginUtilsWrapper::GetInstance()->get();
 }
 
+// static
 void LoginUtils::Set(LoginUtils* mock) {
   LoginUtilsWrapper::GetInstance()->reset(mock);
 }
 
+// static
 void LoginUtils::DoBrowserLaunch(Profile* profile,
                                  LoginDisplayHost* login_host) {
   if (browser_shutdown::IsTryingToQuit())
     return;
 
-  chromeos::StatusAreaViewChromeos::
-      SetScreenMode(StatusAreaViewChromeos::BROWSER_MODE);
+  StatusAreaViewChromeos::SetScreenMode(StatusAreaViewChromeos::BROWSER_MODE);
+  if (login_host) {
+    login_host->SetStatusAreaVisible(true);
+    login_host->SetStatusAreaEnabled(true);
+#if defined(USE_AURA)
+    // Close lock window now so that the launched browser can receive focus.
+    // TODO(oshima): Implement hide animation for lock screens.
+    login_host->CloseWindow();
+#endif
+  }
+
   BootTimesLoader::Get()->AddLoginTimeMarker("BrowserLaunched", false);
 
   VLOG(1) << "Launching browser...";
   BrowserInit browser_init;
   int return_code;
-  BrowserInit::IsFirstRun first_run = FirstRun::IsChromeFirstRun() ?
+  BrowserInit::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       BrowserInit::IS_FIRST_RUN: BrowserInit::IS_NOT_FIRST_RUN;
   browser_init.LaunchBrowser(*CommandLine::ForCurrentProcess(),
                              profile,
@@ -1338,8 +1396,21 @@ void LoginUtils::DoBrowserLaunch(Profile* profile,
   // browser before it is dereferenced by the login host.
   if (login_host) {
     login_host->OnSessionStart();
-    login_host = NULL;
+    content::NotificationService::current()->Notify(
+        chrome::NOTIFICATION_SESSION_STARTED,
+        content::NotificationService::AllSources(),
+        content::NotificationService::NoDetails());
   }
+}
+
+// static
+bool LoginUtils::IsWhitelisted(const std::string& username) {
+  CrosSettings* cros_settings = CrosSettings::Get();
+  bool allow_new_user = false;
+  cros_settings->GetBoolean(kAccountsPrefAllowNewUser, &allow_new_user);
+  if (allow_new_user)
+    return true;
+  return cros_settings->FindEmailInList(kAccountsPrefUsers, username);
 }
 
 }  // namespace chromeos

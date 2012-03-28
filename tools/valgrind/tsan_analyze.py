@@ -67,6 +67,7 @@ class TsanAnalyzer(object):
     '''
 
     self._use_gdb = use_gdb
+    self._cur_testcase = None
 
   def ReadLine(self):
     self.line_ = self.cur_fd_.readline()
@@ -235,9 +236,12 @@ class TsanAnalyzer(object):
 
     retcode = 0
     if reports:
-      logging.error("FAIL! Found %i report(s)" % len(reports))
+      sys.stdout.flush()
+      sys.stderr.flush()
+      logging.info("FAIL! Found %i report(s)" % len(reports))
       for report in reports:
-        logging.error('\n' + report)
+        logging.info('\n' + report)
+      sys.stdout.flush()
       retcode = -1
 
     # Report tool's insanity even if there were errors.
@@ -265,6 +269,7 @@ def main():
     parser.error("no filename specified")
   filenames = args
 
+  logging.getLogger().setLevel(logging.INFO)
   analyzer = TsanAnalyzer(options.source_dir, use_gdb=True)
   return analyzer.Report(filenames, None)
 

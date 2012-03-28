@@ -10,7 +10,6 @@
 #include "content/public/common/resource_response.h"
 #include "ipc/ipc_message_macros.h"
 #include "net/base/upload_data.h"
-#include "third_party/WebKit/Source/WebKit/chromium/public/WebReferrerPolicy.h"
 
 #define IPC_MESSAGE_START ResourceMsgStart
 #undef IPC_MESSAGE_EXPORT
@@ -170,7 +169,7 @@ IPC_MESSAGE_ROUTED4(ResourceMsg_RequestComplete,
                     int /* request_id */,
                     net::URLRequestStatus /* status */,
                     std::string /* security info */,
-                    base::Time /* completion_time */)
+                    base::TimeTicks /* completion_time */)
 
 // Resource messages sent from the renderer to the browser.
 

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 #include "chrome/browser/sync/syncable/directory_manager.h"
 #include "chrome/browser/sync/syncable/syncable-inl.h"
 #include "chrome/browser/sync/syncable/syncable.h"
-#include "chrome/browser/sync/util/sqlite_utils.h"
 #include "chrome/browser/sync/util/time.h"
 #include "sql/connection.h"
 #include "sql/statement.h"
@@ -43,6 +42,14 @@ class MigrationTest : public testing::TestWithParam<int> {
     return temp_dir_.path().Append(
         DirectoryManager::GetSyncDataDatabaseFilename());
   }
+
+  static bool LoadAndIgnoreReturnedData(DirectoryBackingStore *dbs) {
+    MetahandlesIndex metas;
+    STLElementDeleter<MetahandlesIndex> index_deleter(&metas);
+    Directory::KernelLoadInfo kernel_load_info;
+    return dbs->Load(&metas, &kernel_load_info) == OPENED;
+  }
+
   void SetUpVersion67Database();
   void SetUpVersion68Database();
   void SetUpVersion69Database();
@@ -53,17 +60,16 @@ class MigrationTest : public testing::TestWithParam<int> {
   void SetUpVersion74Database();
   void SetUpVersion75Database();
   void SetUpVersion76Database();
+  void SetUpVersion77Database();
 
   void SetUpCurrentDatabaseAndCheckVersion() {
     SetUpVersion70Database();  // Prepopulates data.
     scoped_ptr<DirectoryBackingStore> dbs(
         new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-    dbs->BeginLoad();
-    ASSERT_EQ(OPENED, dbs->InitializeTables());
+    ASSERT_TRUE(LoadAndIgnoreReturnedData(dbs.get()));
     ASSERT_FALSE(dbs->needs_column_refresh_);
     ASSERT_EQ(kCurrentDBVersion, dbs->GetVersion());
-    dbs->EndLoad();
   }
 
  private:
@@ -206,25 +212,39 @@ class DirectoryBackingStoreTest : public MigrationTest {};
 // functions.
 #define LEGACY_META_PROTO_TIMES(x) LEGACY_META_PROTO_TIMES_##x
 #define LEGACY_META_PROTO_TIMES_STR(x) LEGACY_META_PROTO_TIMES_STR_##x
-#define META_PROTO_TIMES(x) META_PROTO_TIMES_##x
 #define LEGACY_PROTO_TIME_VALS(x)    \
   LEGACY_META_PROTO_TIMES_STR(x) "," \
   LEGACY_META_PROTO_TIMES_STR(x) "," \
   LEGACY_META_PROTO_TIMES_STR(x) "," \
   LEGACY_META_PROTO_TIMES_STR(x)
+#define META_PROTO_TIMES(x) META_PROTO_TIMES_##x
+#define META_PROTO_TIMES_STR(x) META_PROTO_TIMES_STR_##x
+#define META_PROTO_TIMES_VALS(x)    \
+  META_PROTO_TIMES_STR(x) "," \
+  META_PROTO_TIMES_STR(x) "," \
+  META_PROTO_TIMES_STR(x) "," \
+  META_PROTO_TIMES_STR(x)
 
 namespace {
 
 // Helper functions for testing.
 
+enum ShouldIncludeDeletedItems {
+  INCLUDE_DELETED_ITEMS,
+  DONT_INCLUDE_DELETED_ITEMS
+};
+
 // Returns a map from metahandle -> expected legacy time (in proto
 // format).
-std::map<int64, int64> GetExpectedLegacyMetaProtoTimes() {
+std::map<int64, int64> GetExpectedLegacyMetaProtoTimes(
+    enum ShouldIncludeDeletedItems include_deleted) {
   std::map<int64, int64> expected_legacy_meta_proto_times;
   expected_legacy_meta_proto_times[1] = LEGACY_META_PROTO_TIMES(1);
-  expected_legacy_meta_proto_times[2] = LEGACY_META_PROTO_TIMES(2);
-  expected_legacy_meta_proto_times[4] = LEGACY_META_PROTO_TIMES(4);
-  expected_legacy_meta_proto_times[5] = LEGACY_META_PROTO_TIMES(5);
+  if (include_deleted == INCLUDE_DELETED_ITEMS) {
+    expected_legacy_meta_proto_times[2] = LEGACY_META_PROTO_TIMES(2);
+    expected_legacy_meta_proto_times[4] = LEGACY_META_PROTO_TIMES(4);
+    expected_legacy_meta_proto_times[5] = LEGACY_META_PROTO_TIMES(5);
+  }
   expected_legacy_meta_proto_times[6] = LEGACY_META_PROTO_TIMES(6);
   expected_legacy_meta_proto_times[7] = LEGACY_META_PROTO_TIMES(7);
   expected_legacy_meta_proto_times[8] = LEGACY_META_PROTO_TIMES(8);
@@ -238,12 +258,15 @@ std::map<int64, int64> GetExpectedLegacyMetaProtoTimes() {
 }
 
 // Returns a map from metahandle -> expected time (in proto format).
-std::map<int64, int64> GetExpectedMetaProtoTimes() {
+std::map<int64, int64> GetExpectedMetaProtoTimes(
+    enum ShouldIncludeDeletedItems include_deleted) {
   std::map<int64, int64> expected_meta_proto_times;
   expected_meta_proto_times[1] = META_PROTO_TIMES(1);
-  expected_meta_proto_times[2] = META_PROTO_TIMES(2);
-  expected_meta_proto_times[4] = META_PROTO_TIMES(4);
-  expected_meta_proto_times[5] = META_PROTO_TIMES(5);
+  if (include_deleted == INCLUDE_DELETED_ITEMS) {
+    expected_meta_proto_times[2] = META_PROTO_TIMES(2);
+    expected_meta_proto_times[4] = META_PROTO_TIMES(4);
+    expected_meta_proto_times[5] = META_PROTO_TIMES(5);
+  }
   expected_meta_proto_times[6] = META_PROTO_TIMES(6);
   expected_meta_proto_times[7] = META_PROTO_TIMES(7);
   expected_meta_proto_times[8] = META_PROTO_TIMES(8);
@@ -260,7 +283,7 @@ std::map<int64, int64> GetExpectedMetaProtoTimes() {
 std::map<int64, base::Time> GetExpectedMetaTimes() {
   std::map<int64, base::Time> expected_meta_times;
   const std::map<int64, int64>& expected_meta_proto_times =
-      GetExpectedMetaProtoTimes();
+      GetExpectedMetaProtoTimes(INCLUDE_DELETED_ITEMS);
   for (std::map<int64, int64>::const_iterator it =
            expected_meta_proto_times.begin();
        it != expected_meta_proto_times.end(); ++it) {
@@ -272,29 +295,25 @@ std::map<int64, base::Time> GetExpectedMetaTimes() {
 
 // Extracts a map from metahandle -> time (in proto format) from the
 // given database.
-std::map<int64, int64> GetMetaProtoTimes(sqlite3* db_handle) {
-  sqlite_utils::SQLStatement statement;
-  statement.prepare(
-      db_handle,
-      "SELECT metahandle, mtime, server_mtime, ctime, server_ctime FROM metas");
-  EXPECT_EQ(5, statement.column_count());
+std::map<int64, int64> GetMetaProtoTimes(sql::Connection &db) {
+  sql::Statement s(db.GetCachedStatement(
+          SQL_FROM_HERE,
+          "SELECT metahandle, mtime, server_mtime, ctime, server_ctime "
+          "FROM metas"));
+  EXPECT_EQ(5, s.ColumnCount());
   std::map<int64, int64> meta_times;
-  while (true) {
-    int query_result = statement.step();
-    if (query_result != SQLITE_ROW) {
-      EXPECT_EQ(SQLITE_DONE, query_result);
-      break;
-    }
-    int64 metahandle = statement.column_int64(0);
-    int64 mtime = statement.column_int64(1);
-    int64 server_mtime = statement.column_int64(2);
-    int64 ctime = statement.column_int64(3);
-    int64 server_ctime = statement.column_int64(4);
+  while (s.Step()) {
+    int64 metahandle = s.ColumnInt64(0);
+    int64 mtime = s.ColumnInt64(1);
+    int64 server_mtime = s.ColumnInt64(2);
+    int64 ctime = s.ColumnInt64(3);
+    int64 server_ctime = s.ColumnInt64(4);
     EXPECT_EQ(mtime, server_mtime);
     EXPECT_EQ(mtime, ctime);
     EXPECT_EQ(mtime, server_ctime);
     meta_times[metahandle] = mtime;
   }
+  EXPECT_TRUE(s.Succeeded());
   return meta_times;
 }
 
@@ -1434,6 +1453,98 @@ void MigrationTest::SetUpVersion76Database() {
   ASSERT_TRUE(connection.CommitTransaction());
 }
 
+void MigrationTest::SetUpVersion77Database() {
+  sql::Connection connection;
+  ASSERT_TRUE(connection.Open(GetDatabasePath()));
+  ASSERT_TRUE(connection.BeginTransaction());
+  ASSERT_TRUE(connection.Execute(
+      "CREATE TABLE share_version (id VARCHAR(128) primary key, data INT);"
+      "INSERT INTO 'share_version' VALUES('nick@chromium.org',77);"
+      "CREATE TABLE models (model_id BLOB primary key, progress_marker BLOB, in"
+          "itial_sync_ended BOOLEAN default 0);"
+      "INSERT INTO 'models' VALUES(X'C2881000',X'0888810218B605',1);"
+      "CREATE TABLE 'metas'(metahandle bigint primary key ON CONFLICT FAIL,base"
+          "_version bigint default -1,server_version bigint default 0,server_po"
+          "sition_in_parent bigint default 0,local_external_id bigint default 0"
+          ",mtime bigint default 0,server_mtime bigint default 0,ctime bigint d"
+          "efault 0,server_ctime bigint default 0,id varchar(255) default 'r',p"
+          "arent_id varchar(255) default 'r',server_parent_id varchar(255) defa"
+          "ult 'r',prev_id varchar(255) default 'r',next_id varchar(255) defaul"
+          "t 'r',is_unsynced bit default 0,is_unapplied_update bit default 0,is"
+          "_del bit default 0,is_dir bit default 0,server_is_dir bit default 0,"
+          "server_is_del bit default 0,non_unique_name varchar,server_non_uniqu"
+          "e_name varchar(255),unique_server_tag varchar,unique_client_tag varc"
+          "har,specifics blob,server_specifics blob);"
+      "INSERT INTO 'metas' VALUES(1,-1,0,0,0," META_PROTO_TIMES_VALS(1)
+          ",'r','r','r','r','r',0,0,0,1,0,0,NULL,NULL,NULL,NULL,X'',X'');"
+      "INSERT INTO 'metas' VALUES(2,669,669,-2097152,4,"
+          META_PROTO_TIMES_VALS(2) ",'s_ID_2','s_ID_9','s_ID_9','s_ID_2','s_ID_"
+          "2',0,0,1,0,0,1,'Deleted Item','Deleted Item',NULL,NULL,X'C28810220A1"
+          "6687474703A2F2F7777772E676F6F676C652E636F6D2F12084141534741534741',X"
+          "'C28810260A17687474703A2F2F7777772E676F6F676C652E636F6D2F32120B41534"
+          "14447414447414447');"
+      "INSERT INTO 'metas' VALUES(4,681,681,-3145728,3,"
+          META_PROTO_TIMES_VALS(4) ",'s_ID_4','s_ID_9','s_ID_9','s_ID_4','s_ID_"
+          "4',0,0,1,0,0,1,'Welcome to Chromium','Welcome to Chromium',NULL,NULL"
+          ",X'C28810350A31687474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6"
+          "D652F696E746C2F656E2F77656C636F6D652E68746D6C1200',X'C28810350A31687"
+          "474703A2F2F7777772E676F6F676C652E636F6D2F6368726F6D652F696E746C2F656"
+          "E2F77656C636F6D652E68746D6C1200');"
+      "INSERT INTO 'metas' VALUES(5,677,677,1048576,7," META_PROTO_TIMES_VALS(5)
+          ",'s_ID_5','s_ID_9','s_ID_9','s_ID_5','s_ID_5',0,0,1,0,0,1,'Google','"
+          "Google',NULL,NULL,X'C28810220A16687474703A2F2F7777772E676F6F676C652E"
+          "636F6D2F12084147415347415347',X'C28810220A16687474703A2F2F7777772E67"
+          "6F6F676C652E636F6D2F12084147464447415347');"
+      "INSERT INTO 'metas' VALUES(6,694,694,-4194304,6,"
+          META_PROTO_TIMES_VALS(6) ",'s_ID_6','s_ID_9','s_ID_9','r','r',0,0,0,1"
+          ",1,0,'The Internet','The Internet',NULL,NULL,X'C2881000',X'C2881000'"
+          ");"
+      "INSERT INTO 'metas' VALUES(7,663,663,1048576,0," META_PROTO_TIMES_VALS(7)
+          ",'s_ID_7','r','r','r','r',0,0,0,1,1,0,'Google Chrome','Goo"
+          "gle Chrome','google_chrome',NULL,NULL,NULL);"
+      "INSERT INTO 'metas' VALUES(8,664,664,1048576,0," META_PROTO_TIMES_VALS(8)
+          ",'s_ID_8','s_ID_7','s_ID_7','r','r',0,0,0,1,1,0,'Bookmarks','Bookmar"
+          "ks','google_chrome_bookmarks',NULL,X'C2881000',X'C2881000');"
+      "INSERT INTO 'metas' VALUES(9,665,665,1048576,1," META_PROTO_TIMES_VALS(9)
+          ",'s_ID_9','s_ID_8','s_ID_8','r','s_ID_10',0,0,0,1,1,0,'Bookmark Bar'"
+          ",'Bookmark Bar','bookmark_bar',NULL,X'C2881000',X'C2881000');"
+      "INSERT INTO 'metas' VALUES(10,666,666,2097152,2,"
+          META_PROTO_TIMES_VALS(10) ",'s_ID_10','s_ID_8','s_ID_8','s_ID_9','r',"
+          "0,0,0,1,1,0,'Other Bookmarks','Other Bookmarks','other_bookmarks',NU"
+          "LL,X'C2881000',X'C2881000');"
+      "INSERT INTO 'metas' VALUES(11,683,683,-1048576,8,"
+          META_PROTO_TIMES_VALS(11) ",'s_ID_11','s_ID_6','s_ID_6','r','s_ID_13'"
+          ",0,0,0,0,0,0,'Home (The Chromium Projects)','Home (The Chromium Proj"
+          "ects)',NULL,NULL,X'C28810220A18687474703A2F2F6465762E6368726F6D69756"
+          "D2E6F72672F1206414741545741',X'C28810290A1D687474703A2F2F6465762E636"
+          "8726F6D69756D2E6F72672F6F7468657212084146414756415346');"
+      "INSERT INTO 'metas' VALUES(12,685,685,0,9," META_PROTO_TIMES_VALS(12)
+          ",'s_ID_12','s_ID_6','s_"
+          "ID_6','s_ID_13','s_ID_14',0,0,0,1,1,0,'Extra Bookmarks','Extra Bookm"
+          "arks',NULL,NULL,X'C2881000',X'C2881000');"
+      "INSERT INTO 'metas' VALUES(13,687,687,-917504,10,"
+          META_PROTO_TIMES_VALS(13) ",'s_ID_13','s_ID_6','s_ID_6','s_ID_11','s_"
+          "ID_12',0,0,0,0,0,0,'ICANN | Internet Corporation for Assigned Names "
+          "and Numbers','ICANN | Internet Corporation for Assigned Names and Nu"
+          "mbers',NULL,NULL,X'C28810240A15687474703A2F2F7777772E6963616E6E2E636"
+          "F6D2F120B504E474158463041414646',X'C28810200A15687474703A2F2F7777772"
+          "E6963616E6E2E636F6D2F120744414146415346');"
+      "INSERT INTO 'metas' VALUES(14,692,692,1048576,11,"
+          META_PROTO_TIMES_VALS(14) ",'s_ID_14','s_ID_6','s_ID_6','s_ID_12','r'"
+          ",0,0,0,0,0,0,'The WebKit Open Source Project','The WebKit Open Sourc"
+          "e Project',NULL,NULL,X'C288101A0A12687474703A2F2F7765626B69742E6F726"
+          "72F1204504E4758',X'C288101C0A13687474703A2F2F7765626B69742E6F72672F7"
+          "81205504E473259');"
+      "CREATE TABLE 'share_info' (id TEXT primary key, name TEXT, store_birthda"
+          "y TEXT, db_create_version TEXT, db_create_time INT, next_id INT defa"
+          "ult -2, cache_guid TEXT , notification_state BLOB);"
+      "INSERT INTO 'share_info' VALUES('nick@chromium.org','nick@chromium.org',"
+          "'c27e9f59-08ca-46f8-b0cc-f16a2ed778bb','Unknown',1263522064,-65542,'"
+          "9010788312004066376x-6609234393368420856x',NULL);"
+      ));
+  ASSERT_TRUE(connection.CommitTransaction());
+}
+
 TEST_F(DirectoryBackingStoreTest, MigrateVersion67To68) {
   SetUpVersion67Database();
 
@@ -1450,26 +1561,26 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion67To68) {
   scoped_ptr<DirectoryBackingStore> dbs(
       new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
+  dbs->OpenConnectionForTest();
   ASSERT_FALSE(dbs->needs_column_refresh_);
   ASSERT_TRUE(dbs->MigrateVersion67To68());
   ASSERT_EQ(68, dbs->GetVersion());
-  dbs->EndLoad();
   ASSERT_TRUE(dbs->needs_column_refresh_);
 }
 
 TEST_F(DirectoryBackingStoreTest, MigrateVersion68To69) {
   SetUpVersion68Database();
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_TRUE(dbs->MigrateVersion68To69());
-  ASSERT_EQ(69, dbs->GetVersion());
-  dbs->EndLoad();
-  ASSERT_TRUE(dbs->needs_column_refresh_);
+    dbs->OpenConnectionForTest();
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion68To69());
+    ASSERT_EQ(69, dbs->GetVersion());
+    ASSERT_TRUE(dbs->needs_column_refresh_);
+  }
 
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
@@ -1509,15 +1620,16 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion69To70) {
     ASSERT_FALSE(connection.DoesColumnExist("metas", "unique_client_tag"));
   }
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_TRUE(dbs->MigrateVersion69To70());
-  ASSERT_EQ(70, dbs->GetVersion());
-  dbs->EndLoad();
-  ASSERT_TRUE(dbs->needs_column_refresh_);
+    dbs->OpenConnectionForTest();
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion69To70());
+    ASSERT_EQ(70, dbs->GetVersion());
+    ASSERT_TRUE(dbs->needs_column_refresh_);
+  }
 
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
@@ -1543,15 +1655,16 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion70To71) {
     ASSERT_FALSE(connection.DoesTableExist("models"));
   }
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_TRUE(dbs->MigrateVersion70To71());
-  ASSERT_EQ(71, dbs->GetVersion());
-  dbs->EndLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
+    dbs->OpenConnectionForTest();
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion70To71());
+    ASSERT_EQ(71, dbs->GetVersion());
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+  }
 
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
@@ -1589,15 +1702,16 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion71To72) {
     ASSERT_TRUE(connection.DoesTableExist("extended_attributes"));
   }
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_TRUE(dbs->MigrateVersion71To72());
-  ASSERT_EQ(72, dbs->GetVersion());
-  dbs->EndLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
+    dbs->OpenConnectionForTest();
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion71To72());
+    ASSERT_EQ(72, dbs->GetVersion());
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+  }
 
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
@@ -1614,15 +1728,16 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion72To73) {
         connection.DoesColumnExist("share_info", "notification_state"));
   }
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_TRUE(dbs->MigrateVersion72To73());
-  ASSERT_EQ(73, dbs->GetVersion());
-  dbs->EndLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->OpenConnectionForTest());
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion72To73());
+    ASSERT_EQ(73, dbs->GetVersion());
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+  }
 
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
@@ -1652,15 +1767,16 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion73To74) {
             "autofill_profiles_added_during_migration"));
   }
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_TRUE(dbs->MigrateVersion73To74());
-  ASSERT_EQ(74, dbs->GetVersion());
-  dbs->EndLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
+    dbs->OpenConnectionForTest();
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion73To74());
+    ASSERT_EQ(74, dbs->GetVersion());
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+  }
 
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
@@ -1691,15 +1807,16 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion74To75) {
         "last_download_timestamp"));
   }
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-  dbs->BeginLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_TRUE(dbs->MigrateVersion74To75());
-  ASSERT_EQ(75, dbs->GetVersion());
-  dbs->EndLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
+    dbs->OpenConnectionForTest();
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion74To75());
+    ASSERT_EQ(75, dbs->GetVersion());
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+  }
 
   sql::Connection connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
@@ -1728,29 +1845,13 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion75To76) {
 
   scoped_ptr<DirectoryBackingStore> dbs(
       new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
-  dbs->BeginLoad();
+  dbs->OpenConnectionForTest();
   ASSERT_FALSE(dbs->needs_column_refresh_);
   ASSERT_TRUE(dbs->MigrateVersion75To76());
   ASSERT_EQ(76, dbs->GetVersion());
   ASSERT_TRUE(dbs->needs_column_refresh_);
-  dbs->RefreshColumns();
-  dbs->EndLoad();
-
-  sql::Connection connection;
-  ASSERT_TRUE(connection.Open(GetDatabasePath()));
-  ASSERT_FALSE(
-      connection.DoesColumnExist("share_info", "autofill_migration_state"));
-  ASSERT_FALSE(
-      connection.DoesColumnExist("share_info",
-          "bookmarks_added_during_autofill_migration"));
-  ASSERT_FALSE(
-      connection.DoesColumnExist("share_info", "autofill_migration_time"));
-  ASSERT_FALSE(
-      connection.DoesColumnExist("share_info",
-          "autofill_entries_added_during_migration"));
-  ASSERT_FALSE(
-      connection.DoesColumnExist("share_info",
-          "autofill_profiles_added_during_migration"));
+  // Cannot actual refresh columns due to version 76 not containing all
+  // necessary columns.
 }
 
 TEST_F(DirectoryBackingStoreTest, MigrateVersion76To77) {
@@ -1758,30 +1859,50 @@ TEST_F(DirectoryBackingStoreTest, MigrateVersion76To77) {
 
   scoped_ptr<DirectoryBackingStore> dbs(
       new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
-  dbs->BeginLoad();
+  dbs->OpenConnectionForTest();
   ASSERT_FALSE(dbs->needs_column_refresh_);
 
-  EXPECT_EQ(GetExpectedLegacyMetaProtoTimes(),
-            GetMetaProtoTimes(dbs->load_dbhandle_));
-  // Since we the proto times are expected to be in a legacy format,
-  // they may not be compatible with ProtoTimeToTime, so we don't call
-  // ExpectTimes().
+  EXPECT_EQ(GetExpectedLegacyMetaProtoTimes(INCLUDE_DELETED_ITEMS),
+            GetMetaProtoTimes(dbs->db_));
+  // Since the proto times are expected to be in a legacy format, they may not
+  // be compatible with ProtoTimeToTime, so we don't call ExpectTimes().
 
   ASSERT_TRUE(dbs->MigrateVersion76To77());
   ASSERT_EQ(77, dbs->GetVersion());
 
-  EXPECT_EQ(GetExpectedMetaProtoTimes(),
-            GetMetaProtoTimes(dbs->load_dbhandle_));
+  EXPECT_EQ(GetExpectedMetaProtoTimes(INCLUDE_DELETED_ITEMS),
+            GetMetaProtoTimes(dbs->db_));
+  // Cannot actually load entries due to version 77 not having all required
+  // columns.
+  ASSERT_FALSE(dbs->needs_column_refresh_);
+}
 
+TEST_F(DirectoryBackingStoreTest, MigrateVersion77To78) {
+  SetUpVersion77Database();
   {
-    MetahandlesIndex index;
-    STLElementDeleter<MetahandlesIndex> index_deleter(&index);
-    dbs->LoadEntries(&index);
-    ExpectTimes(index, GetExpectedMetaTimes());
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_FALSE(
+        connection.DoesColumnExist("metas", "BASE_SERVER_SPECIFICS"));
   }
 
-  dbs->EndLoad();
-  ASSERT_FALSE(dbs->needs_column_refresh_);
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+    dbs->OpenConnectionForTest();
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_TRUE(dbs->MigrateVersion77To78());
+    ASSERT_EQ(78, dbs->GetVersion());
+
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+  }
+
+  {
+    sql::Connection connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(
+        connection.DoesColumnExist("metas", "base_server_specifics"));
+  }
 }
 
 TEST_P(MigrationTest, ToCurrentVersion) {
@@ -1816,6 +1937,9 @@ TEST_P(MigrationTest, ToCurrentVersion) {
     case 76:
       SetUpVersion76Database();
       break;
+    case 77:
+      SetUpVersion77Database();
+      break;
     default:
       // If you see this error, it may mean that you've increased the
       // database version number but you haven't finished adding unit tests
@@ -1836,134 +1960,102 @@ TEST_P(MigrationTest, ToCurrentVersion) {
       FAIL() << "Need to supply database dump for version " << GetParam();
   }
 
-  scoped_ptr<DirectoryBackingStore> dbs(
-      new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
-
-  dbs->BeginLoad();
-  ASSERT_TRUE(OPENED == dbs->InitializeTables());
-  ASSERT_FALSE(dbs->needs_column_refresh_);
-  ASSERT_EQ(kCurrentDBVersion, dbs->GetVersion());
-
-  {
-    sql::Connection connection;
-    ASSERT_TRUE(connection.Open(GetDatabasePath()));
-
-    // Columns deleted in Version 67.
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "name"));
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "unsanitized_name"));
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "server_name"));
-
-    // Columns added in Version 68.
-    ASSERT_TRUE(connection.DoesColumnExist("metas", "specifics"));
-    ASSERT_TRUE(connection.DoesColumnExist("metas", "server_specifics"));
-
-    // Columns deleted in Version 68.
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "is_bookmark_object"));
-    ASSERT_FALSE(connection.DoesColumnExist("metas",
-                                            "server_is_bookmark_object"));
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "bookmark_favicon"));
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "bookmark_url"));
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "server_bookmark_url"));
-
-    // Renamed a column in Version 70
-    ASSERT_FALSE(connection.DoesColumnExist("metas", "singleton_tag"));
-    ASSERT_TRUE(connection.DoesColumnExist("metas", "unique_server_tag"));
-    ASSERT_TRUE(connection.DoesColumnExist("metas", "unique_client_tag"));
-
-    // Removed extended attributes in Version 72.
-    ASSERT_FALSE(connection.DoesTableExist("extended_attributes"));
-
-    // Columns added in Version 73.
-    ASSERT_TRUE(connection.DoesColumnExist(
-        "share_info", "notification_state"));
-
-    // Column replaced in version 75.
-    ASSERT_TRUE(connection.DoesColumnExist("models", "progress_marker"));
-    ASSERT_FALSE(connection.DoesColumnExist("models",
-        "last_download_timestamp"));
-
-    // Columns removed in version 76.
-    ASSERT_FALSE(
-        connection.DoesColumnExist("share_info", "autofill_migration_state"));
-    ASSERT_FALSE(connection.DoesColumnExist("share_info",
-        "bookmarks_added_during_autofill_migration"));
-    ASSERT_FALSE(
-      connection.DoesColumnExist("share_info", "autofill_migration_time"));
-    ASSERT_FALSE(connection.DoesColumnExist("share_info",
-          "autofill_entries_added_during_migration"));
-    ASSERT_FALSE(connection.DoesColumnExist("share_info",
-          "autofill_profiles_added_during_migration"));
-  }
-  {
-    syncable::Directory::KernelLoadInfo dir_info;
-    dbs->LoadInfo(&dir_info);
-
-    // Check download_progress state (v75 migration)
-    ASSERT_EQ(694,
-        dir_info.kernel_info.download_progress[syncable::BOOKMARKS]
-        .timestamp_token_for_migration());
-    ASSERT_FALSE(
-        dir_info.kernel_info.download_progress[syncable::BOOKMARKS]
-        .has_token());
-    ASSERT_EQ(32904,
-        dir_info.kernel_info.download_progress[syncable::BOOKMARKS]
-        .data_type_id());
-    ASSERT_FALSE(
-        dir_info.kernel_info.download_progress[syncable::THEMES]
-        .has_timestamp_token_for_migration());
-    ASSERT_TRUE(
-        dir_info.kernel_info.download_progress[syncable::THEMES]
-        .has_token());
-    ASSERT_TRUE(
-        dir_info.kernel_info.download_progress[syncable::THEMES]
-        .token().empty());
-    ASSERT_EQ(41210,
-        dir_info.kernel_info.download_progress[syncable::THEMES]
-        .data_type_id());
-  }
-
+  syncable::Directory::KernelLoadInfo dir_info;
   MetahandlesIndex index;
   STLElementDeleter<MetahandlesIndex> index_deleter(&index);
-  dbs->LoadEntries(&index);
 
-  EXPECT_EQ(GetExpectedMetaProtoTimes(),
-            GetMetaProtoTimes(dbs->load_dbhandle_));
+  {
+    scoped_ptr<DirectoryBackingStore> dbs(
+        new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
+    ASSERT_EQ(OPENED, dbs->Load(&index, &dir_info));
+    ASSERT_FALSE(dbs->needs_column_refresh_);
+    ASSERT_EQ(kCurrentDBVersion, dbs->GetVersion());
+  }
+
+  sql::Connection connection;
+  ASSERT_TRUE(connection.Open(GetDatabasePath()));
+
+  // Columns deleted in Version 67.
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "name"));
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "unsanitized_name"));
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "server_name"));
+
+  // Columns added in Version 68.
+  ASSERT_TRUE(connection.DoesColumnExist("metas", "specifics"));
+  ASSERT_TRUE(connection.DoesColumnExist("metas", "server_specifics"));
+
+  // Columns deleted in Version 68.
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "is_bookmark_object"));
+  ASSERT_FALSE(connection.DoesColumnExist("metas",
+                                          "server_is_bookmark_object"));
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "bookmark_favicon"));
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "bookmark_url"));
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "server_bookmark_url"));
+
+  // Renamed a column in Version 70
+  ASSERT_FALSE(connection.DoesColumnExist("metas", "singleton_tag"));
+  ASSERT_TRUE(connection.DoesColumnExist("metas", "unique_server_tag"));
+  ASSERT_TRUE(connection.DoesColumnExist("metas", "unique_client_tag"));
+
+  // Removed extended attributes in Version 72.
+  ASSERT_FALSE(connection.DoesTableExist("extended_attributes"));
+
+  // Columns added in Version 73.
+  ASSERT_TRUE(connection.DoesColumnExist(
+      "share_info", "notification_state"));
+
+  // Column replaced in version 75.
+  ASSERT_TRUE(connection.DoesColumnExist("models", "progress_marker"));
+  ASSERT_FALSE(connection.DoesColumnExist("models",
+      "last_download_timestamp"));
+
+  // Columns removed in version 76.
+  ASSERT_FALSE(
+      connection.DoesColumnExist("share_info", "autofill_migration_state"));
+  ASSERT_FALSE(connection.DoesColumnExist("share_info",
+      "bookmarks_added_during_autofill_migration"));
+  ASSERT_FALSE(
+    connection.DoesColumnExist("share_info", "autofill_migration_time"));
+  ASSERT_FALSE(connection.DoesColumnExist("share_info",
+        "autofill_entries_added_during_migration"));
+  ASSERT_FALSE(connection.DoesColumnExist("share_info",
+        "autofill_profiles_added_during_migration"));
+
+  // Column added in version 78.
+  ASSERT_TRUE(connection.DoesColumnExist("metas", "base_server_specifics"));
+
+  // Check download_progress state (v75 migration)
+  ASSERT_EQ(694,
+      dir_info.kernel_info.download_progress[syncable::BOOKMARKS]
+      .timestamp_token_for_migration());
+  ASSERT_FALSE(
+      dir_info.kernel_info.download_progress[syncable::BOOKMARKS]
+      .has_token());
+  ASSERT_EQ(32904,
+      dir_info.kernel_info.download_progress[syncable::BOOKMARKS]
+      .data_type_id());
+  ASSERT_FALSE(
+      dir_info.kernel_info.download_progress[syncable::THEMES]
+      .has_timestamp_token_for_migration());
+  ASSERT_TRUE(
+      dir_info.kernel_info.download_progress[syncable::THEMES]
+      .has_token());
+  ASSERT_TRUE(
+      dir_info.kernel_info.download_progress[syncable::THEMES]
+      .token().empty());
+  ASSERT_EQ(41210,
+      dir_info.kernel_info.download_progress[syncable::THEMES]
+      .data_type_id());
+
+  // Check metas
+  EXPECT_EQ(GetExpectedMetaProtoTimes(DONT_INCLUDE_DELETED_ITEMS),
+            GetMetaProtoTimes(connection));
   ExpectTimes(index, GetExpectedMetaTimes());
-
-  dbs->EndLoad();
 
   MetahandlesIndex::iterator it = index.begin();
   ASSERT_TRUE(it != index.end());
   ASSERT_EQ(1, (*it)->ref(META_HANDLE));
   EXPECT_TRUE((*it)->ref(ID).IsRoot());
-
-  ASSERT_TRUE(++it != index.end()) << "Upgrade destroyed database contents.";
-  ASSERT_EQ(2, (*it)->ref(META_HANDLE));
-  EXPECT_TRUE((*it)->ref(IS_DEL));
-  EXPECT_TRUE((*it)->ref(SERVER_IS_DEL));
-  EXPECT_TRUE((*it)->ref(SPECIFICS).HasExtension(sync_pb::bookmark));
-  EXPECT_TRUE((*it)->ref(SERVER_SPECIFICS).HasExtension(sync_pb::bookmark));
-  EXPECT_EQ("http://www.google.com/",
-      (*it)->ref(SPECIFICS).GetExtension(sync_pb::bookmark).url());
-  EXPECT_EQ("AASGASGA",
-      (*it)->ref(SPECIFICS).GetExtension(sync_pb::bookmark).favicon());
-  EXPECT_EQ("http://www.google.com/2",
-      (*it)->ref(SERVER_SPECIFICS).GetExtension(sync_pb::bookmark).url());
-  EXPECT_EQ("ASADGADGADG",
-      (*it)->ref(SERVER_SPECIFICS).GetExtension(sync_pb::bookmark).favicon());
-  EXPECT_EQ("", (*it)->ref(UNIQUE_SERVER_TAG));
-  EXPECT_EQ("Deleted Item", (*it)->ref(NON_UNIQUE_NAME));
-  EXPECT_EQ("Deleted Item", (*it)->ref(SERVER_NON_UNIQUE_NAME));
-
-  ASSERT_TRUE(++it != index.end());
-  ASSERT_EQ(4, (*it)->ref(META_HANDLE));
-  EXPECT_TRUE((*it)->ref(IS_DEL));
-  EXPECT_TRUE((*it)->ref(SERVER_IS_DEL));
-
-  ASSERT_TRUE(++it != index.end());
-  ASSERT_EQ(5, (*it)->ref(META_HANDLE));
-  EXPECT_TRUE((*it)->ref(IS_DEL));
-  EXPECT_TRUE((*it)->ref(SERVER_IS_DEL));
 
   ASSERT_TRUE(++it != index.end());
   ASSERT_EQ(6, (*it)->ref(META_HANDLE));
@@ -2069,11 +2161,13 @@ TEST_F(DirectoryBackingStoreTest, ModelTypeIds) {
   }
 }
 
-TEST_F(DirectoryBackingStoreTest, Corruption) {
+// TODO(109668): This had to be disabled because the latest API will
+// intentionally crash when a database is this badly corrupted.
+TEST_F(DirectoryBackingStoreTest, DISABLED_Corruption) {
   {
     scoped_ptr<DirectoryBackingStore> dbs(
         new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
-    EXPECT_TRUE(dbs->BeginLoad());
+    EXPECT_TRUE(LoadAndIgnoreReturnedData(dbs.get()));
   }
   std::string bad_data("BAD DATA");
   EXPECT_TRUE(file_util::WriteFile(GetDatabasePath(), bad_data.data(),
@@ -2082,7 +2176,7 @@ TEST_F(DirectoryBackingStoreTest, Corruption) {
     scoped_ptr<DirectoryBackingStore> dbs(
         new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
 
-    EXPECT_FALSE(dbs->BeginLoad());
+    EXPECT_FALSE(LoadAndIgnoreReturnedData(dbs.get()));
   }
 }
 
@@ -2090,10 +2184,11 @@ TEST_F(DirectoryBackingStoreTest, DeleteEntries) {
   SetUpCurrentDatabaseAndCheckVersion();
   scoped_ptr<DirectoryBackingStore> dbs(
       new DirectoryBackingStore(GetUsername(), GetDatabasePath()));
-  dbs->BeginLoad();
   MetahandlesIndex index;
+  Directory::KernelLoadInfo kernel_load_info;
   STLElementDeleter<MetahandlesIndex> index_deleter(&index);
-  dbs->LoadEntries(&index);
+
+  dbs->Load(&index, &kernel_load_info);
   size_t initial_size = index.size();
   ASSERT_LT(0U, initial_size) << "Test requires entries to delete.";
   int64 first_to_die = (*index.begin())->ref(META_HANDLE);
@@ -2126,9 +2221,6 @@ TEST_F(DirectoryBackingStoreTest, DeleteEntries) {
   STLDeleteElements(&index);
   dbs->LoadEntries(&index);
   EXPECT_EQ(0U, index.size());
-
-  dbs->EndLoad();
-  dbs->EndSave();
 }
 
 }  // namespace syncable

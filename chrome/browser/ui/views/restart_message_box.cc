@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,7 +8,6 @@
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/message_box_flags.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/widget/widget.h"
 
@@ -39,8 +38,8 @@ void RestartMessageBox::DeleteDelegate() {
   delete this;
 }
 
-bool RestartMessageBox::IsModal() const {
-  return true;
+ui::ModalType RestartMessageBox::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 views::View* RestartMessageBox::GetContentsView() {
@@ -62,8 +61,7 @@ RestartMessageBox::RestartMessageBox(gfx::NativeWindow parent_window) {
   const int kDialogWidth = 400;
   // Also deleted when the window closes.
   message_box_view_ = new views::MessageBoxView(
-      ui::MessageBoxFlags::kFlagHasMessage |
-          ui::MessageBoxFlags::kFlagHasOKButton,
+      views::MessageBoxView::NO_OPTIONS,
       l10n_util::GetStringUTF16(IDS_OPTIONS_RELAUNCH_REQUIRED),
       string16(),
       kDialogWidth);

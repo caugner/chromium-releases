@@ -24,6 +24,7 @@
 <link rel="stylesheet" href="../shared/css/bubble.css">
 <link rel="stylesheet" href="../shared/css/expandable_bubble.css">
 <link rel="stylesheet" href="../shared/css/menu.css">
+<link rel="stylesheet" href="../shared/css/trash.css">
 <link rel="stylesheet" href="apps_page.css">
 <link rel="stylesheet" href="most_visited_page.css">
 <link rel="stylesheet" href="nav_dot.css">
@@ -105,23 +106,33 @@
       <button id="recently-closed-menu-button" class="custom-appearance">
         <span i18n-content="recentlyclosed"></span>
         <div class="disclosure-triangle"></div>
+        <div id="vertical-separator"></div>
       </button>
 
-      <div id="trash">
-        <span i18n-content="appuninstall"></span>
+      <a id="chrome-web-store-href">
+        <span id="chrome-web-store-title" i18n-content="webStoreTitle"></span>
+      </a>
+
+      <div id="trash" class="trash">
+        <span class="lid"></span>
+        <span class="can"></span>
+        <span class="trash-text" i18n-content="appuninstall"></span>
       </div>
     </div>
   </div>
 </body>
 
+<!-- A div to hold all the templates, and in the darkness bind them. -->
+<div hidden>
+
 <!-- NTP4 intro bubble -->
-<div id="ntp4-intro-bubble-contents" hidden>
+<div id="ntp4-intro-bubble-contents">
   <div i18n-content="ntp4_intro_message"></div>
   <a i18n-content="learn_more" target="_blank"></a>
 </div>
 
 <!-- Login status bubble -->
-<div id="login-status-bubble-contents" hidden>
+<div id="login-status-bubble-contents">
   <div id="login-status-message-container">
     <span i18n-content="login_status_message"></span>
     <a id="login-status-learn-more" i18n-content="login_status_learn_more"
@@ -136,15 +147,15 @@
     </button>
   </div>
 </div>
-  
+
 <!-- Apps promo. -->
-<div id="apps-promo-extras-template" class="apps-promo-extras" hidden>
+<div id="apps-promo-extras-template" class="apps-promo-extras">
   <h3 class="apps-promo-heading"></h3>
   <a class="apps-promo-link g-button-basic"></a>
 </div>
 
 <!-- App Contents w/ Large Icon -->
-<div id="app-large-icon-template" class="app-contents" hidden>
+<div id="app-large-icon-template" class="app-contents">
   <div class="app-img-container">
     <img class="invisible">
   </div>
@@ -152,7 +163,7 @@
 </div>
 
 <!-- App Contents w/ Small Icon -->
-<div id="app-small-icon-template" class="app-contents" hidden>
+<div id="app-small-icon-template" class="app-contents">
   <div class="app-icon-div">
     <div class="app-img-container">
       <img class="invisible">
@@ -161,5 +172,10 @@
   </div>
   <span class="title"></span>
 </div>
+
+</div>
+
+<!-- This is used to measure text in the current locale. It is not visible. -->
+<div id="fontMeasuringDiv"></div>
 
 </html>

@@ -1,14 +1,12 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "webkit/media/buffered_data_source.h"
 
 #include "base/bind.h"
-#include "media/base/filter_host.h"
 #include "media/base/media_log.h"
 #include "net/base/net_errors.h"
-#include "webkit/media/web_data_source_factory.h"
 
 using WebKit::WebFrame;
 
@@ -22,22 +20,6 @@ static const int kInitialReadBufferSize = 32768;
 // Number of cache misses we allow for a single Read() before signalling an
 // error.
 static const int kNumCacheMissRetries = 3;
-
-static WebDataSource* NewBufferedDataSource(MessageLoop* render_loop,
-                                            WebKit::WebFrame* frame,
-                                            media::MediaLog* media_log) {
-  return new BufferedDataSource(render_loop, frame, media_log);
-}
-
-// static
-media::DataSourceFactory* BufferedDataSource::CreateFactory(
-    MessageLoop* render_loop,
-    WebKit::WebFrame* frame,
-    media::MediaLog* media_log,
-    const WebDataSourceBuildObserverHack& build_observer) {
-  return new WebDataSourceFactory(render_loop, frame, media_log,
-                                  &NewBufferedDataSource, build_observer);
-}
 
 BufferedDataSource::BufferedDataSource(
     MessageLoop* render_loop,
@@ -85,7 +67,7 @@ BufferedResourceLoader* BufferedDataSource::CreateResourceLoader(
                                     media_log_);
 }
 
-void BufferedDataSource::set_host(media::FilterHost* host) {
+void BufferedDataSource::set_host(media::DataSourceHost* host) {
   DataSource::set_host(host);
 
   if (loader_.get()) {
@@ -94,10 +76,12 @@ void BufferedDataSource::set_host(media::FilterHost* host) {
   }
 }
 
-void BufferedDataSource::Initialize(const std::string& url,
+void BufferedDataSource::Initialize(const GURL& url,
                                     const media::PipelineStatusCB& callback) {
-  // Saves the url.
-  url_ = GURL(url);
+  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(!callback.is_null());
+  DCHECK(!loader_.get());
+  url_ = url;
 
   // This data source doesn't support data:// protocol so reject it.
   if (url_.SchemeIs(kDataScheme)) {
@@ -105,25 +89,28 @@ void BufferedDataSource::Initialize(const std::string& url,
     return;
   }
 
-  DCHECK(!callback.is_null());
-  {
-    base::AutoLock auto_lock(lock_);
-    initialize_cb_ = callback;
+  initialize_cb_ = callback;
+
+  if (url_.SchemeIs(kHttpScheme) || url_.SchemeIs(kHttpsScheme)) {
+    // Do an unbounded range request starting at the beginning.  If the server
+    // responds with 200 instead of 206 we'll fall back into a streaming mode.
+    loader_.reset(CreateResourceLoader(0, kPositionNotSpecified));
+    loader_->Start(
+        base::Bind(&BufferedDataSource::HttpInitialStartCallback, this),
+        base::Bind(&BufferedDataSource::NetworkEventCallback, this),
+        frame_);
+    return;
   }
 
-  // Post a task to complete the initialization task.
-  render_loop_->PostTask(FROM_HERE,
-      base::Bind(&BufferedDataSource::InitializeTask, this));
-}
-
-void BufferedDataSource::CancelInitialize() {
-  base::AutoLock auto_lock(lock_);
-  DCHECK(!initialize_cb_.is_null());
-
-  initialize_cb_.Reset();
-
-  render_loop_->PostTask(
-      FROM_HERE, base::Bind(&BufferedDataSource::CleanupTask, this));
+  // For all other protocols, assume they support range request. We fetch
+  // the full range of the resource to obtain the instance size because
+  // we won't be served HTTP headers.
+  loader_.reset(CreateResourceLoader(kPositionNotSpecified,
+                                     kPositionNotSpecified));
+  loader_->Start(
+      base::Bind(&BufferedDataSource::NonHttpInitialStartCallback, this),
+      base::Bind(&BufferedDataSource::NetworkEventCallback, this),
+      frame_);
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -207,39 +194,6 @@ void BufferedDataSource::Abort() {
 
 /////////////////////////////////////////////////////////////////////////////
 // Render thread tasks.
-void BufferedDataSource::InitializeTask() {
-  DCHECK(MessageLoop::current() == render_loop_);
-  DCHECK(!loader_.get());
-
-  {
-    base::AutoLock auto_lock(lock_);
-    if (stopped_on_render_loop_ || initialize_cb_.is_null() ||
-        stop_signal_received_) {
-      return;
-    }
-  }
-
-  if (url_.SchemeIs(kHttpScheme) || url_.SchemeIs(kHttpsScheme)) {
-    // Do an unbounded range request starting at the beginning.  If the server
-    // responds with 200 instead of 206 we'll fall back into a streaming mode.
-    loader_ = CreateResourceLoader(0, kPositionNotSpecified);
-    loader_->Start(
-        base::Bind(&BufferedDataSource::HttpInitialStartCallback, this),
-        base::Bind(&BufferedDataSource::NetworkEventCallback, this),
-        frame_);
-  } else {
-    // For all other protocols, assume they support range request. We fetch
-    // the full range of the resource to obtain the instance size because
-    // we won't be served HTTP headers.
-    loader_ = CreateResourceLoader(kPositionNotSpecified,
-                                   kPositionNotSpecified);
-    loader_->Start(
-        base::Bind(&BufferedDataSource::NonHttpInitialStartCallback, this),
-        base::Bind(&BufferedDataSource::NetworkEventCallback, this),
-        frame_);
-  }
-}
-
 void BufferedDataSource::ReadTask(
     int64 position,
     int read_size,
@@ -303,7 +257,7 @@ void BufferedDataSource::RestartLoadingTask() {
       return;
   }
 
-  loader_ = CreateResourceLoader(read_position_, kPositionNotSpecified);
+  loader_.reset(CreateResourceLoader(read_position_, kPositionNotSpecified));
   loader_->Start(
       base::Bind(&BufferedDataSource::PartialReadStartCallback, this),
       base::Bind(&BufferedDataSource::NetworkEventCallback, this),
@@ -363,7 +317,7 @@ BufferedDataSource::ChooseDeferStrategy() {
 // prior to make this method call.
 void BufferedDataSource::ReadInternal() {
   DCHECK(MessageLoop::current() == render_loop_);
-  DCHECK(loader_);
+  DCHECK(loader_.get());
 
   // First we prepare the intermediate read buffer for BufferedResourceLoader
   // to write to.
@@ -441,8 +395,8 @@ void BufferedDataSource::HttpInitialStartCallback(int error) {
     // Assuming that the Range header was causing the problem. Retry without
     // the Range header.
     using_range_request_ = false;
-    loader_ = CreateResourceLoader(kPositionNotSpecified,
-                                   kPositionNotSpecified);
+    loader_.reset(CreateResourceLoader(kPositionNotSpecified,
+                                       kPositionNotSpecified));
     loader_->Start(
         base::Bind(&BufferedDataSource::HttpInitialStartCallback, this),
         base::Bind(&BufferedDataSource::NetworkEventCallback, this),
@@ -650,13 +604,12 @@ void BufferedDataSource::UpdateHostState_Locked() {
   // Called from various threads, under lock.
   lock_.AssertAcquired();
 
-  media::FilterHost* filter_host = host();
-  if (!filter_host)
+  if (!host())
     return;
 
   if (total_bytes_ != kPositionNotSpecified)
-    filter_host->SetTotalBytes(total_bytes_);
-  filter_host->SetBufferedBytes(buffered_bytes_);
+    host()->SetTotalBytes(total_bytes_);
+  host()->SetBufferedBytes(buffered_bytes_);
 }
 
 }  // namespace webkit_media

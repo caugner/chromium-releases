@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/string16.h"
 #include "chrome/browser/autocomplete/network_action_predictor_database.h"
+#include "chrome/browser/profiles/profile_keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
@@ -36,7 +37,8 @@ class URLDatabase;
 // use PostTaskAndReply without fear of crashes if it is destroyed before the
 // reply triggers. This is necessary during initialization.
 class NetworkActionPredictor
-    : public content::NotificationObserver,
+    : public ProfileKeyedService,
+      public content::NotificationObserver,
       public base::SupportsWeakPtr<NetworkActionPredictor> {
  public:
   enum Action {
@@ -74,6 +76,7 @@ class NetworkActionPredictor
 
  private:
   friend class NetworkActionPredictorTest;
+  friend class NetworkActionPredictorDOMHandler;
 
   struct TransitionalMatch {
     TransitionalMatch();
@@ -112,6 +115,9 @@ class NetworkActionPredictor
 
   static const int kMaximumDaysToKeepEntry;
 
+  // ProfileKeyedService
+  virtual void Shutdown() OVERRIDE;
+
   // NotificationObserver
   virtual void Observe(int type,
                        const content::NotificationSource& source,
@@ -148,6 +154,9 @@ class NetworkActionPredictor
                              const AutocompleteMatch& match,
                              bool* is_in_db) const;
 
+  // Calculates the confidence for an entry in the DBCacheMap.
+  double CalculateConfidenceForDbEntry(DBCacheMap::const_iterator iter) const;
+
   // Adds a row to the database and caches.
   void AddRow(const DBCacheKey& key,
               const NetworkActionPredictorDatabase::Row& row);
@@ -172,6 +181,10 @@ class NetworkActionPredictor
 
   // This is cleared after every Omnibox navigation.
   std::vector<TransitionalMatch> transitional_matches_;
+
+  // This allows us to predict the effect of confidence threshold changes on
+  // accuracy.
+  mutable std::vector<std::pair<GURL, double> > tracked_urls_;
 
   DBCacheMap db_cache_;
   DBIdCacheMap db_id_cache_;

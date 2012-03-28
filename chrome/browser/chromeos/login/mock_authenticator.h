@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,7 +11,6 @@
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/chromeos/login/authenticator.h"
-#include "chrome/browser/chromeos/login/background_view.h"
 #include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/common/net/gaia/google_service_auth_error.h"
 #include "content/public/browser/browser_thread.h"
@@ -104,13 +103,9 @@ class MockLoginUtils : public LoginUtils {
 
   virtual void StartTokenServices(Profile* profile) OVERRIDE {}
 
-  virtual void StartSync(
+  virtual void StartSignedInServices(
       Profile* profile,
       const GaiaAuthConsumer::ClientLoginResult& credentials) OVERRIDE {}
-
-  virtual void SetBackgroundView(BackgroundView* background_view) OVERRIDE;
-
-  virtual BackgroundView* GetBackgroundView() OVERRIDE;
 
   virtual std::string GetOffTheRecordCommandLine(
       const GURL& start_url,
@@ -123,11 +118,12 @@ class MockLoginUtils : public LoginUtils {
   virtual void TransferDefaultAuthCache(Profile* default_profile,
                                         Profile* new_profile) OVERRIDE;
 
+  virtual void StopBackgroundFetchers() OVERRIDE;
+
  private:
   std::string expected_username_;
   std::string expected_password_;
   std::string auth_token_;
-  chromeos::BackgroundView* background_view_;
 
   DISALLOW_COPY_AND_ASSIGN(MockLoginUtils);
 };

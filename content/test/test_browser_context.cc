@@ -9,6 +9,9 @@
 #include "content/browser/mock_resource_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::DownloadManager;
+using content::HostZoomMap;
+
 TestBrowserContext::TestBrowserContext() {
   EXPECT_TRUE(browser_context_dir_.CreateUniqueTempDir());
 }
@@ -54,7 +57,7 @@ HostZoomMap* TestBrowserContext::GetHostZoomMap() {
   return NULL;
 }
 
-GeolocationPermissionContext*
+content::GeolocationPermissionContext*
 TestBrowserContext::GetGeolocationPermissionContext() {
   return NULL;
 }

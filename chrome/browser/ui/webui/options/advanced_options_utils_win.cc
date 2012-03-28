@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,8 +14,12 @@
 #include "base/path_service.h"
 #include "base/threading/thread.h"
 #include "chrome/browser/browser_process.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/tab_contents/tab_contents_view.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_view.h"
+
+using content::BrowserThread;
+using content::WebContents;
 
 // Callback that opens the Internet Options control panel dialog with the
 // Connections tab selected.
@@ -44,22 +48,22 @@ void OpenConnectionDialogCallback() {
 }
 
 void AdvancedOptionsUtilities::ShowNetworkProxySettings(
-      TabContents* tab_contents) {
-  base::Thread* thread = g_browser_process->file_thread();
-  DCHECK(thread);
-  thread->message_loop()->PostTask(FROM_HERE,
-                                   base::Bind(&OpenConnectionDialogCallback));
+      WebContents* web_contents) {
+  DCHECK(BrowserThread::IsMessageLoopValid(BrowserThread::FILE));
+  BrowserThread::PostTask(BrowserThread::FILE,
+                          FROM_HERE,
+                          base::Bind(&OpenConnectionDialogCallback));
 }
 
 void AdvancedOptionsUtilities::ShowManageSSLCertificates(
-      TabContents* tab_contents) {
+      WebContents* web_contents) {
   CRYPTUI_CERT_MGR_STRUCT cert_mgr = { 0 };
   cert_mgr.dwSize = sizeof(CRYPTUI_CERT_MGR_STRUCT);
   cert_mgr.hwndParent =
 #if defined(USE_AURA)
       NULL;
 #else
-      tab_contents->view()->GetTopLevelNativeWindow();
+      web_contents->GetView()->GetTopLevelNativeWindow();
 #endif
   ::CryptUIDlgCertMgr(&cert_mgr);
 }

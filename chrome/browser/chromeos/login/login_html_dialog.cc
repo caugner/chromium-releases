@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,9 @@
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
 #include "ui/views/widget/widget.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace chromeos {
 
@@ -56,7 +59,7 @@ LoginHtmlDialog::~LoginHtmlDialog() {
 
 void LoginHtmlDialog::Show() {
   HtmlDialogView* html_view =
-      new HtmlDialogView(ProfileManager::GetDefaultProfile(), this);
+      new HtmlDialogView(ProfileManager::GetDefaultProfile(), NULL, this);
 #if defined(USE_AURA)
   // TODO(saintlou): Until the new Bubble have been landed.
   views::Widget::CreateWindowWithParent(html_view, parent_window_);
@@ -76,8 +79,8 @@ void LoginHtmlDialog::Show() {
     bubble_frame_view_->StartThrobber();
     notification_registrar_.Add(
         this, content::NOTIFICATION_LOAD_COMPLETED_MAIN_FRAME,
-        content::Source<TabContents>(
-            html_view->dom_contents()->tab_contents()));
+        content::Source<WebContents>(
+            html_view->dom_contents()->web_contents()));
   }
 #endif
   html_view->GetWidget()->Show();
@@ -90,11 +93,15 @@ void LoginHtmlDialog::SetDialogSize(int width, int height) {
   height_ = height;
 }
 
+void LoginHtmlDialog::SetDialogTitle(const string16& title) {
+  title_ = title;
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // LoginHtmlDialog, protected:
 
-bool LoginHtmlDialog::IsDialogModal() const {
-  return true;
+ui::ModalType LoginHtmlDialog::GetDialogModalType() const {
+  return ui::MODAL_TYPE_SYSTEM;
 }
 
 string16 LoginHtmlDialog::GetDialogTitle() const {
@@ -124,7 +131,7 @@ void LoginHtmlDialog::OnDialogClosed(const std::string& json_retval) {
     delegate_->OnDialogClosed();
 }
 
-void LoginHtmlDialog::OnCloseContents(TabContents* source,
+void LoginHtmlDialog::OnCloseContents(WebContents* source,
                                       bool* out_close_dialog) {
   if (out_close_dialog)
     *out_close_dialog = true;

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -3297,6 +3297,27 @@ TEST_F(GLES2FormatTest, RenderbufferStorageMultisampleEXT) {
       next_cmd, sizeof(cmd));
 }
 
+TEST_F(GLES2FormatTest, TexStorage2DEXT) {
+  TexStorage2DEXT& cmd = *GetBufferAs<TexStorage2DEXT>();
+  void* next_cmd = cmd.Set(
+      &cmd,
+      static_cast<GLenum>(11),
+      static_cast<GLsizei>(12),
+      static_cast<GLenum>(13),
+      static_cast<GLsizei>(14),
+      static_cast<GLsizei>(15));
+  EXPECT_EQ(static_cast<uint32>(TexStorage2DEXT::kCmdId),
+            cmd.header.command);
+  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
+  EXPECT_EQ(static_cast<GLenum>(11), cmd.target);
+  EXPECT_EQ(static_cast<GLsizei>(12), cmd.levels);
+  EXPECT_EQ(static_cast<GLenum>(13), cmd.internalFormat);
+  EXPECT_EQ(static_cast<GLsizei>(14), cmd.width);
+  EXPECT_EQ(static_cast<GLsizei>(15), cmd.height);
+  CheckBytesWrittenMatchesExpectedSize(
+      next_cmd, sizeof(cmd));
+}
+
 TEST_F(GLES2FormatTest, SwapBuffers) {
   SwapBuffers& cmd = *GetBufferAs<SwapBuffers>();
   void* next_cmd = cmd.Set(
@@ -3489,17 +3510,6 @@ TEST_F(GLES2FormatTest, GetProgramInfoCHROMIUM) {
       next_cmd, sizeof(cmd));
 }
 
-TEST_F(GLES2FormatTest, Placeholder447CHROMIUM) {
-  Placeholder447CHROMIUM& cmd = *GetBufferAs<Placeholder447CHROMIUM>();
-  void* next_cmd = cmd.Set(
-      &cmd);
-  EXPECT_EQ(static_cast<uint32>(Placeholder447CHROMIUM::kCmdId),
-            cmd.header.command);
-  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
-  CheckBytesWrittenMatchesExpectedSize(
-      next_cmd, sizeof(cmd));
-}
-
 TEST_F(GLES2FormatTest, CreateStreamTextureCHROMIUM) {
   CreateStreamTextureCHROMIUM& cmd =
       *GetBufferAs<CreateStreamTextureCHROMIUM>();
@@ -3528,17 +3538,6 @@ TEST_F(GLES2FormatTest, DestroyStreamTextureCHROMIUM) {
             cmd.header.command);
   EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
   EXPECT_EQ(static_cast<GLuint>(11), cmd.texture);
-  CheckBytesWrittenMatchesExpectedSize(
-      next_cmd, sizeof(cmd));
-}
-
-TEST_F(GLES2FormatTest, Placeholder453CHROMIUM) {
-  Placeholder453CHROMIUM& cmd = *GetBufferAs<Placeholder453CHROMIUM>();
-  void* next_cmd = cmd.Set(
-      &cmd);
-  EXPECT_EQ(static_cast<uint32>(Placeholder453CHROMIUM::kCmdId),
-            cmd.header.command);
-  EXPECT_EQ(sizeof(cmd), cmd.header.size * 4u);
   CheckBytesWrittenMatchesExpectedSize(
       next_cmd, sizeof(cmd));
 }

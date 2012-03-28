@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,7 +12,7 @@
 #include "chrome/browser/download/download_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "content/browser/download/download_manager.h"
+#include "content/public/browser/download_manager.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -43,12 +43,10 @@ DownloadInProgressDialogView::DownloadInProgressDialogView(Browser* browser)
   string16 warning_text;
   string16 explanation_text;
   if (download_count == 1) {
-    warning_text = l10n_util::GetStringFUTF16(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING,
-        product_name_);
-    explanation_text = l10n_util::GetStringFUTF16(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION,
-        product_name_);
+    warning_text = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING);
+    explanation_text = l10n_util::GetStringUTF16(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
     ok_button_text_ = l10n_util::GetStringUTF16(
         IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_OK_BUTTON_LABEL);
     cancel_button_text_ = l10n_util::GetStringUTF16(
@@ -56,11 +54,9 @@ DownloadInProgressDialogView::DownloadInProgressDialogView(Browser* browser)
   } else {
     warning_text = l10n_util::GetStringFUTF16(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
-        product_name_,
         UTF8ToUTF16(base::IntToString(download_count)));
-    explanation_text = l10n_util::GetStringFUTF16(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION,
-        product_name_);
+    explanation_text = l10n_util::GetStringUTF16(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
     ok_button_text_ = l10n_util::GetStringUTF16(
         IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_OK_BUTTON_LABEL);
     cancel_button_text_ = l10n_util::GetStringUTF16(
@@ -132,8 +128,8 @@ bool DownloadInProgressDialogView::Accept() {
   return true;
 }
 
-bool DownloadInProgressDialogView::IsModal() const {
-  return true;
+ui::ModalType DownloadInProgressDialogView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 string16 DownloadInProgressDialogView::GetWindowTitle() const {

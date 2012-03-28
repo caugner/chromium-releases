@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -21,7 +21,6 @@
 #include "ui/gfx/gl/gl_implementation.h"
 #include "ui/gfx/gl/gl_surface.h"
 #include "webkit/glue/webkit_glue.h"
-#include "webkit/plugins/npapi/default_plugin_shared.h"
 #include "webkit/plugins/npapi/plugin_instance.h"
 #include "webkit/plugins/npapi/plugin_lib.h"
 #include "webkit/plugins/npapi/plugin_list.h"
@@ -850,6 +849,13 @@ NPError NPN_GetValue(NPP id, NPNVariable variable, void* value) {
       rv = NPERR_NO_ERROR;
       break;
     }
+    case NPNVsupportsCompositingCoreAnimationPluginsBool: {
+      NPBool* supports_compositing = reinterpret_cast<NPBool*>(value);
+      *supports_compositing =
+          webkit::npapi::UsingCompositedCoreAnimationPlugins();
+      rv = NPERR_NO_ERROR;
+      break;
+    }
     case NPNVsupportsUpdatedCocoaTextInputBool: {
       // We support the clarifications to the Cocoa IME event spec, but since
       // IME currently only works on 10.6, only answer true there.
@@ -1004,7 +1010,8 @@ NPError NPN_GetValueForURL(NPP id,
       if (!webplugin)
         return NPERR_GENERIC_ERROR;
 
-      result = webplugin->FindProxyForUrl(GURL(std::string(url)), &result);
+      if (!webplugin->FindProxyForUrl(GURL(std::string(url)), &result))
+        return NPERR_GENERIC_ERROR;
       break;
     }
     case NPNURLVCookie: {

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/debug/trace_event.h"
 #include "base/message_loop.h"
 #include "base/string_util.h"
 #include "chrome/browser/extensions/extension_host.h"
@@ -32,8 +33,8 @@
 #include "chrome/common/extensions/extension.h"
 #include "content/browser/renderer_host/render_view_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -276,7 +277,7 @@ void BalloonViewImpl::Show(Balloon* balloon) {
   gtk_container_add(GTK_CONTAINER(label_alignment), source_label_);
   gtk_box_pack_start(GTK_BOX(hbox_), label_alignment, FALSE, FALSE, 0);
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   // Create a button to dismiss the balloon and add it to the toolbar.
   close_button_.reset(new CustomDrawButton(IDR_TAB_CLOSE,
@@ -345,9 +346,9 @@ void BalloonViewImpl::Show(Balloon* balloon) {
 
 void BalloonViewImpl::Update() {
   DCHECK(html_contents_.get()) << "BalloonView::Update called before Show";
-  if (!html_contents_->tab_contents())
+  if (!html_contents_->web_contents())
     return;
-  html_contents_->tab_contents()->controller().LoadURL(
+  html_contents_->web_contents()->GetController().LoadURL(
       balloon_->notification().content_url(), content::Referrer(),
       content::PAGE_TRANSITION_LINK, std::string());
 }
@@ -413,6 +414,7 @@ void BalloonViewImpl::OnCloseButton(GtkWidget* widget) {
 // HTML view cut off the roundedness of the notification window.
 gboolean BalloonViewImpl::OnContentsExpose(GtkWidget* sender,
                                            GdkEventExpose* event) {
+  TRACE_EVENT0("ui::gtk", "BalloonViewImpl::OnContentsExpose");
   cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);
@@ -436,6 +438,7 @@ gboolean BalloonViewImpl::OnContentsExpose(GtkWidget* sender,
 }
 
 gboolean BalloonViewImpl::OnExpose(GtkWidget* sender, GdkEventExpose* event) {
+  TRACE_EVENT0("ui::gtk", "BalloonViewImpl::OnExpose");
   cairo_t* cr = gdk_cairo_create(GDK_DRAWABLE(sender->window));
   gdk_cairo_rectangle(cr, &event->area);
   cairo_clip(cr);

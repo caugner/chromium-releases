@@ -1,4 +1,4 @@
- // Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/debug/trace_event.h"
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/extension_tab_helper.h"
@@ -17,31 +18,31 @@
 #include "chrome/browser/ui/gtk/custom_button.h"
 #include "chrome/browser/ui/gtk/gtk_theme_service.h"
 #include "chrome/browser/ui/gtk/gtk_util.h"
+#include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "grit/ui_resources.h"
+#include "skia/ext/image_operations.h"
 #include "ui/base/animation/slide_animation.h"
 #include "ui/base/animation/throb_animation.h"
+#include "ui/base/gtk/gtk_compat.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas_skia_paint.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/gtk_util.h"
-#include "ui/gfx/image/image.h"
 #include "ui/gfx/image/cairo_cached_surface.h"
+#include "ui/gfx/image/image.h"
 #include "ui/gfx/pango_util.h"
 #include "ui/gfx/platform_font_pango.h"
 #include "ui/gfx/skbitmap_operations.h"
-#include "skia/ext/image_operations.h"
 
-#if !GTK_CHECK_VERSION(2, 22, 0)
-#define gtk_button_get_event_window(button) button->event_window
-#endif  // Gtk+ >= 2.22
+using content::WebContents;
 
 namespace {
 
@@ -97,9 +98,13 @@ gfx::Rect GetWidgetBoundsRelativeToParent(GtkWidget* parent,
                                           GtkWidget* widget) {
   gfx::Point parent_pos = gtk_util::GetWidgetScreenPosition(parent);
   gfx::Point widget_pos = gtk_util::GetWidgetScreenPosition(widget);
+
+  GtkAllocation allocation;
+  gtk_widget_get_allocation(widget, &allocation);
+
   return gfx::Rect(widget_pos.x() - parent_pos.x(),
                    widget_pos.y() - parent_pos.y(),
-                   widget->allocation.width, widget->allocation.height);
+                   allocation.width, allocation.height);
 }
 
 }  // namespace
@@ -316,7 +321,7 @@ void TabRendererGtk::Observe(int type,
       theme_service_->GetColor(ThemeService::COLOR_BACKGROUND_TAB_TEXT);
 }
 
-void TabRendererGtk::UpdateData(TabContents* contents,
+void TabRendererGtk::UpdateData(WebContents* contents,
                                 bool app,
                                 bool loading_only) {
   DCHECK(contents);
@@ -325,8 +330,8 @@ void TabRendererGtk::UpdateData(TabContents* contents,
 
   if (!loading_only) {
     data_.title = contents->GetTitle();
-    data_.incognito = contents->browser_context()->IsOffTheRecord();
-    data_.crashed = contents->is_crashed();
+    data_.incognito = contents->GetBrowserContext()->IsOffTheRecord();
+    data_.crashed = contents->IsCrashed();
 
     SkBitmap* app_icon =
         TabContentsWrapper::GetCurrentWrapperForContents(contents)->
@@ -391,7 +396,7 @@ void TabRendererGtk::UpdateData(TabContents* contents,
     // will eventually be chromium-themable and this code will go away.
     data_.is_default_favicon =
         (data_.favicon.pixelRef() ==
-        ResourceBundle::GetSharedInstance().GetBitmapNamed(
+        ui::ResourceBundle::GetSharedInstance().GetBitmapNamed(
             IDR_DEFAULT_FAVICON)->pixelRef());
   }
 
@@ -754,7 +759,7 @@ void TabRendererGtk::Layout() {
         theme_service_->GetColor(ThemeService::COLOR_TAB_TEXT);
       if (!close_button_color_ || tab_text_color != close_button_color_) {
         close_button_color_ = tab_text_color;
-        ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+        ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
         close_button_->SetBackground(close_button_color_,
             rb.GetBitmapNamed(IDR_TAB_CLOSE),
             rb.GetBitmapNamed(IDR_TAB_CLOSE_MASK));
@@ -835,7 +840,7 @@ void TabRendererGtk::PaintTitle(GtkWidget* widget, cairo_t* cr) {
   if (title.empty()) {
     title = data_.loading ?
         l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE) :
-        TabContentsWrapper::GetDefaultTitle();
+        CoreTabHelper::GetDefaultTitle();
   } else {
     Browser::FormatTitleForDisplay(&title);
   }
@@ -864,8 +869,7 @@ void TabRendererGtk::PaintIcon(GtkWidget* widget, cairo_t* cr) {
     to_display = theme_service_->GetImageNamed(IDR_SAD_FAVICON)->ToCairo();
   } else if (!data_.favicon.isNull()) {
     if (data_.is_default_favicon && theme_service_->UsingNativeTheme()) {
-      to_display = theme_service_->GetCairoIcon(
-          GtkThemeService::NATIVE_FAVICON, widget);
+      to_display = GtkThemeService::GetDefaultFavicon(true)->ToCairo();
     } else if (data_.cairo_favicon.valid()) {
       to_display = &data_.cairo_favicon;
     }
@@ -905,7 +909,7 @@ void TabRendererGtk::DrawTabBackground(
   tab_bg->ToCairo()->SetSource(cr, widget, -offset_x, -offset_y);
   cairo_pattern_set_extend(cairo_get_source(cr), CAIRO_EXTEND_REPEAT);
 
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
 
   // Draw left edge
   gfx::Image& tab_l_mask = rb.GetNativeImageNamed(IDR_TAB_ALPHA_LEFT);
@@ -924,13 +928,12 @@ void TabRendererGtk::DrawTabBackground(
                                     width() - tab_active_l_width_, 0);
 }
 
-void TabRendererGtk::DrawTabShadow(
-    cairo_t* cr,
-    GtkWidget* widget,
-    int left_idr,
-    int center_idr,
-    int right_idr) {
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+void TabRendererGtk::DrawTabShadow(cairo_t* cr,
+                                   GtkWidget* widget,
+                                   int left_idr,
+                                   int center_idr,
+                                   int right_idr) {
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   gfx::Image& active_image_l = rb.GetNativeImageNamed(left_idr);
   gfx::Image& active_image_c = rb.GetNativeImageNamed(center_idr);
   gfx::Image& active_image_r = rb.GetNativeImageNamed(right_idr);
@@ -1067,6 +1070,8 @@ gboolean TabRendererGtk::OnCloseButtonMouseRelease(GtkWidget* widget,
 
 gboolean TabRendererGtk::OnExposeEvent(GtkWidget* widget,
                                        GdkEventExpose* event) {
+  TRACE_EVENT0("ui::gtk", "TabRendererGtk::OnExposeEvent");
+
   PaintTab(widget, event);
   gtk_container_propagate_expose(GTK_CONTAINER(tab_.get()),
                                  close_button_->widget(), event);
@@ -1107,7 +1112,7 @@ void TabRendererGtk::InitResources() {
     return;
 
   // Grab the pixel sizes of our masking images.
-  ResourceBundle& rb = ResourceBundle::GetSharedInstance();
+  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
   GdkPixbuf* tab_active_l = rb.GetNativeImageNamed(IDR_TAB_ACTIVE_LEFT);
   tab_active_l_width_ = gdk_pixbuf_get_width(tab_active_l);
   tab_active_l_height_ = gdk_pixbuf_get_height(tab_active_l);
@@ -1118,7 +1123,7 @@ void TabRendererGtk::InitResources() {
   close_button_width_ = rb.GetBitmapNamed(IDR_TAB_CLOSE)->width();
   close_button_height_ = rb.GetBitmapNamed(IDR_TAB_CLOSE)->height();
 
-  const gfx::Font& base_font = rb.GetFont(ResourceBundle::BaseFont);
+  const gfx::Font& base_font = rb.GetFont(ui::ResourceBundle::BaseFont);
   title_font_ = new gfx::Font(base_font.GetFontName(), kFontPixelSize);
   title_font_height_ = title_font_->GetHeight();
 

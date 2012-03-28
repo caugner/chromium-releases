@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -12,6 +12,7 @@
 #include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/string_util.h"
+#include "base/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_info_map.h"
@@ -37,13 +38,18 @@
 namespace {
 
 net::HttpResponseHeaders* BuildHttpHeaders(
-    const std::string& content_security_policy) {
+    const std::string& content_security_policy, bool send_cors_header) {
   std::string raw_headers;
   raw_headers.append("HTTP/1.1 200 OK");
   if (!content_security_policy.empty()) {
     raw_headers.append(1, '\0');
     raw_headers.append("X-WebKit-CSP: ");
     raw_headers.append(content_security_policy);
+  }
+
+  if (send_cors_header) {
+    raw_headers.append(1, '\0');
+    raw_headers.append("Access-Control-Allow-Origin: *");
   }
   raw_headers.append(2, '\0');
   return new net::HttpResponseHeaders(raw_headers);
@@ -53,11 +59,12 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
  public:
   URLRequestResourceBundleJob(
       net::URLRequest* request, const FilePath& filename, int resource_id,
-      const std::string& content_security_policy)
+      const std::string& content_security_policy, bool send_cors_header)
       : net::URLRequestSimpleJob(request),
         filename_(filename),
         resource_id_(resource_id) {
-    response_info_.headers = BuildHttpHeaders(content_security_policy);
+    response_info_.headers = BuildHttpHeaders(content_security_policy,
+                                              send_cors_header);
   }
 
   // Overridden from URLRequestSimpleJob:
@@ -101,13 +108,53 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
   net::HttpResponseInfo response_info_;
 };
 
+class GeneratedBackgroundPageJob : public net::URLRequestSimpleJob {
+ public:
+  GeneratedBackgroundPageJob(net::URLRequest* request,
+                             const scoped_refptr<const Extension> extension,
+                             const std::string& content_security_policy)
+      : net::URLRequestSimpleJob(request),
+        extension_(extension) {
+    const bool send_cors_headers = false;
+    response_info_.headers = BuildHttpHeaders(content_security_policy,
+                                              send_cors_headers);
+  }
+
+  // Overridden from URLRequestSimpleJob:
+  virtual bool GetData(std::string* mime_type,
+                       std::string* charset,
+                       std::string* data) const OVERRIDE {
+    *mime_type = "text/html";
+    *charset = "utf-8";
+
+    *data = "<!DOCTYPE html>\n<body>\n";
+    for (size_t i = 0; i < extension_->background_scripts().size(); ++i) {
+      *data += "<script src=\"";
+      *data += extension_->background_scripts()[i];
+      *data += "\"></script>\n";
+    }
+
+    return true;
+  }
+
+  virtual void GetResponseInfo(net::HttpResponseInfo* info) {
+    *info = response_info_;
+  }
+
+ private:
+  scoped_refptr<const Extension> extension_;
+  net::HttpResponseInfo response_info_;
+};
+
 class URLRequestExtensionJob : public net::URLRequestFileJob {
  public:
   URLRequestExtensionJob(net::URLRequest* request,
                          const FilePath& filename,
-                         const std::string& content_security_policy)
+                         const std::string& content_security_policy,
+                         bool send_cors_header)
     : net::URLRequestFileJob(request, filename) {
-    response_info_.headers = BuildHttpHeaders(content_security_policy);
+      response_info_.headers = BuildHttpHeaders(content_security_policy,
+                                                send_cors_header);
   }
 
   virtual void GetResponseInfo(net::HttpResponseInfo* info) OVERRIDE {
@@ -218,8 +265,21 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
   }
 
   std::string content_security_policy;
-  if (extension)
+  bool send_cors_header = false;
+  if (extension) {
     content_security_policy = extension->content_security_policy();
+    if ((extension->manifest_version() >= 2 ||
+             extension->HasWebAccessibleResources()) &&
+        extension->IsResourceWebAccessible(request->url().path()))
+      send_cors_header = true;
+  }
+
+  std::string path = request->url().path();
+  if (path.size() > 1 &&
+      path.substr(1) == extension_filenames::kGeneratedBackgroundPageFilename) {
+    return new GeneratedBackgroundPageJob(
+        request, extension, content_security_policy);
+  }
 
   FilePath resources_path;
   if (PathService::Get(chrome::DIR_RESOURCES, &resources_path) &&
@@ -241,7 +301,8 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
 #endif
       if (relative_path == bm_resource_path) {
         return new URLRequestResourceBundleJob(request, relative_path,
-            kComponentExtensionResources[i].value, content_security_policy);
+            kComponentExtensionResources[i].value, content_security_policy,
+            send_cors_header);
       }
     }
   }
@@ -259,7 +320,7 @@ ExtensionProtocolHandler::MaybeCreateJob(net::URLRequest* request) const {
   }
 
   return new URLRequestExtensionJob(request, resource_file_path,
-                                    content_security_policy);
+                                    content_security_policy, send_cors_header);
 }
 
 }  // namespace

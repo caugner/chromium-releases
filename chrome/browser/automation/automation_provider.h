@@ -21,13 +21,13 @@
 #include "base/compiler_specific.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/message_loop_helpers.h"
 #include "base/observer_list.h"
 #include "base/string16.h"
 #include "chrome/browser/autofill/field_types.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/common/automation_constants.h"
 #include "chrome/common/content_settings.h"
-#include "content/browser/cancelable_request.h"
-#include "content/browser/tab_contents/navigation_entry.h"
 #include "content/browser/trace_controller.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_observer.h"
@@ -38,6 +38,22 @@
 #include "ui/views/events/event.h"
 #endif  // defined(OS_WIN) && !defined(USE_AURA)
 
+class AutomationBrowserTracker;
+class AutomationExtensionTracker;
+class AutomationResourceMessageFilter;
+class AutomationTabTracker;
+class AutomationWindowTracker;
+class Browser;
+class Extension;
+class ExtensionTestResultNotificationObserver;
+class ExternalTabContainer;
+class FilePath;
+class InitialLoadObserver;
+class LoginHandler;
+class MetricEventDurationObserver;
+class NavigationControllerRestoredObserver;
+class Profile;
+class RenderViewHost;
 class TabContents;
 struct AutomationMsg_Find_Params;
 struct Reposition_Params;
@@ -47,28 +63,17 @@ namespace IPC {
 class ChannelProxy;
 }
 
-class AutomationBrowserTracker;
-class AutomationExtensionTracker;
-class AutomationResourceMessageFilter;
-class AutomationTabTracker;
-class AutomationWindowTracker;
-class Browser;
-class DownloadItem;
-class Extension;
-class ExtensionTestResultNotificationObserver;
-class ExternalTabContainer;
-class FilePath;
-class InitialLoadObserver;
-class LoginHandler;
-class MetricEventDurationObserver;
+namespace content {
 class NavigationController;
-class NavigationControllerRestoredObserver;
-class Profile;
-class RenderViewHost;
-class TabContents;
+}
 
 namespace base {
 class DictionaryValue;
+}
+
+namespace content {
+class DownloadItem;
+class WebContents;
 }
 
 namespace gfx {
@@ -115,8 +120,9 @@ class AutomationProvider
   // Get the index of a particular NavigationController object
   // in the given parent window.  This method uses
   // TabStrip::GetIndexForNavigationController to get the index.
-  int GetIndexForNavigationController(const NavigationController* controller,
-                                      const Browser* parent) const;
+  int GetIndexForNavigationController(
+      const content::NavigationController* controller,
+      const Browser* parent) const;
 
   // Add or remove a non-owning reference to a tab's LoginHandler.  This is for
   // when a login prompt is shown for HTTP/FTP authentication.
@@ -124,8 +130,9 @@ class AutomationProvider
   // Eventually we'll probably want ways to interact with the ChromeView of the
   // login window in a generic manner, such that it can be used for anything,
   // not just logins.
-  void AddLoginHandler(NavigationController* tab, LoginHandler* handler);
-  void RemoveLoginHandler(NavigationController* tab);
+  void AddLoginHandler(content::NavigationController* tab,
+                       LoginHandler* handler);
+  void RemoveLoginHandler(content::NavigationController* tab);
 
   // IPC::Channel::Sender implementation.
   virtual bool Send(IPC::Message* msg) OVERRIDE;
@@ -154,23 +161,24 @@ class AutomationProvider
   // Get the DictionaryValue equivalent for a download item. Caller owns the
   // DictionaryValue.
   base::DictionaryValue* GetDictionaryFromDownloadItem(
-      const DownloadItem* download);
+      const content::DownloadItem* download);
 
  protected:
   friend struct content::BrowserThread::DeleteOnThread<
       content::BrowserThread::UI>;
-  friend class DeleteTask<AutomationProvider>;
+  friend class base::DeleteHelper<AutomationProvider>;
   virtual ~AutomationProvider();
 
   // Helper function to find the browser window that contains a given
   // NavigationController and activate that tab.
   // Returns the Browser if found.
-  Browser* FindAndActivateTab(NavigationController* contents);
+  Browser* FindAndActivateTab(content::NavigationController* contents);
 
-  // Convert a tab handle into a TabContents. If |tab| is non-NULL a pointer
+  // Convert a tab handle into a WebContents. If |tab| is non-NULL a pointer
   // to the tab is also returned. Returns NULL in case of failure or if the tab
-  // is not of the TabContents type.
-  TabContents* GetTabContentsForHandle(int handle, NavigationController** tab);
+  // is not of the WebContents type.
+  content::WebContents* GetWebContentsForHandle(
+      int handle, content::NavigationController** tab);
 
   // Returns the protocol version which typically is the module version.
   virtual std::string GetProtocolVersion();
@@ -190,7 +198,8 @@ class AutomationProvider
   scoped_ptr<AutomationTabTracker> tab_tracker_;
   scoped_ptr<AutomationWindowTracker> window_tracker_;
 
-  typedef std::map<NavigationController*, LoginHandler*> LoginHandlerMap;
+  typedef std::map<content::NavigationController*, LoginHandler*>
+      LoginHandlerMap;
   LoginHandlerMap login_handler_map_;
 
   Profile* profile_;
@@ -205,7 +214,7 @@ class AutomationProvider
 
   // Sends a find request for a given query.
   void SendFindRequest(
-      TabContents* tab_contents,
+      content::WebContents* web_contents,
       bool with_json,
       const string16& search_string,
       bool forward,
@@ -230,7 +239,7 @@ class AutomationProvider
   virtual void OnEndTracingComplete() OVERRIDE;
   virtual void OnTraceDataCollected(const std::string& trace_fragment) OVERRIDE;
 
-  void OnUnhandledMessage();
+  void OnUnhandledMessage(const IPC::Message& message);
 
   // Clear and reinitialize the automation IPC channel.
   bool ReinitializeChannel();

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -8,12 +8,13 @@
 # Do NOT CHANGE this if you don't know what you're doing -- see
 # https://code.google.com/p/chromium/wiki/UpdatingClang
 # Reverting problematic clang rolls is safe, though.
-CLANG_REVISION=145240
+CLANG_REVISION=148911
 
 THIS_DIR="$(dirname "${0}")"
 LLVM_DIR="${THIS_DIR}/../../../third_party/llvm"
 LLVM_BUILD_DIR="${LLVM_DIR}/../llvm-build"
 CLANG_DIR="${LLVM_DIR}/tools/clang"
+COMPILER_RT_DIR="${LLVM_DIR}/projects/compiler-rt"
 STAMP_FILE="${LLVM_BUILD_DIR}/cr_build_revision"
 
 # ${A:-a} returns $A if it's set, a else.
@@ -101,11 +102,25 @@ rm -f "${STAMP_FILE}"
 # created them.
 if [[ "${OS}" = "Darwin" ]]; then
   XCODEBUILD_DIR="${THIS_DIR}/../../../xcodebuild"
-  MAKE_DIR="${THIS_DIR}/../../../out"
+  if [ -f "${THIS_DIR}/../../../WebKit.gyp" ]; then
+    # We're inside a WebKit checkout.
+    # TODO(thakis): try to unify the directory layout of the xcode- and
+    # make-based builds. http://crbug.com/110455
+    MAKE_DIR="${THIS_DIR}/../../../../../../out"
+  else
+    # We're inside a Chromium checkout.
+    MAKE_DIR="${THIS_DIR}/../../../out"
+  fi
   for CONFIG in Debug Release; do
     if [[ -d "${MAKE_DIR}/${CONFIG}/obj.target" ]]; then
       echo "Clobbering ${CONFIG} PCH files for make build"
       find "${MAKE_DIR}/${CONFIG}/obj.target" -name '*.gch' -exec rm {} +
+    fi
+
+    # ninja puts its output below ${MAKE_DIR} as well.
+    if [[ -d "${MAKE_DIR}/${CONFIG}/obj" ]]; then
+      echo "Clobbering ${CONFIG} PCH files for ninja build"
+      find "${MAKE_DIR}/${CONFIG}/obj" -name '*.gch' -exec rm {} +
     fi
 
     if [[ -d "${XCODEBUILD_DIR}/${CONFIG}/SharedPrecompiledHeaders" ]]; then
@@ -161,6 +176,10 @@ fi
 echo Getting clang r"${CLANG_REVISION}" in "${CLANG_DIR}"
 svn co --force "${LLVM_REPO_URL}/cfe/trunk@${CLANG_REVISION}" "${CLANG_DIR}"
 
+echo Getting compiler-rt r"${CLANG_REVISION}" in "${COMPILER_RT_DIR}"
+svn co --force "${LLVM_REPO_URL}/compiler-rt/trunk@${CLANG_REVISION}" \
+               "${COMPILER_RT_DIR}"
+
 # Echo all commands.
 set -x
 
@@ -184,7 +203,7 @@ if [ "${OS}" = "Linux" ]; then
 elif [ "${OS}" = "Darwin" ]; then
   NUM_JOBS="$(sysctl -n hw.ncpu)"
 fi
-make -j"${NUM_JOBS}"
+MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}"
 cd -
 
 # Build plugin.
@@ -198,7 +217,7 @@ cp -R "${PLUGIN_SRC_DIR}" "${PLUGIN_DST_DIR}"
 rm -rf "${PLUGIN_BUILD_DIR}"
 mkdir -p "${PLUGIN_BUILD_DIR}"
 cp "${PLUGIN_SRC_DIR}/Makefile" "${PLUGIN_BUILD_DIR}"
-make -j"${NUM_JOBS}" -C "${PLUGIN_BUILD_DIR}"
+MACOSX_DEPLOYMENT_TARGET=10.5 make -j"${NUM_JOBS}" -C "${PLUGIN_BUILD_DIR}"
 
 if [[ -n "$run_tests" ]]; then
   # Run a few tests.

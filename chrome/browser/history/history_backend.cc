@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,6 +9,7 @@
 #include <set>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/file_util.h"
@@ -20,6 +21,7 @@
 #include "base/time.h"
 #include "chrome/browser/autocomplete/history_url_provider.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_publisher.h"
 #include "chrome/browser/history/in_memory_history_backend.h"
@@ -28,7 +30,6 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/cancelable_request.h"
 #include "content/browser/download/download_persistent_store_info.h"
 #include "googleurl/src/gurl.h"
 #include "grit/chromium_strings.h"
@@ -70,9 +71,8 @@ namespace history {
 // dependency between MostVisitedModel and the history backend.
 static const int kSegmentDataRetention = 90;
 
-// The number of milliseconds we'll wait to do a commit, so that things are
-// batched together.
-static const int kCommitIntervalMs = 10000;
+// How long we'll wait to do a commit, so that things are batched together.
+static const int kCommitIntervalSeconds = 10;
 
 // The amount of time before we re-fetch the favicon.
 static const int kFaviconRefetchDays = 7;
@@ -123,8 +123,8 @@ MostVisitedURL MakeMostVisitedURL(const PageUsageData& page_data,
 // be assigned to a RunnableMethod.
 //
 // TODO(brettw): bug 1165182: This should be replaced with a
-// ScopedRunnableMethodFactory which will handle everything automatically (like
-// we do in ExpireHistoryBackend).
+// base::WeakPtrFactory which will handle everything automatically (like we do
+// in ExpireHistoryBackend).
 class CommitLaterTask : public base::RefCounted<CommitLaterTask> {
  public:
   explicit CommitLaterTask(HistoryBackend* history_backend)
@@ -209,7 +209,6 @@ HistoryBackend::HistoryBackend(const FilePath& history_dir,
       ALLOW_THIS_IN_INITIALIZER_LIST(expirer_(this, bookmark_service)),
       recent_redirects_(kMaxRedirectCount),
       backend_destroy_message_loop_(NULL),
-      backend_destroy_task_(NULL),
       segment_queried_(false),
       bookmark_service_(bookmark_service) {
 }
@@ -237,7 +236,7 @@ HistoryBackend::~HistoryBackend() {
     text_database_.reset();
   }
 
-  if (backend_destroy_task_) {
+  if (!backend_destroy_task_.is_null()) {
     // Notify an interested party (typically a unit test) that we're done.
     DCHECK(backend_destroy_message_loop_);
     backend_destroy_message_loop_->PostTask(FROM_HERE, backend_destroy_task_);
@@ -251,11 +250,9 @@ void HistoryBackend::Init(const std::string& languages, bool force_fail) {
 }
 
 void HistoryBackend::SetOnBackendDestroyTask(MessageLoop* message_loop,
-                                             Task* task) {
-  if (backend_destroy_task_) {
+                                             const base::Closure& task) {
+  if (!backend_destroy_task_.is_null())
     DLOG(WARNING) << "Setting more than one destroy task, overriding";
-    delete backend_destroy_task_;
-  }
   backend_destroy_message_loop_ = message_loop;
   backend_destroy_task_ = task;
 }
@@ -779,7 +776,7 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls,
     // the date of the added visit.
     URLDatabase* url_database;
     VisitDatabase* visit_database;
-    if (i->last_visit() < expirer_.GetCurrentArchiveTime()) {
+    if (IsExpiredVisitTime(i->last_visit())) {
       if (!archived_db_.get())
         return;  // No archived database to save it to, just forget this.
       url_database = archived_db_.get();
@@ -851,6 +848,10 @@ void HistoryBackend::AddPagesWithDetails(const std::vector<URLRow>& urls,
                          modified.release());
 
   ScheduleCommit();
+}
+
+bool HistoryBackend::IsExpiredVisitTime(const base::Time& time) {
+  return time < expirer_.GetCurrentArchiveTime();
 }
 
 void HistoryBackend::SetPageTitle(const GURL& url,
@@ -1066,8 +1067,9 @@ void HistoryBackend::QuerySegmentUsage(
     // entries.
     if (!segment_queried_) {
       segment_queried_ = true;
-      MessageLoop::current()->PostTask(FROM_HERE,
-          NewRunnableMethod(this, &HistoryBackend::DeleteOldSegmentData));
+      MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(&HistoryBackend::DeleteOldSegmentData, this));
     }
   }
   request->ForwardResult(request->handle(), &request->value.get());
@@ -1936,10 +1938,10 @@ void HistoryBackend::ScheduleCommit() {
   if (scheduled_commit_.get())
     return;
   scheduled_commit_ = new CommitLaterTask(this);
-  MessageLoop::current()->PostDelayedTask(FROM_HERE,
-      NewRunnableMethod(scheduled_commit_.get(),
-                        &CommitLaterTask::RunCommit),
-      kCommitIntervalMs);
+  MessageLoop::current()->PostDelayedTask(
+      FROM_HERE,
+      base::Bind(&CommitLaterTask::RunCommit, scheduled_commit_.get()),
+      base::TimeDelta::FromSeconds(kCommitIntervalSeconds));
 }
 
 void HistoryBackend::CancelScheduledCommit() {
@@ -1976,8 +1978,8 @@ void HistoryBackend::ProcessDBTaskImpl() {
     // Tasks wants to run some more. Schedule it at the end of current tasks.
     db_task_requests_.push_back(request);
     // And process it after an invoke later.
-    MessageLoop::current()->PostTask(FROM_HERE, NewRunnableMethod(
-        this, &HistoryBackend::ProcessDBTaskImpl));
+    MessageLoop::current()->PostTask(
+        FROM_HERE, base::Bind(&HistoryBackend::ProcessDBTaskImpl, this));
   }
 }
 
@@ -1996,10 +1998,7 @@ void HistoryBackend::ReleaseDBTasks() {
 ////////////////////////////////////////////////////////////////////////////////
 
 void HistoryBackend::DeleteURLs(const std::vector<GURL>& urls) {
-  for (std::vector<GURL>::const_iterator url = urls.begin(); url != urls.end();
-       ++url) {
-    expirer_.DeleteURL(*url);
-  }
+  expirer_.DeleteURLs(urls);
 
   db_->GetStartDate(&first_recorded_time_);
   // Force a commit, if the user is deleting something for privacy reasons, we

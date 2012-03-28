@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -46,9 +46,13 @@ void ServiceProcessControl::ConnectInternal() {
 
   // TODO(hclam): Handle error connecting to channel.
   const IPC::ChannelHandle channel_id = GetServiceProcessChannel();
-  channel_.reset(new IPC::ChannelProxy(
+  SetChannel(new IPC::ChannelProxy(
       channel_id, IPC::Channel::MODE_NAMED_CLIENT, this,
       BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)));
+}
+
+void ServiceProcessControl::SetChannel(IPC::ChannelProxy* channel) {
+  channel_.reset(channel);
 }
 
 void ServiceProcessControl::RunConnectDoneTasks() {
@@ -256,8 +260,6 @@ ServiceProcessControl* ServiceProcessControl::GetInstance() {
   return Singleton<ServiceProcessControl>::get();
 }
 
-DISABLE_RUNNABLE_METHOD_REFCOUNT(ServiceProcessControl);
-
 ServiceProcessControl::Launcher::Launcher(ServiceProcessControl* process,
                                           CommandLine* cmd_line)
     : process_(process),
@@ -298,7 +300,7 @@ void ServiceProcessControl::Launcher::DoDetectLaunched() {
   retry_count_++;
 
   // If the service process is not launched yet then check again in 2 seconds.
-  const int kDetectLaunchRetry = 2000;
+  const base::TimeDelta kDetectLaunchRetry = base::TimeDelta::FromSeconds(2);
   MessageLoop::current()->PostDelayedTask(
       FROM_HERE, base::Bind(&Launcher::DoDetectLaunched, this),
       kDetectLaunchRetry);

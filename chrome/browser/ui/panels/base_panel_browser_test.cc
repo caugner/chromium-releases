@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,14 +11,18 @@
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
 #include "base/path_service.h"
+#include "base/string_number_conversions.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/panels/native_panel.h"
 #include "chrome/browser/ui/panels/panel_manager.h"
+#include "chrome/browser/ui/panels/panel_mouse_watcher.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
+#include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/string_ordinal.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/browser/tab_contents/test_tab_contents.h"
 #include "content/public/browser/notification_service.h"
@@ -151,8 +155,8 @@ void MockAutoHidingDesktopBarImpl::NotifyThicknessChange() {
 }
 
 bool ExistsPanel(Panel* panel) {
-  const PanelManager::Panels& panels = PanelManager::GetInstance()->panels();
-  return find(panels.begin(), panels.end(), panel) != panels.end();
+  std::vector<Panel*> panels = PanelManager::GetInstance()->panels();
+  return std::find(panels.begin(), panels.end(), panel) != panels.end();
 }
 
 }  // namespace
@@ -174,6 +178,7 @@ BasePanelBrowserTest::~BasePanelBrowserTest() {
 
 void BasePanelBrowserTest::SetUpCommandLine(CommandLine* command_line) {
   EnableDOMAutomation();
+  command_line->AppendSwitch(switches::kEnablePanels);
 }
 
 void BasePanelBrowserTest::SetUpOnMainThread() {
@@ -190,7 +195,9 @@ void BasePanelBrowserTest::SetUpOnMainThread() {
   if (!testing_work_area_.IsEmpty())
     panel_manager->SetWorkAreaForTesting(testing_work_area_);
   panel_manager->enable_auto_sizing(false);
-  panel_manager->remove_delays_for_testing();
+
+  PanelManager::shorten_time_intervals_for_testing();
+
   // This is needed so the subsequently created panels can be activated.
   // On a Mac, it transforms background-only test process into foreground one.
   EXPECT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
@@ -321,18 +328,21 @@ Panel* BasePanelBrowserTest::CreatePanelWithParams(
     panel->ShowInactive();
 #endif
   }
-  MessageLoopForUI::current()->RunAllPending();
-  // More waiting, because gaining or losing focus may require inter-process
-  // asynchronous communication, and it is not enough to just run the local
-  // message loop to make sure this activity has completed.
-  WaitForPanelActiveState(panel, params.show_flag);
 
-  // On Linux, window size is not available right away and we should wait
-  // before moving forward with the test.
-  WaitForWindowSizeAvailable(panel);
+  if (params.wait_for_fully_created) {
+    MessageLoopForUI::current()->RunAllPending();
+    // More waiting, because gaining or losing focus may require inter-process
+    // asynchronous communication, and it is not enough to just run the local
+    // message loop to make sure this activity has completed.
+    WaitForPanelActiveState(panel, params.show_flag);
 
-  // Wait for the bounds animations on creation to finish.
-  WaitForBoundsAnimationFinished(panel);
+    // On Linux, window size is not available right away and we should wait
+    // before moving forward with the test.
+    WaitForWindowSizeAvailable(panel);
+
+    // Wait for the bounds animations on creation to finish.
+    WaitForBoundsAnimationFinished(panel);
+  }
 
   return panel;
 }
@@ -376,6 +386,28 @@ scoped_refptr<Extension> BasePanelBrowserTest::CreateExtension(
   EXPECT_TRUE(extension.get());
   EXPECT_STREQ("", error.c_str());
   browser()->GetProfile()->GetExtensionService()->
-      OnExtensionInstalled(extension.get(), false, -1);
+      OnExtensionInstalled(extension.get(), false, StringOrdinal());
   return extension;
+}
+
+void BasePanelBrowserTest::CloseWindowAndWait(Browser* browser) {
+  // Closing a browser window may involve several async tasks. Need to use
+  // message pump and wait for the notification.
+  size_t browser_count = BrowserList::size();
+  ui_test_utils::WindowedNotificationObserver signal(
+      chrome::NOTIFICATION_BROWSER_CLOSED,
+      content::Source<Browser>(browser));
+  browser->CloseWindow();
+  signal.Wait();
+  // Now we have one less browser instance.
+  EXPECT_EQ(browser_count - 1, BrowserList::size());
+}
+
+void BasePanelBrowserTest::MoveMouse(const gfx::Point& position) {
+  PanelManager::GetInstance()->mouse_watcher()->NotifyMouseMovement(position);
+}
+
+std::string BasePanelBrowserTest::MakePanelName(int index) {
+  std::string panel_name("Panel");
+  return panel_name + base::IntToString(index);
 }

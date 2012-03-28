@@ -110,7 +110,7 @@ class SyncSessionContext {
   }
 
   // This is virtual for unit tests.
-  virtual void SetUnthrottleTime(const syncable::ModelTypeSet& types,
+  virtual void SetUnthrottleTime(syncable::ModelTypeSet types,
                                  const base::TimeTicks& time);
 
   // This prunes the |unthrottle_time_| map based on the |time| passed in. This

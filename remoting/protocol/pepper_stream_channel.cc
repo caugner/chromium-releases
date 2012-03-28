@@ -45,25 +45,22 @@ PepperStreamChannel::PepperStreamChannel(
       name_(name),
       callback_(callback),
       channel_(NULL),
-      connected_(false),
-      ALLOW_THIS_IN_INITIALIZER_LIST(p2p_connect_callback_(
-          this, &PepperStreamChannel::OnP2PConnect)) {
+      connected_(false) {
 }
 
 PepperStreamChannel::~PepperStreamChannel() {
   session_->OnDeleteChannel(this);
-  // Verify that the |channel_| is ether destroyed or we own it.
-  DCHECK_EQ(channel_, owned_channel_.get());
   // Channel should be already destroyed if we were connected.
   DCHECK(!connected_ || channel_ == NULL);
 }
 
-void PepperStreamChannel::Connect(pp::Instance* pp_instance,
-                                  const TransportConfig& transport_config,
-                                  ChannelAuthenticator* authenticator) {
+void PepperStreamChannel::Connect(
+    pp::Instance* pp_instance,
+    const TransportConfig& transport_config,
+    scoped_ptr<ChannelAuthenticator> authenticator) {
   DCHECK(CalledOnValidThread());
 
-  authenticator_.reset(authenticator);
+  authenticator_ = authenticator.Pass();
 
   pp::Transport_Dev* transport =
       new pp::Transport_Dev(pp_instance, name_.c_str(),
@@ -122,7 +119,8 @@ void PepperStreamChannel::Connect(pp::Instance* pp_instance,
   channel_ = new PepperTransportSocketAdapter(transport, name_, this);
   owned_channel_.reset(channel_);
 
-  int result = channel_->Connect(&p2p_connect_callback_);
+  int result = channel_->Connect(base::Bind(&PepperStreamChannel::OnP2PConnect,
+                                            base::Unretained(this)));
   if (result != net::ERR_IO_PENDING)
     OnP2PConnect(result);
 }

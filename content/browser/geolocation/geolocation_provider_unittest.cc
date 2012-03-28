@@ -12,6 +12,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using content::AccessTokenStore;
+using content::FakeAccessTokenStore;
 using testing::_;
 using testing::DoAll;
 using testing::DoDefault;
@@ -84,13 +86,13 @@ class StartStopMockLocationProvider : public MockLocationProvider {
 
   virtual bool StartProvider(bool high_accuracy) {
     bool result = MockLocationProvider::StartProvider(high_accuracy);
-    test_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    test_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
     return result;
   }
 
   virtual void StopProvider() {
     MockLocationProvider::StopProvider();
-    test_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+    test_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
   }
 
  private:
@@ -141,10 +143,10 @@ TEST_F(GeolocationProviderTest, StartStop) {
       new MockDependencyFactory(&message_loop_, fake_access_token_store.get());
   base::WaitableEvent event(false, false);
 
-  EXPECT_CALL(*(fake_access_token_store.get()), DoLoadAccessTokens(_))
+  EXPECT_CALL(*(fake_access_token_store.get()), LoadAccessTokens(_))
       .Times(1)
       .WillOnce(DoAll(Invoke(fake_access_token_store.get(),
-                             &FakeAccessTokenStore::DefaultDoLoadAccessTokens),
+                             &FakeAccessTokenStore::DefaultLoadAccessTokens),
                       InvokeWithoutArgs(&event, &base::WaitableEvent::Signal)));
 
   GeolocationArbitrator::SetDependencyFactoryForTest(dependency_factory.get());

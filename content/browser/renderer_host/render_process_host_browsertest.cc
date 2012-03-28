@@ -5,6 +5,7 @@
 #include "content/browser/renderer_host/render_process_host_browsertest.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/process.h"
 #include "chrome/browser/ui/browser.h"
@@ -14,6 +15,8 @@
 #include "content/common/test_url_constants.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
+
+using content::WebContents;
 
 RenderProcessHostTest::RenderProcessHostTest() {
   EnableDOMAutomation();
@@ -32,26 +35,24 @@ int RenderProcessHostTest::RenderProcessHostCount() {
 }
 
 void PostQuit(MessageLoop* loop) {
-  loop->PostTask(FROM_HERE, new MessageLoop::QuitTask);
+  loop->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
-
-void DoNothing() {}
 
 // Show a tab, activating the current one if there is one, and wait for
 // the renderer process to be created or foregrounded, returning the process
 // handle.
 base::ProcessHandle RenderProcessHostTest::ShowSingletonTab(const GURL& page) {
   browser()->ShowSingletonTab(page);
-  TabContents* tc = browser()->GetSelectedTabContents();
-  CHECK(tc->GetURL() == page);
+  WebContents* wc = browser()->GetSelectedWebContents();
+  CHECK(wc->GetURL() == page);
 
   // Ensure that the backgrounding / foregrounding gets a chance to run.
   content::BrowserThread::PostTaskAndReply(
       content::BrowserThread::PROCESS_LAUNCHER, FROM_HERE,
-      base::Bind(DoNothing), MessageLoop::QuitClosure());
+      base::Bind(&base::DoNothing), MessageLoop::QuitClosure());
   MessageLoop::current()->Run();
 
-  return tc->GetRenderProcessHost()->GetHandle();
+  return wc->GetRenderProcessHost()->GetHandle();
 }
 
 IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ProcessPerTab) {
@@ -156,8 +157,8 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ProcessOverflow) {
 
   int tab_count = 1;
   int host_count = 1;
-  TabContents* tab1 = NULL;
-  TabContents* tab2 = NULL;
+  WebContents* tab1 = NULL;
+  WebContents* tab2 = NULL;
   content::RenderProcessHost* rph1 = NULL;
   content::RenderProcessHost* rph2 = NULL;
   content::RenderProcessHost* rph3 = NULL;
@@ -170,7 +171,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ProcessOverflow) {
   GURL newtab(chrome::kTestNewTabURL);
   ui_test_utils::NavigateToURL(browser(), newtab);
   EXPECT_EQ(tab_count, browser()->tab_count());
-  tab1 = browser()->GetTabContentsAt(tab_count - 1);
+  tab1 = browser()->GetWebContentsAt(tab_count - 1);
   rph1 = tab1->GetRenderProcessHost();
   EXPECT_EQ(tab1->GetURL(), newtab);
   EXPECT_EQ(host_count, RenderProcessHostCount());
@@ -183,7 +184,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ProcessOverflow) {
   tab_count++;
   host_count++;
   EXPECT_EQ(tab_count, browser()->tab_count());
-  tab1 = browser()->GetTabContentsAt(tab_count - 1);
+  tab1 = browser()->GetWebContentsAt(tab_count - 1);
   rph2 = tab1->GetRenderProcessHost();
   EXPECT_EQ(tab1->GetURL(), page1);
   EXPECT_EQ(host_count, RenderProcessHostCount());
@@ -196,7 +197,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ProcessOverflow) {
     ui_test_utils::WaitForNewTab(browser());
   tab_count++;
   EXPECT_EQ(tab_count, browser()->tab_count());
-  tab2 = browser()->GetTabContentsAt(tab_count - 1);
+  tab2 = browser()->GetWebContentsAt(tab_count - 1);
   EXPECT_EQ(tab2->GetURL(), page2);
   EXPECT_EQ(host_count, RenderProcessHostCount());
   EXPECT_EQ(tab2->GetRenderProcessHost(), rph2);
@@ -211,7 +212,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ProcessOverflow) {
     ui_test_utils::WaitForNewTab(browser());
   tab_count++;
   EXPECT_EQ(tab_count, browser()->tab_count());
-  tab2 = browser()->GetTabContentsAt(tab_count - 1);
+  tab2 = browser()->GetWebContentsAt(tab_count - 1);
   EXPECT_EQ(tab2->GetURL(), history);
   EXPECT_EQ(host_count, RenderProcessHostCount());
   EXPECT_EQ(tab2->GetRenderProcessHost(), rph1);
@@ -229,7 +230,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ProcessOverflow) {
   host_count++;
 #endif
   EXPECT_EQ(tab_count, browser()->tab_count());
-  tab1 = browser()->GetTabContentsAt(tab_count - 1);
+  tab1 = browser()->GetWebContentsAt(tab_count - 1);
   rph3 = tab1->GetRenderProcessHost();
   EXPECT_EQ(tab1->GetURL(), bookmarks);
   EXPECT_EQ(host_count, RenderProcessHostCount());

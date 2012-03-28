@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -117,7 +117,7 @@ bool ProxyLauncher::WaitForBrowserLaunch(bool wait_for_initial_loads) {
 #if defined(OS_WIN)
     // TODO(phajdan.jr): Get rid of this Sleep when logging_chrome_uitest
     // stops "relying" on it.
-    base::PlatformThread::Sleep(TestTimeouts::action_timeout_ms());
+    base::PlatformThread::Sleep(TestTimeouts::action_timeout());
 #endif
   }
 
@@ -298,7 +298,7 @@ void ProxyLauncher::TerminateBrowser() {
   base::TimeTicks quit_start = base::TimeTicks::Now();
 
   EXPECT_TRUE(automation()->SetFilteredInet(false));
-#if defined(OS_WIN)
+#if defined(OS_WIN) && !defined(USE_AURA)
   scoped_refptr<BrowserProxy> browser(automation()->GetBrowserWindow(0));
   ASSERT_TRUE(browser.get());
   ASSERT_TRUE(browser->TerminateSession());
@@ -340,7 +340,12 @@ bool ProxyLauncher::WaitForBrowserProcessToQuit(int timeout, int* exit_code) {
 #ifdef WAIT_FOR_DEBUGGER_ON_OPEN
   timeout = 500000;
 #endif
-  bool success = base::WaitForExitCodeWithTimeout(process_, exit_code, timeout);
+  bool success = false;
+
+  // Only wait for exit if the "browser, please terminate" message had a
+  // chance of making it through.
+  if (!automation_proxy_->channel_disconnected_on_failure())
+    success = base::WaitForExitCodeWithTimeout(process_, exit_code, timeout);
 
   if (!success)
     TerminateAllChromeProcesses(process_id_);
@@ -552,7 +557,8 @@ bool NamedProxyLauncher::InitializeConnection(const LaunchState& state,
     channel_initialized = IPC::Channel::IsNamedServerInitialized(channel_id_);
     if (channel_initialized)
       break;
-    base::PlatformThread::Sleep(automation::kSleepTime);
+    base::PlatformThread::Sleep(
+        base::TimeDelta::FromMilliseconds(automation::kSleepTime));
   }
   if (!channel_initialized) {
     LOG(ERROR) << "Failed to wait for testing channel presence.";

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -33,10 +33,20 @@ chrome.test.runTests([
     }));
   },
 
+  function highlightCurrentWindow() {
+    chrome.windows.getCurrent(pass(function(win1) {
+      chrome.tabs.highlight({windowId: chrome.windows.WINDOW_ID_CURRENT,
+                             tabs: [0]}, pass(function(win2) {
+        assertEq(win1.id, win2.id);
+      }));
+    }));
+  },
+
   function highlightA() {
     chrome.tabs.query({windowId: testWindowId1, url: 'http://a.com/*'},
                       pass(function(tabs) {
       assertEq(4, tabs.length);
+      // Note: tabs.onHighlightChanged is deprecated.
       chrome.test.listenOnce(chrome.tabs.onHighlightChanged,
                              function(highlightInfo) {
         var tabIds = tabs.map(function(tab) { return tab.id; });
@@ -60,7 +70,7 @@ chrome.test.runTests([
     chrome.tabs.query({windowId: testWindowId1, url: 'http://b.com/*'},
                       pass(function(tabs) {
       assertEq(1, tabs.length);
-      chrome.test.listenOnce(chrome.tabs.onHighlightChanged,
+      chrome.test.listenOnce(chrome.tabs.onHighlighted,
                              function(highlightInfo) {
         var tabIds = tabs.map(function(tab) { return tab.id; });
         assertEq(highlightInfo.windowId, testWindowId1);
@@ -81,7 +91,7 @@ chrome.test.runTests([
     chrome.tabs.query({windowId: testWindowId2, url: 'http://a.com/*'},
                       pass(function(tabs) {
       assertEq(2, tabs.length);
-      chrome.test.listenOnce(chrome.tabs.onHighlightChanged,
+      chrome.test.listenOnce(chrome.tabs.onHighlighted,
                              function(highlightInfo) {
         var tabIds = tabs.map(function(tab) { return tab.id; });
         assertEq(highlightInfo.windowId, testWindowId2);
@@ -109,7 +119,7 @@ chrome.test.runTests([
         {windowId: testWindowId2, highlighted: true, active: false},
         pass(function(tabs) {
       var tabId = tabs[0].id;
-      chrome.test.listenOnce(chrome.tabs.onHighlightChanged,
+      chrome.test.listenOnce(chrome.tabs.onHighlighted,
                              function(highlightInfo) {
         assertEq(1, highlightInfo.tabIds.length);
         assertTrue(tabId != highlightInfo.tabIds[0]);

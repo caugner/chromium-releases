@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,11 +9,11 @@
 #include <string>
 #include <utility>
 
-#include "content/browser/browser_message_filter.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/media_stream_requester.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_stream_options.h"
+#include "content/public/browser/browser_message_filter.h"
 
 namespace content {
 class ResourceContext;
@@ -25,7 +25,7 @@ namespace media_stream {
 // MediaStreamImpl. It's the complement of MediaStreamDispatcher
 // (owned by RenderView).
 class CONTENT_EXPORT MediaStreamDispatcherHost
-    : public BrowserMessageFilter,
+    : public content::BrowserMessageFilter,
       public MediaStreamRequester {
  public:
   MediaStreamDispatcherHost(const content::ResourceContext* resource_context,
@@ -37,12 +37,17 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
       const std::string& label,
       const StreamDeviceInfoArray& audio_devices,
       const StreamDeviceInfoArray& video_devices) OVERRIDE;
-
   virtual void StreamGenerationFailed(const std::string& label) OVERRIDE;
   virtual void AudioDeviceFailed(const std::string& label, int index) OVERRIDE;
   virtual void VideoDeviceFailed(const std::string& label, int index) OVERRIDE;
+  virtual void DevicesEnumerated(const std::string& label,
+                                 const StreamDeviceInfoArray& devices) OVERRIDE;
+  virtual void DevicesEnumerationFailed(const std::string& label) OVERRIDE;
+  virtual void DeviceOpened(const std::string& label,
+                            const StreamDeviceInfo& video_device) OVERRIDE;
+  virtual void DeviceOpenFailed(const std::string& label) OVERRIDE;
 
-  // BrowserMessageFilter implementation.
+  // content::BrowserMessageFilter implementation.
   virtual bool OnMessageReceived(const IPC::Message& message,
                                  bool* message_was_ok) OVERRIDE;
   virtual void OnChannelClosing() OVERRIDE;
@@ -56,6 +61,17 @@ class CONTENT_EXPORT MediaStreamDispatcherHost
                         const std::string& security_origin);
 
   void OnStopGeneratedStream(int render_view_id, const std::string& label);
+
+  void OnEnumerateDevices(int render_view_id,
+                          int page_request_id,
+                          media_stream::MediaStreamType type,
+                          const std::string& security_origin);
+
+  void OnOpenDevice(int render_view_id,
+                    int page_request_id,
+                    const std::string& device_id,
+                    media_stream::MediaStreamType type,
+                    const std::string& security_origin);
 
   // Returns the media stream manager to forward events to,
   // creating one if needed.

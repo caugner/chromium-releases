@@ -47,12 +47,12 @@ class FakeSSLClientSocket : public net::StreamSocket {
 
   // net::StreamSocket implementation.
   virtual int Read(net::IOBuffer* buf, int buf_len,
-                   net::OldCompletionCallback* callback) OVERRIDE;
+                   const net::CompletionCallback& callback) OVERRIDE;
   virtual int Write(net::IOBuffer* buf, int buf_len,
-                    net::OldCompletionCallback* callback) OVERRIDE;
+                    const net::CompletionCallback& callback) OVERRIDE;
   virtual bool SetReceiveBufferSize(int32 size) OVERRIDE;
   virtual bool SetSendBufferSize(int32 size) OVERRIDE;
-  virtual int Connect(net::OldCompletionCallback* callback) OVERRIDE;
+  virtual int Connect(const net::CompletionCallback& callback) OVERRIDE;
   virtual void Disconnect() OVERRIDE;
   virtual bool IsConnected() const OVERRIDE;
   virtual bool IsConnectedAndIdle() const OVERRIDE;
@@ -90,13 +90,6 @@ class FakeSSLClientSocket : public net::StreamSocket {
   void OnVerifyServerHelloDone(int status);
   net::Error ProcessVerifyServerHelloDone(size_t read);
 
-  // Callbacks passed to |transport_socket_|.
-  net::OldCompletionCallbackImpl<FakeSSLClientSocket> connect_callback_;
-  net::OldCompletionCallbackImpl<FakeSSLClientSocket>
-      send_client_hello_callback_;
-  net::OldCompletionCallbackImpl<FakeSSLClientSocket>
-      verify_server_hello_callback_;
-
   scoped_ptr<net::StreamSocket> transport_socket_;
 
   // During the handshake process, holds a value from HandshakeState.
@@ -107,7 +100,7 @@ class FakeSSLClientSocket : public net::StreamSocket {
   bool handshake_completed_;
 
   // The callback passed to Connect().
-  net::OldCompletionCallback* user_connect_callback_;
+  net::CompletionCallback user_connect_callback_;
 
   scoped_refptr<net::DrainableIOBuffer> write_buf_;
   scoped_refptr<net::DrainableIOBuffer> read_buf_;

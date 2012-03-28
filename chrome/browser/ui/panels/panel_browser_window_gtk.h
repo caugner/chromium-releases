@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,14 +14,9 @@
 #include "ui/base/x/work_area_watcher_x_observer.h"
 
 class Panel;
+class PanelBoundsAnimation;
 class PanelSettingsMenuModel;
 class NativePanelTestingGtk;
-
-namespace ui {
-
-class SlideAnimation;
-
-}
 
 class PanelBrowserWindowGtk : public BrowserWindowGtk,
                               public MenuGtk::Delegate,
@@ -29,7 +24,6 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
                               public NativePanel,
                               public ui::AnimationDelegate,
                               public ui::WorkAreaWatcherXObserver {
-  friend class NativePanelTestingGtk;
  public:
   PanelBrowserWindowGtk(Browser* browser, Panel* panel,
                         const gfx::Rect& bounds);
@@ -81,11 +75,11 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual void ShowTaskManagerForPanel() OVERRIDE;
   virtual FindBar* CreatePanelFindBar() OVERRIDE;
   virtual void NotifyPanelOnUserChangedTheme() OVERRIDE;
-  virtual void PanelTabContentsFocused(TabContents* tab_contents) OVERRIDE;
+  virtual void PanelWebContentsFocused(content::WebContents* contents) OVERRIDE;
   virtual void PanelCut() OVERRIDE;
   virtual void PanelCopy() OVERRIDE;
   virtual void PanelPaste() OVERRIDE;
-  virtual void DrawAttention() OVERRIDE;
+  virtual void DrawAttention(bool draw_attention) OVERRIDE;
   virtual bool IsDrawingAttention() const OVERRIDE;
   virtual bool PreHandlePanelKeyboardEvent(
       const NativeWebKeyboardEvent& event,
@@ -102,9 +96,13 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   virtual int TitleOnlyHeight() const OVERRIDE;
   virtual gfx::Size IconOnlySize() const OVERRIDE;
   virtual void EnsurePanelFullyVisible() OVERRIDE;
+  virtual void SetPanelAppIconVisibility(bool visible) OVERRIDE;
 
  private:
-  void StartBoundsAnimation(const gfx::Rect& current_bounds);
+  friend class NativePanelTestingGtk;
+
+  void StartBoundsAnimation(const gfx::Rect& from_bounds,
+                            const gfx::Rect& to_bounds);
   bool IsAnimatingBounds() const;
 
   // MessageLoop::Observer implementation:
@@ -122,6 +120,7 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
 
   void SetBoundsInternal(const gfx::Rect& bounds, bool animate);
 
+  void UpdateAttention(bool draw_attention);
   GdkRectangle GetTitlebarRectForDrawAttention() const;
 
   CHROMEGTK_CALLBACK_1(PanelBrowserWindowGtk, gboolean,
@@ -147,6 +146,10 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   CHROMEGTK_CALLBACK_1(PanelBrowserWindowGtk, gboolean, OnDragButtonReleased,
                        GdkEventButton*);
 
+  // Tests will set this to false to prevent actual GTK drags from being
+  // triggered as that generates extra unwanted signals and focus grabs.
+  bool system_drag_disabled_for_testing_;
+
   // A copy of the last button press event, used to initiate a drag.
   GdkEvent* last_mouse_down_;
 
@@ -154,10 +157,6 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   // type GInitiallyUnowned, but the widget initialization code sinks the
   // reference, so we can't use an OwnedWidgetGtk here.
   GtkWidget* drag_widget_;
-
-  // Used to destroy the drag widget after a return to the message loop.
-  ScopedRunnableMethodFactory<PanelBrowserWindowGtk>
-      destroy_drag_widget_factory_;
 
   // Due to a bug in GTK+, we need to force the end of a drag when we get a
   // mouse release event on the the dragged widget, otherwise, we don't know
@@ -188,8 +187,14 @@ class PanelBrowserWindowGtk : public BrowserWindowGtk,
   base::Time disableMinimizeUntilTime_;
 
   // Used to animate the bounds change.
-  scoped_ptr<ui::SlideAnimation> bounds_animator_;
+  scoped_ptr<PanelBoundsAnimation> bounds_animator_;
   gfx::Rect animation_start_bounds_;
+
+  // This records the bounds set on the last animation progress notification.
+  // We need this for the case where a new bounds animation starts before the
+  // current one completes. In this case, we want to start the new animation
+  // from where the last one left.
+  gfx::Rect last_animation_progressed_bounds_;
 
   DISALLOW_COPY_AND_ASSIGN(PanelBrowserWindowGtk);
 };

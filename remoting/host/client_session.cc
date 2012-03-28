@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,7 +7,6 @@
 #include <algorithm>
 
 #include "base/message_loop_proxy.h"
-#include "base/task.h"
 #include "remoting/host/capturer.h"
 #include "remoting/proto/event.pb.h"
 
@@ -126,6 +125,14 @@ void ClientSession::OnSequenceNumberUpdated(
   event_handler_->OnSessionSequenceNumber(this, sequence_number);
 }
 
+void ClientSession::OnClientIpAddress(protocol::ConnectionToClient* connection,
+                                      const std::string& channel_name,
+                                      const net::IPEndPoint& end_point) {
+  DCHECK(CalledOnValidThread());
+  DCHECK_EQ(connection_.get(), connection);
+  event_handler_->OnSessionIpAddress(this, channel_name, end_point);
+}
+
 void ClientSession::Disconnect() {
   DCHECK(CalledOnValidThread());
   DCHECK(connection_.get());
@@ -240,6 +247,7 @@ void ClientSession::RestoreEventState() {
   for (int i = 1; i < MouseEvent::BUTTON_MAX; i++) {
     if (remote_mouse_button_state_ & (1 << (i - 1))) {
       MouseEvent mouse;
+      // TODO(wez): Shouldn't [need to] set position here.
       mouse.set_x(remote_mouse_pos_.x());
       mouse.set_y(remote_mouse_pos_.y());
       mouse.set_button((MouseEvent::MouseButton)i);

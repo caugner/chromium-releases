@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "ui/base/events.h"
 #include "ui/base/ui_export.h"
 
 typedef unsigned long Atom;
@@ -123,6 +124,15 @@ UI_EXPORT bool GetAtomArrayProperty(XID window,
 UI_EXPORT bool GetStringProperty(
     XID window, const std::string& property_name, std::string* value);
 
+UI_EXPORT bool SetIntProperty(XID window,
+                              const std::string& name,
+                              const std::string& type,
+                              int value);
+UI_EXPORT bool SetIntArrayProperty(XID window,
+                                   const std::string& name,
+                                   const std::string& type,
+                                   const std::vector<int>& value);
+
 // Gets the X atom for default display corresponding to atom_name.
 Atom GetAtom(const char* atom_name);
 
@@ -227,6 +237,23 @@ UI_EXPORT void SetDefaultX11ErrorHandlers();
 
 // Return true if a given window is in full-screen mode.
 UI_EXPORT bool IsX11WindowFullScreen(XID window);
+
+// Return true if event type is MotionNotify.
+UI_EXPORT bool IsMotionEvent(XEvent* event);
+
+// Returns the mapped button.
+int GetMappedButton(int button);
+
+// Updates button mapping. This is usually called when a MappingNotify event is
+// received.
+UI_EXPORT void UpdateButtonMap();
+
+// Initializes a XEvent that holds XKeyEvent for testing. Note that ui::EF_
+// flags should be passed as |flags|, not the native ones in <X11/X.h>.
+UI_EXPORT void InitXKeyEventForTesting(EventType type,
+                                       KeyboardCode key_code,
+                                       int flags,
+                                       XEvent* event);
 
 }  // namespace ui
 

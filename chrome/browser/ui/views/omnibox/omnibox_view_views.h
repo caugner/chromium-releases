@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,11 +19,19 @@
 #include "ui/views/view.h"
 #include "webkit/glue/window_open_disposition.h"
 
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/input_method/input_method_manager.h"
+#endif
+
 class AutocompleteEditController;
 class AutocompleteEditModel;
 class AutocompletePopupView;
 class Profile;
 class TabContents;
+
+namespace ui {
+class OSExchangeData;
+}  // namespace ui
 
 // Views-implementation of OmniboxView. This is based on gtk implementation.
 // The following features are not yet supported.
@@ -33,10 +41,15 @@ class TabContents;
 // Adjust paste behavior (should not autocomplete).
 // Custom context menu for omnibox.
 // Instant.
-class OmniboxViewViews : public views::View,
-                         public OmniboxView,
-                         public content::NotificationObserver,
-                         public views::TextfieldController {
+class OmniboxViewViews
+    : public views::View,
+      public OmniboxView,
+      public content::NotificationObserver,
+#if defined(OS_CHROMEOS)
+      public
+          chromeos::input_method::InputMethodManager::CandidateWindowObserver,
+#endif
+      public views::TextfieldController {
  public:
   // The internal view class name.
   static const char kViewClassName[];
@@ -68,6 +81,13 @@ class OmniboxViewViews : public views::View,
   void HandleFocusIn();
   void HandleFocusOut();
 
+  // Sets whether the location entry can accept focus.
+  void SetLocationEntryFocusable(bool focusable);
+
+  // Returns true if the location entry is focusable and visible in
+  // the root view.
+  bool IsLocationEntryFocusableInRootView() const;
+
   // Implements views::View
   virtual void Layout() OVERRIDE;
   virtual void GetAccessibleState(ui::AccessibleViewState* state) OVERRIDE;
@@ -77,19 +97,15 @@ class OmniboxViewViews : public views::View,
   // OmniboxView:
   virtual AutocompleteEditModel* model() OVERRIDE;
   virtual const AutocompleteEditModel* model() const OVERRIDE;
-
-  virtual void SaveStateToTab(TabContents* tab) OVERRIDE;
-
-  virtual void Update(const TabContents* tab_for_state_restoring) OVERRIDE;
-
+  virtual void SaveStateToTab(content::WebContents* tab) OVERRIDE;
+  virtual void Update(
+      const content::WebContents* tab_for_state_restoring) OVERRIDE;
   virtual void OpenMatch(const AutocompleteMatch& match,
                          WindowOpenDisposition disposition,
                          const GURL& alternate_nav_url,
                          size_t selected_line,
                          const string16& keyword) OVERRIDE;
-
   virtual string16 GetText() const OVERRIDE;
-
   virtual bool IsEditingOrEmpty() const OVERRIDE;
   virtual int GetIcon() const OVERRIDE;
   virtual void SetUserText(const string16& text) OVERRIDE;
@@ -140,6 +156,19 @@ class OmniboxViewViews : public views::View,
                               const views::KeyEvent& key_event) OVERRIDE;
   virtual void OnBeforeUserAction(views::Textfield* sender) OVERRIDE;
   virtual void OnAfterUserAction(views::Textfield* sender) OVERRIDE;
+  virtual void OnAfterCutOrCopy() OVERRIDE;
+  virtual void OnWriteDragData(ui::OSExchangeData* data) OVERRIDE;
+  virtual void UpdateContextMenu(ui::SimpleMenuModel* menu_contents) OVERRIDE;
+  virtual bool IsCommandIdEnabled(int command_id) const OVERRIDE;
+  virtual void ExecuteCommand(int command_id) OVERRIDE;
+
+#if defined(OS_CHROMEOS)
+  // chromeos::input_method::InputMethodManager::CandidateWindowObserver:
+  virtual void CandidateWindowOpened(
+      chromeos::input_method::InputMethodManager* manager) OVERRIDE;
+  virtual void CandidateWindowClosed(
+      chromeos::input_method::InputMethodManager* manager) OVERRIDE;
+#endif
 
  private:
   // Return the number of characers in the current buffer.
@@ -158,9 +187,11 @@ class OmniboxViewViews : public views::View,
   // Returns the selected text.
   string16 GetSelectedText() const;
 
-  AutocompletePopupView* CreatePopupView(View* location_bar);
-
   views::Textfield* textfield_;
+
+  // When true, the location bar view is read only and also is has a slightly
+  // different presentation (smaller font size). This is used for popups.
+  bool popup_window_mode_;
 
   scoped_ptr<AutocompleteEditModel> model_;
   scoped_ptr<AutocompletePopupView> popup_view_;
@@ -170,10 +201,6 @@ class OmniboxViewViews : public views::View,
   // The object that handles additional command functionality exposed on the
   // edit, such as invoking the keyword editor.
   CommandUpdater* command_updater_;
-
-  // When true, the location bar view is read only and also is has a slightly
-  // different presentation (smaller font size). This is used for popups.
-  bool popup_window_mode_;
 
   ToolbarModel::SecurityLevel security_level_;
 
@@ -189,6 +216,11 @@ class OmniboxViewViews : public views::View,
   // Was the delete key pressed with an empty selection at the end of the edit?
   bool delete_at_end_pressed_;
   LocationBarView* location_bar_view_;
+
+  // True if the IME candidate window is open. When this is true, we want to
+  // avoid showing the popup. So far, the candidate window is detected only
+  // on Chrome OS.
+  bool ime_candidate_window_open_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViews);
 };

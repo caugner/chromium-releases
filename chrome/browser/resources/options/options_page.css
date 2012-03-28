@@ -20,6 +20,11 @@
 #search-field {
   font-size: inherit;
   margin: 0;
+  width: 100%;
+}
+
+#searchPageNav {
+  -webkit-padding-start: 20px;
 }
 
 /*
@@ -91,7 +96,7 @@ html[touch-optimized] body {
 }
 
 .close-subpage {
-  background-image: url('chrome://theme/IDR_CLOSE_BAR');
+  background-image: url('../../../../ui/resources/close_bar.png');
   height: 16px;
   min-width: 0;
   position: relative;
@@ -99,20 +104,12 @@ html[touch-optimized] body {
   width: 16px;
 }
 
-/*  In TOUCH_UI builds, the IDR_CLOSE_BAR resource is double-size. */
-<if expr="pp_ifdef('touchui')">
-.close-subpage {
-  height: 32px;
-  width: 32px;
-}
-</if>
-
 .close-subpage:hover {
-  background-image: url('chrome://theme/IDR_CLOSE_BAR_H');
+  background-image: url('../../../../ui/resources/close_bar_h.png');
 }
 
 .close-subpage:active {
-  background-image: url('chrome://theme/IDR_CLOSE_BAR_P');
+  background-image: url('../../../../ui/resources/close_bar_p.png');
 }
 
 html[dir='ltr'] .close-subpage {
@@ -163,13 +160,13 @@ html[dir='rtl'] .action-area {
 .bottom-strip {
   padding: 12px;
   position: absolute;
-  right: 0px;
-  bottom: 0px;
+  right: 0;
+  bottom: 0;
   border-top: none;
 }
 
 .overlay .page {
-  -webkit-box-shadow: 0px 5px 80px #505050;
+  -webkit-box-shadow: 0 5px 80px #505050;
   background: white;
   border: 1px solid rgb(188, 193, 208);
   border-radius: 2px;
@@ -212,7 +209,7 @@ html[dir='rtl'] .action-area {
 }
 
 .subpage-sheet {
-  -webkit-box-shadow: #666 0px 2px 5px;
+  -webkit-box-shadow: #666 0 2px 5px;
   background-color: white;
   border-left: 1px solid #b8b8b8;
   box-sizing: border-box;
@@ -223,8 +220,10 @@ html[dir='rtl'] .action-area {
 
 .subpage-sheet-contents {
   box-sizing: border-box;
-  padding: 0px 20px 20px 20px;
-  width: 650px;
+  max-width: 900px;
+  min-width: 650px;
+  padding: 0 20px 20px 20px;
+  width: 95%;
 }
 
 .managed-prefs-banner {
@@ -359,6 +358,13 @@ list > * {
   margin: 0;
 }
 
+list > .spacer {
+  /* The above height rule should not apply to spacers. When redraw is called
+     on the list they will be given an explicit element height but this ensures
+     they have 0 height to begin with. */
+  height: 0;
+}
+
 list:not([disabled]) > :hover {
   background-color: #e4ecf7;
 }
@@ -430,7 +436,7 @@ list .close-button {
   -webkit-transition: 150ms opacity;
   background-color: transparent;
   /* TODO(stuartmorgan): Replace with real images once they are available. */
-  background-image: url("../../../app/theme/close_bar.png");
+  background-image: url("../../../../ui/resources/close_bar.png");
   border: none;
   display: block;
   height: 16px;
@@ -448,11 +454,11 @@ list .close-button[disabled] {
 }
 
 list .close-button:hover {
-  background-image: url("../../../app/theme/close_bar_h.png");
+  background-image: url("../../../../ui/resources/close_bar_h.png");
 }
 
 list .close-button:active {
-  background-image: url("../../../app/theme/close_bar_p.png");
+  background-image: url("../../../../ui/resources/close_bar_p.png");
 }
 
 list .static-text {

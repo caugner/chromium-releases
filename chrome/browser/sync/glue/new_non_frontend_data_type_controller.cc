@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,19 +22,22 @@ NewNonFrontendDataTypeController::NewNonFrontendDataTypeController()
 
 NewNonFrontendDataTypeController::NewNonFrontendDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
-    Profile* profile)
-    : NonFrontendDataTypeController(profile_sync_factory, profile),
+    Profile* profile,
+    ProfileSyncService* sync_service)
+    : NonFrontendDataTypeController(profile_sync_factory,
+                                    profile,
+                                    sync_service),
       shared_change_processor_(NULL) {
 }
 
 NewNonFrontendDataTypeController::~NewNonFrontendDataTypeController() {}
 
-void NewNonFrontendDataTypeController::Start(StartCallback* start_callback) {
+void NewNonFrontendDataTypeController::Start(
+    const StartCallback& start_callback) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  DCHECK(start_callback);
+  DCHECK(!start_callback.is_null());
   if (state() != NOT_RUNNING) {
-    start_callback->Run(BUSY, SyncError());
-    delete start_callback;
+    start_callback.Run(BUSY, SyncError());
     return;
   }
 

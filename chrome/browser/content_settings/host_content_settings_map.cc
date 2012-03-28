@@ -27,16 +27,17 @@
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/content_switches.h"
 #include "googleurl/src/gurl.h"
 #include "net/base/net_errors.h"
 #include "net/base/static_cookie_policy.h"
 
 using content::BrowserThread;
+using content::UserMetricsAction;
 
 namespace {
 
@@ -68,17 +69,10 @@ bool ContentTypeHasCompoundValue(ContentSettingsType type) {
   return type == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE;
 }
 
-ContentSetting GetDefaultSetting(
-    content_settings::RuleIterator* rule_iterator) {
-  ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
-  while (rule_iterator->HasNext()) {
-    content_settings::Rule rule = rule_iterator->Next();
-    if (rule.primary_pattern == wildcard &&
-        rule.secondary_pattern == wildcard) {
-      return content_settings::ValueToContentSetting(rule.value.get());
-    }
-  }
-  return CONTENT_SETTING_DEFAULT;
+// Returns true if the |content_type| supports a resource identifier.
+// Resource identifiers are supported (but not required) for plug-ins.
+bool SupportsResourceIdentifier(ContentSettingsType content_type) {
+  return content_type == CONTENT_SETTINGS_TYPE_PLUGINS;
 }
 
 }  // namespace
@@ -120,6 +114,8 @@ void HostContentSettingsMap::RegisterUserPrefs(PrefService* prefs) {
   prefs->RegisterIntegerPref(prefs::kContentSettingsWindowLastTabIndex,
                              0,
                              PrefService::UNSYNCABLE_PREF);
+  prefs->RegisterIntegerPref(prefs::kContentSettingsDefaultWhitelistVersion,
+                             0, PrefService::SYNCABLE_PREF);
 
   // Register the prefs for the content settings providers.
   content_settings::DefaultProvider::RegisterUserPrefs(prefs);
@@ -132,7 +128,16 @@ ContentSetting HostContentSettingsMap::GetDefaultContentSettingFromProvider(
     content_settings::ProviderInterface* provider) const {
   scoped_ptr<content_settings::RuleIterator> rule_iterator(
       provider->GetRuleIterator(content_type, "", false));
-  return GetDefaultSetting(rule_iterator.get());
+
+  ContentSettingsPattern wildcard = ContentSettingsPattern::Wildcard();
+  while (rule_iterator->HasNext()) {
+    content_settings::Rule rule = rule_iterator->Next();
+    if (rule.primary_pattern == wildcard &&
+        rule.secondary_pattern == wildcard) {
+      return content_settings::ValueToContentSetting(rule.value.get());
+    }
+  }
+  return CONTENT_SETTING_DEFAULT;
 }
 
 ContentSetting HostContentSettingsMap::GetDefaultContentSetting(
@@ -168,6 +173,7 @@ ContentSetting HostContentSettingsMap::GetContentSetting(
     const GURL& secondary_url,
     ContentSettingsType content_type,
     const std::string& resource_identifier) const {
+  DCHECK(!ContentTypeHasCompoundValue(content_type));
   scoped_ptr<base::Value> value(GetWebsiteSetting(
       primary_url, secondary_url, content_type, resource_identifier, NULL));
   return content_settings::ValueToContentSetting(value.get());
@@ -177,7 +183,7 @@ void HostContentSettingsMap::GetSettingsForOneType(
     ContentSettingsType content_type,
     const std::string& resource_identifier,
     ContentSettingsForOneType* settings) const {
-  DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
+  DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
   DCHECK(settings);
 
@@ -207,7 +213,7 @@ void HostContentSettingsMap::GetSettingsForOneType(
 void HostContentSettingsMap::SetDefaultContentSetting(
     ContentSettingsType content_type,
     ContentSetting setting) {
-  DCHECK_NE(content_type, CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE);
+  DCHECK(!ContentTypeHasCompoundValue(content_type));
   DCHECK(IsSettingAllowedForType(setting, content_type));
 
   base::Value* value = NULL;
@@ -228,7 +234,7 @@ void HostContentSettingsMap::SetWebsiteSetting(
     const std::string& resource_identifier,
     base::Value* value) {
   DCHECK(IsValueAllowedForType(value, content_type));
-  DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
+  DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
   for (ProviderIterator provider = content_settings_providers_.begin();
        provider != content_settings_providers_.end();
@@ -250,7 +256,7 @@ void HostContentSettingsMap::SetContentSetting(
     ContentSettingsType content_type,
     const std::string& resource_identifier,
     ContentSetting setting) {
-  DCHECK_NE(content_type, CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE);
+  DCHECK(!ContentTypeHasCompoundValue(content_type));
   base::Value* value = NULL;
   if (setting != CONTENT_SETTING_DEFAULT)
     value = Value::CreateIntegerValue(setting);
@@ -270,6 +276,7 @@ void HostContentSettingsMap::AddExceptionForURL(
   // TODO(markusheintz): Until the UI supports pattern pairs, both urls must
   // match.
   DCHECK(primary_url == secondary_url);
+  DCHECK(!ContentTypeHasCompoundValue(content_type));
 
   // Make sure there is no entry that would override the pattern we are about
   // to insert for exactly this URL.
@@ -326,9 +333,6 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
     case CONTENT_SETTINGS_TYPE_COOKIES:
       return setting == CONTENT_SETTING_SESSION_ONLY;
     case CONTENT_SETTINGS_TYPE_PLUGINS:
-      return setting == CONTENT_SETTING_ASK &&
-             CommandLine::ForCurrentProcess()->HasSwitch(
-                 switches::kEnableClickToPlay);
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
     case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
     case CONTENT_SETTINGS_TYPE_INTENTS:
@@ -415,7 +419,7 @@ base::Value* HostContentSettingsMap::GetWebsiteSetting(
     ContentSettingsType content_type,
     const std::string& resource_identifier,
     content_settings::SettingInfo* info) const {
-  DCHECK(content_settings::SupportsResourceIdentifier(content_type) ||
+  DCHECK(SupportsResourceIdentifier(content_type) ||
          resource_identifier.empty());
 
   // Check if the scheme of the requesting url is whitelisted.

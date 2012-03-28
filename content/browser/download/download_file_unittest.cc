@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,19 +8,19 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/download/download_create_info.h"
 #include "content/browser/download/download_file_impl.h"
-#include "content/browser/download/download_id.h"
-#include "content/browser/download/download_id_factory.h"
-#include "content/browser/download/download_manager.h"
 #include "content/browser/download/download_request_handle.h"
 #include "content/browser/download/download_status_updater.h"
 #include "content/browser/download/mock_download_manager.h"
-#include "content/browser/download/mock_download_manager_delegate.h"
+#include "content/public/browser/download_manager.h"
 #include "net/base/file_stream.h"
 #include "net/base/net_errors.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
 using content::BrowserThreadImpl;
+using content::DownloadFile;
+using content::DownloadId;
+using content::DownloadManager;
 
 DownloadId::Domain kValidIdDomain = "valid DownloadId::Domain";
 
@@ -40,7 +40,6 @@ class DownloadFileTest : public testing::Test {
   // calling Release() on |download_manager_| won't ever result in its
   // destructor being called and we get a leak.
   DownloadFileTest() :
-      id_factory_(new DownloadIdFactory(kValidIdDomain)),
       ui_thread_(BrowserThread::UI, &loop_),
       file_thread_(BrowserThread::FILE, &loop_) {
   }
@@ -49,11 +48,7 @@ class DownloadFileTest : public testing::Test {
   }
 
   virtual void SetUp() {
-    download_manager_delegate_.reset(new MockDownloadManagerDelegate());
-    download_manager_ = new MockDownloadManager(
-        download_manager_delegate_.get(),
-        id_factory_,
-        &download_status_updater_);
+    download_manager_ = new MockDownloadManager;
   }
 
   virtual void TearDown() {
@@ -66,14 +61,16 @@ class DownloadFileTest : public testing::Test {
     ui_thread_.message_loop()->RunAllPending();
   }
 
-  virtual void CreateDownloadFile(scoped_ptr<DownloadFile>* file, int offset) {
+  virtual void CreateDownloadFile(scoped_ptr<DownloadFile>* file,
+                                  int offset,
+                                  bool calculate_hash) {
     DownloadCreateInfo info;
     info.download_id = DownloadId(kValidIdDomain, kDummyDownloadId + offset);
     // info.request_handle default constructed to null.
     info.save_info.file_stream = file_stream_;
     file->reset(
         new DownloadFileImpl(&info, new DownloadRequestHandle(),
-                             download_manager_));
+                             download_manager_, calculate_hash));
   }
 
   virtual void DestroyDownloadFile(scoped_ptr<DownloadFile>* file, int offset) {
@@ -104,8 +101,6 @@ class DownloadFileTest : public testing::Test {
   }
 
  protected:
-  DownloadStatusUpdater download_status_updater_;
-  scoped_ptr<MockDownloadManagerDelegate> download_manager_delegate_;
   scoped_refptr<DownloadManager> download_manager_;
 
   linked_ptr<net::FileStream> file_stream_;
@@ -115,7 +110,6 @@ class DownloadFileTest : public testing::Test {
 
  private:
   MessageLoop loop_;
-  scoped_refptr<DownloadIdFactory> id_factory_;
   // UI thread.
   BrowserThreadImpl ui_thread_;
   // File thread to satisfy debug checks in DownloadFile.
@@ -139,8 +133,8 @@ const int DownloadFileTest::kDummyRequestId = 67;
 // Rename the file before any data is downloaded, after some has, after it all
 // has, and after it's closed.
 TEST_F(DownloadFileTest, RenameFileFinal) {
-  CreateDownloadFile(&download_file_, 0);
-  ASSERT_EQ(net::OK, download_file_->Initialize(true));
+  CreateDownloadFile(&download_file_, 0, true);
+  ASSERT_EQ(net::OK, download_file_->Initialize());
   FilePath initial_path(download_file_->FullPath());
   EXPECT_TRUE(file_util::PathExists(initial_path));
   FilePath path_1(initial_path.InsertBeforeExtensionASCII("_1"));
@@ -183,7 +177,7 @@ TEST_F(DownloadFileTest, RenameFileFinal) {
 
   // Should not be able to get the hash until the file is closed.
   std::string hash;
-  EXPECT_FALSE(download_file_->GetSha256Hash(&hash));
+  EXPECT_FALSE(download_file_->GetHash(&hash));
 
   download_file_->Finish();
 
@@ -197,7 +191,7 @@ TEST_F(DownloadFileTest, RenameFileFinal) {
   EXPECT_TRUE(file_util::PathExists(path_4));
 
   // Check the hash.
-  EXPECT_TRUE(download_file_->GetSha256Hash(&hash));
+  EXPECT_TRUE(download_file_->GetHash(&hash));
   EXPECT_EQ(kDataHash, base::HexEncode(hash.data(), hash.size()));
 
   DestroyDownloadFile(&download_file_, 0);

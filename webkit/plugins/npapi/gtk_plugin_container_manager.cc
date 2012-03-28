@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -66,7 +66,7 @@ void GtkPluginContainerManager::MovePluginContainer(
   if (!widget)
     return;
 
-  DCHECK(!GTK_WIDGET_NO_WINDOW(widget));
+  DCHECK(gtk_widget_get_has_window(widget));
 
   if (!move.visible) {
     gtk_widget_hide(widget);
@@ -85,7 +85,8 @@ void GtkPluginContainerManager::MovePluginContainer(
     GdkRectangle clip_rect = move.clip_rect.ToGdkRectangle();
     GdkRegion* clip_region = gdk_region_rectangle(&clip_rect);
     gfx::SubtractRectanglesFromRegion(clip_region, move.cutout_rects);
-    gdk_window_shape_combine_region(widget->window, clip_region, 0, 0);
+    gdk_window_shape_combine_region(gtk_widget_get_window(widget),
+                                    clip_region, 0, 0);
     gdk_region_destroy(clip_region);
   }
 

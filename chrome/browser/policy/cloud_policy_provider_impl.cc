@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,7 @@ namespace policy {
 CloudPolicyProviderImpl::CloudPolicyProviderImpl(
     BrowserPolicyConnector* browser_policy_connector,
     const PolicyDefinitionList* policy_list,
-    CloudPolicyCacheBase::PolicyLevel level)
+    PolicyLevel level)
     : CloudPolicyProvider(policy_list),
       browser_policy_connector_(browser_policy_connector),
       level_(level),
@@ -68,32 +68,6 @@ void CloudPolicyProviderImpl::PrependCache(CloudPolicyCacheBase* cache) {
   RecombineCachesAndTriggerUpdate();
 }
 
-// static
-void CloudPolicyProviderImpl::CombineTwoPolicyMaps(const PolicyMap& base,
-                                                   const PolicyMap& overlay,
-                                                   PolicyMap* out_map) {
-  bool added_proxy_policy = false;
-  out_map->Clear();
-
-  for (PolicyMap::const_iterator i = base.begin(); i != base.end(); ++i) {
-    out_map->Set(i->first, i->second->DeepCopy());
-    added_proxy_policy = added_proxy_policy ||
-                         ConfigurationPolicyPrefStore::IsProxyPolicy(i->first);
-  }
-
-  // Add every entry of |overlay| which has not been added by |base|. Only add
-  // proxy policies if none of them was added by |base|.
-  for (PolicyMap::const_iterator i = overlay.begin(); i != overlay.end(); ++i) {
-    if (ConfigurationPolicyPrefStore::IsProxyPolicy(i->first)) {
-      if (!added_proxy_policy) {
-        out_map->Set(i->first, i->second->DeepCopy());
-      }
-    } else if (!out_map->Get(i->first)) {
-      out_map->Set(i->first, i->second->DeepCopy());
-    }
-  }
-}
-
 void CloudPolicyProviderImpl::RecombineCachesAndTriggerUpdate() {
   // Re-check whether all caches are ready.
   if (!initialization_complete_) {
@@ -111,16 +85,19 @@ void CloudPolicyProviderImpl::RecombineCachesAndTriggerUpdate() {
 
   // Reconstruct the merged policy map.
   PolicyMap newly_combined;
+  PolicyMap cache_policies;
   for (ListType::iterator i = caches_.begin(); i != caches_.end(); ++i) {
     if (!(*i)->IsReady())
       continue;
-    PolicyMap tmp_map;
-    CombineTwoPolicyMaps(newly_combined, *(*i)->policy(level_), &tmp_map);
-    newly_combined.Swap(&tmp_map);
+    cache_policies.CopyFrom(*(*i)->policy());
+    FixDeprecatedPolicies(&cache_policies);
+    newly_combined.MergeFrom(cache_policies);
   }
 
-  // Trigger a notification.
+  newly_combined.FilterLevel(level_);
   combined_.Swap(&newly_combined);
+
+  // Trigger a notification.
   if (pending_update_caches_.empty())
     NotifyPolicyUpdated();
 }

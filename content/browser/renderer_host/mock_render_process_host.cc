@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,7 +22,6 @@ MockRenderProcessHost::MockRenderProcessHost(
           factory_(NULL),
           id_(ChildProcessHostImpl::GenerateChildProcessUniqueId()),
           browser_context_(browser_context),
-          max_page_id_(-1),
           fast_shutdown_started_(false) {
   // Child process security operations can't be unit tested unless we add
   // ourselves as an existing child process.
@@ -50,10 +49,6 @@ bool MockRenderProcessHost::Init(bool is_accessibility_enabled) {
 int MockRenderProcessHost::GetNextRoutingID() {
   static int prev_routing_id = 0;
   return ++prev_routing_id;
-}
-
-void MockRenderProcessHost::UpdateAndSendMaxPageID(int32 page_id) {
-  UpdateMaxPageID(page_id);
 }
 
 void MockRenderProcessHost::CancelResourceRequests(int render_widget_id) {
@@ -123,16 +118,14 @@ TransportDIB* MockRenderProcessHost::GetTransportDIB(TransportDIB::Id dib_id) {
   // On Mac, TransportDIBs are always created in the browser, so we cannot map
   // one from a dib_id.
   transport_dib_ = TransportDIB::Create(100 * 100 * 4, 0);
+#elif defined(OS_ANDROID)
+  // On Android, Handles and Ids are the same underlying type.
+  transport_dib_ = TransportDIB::Map(dib_id);
 #elif defined(OS_POSIX)
   transport_dib_ = TransportDIB::Map(dib_id.shmkey);
 #endif
 
   return transport_dib_;
-}
-
-void MockRenderProcessHost::SetCompositingSurface(
-    int render_widget_id,
-    gfx::PluginWindowHandle compositing_surface) {
 }
 
 int MockRenderProcessHost::GetID() const {
@@ -192,11 +185,6 @@ IPC::Channel::Listener* MockRenderProcessHost::GetListenerByID(
   return listeners_.Lookup(routing_id);
 }
 
-void MockRenderProcessHost::UpdateMaxPageID(int32 page_id) {
-  if (page_id > max_page_id_)
-    max_page_id_ = page_id;
-}
-
 content::BrowserContext* MockRenderProcessHost::GetBrowserContext() const {
   return browser_context_;
 }
@@ -217,8 +205,7 @@ base::TimeDelta MockRenderProcessHost::GetChildProcessIdleTime() const {
 
 content::RenderProcessHost::listeners_iterator
     MockRenderProcessHost::ListenersIterator() {
-  IDMap<IPC::Channel::Listener> listeners;
-  return listeners_iterator(&listeners);
+  return listeners_iterator(&listeners_);
 }
 
 bool MockRenderProcessHost::OnMessageReceived(const IPC::Message& msg) {

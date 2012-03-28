@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/synchronization/lock.h"
-#include "media/base/filter_factories.h"
-#include "media/base/filters.h"
+#include "googleurl/src/gurl.h"
+#include "media/base/data_source.h"
 #include "webkit/media/buffered_resource_loader.h"
 
 namespace media {
@@ -24,26 +24,18 @@ namespace webkit_media {
 // thread as well as media-specific threads.
 class BufferedDataSource : public WebDataSource {
  public:
-  // Creates a DataSourceFactory for building BufferedDataSource objects.
-  static media::DataSourceFactory* CreateFactory(
-      MessageLoop* render_loop,
-      WebKit::WebFrame* frame,
-      media::MediaLog* media_log,
-      const WebDataSourceBuildObserverHack& build_observer);
-
   BufferedDataSource(MessageLoop* render_loop,
                      WebKit::WebFrame* frame,
                      media::MediaLog* media_log);
 
   virtual ~BufferedDataSource();
 
-  // media::Filter implementation.
-  virtual void set_host(media::FilterHost* host) OVERRIDE;
+  // media::DataSource implementation.
+  // Called from demuxer thread.
+  virtual void set_host(media::DataSourceHost* host) OVERRIDE;
   virtual void Stop(const base::Closure& callback) OVERRIDE;
   virtual void SetPlaybackRate(float playback_rate) OVERRIDE;
 
-  // media::DataSource implementation.
-  // Called from demuxer thread.
   virtual void Read(
       int64 position,
       size_t size,
@@ -55,9 +47,8 @@ class BufferedDataSource : public WebDataSource {
   virtual void SetBitrate(int bitrate) OVERRIDE;
 
   // webkit_glue::WebDataSource implementation.
-  virtual void Initialize(const std::string& url,
+  virtual void Initialize(const GURL& url,
                           const media::PipelineStatusCB& callback) OVERRIDE;
-  virtual void CancelInitialize() OVERRIDE;
   virtual bool HasSingleOrigin() OVERRIDE;
   virtual void Abort() OVERRIDE;
 
@@ -70,10 +61,6 @@ class BufferedDataSource : public WebDataSource {
 
  private:
   friend class BufferedDataSourceTest;
-
-  // Posted to perform initialization on render thread and start resource
-  // loading.
-  void InitializeTask();
 
   // Task posted to perform actual reading on the render thread.
   void ReadTask(int64 position, int read_size, uint8* read_buffer);
@@ -155,7 +142,7 @@ class BufferedDataSource : public WebDataSource {
   WebKit::WebFrame* frame_;
 
   // A resource loader for the media resource.
-  scoped_refptr<BufferedResourceLoader> loader_;
+  scoped_ptr<BufferedResourceLoader> loader_;
 
   // True if |loader| is downloading data.
   bool is_downloading_data_;

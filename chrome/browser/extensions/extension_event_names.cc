@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,11 +6,13 @@
 
 namespace extension_event_names {
 
+const char kOnTabActivated[] = "tabs.onActivated";
 const char kOnTabActiveChanged[] = "tabs.onActiveChanged";
 const char kOnTabAttached[] = "tabs.onAttached";
 const char kOnTabCreated[] = "tabs.onCreated";
 const char kOnTabDetached[] = "tabs.onDetached";
 const char kOnTabHighlightChanged[] = "tabs.onHighlightChanged";
+const char kOnTabHighlighted[] = "tabs.onHighlighted";
 const char kOnTabMoved[] = "tabs.onMoved";
 const char kOnTabRemoved[] = "tabs.onRemoved";
 const char kOnTabSelectionChanged[] = "tabs.onSelectionChanged";
@@ -37,4 +39,7 @@ const char kOnDownloadChanged[] = "experimental.downloads.onChanged";
 const char kOnDownloadErased[] = "experimental.downloads.onErased";
 
 const char kOnSettingsChanged[] = "experimental.storage.onChanged";
+
+const char kOnTerminalProcessOutput[] = "terminalPrivate.onProcessOutput";
+
 }  // namespace extension_event_names

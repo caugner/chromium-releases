@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -41,13 +41,13 @@
 #include "chrome/common/extensions/extension.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_child_process_host.h"
-#include "content/browser/renderer_host/render_message_filter.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/browser_child_process_host_iterator.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/child_process_data.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/process_type.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -65,7 +65,9 @@
 #include "ui/gfx/icon_util.h"
 #endif  // defined(OS_WIN)
 
+using content::BrowserChildProcessHostIterator;
 using content::BrowserThread;
+using content::WebContents;
 
 namespace {
 
@@ -113,11 +115,7 @@ TaskManagerRendererResource::TaskManagerRendererResource(
   // We cache the process and pid as when a Tab/BackgroundContents is closed the
   // process reference becomes NULL and the TaskManager still needs it.
   pid_ = base::GetProcId(process_);
-  stats_.images.size = 0;
-  stats_.cssStyleSheets.size = 0;
-  stats_.scripts.size = 0;
-  stats_.xslStyleSheets.size = 0;
-  stats_.fonts.size = 0;
+  memset(&stats_, 0, sizeof(stats_));
 }
 
 TaskManagerRendererResource::~TaskManagerRendererResource() {
@@ -220,8 +218,8 @@ SkBitmap* TaskManagerTabContentsResource::prerender_icon_ = NULL;
 TaskManagerTabContentsResource::TaskManagerTabContentsResource(
     TabContentsWrapper* tab_contents)
     : TaskManagerRendererResource(
-          tab_contents->tab_contents()->GetRenderProcessHost()->GetHandle(),
-          tab_contents->render_view_host()),
+          tab_contents->web_contents()->GetRenderProcessHost()->GetHandle(),
+          tab_contents->web_contents()->GetRenderViewHost()),
       tab_contents_(tab_contents),
       is_instant_preview_(false) {
   if (!prerender_icon_) {
@@ -251,12 +249,12 @@ bool TaskManagerTabContentsResource::IsPrerendering() const {
       prerender::PrerenderManagerFactory::GetForProfile(
           tab_contents_->profile());
   return prerender_manager &&
-         prerender_manager->IsTabContentsPrerendering(
-             tab_contents_->tab_contents());
+         prerender_manager->IsWebContentsPrerendering(
+             tab_contents_->web_contents());
 }
 
 bool TaskManagerTabContentsResource::HostsExtension() const {
-  return tab_contents_->tab_contents()->GetURL().SchemeIs(
+  return tab_contents_->web_contents()->GetURL().SchemeIs(
       chrome::kExtensionScheme);
 }
 
@@ -266,7 +264,7 @@ TaskManager::Resource::Type TaskManagerTabContentsResource::GetType() const {
 
 string16 TaskManagerTabContentsResource::GetTitle() const {
   // Fall back on the URL if there's no title.
-  TabContents* contents = tab_contents_->tab_contents();
+  WebContents* contents = tab_contents_->web_contents();
   string16 tab_title = contents->GetTitle();
   GURL url = contents->GetURL();
   if (tab_title.empty()) {
@@ -329,8 +327,8 @@ const Extension* TaskManagerTabContentsResource::GetExtension() const {
   if (HostsExtension()) {
     ExtensionService* extension_service =
         tab_contents_->profile()->GetExtensionService();
-    return extension_service->GetExtensionByURL(
-        tab_contents_->tab_contents()->GetURL());
+    return extension_service->extensions()->GetByID(
+        tab_contents_->web_contents()->GetURL().host());
   }
 
   return NULL;
@@ -354,9 +352,9 @@ TaskManager::Resource* TaskManagerTabContentsResourceProvider::GetResource(
     int origin_pid,
     int render_process_host_id,
     int routing_id) {
-  TabContents* tab_contents =
-      tab_util::GetTabContentsByID(render_process_host_id, routing_id);
-  if (!tab_contents)  // Not one of our resource.
+  WebContents* web_contents =
+      tab_util::GetWebContentsByID(render_process_host_id, routing_id);
+  if (!web_contents)  // Not one of our resource.
     return NULL;
 
   // If an origin PID was specified then the request originated in a plugin
@@ -365,7 +363,7 @@ TaskManager::Resource* TaskManagerTabContentsResourceProvider::GetResource(
     return NULL;
 
   TabContentsWrapper* wrapper =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
   std::map<TabContentsWrapper*, TaskManagerTabContentsResource*>::iterator
       res_iter = resources_.find(wrapper);
   if (res_iter == resources_.end()) {
@@ -385,17 +383,17 @@ void TaskManagerTabContentsResourceProvider::StartUpdating() {
     Add(*iterator);
 
   // Then we register for notifications to get new tabs.
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
                  content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_SWAPPED,
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
                  content::NotificationService::AllBrowserContextsAndSources());
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
                  content::NotificationService::AllBrowserContextsAndSources());
   // TAB_CONTENTS_DISCONNECTED should be enough to know when to remove a
   // resource.  This is an attempt at mitigating a crasher that seem to
   // indicate a resource is still referencing a deleted TabContents
   // (http://crbug.com/7321).
-  registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+  registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                  content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Add(this, chrome::NOTIFICATION_INSTANT_COMMITTED,
                  content::NotificationService::AllBrowserContextsAndSources());
@@ -407,16 +405,16 @@ void TaskManagerTabContentsResourceProvider::StopUpdating() {
 
   // Then we unregister for notifications to get new tabs.
   registrar_.Remove(
-      this, content::NOTIFICATION_TAB_CONTENTS_CONNECTED,
+      this, content::NOTIFICATION_WEB_CONTENTS_CONNECTED,
       content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(
-      this, content::NOTIFICATION_TAB_CONTENTS_SWAPPED,
+      this, content::NOTIFICATION_WEB_CONTENTS_SWAPPED,
       content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(
-      this, content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED,
+      this, content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED,
       content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(
-      this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+      this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
       content::NotificationService::AllBrowserContextsAndSources());
   registrar_.Remove(
       this, chrome::NOTIFICATION_INSTANT_COMMITTED,
@@ -442,8 +440,8 @@ void TaskManagerTabContentsResourceProvider::Add(
     return;
 
   // Don't add dead tabs or tabs that haven't yet connected.
-  if (!tab_contents->tab_contents()->GetRenderProcessHost()->GetHandle() ||
-      !tab_contents->tab_contents()->notify_disconnection()) {
+  if (!tab_contents->web_contents()->GetRenderProcessHost()->GetHandle() ||
+      !tab_contents->web_contents()->WillNotifyDisconnection()) {
     return;
   }
 
@@ -501,26 +499,26 @@ void TaskManagerTabContentsResourceProvider::Observe(int type,
     tab_contents = content::Source<TabContentsWrapper>(source).ptr();
   } else {
     tab_contents = TabContentsWrapper::GetCurrentWrapperForContents(
-        content::Source<TabContents>(source).ptr());
+        content::Source<WebContents>(source).ptr());
   }
   // A background page does not have a TabContentsWrapper.
   if (!tab_contents)
     return;
   switch (type) {
-    case content::NOTIFICATION_TAB_CONTENTS_CONNECTED:
+    case content::NOTIFICATION_WEB_CONTENTS_CONNECTED:
       Add(tab_contents);
       break;
-    case content::NOTIFICATION_TAB_CONTENTS_SWAPPED:
+    case content::NOTIFICATION_WEB_CONTENTS_SWAPPED:
       Remove(tab_contents);
       Add(tab_contents);
       break;
-    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED:
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED:
       // If this DCHECK is triggered, it could explain http://crbug.com/7321 .
       DCHECK(resources_.find(tab_contents) ==
              resources_.end()) << "TAB_CONTENTS_DESTROYED with no associated "
                                   "TAB_CONTENTS_DISCONNECTED";
       // Fall through.
-    case content::NOTIFICATION_TAB_CONTENTS_DISCONNECTED:
+    case content::NOTIFICATION_WEB_CONTENTS_DISCONNECTED:
       Remove(tab_contents);
       break;
     case chrome::NOTIFICATION_INSTANT_COMMITTED:
@@ -542,9 +540,9 @@ TaskManagerBackgroundContentsResource::TaskManagerBackgroundContentsResource(
     BackgroundContents* background_contents,
     const string16& application_name)
     : TaskManagerRendererResource(
-          background_contents->tab_contents()->GetRenderProcessHost()->
+          background_contents->web_contents()->GetRenderProcessHost()->
               GetHandle(),
-          background_contents->tab_contents()->render_view_host()),
+          background_contents->web_contents()->GetRenderViewHost()),
       background_contents_(background_contents),
       application_name_(application_name) {
   // Just use the same icon that other extension resources do.
@@ -611,9 +609,9 @@ TaskManagerBackgroundContentsResourceProvider::GetResource(
     return NULL;
 
   for (Resources::iterator i = resources_.begin(); i != resources_.end(); i++) {
-    TabContents* tab = i->first->tab_contents();
-    if (tab->render_view_host()->process()->GetID() == render_process_host_id
-        && tab->render_view_host()->routing_id() == routing_id) {
+    WebContents* tab = i->first->web_contents();
+    if (tab->GetRenderProcessHost()->GetID() == render_process_host_id
+        && tab->GetRenderViewHost()->routing_id() == routing_id) {
       return i->second;
     }
   }
@@ -705,7 +703,7 @@ void TaskManagerBackgroundContentsResourceProvider::Add(
     return;
 
   // Don't add contents whose process is dead.
-  if (!contents->tab_contents()->GetRenderProcessHost()->GetHandle())
+  if (!contents->web_contents()->GetRenderProcessHost()->GetHandle())
     return;
 
   // Should never add the same BackgroundContents twice.
@@ -1072,15 +1070,11 @@ void TaskManagerChildProcessResourceProvider::AddToTaskManager(
 // The ChildProcessData::Iterator has to be used from the IO thread.
 void TaskManagerChildProcessResourceProvider::RetrieveChildProcessData() {
   std::vector<content::ChildProcessData> child_processes;
-  for (BrowserChildProcessHost::Iterator iter; !iter.Done(); ++iter) {
+  for (BrowserChildProcessHostIterator iter; !iter.Done(); ++iter) {
     // Only add processes which are already started, since we need their handle.
-    if ((*iter)->handle() == base::kNullProcessHandle)
+    if (iter.GetData().handle == base::kNullProcessHandle)
       continue;
-    content::ChildProcessData data;
-    data.type = (*iter)->type();
-    data.name = (*iter)->name();
-    data.handle = (*iter)->handle();
-    child_processes.push_back(data);
+    child_processes.push_back(iter.GetData());
   }
   // Now notify the UI thread that we have retrieved information about child
   // processes.

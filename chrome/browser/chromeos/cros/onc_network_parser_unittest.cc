@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,16 +8,30 @@
 #include <keyhi.h>
 #include <pk11pub.h>
 
+#include "base/file_util.h"
+#include "base/json/json_value_serializer.h"
 #include "base/lazy_instance.h"
-#include "base/scoped_temp_dir.h"
+#include "base/message_loop.h"
+#include "base/path_service.h"
+#include "base/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/dbus/dbus_thread_manager.h"
+#include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/chromeos/system/runtime_environment.h"
+#include "chrome/browser/net/pref_proxy_config_tracker_impl.h"
+#include "chrome/common/chrome_paths.h"
+#include "chrome/test/base/testing_browser_process.h"
+#include "chrome/test/base/testing_pref_service.h"
+#include "content/test/test_browser_thread.h"
 #include "crypto/nss_util.h"
 #include "net/base/cert_database.h"
 #include "net/base/cert_type.h"
 #include "net/base/crypto_module.h"
 #include "net/base/x509_certificate.h"
+#include "net/proxy/proxy_config.h"
 #include "net/third_party/mozilla_security_manager/nsNSSCertTrust.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
@@ -26,87 +40,6 @@ namespace msm = mozilla_security_manager;
 namespace chromeos {
 
 namespace {
-const char kNetworkConfigurationOpenVPN[] =
-      "    {"
-      "      \"GUID\": \"{408290ea-9299-4757-ab04-8957d55f0f13}\","
-      "      \"Type\": \"VPN\","
-      "      \"Name\": \"MyVPN\","
-      "      \"VPN\": {"
-      "        \"Host\": \"vpn.acme.org\","
-      "        \"Type\": \"OpenVPN\","
-      "        \"OpenVPN\": {"
-      "          \"AuthRetry\": \"interact\","
-      "          \"CompLZO\": \"true\","
-      "          \"KeyDirection\": \"1\","
-      "          \"Port\": 443,"
-      "          \"Proto\": \"udp\","
-      "          \"PushPeerInfo\": true,"
-      "          \"RemoteCertEKU\": \"TLS Web Server Authentication\","
-      "          \"RemoteCertKU\": ["
-      "            \"eo\""
-      "          ],"
-      "          \"RemoteCertTLS\": \"server\","
-      "          \"RenegSec\": 0,"
-      "          \"ServerPollTimeout\": 10,"
-      "          \"StaticChallenge\": \"My static challenge\","
-      "          \"TLSAuthContents\": \""
-      "-----BEGIN OpenVPN Static key V1-----\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
-      "END OpenVPN Static key V1-----\n\","
-      "          \"TLSRemote\": \"MyOpenVPNServer\","
-      "          \"SaveCredentials\": false,"
-      "          \"ServerCARef\": \"{55ca78f6-0842-4e1b-96a3-09a9e1a26ef5}\","
-      "          \"ClientCertType\": \"Pattern\","
-      "          \"ClientCertPattern\": {"
-      "            \"IssuerRef\": \"{68a2ed90-13a1-4120-a1fe-282508320e18}\","
-      "            \"EnrollmentURI\": ["
-      "              \"chrome-extension://abc/keygen-cert.html\""
-      "            ]"
-      "          },"
-      "        }"
-      "      }"
-      "    }";
-
-const char kCertificateWebAuthority[] =
-      "        {"
-      "            \"GUID\": \"{f998f760-272b-6939-4c2beffe428697ab}\","
-      "            \"Type\": \"Authority\","
-      "            \"Trust\": [\"Web\"],"
-      "            \"X509\": \"MIIDojCCAwugAwIBAgIJAKGvi5ZgEWDVMA0GCSqGSIb3D"
-      "QEBBAUAMIGTMRUwEwYDVQQKEwxHb29nbGUsIEluYy4xETAPBgNVBAsTCENocm9tZU9TMS"
-      "IwIAYJKoZIhvcNAQkBFhNnc3BlbmNlckBnb29nbGUuY29tMRowGAYDVQQHExFNb3VudGF"
-      "pbiBWaWV3LCBDQTELMAkGA1UECBMCQ0ExCzAJBgNVBAYTAlVTMQ0wCwYDVQQDEwRsbWFv"
-      "MB4XDTExMDMxNjIzNDcxMFoXDTEyMDMxNTIzNDcxMFowgZMxFTATBgNVBAoTDEdvb2dsZ"
-      "SwgSW5jLjERMA8GA1UECxMIQ2hyb21lT1MxIjAgBgkqhkiG9w0BCQEWE2dzcGVuY2VyQG"
-      "dvb2dsZS5jb20xGjAYBgNVBAcTEU1vdW50YWluIFZpZXcsIENBMQswCQYDVQQIEwJDQTE"
-      "LMAkGA1UEBhMCVVMxDTALBgNVBAMTBGxtYW8wgZ8wDQYJKoZIhvcNAQEBBQADgY0AMIGJ"
-      "AoGBAMDX6BQz2JUzIAVjetiXxDznd2wdqVqVHfNkbSRW+xBywgqUaIXmFEGUol7VzPfme"
-      "FV8o8ok/eFlQB0h6ycqgwwMd0KjtJs2ys/k0F5GuN0G7fsgr+NRnhVgxj21yF6gYTN/8a"
-      "9kscla/svdmp8ekexbALFnghbLBx3CgcqUxT+tAgMBAAGjgfswgfgwDAYDVR0TBAUwAwE"
-      "B/zAdBgNVHQ4EFgQUbYygbSkl4kpjCNuxoezFGupA97UwgcgGA1UdIwSBwDCBvYAUbYyg"
-      "bSkl4kpjCNuxoezFGupA97WhgZmkgZYwgZMxFTATBgNVBAoTDEdvb2dsZSwgSW5jLjERM"
-      "A8GA1UECxMIQ2hyb21lT1MxIjAgBgkqhkiG9w0BCQEWE2dzcGVuY2VyQGdvb2dsZS5jb2"
-      "0xGjAYBgNVBAcTEU1vdW50YWluIFZpZXcsIENBMQswCQYDVQQIEwJDQTELMAkGA1UEBhM"
-      "CVVMxDTALBgNVBAMTBGxtYW+CCQChr4uWYBFg1TANBgkqhkiG9w0BAQQFAAOBgQCDq9wi"
-      "Q4uVuf1CQU3sXfXCy1yqi5m8AsO9FxHvah5/SVFNwKllqTfedpCaWEswJ55YAojW9e+pY"
-      "2Fh3Fo/Y9YkF88KCtLuBjjqDKCRLxF4LycjHODKyQQ7mN/t5AtP9yKOsNvWF+M4IfReg5"
-      "1kohau6FauQx87by5NIRPdkNPvkQ==\""
-      "        }";
 
 const char g_token_name[] = "OncNetworkParserTest token";
 
@@ -115,10 +48,10 @@ net::CertType GetCertType(const net::X509Certificate* cert) {
   msm::nsNSSCertTrust trust(cert->os_cert_handle()->trust);
   if (trust.HasAnyUser())
     return net::USER_CERT;
-  if (trust.HasAnyCA() || CERT_IsCACert(cert->os_cert_handle(), NULL))
-    return net::CA_CERT;
   if (trust.HasPeer(PR_TRUE, PR_FALSE, PR_FALSE))
     return net::SERVER_CERT;
+  if (trust.HasAnyCA() || CERT_IsCACert(cert->os_cert_handle(), NULL))
+    return net::CA_CERT;
   return net::UNKNOWN_CERT;
 }
 
@@ -127,18 +60,15 @@ net::CertType GetCertType(const net::X509Certificate* cert) {
 class OncNetworkParserTest : public testing::Test {
  public:
   static void SetUpTestCase() {
-    ASSERT_TRUE(temp_db_dir_.Get().CreateUniqueTempDir());
     // Ideally, we'd open a test DB for each test case, and close it
     // again, removing the temp dir, but unfortunately, there's a
     // bug in NSS that prevents this from working, so we just open
     // it once, and empty it for each test case.  Here's the bug:
     // https://bugzilla.mozilla.org/show_bug.cgi?id=588269
-    ASSERT_TRUE(
-        crypto::OpenTestNSSDB(temp_db_dir_.Get().path(), g_token_name));
-  }
-
-  static void TearDownTestCase() {
-    ASSERT_TRUE(temp_db_dir_.Get().Delete());
+    ASSERT_TRUE(crypto::OpenTestNSSDB());
+    // There is no matching TearDownTestCase call to close the test NSS DB
+    // because that would leave NSS in a potentially broken state for further
+    // tests, due to https://bugzilla.mozilla.org/show_bug.cgi?id=588269
   }
 
   virtual void SetUp() {
@@ -156,6 +86,18 @@ class OncNetworkParserTest : public testing::Test {
     EXPECT_EQ(0U, ListCertsInSlot(slot_->os_module_handle()).size());
   }
 
+  virtual void GetTestData(const std::string& filename, std::string* contents) {
+      FilePath path;
+      std::string error;
+      PathService::Get(chrome::DIR_TEST_DATA, &path);
+      path = path.AppendASCII("chromeos").AppendASCII("cros").Append(filename);
+      ASSERT_TRUE(contents != NULL);
+      ASSERT_TRUE(file_util::PathExists(path))
+        << "Couldn't find test data file " << path.value();
+      ASSERT_TRUE(file_util::ReadFileToString(path, contents))
+        << "Unable to read test data file " << path.value();
+  }
+
   const base::Value* GetExpectedProperty(const Network* network,
                                          PropertyIndex index,
                                          base::Value::Type expected_type);
@@ -165,6 +107,9 @@ class OncNetworkParserTest : public testing::Test {
   void CheckBooleanProperty(const Network* network,
                             PropertyIndex index,
                             bool expected);
+
+  void TestProxySettings(const std::string proxy_settings_blob,
+                         net::ProxyConfig* net_config);
 
  protected:
   scoped_refptr<net::CryptoModule> slot_;
@@ -197,7 +142,7 @@ class OncNetworkParserTest : public testing::Test {
     return ok;
   }
 
-  static base::LazyInstance<ScopedTempDir> temp_db_dir_;
+  ScopedStubCrosEnabler stub_cros_enabler_;
 };
 
 const base::Value* OncNetworkParserTest::GetExpectedProperty(
@@ -242,28 +187,33 @@ void OncNetworkParserTest::CheckBooleanProperty(const Network* network,
   EXPECT_EQ(expected, bool_value);
 }
 
-// static
-base::LazyInstance<ScopedTempDir> OncNetworkParserTest::temp_db_dir_ =
-    LAZY_INSTANCE_INITIALIZER;
+void OncNetworkParserTest::TestProxySettings(const std::string test_blob,
+                                             net::ProxyConfig* net_config) {
+  // Parse Network Configuration including ProxySettings dictionary.
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
+  scoped_ptr<Network> network(parser.ParseNetwork(0));
+  ASSERT_TRUE(network.get());
+  EXPECT_FALSE(network->proxy_config().empty());
 
-TEST_F(OncNetworkParserTest, TestCreateNetworkWifi1) {
-  std::string test_blob(
-      "{"
-      "  \"NetworkConfigurations\": [{"
-      "    \"GUID\": \"{485d6076-dd44-6b6d-69787465725f5045}\","
-      "    \"Type\": \"WiFi\","
-      "    \"WiFi\": {"
-      "      \"Security\": \"WEP-PSK\","
-      "      \"SSID\": \"ssid\","
-      "      \"Passphrase\": \"pass\","
-      "    }"
-      "  }]"
-      "}");
-  OncNetworkParser parser(test_blob);
+  // Deserialize ProxyConfig string property of Network into
+  // ProxyConfigDictionary and decode into net::ProxyConfig.
+  JSONStringValueSerializer serializer(network->proxy_config());
+  scoped_ptr<Value> value(serializer.Deserialize(NULL, NULL));
+  ASSERT_TRUE(value.get());
+  EXPECT_TRUE(value->GetType() == Value::TYPE_DICTIONARY);
+  DictionaryValue* dict = static_cast<DictionaryValue*>(value.get());
+  ProxyConfigDictionary proxy_dict(dict);
+  EXPECT_TRUE(PrefProxyConfigTrackerImpl::PrefConfigToNetConfig(proxy_dict,
+                                                                net_config));
+}
+
+TEST_F(OncNetworkParserTest, TestCreateNetworkWifi) {
+  std::string test_blob;
+  GetTestData("network-wifi.onc", &test_blob);
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
 
   EXPECT_EQ(1, parser.GetNetworkConfigsSize());
   EXPECT_EQ(0, parser.GetCertificatesSize());
-  EXPECT_FALSE(parser.ParseNetwork(1));
   scoped_ptr<Network> network(parser.ParseNetwork(0));
   ASSERT_TRUE(network.get());
 
@@ -274,32 +224,52 @@ TEST_F(OncNetworkParserTest, TestCreateNetworkWifi1) {
   EXPECT_EQ(wifi->name(), "ssid");
   CheckStringProperty(wifi, PROPERTY_INDEX_SSID, "ssid");
   EXPECT_EQ(wifi->auto_connect(), false);
-  EXPECT_EQ(wifi->passphrase(), "pass");
-  CheckStringProperty(wifi, PROPERTY_INDEX_PASSPHRASE, "pass");
+  EXPECT_EQ(wifi->passphrase(), "z123456789012");
+  CheckStringProperty(wifi, PROPERTY_INDEX_PASSPHRASE, "z123456789012");
 }
 
+TEST_F(OncNetworkParserTest, TestCreateNetworkEthernet) {
+  std::string test_blob;
+  GetTestData("network-ethernet.onc", &test_blob);
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
+
+  EXPECT_GE(parser.GetNetworkConfigsSize(), 1);
+  scoped_ptr<Network> network(parser.ParseNetwork(0));
+  ASSERT_TRUE(network.get());
+
+  EXPECT_EQ(network->type(), chromeos::TYPE_ETHERNET);
+  EthernetNetwork* ethernet = static_cast<EthernetNetwork*>(network.get());
+  EXPECT_EQ(ethernet->name(), "My Ethernet Network");
+}
+
+TEST_F(OncNetworkParserTest, TestLoadEncryptedOnc) {
+  std::string test_blob;
+  GetTestData("encrypted.onc", &test_blob);
+  OncNetworkParser parser(test_blob,
+                          "test0000",
+                          NetworkUIData::ONC_SOURCE_USER_IMPORT);
+  ASSERT_TRUE(parser.parse_error().empty());
+  EXPECT_EQ(1, parser.GetNetworkConfigsSize());
+  EXPECT_EQ(0, parser.GetCertificatesSize());
+  scoped_ptr<Network> network(parser.ParseNetwork(0));
+  ASSERT_TRUE(network.get());
+
+  EXPECT_EQ(network->type(), chromeos::TYPE_WIFI);
+  WifiNetwork* wifi = static_cast<WifiNetwork*>(network.get());
+  EXPECT_EQ(wifi->encryption(), chromeos::SECURITY_NONE);
+  EXPECT_EQ(wifi->name(), "WirelessNetwork");
+  EXPECT_EQ(wifi->auto_connect(), false);
+  EXPECT_EQ(wifi->passphrase(), "");
+}
+
+
 TEST_F(OncNetworkParserTest, TestCreateNetworkWifiEAP1) {
-  std::string test_blob(
-      "{"
-      "  \"NetworkConfigurations\": [{"
-      "    \"GUID\": \"{485d6076-dd44-6b6d-69787465725f5045}\","
-      "    \"Type\": \"WiFi\","
-      "    \"WiFi\": {"
-      "      \"Security\": \"WPA-EAP\","
-      "      \"SSID\": \"ssid\","
-      "      \"AutoConnect\": true,"
-      "      \"EAP\": {"
-      "        \"Outer\": \"PEAP\","
-      "        \"UseSystemCAs\": false,"
-      "      }"
-      "    }"
-      "  }]"
-      "}");
-  OncNetworkParser parser(test_blob);
+  std::string test_blob;
+  GetTestData("network-wifi-eap1.onc", &test_blob);
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
 
   EXPECT_EQ(1, parser.GetNetworkConfigsSize());
   EXPECT_EQ(0, parser.GetCertificatesSize());
-  EXPECT_FALSE(parser.ParseNetwork(1));
   scoped_ptr<Network> network(parser.ParseNetwork(0));
   ASSERT_TRUE(network.get());
 
@@ -317,29 +287,13 @@ TEST_F(OncNetworkParserTest, TestCreateNetworkWifiEAP1) {
 }
 
 TEST_F(OncNetworkParserTest, TestCreateNetworkWifiEAP2) {
-  std::string test_blob(
-      "{"
-      "  \"NetworkConfigurations\": [{"
-      "    \"GUID\": \"{485d6076-dd44-6b6d-69787465725f5045}\","
-      "    \"Type\": \"WiFi\","
-      "    \"WiFi\": {"
-      "      \"Security\": \"WPA-EAP\","
-      "      \"SSID\": \"ssid\","
-      "      \"AutoConnect\": false,"
-      "      \"EAP\": {"
-      "        \"Outer\": \"LEAP\","
-      "        \"Identity\": \"user\","
-      "        \"Password\": \"pass\","
-      "        \"AnonymousIdentity\": \"anon\","
-      "      }"
-      "    }"
-      "  }]"
-      "}");
-  OncNetworkParser parser(test_blob);
+  std::string test_blob;
+  GetTestData("network-wifi-eap2.onc", &test_blob);
+
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
 
   EXPECT_EQ(1, parser.GetNetworkConfigsSize());
   EXPECT_EQ(0, parser.GetCertificatesSize());
-  EXPECT_FALSE(parser.ParseNetwork(1));
   scoped_ptr<Network> network(parser.ParseNetwork(0));
   ASSERT_TRUE(network.get());
 
@@ -358,16 +312,29 @@ TEST_F(OncNetworkParserTest, TestCreateNetworkWifiEAP2) {
   CheckStringProperty(wifi, PROPERTY_INDEX_EAP_ANONYMOUS_IDENTITY, "anon");
 }
 
+TEST_F(OncNetworkParserTest, TestCreateNetworkUnknownFields) {
+  std::string test_blob;
+  GetTestData("network-unknown-fields.onc", &test_blob);
+
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
+  scoped_ptr<Network> network(parser.ParseNetwork(0));
+  ASSERT_TRUE(network.get());
+
+  EXPECT_EQ(network->type(), chromeos::TYPE_WIFI);
+  WifiNetwork* wifi = static_cast<WifiNetwork*>(network.get());
+  EXPECT_EQ(wifi->encryption(), chromeos::SECURITY_WEP);
+  EXPECT_EQ(wifi->name(), "ssid");
+  EXPECT_EQ(wifi->passphrase(), "z123456789012");
+}
+
 TEST_F(OncNetworkParserTest, TestCreateNetworkOpenVPN) {
-  std::string test_blob(std::string(
-      "{"
-      "  \"NetworkConfigurations\": [") +
-      std::string(kNetworkConfigurationOpenVPN) + std::string(
-      "  ]}"));
-  OncNetworkParser parser(test_blob);
+  std::string test_blob;
+  GetTestData("network-openvpn.onc", &test_blob);
+
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
 
   EXPECT_EQ(1, parser.GetNetworkConfigsSize());
-  EXPECT_EQ(0, parser.GetCertificatesSize());
+  EXPECT_EQ(1, parser.GetCertificatesSize());
   scoped_ptr<Network> network(parser.ParseNetwork(0));
   ASSERT_TRUE(network.get() != NULL);
 
@@ -420,30 +387,10 @@ TEST_F(OncNetworkParserTest, TestCreateNetworkOpenVPN) {
 }
 
 TEST_F(OncNetworkParserTest, TestCreateNetworkL2TPIPsec) {
-  std::string test_blob(
-      "{"
-      "  \"NetworkConfigurations\": ["
-      "    {"
-      "      \"GUID\": \"{926b84e4-f2c5-0972-b9bbb8f44c4316f5}\","
-      "      \"Name\": \"MyL2TPVPN\","
-      "      \"Type\": \"VPN\","
-      "      \"VPN\": {"
-      "        \"Host\": \"l2tp.acme.org\","
-      "        \"Type\": \"L2TP-IPsec\","
-      "        \"IPsec\": {"
-      "          \"IKEVersion\": 1,"
-      "          \"AuthenticationType\": \"PSK\","
-      "          \"PSK\": \"passphrase\""
-      "        },"
-      "        \"L2TP\": {"
-      "          \"SaveCredentials\": false"
-      "        }"
-      "      }"
-      "    }"
-      "  ],"
-      "  \"Certificates\": []"
-      "}");
-  OncNetworkParser parser(test_blob);
+  std::string test_blob;
+  GetTestData("network-l2tp-ipsec.onc", &test_blob);
+
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
 
   EXPECT_EQ(1, parser.GetNetworkConfigsSize());
   EXPECT_EQ(0, parser.GetCertificatesSize());
@@ -467,49 +414,12 @@ TEST_F(OncNetworkParserTest, TestCreateNetworkL2TPIPsec) {
 }
 
 TEST_F(OncNetworkParserTest, TestAddClientCertificate) {
-  std::string test_blob(
-      "{"
-      "    \"Certificates\": ["
-      "        {"
-      "            \"GUID\": \"{f998f760-272b-6939-4c2beffe428697ac}\","
-      "            \"Type\": \"Client\","
-      "            \"PKCS12\": \"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\""
-      "        }"
-      "    ],"
-      "}");
+  std::string certificate_json;
+  GetTestData("certificate-client.onc", &certificate_json);
+
   std::string test_guid("{f998f760-272b-6939-4c2beffe428697ac}");
-  OncNetworkParser parser(test_blob);
+  OncNetworkParser parser(certificate_json, "",
+                          NetworkUIData::ONC_SOURCE_USER_IMPORT);
   ASSERT_EQ(1, parser.GetCertificatesSize());
 
   scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
@@ -555,31 +465,80 @@ TEST_F(OncNetworkParserTest, TestAddClientCertificate) {
   }
 }
 
+TEST_F(OncNetworkParserTest, TestUpdateClientCertificate) {
+  std::string certificate_json;
+  GetTestData("certificate-client.onc", &certificate_json);
+  std::string certificate_update_json;
+  GetTestData("certificate-client-update.onc", &certificate_update_json);
+
+  std::string test_guid("{f998f760-272b-6939-4c2beffe428697ac}");
+  std::string updated_guid("{f998f760-272b-6939-4c2beffe428697ad}");
+  {
+    // First we import a certificate.
+    OncNetworkParser parser(certificate_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+    EXPECT_EQ(net::USER_CERT, GetCertType(cert.get()));
+
+    EXPECT_STREQ(test_guid.c_str(),
+                 cert->GetDefaultNickname(net::USER_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(test_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::USER_CERT, GetCertType(result_list[0].get()));
+  }
+
+  {
+    // Now we import the same certificate with a different GUID. The cert should
+    // be retrievable via the new GUID.
+    OncNetworkParser parser(certificate_update_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+
+    EXPECT_STREQ(updated_guid.c_str(),
+                 cert->GetDefaultNickname(net::USER_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(updated_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::USER_CERT, GetCertType(result_list[0].get()));
+  }
+}
+
+TEST_F(OncNetworkParserTest, TestReimportClientCertificate) {
+  std::string certificate_json;
+  GetTestData("certificate-client.onc", &certificate_json);
+  std::string test_guid("{f998f760-272b-6939-4c2beffe428697ac}");
+
+  // Verify that reimporting a client certificate works.
+  for (int i = 0; i < 2; ++i) {
+    OncNetworkParser parser(certificate_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+    EXPECT_EQ(net::USER_CERT, GetCertType(cert.get()));
+
+    EXPECT_STREQ(test_guid.c_str(),
+                 cert->GetDefaultNickname(net::USER_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(test_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::USER_CERT, GetCertType(result_list[0].get()));
+  }
+}
+
 TEST_F(OncNetworkParserTest, TestAddServerCertificate) {
-  std::string test_blob(
-      "{"
-      "    \"Certificates\": ["
-      "        {"
-      "            \"GUID\": \"{f998f760-272b-6939-4c2beffe428697aa}\","
-      "            \"Type\": \"Server\","
-      "            \"X509\": \"MIICWDCCAcECAxAAATANBgkqhkiG9w0BAQQFADCBkzEVM"
-      "BMGA1UEChMMR29vZ2xlLCBJbmMuMREwDwYDVQQLEwhDaHJvbWVPUzEiMCAGCSqGSIb3DQ"
-      "EJARYTZ3NwZW5jZXJAZ29vZ2xlLmNvbTEaMBgGA1UEBxMRTW91bnRhaW4gVmlldywgQ0E"
-      "xCzAJBgNVBAgTAkNBMQswCQYDVQQGEwJVUzENMAsGA1UEAxMEbG1hbzAeFw0xMTAzMTYy"
-      "MzQ5MzhaFw0xMjAzMTUyMzQ5MzhaMFMxCzAJBgNVBAYTAlVTMQswCQYDVQQIEwJDQTEVM"
-      "BMGA1UEChMMR29vZ2xlLCBJbmMuMREwDwYDVQQLEwhDaHJvbWVPUzENMAsGA1UEAxMEbG"
-      "1hbzCBnzANBgkqhkiG9w0BAQEFAAOBjQAwgYkCgYEA31WiJ9LvprrhKtDlW0RdLFAO7Qj"
-      "kvs+sG6j2Vp2aBSrlhALG/0BVHUhWi4F/HHJho+ncLHAg5AGO0sdAjYUdQG6tfPqjLsIA"
-      "LtoKEZZdFe/JhmqOEaxWsSdu2S2RdPgCQOsP79EH58gXwu2gejCkJDmU22WL4YLuqOc17"
-      "nxbDC8CAwEAATANBgkqhkiG9w0BAQQFAAOBgQCv4vMD+PMlfnftu4/6Yf/oMLE8yCOqZT"
-      "Q/dWCxB9PiJnOefiBeSzSZE6Uv3G7qnblZPVZaFeJMd+ostt0viCyPucFsFgLMyyoV1dM"
-      "VPVwJT5Iq1AHehWXnTBbxUK9wioA5jOEKdroKjuSSsg/Q8Wx6cpJmttQz5olGPgstmACR"
-      "WA==\""
-      "        }"
-      "    ],"
-      "}");
+  std::string test_blob;
+  GetTestData("certificate-server.onc", &test_blob);
+
   std::string test_guid("{f998f760-272b-6939-4c2beffe428697aa}");
-  OncNetworkParser parser(test_blob);
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
   ASSERT_EQ(1, parser.GetCertificatesSize());
 
   scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
@@ -603,14 +562,80 @@ TEST_F(OncNetworkParserTest, TestAddServerCertificate) {
 
 }
 
-TEST_F(OncNetworkParserTest, TestAddAuthorityCertificate) {
-  const std::string test_blob(std::string("{"
-      "    \"Certificates\": [") +
-      std::string(kCertificateWebAuthority) + std::string(
-      "    ],"
-      "}"));
+TEST_F(OncNetworkParserTest, TestUpdateServerCertificate) {
+  std::string certificate_json;
+  GetTestData("certificate-server.onc", &certificate_json);
+  std::string certificate_update_json;
+  GetTestData("certificate-server-update.onc", &certificate_update_json);
+
+  std::string test_guid("{f998f760-272b-6939-4c2beffe428697aa}");
+  std::string updated_guid("{f998f760-272b-6939-4c2beffe428697ab}");
+  {
+    // First we import a certificate.
+    OncNetworkParser parser(certificate_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+    EXPECT_EQ(net::SERVER_CERT, GetCertType(cert.get()));
+
+    EXPECT_STREQ(test_guid.c_str(),
+                 cert->GetDefaultNickname(net::SERVER_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(test_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::SERVER_CERT, GetCertType(result_list[0].get()));
+  }
+
+  {
+    // Reimport the same certificate with a different GUID. The cert should
+    // be returned if we ask for the updated GUID.
+    OncNetworkParser parser(certificate_update_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+
+    EXPECT_STREQ(updated_guid.c_str(),
+                 cert->GetDefaultNickname(net::SERVER_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(updated_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::SERVER_CERT, GetCertType(result_list[0].get()));
+  }
+}
+
+TEST_F(OncNetworkParserTest, TestReimportServerCertificate) {
+  std::string certificate_json;
+  GetTestData("certificate-server.onc", &certificate_json);
+  std::string test_guid("{f998f760-272b-6939-4c2beffe428697aa}");
+
+  // Verify that importing the certificate twice works.
+  for (int i = 0; i < 2; i++) {
+    OncNetworkParser parser(certificate_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+    EXPECT_EQ(net::SERVER_CERT, GetCertType(cert.get()));
+
+    EXPECT_STREQ(test_guid.c_str(),
+                 cert->GetDefaultNickname(net::SERVER_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(test_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::SERVER_CERT, GetCertType(result_list[0].get()));
+  }
+}
+
+TEST_F(OncNetworkParserTest, TestAddWebAuthorityCertificate) {
+  std::string test_blob;
+  GetTestData("certificate-web-authority.onc", &test_blob);
+
   std::string test_guid("{f998f760-272b-6939-4c2beffe428697ab}");
-  OncNetworkParser parser(test_blob);
+  OncNetworkParser parser(test_blob, "", NetworkUIData::ONC_SOURCE_USER_IMPORT);
   ASSERT_EQ(1, parser.GetCertificatesSize());
 
   scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
@@ -631,20 +656,83 @@ TEST_F(OncNetworkParserTest, TestAddAuthorityCertificate) {
   SECKEYPublicKeyList* pubkey_list =
       PK11_ListPublicKeysInSlot(slot_->os_module_handle(), NULL);
   EXPECT_FALSE(pubkey_list);
+}
 
+TEST_F(OncNetworkParserTest, TestUpdateWebAuthorityCertificate) {
+  std::string authority_json;
+  GetTestData("certificate-web-authority.onc", &authority_json);
+  std::string authority_update_json;
+  GetTestData("certificate-web-authority-update.onc",
+              &authority_update_json);
+
+  std::string test_guid("{f998f760-272b-6939-4c2beffe428697ab}");
+  std::string updated_guid("{f998f760-272b-6939-4c2beffe428697ac}");
+  {
+    // First we import an authority certificate.
+    OncNetworkParser parser(authority_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+    EXPECT_EQ(net::CA_CERT, GetCertType(cert.get()));
+
+    EXPECT_STREQ(test_guid.c_str(),
+                 cert->GetDefaultNickname(net::CA_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(test_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::CA_CERT, GetCertType(result_list[0].get()));
+  }
+
+  {
+    // Reimport the same cert with a different GUID and check that the cert
+    // shows up under the new GUID.
+    OncNetworkParser parser(authority_update_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+
+    EXPECT_STREQ(updated_guid.c_str(),
+                 cert->GetDefaultNickname(net::CA_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(updated_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::CA_CERT, GetCertType(result_list[0].get()));
+  }
+}
+
+TEST_F(OncNetworkParserTest, TestReimportWebAuthorityCertificate) {
+  std::string authority_json;
+  GetTestData("certificate-web-authority.onc", &authority_json);
+  std::string test_guid("{f998f760-272b-6939-4c2beffe428697ab}");
+
+  // Verify that importing the certificate twice works.
+  for (int i = 0; i < 2; i++) {
+    OncNetworkParser parser(authority_json, "",
+                            NetworkUIData::ONC_SOURCE_USER_IMPORT);
+    ASSERT_EQ(1, parser.GetCertificatesSize());
+
+    scoped_refptr<net::X509Certificate> cert = parser.ParseCertificate(0).get();
+    ASSERT_TRUE(cert.get() != NULL);
+    EXPECT_EQ(net::CA_CERT, GetCertType(cert.get()));
+
+    EXPECT_STREQ(test_guid.c_str(),
+                 cert->GetDefaultNickname(net::CA_CERT).c_str());
+    net::CertificateList result_list;
+    OncNetworkParser::ListCertsWithNickname(test_guid, &result_list);
+    ASSERT_EQ(1ul, result_list.size());
+    EXPECT_EQ(net::CA_CERT, GetCertType(result_list[0].get()));
+  }
 }
 
 TEST_F(OncNetworkParserTest, TestNetworkAndCertificate) {
-  std::string test_blob(std::string(
-      "{"
-      "  \"NetworkConfigurations\": [") +
-      std::string(kNetworkConfigurationOpenVPN) + std::string(
-      "  ],"
-      "  \"Certificates\": [") +
-      std::string(kCertificateWebAuthority) + std::string(
-      "  ],"
-      "}"));
-  OncNetworkParser parser(test_blob);
+  std::string test_blob;
+  GetTestData("network-openvpn.onc", &test_blob);
+
+  OncNetworkParser parser(test_blob, "",
+                          NetworkUIData::ONC_SOURCE_USER_IMPORT);
 
   EXPECT_EQ(1, parser.GetCertificatesSize());
   EXPECT_TRUE(parser.ParseCertificate(0));
@@ -655,6 +743,122 @@ TEST_F(OncNetworkParserTest, TestNetworkAndCertificate) {
   EXPECT_EQ(network->type(), chromeos::TYPE_VPN);
   VirtualNetwork* vpn = static_cast<VirtualNetwork*>(network.get());
   EXPECT_EQ(PROVIDER_TYPE_OPEN_VPN, vpn->provider_type());
+}
+
+TEST_F(OncNetworkParserTest, TestProxySettingsDirect) {
+  std::string proxy_settings_blob;
+  GetTestData("network-wifi-proxy-direct.onc", &proxy_settings_blob);
+
+  net::ProxyConfig net_config;
+  TestProxySettings(proxy_settings_blob, &net_config);
+  EXPECT_EQ(net::ProxyConfig::ProxyRules::TYPE_NO_RULES,
+            net_config.proxy_rules().type);
+  EXPECT_FALSE(net_config.HasAutomaticSettings());
+}
+
+TEST_F(OncNetworkParserTest, TestProxySettingsWpad) {
+  std::string proxy_settings_blob;
+  GetTestData("network-wifi-proxy-wpad.onc", &proxy_settings_blob);
+
+  net::ProxyConfig net_config;
+  TestProxySettings(proxy_settings_blob, &net_config);
+  EXPECT_EQ(net::ProxyConfig::ProxyRules::TYPE_NO_RULES,
+            net_config.proxy_rules().type);
+  EXPECT_TRUE(net_config.HasAutomaticSettings());
+  EXPECT_TRUE(net_config.auto_detect());
+  EXPECT_FALSE(net_config.has_pac_url());
+}
+
+TEST_F(OncNetworkParserTest, TestProxySettingsPac) {
+  const std::string kPacUrl("http://proxyconfig.corp.google.com/wpad.dat");
+  std::string proxy_settings_blob;
+  GetTestData("network-wifi-proxy-pac.onc", &proxy_settings_blob);
+
+  net::ProxyConfig net_config;
+  TestProxySettings(proxy_settings_blob, &net_config);
+  EXPECT_EQ(net::ProxyConfig::ProxyRules::TYPE_NO_RULES,
+            net_config.proxy_rules().type);
+  EXPECT_TRUE(net_config.HasAutomaticSettings());
+  EXPECT_FALSE(net_config.auto_detect());
+  EXPECT_TRUE(net_config.has_pac_url());
+  EXPECT_EQ(GURL(kPacUrl), net_config.pac_url());
+}
+
+TEST_F(OncNetworkParserTest, TestProxySettingsManual) {
+  const std::string kHttpHost("http.example.com");
+  const std::string kHttpsHost("https.example.com");
+  const std::string kFtpHost("ftp.example.com");
+  const std::string socks_host("socks5://socks.example.com");
+  const uint16 kHttpPort = 1234;
+  const uint16 kHttpsPort = 3456;
+  const uint16 kFtpPort = 5678;
+  const uint16 kSocksPort = 7890;
+  std::string proxy_settings_blob;
+  GetTestData("network-wifi-proxy-manual.onc", &proxy_settings_blob);
+
+  net::ProxyConfig net_config;
+  TestProxySettings(
+      base::StringPrintf(proxy_settings_blob.data(),
+                         kHttpPort, kHttpsPort, kFtpPort, kSocksPort),
+      &net_config);
+  const net::ProxyConfig::ProxyRules& rules = net_config.proxy_rules();
+  EXPECT_EQ(net::ProxyConfig::ProxyRules::TYPE_PROXY_PER_SCHEME, rules.type);
+  // Verify http proxy server.
+  EXPECT_TRUE(rules.proxy_for_http.is_valid());
+  EXPECT_EQ(rules.proxy_for_http,
+            net::ProxyServer(net::ProxyServer::SCHEME_HTTP,
+                             net::HostPortPair(kHttpHost, kHttpPort)));
+  // Verify https proxy server.
+  EXPECT_TRUE(rules.proxy_for_https.is_valid());
+  EXPECT_EQ(rules.proxy_for_https,
+            net::ProxyServer(net::ProxyServer::SCHEME_HTTP,
+                             net::HostPortPair(kHttpsHost, kHttpsPort)));
+  // Verify ftp proxy server.
+  EXPECT_TRUE(rules.proxy_for_ftp.is_valid());
+  EXPECT_EQ(rules.proxy_for_ftp,
+            net::ProxyServer(net::ProxyServer::SCHEME_HTTP,
+                             net::HostPortPair(kFtpHost, kFtpPort)));
+  // Verify socks server.
+  EXPECT_TRUE(rules.fallback_proxy.is_valid());
+  EXPECT_EQ(rules.fallback_proxy,
+            net::ProxyServer(net::ProxyServer::SCHEME_SOCKS5,
+                             net::HostPortPair(socks_host, kSocksPort)));
+  // Verify bypass rules.
+  net::ProxyBypassRules expected_bypass_rules;
+  expected_bypass_rules.AddRuleFromString("google.com");
+  expected_bypass_rules.AddRuleToBypassLocal();
+  EXPECT_TRUE(expected_bypass_rules.Equals(rules.bypass_rules));
+}
+
+TEST(OncNetworkParserUserExpansionTest, GetUserExpandedValue) {
+  NetworkUIData::ONCSource source = NetworkUIData::ONC_SOURCE_USER_IMPORT;
+
+  // Setup environment needed by UserManager.
+  MessageLoop loop;
+  content::TestBrowserThread ui_thread(content::BrowserThread::UI, &loop);
+  base::ShadowingAtExitManager at_exit_manager;
+  ScopedTestingLocalState local_state(
+      static_cast<TestingBrowserProcess*>(g_browser_process));
+
+  base::StringValue login_id_pattern("a ${LOGIN_ID} b");
+  base::StringValue login_email_pattern("a ${LOGIN_EMAIL} b");
+
+  // No expansion if there is no user logged in.
+  EXPECT_EQ("a ${LOGIN_ID} b",
+            chromeos::OncNetworkParser::GetUserExpandedValue(
+                login_id_pattern, source));
+  EXPECT_EQ("a ${LOGIN_EMAIL} b",
+            chromeos::OncNetworkParser::GetUserExpandedValue(
+                login_email_pattern, source));
+
+  // Log in a user and check that the expansions work as expected.
+  UserManager::Get()->UserLoggedIn("onc@example.com");
+  EXPECT_EQ("a onc b",
+            chromeos::OncNetworkParser::GetUserExpandedValue(
+                login_id_pattern, source));
+  EXPECT_EQ("a onc@example.com b",
+            chromeos::OncNetworkParser::GetUserExpandedValue(
+                login_email_pattern, source));
 }
 
 }  // namespace chromeos

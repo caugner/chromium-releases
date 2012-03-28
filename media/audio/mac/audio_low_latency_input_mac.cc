@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 #include "base/logging.h"
+#include "base/mac/mac_logging.h"
 #include "media/audio/audio_util.h"
 #include "media/audio/mac/audio_manager_mac.h"
 
@@ -215,25 +216,27 @@ bool AUAudioInputStream::Open() {
 
 void AUAudioInputStream::Start(AudioInputCallback* callback) {
   DCHECK(callback);
-  if (started_)
+  DLOG_IF(ERROR, !audio_unit_) << "Open() has not been called successfully";
+  if (started_ || !audio_unit_)
     return;
   sink_ = callback;
   OSStatus result = AudioOutputUnitStart(audio_unit_);
   if (result == noErr) {
     started_ = true;
   }
-  DLOG_IF(ERROR, result != noErr) << "Failed to start acquiring data";
+  OSSTATUS_DLOG_IF(ERROR, result != noErr, result)
+      << "Failed to start acquiring data";
 }
 
 void AUAudioInputStream::Stop() {
   if (!started_)
     return;
-  OSStatus result;
-  result = AudioOutputUnitStop(audio_unit_);
+  OSStatus result = AudioOutputUnitStop(audio_unit_);
   if (result == noErr) {
     started_ = false;
   }
-  DLOG_IF(ERROR, result != noErr) << "Failed to stop acquiring data";
+  OSSTATUS_DLOG_IF(ERROR, result != noErr, result)
+      << "Failed to stop acquiring data";
 }
 
 void AUAudioInputStream::Close() {
@@ -326,7 +329,7 @@ double AUAudioInputStream::HardwareSampleRate() {
                                                0,
                                                &info_size,
                                                &device_id);
-  DCHECK_EQ(result, 0);
+  OSSTATUS_DCHECK(result == noErr, result);
   if (result)
     return 0.0;
 
@@ -366,7 +369,8 @@ double AUAudioInputStream::GetHardwareLatency() {
                                          0,
                                          &audio_unit_latency_sec,
                                          &size);
-  DLOG_IF(WARNING, result != noErr) << "Could not get audio unit latency.";
+  OSSTATUS_DLOG_IF(WARNING, result != noErr, result)
+      << "Could not get audio unit latency";
 
   // Get input audio device latency.
   AudioObjectPropertyAddress property_address = {
@@ -435,7 +439,8 @@ double AUAudioInputStream::GetCaptureLatency(
 }
 
 void AUAudioInputStream::HandleError(OSStatus err) {
-  NOTREACHED() << "error code: " << err;
+  NOTREACHED() << "error " << GetMacOSStatusErrorString(err)
+               << " (" << err << ")";
   if (sink_)
     sink_->OnError(this, static_cast<int>(err));
 }

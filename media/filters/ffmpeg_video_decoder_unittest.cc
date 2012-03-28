@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,7 +19,6 @@
 #include "media/ffmpeg/ffmpeg_common.h"
 #include "media/filters/ffmpeg_glue.h"
 #include "media/filters/ffmpeg_video_decoder.h"
-#include "media/video/video_decode_engine.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using ::testing::_;
@@ -59,10 +58,11 @@ class FFmpegVideoDecoderTest : public testing::Test {
     ReadTestDataFile("vp8-I-frame-320x240", &i_frame_buffer_);
     ReadTestDataFile("vp8-corrupt-I-frame", &corrupt_i_frame_buffer_);
 
-    config_.Initialize(kCodecVP8, kVideoFormat, kCodedSize, kVisibleRect,
+    config_.Initialize(kCodecVP8, VIDEO_CODEC_PROFILE_UNKNOWN,
+                       kVideoFormat, kCodedSize, kVisibleRect,
                        kFrameRate.num, kFrameRate.den,
                        kAspectRatio.num, kAspectRatio.den,
-                       NULL, 0);
+                       NULL, 0, true);
   }
 
   virtual ~FFmpegVideoDecoderTest() {}
@@ -71,15 +71,20 @@ class FFmpegVideoDecoderTest : public testing::Test {
     InitializeWithConfig(config_);
   }
 
-  void InitializeWithConfig(const VideoDecoderConfig& config) {
+  void InitializeWithConfigAndStatus(const VideoDecoderConfig& config,
+                                     PipelineStatus status) {
     EXPECT_CALL(*demuxer_, video_decoder_config())
         .WillOnce(ReturnRef(config));
 
-    decoder_->Initialize(demuxer_, NewExpectedClosure(),
+    decoder_->Initialize(demuxer_, NewExpectedStatusCB(status),
                          base::Bind(&MockStatisticsCallback::OnStatistics,
                                     base::Unretained(&statistics_callback_)));
 
     message_loop_.RunAllPending();
+  }
+
+  void InitializeWithConfig(const VideoDecoderConfig& config) {
+    InitializeWithConfigAndStatus(config, PIPELINE_OK);
   }
 
   void Pause() {
@@ -182,37 +187,6 @@ class FFmpegVideoDecoderTest : public testing::Test {
     message_loop_.RunAllPending();
   }
 
-  void SetupTimestampTest() {
-    Initialize();
-    EXPECT_CALL(*demuxer_, Read(_))
-        .WillRepeatedly(Invoke(this, &FFmpegVideoDecoderTest::ReadTimestamp));
-    EXPECT_CALL(statistics_callback_, OnStatistics(_))
-        .Times(AnyNumber());
-  }
-
-  void PushTimestamp(int64 timestamp) {
-    timestamps_.push_back(timestamp);
-  }
-
-  int64 PopTimestamp() {
-    scoped_refptr<VideoFrame> video_frame;
-    Read(&video_frame);
-
-    return video_frame->GetTimestamp().InMicroseconds();
-  }
-
-  void ReadTimestamp(const DemuxerStream::ReadCallback& read_callback) {
-    if (timestamps_.empty()) {
-      read_callback.Run(end_of_stream_buffer_);
-      return;
-    }
-
-    i_frame_buffer_->SetTimestamp(
-        base::TimeDelta::FromMicroseconds(timestamps_.front()));
-    timestamps_.pop_front();
-    read_callback.Run(i_frame_buffer_);
-  }
-
   MOCK_METHOD1(FrameReady, void(scoped_refptr<VideoFrame>));
 
   MessageLoop message_loop_;
@@ -243,38 +217,35 @@ TEST_F(FFmpegVideoDecoderTest, Initialize_Normal) {
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_UnsupportedDecoder) {
   // Test avcodec_find_decoder() returning NULL.
-  VideoDecoderConfig config(kUnknownVideoCodec, kVideoFormat,
+  VideoDecoderConfig config(kUnknownVideoCodec, VIDEO_CODEC_PROFILE_UNKNOWN,
+                            kVideoFormat,
                             kCodedSize, kVisibleRect,
                             kFrameRate.num, kFrameRate.den,
                             kAspectRatio.num, kAspectRatio.den,
                             NULL, 0);
-
-  EXPECT_CALL(host_, SetError(PIPELINE_ERROR_DECODE));
-  InitializeWithConfig(config);
+  InitializeWithConfigAndStatus(config, PIPELINE_ERROR_DECODE);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_UnsupportedPixelFormat) {
   // Ensure decoder handles unsupport pixel formats without crashing.
-  VideoDecoderConfig config(kCodecVP8, VideoFrame::INVALID,
+  VideoDecoderConfig config(kCodecVP8, VIDEO_CODEC_PROFILE_UNKNOWN,
+                            VideoFrame::INVALID,
                             kCodedSize, kVisibleRect,
                             kFrameRate.num, kFrameRate.den,
                             kAspectRatio.num, kAspectRatio.den,
                             NULL, 0);
-
-  EXPECT_CALL(host_, SetError(PIPELINE_ERROR_DECODE));
-  InitializeWithConfig(config);
+  InitializeWithConfigAndStatus(config, PIPELINE_ERROR_DECODE);
 }
 
 TEST_F(FFmpegVideoDecoderTest, Initialize_OpenDecoderFails) {
   // Specify Theora w/o extra data so that avcodec_open() fails.
-  VideoDecoderConfig config(kCodecTheora, kVideoFormat,
+  VideoDecoderConfig config(kCodecTheora, VIDEO_CODEC_PROFILE_UNKNOWN,
+                            kVideoFormat,
                             kCodedSize, kVisibleRect,
                             kFrameRate.num, kFrameRate.den,
                             kAspectRatio.num, kAspectRatio.den,
                             NULL, 0);
-
-  EXPECT_CALL(host_, SetError(PIPELINE_ERROR_DECODE));
-  InitializeWithConfig(config);
+  InitializeWithConfigAndStatus(config, PIPELINE_ERROR_DECODE);
 }
 
 TEST_F(FFmpegVideoDecoderTest, DecodeFrame_Normal) {
@@ -467,51 +438,16 @@ TEST_F(FFmpegVideoDecoderTest, Stop_EndOfStream) {
   Stop();
 }
 
-// Test normal operation of timestamping where all input has valid timestamps.
-TEST_F(FFmpegVideoDecoderTest, Timestamps_Normal) {
-  SetupTimestampTest();
+// Test aborted read on the demuxer stream.
+TEST_F(FFmpegVideoDecoderTest, AbortPendingRead) {
+  Initialize();
 
-  PushTimestamp(0);
-  PushTimestamp(1000);
-  PushTimestamp(2000);
-  PushTimestamp(3000);
+  EXPECT_CALL(*demuxer_, Read(_))
+      .WillOnce(ReturnBuffer(scoped_refptr<Buffer>()));
 
-  EXPECT_EQ(0, PopTimestamp());
-  EXPECT_EQ(1000, PopTimestamp());
-  EXPECT_EQ(2000, PopTimestamp());
-  EXPECT_EQ(3000, PopTimestamp());
-}
-
-// Test situation where some input timestamps are missing and estimation will
-// be used based on the frame rate.
-TEST_F(FFmpegVideoDecoderTest, Timestamps_Estimated) {
-  SetupTimestampTest();
-
-  PushTimestamp(0);
-  PushTimestamp(1000);
-  PushTimestamp(kNoTimestamp.InMicroseconds());
-  PushTimestamp(kNoTimestamp.InMicroseconds());
-
-  EXPECT_EQ(0, PopTimestamp());
-  EXPECT_EQ(1000, PopTimestamp());
-  EXPECT_EQ(11000, PopTimestamp());
-  EXPECT_EQ(21000, PopTimestamp());
-}
-
-// Test resulting timestamps from end of stream.
-TEST_F(FFmpegVideoDecoderTest, Timestamps_EndOfStream) {
-  SetupTimestampTest();
-
-  PushTimestamp(0);
-  PushTimestamp(1000);
-
-  EXPECT_EQ(0, PopTimestamp());
-  EXPECT_EQ(1000, PopTimestamp());
-
-  // Following are all end of stream buffers.
-  EXPECT_EQ(0, PopTimestamp());
-  EXPECT_EQ(0, PopTimestamp());
-  EXPECT_EQ(0, PopTimestamp());
+  scoped_refptr<VideoFrame> video_frame;
+  Read(&video_frame);
+  EXPECT_FALSE(video_frame);
 }
 
 }  // namespace media

@@ -8,7 +8,6 @@
 #include "base/json/json_writer.h"
 #include "base/message_loop.h"
 #include "base/string_number_conversions.h"
-#include "base/task.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
 
@@ -20,9 +19,9 @@
 #include "chrome/browser/task_manager/task_manager.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/common/extensions/extension_error_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 
 namespace keys = extension_processes_api_constants;
 
@@ -171,7 +170,7 @@ bool GetProcessIdForTabFunction::RunImpl() {
   }
 
   // Return the process ID of the tab as an integer.
-  int id = base::GetProcId(contents->tab_contents()->
+  int id = base::GetProcId(contents->web_contents()->
       GetRenderProcessHost()->GetHandle());
   result_.reset(Value::CreateIntegerValue(id));
   return true;

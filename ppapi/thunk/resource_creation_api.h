@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,9 +17,9 @@
 #include "ppapi/c/ppb_graphics_3d.h"
 #include "ppapi/c/ppb_image_data.h"
 #include "ppapi/c/ppb_input_event.h"
+#include "ppapi/c/ppb_websocket.h"
 #include "ppapi/c/dev/pp_video_dev.h"
 #include "ppapi/c/dev/ppb_transport_dev.h"
-#include "ppapi/c/dev/ppb_websocket_dev.h"
 #include "ppapi/shared_impl/api_id.h"
 
 struct PP_Flash_Menu;
@@ -103,6 +103,9 @@ class ResourceCreationAPI {
       const PP_Point* mouse_position,
       int32_t click_count,
       const PP_Point* mouse_movement) = 0;
+  virtual PP_Resource CreateResourceArray(PP_Instance instance,
+                                          const PP_Resource elements[],
+                                          uint32_t size) = 0;
   virtual PP_Resource CreateScrollbar(PP_Instance instance,
                                       PP_Bool vertical) = 0;
   virtual PP_Resource CreateTCPSocketPrivate(PP_Instance instace) = 0;

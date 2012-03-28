@@ -4,6 +4,7 @@
 
 #include "base/file_util.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop.h"
 #include "base/path_service.h"
 #include "base/scoped_temp_dir.h"
 #include "base/scoped_temp_dir.h"
@@ -49,7 +50,7 @@ class MockSandboxedExtensionUnpackerClient
                     const Extension* extension));
 
   MOCK_METHOD1(OnUnpackFailure,
-               void(const std::string& error));
+               void(const string16& error));
 
   void DelegateToFake() {
     ON_CALL(*this, OnUnpackSuccess(_, _, _, _))

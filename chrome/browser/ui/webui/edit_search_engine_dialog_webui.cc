@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -19,10 +19,14 @@
 #include "chrome/browser/ui/search_engines/edit_search_engine_controller.h"
 #include "chrome/browser/ui/webui/theme_source.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/ui_resources.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 const int kEditSearchEngineDialogWidth = 440;
@@ -63,8 +67,8 @@ void EditSearchEngineDialogWebUI::ShowDialog() {
 }
 
 // HtmlDialogUIDelegate methods
-bool EditSearchEngineDialogWebUI::IsDialogModal() const {
-  return true;
+ui::ModalType EditSearchEngineDialogWebUI::GetDialogModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
 }
 
 string16 EditSearchEngineDialogWebUI::GetDialogTitle() const {
@@ -96,8 +100,8 @@ void EditSearchEngineDialogWebUI::OnDialogClosed(
   delete this;
 }
 
-void EditSearchEngineDialogWebUI::OnCloseContents(TabContents* source,
-                                             bool* out_close_dialog) {
+void EditSearchEngineDialogWebUI::OnCloseContents(WebContents* source,
+                                                  bool* out_close_dialog) {
   NOTIMPLEMENTED();
 }
 
@@ -123,10 +127,10 @@ EditSearchEngineDialogHandlerWebUI::~EditSearchEngineDialogHandlerWebUI() {
 
 // Overridden from WebUIMessageHandler
 void EditSearchEngineDialogHandlerWebUI::RegisterMessages() {
-  web_ui_->RegisterMessageCallback("requestDetails",
+  web_ui()->RegisterMessageCallback("requestDetails",
       base::Bind(&EditSearchEngineDialogHandlerWebUI::RequestDetails,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("requestValidation",
+  web_ui()->RegisterMessageCallback("requestValidation",
       base::Bind(&EditSearchEngineDialogHandlerWebUI::RequestValidation,
                  base::Unretained(this)));
 }
@@ -139,8 +143,8 @@ void EditSearchEngineDialogHandlerWebUI::RequestDetails(
   dict.SetString("url", controller_->template_url()->url()->DisplayURL());
 
   // Send list of tab contents details to javascript.
-  web_ui_->CallJavascriptFunction("editSearchEngineDialog.setDetails",
-                                  dict);
+  web_ui()->CallJavascriptFunction("editSearchEngineDialog.setDetails",
+                                   dict);
 }
 
 void EditSearchEngineDialogHandlerWebUI::RequestValidation(
@@ -160,8 +164,8 @@ void EditSearchEngineDialogHandlerWebUI::RequestValidation(
     validation.SetBoolean("url", isUrlValid);
     validation.SetBoolean("ok", isDescriptionValid && isKeywordValid &&
                           isUrlValid);
-    web_ui_->CallJavascriptFunction("editSearchEngineDialog.setValidation",
-                                    validation);
+    web_ui()->CallJavascriptFunction("editSearchEngineDialog.setValidation",
+                                     validation);
   }
 }
 

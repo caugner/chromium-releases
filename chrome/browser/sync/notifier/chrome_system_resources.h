@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 //
@@ -15,10 +15,9 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/message_loop.h"
-#include "base/task.h"
 #include "base/threading/non_thread_safe.h"
 #include "chrome/browser/sync/notifier/state_writer.h"
 #include "google/cacheinvalidation/v2/system-resources.h"
@@ -36,6 +35,9 @@ class ChromeLogger : public invalidation::Logger {
   // invalidation::Logger implementation.
   virtual void Log(LogLevel level, const char* file, int line,
                    const char* format, ...) OVERRIDE;
+
+  virtual void SetSystemResources(
+      invalidation::SystemResources* resources) OVERRIDE;
 };
 
 class ChromeScheduler : public invalidation::Scheduler {
@@ -56,20 +58,17 @@ class ChromeScheduler : public invalidation::Scheduler {
 
   virtual invalidation::Time GetCurrentTime() const OVERRIDE;
 
+  virtual void SetSystemResources(
+      invalidation::SystemResources* resources) OVERRIDE;
+
  private:
-  scoped_ptr<ScopedRunnableMethodFactory<ChromeScheduler> >
-      scoped_runnable_method_factory_;
+  base::WeakPtrFactory<ChromeScheduler> weak_factory_;
   // Holds all posted tasks that have not yet been run.
   std::set<invalidation::Closure*> posted_tasks_;
 
   const MessageLoop* created_on_loop_;
   bool is_started_;
   bool is_stopped_;
-
-  // If the scheduler has been started, inserts |task| into
-  // |posted_tasks_| and returns a Task* to post.  Otherwise,
-  // immediately deletes |task| and returns NULL.
-  Task* MakeTaskToPost(invalidation::Closure* task);
 
   // Runs the task, deletes it, and removes it from |posted_tasks_|.
   void RunPostedTask(invalidation::Closure* task);
@@ -97,6 +96,9 @@ class ChromeStorage : public invalidation::Storage {
 
   virtual void ReadAllKeys(
       invalidation::ReadAllKeysCallback* key_callback) OVERRIDE;
+
+  virtual void SetSystemResources(
+      invalidation::SystemResources* resources) OVERRIDE;
 
  private:
   // Runs the given storage callback with SUCCESS status and deletes it.
@@ -129,13 +131,16 @@ class ChromeNetwork : public invalidation::NetworkChannel {
   virtual void AddNetworkStatusReceiver(
       invalidation::NetworkStatusCallback* network_status_receiver) OVERRIDE;
 
+  virtual void SetSystemResources(
+      invalidation::SystemResources* resources) OVERRIDE;
+
  private:
   void HandleInboundMessage(const std::string& incoming_message);
 
   CacheInvalidationPacketHandler* packet_handler_;
   scoped_ptr<invalidation::MessageCallback> incoming_receiver_;
   std::vector<invalidation::NetworkStatusCallback*> network_status_receivers_;
-  base::ScopedCallbackFactory<ChromeNetwork> scoped_callback_factory_;
+  base::WeakPtrFactory<ChromeNetwork> weak_factory_;
 };
 
 class ChromeSystemResources : public invalidation::SystemResources {

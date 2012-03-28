@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -42,6 +42,8 @@ class PepperSession : public Session {
   // Session interface.
   virtual void SetStateChangeCallback(
       const StateChangeCallback& callback) OVERRIDE;
+  virtual void SetRouteChangeCallback(
+      const RouteChangeCallback& callback) OVERRIDE;
   virtual Error error() OVERRIDE;
   virtual void CreateStreamChannel(
       const std::string& name,
@@ -66,8 +68,8 @@ class PepperSession : public Session {
 
   // Start cs connection by sending session-initiate message.
   void StartConnection(const std::string& peer_jid,
-                       Authenticator* authenticator,
-                       CandidateSessionConfig* config,
+                       scoped_ptr<Authenticator> authenticator,
+                       scoped_ptr<CandidateSessionConfig> config,
                        const StateChangeCallback& state_change_callback);
 
   // Handler for session-initiate response.
@@ -83,11 +85,15 @@ class PepperSession : public Session {
 
   // Message handlers for incoming messages.
   void OnAccept(const JingleMessage& message, JingleMessageReply* reply);
+  void OnSessionInfo(const JingleMessage& message, JingleMessageReply* reply);
   void OnTerminate(const JingleMessage& message, JingleMessageReply* reply);
   void ProcessTransportInfo(const JingleMessage& message);
 
   // Called from OnAccept() to initialize session config.
   bool InitializeConfigFromDescription(const ContentDescription* description);
+
+  void ProcessAuthenticationStep();
+  void OnSessionInfoResponse(const buzz::XmlElement* response);
 
   // Called by PepperChannel.
   void AddLocalCandidate(const cricket::Candidate& candidate);
@@ -116,6 +122,7 @@ class PepperSession : public Session {
   scoped_ptr<Authenticator> authenticator_;
 
   scoped_ptr<IqRequest> initiate_request_;
+  scoped_ptr<IqRequest> session_info_request_;
   scoped_ptr<IqRequest> transport_info_request_;
 
   ChannelsMap channels_;

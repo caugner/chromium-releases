@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -45,7 +45,7 @@ namespace {
 
 // Whether to use accelerated compositing when necessary (e.g. when a view has a
 // transformation).
-#if defined(VIEWS_COMPOSITOR)
+#if defined(USE_AURA)
 bool use_acceleration_when_possible = true;
 #else
 bool use_acceleration_when_possible = false;
@@ -116,8 +116,7 @@ View::View()
       enabled_(true),
       painting_enabled_(true),
       registered_for_visible_bounds_notification_(false),
-      clip_x_(0.0),
-      clip_y_(0.0),
+      clip_insets_(0, 0, 0, 0),
       needs_layout_(true),
       flip_canvas_on_paint_for_rtl_ui_(false),
       paint_to_layer_(false),
@@ -160,16 +159,25 @@ Widget* View::GetWidget() {
 }
 
 void View::AddChildView(View* view) {
+  if (view->parent_ == this)
+    return;
   AddChildViewAt(view, child_count());
 }
 
 void View::AddChildViewAt(View* view, int index) {
   CHECK_NE(view, this) << "You cannot add a view as its own child";
+  DCHECK_GE(index, 0);
+  DCHECK_LE(index, child_count());
 
   // If |view| has a parent, remove it from its parent.
   View* parent = view->parent_;
-  if (parent)
+  if (parent) {
+    if (parent == this) {
+      ReorderChildView(view, index);
+      return;
+    }
     parent->RemoveChildView(view);
+  }
 
   // Sets the prev/next focus views.
   InitFocusSiblings(view, index);
@@ -267,7 +275,7 @@ void View::SetBoundsRect(const gfx::Rect& bounds) {
     return;
   }
 
-  if (IsVisible()) {
+  if (visible_) {
     // Paint where the view is currently.
     SchedulePaintBoundsChanged(
         bounds_.size() == bounds.size() ? SCHEDULE_PAINT_SIZE_SAME :
@@ -317,7 +325,7 @@ gfx::Insets View::GetInsets() const {
 }
 
 gfx::Rect View::GetVisibleBounds() const {
-  if (!IsVisibleInRootView())
+  if (!IsDrawn())
     return gfx::Rect();
   gfx::Rect vis_bounds(0, 0, width(), height());
   gfx::Rect ancestor_bounds;
@@ -398,12 +406,8 @@ void View::SetVisible(bool visible) {
   }
 }
 
-bool View::IsVisible() const {
-  return visible_;
-}
-
-bool View::IsVisibleInRootView() const {
-  return IsVisible() && parent_ ? parent_->IsVisibleInRootView() : false;
+bool View::IsDrawn() const {
+  return visible_ && parent_ ? parent_->IsDrawn() : false;
 }
 
 void View::SetEnabled(bool enabled) {
@@ -411,10 +415,6 @@ void View::SetEnabled(bool enabled) {
     enabled_ = enabled;
     OnEnabledChanged();
   }
-}
-
-bool View::IsEnabled() const {
-  return enabled_;
 }
 
 void View::OnEnabledChanged() {
@@ -644,6 +644,19 @@ void View::ConvertPointToScreen(const View* src, gfx::Point* p) {
   }
 }
 
+// static
+void View::ConvertPointFromScreen(const View* dst, gfx::Point* p) {
+  DCHECK(dst);
+  DCHECK(p);
+
+  const views::Widget* widget = dst->GetWidget();
+  if (!widget)
+    return;
+  const gfx::Rect r = widget->GetClientAreaScreenBounds();
+  p->Offset(-r.x(), -r.y());
+  views::View::ConvertPointFromWidget(dst, p);
+}
+
 gfx::Rect View::ConvertRectToParent(const gfx::Rect& rect) const {
   gfx::Rect x_rect = rect;
   GetTransform().TransformRect(&x_rect);
@@ -665,7 +678,7 @@ void View::SchedulePaint() {
 }
 
 void View::SchedulePaintInRect(const gfx::Rect& rect) {
-  if (!IsVisible() || !painting_enabled_)
+  if (!visible_ || !painting_enabled_)
     return;
 
   if (layer()) {
@@ -689,11 +702,13 @@ void View::Paint(gfx::Canvas* canvas) {
   // Note that the X (or left) position we pass to ClipRectInt takes into
   // consideration whether or not the view uses a right-to-left layout so that
   // we paint our view in its mirrored position if need be.
-  if (!canvas->ClipRect(gfx::Rect(GetMirroredX(), y(),
-                                  width() - static_cast<int>(clip_x_),
-                                  height() - static_cast<int>(clip_y_)))) {
+  gfx::Rect clip_rect = bounds();
+  clip_rect.Inset(clip_insets_);
+  if (parent_)
+    clip_rect.set_x(parent_->GetMirroredXForRect(clip_rect));
+  if (!canvas->ClipRect(clip_rect))
     return;
-  }
+
   // Non-empty clip, translate the graphics such that 0,0 corresponds to
   // where this view is located (related to its parent).
   canvas->Translate(GetMirroredPosition());
@@ -726,7 +741,7 @@ View* View::GetEventHandlerForPoint(const gfx::Point& point) {
   // tightly encloses the specified point.
   for (int i = child_count() - 1; i >= 0; --i) {
     View* child = child_at(i);
-    if (!child->IsVisible())
+    if (!child->visible())
       continue;
 
     gfx::Point point_in_child_coords(point);
@@ -801,6 +816,10 @@ ui::TouchStatus View::OnTouchEvent(const TouchEvent& event) {
   return ui::TOUCH_STATUS_UNKNOWN;
 }
 
+ui::GestureStatus View::OnGestureEvent(const GestureEvent& event) {
+  return ui::GESTURE_STATUS_UNKNOWN;
+}
+
 void View::SetMouseHandler(View *new_mouse_handler) {
   // It is valid for new_mouse_handler to be NULL
   if (parent_)
@@ -826,6 +845,12 @@ ui::TextInputClient* View::GetTextInputClient() {
 InputMethod* View::GetInputMethod() {
   Widget* widget = GetWidget();
   return widget ? widget->GetInputMethod() : NULL;
+}
+
+ui::GestureStatus View::ProcessGestureEvent(const GestureEvent& event) {
+  // TODO(Gajen): Implement a grab scheme similar to as as is found in
+  //              MousePressed.
+  return OnGestureEvent(event);
 }
 
 // Accelerators ----------------------------------------------------------------
@@ -878,6 +903,10 @@ bool View::AcceleratorPressed(const ui::Accelerator& accelerator) {
   return false;
 }
 
+bool View::CanHandleAccelerators() const {
+  return enabled() && IsDrawn() && GetWidget() && GetWidget()->IsVisible();
+}
+
 // Focus -----------------------------------------------------------------------
 
 bool View::HasFocus() const {
@@ -902,13 +931,12 @@ void View::SetNextFocusableView(View* view) {
   next_focusable_view_ = view;
 }
 
-bool View::IsFocusableInRootView() const {
-  return IsFocusable() && IsVisibleInRootView();
+bool View::IsFocusable() const {
+  return focusable_ && enabled_ && IsDrawn();
 }
 
-bool View::IsAccessibilityFocusableInRootView() const {
-  return (focusable_ || accessibility_focusable_) && IsEnabled() &&
-    IsVisibleInRootView();
+bool View::IsAccessibilityFocusable() const {
+  return (focusable_ || accessibility_focusable_) && enabled_ && IsDrawn();
 }
 
 FocusManager* View::GetFocusManager() {
@@ -923,7 +951,7 @@ const FocusManager* View::GetFocusManager() const {
 
 void View::RequestFocus() {
   FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager && IsFocusableInRootView())
+  if (focus_manager && IsFocusable())
     focus_manager->SetFocusedView(this);
 }
 
@@ -1102,7 +1130,7 @@ void View::OnPaintBorder(gfx::Canvas* canvas) {
 }
 
 void View::OnPaintFocusBorder(gfx::Canvas* canvas) {
-  if ((IsFocusable() || IsAccessibilityFocusableInRootView()) && HasFocus()) {
+  if (HasFocus() && (focusable() || IsAccessibilityFocusable())) {
     TRACE_EVENT2("views", "views::OnPaintFocusBorder",
                  "width", canvas->GetSkCanvas()->getDevice()->width(),
                  "height", canvas->GetSkCanvas()->getDevice()->height());
@@ -1165,19 +1193,19 @@ void View::MoveLayerToParent(ui::Layer* parent_layer,
 void View::UpdateLayerVisibility() {
   if (!use_acceleration_when_possible)
     return;
-  bool visible = IsVisible();
+  bool visible = visible_;
   for (const View* v = parent_; visible && v && !v->layer(); v = v->parent_)
-    visible = v->IsVisible();
+    visible = v->visible();
 
   UpdateChildLayerVisibility(visible);
 }
 
 void View::UpdateChildLayerVisibility(bool ancestor_visible) {
   if (layer()) {
-    layer()->SetVisible(ancestor_visible && IsVisible());
+    layer()->SetVisible(ancestor_visible && visible_);
   } else {
     for (int i = 0, count = child_count(); i < count; ++i)
-      child_at(i)->UpdateChildLayerVisibility(ancestor_visible && IsVisible());
+      child_at(i)->UpdateChildLayerVisibility(ancestor_visible && visible_);
   }
 }
 
@@ -1204,7 +1232,7 @@ void View::ReorderLayers() {
   while (v && !v->layer())
     v = v->parent();
 
-  // Forward to widget in case we're in a NativeWidgetView.
+  // Forward to widget in case we're in a NativeWidgetAura.
   if (!v) {
     if (GetWidget())
       GetWidget()->ReorderLayers();
@@ -1237,10 +1265,6 @@ void View::GetHitTestMask(gfx::Path* mask) const {
 }
 
 // Focus -----------------------------------------------------------------------
-
-bool View::IsFocusable() const {
-  return focusable_ && IsEnabled() && IsVisible();
-}
 
 void View::OnFocus() {
   // TODO(beng): Investigate whether it's possible for us to move this to
@@ -1355,17 +1379,6 @@ std::string View::DoPrintViewGraph(bool first, View* view_with_children) {
                  this->bounds().height());
   result.append(bounds_buffer);
 
-  if (layer() && !layer()->hole_rect().IsEmpty()) {
-    base::snprintf(bounds_buffer,
-                   arraysize(bounds_buffer),
-                   "\\n hole bounds: (%d, %d), (%dx%d)",
-                   layer()->hole_rect().x(),
-                   layer()->hole_rect().y(),
-                   layer()->hole_rect().width(),
-                   layer()->hole_rect().height());
-    result.append(bounds_buffer);
-  }
-
   if (GetTransform().HasChange()) {
     gfx::Point translation;
     float rotation;
@@ -1474,7 +1487,7 @@ void View::SchedulePaintBoundsChanged(SchedulePaintType type) {
 }
 
 void View::PaintCommon(gfx::Canvas* canvas) {
-  if (!IsVisible() || !painting_enabled_)
+  if (!visible_ || !painting_enabled_)
     return;
 
   {
@@ -1600,15 +1613,11 @@ void View::PropagateVisibilityNotifications(View* start, bool is_visible) {
 }
 
 void View::VisibilityChangedImpl(View* starting_from, bool is_visible) {
-  if (is_visible)
-    RegisterPendingAccelerators();
-  else
-    UnregisterAccelerators(true);
   VisibilityChanged(starting_from, is_visible);
 }
 
 void View::BoundsChanged(const gfx::Rect& previous_bounds) {
-  if (IsVisible()) {
+  if (visible_) {
     // Paint the new bounds.
     SchedulePaintBoundsChanged(
         bounds_.size() == previous_bounds.size() ? SCHEDULE_PAINT_SIZE_SAME :
@@ -1851,9 +1860,8 @@ void View::DestroyLayer() {
 // Input -----------------------------------------------------------------------
 
 bool View::ProcessMousePressed(const MouseEvent& event, DragInfo* drag_info) {
-  const bool enabled = IsEnabled();
   int drag_operations =
-      (enabled && event.IsOnlyLeftMouseButton() && HitTest(event.location())) ?
+      (enabled_ && event.IsOnlyLeftMouseButton() && HitTest(event.location())) ?
       GetDragOperations(event.location()) : 0;
   ContextMenuController* context_menu_controller = event.IsRightMouseButton() ?
       context_menu_controller_ : 0;
@@ -1861,7 +1869,7 @@ bool View::ProcessMousePressed(const MouseEvent& event, DragInfo* drag_info) {
   const bool result = OnMousePressed(event);
   // WARNING: we may have been deleted, don't use any View variables.
 
-  if (!enabled)
+  if (!enabled_)
     return result;
 
   if (drag_operations != ui::DragDropTypes::DRAG_NONE) {
@@ -1943,9 +1951,6 @@ void View::RegisterPendingAccelerators() {
 #endif
     return;
   }
-  // Only register accelerators if we are visible.
-  if (!IsVisibleInRootView() || !GetWidget()->IsVisible())
-    return;
   for (std::vector<ui::Accelerator>::const_iterator i(
            accelerators_->begin() + registered_accelerator_count_);
        i != accelerators_->end(); ++i) {
@@ -2046,6 +2051,7 @@ void View::UpdateTooltip() {
 // Drag and drop ---------------------------------------------------------------
 
 void View::DoDrag(const MouseEvent& event, const gfx::Point& press_pt) {
+#if !defined(OS_MACOSX)
   int drag_operations = GetDragOperations(press_pt);
   if (drag_operations == ui::DragDropTypes::DRAG_NONE)
     return;
@@ -2056,6 +2062,7 @@ void View::DoDrag(const MouseEvent& event, const gfx::Point& press_pt) {
   // Message the RootView to do the drag and drop. That way if we're removed
   // the RootView can detect it and avoid calling us back.
   GetWidget()->RunShellDrag(this, data, drag_operations);
+#endif  // !defined(OS_MACOSX)
 }
 
 }  // namespace views

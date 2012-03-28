@@ -5,5 +5,9 @@
   "permissions": ["webRequest", "webRequestBlocking",
                   "http://icanhascheezburger.files.wordpress.com/*",
                   "http://chzmemebase.files.wordpress.com/*"],
-  "background_page": "background.html"
+  "background": {
+    "scripts": ["loldogs.js", "background.js"]
+  },
+
+  "manifest_version": 2
 }

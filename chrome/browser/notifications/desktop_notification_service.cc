@@ -28,24 +28,26 @@
 #include "chrome/common/content_settings_pattern.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/browser_child_process_host.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/site_instance.h"
 #include "content/browser/worker_host/worker_process_host.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/show_desktop_notification_params.h"
 #include "grit/browser_resources.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources_standard.h"
 #include "net/base/escape.h"
+#include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 
 using content::BrowserThread;
+using content::WebContents;
 using WebKit::WebNotificationPresenter;
 using WebKit::WebTextDirection;
+using WebKit::WebSecurityOrigin;
 
 const ContentSetting kDefaultSetting = CONTENT_SETTING_ASK;
 
@@ -327,12 +329,12 @@ ContentSetting DesktopNotificationService::GetContentSetting(
 
 void DesktopNotificationService::RequestPermission(
     const GURL& origin, int process_id, int route_id, int callback_context,
-    TabContents* tab) {
+    WebContents* tab) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   if (!tab) {
     Browser* browser = BrowserList::GetLastActiveWithProfile(profile_);
     if (browser)
-      tab = browser->GetSelectedTabContents();
+      tab = browser->GetSelectedWebContents();
   }
 
   if (!tab)
@@ -406,9 +408,14 @@ string16 DesktopNotificationService::DisplayNameForOrigin(
     const GURL& origin) {
   // If the source is an extension, lookup the display name.
   if (origin.SchemeIs(chrome::kExtensionScheme)) {
-    ExtensionService* ext_service = profile_->GetExtensionService();
-    if (ext_service) {
-      const Extension* extension = ext_service->GetExtensionByURL(origin);
+    ExtensionService* extension_service = profile_->GetExtensionService();
+    if (extension_service) {
+      const Extension* extension =
+          extension_service->extensions()->GetExtensionOrAppByURL(
+              ExtensionURLInfo(
+                  WebSecurityOrigin::createFromString(
+                      UTF8ToUTF16(origin.spec())),
+                  origin));
       if (extension)
         return UTF8ToUTF16(extension->name());
     }

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,7 @@
 #define CONTENT_RENDERER_RENDER_WIDGET_H_
 #pragma once
 
+#include <deque>
 #include <vector>
 
 #include "base/basictypes.h"
@@ -28,6 +29,9 @@
 #include "ui/gfx/size.h"
 #include "ui/gfx/surface/transport_dib.h"
 #include "webkit/glue/webcursor.h"
+
+struct ViewHostMsg_UpdateRect_Params;
+class ViewHostMsg_UpdateRect;
 
 namespace IPC {
 class SyncMessage;
@@ -87,6 +91,10 @@ class CONTENT_EXPORT RenderWidget
     return routing_id_;
   }
 
+  int32 surface_id() const {
+    return surface_id_;
+  }
+
   // May return NULL when the window is closing.
   WebKit::WebWidget* webwidget() const { return webwidget_; }
 
@@ -94,6 +102,7 @@ class CONTENT_EXPORT RenderWidget
   gfx::Size size() const { return size_; }
   bool has_focus() const { return has_focus_; }
   bool is_fullscreen() const { return is_fullscreen_; }
+  bool is_hidden() const { return is_hidden_; }
 
   // IPC::Channel::Listener
   virtual bool OnMessageReceived(const IPC::Message& msg) OVERRIDE;
@@ -198,6 +207,7 @@ class CONTENT_EXPORT RenderWidget
   virtual void OnResize(const gfx::Size& new_size,
                         const gfx::Rect& resizer_rect,
                         bool is_fullscreen);
+  void OnChangeResizeRect(const gfx::Rect& resizer_rect);
   virtual void OnWasHidden();
   virtual void OnWasRestored(bool needs_repainting);
   virtual void OnWasSwappedOut();
@@ -224,10 +234,14 @@ class CONTENT_EXPORT RenderWidget
   void OnSetTextDirection(WebKit::WebTextDirection direction);
   void OnGetFPS();
 
-  // Override point to notify derived classes that a paint has happened.
-  // DidInitiatePaint happens when we've generated a new bitmap and sent it to
-  // the browser. DidFlushPaint happens once we've received the ACK that the
-  // screen has actually been updated.
+  // Override points to notify derived classes that a paint has happened.
+  // WillInitiatePaint happens when we're about to generate a new bitmap and
+  // send it to the browser. DidInitiatePaint happens when that has completed,
+  // and subsequent rendering won't affect the painted content. DidFlushPaint
+  // happens once we've received the ACK that the screen has been updated.
+  // For a given paint operation, these overrides will always be called in the
+  // order WillInitiatePaint, DidInitiatePaint, DidFlushPaint.
+  virtual void WillInitiatePaint() {}
   virtual void DidInitiatePaint() {}
   virtual void DidFlushPaint() {}
 
@@ -269,15 +283,8 @@ class CONTENT_EXPORT RenderWidget
   // state.
   void SetHidden(bool hidden);
 
-  bool is_hidden() const { return is_hidden_; }
-
   void WillToggleFullscreen();
   void DidToggleFullscreen();
-
-  // True if an UpdateRect_ACK message is pending.
-  bool update_reply_pending() const {
-    return update_reply_pending_;
-  }
 
   bool next_paint_is_resize_ack() const;
   bool next_paint_is_restore_ack() const;
@@ -339,6 +346,8 @@ class CONTENT_EXPORT RenderWidget
   // Routing ID that allows us to communicate to the parent browser process
   // RenderWidgetHost. When MSG_ROUTING_NONE, no messages may be sent.
   int32 routing_id_;
+
+  int32 surface_id_;
 
   // We are responsible for destroying this object via its Close method.
   WebKit::WebWidget* webwidget_;
@@ -459,6 +468,9 @@ class CONTENT_EXPORT RenderWidget
 
   scoped_ptr<IPC::Message> pending_input_event_ack_;
 
+  // Indicates if the next sequence of Char events should be suppressed or not.
+  bool suppress_next_char_events_;
+
   // Set to true if painting to the window is handled by the accelerated
   // compositor.
   bool is_accelerated_compositing_active_;
@@ -470,6 +482,17 @@ class CONTENT_EXPORT RenderWidget
 
   bool has_disable_gpu_vsync_switch_;
   base::TimeTicks last_do_deferred_update_time_;
+
+  // UpdateRect parameters for the current compositing pass. This is used to
+  // pass state between DoDeferredUpdate and OnSwapBuffersPosted.
+  scoped_ptr<ViewHostMsg_UpdateRect_Params> pending_update_params_;
+
+  // Queue of UpdateRect messages corresponding to a SwapBuffers. We want to
+  // delay sending of UpdateRect until the corresponding SwapBuffers has been
+  // executed. Since we can have several in flight, we need to keep them in a
+  // queue. Note: some SwapBuffers may not correspond to an update, in which
+  // case NULL is added to the queue.
+  std::deque<ViewHostMsg_UpdateRect*> updates_pending_swap_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidget);
 };

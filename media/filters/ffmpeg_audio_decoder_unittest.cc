@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -54,16 +54,13 @@ class FFmpegAudioDecoderTest : public testing::Test {
     // Push in an EOS buffer.
     encoded_audio_.push_back(new DataBuffer(0));
 
-    decoder_->set_consume_audio_samples_callback(
-        base::Bind(&FFmpegAudioDecoderTest::DecodeFinished,
-                   base::Unretained(this)));
-
     config_.Initialize(kCodecVorbis,
                        16,
                        CHANNEL_LAYOUT_STEREO,
                        44100,
                        vorbis_extradata_.get(),
-                       vorbis_extradata_size_);
+                       vorbis_extradata_size_,
+                       true);
   }
 
   virtual ~FFmpegAudioDecoderTest() {}
@@ -91,6 +88,12 @@ class FFmpegAudioDecoderTest : public testing::Test {
     scoped_refptr<Buffer> buffer(encoded_audio_.front());
     encoded_audio_.pop_front();
     read_callback.Run(buffer);
+  }
+
+  void Read() {
+    decoder_->Read(base::Bind(
+        &FFmpegAudioDecoderTest::DecodeFinished, base::Unretained(this)));
+    message_loop_.RunAllPending();
   }
 
   void DecodeFinished(scoped_refptr<Buffer> buffer) {
@@ -157,12 +160,9 @@ TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
   EXPECT_CALL(statistics_callback_, OnStatistics(_))
       .Times(5);
 
-  // We have to use a buffer to trigger a read. Silly.
-  scoped_refptr<DataBuffer> buffer(0);
-  decoder_->ProduceAudioSamples(buffer);
-  decoder_->ProduceAudioSamples(buffer);
-  decoder_->ProduceAudioSamples(buffer);
-  message_loop_.RunAllPending();
+  Read();
+  Read();
+  Read();
 
   // We should have three decoded audio buffers.
   //
@@ -173,12 +173,25 @@ TEST_F(FFmpegAudioDecoderTest, ProduceAudioSamples) {
   ExpectDecodedAudio(2, 2902, 23219);
 
   // Call one more time to trigger EOS.
-  //
-  // TODO(scherkus): EOS should flush data, not overwrite timestamps with zero.
-  decoder_->ProduceAudioSamples(buffer);
-  message_loop_.RunAllPending();
+  Read();
   ASSERT_EQ(4u, decoded_audio_.size());
   ExpectEndOfStream(3);
+
+  Stop();
+}
+
+TEST_F(FFmpegAudioDecoderTest, ReadAbort) {
+  Initialize();
+
+  encoded_audio_.clear();
+  encoded_audio_.push_back(NULL);
+
+  EXPECT_CALL(*demuxer_, Read(_))
+      .WillOnce(InvokeReadPacket(this));
+  Read();
+
+  EXPECT_EQ(decoded_audio_.size(), 1u);
+  EXPECT_TRUE(decoded_audio_[0].get() ==  NULL);
 
   Stop();
 }

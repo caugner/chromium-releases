@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,6 +16,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/screen.h"
 
+using content::WebContents;
+using content::WebUIMessageHandler;
+
 static const int kBaseWidth = 1252;
 static const int kBaseHeight = 516;
 static const int kHorizontalMargin = 28;
@@ -29,8 +32,8 @@ KeyboardOverlayDelegate::KeyboardOverlayDelegate(
 KeyboardOverlayDelegate::~KeyboardOverlayDelegate() {
 }
 
-bool KeyboardOverlayDelegate::IsDialogModal() const {
-  return true;
+ui::ModalType KeyboardOverlayDelegate::GetDialogModalType() const {
+  return ui::MODAL_TYPE_SYSTEM;
 }
 
 string16 KeyboardOverlayDelegate::GetDialogTitle() const {
@@ -69,7 +72,7 @@ void KeyboardOverlayDelegate::OnDialogClosed(
   return;
 }
 
-void KeyboardOverlayDelegate::OnCloseContents(TabContents* source,
+void KeyboardOverlayDelegate::OnCloseContents(WebContents* source,
                                               bool* out_close_dialog) {
 }
 

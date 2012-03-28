@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -314,7 +314,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, AutoUpdate) {
   ExtensionTestMessageListener listener1("v1 installed", false);
   ExtensionService* service = browser()->profile()->GetExtensionService();
   const size_t size_before = service->extensions()->size();
-  ASSERT_TRUE(service->disabled_extensions()->empty());
+  ASSERT_TRUE(service->disabled_extensions()->is_empty());
   const Extension* extension =
       InstallExtension(basedir.AppendASCII("v1.crx"), 1);
   ASSERT_TRUE(extension);
@@ -382,7 +382,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalUrlUpdate) {
                                      basedir.AppendASCII("v2.crx"));
 
   const size_t size_before = service->extensions()->size();
-  ASSERT_TRUE(service->disabled_extensions()->empty());
+  ASSERT_TRUE(service->disabled_extensions()->is_empty());
 
   PendingExtensionManager* pending_extension_manager =
       service->pending_extension_manager();
@@ -392,9 +392,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalUrlUpdate) {
   // is race-prone, because instantating the ExtensionService starts a read
   // of external_extensions.json before this test function starts.
 
-  pending_extension_manager->AddFromExternalUpdateUrl(
+  EXPECT_TRUE(pending_extension_manager->AddFromExternalUpdateUrl(
       kExtensionId, GURL("http://localhost/autoupdate/manifest"),
-      Extension::EXTERNAL_PREF_DOWNLOAD);
+      Extension::EXTERNAL_PREF_DOWNLOAD));
 
   // Run autoupdate and make sure version 2 of the extension was installed.
   service->updater()->CheckNow();
@@ -415,9 +415,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalUrlUpdate) {
 
   // Try to install the extension again from an external source. It should fail
   // because of the killbit.
-  pending_extension_manager->AddFromExternalUpdateUrl(
+  EXPECT_FALSE(pending_extension_manager->AddFromExternalUpdateUrl(
       kExtensionId, GURL("http://localhost/autoupdate/manifest"),
-      Extension::EXTERNAL_PREF_DOWNLOAD);
+      Extension::EXTERNAL_PREF_DOWNLOAD));
   EXPECT_FALSE(pending_extension_manager->IsIdPending(kExtensionId))
       << "External reinstall of a killed extension shouldn't work.";
   EXPECT_TRUE(extension_prefs->IsExternalExtensionUninstalled(kExtensionId))
@@ -465,7 +465,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, ExternalPolicyRefresh) {
                                      basedir.AppendASCII("v2.crx"));
 
   const size_t size_before = service->extensions()->size();
-  ASSERT_TRUE(service->disabled_extensions()->empty());
+  ASSERT_TRUE(service->disabled_extensions()->is_empty());
 
   PrefService* prefs = browser()->profile()->GetPrefs();
   const ListValue* forcelist =
@@ -520,7 +520,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, PolicyOverridesUserInstall) {
   service->updater()->set_blacklist_checks_enabled(false);
   const size_t size_before = service->extensions()->size();
   FilePath basedir = test_data_dir_.AppendASCII("autoupdate");
-  ASSERT_TRUE(service->disabled_extensions()->empty());
+  ASSERT_TRUE(service->disabled_extensions()->is_empty());
 
   // Note: This interceptor gets requests on the IO thread.
   scoped_refptr<AutoUpdateInterceptor> interceptor(new AutoUpdateInterceptor());
@@ -581,7 +581,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, PolicyOverridesUserInstall) {
   ASSERT_TRUE(extension);
   EXPECT_EQ(Extension::INTERNAL, extension->location());
   EXPECT_TRUE(service->IsExtensionEnabled(kExtensionId));
-  EXPECT_TRUE(service->disabled_extensions()->empty());
+  EXPECT_TRUE(service->disabled_extensions()->is_empty());
 
   service->DisableExtension(kExtensionId);
   EXPECT_EQ(1u, service->disabled_extensions()->size());
@@ -604,5 +604,5 @@ IN_PROC_BROWSER_TEST_F(ExtensionManagementTest, PolicyOverridesUserInstall) {
   ASSERT_TRUE(extension);
   EXPECT_EQ(Extension::EXTERNAL_POLICY_DOWNLOAD, extension->location());
   EXPECT_TRUE(service->IsExtensionEnabled(kExtensionId));
-  EXPECT_TRUE(service->disabled_extensions()->empty());
+  EXPECT_TRUE(service->disabled_extensions()->is_empty());
 }

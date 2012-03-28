@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,8 +25,11 @@ namespace pp {
 
 namespace {
 
-template <> const char* interface_name<PPB_Var>() {
-  return PPB_VAR_INTERFACE;
+template <> const char* interface_name<PPB_Var_1_1>() {
+  return PPB_VAR_INTERFACE_1_1;
+}
+template <> const char* interface_name<PPB_Var_1_0>() {
+  return PPB_VAR_INTERFACE_1_0;
 }
 
 // Technically you can call AddRef and Release on any Var, but it may involve
@@ -34,6 +37,21 @@ template <> const char* interface_name<PPB_Var>() {
 // only do refcounting on the necessary objects.
 inline bool NeedsRefcounting(const PP_Var& var) {
   return var.type > PP_VARTYPE_DOUBLE;
+}
+
+// This helper function detects whether PPB_Var version 1.1 is available. If so,
+// it uses it to create a PP_Var for the given string. Otherwise it falls back
+// to PPB_Var version 1.0.
+PP_Var VarFromUtf8Helper(const char* utf8_str, uint32_t len) {
+  if (has_interface<PPB_Var_1_1>()) {
+    return get_interface<PPB_Var_1_1>()->VarFromUtf8(utf8_str, len);
+  } else if (has_interface<PPB_Var_1_0>()) {
+    return get_interface<PPB_Var_1_0>()->VarFromUtf8(Module::Get()->pp_module(),
+                                                     utf8_str,
+                                                     len);
+  } else {
+    return PP_MakeNull();
+  }
 }
 
 }  // namespace
@@ -72,36 +90,23 @@ Var::Var(double d) {
 }
 
 Var::Var(const char* utf8_str) {
-  if (has_interface<PPB_Var>()) {
-    uint32_t len = utf8_str ? static_cast<uint32_t>(strlen(utf8_str)) : 0;
-    var_ = get_interface<PPB_Var>()->VarFromUtf8(Module::Get()->pp_module(),
-                                                 utf8_str, len);
-  } else {
-    var_.type = PP_VARTYPE_NULL;
-    var_.padding = 0;
-  }
+  uint32_t len = utf8_str ? static_cast<uint32_t>(strlen(utf8_str)) : 0;
+  var_ = VarFromUtf8Helper(utf8_str, len);
   needs_release_ = (var_.type == PP_VARTYPE_STRING);
 }
 
 Var::Var(const std::string& utf8_str) {
-  if (has_interface<PPB_Var>()) {
-    var_ = get_interface<PPB_Var>()->VarFromUtf8(
-        Module::Get()->pp_module(),
-        utf8_str.c_str(),
-        static_cast<uint32_t>(utf8_str.size()));
-  } else {
-    var_.type = PP_VARTYPE_NULL;
-    var_.padding = 0;
-  }
+  var_ = VarFromUtf8Helper(utf8_str.c_str(),
+                            static_cast<uint32_t>(utf8_str.size()));
   needs_release_ = (var_.type == PP_VARTYPE_STRING);
 }
 
 Var::Var(const Var& other) {
   var_ = other.var_;
   if (NeedsRefcounting(var_)) {
-    if (has_interface<PPB_Var>()) {
+    if (has_interface<PPB_Var_1_0>()) {
       needs_release_ = true;
-      get_interface<PPB_Var>()->AddRef(var_);
+      get_interface<PPB_Var_1_0>()->AddRef(var_);
     } else {
       var_.type = PP_VARTYPE_NULL;
       needs_release_ = false;
@@ -112,8 +117,8 @@ Var::Var(const Var& other) {
 }
 
 Var::~Var() {
-  if (needs_release_ && has_interface<PPB_Var>())
-    get_interface<PPB_Var>()->Release(var_);
+  if (needs_release_ && has_interface<PPB_Var_1_0>())
+    get_interface<PPB_Var_1_0>()->Release(var_);
 }
 
 Var& Var::operator=(const Var& other) {
@@ -127,15 +132,15 @@ Var& Var::operator=(const Var& other) {
   // object to itself by addrefing the new one before releasing the old one.
   bool old_needs_release = needs_release_;
   if (NeedsRefcounting(other.var_)) {
-    // Assume we already has_interface<PPB_Var> for refcounted vars or else we
-    // couldn't have created them in the first place.
+    // Assume we already has_interface<PPB_Var_1_0> for refcounted vars or else
+    // we couldn't have created them in the first place.
     needs_release_ = true;
-    get_interface<PPB_Var>()->AddRef(other.var_);
+    get_interface<PPB_Var_1_0>()->AddRef(other.var_);
   } else {
     needs_release_ = false;
   }
   if (old_needs_release)
-    get_interface<PPB_Var>()->Release(var_);
+    get_interface<PPB_Var_1_0>()->Release(var_);
 
   var_ = other.var_;
   return *this;
@@ -198,28 +203,28 @@ std::string Var::AsString() const {
     return std::string();
   }
 
-  if (!has_interface<PPB_Var>())
+  if (!has_interface<PPB_Var_1_0>())
     return std::string();
   uint32_t len;
-  const char* str = get_interface<PPB_Var>()->VarToUtf8(var_, &len);
+  const char* str = get_interface<PPB_Var_1_0>()->VarToUtf8(var_, &len);
   return std::string(str, len);
 }
 
 std::string Var::DebugString() const {
   char buf[256];
   if (is_undefined()) {
-    snprintf(buf, sizeof(buf), "Var<UNDEFINED>");
+    snprintf(buf, sizeof(buf), "Var(UNDEFINED)");
   } else if (is_null()) {
-    snprintf(buf, sizeof(buf), "Var<NULL>");
+    snprintf(buf, sizeof(buf), "Var(NULL)");
   } else if (is_bool()) {
-    snprintf(buf, sizeof(buf), AsBool() ? "Var<true>" : "Var<false>");
+    snprintf(buf, sizeof(buf), AsBool() ? "Var(true)" : "Var(false)");
   } else if (is_int()) {
     // Note that the following static_cast is necessary because
     // NativeClient's int32_t is actually "long".
     // TODO(sehr,polina): remove this after newlib is changed.
-    snprintf(buf, sizeof(buf), "Var<%d>", static_cast<int>(AsInt()));
+    snprintf(buf, sizeof(buf), "Var(%d)", static_cast<int>(AsInt()));
   } else if (is_double()) {
-    snprintf(buf, sizeof(buf), "Var<%f>", AsDouble());
+    snprintf(buf, sizeof(buf), "Var(%f)", AsDouble());
   } else if (is_string()) {
     char format[] = "Var<'%s'>";
     size_t decoration = sizeof(format) - 2;  // The %s is removed.
@@ -230,8 +235,12 @@ std::string Var::DebugString() const {
       str.append("...");
     }
     snprintf(buf, sizeof(buf), format, str.c_str());
+  } else if (is_array_buffer()) {
+    // TODO(dmichael): We could make this dump hex. Maybe DebugString should be
+    // virtual?
+    snprintf(buf, sizeof(buf), "Var(ARRAY_BUFFER)");
   } else if (is_object()) {
-    snprintf(buf, sizeof(buf), "Var<OBJECT>");
+    snprintf(buf, sizeof(buf), "Var(OBJECT)");
   }
   return buf;
 }

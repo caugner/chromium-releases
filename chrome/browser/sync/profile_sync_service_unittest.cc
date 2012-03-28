@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,7 +6,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop.h"
 #include "base/values.h"
-#include "chrome/browser/net/gaia/token_service.h"
+#include "chrome/browser/signin/signin_manager.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/token_service.h"
 #include "chrome/browser/sync/glue/bookmark_data_type_controller.h"
 #include "chrome/browser/sync/glue/data_type_controller.h"
 #include "chrome/browser/sync/js/js_arg_list.h"
@@ -44,11 +46,13 @@ class ProfileSyncServiceTest : public testing::Test {
  protected:
   ProfileSyncServiceTest()
       : ui_thread_(BrowserThread::UI, &ui_loop_),
+        file_thread_(BrowserThread::FILE),
         io_thread_(BrowserThread::IO) {}
 
   virtual ~ProfileSyncServiceTest() {}
 
   virtual void SetUp() {
+    file_thread_.Start();
     io_thread_.StartIOThread();
     profile_.reset(new TestingProfile());
     profile_->CreateRequestContext();
@@ -70,6 +74,7 @@ class ProfileSyncServiceTest : public testing::Test {
     // posting on the IO thread).
     ui_loop_.RunAllPending();
     io_thread_.Stop();
+    file_thread_.Stop();
     // Ensure that the sync objects destruct to avoid memory leaks.
     ui_loop_.RunAllPending();
   }
@@ -87,9 +92,18 @@ class ProfileSyncServiceTest : public testing::Test {
       bool sync_setup_completed,
       bool expect_create_dtm) {
     if (!service_.get()) {
-      // Set bootstrap to true and it will provide a logged in user for test
+      SigninManager* signin =
+          SigninManagerFactory::GetForProfile(profile_.get());
+      signin->SetAuthenticatedUsername("test");
+      ProfileSyncComponentsFactoryMock* factory =
+          new ProfileSyncComponentsFactoryMock();
       service_.reset(new TestProfileSyncService(
-          &factory_, profile_.get(), "test", true, base::Closure()));
+          factory,
+          profile_.get(),
+          signin,
+          ProfileSyncService::AUTO_START,
+          true,
+          base::Closure()));
       if (!set_initial_sync_ended)
         service_->dont_set_initial_sync_ended_on_init();
       if (synchronous_sync_configuration)
@@ -99,10 +113,11 @@ class ProfileSyncServiceTest : public testing::Test {
 
       if (expect_create_dtm) {
         // Register the bookmark data type.
-        EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
+        EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
             WillOnce(ReturnNewDataTypeManager());
       } else {
-        EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).Times(0);
+        EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
+            Times(0);
       }
 
       if (issue_auth_token) {
@@ -122,17 +137,24 @@ class ProfileSyncServiceTest : public testing::Test {
   MessageLoop ui_loop_;
   // Needed by |service_|.
   content::TestBrowserThread ui_thread_;
+  // Needed by DisableAndEnableSyncTemporarily test case.
+  content::TestBrowserThread file_thread_;
   // Needed by |service| and |profile_|'s request context.
   content::TestBrowserThread io_thread_;
 
   scoped_ptr<TestProfileSyncService> service_;
   scoped_ptr<TestingProfile> profile_;
-  ProfileSyncComponentsFactoryMock factory_;
 };
 
 TEST_F(ProfileSyncServiceTest, InitialState) {
+  SigninManager* signin = SigninManagerFactory::GetForProfile(profile_.get());
   service_.reset(new TestProfileSyncService(
-      &factory_, profile_.get(), "", true, base::Closure()));
+      new ProfileSyncComponentsFactoryMock(),
+      profile_.get(),
+      signin,
+      ProfileSyncService::MANUAL_START,
+      true,
+      base::Closure()));
   EXPECT_TRUE(
       service_->sync_service_url().spec() ==
         ProfileSyncService::kSyncServerUrl ||
@@ -144,19 +166,35 @@ TEST_F(ProfileSyncServiceTest, DisabledByPolicy) {
   profile_->GetTestingPrefService()->SetManagedPref(
       prefs::kSyncManaged,
       Value::CreateBooleanValue(true));
+  SigninManager* signin = SigninManagerFactory::GetForProfile(profile_.get());
   service_.reset(new TestProfileSyncService(
-      &factory_, profile_.get(), "", true, base::Closure()));
+      new ProfileSyncComponentsFactoryMock(),
+      profile_.get(),
+      signin,
+      ProfileSyncService::MANUAL_START,
+      true,
+      base::Closure()));
   service_->Initialize();
   EXPECT_TRUE(service_->IsManaged());
 }
 
 TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
+  SigninManager* signin = SigninManagerFactory::GetForProfile(profile_.get());
+  signin->SetAuthenticatedUsername("test");
+  ProfileSyncComponentsFactoryMock* factory =
+      new ProfileSyncComponentsFactoryMock();
   service_.reset(new TestProfileSyncService(
-      &factory_, profile_.get(), "test", true, base::Closure()));
-  EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).Times(0);
-  EXPECT_CALL(factory_, CreateBookmarkSyncComponents(_, _)).Times(0);
+      factory,
+      profile_.get(),
+      signin,
+      ProfileSyncService::AUTO_START,
+      true,
+      base::Closure()));
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).Times(0);
+  EXPECT_CALL(*factory, CreateBookmarkSyncComponents(_, _)).
+      Times(0);
   service_->RegisterDataTypeController(
-      new BookmarkDataTypeController(&factory_,
+      new BookmarkDataTypeController(service_->factory(),
                                      profile_.get(),
                                      service_.get()));
 
@@ -165,10 +203,19 @@ TEST_F(ProfileSyncServiceTest, AbortedByShutdown) {
 }
 
 TEST_F(ProfileSyncServiceTest, DisableAndEnableSyncTemporarily) {
+  SigninManager* signin = SigninManagerFactory::GetForProfile(profile_.get());
+  signin->SetAuthenticatedUsername("test");
+  ProfileSyncComponentsFactoryMock* factory =
+      new ProfileSyncComponentsFactoryMock();
   service_.reset(new TestProfileSyncService(
-      &factory_, profile_.get(), "test", true, base::Closure()));
+      factory,
+      profile_.get(),
+      signin,
+      ProfileSyncService::AUTO_START,
+      true,
+      base::Closure()));
   // Register the bookmark data type.
-  EXPECT_CALL(factory_, CreateDataTypeManager(_, _)).
+  EXPECT_CALL(*factory, CreateDataTypeManager(_, _)).
       WillRepeatedly(ReturnNewDataTypeManager());
 
   IssueTestTokens();
@@ -306,7 +353,8 @@ TEST_F(ProfileSyncServiceTest, TestStartupWithOldSyncData) {
   ASSERT_NE(file2text.compare(nonsense2), 0);
 }
 
-TEST_F(ProfileSyncServiceTest, CorruptDatabase) {
+// Disabled because of crbug.com/109668.
+TEST_F(ProfileSyncServiceTest, DISABLED_CorruptDatabase) {
   const char* nonesense = "not a database";
 
   FilePath temp_directory = profile_->GetPath().AppendASCII("Sync Data");

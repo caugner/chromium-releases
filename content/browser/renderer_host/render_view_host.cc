@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,30 +17,30 @@
 #include "base/time.h"
 #include "base/utf_string_conversions.h"
 #include "base/values.h"
-#include "content/browser/browser_context.h"
-#include "content/browser/browser_message_filter.h"
 #include "content/browser/child_process_security_policy.h"
 #include "content/browser/cross_site_request_manager.h"
-#include "content/browser/host_zoom_map.h"
+#include "content/browser/gpu/gpu_surface_tracker.h"
+#include "content/browser/host_zoom_map_impl.h"
 #include "content/browser/in_process_webkit/session_storage_namespace.h"
 #include "content/browser/power_save_blocker.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/site_instance.h"
-#include "content/browser/user_metrics.h"
 #include "content/common/desktop_notification_messages.h"
 #include "content/common/drag_messages.h"
 #include "content/common/speech_input_messages.h"
 #include "content/common/swapped_out_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/native_web_keyboard_event.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_view_host_delegate.h"
 #include "content/public/browser/render_view_host_observer.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/result_codes.h"
@@ -54,13 +54,18 @@
 #include "webkit/glue/webdropdata.h"
 
 using base::TimeDelta;
+using content::BrowserMessageFilter;
 using content::BrowserThread;
+using content::RenderViewHostDelegate;
+using content::SiteInstance;
+using content::UserMetricsAction;
 using WebKit::WebConsoleMessage;
 using WebKit::WebDragOperation;
 using WebKit::WebDragOperationNone;
 using WebKit::WebDragOperationsMask;
 using WebKit::WebInputEvent;
 using WebKit::WebMediaPlayerAction;
+using WebKit::WebPluginAction;
 
 namespace {
 
@@ -105,7 +110,7 @@ RenderViewHost::RenderViewHost(SiteInstance* instance,
                                int routing_id,
                                SessionStorageNamespace* session_storage)
     : RenderWidgetHost(instance->GetProcess(), routing_id),
-      instance_(instance),
+      instance_(static_cast<SiteInstanceImpl*>(instance)),
       delegate_(delegate),
       waiting_for_drag_context_response_(false),
       enabled_bindings_(0),
@@ -158,7 +163,8 @@ RenderViewHost::~RenderViewHost() {
       process()->GetID(), routing_id(), false);
 }
 
-bool RenderViewHost::CreateRenderView(const string16& frame_name) {
+bool RenderViewHost::CreateRenderView(const string16& frame_name,
+                                      int32 max_page_id) {
   DCHECK(!IsRenderViewLive()) << "Creating view twice";
 
   // The process may (if we're sharing a process with another host that already
@@ -172,8 +178,14 @@ bool RenderViewHost::CreateRenderView(const string16& frame_name) {
 
   renderer_initialized_ = true;
 
-  process()->SetCompositingSurface(routing_id(),
-                                   GetCompositingSurface());
+  GpuSurfaceTracker::Get()->SetSurfaceHandle(
+      surface_id(), GetCompositingSurface());
+
+  // Ensure the RenderView starts with a next_page_id larger than any existing
+  // page ID it might be asked to render.
+  int32 next_page_id = 1;
+  if (max_page_id > -1)
+    next_page_id = max_page_id + 1;
 
   ViewMsg_New_Params params;
   params.parent_window = GetNativeViewId();
@@ -181,8 +193,10 @@ bool RenderViewHost::CreateRenderView(const string16& frame_name) {
       delegate_->GetRendererPrefs(process()->GetBrowserContext());
   params.web_preferences = delegate_->GetWebkitPrefs();
   params.view_id = routing_id();
+  params.surface_id = surface_id();
   params.session_storage_namespace_id = session_storage_namespace_->id();
   params.frame_name = frame_name;
+  params.next_page_id = next_page_id;
   Send(new ViewMsg_New(params));
 
   // If it's enabled, tell the renderer to set up the Javascript bindings for
@@ -223,13 +237,9 @@ void RenderViewHost::Navigate(const ViewMsg_Navigate_Params& params) {
     DCHECK(!suspended_nav_message_.get());
     suspended_nav_message_.reset(nav_message);
   } else {
-    // Unset this, otherwise if true and the hang monitor fires we'll
-    // incorrectly close the tab.
-    is_waiting_for_unload_ack_ = false;
-
-    // Unset this, in case we never finished committing a previous RVH swap.
-    // Otherwise we'll filter out the messages for this navigation.
-    is_swapped_out_ = false;
+    // Get back to a clean state, in case we start a new navigation without
+    // completing a RVH swap or unload handler.
+    SetSwappedOut(false);
 
     Send(nav_message);
   }
@@ -273,7 +283,8 @@ void RenderViewHost::SetNavigationsSuspended(bool suspend) {
     // There's a navigation message waiting to be sent.  Now that we're not
     // suspended anymore, resume navigation by sending it.  If we were swapped
     // out, we should also stop filtering out the IPC messages now.
-    is_swapped_out_ = false;
+    SetSwappedOut(false);
+
     Send(suspended_nav_message_.release());
   }
 }
@@ -319,12 +330,6 @@ void RenderViewHost::FirePageBeforeUnload(bool for_cross_site_transition) {
 
 void RenderViewHost::SwapOut(int new_render_process_host_id,
                              int new_request_id) {
-  // Start filtering IPC messages to avoid confusing the delegate.  This will
-  // prevent any dialogs from appearing during unload handlers, but we've
-  // already decided to silence them in crbug.com/68780.  We will set it back
-  // to false in SetNavigationsSuspended if we swap back in.
-  is_swapped_out_ = true;
-
   // This will be set back to false in OnSwapOutACK, just before we replace
   // this RVH with the pending RVH.
   is_waiting_for_unload_ack_ = true;
@@ -356,6 +361,14 @@ void RenderViewHost::OnSwapOutACK() {
 void RenderViewHost::WasSwappedOut() {
   // Don't bother reporting hung state anymore.
   StopHangMonitorTimeout();
+
+  // Now that we're no longer the active RVH in the tab, start filtering out
+  // most IPC messages.  Usually the renderer will have stopped sending
+  // messages as of OnSwapOutACK.  However, we may have timed out waiting
+  // for that message, and additional IPC messages may keep streaming in.
+  // We filter them out, as long as that won't cause problems (e.g., we
+  // still allow synchronous messages through).
+  SetSwappedOut(true);
 
   // Inform the renderer that it can exit if no one else is using it.
   Send(new ViewMsg_WasSwappedOut(routing_id()));
@@ -567,6 +580,20 @@ void RenderViewHost::DragSourceSystemDragEnded() {
 }
 
 void RenderViewHost::AllowBindings(int bindings_flags) {
+  // Ensure we aren't granting bindings to a process that has already
+  // been used for non-privileged views.
+  if (process()->HasConnection() &&
+      !ChildProcessSecurityPolicy::GetInstance()->HasWebUIBindings(
+          process()->GetID())) {
+    // This process has no bindings yet. Make sure it does not have more
+    // than this single view.
+    content::RenderProcessHost::listeners_iterator iter(
+        process()->ListenersIterator());
+    iter.Advance();
+    if (!iter.IsAtEnd())
+      return;
+  }
+
   if (bindings_flags & content::BINDINGS_POLICY_WEB_UI) {
     ChildProcessSecurityPolicy::GetInstance()->GrantWebUIBindings(
         process()->GetID());
@@ -579,8 +606,13 @@ void RenderViewHost::AllowBindings(int bindings_flags) {
 
 void RenderViewHost::SetWebUIProperty(const std::string& name,
                                       const std::string& value) {
-  DCHECK(enabled_bindings_  & content::BINDINGS_POLICY_WEB_UI);
-  Send(new ViewMsg_SetWebUIProperty(routing_id(), name, value));
+  // This is just a sanity check before telling the renderer to enable the
+  // property.  It could lie and send the corresponding IPC messages anyway,
+  // but we will not act on them if enabled_bindings_ doesn't agree.
+  if (enabled_bindings_ & content::BINDINGS_POLICY_WEB_UI)
+    Send(new ViewMsg_SetWebUIProperty(routing_id(), name, value));
+  else
+    NOTREACHED() << "WebUI bindings not enabled.";
 }
 
 void RenderViewHost::GotFocus() {
@@ -650,10 +682,21 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
     return true;
 
   // Filter out most IPC messages if this renderer is swapped out.
-  // We still want to certain ACKs to keep our state consistent.
-  if (is_swapped_out_)
-    if (!content::SwappedOutMessages::CanHandleWhileSwappedOut(msg))
+  // We still want to handle certain ACKs to keep our state consistent.
+  if (is_swapped_out_) {
+    if (!content::SwappedOutMessages::CanHandleWhileSwappedOut(msg)) {
+      // If this is a synchronous message and we decided not to handle it,
+      // we must send an error reply, or else the renderer will be stuck
+      // and won't respond to future requests.
+      if (msg.is_sync()) {
+        IPC::Message* reply = IPC::SyncMessage::GenerateReply(&msg);
+        reply->set_reply_error();
+        Send(reply);
+      }
+      // Don't continue looking for someone to handle it.
       return true;
+    }
+  }
 
   ObserverListBase<content::RenderViewHostObserver>::Iterator it(observers_);
   content::RenderViewHostObserver* observer;
@@ -742,7 +785,7 @@ bool RenderViewHost::OnMessageReceived(const IPC::Message& msg) {
   if (!msg_is_ok) {
     // The message had a handler, but its de-serialization failed.
     // Kill the renderer.
-    UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_RVH"));
+    content::RecordAction(UserMetricsAction("BadMessageTerminate_RVH"));
     process()->ReceivedBadMessage();
   }
 
@@ -1061,14 +1104,14 @@ void RenderViewHost::OnMsgRunJavaScriptMessage(
     const string16& message,
     const string16& default_prompt,
     const GURL& frame_url,
-    const int flags,
+    ui::JavascriptMessageType type,
     IPC::Message* reply_msg) {
   // While a JS message dialog is showing, tabs in the same process shouldn't
   // process input events.
   process()->SetIgnoreInputEvents(true);
   StopHangMonitorTimeout();
   delegate_->RunJavaScriptMessage(this, message, default_prompt, frame_url,
-                                  flags, reply_msg,
+                                  type, reply_msg,
                                   &are_javascript_messages_suppressed_);
 }
 
@@ -1224,6 +1267,10 @@ void RenderViewHost::OnMsgBlur() {
   delegate_->Deactivate();
 }
 
+gfx::Rect RenderViewHost::GetRootWindowResizerRect() const {
+  return delegate_->GetRootWindowResizerRect();
+}
+
 void RenderViewHost::ForwardMouseEvent(
     const WebKit::WebMouseEvent& mouse_event) {
 
@@ -1309,8 +1356,6 @@ void RenderViewHost::SetAltErrorPageURL(const GURL& url) {
 
 void RenderViewHost::ExitFullscreen() {
   RejectMouseLockOrUnlockIfNecessary();
-
-  Send(new ViewMsg_ExitFullscreen(routing_id()));
 }
 
 void RenderViewHost::UpdateWebkitPreferences(const WebPreferences& prefs) {
@@ -1376,6 +1421,11 @@ void RenderViewHost::ExecuteMediaPlayerActionAtLocation(
   Send(new ViewMsg_MediaPlayerActionAt(routing_id(), location, action));
 }
 
+void RenderViewHost::ExecutePluginActionAtLocation(
+  const gfx::Point& location, const WebKit::WebPluginAction& action) {
+  Send(new ViewMsg_PluginActionAt(routing_id(), location, action));
+}
+
 void RenderViewHost::DisassociateFromPopupCount() {
   Send(new ViewMsg_DisassociateFromPopupCount(routing_id()));
 }
@@ -1397,16 +1447,19 @@ void RenderViewHost::OnAccessibilityNotifications(
     for (unsigned i = 0; i < params.size(); i++) {
       const ViewHostMsg_AccessibilityNotification_Params& param = params[i];
 
-      if (param.notification_type == ViewHostMsg_AccEvent::LOAD_COMPLETE &&
+      if ((param.notification_type == ViewHostMsg_AccEvent::LAYOUT_COMPLETE ||
+           param.notification_type == ViewHostMsg_AccEvent::LOAD_COMPLETE) &&
           save_accessibility_tree_for_testing_) {
         accessibility_tree_ = param.acc_tree;
+
+        // Only notify for non-blank pages.
+        if (accessibility_tree_.children.size() > 0)
+          content::NotificationService::current()->Notify(
+              content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
+              content::Source<RenderViewHost>(this),
+              content::NotificationService::NoDetails());
       }
     }
-
-    content::NotificationService::current()->Notify(
-        content::NOTIFICATION_RENDER_VIEW_HOST_ACCESSIBILITY_TREE_UPDATED,
-        content::Source<RenderViewHost>(this),
-        content::NotificationService::NoDetails());
   }
 
   Send(new ViewMsg_AccessibilityNotifications_ACK(routing_id()));
@@ -1429,22 +1482,10 @@ void RenderViewHost::OnScriptEvalResponse(int id, const ListValue& result) {
 void RenderViewHost::OnDidZoomURL(double zoom_level,
                                   bool remember,
                                   const GURL& url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  HostZoomMap* host_zoom_map = process()->GetBrowserContext()->
-      GetHostZoomMap();
+  HostZoomMapImpl* host_zoom_map = static_cast<HostZoomMapImpl*>(
+      process()->GetBrowserContext()->GetHostZoomMap());
   if (remember) {
     host_zoom_map->SetZoomLevel(net::GetHostOrSpecFromURL(url), zoom_level);
-    // Notify renderers from this browser context.
-    for (content::RenderProcessHost::iterator i(
-            content::RenderProcessHost::AllHostsIterator());
-         !i.IsAtEnd(); i.Advance()) {
-      content::RenderProcessHost* render_process_host = i.GetCurrentValue();
-      if (render_process_host->GetBrowserContext()->GetHostZoomMap()->
-          GetOriginal() == host_zoom_map) {
-        render_process_host->Send(
-            new ViewMsg_SetZoomLevelForCurrentURL(url, zoom_level));
-      }
-    }
   } else {
     host_zoom_map->SetTemporaryZoomLevel(
         process()->GetID(), routing_id(), zoom_level);
@@ -1523,6 +1564,16 @@ void RenderViewHost::OnWebUISend(const GURL& source_url,
                                  const std::string& name,
                                  const base::ListValue& args) {
   delegate_->WebUISend(this, source_url, name, args);
+}
+
+void RenderViewHost::SetSwappedOut(bool is_swapped_out) {
+  is_swapped_out_ = is_swapped_out;
+
+  // Whenever we change swap out state, we should not be waiting for
+  // beforeunload or unload acks.  We clear them here to be safe, since they
+  // can cause navigations to be ignored in OnMsgNavigate.
+  is_waiting_for_beforeunload_ack_ = false;
+  is_waiting_for_unload_ack_ = false;
 }
 
 void RenderViewHost::ClearPowerSaveBlockers() {

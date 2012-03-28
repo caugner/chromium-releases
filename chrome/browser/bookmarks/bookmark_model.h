@@ -18,9 +18,9 @@
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
 #include "chrome/browser/bookmarks/bookmark_service.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/history/history.h"
-#include "content/browser/cancelable_request.h"
 #include "content/public/browser/notification_registrar.h"
 #include "googleurl/src/gurl.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -59,6 +59,11 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
   BookmarkNode(int64 id, const GURL& url);
 
   virtual ~BookmarkNode();
+
+  // Set the node's internal title. Note that this neither invokes observers
+  // nor updates any bookmark model this node may be in. For that functionality,
+  // BookmarkModel::SetTitle(..) should be used instead.
+  virtual void SetTitle(const string16& title) OVERRIDE;
 
   // Returns an unique id for this node.
   // For bookmark nodes that are managed by the bookmark model, the IDs are
@@ -156,6 +161,26 @@ class BookmarkNode : public ui::TreeNode<BookmarkNode> {
   HistoryService::Handle favicon_load_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(BookmarkNode);
+};
+
+// BookmarkPermanentNode -------------------------------------------------------
+
+// Node used for the permanent folders (excluding the root).
+class BookmarkPermanentNode : public BookmarkNode {
+ public:
+  explicit BookmarkPermanentNode(int64 id);
+  virtual ~BookmarkPermanentNode();
+
+  // WARNING: this code is used for other projects. Contact noyau@ for details.
+  void set_visible(bool value) { visible_ = value; }
+
+  // BookmarkNode overrides:
+  virtual bool IsVisible() const OVERRIDE;
+
+ private:
+  bool visible_;
+
+  DISALLOW_COPY_AND_ASSIGN(BookmarkPermanentNode);
 };
 
 // BookmarkModel --------------------------------------------------------------
@@ -329,8 +354,8 @@ class BookmarkModel : public content::NotificationObserver,
     return expanded_state_tracker_.get();
   }
 
-  // Sets whether the mobile folder is visible. This is set by sync.
-  void SetMobileFolderVisible(bool value);
+  // Sets the visibility of one of the permanent nodes. This is set by sync.
+  void SetPermanentNodeVisible(BookmarkNode::Type type, bool value);
 
  private:
   friend class BookmarkCodecTest;
@@ -382,7 +407,7 @@ class BookmarkModel : public content::NotificationObserver,
 
   // Creates one of the possible permanent nodes (bookmark bar node, other node
   // and mobile node) from |type|.
-  BookmarkNode* CreatePermanentNode(BookmarkNode::Type type);
+  BookmarkPermanentNode* CreatePermanentNode(BookmarkNode::Type type);
 
   // Notification that a favicon has finished loading. If we can decode the
   // favicon, FaviconLoaded is invoked.
@@ -431,9 +456,9 @@ class BookmarkModel : public content::NotificationObserver,
   // children.
   BookmarkNode root_;
 
-  BookmarkNode* bookmark_bar_node_;
-  BookmarkNode* other_node_;
-  BookmarkNode* mobile_node_;
+  BookmarkPermanentNode* bookmark_bar_node_;
+  BookmarkPermanentNode* other_node_;
+  BookmarkPermanentNode* mobile_node_;
 
   // The maximum ID assigned to the bookmark nodes in the model.
   int64 next_node_id_;

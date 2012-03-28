@@ -23,8 +23,8 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/pref_names.h"
 #include "content/browser/accessibility/browser_accessibility_state.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
@@ -49,6 +49,9 @@
 #include "chrome/browser/ui/views/app_menu_button_win.h"
 #endif
 #endif
+
+using content::UserMetricsAction;
+using content::WebContents;
 
 // static
 const char ToolbarView::kViewClassName[] = "browser/ui/views/ToolbarView";
@@ -135,8 +138,8 @@ void ToolbarView::Init() {
   forward_menu_model_.reset(new BackForwardMenuModel(
       browser_, BackForwardMenuModel::FORWARD_MENU));
   back_ = new views::ButtonDropDown(this, back_menu_model_.get());
-  back_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
-                                     ui::EF_MIDDLE_BUTTON_DOWN);
+  back_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
+                                     ui::EF_MIDDLE_MOUSE_BUTTON);
   back_->set_tag(IDC_BACK);
   back_->SetImageAlignment(views::ImageButton::ALIGN_RIGHT,
                            views::ImageButton::ALIGN_TOP);
@@ -145,8 +148,8 @@ void ToolbarView::Init() {
   back_->set_id(VIEW_ID_BACK_BUTTON);
 
   forward_ = new views::ButtonDropDown(this, forward_menu_model_.get());
-  forward_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
-                                        ui::EF_MIDDLE_BUTTON_DOWN);
+  forward_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
+                                        ui::EF_MIDDLE_MOUSE_BUTTON);
   forward_->set_tag(IDC_FORWARD);
   forward_->SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_FORWARD));
   forward_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_FORWARD));
@@ -158,16 +161,16 @@ void ToolbarView::Init() {
           LocationBarView::POPUP : LocationBarView::NORMAL);
 
   reload_ = new ReloadButton(location_bar_, browser_);
-  reload_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
-                                       ui::EF_MIDDLE_BUTTON_DOWN);
+  reload_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
+                                       ui::EF_MIDDLE_MOUSE_BUTTON);
   reload_->set_tag(IDC_RELOAD);
   reload_->SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_RELOAD));
   reload_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_RELOAD));
   reload_->set_id(VIEW_ID_RELOAD_BUTTON);
 
   home_ = new views::ImageButton(this);
-  home_->set_triggerable_event_flags(ui::EF_LEFT_BUTTON_DOWN |
-                                     ui::EF_MIDDLE_BUTTON_DOWN);
+  home_->set_triggerable_event_flags(ui::EF_LEFT_MOUSE_BUTTON |
+                                     ui::EF_MIDDLE_MOUSE_BUTTON);
   home_->set_tag(IDC_HOME);
   home_->SetTooltipText(l10n_util::GetStringUTF16(IDS_TOOLTIP_HOME));
   home_->SetAccessibleName(l10n_util::GetStringUTF16(IDS_ACCNAME_HOME));
@@ -217,16 +220,12 @@ void ToolbarView::Init() {
   }
 }
 
-void ToolbarView::Update(TabContents* tab, bool should_restore_state) {
+void ToolbarView::Update(WebContents* tab, bool should_restore_state) {
   if (location_bar_)
     location_bar_->Update(should_restore_state ? tab : NULL);
 
   if (browser_actions_)
     browser_actions_->RefreshBrowserActionViews();
-}
-
-void ToolbarView::SetPaneFocusAndFocusLocationBar() {
-  SetPaneFocus(location_bar_);
 }
 
 void ToolbarView::SetPaneFocusAndFocusAppMenu() {
@@ -275,9 +274,7 @@ SkBitmap ToolbarView::GetAppMenuIcon(views::CustomButton::ButtonState state) {
     return icon;
 
   // Draw the chrome app menu icon onto the canvas.
-  scoped_ptr<gfx::CanvasSkia> canvas(
-      new gfx::CanvasSkia(icon.width(), icon.height(), false));
-  canvas->DrawBitmapInt(icon, 0, 0);
+  scoped_ptr<gfx::CanvasSkia> canvas(new gfx::CanvasSkia(icon, false));
 
   SkBitmap badge;
   // Only one badge can be active at any given time. The Upgrade notification
@@ -289,7 +286,7 @@ SkBitmap ToolbarView::GetAppMenuIcon(views::CustomButton::ButtonState state) {
   } else if (ShouldShowIncompatibilityWarning()) {
 #if defined(OS_WIN)
     if (!was_showing)
-      UserMetrics::RecordAction(UserMetricsAction("ConflictBadge"));
+      content::RecordAction(UserMetricsAction("ConflictBadge"));
     badge = *tp->GetBitmapNamed(IDR_CONFLICT_BADGE);
     incompatibility_badge_showing = true;
 #else
@@ -632,9 +629,14 @@ bool ToolbarView::AcceleratorPressed(const ui::Accelerator& accelerator) {
 // ToolbarView, protected:
 
 // Override this so that when the user presses F6 to rotate toolbar panes,
-// the location bar gets focus, not the first control in the toolbar.
-views::View* ToolbarView::GetDefaultFocusableChild() {
-  return location_bar_;
+// the location bar gets focus, not the first control in the toolbar - and
+// also so that it selects all content in the location bar.
+bool ToolbarView::SetPaneFocusAndFocusDefault() {
+  if (!SetPaneFocus(location_bar_))
+    return false;
+
+  location_bar_->SelectAll();
+  return true;
 }
 
 void ToolbarView::RemovePaneFocus() {

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 #include "base/stringprintf.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
+#include "base/threading/thread_restrictions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -26,6 +27,8 @@
 #endif
 
 using base::Time;
+
+static const int kDiskDelayMs = 20;
 
 // Tests that can run with different types of caches.
 class DiskCacheBackendTest : public DiskCacheTestWithCache {
@@ -194,7 +197,7 @@ TEST_F(DiskCacheBackendTest, AppCacheKeying) {
 }
 
 TEST_F(DiskCacheTest, CreateBackend) {
-  TestOldCompletionCallback cb;
+  net::TestCompletionCallback cb;
 
   {
     ASSERT_TRUE(CleanupCacheDir());
@@ -205,8 +208,8 @@ TEST_F(DiskCacheTest, CreateBackend) {
     // Test the private factory methods.
     disk_cache::Backend* cache = NULL;
     int rv = disk_cache::BackendImpl::CreateBackend(
-                 cache_path_, false, 0, net::DISK_CACHE, disk_cache::kNoRandom,
-                 cache_thread.message_loop_proxy(), NULL, &cache, &cb);
+        cache_path_, false, 0, net::DISK_CACHE, disk_cache::kNoRandom,
+        cache_thread.message_loop_proxy(), NULL, &cache, cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
     ASSERT_TRUE(cache);
     delete cache;
@@ -219,20 +222,33 @@ TEST_F(DiskCacheTest, CreateBackend) {
     // Now test the public API.
     rv = disk_cache::CreateCacheBackend(net::DISK_CACHE, cache_path_, 0, false,
                                         cache_thread.message_loop_proxy(),
-                                        NULL, &cache, &cb);
+                                        NULL, &cache, cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
     ASSERT_TRUE(cache);
     delete cache;
     cache = NULL;
 
     rv = disk_cache::CreateCacheBackend(net::MEMORY_CACHE, FilePath(), 0, false,
-                                        NULL, NULL, &cache, &cb);
+                                        NULL, NULL, &cache, cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
     ASSERT_TRUE(cache);
     delete cache;
   }
 
   MessageLoop::current()->RunAllPending();
+}
+
+// Testst that re-creating the cache performs the expected cleanup.
+TEST_F(DiskCacheBackendTest, CreateBackend_MissingFile) {
+  ASSERT_TRUE(CopyTestCache("bad_entry"));
+  FilePath filename = cache_path_.AppendASCII("data_1");
+  file_util::Delete(filename, false);
+  DisableFirstCleanup();
+  SetForceCreation();
+
+  bool prev = base::ThreadRestrictions::SetIOAllowed(false);
+  InitCache();
+  base::ThreadRestrictions::SetIOAllowed(prev);
 }
 
 TEST_F(DiskCacheBackendTest, ExternalFiles) {
@@ -259,7 +275,7 @@ TEST_F(DiskCacheBackendTest, ExternalFiles) {
 
 // Tests that we deal with file-level pending operations at destruction time.
 TEST_F(DiskCacheTest, ShutdownWithPendingIO) {
-  TestOldCompletionCallback cb;
+  net::TestCompletionCallback cb;
 
   {
     ASSERT_TRUE(CleanupCacheDir());
@@ -271,12 +287,13 @@ TEST_F(DiskCacheTest, ShutdownWithPendingIO) {
     int rv = disk_cache::BackendImpl::CreateBackend(
                  cache_path_, false, 0, net::DISK_CACHE, disk_cache::kNoRandom,
                  base::MessageLoopProxy::current(), NULL,
-                 &cache, &cb);
+                 &cache, cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
 
     disk_cache::EntryImpl* entry;
-    rv = cache->CreateEntry("some key",
-                            reinterpret_cast<disk_cache::Entry**>(&entry), &cb);
+    rv = cache->CreateEntry(
+        "some key", reinterpret_cast<disk_cache::Entry**>(&entry),
+        cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
 
     const int kSize = 25000;
@@ -287,7 +304,7 @@ TEST_F(DiskCacheTest, ShutdownWithPendingIO) {
       // We are using the current thread as the cache thread because we want to
       // be able to call directly this method to make sure that the OS (instead
       // of us switching thread) is returning IO pending.
-      rv = entry->WriteDataImpl(0, i, buffer, kSize, &cb, false);
+      rv = entry->WriteDataImpl(0, i, buffer, kSize, cb.callback(), false);
       if (rv == net::ERR_IO_PENDING)
         break;
       EXPECT_EQ(kSize, rv);
@@ -310,7 +327,7 @@ TEST_F(DiskCacheTest, ShutdownWithPendingIO) {
 
 // Tests that we deal with background-thread pending operations.
 TEST_F(DiskCacheTest, ShutdownWithPendingIO2) {
-  TestOldCompletionCallback cb;
+  net::TestCompletionCallback cb;
 
   {
     ASSERT_TRUE(CleanupCacheDir());
@@ -320,19 +337,19 @@ TEST_F(DiskCacheTest, ShutdownWithPendingIO2) {
 
     disk_cache::Backend* cache;
     int rv = disk_cache::BackendImpl::CreateBackend(
-                 cache_path_, false, 0, net::DISK_CACHE, disk_cache::kNoRandom,
-                 cache_thread.message_loop_proxy(), NULL, &cache, &cb);
+        cache_path_, false, 0, net::DISK_CACHE, disk_cache::kNoRandom,
+        cache_thread.message_loop_proxy(), NULL, &cache, cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
 
     disk_cache::Entry* entry;
-    rv = cache->CreateEntry("some key", &entry, &cb);
+    rv = cache->CreateEntry("some key", &entry, cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
 
     const int kSize = 25000;
     scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kSize));
     CacheTestFillBuffer(buffer->data(), kSize, false);
 
-    rv = entry->WriteData(0, 0, buffer, kSize, &cb, false);
+    rv = entry->WriteData(0, 0, buffer, kSize, cb.callback(), false);
     EXPECT_EQ(net::ERR_IO_PENDING, rv);
 
     entry->Close();
@@ -352,12 +369,12 @@ TEST_F(DiskCacheTest, TruncatedIndex) {
   base::Thread cache_thread("CacheThread");
   ASSERT_TRUE(cache_thread.StartWithOptions(
                   base::Thread::Options(MessageLoop::TYPE_IO, 0)));
-  TestOldCompletionCallback cb;
+  net::TestCompletionCallback cb;
 
   disk_cache::Backend* backend = NULL;
   int rv = disk_cache::BackendImpl::CreateBackend(
-               cache_path_, false, 0, net::DISK_CACHE, disk_cache::kNone,
-               cache_thread.message_loop_proxy(), NULL, &backend, &cb);
+      cache_path_, false, 0, net::DISK_CACHE, disk_cache::kNone,
+      cache_thread.message_loop_proxy(), NULL, &backend, cb.callback());
   ASSERT_NE(net::OK, cb.GetResult(rv));
 
   ASSERT_TRUE(backend == NULL);
@@ -924,7 +941,7 @@ void DiskCacheBackendTest::BackendEnumerations2() {
   FlushQueueForTest();
 
   // Make sure that the timestamp is not the same.
-  base::PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kDiskDelayMs));
   ASSERT_EQ(net::OK, OpenEntry(second, &entry1));
   void* iter = NULL;
   ASSERT_EQ(net::OK, OpenNextEntry(&iter, &entry2));
@@ -1100,7 +1117,7 @@ void DiskCacheBackendTest::BackendDoomRecent() {
   entry->Close();
   FlushQueueForTest();
 
-  base::PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kDiskDelayMs));
   Time middle = Time::Now();
 
   ASSERT_EQ(net::OK, CreateEntry("third", &entry));
@@ -1109,7 +1126,7 @@ void DiskCacheBackendTest::BackendDoomRecent() {
   entry->Close();
   FlushQueueForTest();
 
-  base::PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kDiskDelayMs));
   Time final = Time::Now();
 
   ASSERT_EQ(4, cache_->GetEntryCount());
@@ -1145,7 +1162,7 @@ void DiskCacheBackendTest::BackendDoomBetween() {
   entry->Close();
   FlushQueueForTest();
 
-  base::PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kDiskDelayMs));
   Time middle_start = Time::Now();
 
   ASSERT_EQ(net::OK, CreateEntry("second", &entry));
@@ -1154,7 +1171,7 @@ void DiskCacheBackendTest::BackendDoomBetween() {
   entry->Close();
   FlushQueueForTest();
 
-  base::PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kDiskDelayMs));
   Time middle_end = Time::Now();
 
   ASSERT_EQ(net::OK, CreateEntry("fourth", &entry));
@@ -1163,7 +1180,7 @@ void DiskCacheBackendTest::BackendDoomBetween() {
   entry->Close();
   FlushQueueForTest();
 
-  base::PlatformThread::Sleep(20);
+  base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(kDiskDelayMs));
   Time final = Time::Now();
 
   ASSERT_EQ(4, cache_->GetEntryCount());
@@ -1344,12 +1361,12 @@ TEST_F(DiskCacheTest, DeleteOld) {
   base::Thread cache_thread("CacheThread");
   ASSERT_TRUE(cache_thread.StartWithOptions(
                   base::Thread::Options(MessageLoop::TYPE_IO, 0)));
-  TestOldCompletionCallback cb;
+  net::TestCompletionCallback cb;
 
   disk_cache::Backend* cache;
   int rv = disk_cache::BackendImpl::CreateBackend(
                cache_path_, true, 0, net::DISK_CACHE, disk_cache::kNoRandom,
-               cache_thread.message_loop_proxy(), NULL, &cache, &cb);
+               cache_thread.message_loop_proxy(), NULL, &cache, cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
 
   MessageLoopHelper helper;
@@ -2238,19 +2255,19 @@ TEST_F(DiskCacheTest, MultipleInstances) {
   ScopedTestCache store3("cache_test3");
   base::Thread cache_thread("CacheThread");
   ASSERT_TRUE(cache_thread.StartWithOptions(
-                  base::Thread::Options(MessageLoop::TYPE_IO, 0)));
-  TestOldCompletionCallback cb;
+      base::Thread::Options(MessageLoop::TYPE_IO, 0)));
+  net::TestCompletionCallback cb;
 
   const int kNumberOfCaches = 2;
   disk_cache::Backend* cache[kNumberOfCaches];
 
   int rv = disk_cache::BackendImpl::CreateBackend(
-               store1.path(), false, 0, net::DISK_CACHE, disk_cache::kNone,
-               cache_thread.message_loop_proxy(), NULL, &cache[0], &cb);
+      store1.path(), false, 0, net::DISK_CACHE, disk_cache::kNone,
+      cache_thread.message_loop_proxy(), NULL, &cache[0], cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
   rv = disk_cache::BackendImpl::CreateBackend(
-           store2.path(), false, 0, net::MEDIA_CACHE, disk_cache::kNone,
-           cache_thread.message_loop_proxy(), NULL, &cache[1], &cb);
+      store2.path(), false, 0, net::MEDIA_CACHE, disk_cache::kNone,
+      cache_thread.message_loop_proxy(), NULL, &cache[1], cb.callback());
   ASSERT_EQ(net::OK, cb.GetResult(rv));
 
   ASSERT_TRUE(cache[0] != NULL && cache[1] != NULL);
@@ -2258,7 +2275,7 @@ TEST_F(DiskCacheTest, MultipleInstances) {
   std::string key("the first key");
   disk_cache::Entry* entry;
   for (int i = 0; i < kNumberOfCaches; i++) {
-    rv = cache[i]->CreateEntry(key, &entry, &cb);
+    rv = cache[i]->CreateEntry(key, &entry, cb.callback());
     ASSERT_EQ(net::OK, cb.GetResult(rv));
     entry->Close();
   }

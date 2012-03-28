@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,6 +6,8 @@
 
 #include "base/utf_string_conversions.h"
 #include "chrome/browser/ui/global_error.h"
+#include "chrome/browser/ui/global_error_service.h"
+#include "chrome/browser/ui/global_error_service_factory.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar_view.h"
 #include "chrome/browser/ui/views/window.h"
@@ -29,21 +31,42 @@ const int kMaxBubbleViewWidth = 262;
 // The horizontal padding between the title and the icon.
 const int kTitleHorizontalPadding = 3;
 
-// The vertical offset of the wrench bubble from the wrench menu button.
-const int kWrenchBubblePointOffsetY = -6;
+// The vertical inset of the wrench bubble anchor from the wrench menu button.
+const int kAnchorVerticalInset = 5;
 
 const int kLayoutBottomPadding = 2;
 
 }  // namespace
 
+// GlobalErrorBubbleViewBase ---------------------------------------------------
+
+// static
+GlobalErrorBubbleViewBase* GlobalErrorBubbleViewBase::ShowBubbleView(
+    Browser* browser,
+    const base::WeakPtr<GlobalError>& error) {
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
+  views::View* wrench_button = browser_view->toolbar()->app_menu();
+  GlobalErrorBubbleView* bubble_view =
+      new GlobalErrorBubbleView(wrench_button,
+                                views::BubbleBorder::TOP_RIGHT,
+                                browser,
+                                error);
+  browser::CreateViewsBubble(bubble_view);
+  bubble_view->StartFade(true);
+  return bubble_view;
+}
+
+// GlobalErrorBubbleView -------------------------------------------------------
+
 GlobalErrorBubbleView::GlobalErrorBubbleView(
     views::View* anchor_view,
     views::BubbleBorder::ArrowLocation location,
     Browser* browser,
-    GlobalError* error)
+    const base::WeakPtr<GlobalError>& error)
     : BubbleDelegateView(anchor_view, location),
       browser_(browser),
       error_(error) {
+  DCHECK(error_);
   ResourceBundle& rb = ResourceBundle::GetSharedInstance();
   int resource_id = error_->GetBubbleViewIconResourceID();
   scoped_ptr<views::ImageView> image_view(new views::ImageView());
@@ -125,33 +148,28 @@ GlobalErrorBubbleView::~GlobalErrorBubbleView() {
 
 gfx::Rect GlobalErrorBubbleView::GetAnchorRect() {
   gfx::Rect rect(views::BubbleDelegateView::GetAnchorRect());
-  rect.Offset(0, anchor_view() ? kWrenchBubblePointOffsetY : 0);
+  rect.Inset(0, anchor_view() ? kAnchorVerticalInset : 0);
   return rect;
 }
 
 void GlobalErrorBubbleView::ButtonPressed(views::Button* sender,
                                           const views::Event& event) {
-  if (sender->tag() == TAG_ACCEPT_BUTTON)
-    error_->BubbleViewAcceptButtonPressed();
-  else if (sender->tag() == TAG_CANCEL_BUTTON)
-    error_->BubbleViewCancelButtonPressed();
-  else
-    NOTREACHED();
+  if (error_) {
+    if (sender->tag() == TAG_ACCEPT_BUTTON)
+      error_->BubbleViewAcceptButtonPressed(browser_);
+    else if (sender->tag() == TAG_CANCEL_BUTTON)
+      error_->BubbleViewCancelButtonPressed(browser_);
+    else
+      NOTREACHED();
+  }
   GetWidget()->Close();
 }
 
 void GlobalErrorBubbleView::WindowClosing() {
-  error_->BubbleViewDidClose();
+  if (error_)
+    error_->BubbleViewDidClose(browser_);
 }
 
-void GlobalError::ShowBubbleView(Browser* browser, GlobalError* error) {
-  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
-  views::View* wrench_button = browser_view->toolbar()->app_menu();
-  GlobalErrorBubbleView* bubble_view =
-      new GlobalErrorBubbleView(wrench_button,
-                                views::BubbleBorder::TOP_RIGHT,
-                                browser,
-                                error);
-  browser::CreateViewsBubble(bubble_view);
-  bubble_view->StartFade(true);
+void GlobalErrorBubbleView::CloseBubbleView() {
+  GetWidget()->Close();
 }

@@ -1,7 +1,7 @@
 {
   "name": "A browser action with no icon that makes the page red",
   "version": "1.0",
-  "background_page": "background.html",
+  "background": { "scripts": ["background.js"] },
   "permissions": [
     "tabs", "http://*/*"
   ],
@@ -9,5 +9,5 @@
     "name": "Make this page red",
     "icons": ["icon.png"]
   },
-  "content_security_policy": "default-src 'none'; script-src 'self'"
+  "manifest_version": 2
 }

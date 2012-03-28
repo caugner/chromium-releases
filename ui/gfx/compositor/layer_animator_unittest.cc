@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "ui/gfx/compositor/layer_animation_delegate.h"
 #include "ui/gfx/compositor/layer_animation_element.h"
 #include "ui/gfx/compositor/layer_animation_sequence.h"
+#include "ui/gfx/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/compositor/test/test_layer_animation_delegate.h"
 #include "ui/gfx/compositor/test/test_layer_animation_observer.h"
 #include "ui/gfx/compositor/test/test_utils.h"
@@ -21,6 +22,28 @@
 namespace ui {
 
 namespace {
+
+class TestImplicitAnimationObserver : public ImplicitAnimationObserver {
+ public:
+  TestImplicitAnimationObserver() : animations_completed_(false) {}
+
+  bool animations_completed() const { return animations_completed_; }
+  void set_animations_completed(bool completed) {
+    animations_completed_ = completed;
+  }
+
+ private:
+  // ImplicitAnimationObserver implementation
+  virtual void OnImplicitAnimationsCompleted() OVERRIDE {
+    animations_completed_ = true;
+  }
+
+  bool animations_completed_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestImplicitAnimationObserver);
+};
+
+} // namespace
 
 // Checks that setting a property on an implicit animator causes an animation to
 // happen.
@@ -44,7 +67,6 @@ TEST(LayerAnimatorTest, NoImplicitAnimation) {
   animator->set_disable_timer_for_test(true);
   TestLayerAnimationDelegate delegate;
   animator->SetDelegate(&delegate);
-  base::TimeTicks now = base::TimeTicks::Now();
   animator->SetOpacity(0.5);
   EXPECT_FALSE(animator->is_animating());
   EXPECT_FLOAT_EQ(delegate.GetOpacityForAnimation(), 0.5);
@@ -57,7 +79,6 @@ TEST(LayerAnimatorTest, StopAnimatingProperty) {
   animator->set_disable_timer_for_test(true);
   TestLayerAnimationDelegate delegate;
   animator->SetDelegate(&delegate);
-  base::TimeTicks now = base::TimeTicks::Now();
   double target_opacity(0.5);
   gfx::Rect target_bounds(0, 0, 50, 50);
   animator->SetOpacity(target_opacity);
@@ -77,7 +98,6 @@ TEST(LayerAnimatorTest, StopAnimating) {
   animator->set_disable_timer_for_test(true);
   TestLayerAnimationDelegate delegate;
   animator->SetDelegate(&delegate);
-  base::TimeTicks now = base::TimeTicks::Now();
   double target_opacity(0.5);
   gfx::Rect target_bounds(0, 0, 50, 50);
   animator->SetOpacity(target_opacity);
@@ -652,6 +672,7 @@ TEST(LayerAnimatorTest, AddObserverExplicit) {
   TestLayerAnimationDelegate delegate;
   animator->SetDelegate(&delegate);
   animator->AddObserver(&observer);
+  observer.set_requires_notification_when_animator_destroyed(true);
 
   EXPECT_TRUE(!observer.last_ended_sequence());
 
@@ -701,7 +722,7 @@ TEST(LayerAnimatorTest, AddObserverImplicit) {
 
   TestLayerAnimationObserver scoped_observer;
   {
-    LayerAnimator::ScopedSettings settings(animator.get());
+    ScopedLayerAnimationSettings settings(animator.get());
     settings.AddObserver(&scoped_observer);
     for (int i = 0; i < 2; ++i) {
       // reset the observer
@@ -720,6 +741,58 @@ TEST(LayerAnimatorTest, AddObserverImplicit) {
   start_time = base::TimeTicks::Now();
   element->Step(start_time + base::TimeDelta::FromMilliseconds(1000));
   EXPECT_TRUE(!scoped_observer.last_ended_sequence());
+}
+
+// Tests that an observer added to a scoped settings object is still notified
+// when the object goes out of scope.
+TEST(LayerAnimatorTest, ImplicitAnimationObservers) {
+  scoped_ptr<LayerAnimator> animator(LayerAnimator::CreateDefaultAnimator());
+  AnimationContainerElement* element = animator.get();
+  animator->set_disable_timer_for_test(true);
+  TestImplicitAnimationObserver observer;
+  TestLayerAnimationDelegate delegate;
+  animator->SetDelegate(&delegate);
+
+  EXPECT_FALSE(observer.animations_completed());
+  animator->SetOpacity(1.0f);
+
+  {
+    ScopedLayerAnimationSettings settings(animator.get());
+    settings.AddImplicitObserver(&observer);
+    animator->SetOpacity(0.0f);
+  }
+
+  EXPECT_FALSE(observer.animations_completed());
+  base::TimeTicks start_time = animator->get_last_step_time_for_test();
+  element->Step(start_time + base::TimeDelta::FromMilliseconds(1000));
+  EXPECT_TRUE(observer.animations_completed());
+  EXPECT_FLOAT_EQ(0.0f, delegate.GetOpacityForAnimation());
+}
+
+// Tests that an observer added to a scoped settings object is still notified
+// when the object goes out of scope due to the animation being interrupted.
+TEST(LayerAnimatorTest, InterruptedImplicitAnimationObservers) {
+  scoped_ptr<LayerAnimator> animator(LayerAnimator::CreateDefaultAnimator());
+  animator->set_disable_timer_for_test(true);
+  TestImplicitAnimationObserver observer;
+  TestLayerAnimationDelegate delegate;
+  animator->SetDelegate(&delegate);
+
+  EXPECT_FALSE(observer.animations_completed());
+  animator->SetOpacity(1.0f);
+
+  {
+    ScopedLayerAnimationSettings settings(animator.get());
+    settings.AddImplicitObserver(&observer);
+    animator->SetOpacity(0.0f);
+  }
+
+  EXPECT_FALSE(observer.animations_completed());
+  // This should interrupt the implicit animation causing the observer to be
+  // notified immediately.
+  animator->SetOpacity(1.0f);
+  EXPECT_TRUE(observer.animations_completed());
+  EXPECT_FLOAT_EQ(1.0f, delegate.GetOpacityForAnimation());
 }
 
 TEST(LayerAnimatorTest, RemoveObserverShouldRemoveFromSequences) {
@@ -757,6 +830,34 @@ TEST(LayerAnimatorTest, RemoveObserverShouldRemoveFromSequences) {
   EXPECT_TRUE(!removed_observer.last_ended_sequence());
 }
 
+TEST(LayerAnimatorTest, ObserverReleasedBeforeAnimationSequenceEnds) {
+  scoped_ptr<LayerAnimator> animator(LayerAnimator::CreateDefaultAnimator());
+  animator->set_disable_timer_for_test(true);
+
+  scoped_ptr<TestLayerAnimationObserver> observer(
+      new TestLayerAnimationObserver);
+  TestLayerAnimationDelegate delegate;
+  animator->SetDelegate(&delegate);
+  animator->AddObserver(observer.get());
+
+  delegate.SetOpacityFromAnimation(0.0f);
+
+  base::TimeDelta delta = base::TimeDelta::FromSeconds(1);
+  LayerAnimationSequence* sequence = new LayerAnimationSequence(
+      LayerAnimationElement::CreateOpacityElement(1.0f, delta));
+
+  animator->StartAnimation(sequence);
+
+  // |observer| should be attached to |sequence|.
+  EXPECT_EQ(static_cast<size_t>(1), sequence->observers_.size());
+
+  // Now, release |observer|
+  observer.reset();
+
+  // And |sequence| should no longer be attached to |observer|.
+  EXPECT_EQ(static_cast<size_t>(0), sequence->observers_.size());
+}
+
 // Check that setting a property during an animation with a default animator
 // cancels the original animation.
 TEST(LayerAnimatorTest, SettingPropertyDuringAnAnimation) {
@@ -783,7 +884,5 @@ TEST(LayerAnimatorTest, SettingPropertyDuringAnAnimation) {
   EXPECT_FALSE(animator->is_animating());
   EXPECT_EQ(0.5, animator->GetTargetOpacity());
 }
-
-} // namespace
 
 } // namespace ui

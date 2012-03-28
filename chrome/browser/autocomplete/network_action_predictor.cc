@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -88,16 +88,11 @@ NetworkActionPredictor::NetworkActionPredictor(Profile* profile)
 }
 
 NetworkActionPredictor::~NetworkActionPredictor() {
-  db_->OnPredictorDestroyed();
 }
 
 void NetworkActionPredictor::RegisterTransitionalMatches(
     const string16& user_text,
     const AutocompleteResult& result) {
-  if (prerender::GetOmniboxHeuristicToUse() !=
-      prerender::OMNIBOX_HEURISTIC_EXACT_FULL) {
-    return;
-  }
   if (user_text.length() < kMinimumUserTextLength)
     return;
   const string16 lower_user_text(base::i18n::ToLower(user_text));
@@ -131,18 +126,17 @@ void NetworkActionPredictor::ClearTransitionalMatches() {
 NetworkActionPredictor::Action NetworkActionPredictor::RecommendAction(
     const string16& user_text,
     const AutocompleteMatch& match) const {
-  DCHECK(prerender::GetOmniboxHeuristicToUse() ==
-           prerender::OMNIBOX_HEURISTIC_EXACT ||
-         prerender::GetOmniboxHeuristicToUse() ==
-           prerender::OMNIBOX_HEURISTIC_EXACT_FULL);
-
   bool is_in_db = false;
   const double confidence = CalculateConfidence(user_text, match, &is_in_db);
   DCHECK(confidence >= 0.0 && confidence <= 1.0);
 
+  UMA_HISTOGRAM_BOOLEAN("NetworkActionPredictor.MatchIsInDb", is_in_db);
+
   if (is_in_db) {
-    UMA_HISTOGRAM_COUNTS_100("NetworkActionPredictor.Confidence_" +
-                             prerender::GetOmniboxHistogramSuffix(),
+    // Multiple enties with the same URL are fine as the confidence may be
+    // different.
+    tracked_urls_.push_back(std::make_pair(match.destination_url, confidence));
+    UMA_HISTOGRAM_COUNTS_100("NetworkActionPredictor.Confidence",
                              confidence * 100);
   }
 
@@ -157,13 +151,8 @@ NetworkActionPredictor::Action NetworkActionPredictor::RecommendAction(
 
   // Downgrade prerender to preconnect if this is a search match or if omnibox
   // prerendering is disabled.
-  if (action == ACTION_PRERENDER &&
-      ((match.type == AutocompleteMatch::SEARCH_WHAT_YOU_TYPED ||
-       match.type == AutocompleteMatch::SEARCH_SUGGEST ||
-       match.type == AutocompleteMatch::SEARCH_OTHER_ENGINE) ||
-       !prerender::IsOmniboxEnabled(profile_))) {
+  if (action == ACTION_PRERENDER && !prerender::IsOmniboxEnabled(profile_))
     action = ACTION_PRECONNECT;
-  }
 
   return action;
 }
@@ -177,13 +166,17 @@ bool NetworkActionPredictor::IsPreconnectable(const AutocompleteMatch& match) {
     case AutocompleteMatch::SEARCH_WHAT_YOU_TYPED:
     case AutocompleteMatch::SEARCH_HISTORY:
     case AutocompleteMatch::SEARCH_SUGGEST:
-      // A match that uses a non-default search engine (e.g. for tab-to-search).
+    // A match that uses a non-default search engine (e.g. for tab-to-search).
     case AutocompleteMatch::SEARCH_OTHER_ENGINE:
       return true;
 
     default:
       return false;
   }
+}
+
+void NetworkActionPredictor::Shutdown() {
+  db_->OnPredictorDestroyed();
 }
 
 void NetworkActionPredictor::Observe(
@@ -235,23 +228,14 @@ void NetworkActionPredictor::OnOmniboxOpenedUrl(const AutocompleteLog& log) {
   if (log.text.length() < kMinimumUserTextLength)
     return;
 
-  UMA_HISTOGRAM_COUNTS("NetworkActionPredictor.NavigationCount_" +
-                       prerender::GetOmniboxHistogramSuffix(), 1);
+  const AutocompleteMatch& match = log.result.match_at(log.selected_index);
 
-  const GURL& opened_url =
-      log.result.match_at(log.selected_index).destination_url;
+  UMA_HISTOGRAM_BOOLEAN("Prerender.OmniboxNavigationsCouldPrerender",
+                        prerender::IsOmniboxEnabled(profile_));
+
+  const GURL& opened_url = match.destination_url;
 
   const string16 lower_user_text(base::i18n::ToLower(log.text));
-
-  // Add the current match as the only transitional match.
-  if (prerender::GetOmniboxHeuristicToUse() !=
-      prerender::OMNIBOX_HEURISTIC_EXACT_FULL) {
-    DCHECK(transitional_matches_.empty());
-    TransitionalMatch dummy_match;
-    dummy_match.user_text = lower_user_text;
-    dummy_match.urls.push_back(opened_url);
-    transitional_matches_.push_back(dummy_match);
-  }
 
   BeginTransaction();
   // Traverse transitional matches for those that have a user_text that is a
@@ -293,6 +277,18 @@ void NetworkActionPredictor::OnOmniboxOpenedUrl(const AutocompleteLog& log) {
   CommitTransaction();
 
   ClearTransitionalMatches();
+
+  // Check against tracked urls and log accuracy for the confidence we
+  // predicted.
+  for (std::vector<std::pair<GURL, double> >::const_iterator it =
+       tracked_urls_.begin(); it != tracked_urls_.end();
+       ++it) {
+    if (opened_url == it->first) {
+      UMA_HISTOGRAM_COUNTS_100("NetworkActionPredictor.AccurateCount",
+                               it->second * 100);
+    }
+  }
+  tracked_urls_.clear();
 }
 
 
@@ -392,6 +388,11 @@ double NetworkActionPredictor::CalculateConfidence(
     return 0.0;
 
   *is_in_db = true;
+  return CalculateConfidenceForDbEntry(iter);
+}
+
+double NetworkActionPredictor::CalculateConfidenceForDbEntry(
+    DBCacheMap::const_iterator iter) const {
   const DBCacheValue& value = iter->second;
   if (value.number_of_hits < kMinimumNumberOfHits)
     return 0.0;

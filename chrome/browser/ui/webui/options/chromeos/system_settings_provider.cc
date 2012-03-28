@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -121,8 +121,7 @@ static const char* kTimeZones[] = {
     "Pacific/Tongatapu",
 };
 
-static base::LazyInstance<base::Lock,
-                          base::LeakyLazyInstanceTraits<base::Lock> >
+static base::LazyInstance<base::Lock>::Leaky
     g_timezone_bundle_lock = LAZY_INSTANCE_INITIALIZER;
 
 struct UResClose {
@@ -183,7 +182,9 @@ string16 GetExemplarCity(const icu::TimeZone& zone) {
 
 namespace chromeos {
 
-SystemSettingsProvider::SystemSettingsProvider() {
+SystemSettingsProvider::SystemSettingsProvider(
+    const NotifyObserversCallback& notify_cb)
+    : CrosSettingsProvider(notify_cb) {
   for (size_t i = 0; i < arraysize(kTimeZones); i++) {
     timezones_.push_back(icu::TimeZone::createTimeZone(
         icu::UnicodeString(kTimeZones[i], -1, US_INV)));
@@ -242,7 +243,7 @@ void SystemSettingsProvider::TimezoneChanged(const icu::TimeZone& timezone) {
   // Fires system setting change notification.
   timezone_value_.reset(
       base::Value::CreateStringValue(GetKnownTimezoneID(timezone)));
-  CrosSettings::Get()->FireObservers(kSystemTimezone);
+  NotifyObservers(kSystemTimezone);
 }
 
 ListValue* SystemSettingsProvider::GetTimezoneList() {

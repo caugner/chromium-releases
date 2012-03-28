@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -15,7 +15,6 @@
 #include "native_client/src/shared/ppapi_proxy/plugin_resource.h"
 #include "native_client/src/shared/ppapi_proxy/utility.h"
 #include "native_client/src/shared/srpc/nacl_srpc.h"
-#include "native_client/src/untrusted/nacl/syscall_bindings_trampoline.h"
 #include "ppapi/c/ppb_audio.h"
 #include "ppapi/c/ppb_audio_config.h"
 #include "ppapi/cpp/module_impl.h"
@@ -69,7 +68,7 @@ PluginAudio::~PluginAudio() {
 }
 
 bool PluginAudio::InitFromBrowserResource(PP_Resource resource) {
-  DebugPrintf("PluginAudio::InitFromBrowserResource: resource=%"NACL_PRIu32"\n",
+  DebugPrintf("PluginAudio::InitFromBrowserResource: resource=%"NACL_PRId32"\n",
               resource);
   resource_ = resource;
   return true;
@@ -154,7 +153,7 @@ PP_Resource Create(PP_Instance instance,
                    PP_Resource config,
                    PPB_Audio_Callback user_callback,
                    void* user_data) {
-  DebugPrintf("PPB_Audio::Create: instance=%"NACL_PRIu32" config=%"NACL_PRIu32
+  DebugPrintf("PPB_Audio::Create: instance=%"NACL_PRId32" config=%"NACL_PRId32
               " user_callback=%p user_data=%p\n",
               instance, config, user_callback, user_data);
   PP_Resource audio_resource;
@@ -182,7 +181,7 @@ PP_Resource Create(PP_Instance instance,
 
 PP_Bool IsAudio(PP_Resource resource) {
   int32_t success;
-  DebugPrintf("PPB_Audio::IsAudio: resource=%"NACL_PRIu32"\n", resource);
+  DebugPrintf("PPB_Audio::IsAudio: resource=%"NACL_PRId32"\n", resource);
   NaClSrpcError srpc_result =
       PpbAudioRpcClient::PPB_Audio_IsAudio(
           GetMainSrpcChannel(),
@@ -196,7 +195,7 @@ PP_Bool IsAudio(PP_Resource resource) {
 }
 
 PP_Resource GetCurrentConfig(PP_Resource audio) {
-  DebugPrintf("PPB_Audio::GetCurrentConfig: audio=%"NACL_PRIu32"\n", audio);
+  DebugPrintf("PPB_Audio::GetCurrentConfig: audio=%"NACL_PRId32"\n", audio);
   PP_Resource config_resource;
   NaClSrpcError srpc_result =
       PpbAudioRpcClient::PPB_Audio_GetCurrentConfig(
@@ -212,7 +211,7 @@ PP_Resource GetCurrentConfig(PP_Resource audio) {
 }
 
 PP_Bool StartPlayback(PP_Resource audio_resource) {
-  DebugPrintf("PPB_Audio::StartPlayback: audio_resource=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_Audio::StartPlayback: audio_resource=%"NACL_PRId32"\n",
               audio_resource);
   scoped_refptr<PluginAudio> audio =
       PluginResource::GetAs<PluginAudio>(audio_resource);
@@ -242,7 +241,7 @@ PP_Bool StartPlayback(PP_Resource audio_resource) {
 }
 
 PP_Bool StopPlayback(PP_Resource audio_resource) {
-  DebugPrintf("PPB_Audio::StopPlayback: audio_resource=%"NACL_PRIu32"\n",
+  DebugPrintf("PPB_Audio::StopPlayback: audio_resource=%"NACL_PRId32"\n",
               audio_resource);
   scoped_refptr<PluginAudio> audio =
       PluginResource::GetAs<PluginAudio>(audio_resource);
@@ -300,7 +299,7 @@ void PppAudioRpcServer::PPP_Audio_StreamCreated(
     NaClSrpcImcDescType sync_socket) {
   NaClSrpcClosureRunner runner(done);
   rpc->result = NACL_SRPC_RESULT_APP_ERROR;
-  DebugPrintf("PPP_Audio::StreamCreated: audio_resource=%"NACL_PRIu32
+  DebugPrintf("PPP_Audio::StreamCreated: audio_resource=%"NACL_PRId32
               " shm=%"NACL_PRIx32" shm_size=%"NACL_PRIuS
               " sync_socket=%"NACL_PRIx32"\n",
               audio_resource, shm, shm_size, sync_socket);

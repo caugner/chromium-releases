@@ -46,15 +46,15 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
     ~Prompt();
 
     void SetPermissions(std::vector<string16> permissions);
-    void SetInlineInstallWebstoreData(std::string localized_user_count,
+    void SetInlineInstallWebstoreData(const std::string& localized_user_count,
                                       double average_rating,
                                       int rating_count);
 
     PromptType type() const { return type_; }
 
     // Getters for UI element labels.
-    string16 GetDialogTitle() const;
-    string16 GetHeading(std::string extension_name) const;
+    string16 GetDialogTitle(const Extension* extension) const;
+    string16 GetHeading(const std::string& extension_name) const;
     string16 GetAcceptButtonLabel() const;
     bool HasAbortButtonLabel() const;
     string16 GetAbortButtonLabel() const;
@@ -145,7 +145,7 @@ class ExtensionInstallUI : public ImageLoadingTracker::Observer {
   virtual void OnInstallSuccess(const Extension* extension, SkBitmap* icon);
 
   // Installation failed. This is declared virtual for testing.
-  virtual void OnInstallFailure(const std::string& error);
+  virtual void OnInstallFailure(const string16& error);
 
   // ImageLoadingTracker::Observer:
   virtual void OnImageLoaded(

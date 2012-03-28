@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -16,7 +16,10 @@ class Browser;
 class BookmarkModel;
 class BookmarkNode;
 class MenuGtk;  // See below for why we need this.
+
+namespace content {
 class PageNavigator;
+}
 
 // BookmarkNodeMenuModel builds a SimpleMenuModel on demand when the menu is
 // shown, and automatically destroys child models when the menu is closed.
@@ -25,7 +28,7 @@ class BookmarkNodeMenuModel : public ui::SimpleMenuModel {
   BookmarkNodeMenuModel(ui::SimpleMenuModel::Delegate* delegate,
                         BookmarkModel* model,
                         const BookmarkNode* node,
-                        PageNavigator* page_navigator);
+                        content::PageNavigator* page_navigator);
   virtual ~BookmarkNodeMenuModel();
 
   // From SimpleMenuModel. Takes care of deleting submenus.
@@ -64,7 +67,7 @@ class BookmarkNodeMenuModel : public ui::SimpleMenuModel {
   const BookmarkNode* node_;
 
   // The page navigator used to open bookmarks in ActivatedAt().
-  PageNavigator* page_navigator_;
+  content::PageNavigator* page_navigator_;
 
   // A list of the submenus we own and will need to delete.
   std::vector<BookmarkNodeMenuModel*> submenus_;
@@ -87,7 +90,8 @@ class BookmarkSubMenuModel : public BookmarkNodeMenuModel,
   // See below; this is used to allow closing the menu when bookmarks change.
   void SetMenuGtk(MenuGtk* menu) { menu_ = menu; }
 
-  // From BaseBookmarkModelObserver.
+  // From BookmarkModelObserver, BaseBookmarkModelObserver.
+  virtual void Loaded(BookmarkModel* model, bool ids_reassigned) OVERRIDE;
   virtual void BookmarkModelChanged() OVERRIDE;
   virtual void BookmarkModelBeingDeleted(BookmarkModel* model) OVERRIDE;
 

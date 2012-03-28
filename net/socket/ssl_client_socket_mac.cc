@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -13,6 +13,7 @@
 
 #include "base/bind.h"
 #include "base/lazy_instance.h"
+#include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/string_util.h"
 #include "net/base/address_list.h"
@@ -203,7 +204,7 @@ int NetErrorFromOSStatus(OSStatus status) {
     case errSSLPeerCertUnknown...errSSLPeerBadCert:
     case errSSLPeerUnknownCA:
     case errSSLPeerAccessDenied:
-      LOG(WARNING) << "Server rejected client cert (OSStatus=" << status << ")";
+      OSSTATUS_LOG(WARNING, status) << "Server rejected client cert";
       return ERR_BAD_SSL_CLIENT_AUTH_CERT;
 
     case errSSLNegotiation:
@@ -215,8 +216,8 @@ int NetErrorFromOSStatus(OSStatus status) {
     case errSSLModuleAttach:
     case errSSLSessionNotFound:
     default:
-      LOG(WARNING) << "Unknown error " << status <<
-          " mapped to net::ERR_FAILED";
+      OSSTATUS_LOG(WARNING, status)
+          << "Unknown error mapped to net::ERR_FAILED";
       return ERR_FAILED;
   }
 }
@@ -240,8 +241,7 @@ OSStatus OSStatusFromNetError(int net_error) {
     case OK:
       return noErr;
     default:
-      LOG(WARNING) << "Unknown error " << net_error <<
-          " mapped to paramErr";
+      LOG(WARNING) << "Unknown error " << net_error << " mapped to paramErr";
       return paramErr;
   }
 }
@@ -524,16 +524,9 @@ SSLClientSocketMac::SSLClientSocketMac(ClientSocketHandle* transport_socket,
                                        const HostPortPair& host_and_port,
                                        const SSLConfig& ssl_config,
                                        const SSLClientSocketContext& context)
-    : transport_read_callback_(this,
-                               &SSLClientSocketMac::OnTransportReadComplete),
-      transport_write_callback_(this,
-                                &SSLClientSocketMac::OnTransportWriteComplete),
-      transport_(transport_socket),
+    : transport_(transport_socket),
       host_and_port_(host_and_port),
       ssl_config_(ssl_config),
-      user_connect_callback_(NULL),
-      user_read_callback_(NULL),
-      user_write_callback_(NULL),
       user_read_buf_len_(0),
       user_write_buf_len_(0),
       next_handshake_state_(STATE_NONE),
@@ -555,10 +548,10 @@ SSLClientSocketMac::~SSLClientSocketMac() {
   Disconnect();
 }
 
-int SSLClientSocketMac::Connect(OldCompletionCallback* callback) {
+int SSLClientSocketMac::Connect(const CompletionCallback& callback) {
   DCHECK(transport_.get());
   DCHECK(next_handshake_state_ == STATE_NONE);
-  DCHECK(!user_connect_callback_);
+  DCHECK(user_connect_callback_.is_null());
 
   net_log_.BeginEvent(NetLog::TYPE_SSL_CONNECT, NULL);
 
@@ -676,9 +669,9 @@ base::TimeDelta SSLClientSocketMac::GetConnectTimeMicros() const {
 }
 
 int SSLClientSocketMac::Read(IOBuffer* buf, int buf_len,
-                             OldCompletionCallback* callback) {
+                             const CompletionCallback& callback) {
   DCHECK(completed_handshake());
-  DCHECK(!user_read_callback_);
+  DCHECK(user_read_callback_.is_null());
   DCHECK(!user_read_buf_);
 
   user_read_buf_ = buf;
@@ -695,9 +688,9 @@ int SSLClientSocketMac::Read(IOBuffer* buf, int buf_len,
 }
 
 int SSLClientSocketMac::Write(IOBuffer* buf, int buf_len,
-                              OldCompletionCallback* callback) {
+                              const CompletionCallback& callback) {
   DCHECK(completed_handshake());
-  DCHECK(!user_write_callback_);
+  DCHECK(user_write_callback_.is_null());
   DCHECK(!user_write_buf_);
 
   user_write_buf_ = buf;
@@ -731,8 +724,8 @@ void SSLClientSocketMac::GetSSLInfo(SSLInfo* ssl_info) {
   ssl_info->public_key_hashes = server_cert_verify_result_.public_key_hashes;
   ssl_info->is_issued_by_known_root =
       server_cert_verify_result_.is_issued_by_known_root;
-  ssl_info->client_cert_sent =
-      ssl_config_.send_client_cert && ssl_config_.client_cert;
+  ssl_info->client_cert_sent = was_origin_bound_cert_sent() ||
+      (ssl_config_.send_client_cert && ssl_config_.client_cert);
 
   // security info
   SSLCipherSuite suite;
@@ -896,37 +889,37 @@ int SSLClientSocketMac::InitializeSSLContext() {
 
 void SSLClientSocketMac::DoConnectCallback(int rv) {
   DCHECK(rv != ERR_IO_PENDING);
-  DCHECK(user_connect_callback_);
+  DCHECK(!user_connect_callback_.is_null());
 
-  OldCompletionCallback* c = user_connect_callback_;
-  user_connect_callback_ = NULL;
-  c->Run(rv > OK ? OK : rv);
+  CompletionCallback c = user_connect_callback_;
+  user_connect_callback_.Reset();
+  c.Run(rv > OK ? OK : rv);
 }
 
 void SSLClientSocketMac::DoReadCallback(int rv) {
   DCHECK(rv != ERR_IO_PENDING);
-  DCHECK(user_read_callback_);
+  DCHECK(!user_read_callback_.is_null());
 
   // Since Run may result in Read being called, clear user_read_callback_ up
   // front.
-  OldCompletionCallback* c = user_read_callback_;
-  user_read_callback_ = NULL;
+  CompletionCallback c = user_read_callback_;
+  user_read_callback_.Reset();
   user_read_buf_ = NULL;
   user_read_buf_len_ = 0;
-  c->Run(rv);
+  c.Run(rv);
 }
 
 void SSLClientSocketMac::DoWriteCallback(int rv) {
   DCHECK(rv != ERR_IO_PENDING);
-  DCHECK(user_write_callback_);
+  DCHECK(!user_write_callback_.is_null());
 
   // Since Run may result in Write being called, clear user_write_callback_ up
   // front.
-  OldCompletionCallback* c = user_write_callback_;
-  user_write_callback_ = NULL;
+  CompletionCallback c = user_write_callback_;
+  user_write_callback_.Reset();
   user_write_buf_ = NULL;
   user_write_buf_len_ = 0;
-  c->Run(rv);
+  c.Run(rv);
 }
 
 void SSLClientSocketMac::OnHandshakeIOComplete(int result) {
@@ -936,7 +929,7 @@ void SSLClientSocketMac::OnHandshakeIOComplete(int result) {
     // renegotiating (which occurs because we are in the middle of a Read
     // when the renegotiation process starts).  So we complete the Read
     // here.
-    if (!user_connect_callback_) {
+    if (user_connect_callback_.is_null()) {
       DoReadCallback(rv);
       return;
     }
@@ -1203,7 +1196,7 @@ int SSLClientSocketMac::SetClientCert() {
   VLOG(1) << "SSLSetCertificate(" << CFArrayGetCount(cert_refs) << " certs)";
   OSStatus result = SSLSetCertificate(ssl_context_, cert_refs);
   if (result)
-    LOG(ERROR) << "SSLSetCertificate returned OSStatus " << result;
+    OSSTATUS_LOG(ERROR, result) << "SSLSetCertificate failed";
   return result;
 }
 
@@ -1274,7 +1267,7 @@ int SSLClientSocketMac::DoCompletedRenegotiation(int result) {
 }
 
 void SSLClientSocketMac::DidCompleteRenegotiation() {
-  DCHECK(!user_connect_callback_);
+  DCHECK(user_connect_callback_.is_null());
   renegotiating_ = false;
   next_handshake_state_ = STATE_COMPLETED_RENEGOTIATION;
 }
@@ -1354,9 +1347,11 @@ OSStatus SSLClientSocketMac::SSLReadCallback(SSLConnectionRef connection,
   int rv = 1;  // any old value to spin the loop below
   while (rv > 0 && total_read < *data_length) {
     us->read_io_buf_ = new IOBuffer(*data_length - total_read);
-    rv = us->transport_->socket()->Read(us->read_io_buf_,
-                                        *data_length - total_read,
-                                        &us->transport_read_callback_);
+    rv = us->transport_->socket()->Read(
+        us->read_io_buf_,
+        *data_length - total_read,
+        base::Bind(&SSLClientSocketMac::OnTransportReadComplete,
+                   base::Unretained(us)));
 
     if (rv >= 0) {
       us->recv_buffer_.insert(us->recv_buffer_.end(),
@@ -1416,9 +1411,11 @@ OSStatus SSLClientSocketMac::SSLWriteCallback(SSLConnectionRef connection,
     us->write_io_buf_ = new IOBuffer(us->send_buffer_.size());
     memcpy(us->write_io_buf_->data(), &us->send_buffer_[0],
            us->send_buffer_.size());
-    rv = us->transport_->socket()->Write(us->write_io_buf_,
-                                         us->send_buffer_.size(),
-                                         &us->transport_write_callback_);
+    rv = us->transport_->socket()->Write(
+        us->write_io_buf_,
+        us->send_buffer_.size(),
+        base::Bind(&SSLClientSocketMac::OnTransportWriteComplete,
+                   base::Unretained(us)));
     if (rv > 0) {
       us->send_buffer_.erase(us->send_buffer_.begin(),
                              us->send_buffer_.begin() + rv);

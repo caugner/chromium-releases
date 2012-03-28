@@ -138,7 +138,7 @@ void TestGetInstallState::DoInstallStateTests() {
   }
 
   // All done.
-  main_loop_->PostTask(FROM_HERE, new MessageLoop::QuitTask());
+  main_loop_->PostTask(FROM_HERE, MessageLoop::QuitClosure());
 }
 
 void TestGetInstallState::VerifyInstallState(
@@ -173,9 +173,7 @@ class SearchProviderInstallDataTest : public testing::Test {
   }
 
   virtual void TearDown() {
-    BrowserThread::GetMessageLoopProxyForThread(BrowserThread::IO)->PostTask(
-        FROM_HERE,
-        new DeleteTask<SearchProviderInstallData>(install_data_));
+    BrowserThread::DeleteSoon(BrowserThread::IO, FROM_HERE, install_data_);
     install_data_ = NULL;
 
     // Make sure that the install data class on the UI thread gets cleaned up.

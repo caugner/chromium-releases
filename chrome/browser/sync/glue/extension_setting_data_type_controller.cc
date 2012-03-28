@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -22,10 +22,11 @@ ExtensionSettingDataTypeController::ExtensionSettingDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
     Profile* profile,
     ProfileSyncService* profile_sync_service)
-    : NonFrontendDataTypeController(profile_sync_factory, profile),
+    : NonFrontendDataTypeController(profile_sync_factory,
+                                    profile,
+                                    profile_sync_service),
       type_(type),
-      settings_frontend_(
-          profile->GetExtensionService()->settings_frontend()),
+      profile_(profile),
       profile_sync_service_(profile_sync_service),
       settings_service_(NULL) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
@@ -45,13 +46,16 @@ ExtensionSettingDataTypeController::model_safe_group() const {
 }
 
 bool ExtensionSettingDataTypeController::StartModels() {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  profile_->InitExtensions(true);
   return true;
 }
 
 bool ExtensionSettingDataTypeController::StartAssociationAsync() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   DCHECK_EQ(state(), ASSOCIATING);
-  settings_frontend_->RunWithSyncableService(
+  DCHECK(profile_->GetExtensionService());
+  profile_->GetExtensionService()->settings_frontend()->RunWithSyncableService(
       type_,
       base::Bind(
           &ExtensionSettingDataTypeController::

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,12 +14,12 @@
 #include "base/callback_forward.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
+#include "base/message_loop_helpers.h"
 #include "base/message_loop_proxy.h"
 #include "base/message_pump.h"
 #include "base/observer_list.h"
 #include "base/pending_task.h"
 #include "base/synchronization/lock.h"
-#include "base/task.h"
 #include "base/tracking_info.h"
 #include "base/time.h"
 
@@ -161,26 +161,6 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
   //
   // NOTE: These methods may be called on any thread.  The Task will be invoked
   // on the thread that executes MessageLoop::Run().
-
-  void PostTask(
-      const tracked_objects::Location& from_here, Task* task);
-
-  void PostDelayedTask(
-      const tracked_objects::Location& from_here, Task* task, int64 delay_ms);
-
-  void PostNonNestableTask(
-      const tracked_objects::Location& from_here, Task* task);
-
-  void PostNonNestableDelayedTask(
-      const tracked_objects::Location& from_here, Task* task, int64 delay_ms);
-
-  // TODO(ajwong): Remove the functions above once the Task -> Closure migration
-  // is complete.
-  //
-  // There are 2 sets of Post*Task functions, one which takes the older Task*
-  // function object representation, and one that takes the newer base::Closure.
-  // We have this overload to allow a staged transition between the two systems.
-  // Once the transition is done, the functions above should be deleted.
   void PostTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task);
@@ -189,6 +169,11 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
       const tracked_objects::Location& from_here,
       const base::Closure& task, int64 delay_ms);
 
+  void PostDelayedTask(
+      const tracked_objects::Location& from_here,
+      const base::Closure& task,
+      base::TimeDelta delay);
+
   void PostNonNestableTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task);
@@ -196,6 +181,11 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
   void PostNonNestableDelayedTask(
       const tracked_objects::Location& from_here,
       const base::Closure& task, int64 delay_ms);
+
+  void PostNonNestableDelayedTask(
+      const tracked_objects::Location& from_here,
+      const base::Closure& task,
+      base::TimeDelta delay);
 
   // A variant on PostTask that deletes the given object.  This is useful
   // if the object needs to live until the next run of the MessageLoop (for
@@ -208,7 +198,8 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
   // from RefCountedThreadSafe<T>!
   template <class T>
   void DeleteSoon(const tracked_objects::Location& from_here, const T* object) {
-    PostNonNestableTask(from_here, new DeleteTask<T>(object));
+    base::subtle::DeleteHelperInternal<T, void>::DeleteOnMessageLoop(
+        this, from_here, object);
   }
 
   // A variant on PostTask that releases the given reference counted object
@@ -224,7 +215,8 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
   template <class T>
   void ReleaseSoon(const tracked_objects::Location& from_here,
                    const T* object) {
-    PostNonNestableTask(from_here, new ReleaseTask<T>(object));
+    base::subtle::ReleaseHelperInternal<T, void>::ReleaseOnMessageLoop(
+        this, from_here, object);
   }
 
   // Run the message loop.
@@ -238,25 +230,15 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
   // messages.  This method may only be called on the same thread that called
   // Run, and Run must still be on the call stack.
   //
-  // Use QuitTask or QuitClosure if you need to Quit another thread's
-  // MessageLoop, but note that doing so is fairly dangerous if the target
-  // thread makes nested calls to MessageLoop::Run.  The problem being that you
-  // won't know which nested run loop you are quitting, so be careful!
+  // Use QuitClosure if you need to Quit another thread's MessageLoop, but note
+  // that doing so is fairly dangerous if the target thread makes nested calls
+  // to MessageLoop::Run.  The problem being that you won't know which nested
+  // run loop you are quitting, so be careful!
   void Quit();
 
   // This method is a variant of Quit, that does not wait for pending messages
   // to be processed before returning from Run.
   void QuitNow();
-
-  // Invokes Quit on the current MessageLoop when run.  Useful to schedule an
-  // arbitrary MessageLoop to Quit.
-  // TODO(jhawkins): Remove once task.h is removed.
-  class QuitTask : public Task {
-   public:
-    virtual void Run() OVERRIDE {
-      MessageLoop::current()->Quit();
-    }
-  };
 
   // Invokes Quit on the current MessageLoop when run. Useful to schedule an
   // arbitrary MessageLoop to Quit.
@@ -542,6 +524,17 @@ class BASE_EXPORT MessageLoop : public base::MessagePump::Delegate {
   scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
 
  private:
+  template <class T, class R> friend class base::subtle::DeleteHelperInternal;
+  template <class T, class R> friend class base::subtle::ReleaseHelperInternal;
+
+  void DeleteSoonInternal(const tracked_objects::Location& from_here,
+                          void(*deleter)(const void*),
+                          const void* object);
+  void ReleaseSoonInternal(const tracked_objects::Location& from_here,
+                           void(*releaser)(const void*),
+                           const void* object);
+
+
   DISALLOW_COPY_AND_ASSIGN(MessageLoop);
 };
 

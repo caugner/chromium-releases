@@ -16,6 +16,9 @@ ServiceProcessStateTest.ForceShutdown
 ServiceProcessStateTest.ReadyState
 ServiceProcessStateTest.Singleton
 
+# http://crbug.com/88221
+ConnectionTesterTest.DeleteWhileInProgress
+
 # Failing on Chromium OS. http://crbug.com/104826
 GViewRequestInterceptorTest.DoNotInterceptDownload
 
@@ -24,6 +27,3 @@ ProcessWatcherTest.ImmediateTermination
 
 # Fails under Heapcheck http://crbug.com/104566
 GViewRequestInterceptorTest.DoNotInterceptPdfWhenEnabled
-
-# Crashing on CrOS. http://crbug.com/105335
-BrowserMainTest.WarmConnectionFieldTrial_WarmestSocket

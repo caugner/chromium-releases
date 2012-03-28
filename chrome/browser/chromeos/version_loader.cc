@@ -6,6 +6,7 @@
 
 #include <vector>
 
+#include "base/bind.h"
 #include "base/file_path.h"
 #include "base/file_util.h"
 #include "base/message_loop.h"
@@ -48,7 +49,7 @@ VersionLoader::Handle VersionLoader::GetVersion(
     CancelableRequestConsumerBase* consumer,
     const VersionLoader::GetVersionCallback& callback,
     VersionFormat format) {
-  if (!g_browser_process->file_thread()) {
+  if (!BrowserThread::IsMessageLoopValid(BrowserThread::FILE)) {
     // This should only happen if Chrome is shutting down, so we don't do
     // anything.
     return 0;
@@ -57,16 +58,16 @@ VersionLoader::Handle VersionLoader::GetVersion(
   scoped_refptr<GetVersionRequest> request(new GetVersionRequest(callback));
   AddRequest(request, consumer);
 
-  g_browser_process->file_thread()->message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(backend_.get(), &Backend::GetVersion, request, format));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&Backend::GetVersion, backend_.get(), request, format));
   return request->handle();
 }
 
 VersionLoader::Handle VersionLoader::GetFirmware(
     CancelableRequestConsumerBase* consumer,
     const VersionLoader::GetFirmwareCallback& callback) {
-  if (!g_browser_process->file_thread()) {
+  if (!BrowserThread::IsMessageLoopValid(BrowserThread::FILE)) {
     // This should only happen if Chrome is shutting down, so we don't do
     // anything.
     return 0;
@@ -75,9 +76,9 @@ VersionLoader::Handle VersionLoader::GetFirmware(
   scoped_refptr<GetFirmwareRequest> request(new GetFirmwareRequest(callback));
   AddRequest(request, consumer);
 
-  g_browser_process->file_thread()->message_loop()->PostTask(
-      FROM_HERE,
-      NewRunnableMethod(backend_.get(), &Backend::GetFirmware, request));
+  BrowserThread::PostTask(
+      BrowserThread::FILE, FROM_HERE,
+      base::Bind(&Backend::GetFirmware, backend_.get(), request));
   return request->handle();
 }
 

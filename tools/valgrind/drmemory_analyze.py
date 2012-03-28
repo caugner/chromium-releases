@@ -44,11 +44,9 @@ class DrMemoryError:
     if self._testcase:
       output += "The report came from the `%s` test.\n" % self._testcase
     output += "Suppression (error hash=#%016X#):\n" % self.ErrorHash()
+    output += ("  For more info on using suppressions see "
+        "http://dev.chromium.org/developers/how-tos/using-drmemory#TOC-Suppressing-error-reports-from-the-\n")
     output += "{\n%s\n}\n" % self._suppression
-
-    # TODO(timurrrr): docs on suppressing?
-    #output += ("  For more info on using suppressions see "
-    #           "http://dev.chromium.org/developers/how-tos/using-valgrind#TOC-Suppressing-Errors")
     return output
 
   # This is a device-independent hash identifying the suppression.
@@ -139,18 +137,26 @@ class DrMemoryAnalyzer:
   def Report(self, filenames, testcase, check_sanity):
     sys.stdout.flush()
     # TODO(timurrrr): support positive tests / check_sanity==True
+    self.used_suppressions = defaultdict(int)
 
     to_report = []
-    self.used_suppressions = defaultdict(int)
+    reports_for_this_test = set()
     for f in filenames:
       cur_reports = self.ParseReportFile(f, testcase)
 
       # Filter out the reports that were there in previous tests.
       for r in cur_reports:
-        if r in self.known_errors:
-          pass  # TODO: print out a hash once we add hashes to the reports.
+        if r in reports_for_this_test:
+          # A similar report is about to be printed for this test.
+          pass
+        elif r in self.known_errors:
+          # A similar report has already been printed in one of the prev tests.
+          to_report.append("This error was already printed in some "
+                           "other test, see 'hash=#%016X#'" % r.ErrorHash())
+          reports_for_this_test.add(r)
         else:
           self.known_errors.add(r)
+          reports_for_this_test.add(r)
           to_report.append(r)
 
     common.PrintUsedSuppressionsList(self.used_suppressions)
@@ -159,14 +165,14 @@ class DrMemoryAnalyzer:
       logging.info("PASS: No error reports found")
       return 0
 
-    logging.error("Found %i error reports" % len(to_report))
+    sys.stdout.flush()
     sys.stderr.flush()
+    logging.info("Found %i error reports" % len(to_report))
     for report in to_report:
       self.error_count += 1
       logging.info("Report #%d\n%s" % (self.error_count, report))
-      sys.stdout.flush()
-    logging.error("Total: %i error reports" % len(to_report))
-    sys.stderr.flush()
+    logging.info("Total: %i error reports" % len(to_report))
+    sys.stdout.flush()
     return -1
 
 

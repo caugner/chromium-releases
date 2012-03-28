@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/protocol/typed_url_specifics.pb.h"
 #include "chrome/common/chrome_notification_types.h"
-#include "content/browser/notification_service_impl.h"
+#include "content/public/browser/notification_service.h"
 
 using content::BrowserThread;
 
@@ -50,7 +50,7 @@ TypedUrlChangeProcessor::TypedUrlChangeProcessor(
   // When running in unit tests, there is already a NotificationService object.
   // Since only one can exist at a time per thread, check first.
   if (!content::NotificationService::current())
-    notification_service_.reset(new NotificationServiceImpl);
+    notification_service_.reset(content::NotificationService::Create());
   StartObserving();
 }
 
@@ -240,12 +240,14 @@ void TypedUrlChangeProcessor::ApplyChangesFromSyncModel(
     const sync_pb::TypedUrlSpecifics& typed_url(
         sync_node.GetTypedUrlSpecifics());
     DCHECK(typed_url.visits_size());
-    if (!typed_url.visits_size()) {
+    sync_pb::TypedUrlSpecifics filtered_url =
+        model_associator_->FilterExpiredVisits(typed_url);
+    if (!filtered_url.visits_size()) {
       continue;
     }
 
     if (!model_associator_->UpdateFromSyncDB(
-            typed_url, &pending_new_visits_, &pending_deleted_visits_,
+            filtered_url, &pending_new_visits_, &pending_deleted_visits_,
             &pending_updated_urls_, &pending_new_urls_)) {
       error_handler()->OnUnrecoverableError(
           FROM_HERE, "Could not get existing url's visits.");

@@ -8,13 +8,13 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/sessions/session_id.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 
-class TabContentsWrapper;
-
-class RestoreTabHelper : public TabContentsObserver {
+// This class keeps the extension API's windowID up-to-date with the current
+// window of the tab.
+class RestoreTabHelper : public content::WebContentsObserver {
  public:
-  explicit RestoreTabHelper(TabContentsWrapper* tab);
+  explicit RestoreTabHelper(content::WebContents* contents);
   virtual ~RestoreTabHelper();
 
   // Returns the identifier used by session restore for this tab.
@@ -24,12 +24,10 @@ class RestoreTabHelper : public TabContentsObserver {
   void SetWindowID(const SessionID& id);
   const SessionID& window_id() const { return window_id_; }
 
-  // TabContentsObserver:
+  // content::WebContentsObserver:
   virtual void RenderViewCreated(RenderViewHost* render_view_host) OVERRIDE;
 
  private:
-  TabContentsWrapper* tab_;
-
   // Unique identifier of the tab for session restore. This id is only unique
   // within the current session, and is not guaranteed to be unique across
   // sessions.

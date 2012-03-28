@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,7 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
+#include "base/message_loop_helpers.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebPlugin.h"
 #include "ui/gfx/rect.h"
 #include "webkit/plugins/webkit_plugins_export.h"
@@ -35,7 +35,7 @@ class WebPluginImpl : public WebKit::WebPlugin {
       const base::WeakPtr<PluginDelegate>& plugin_delegate);
 
  private:
-  friend class DeleteTask<WebPluginImpl>;
+  friend class base::DeleteHelper<WebPluginImpl>;
 
   WEBKIT_PLUGINS_EXPORT virtual ~WebPluginImpl();
 
@@ -43,7 +43,7 @@ class WebPluginImpl : public WebKit::WebPlugin {
   virtual bool initialize(WebKit::WebPluginContainer* container);
   virtual void destroy();
   virtual NPObject* scriptableObject();
-  virtual bool getFormValue(WebKit::WebString* value);
+  virtual bool getFormValue(WebKit::WebString& value);
   virtual void paint(WebKit::WebCanvas* canvas, const WebKit::WebRect& rect);
   virtual void updateGeometry(
       const WebKit::WebRect& frame_rect,
@@ -80,6 +80,9 @@ class WebPluginImpl : public WebKit::WebPlugin {
                          int printer_dpi) OVERRIDE;
   virtual bool printPage(int page_number, WebKit::WebCanvas* canvas) OVERRIDE;
   virtual void printEnd() OVERRIDE;
+
+  virtual bool canRotateView() OVERRIDE;
+  virtual void rotateView(RotationType type) OVERRIDE;
 
   struct InitData;
 

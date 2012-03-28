@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -178,7 +178,7 @@ void TestShell::InitializeTestShell(bool layout_test_mode,
 
   const CommandLine& parsed_command_line = *CommandLine::ForCurrentProcess();
   if (parsed_command_line.HasSwitch(test_shell::kCrashDumps)) {
-    std::wstring dir(
+    string16 dir(
         parsed_command_line.GetSwitchValueNative(test_shell::kCrashDumps));
     if (parsed_command_line.HasSwitch(test_shell::kCrashDumpsFulldump)) {
         new google_breakpad::ExceptionHandler(
@@ -247,10 +247,10 @@ std::string TestShell::RewriteLocalUrl(const std::string& url) {
     replace_url = replace_url.AppendASCII("third_party");
     replace_url = replace_url.AppendASCII("WebKit");
     replace_url = replace_url.AppendASCII("LayoutTests");
-    std::wstring replace_url_str = replace_url.value();
+    string16 replace_url_str = replace_url.value();
     replace_url_str.push_back(L'/');
     new_url = std::string("file:///") +
-              WideToUTF8(replace_url_str).append(url.substr(kPrefixLen));
+              UTF16ToUTF8(replace_url_str).append(url.substr(kPrefixLen));
   }
   return new_url;
 }
@@ -475,7 +475,7 @@ void TestShell::ResizeSubViews() {
 }
 
 void TestShell::LoadURLForFrame(const GURL& url,
-                                const std::wstring& frame_name) {
+                                const string16& frame_name) {
   if (!url.is_valid())
     return;
 
@@ -490,7 +490,7 @@ void TestShell::LoadURLForFrame(const GURL& url,
   }
 
   navigation_controller_->LoadEntry(
-      new TestNavigationEntry(-1, url, std::wstring(), frame_name));
+      new TestNavigationEntry(-1, url, frame_name));
 }
 
 LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
@@ -568,7 +568,7 @@ LRESULT CALLBACK TestShell::WndProc(HWND hwnd, UINT message, WPARAM wParam,
 
       if (TestShell::windowList()->empty() || shell->is_modal()) {
         MessageLoop::current()->PostTask(FROM_HERE,
-                                         new MessageLoop::QuitTask());
+                                         MessageLoop::QuitClosure());
       }
       delete shell;
     }

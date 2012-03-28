@@ -25,11 +25,9 @@ gboolean XSourceCheck(GSource* source) {
 
 gboolean XSourceDispatch(GSource* source,
                          GSourceFunc unused_func,
-                         gpointer unused_data) {
-  // TODO(sad): When GTK event proecssing is completely removed, the event
-  // processing and dispatching should be done here (i.e. XNextEvent,
-  // ProcessXEvent etc.)
-  return TRUE;
+                         gpointer data) {
+  base::MessagePumpX* pump = static_cast<base::MessagePumpX*>(data);
+  return pump->DispatchXEvents();
 }
 
 GSourceFuncs XSourceFuncs = {
@@ -128,7 +126,8 @@ void MessagePumpX::InitXSource() {
 
   x_source_ = g_source_new(&XSourceFuncs, sizeof(GSource));
   g_source_add_poll(x_source_, x_poll);
-  g_source_set_can_recurse(x_source_, FALSE);
+  g_source_set_can_recurse(x_source_, TRUE);
+  g_source_set_callback(x_source_, NULL, this, NULL);
   g_source_attach(x_source_, g_main_context_default());
 }
 
@@ -162,24 +161,21 @@ bool MessagePumpX::ProcessXEvent(MessagePumpDispatcher* dispatcher,
   return should_quit;
 }
 
-bool MessagePumpX::RunOnce(GMainContext* context, bool block) {
+gboolean MessagePumpX::DispatchXEvents() {
   Display* display = GetDefaultXDisplay();
+  DCHECK(display);
   MessagePumpDispatcher* dispatcher =
       GetDispatcher() ? GetDispatcher() : g_default_dispatcher;
-
-  if (!display || !dispatcher)
-    return g_main_context_iteration(context, block);
 
   // In the general case, we want to handle all pending events before running
   // the tasks. This is what happens in the message_pump_glib case.
   while (XPending(display)) {
     XEvent xev;
     XNextEvent(display, &xev);
-    if (ProcessXEvent(dispatcher, &xev))
-      return true;
+    if (dispatcher && ProcessXEvent(dispatcher, &xev))
+      return TRUE;
   }
-
-  return g_main_context_iteration(context, block);
+  return TRUE;
 }
 
 bool MessagePumpX::WillProcessXEvent(XEvent* xevent) {

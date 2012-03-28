@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,7 +95,7 @@ std::vector<std::string> MakeNextProtos(const char* a, ...) {
 // SpdyNextProtos returns a vector of NPN protocol strings for negotiating
 // SPDY.
 std::vector<std::string> SpdyNextProtos() {
-  return MakeNextProtos("http/1.1", "spdy/2", NULL);
+  return MakeNextProtos("http/1.1", "spdy/2", "spdy/2.1", NULL);
 }
 
 }  // namespace
@@ -174,7 +174,12 @@ class HttpNetworkTransactionTest : public PlatformTest {
     MessageLoop::current()->RunAllPending();
   }
 
-  void KeepAliveConnectionResendRequestTest(const MockRead& read_failure);
+  // Either |write_failure| specifies a write failure or |read_failure|
+  // specifies a read failure when using a reused socket.  In either case, the
+  // failure should cause the network transaction to resend the request, and the
+  // other argument should be NULL.
+  void KeepAliveConnectionResendRequestTest(const MockWrite* write_failure,
+                                            const MockRead* read_failure);
 
   SimpleGetHelperResult SimpleGetHelperForData(StaticSocketDataProvider* data[],
                                                size_t data_count) {
@@ -193,11 +198,11 @@ class HttpNetworkTransactionTest : public PlatformTest {
       session_deps.socket_factory.AddSocketDataProvider(data[i]);
     }
 
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
 
     CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
     EXPECT_TRUE(log.bound().IsLoggingAllEvents());
-    int rv = trans->Start(&request, &callback, log.bound());
+    int rv = trans->Start(&request, callback.callback(), log.bound());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     out.rv = callback.WaitForResult();
@@ -311,7 +316,7 @@ class CaptureGroupNameSocketPool : public ParentPool {
                             const void* socket_params,
                             RequestPriority priority,
                             ClientSocketHandle* handle,
-                            OldCompletionCallback* callback,
+                            const CompletionCallback& callback,
                             const BoundNetLog& net_log) {
     last_group_name_ = group_name;
     return ERR_IO_PENDING;
@@ -365,8 +370,8 @@ template<>
 CaptureGroupNameSSLSocketPool::CaptureGroupNameSocketPool(
     HostResolver* host_resolver,
     CertVerifier* cert_verifier)
-    : SSLClientSocketPool(0, 0, NULL, host_resolver, cert_verifier, NULL, NULL,
-                          NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL) {}
+    : SSLClientSocketPool(0, 0, NULL, host_resolver, cert_verifier, NULL,
+                          NULL, NULL, "", NULL, NULL, NULL, NULL, NULL, NULL) {}
 
 //-----------------------------------------------------------------------------
 
@@ -715,9 +720,9 @@ TEST_F(HttpNetworkTransactionTest, SingleLocationHeader) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -789,9 +794,9 @@ TEST_F(HttpNetworkTransactionTest, Head) {
                                  data_writes1, arraysize(data_writes1));
   session_deps.socket_factory.AddSocketDataProvider(&data1);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -846,9 +851,9 @@ TEST_F(HttpNetworkTransactionTest, ReuseConnection) {
 
     scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
 
-    int rv = trans->Start(&request, &callback, BoundNetLog());
+    int rv = trans->Start(&request, callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback.WaitForResult();
@@ -888,9 +893,9 @@ TEST_F(HttpNetworkTransactionTest, Ignores100) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -930,9 +935,9 @@ TEST_F(HttpNetworkTransactionTest, Ignores1xx) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -967,9 +972,9 @@ TEST_F(HttpNetworkTransactionTest, Incomplete100ThenEOF) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -997,19 +1002,18 @@ TEST_F(HttpNetworkTransactionTest, EmptyResponse) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
   EXPECT_EQ(ERR_EMPTY_RESPONSE, rv);
 }
 
-// read_failure specifies a read failure that should cause the network
-// transaction to resend the request.
 void HttpNetworkTransactionTest::KeepAliveConnectionResendRequestTest(
-    const MockRead& read_failure) {
+    const MockWrite* write_failure,
+    const MockRead* read_failure) {
   HttpRequestInfo request;
   request.method = "GET";
   request.url = GURL("http://www.foo.com/");
@@ -1018,12 +1022,33 @@ void HttpNetworkTransactionTest::KeepAliveConnectionResendRequestTest(
   SessionDependencies session_deps;
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
 
+  // Written data for successfully sending both requests.
+  MockWrite data1_writes[] = {
+    MockWrite("GET / HTTP/1.1\r\n"
+              "Host: www.foo.com\r\n"
+              "Connection: keep-alive\r\n\r\n"),
+    MockWrite("GET / HTTP/1.1\r\n"
+              "Host: www.foo.com\r\n"
+              "Connection: keep-alive\r\n\r\n")
+  };
+
+  // Read results for the first request.
   MockRead data1_reads[] = {
     MockRead("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n"),
     MockRead("hello"),
-    read_failure,  // Now, we reuse the connection and fail the first read.
+    MockRead(true, OK),
   };
-  StaticSocketDataProvider data1(data1_reads, arraysize(data1_reads), NULL, 0);
+
+  if (write_failure) {
+    ASSERT_TRUE(!read_failure);
+    data1_writes[1] = *write_failure;
+  } else {
+    ASSERT_TRUE(read_failure);
+    data1_reads[2] = *read_failure;
+  }
+
+  StaticSocketDataProvider data1(data1_reads, arraysize(data1_reads),
+                                 data1_writes, arraysize(data1_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data1);
 
   MockRead data2_reads[] = {
@@ -1039,11 +1064,11 @@ void HttpNetworkTransactionTest::KeepAliveConnectionResendRequestTest(
   };
 
   for (int i = 0; i < 2; ++i) {
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
 
     scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-    int rv = trans->Start(&request, &callback, BoundNetLog());
+    int rv = trans->Start(&request, callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback.WaitForResult();
@@ -1062,14 +1087,19 @@ void HttpNetworkTransactionTest::KeepAliveConnectionResendRequestTest(
   }
 }
 
+TEST_F(HttpNetworkTransactionTest, KeepAliveConnectionNotConnectedOnWrite) {
+  MockWrite write_failure(true, ERR_SOCKET_NOT_CONNECTED);
+  KeepAliveConnectionResendRequestTest(&write_failure, NULL);
+}
+
 TEST_F(HttpNetworkTransactionTest, KeepAliveConnectionReset) {
   MockRead read_failure(true, ERR_CONNECTION_RESET);
-  KeepAliveConnectionResendRequestTest(read_failure);
+  KeepAliveConnectionResendRequestTest(NULL, &read_failure);
 }
 
 TEST_F(HttpNetworkTransactionTest, KeepAliveConnectionEOF) {
   MockRead read_failure(false, OK);  // EOF
-  KeepAliveConnectionResendRequestTest(read_failure);
+  KeepAliveConnectionResendRequestTest(NULL, &read_failure);
 }
 
 TEST_F(HttpNetworkTransactionTest, NonKeepAliveConnectionReset) {
@@ -1091,9 +1121,9 @@ TEST_F(HttpNetworkTransactionTest, NonKeepAliveConnectionReset) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -1168,11 +1198,11 @@ TEST_F(HttpNetworkTransactionTest, KeepAliveAfterUnreadBody) {
   std::string response_lines[kNumUnreadBodies];
 
   for (size_t i = 0; i < arraysize(data1_reads) - 2; ++i) {
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
 
     scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-    int rv = trans->Start(&request, &callback, BoundNetLog());
+    int rv = trans->Start(&request, callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback.WaitForResult();
@@ -1203,9 +1233,9 @@ TEST_F(HttpNetworkTransactionTest, KeepAliveAfterUnreadBody) {
   for (int i = 0; i < kNumUnreadBodies; ++i)
     EXPECT_EQ(kStatusLines[i], response_lines[i]);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -1274,9 +1304,9 @@ TEST_F(HttpNetworkTransactionTest, BasicAuth) {
   session_deps.socket_factory.AddSocketDataProvider(&data1);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -1286,9 +1316,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuth) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -1328,9 +1359,9 @@ TEST_F(HttpNetworkTransactionTest, DoNotSendAuth) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads),
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -1392,10 +1423,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAlive) {
   session_deps.socket_factory.AddSocketDataProvider(&data1);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -1405,9 +1436,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAlive) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -1467,10 +1499,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAliveNoBody) {
   session_deps.socket_factory.AddSocketDataProvider(&data1);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -1480,9 +1512,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAliveNoBody) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -1550,10 +1583,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAliveLargeBody) {
   session_deps.socket_factory.AddSocketDataProvider(&data1);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -1563,9 +1596,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAliveLargeBody) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -1635,10 +1669,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAliveImpatientServer) {
   session_deps.socket_factory.AddSocketDataProvider(&data1);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -1648,9 +1682,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthKeepAliveImpatientServer) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -1717,11 +1752,11 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyNoKeepAlive) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -1743,9 +1778,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyNoKeepAlive) {
   EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
   EXPECT_TRUE(CheckBasicProxyAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -1819,9 +1855,9 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyKeepAlive) {
                                  data_writes1, arraysize(data_writes1));
   session_deps.socket_factory.AddSocketDataProvider(&data1);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -1845,10 +1881,11 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyKeepAlive) {
   EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
   EXPECT_TRUE(CheckBasicProxyAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
   // Wrong password (should be "bar").
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBaz), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBaz), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -1902,9 +1939,9 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyCancelTunnel) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -1957,9 +1994,9 @@ TEST_F(HttpNetworkTransactionTest, UnexpectedProxyAuth) {
                                  data_writes1, arraysize(data_writes1));
   session_deps.socket_factory.AddSocketDataProvider(&data1);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -2009,11 +2046,11 @@ TEST_F(HttpNetworkTransactionTest, HttpsServerRequestsProxyAuthThroughProxy) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2062,11 +2099,11 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxyGet) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2111,24 +2148,25 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyGet) {
     MockRead(true, 0, 0),
   };
 
-  scoped_refptr<DelayedSocketData> spdy_data(
+  scoped_ptr<DelayedSocketData> spdy_data(
       new DelayedSocketData(
           1,  // wait for one write to finish before reading.
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2199,22 +2237,23 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyGetWithProxyAuth) {
     MockRead(true, 0, 7),
   };
 
-  scoped_refptr<OrderedSocketData> data(
+  scoped_ptr<OrderedSocketData> data(
       new OrderedSocketData(spdy_reads, arraysize(spdy_reads),
                             spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(data);
+  session_deps.socket_factory.AddSocketDataProvider(data.get());
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2228,9 +2267,10 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyGetWithProxyAuth) {
   EXPECT_TRUE(response->was_fetched_via_spdy);
   EXPECT_TRUE(CheckBasicProxyAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -2291,24 +2331,26 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyConnectHttps) {
     MockRead(true, 0, 7),
   };
 
-  scoped_refptr<OrderedSocketData> spdy_data(
+  scoped_ptr<OrderedSocketData> spdy_data(
       new OrderedSocketData(
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   SSLSocketDataProvider ssl2(true, OK);
   ssl2.was_npn_negotiated = false;
+  ssl2.protocol_negotiated = SSLClientSocket::kProtoUnknown;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2364,26 +2406,28 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyConnectSpdy) {
     MockRead(true, 0, 1),
   };
 
-  scoped_refptr<OrderedSocketData> spdy_data(
+  scoped_ptr<OrderedSocketData> spdy_data(
       new OrderedSocketData(
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   SSLSocketDataProvider ssl2(true, OK);
   ssl2.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl2.next_proto = "spdy/2";
+  ssl2.next_proto = "spdy/2.1";
   ssl2.was_npn_negotiated = true;
+  ssl2.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2431,26 +2475,28 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxySpdyConnectFailure) {
     MockRead(true, 0, 4),
   };
 
-  scoped_refptr<OrderedSocketData> spdy_data(
+  scoped_ptr<OrderedSocketData> spdy_data(
       new OrderedSocketData(
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   SSLSocketDataProvider ssl2(true, OK);
   ssl2.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl2.next_proto = "spdy/2";
+  ssl2.next_proto = "spdy/2.1";
   ssl2.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2511,11 +2557,11 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxyAuthRetry) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2528,9 +2574,10 @@ TEST_F(HttpNetworkTransactionTest, HttpsProxyAuthRetry) {
   EXPECT_TRUE(HttpVersion(1, 1) == response->headers->GetHttpVersion());
   EXPECT_TRUE(CheckBasicProxyAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -2578,11 +2625,11 @@ void HttpNetworkTransactionTest::ConnectStatusHelperWithExpectedStatus(
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -2842,9 +2889,9 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyThenServer) {
   session_deps.socket_factory.AddSocketDataProvider(&data2);
   session_deps.socket_factory.AddSocketDataProvider(&data3);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2854,9 +2901,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyThenServer) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicProxyAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -2866,9 +2914,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthProxyThenServer) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback3;
+  TestCompletionCallback callback3;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo2, kBar2), &callback3);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo2, kBar2), callback3.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback3.WaitForResult();
@@ -2971,11 +3020,11 @@ TEST_F(HttpNetworkTransactionTest, NTLMAuth1) {
   session_deps.socket_factory.AddSocketDataProvider(&data1);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -2987,10 +3036,10 @@ TEST_F(HttpNetworkTransactionTest, NTLMAuth1) {
   ASSERT_FALSE(response == NULL);
   EXPECT_TRUE(CheckNTLMServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
   rv = trans->RestartWithAuth(AuthCredentials(kTestingNTLM, kTestingNTLM),
-                              &callback2);
+                              callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -3002,9 +3051,9 @@ TEST_F(HttpNetworkTransactionTest, NTLMAuth1) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(response->auth_challenge.get() == NULL);
 
-  TestOldCompletionCallback callback3;
+  TestCompletionCallback callback3;
 
-  rv = trans->RestartWithAuth(AuthCredentials(), &callback3);
+  rv = trans->RestartWithAuth(AuthCredentials(), callback3.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback3.WaitForResult();
@@ -3151,11 +3200,11 @@ TEST_F(HttpNetworkTransactionTest, NTLMAuth2) {
   session_deps.socket_factory.AddSocketDataProvider(&data2);
   session_deps.socket_factory.AddSocketDataProvider(&data3);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -3167,19 +3216,19 @@ TEST_F(HttpNetworkTransactionTest, NTLMAuth2) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckNTLMServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
   // Enter the wrong password.
   rv = trans->RestartWithAuth(AuthCredentials(kTestingNTLM, kWrongPassword),
-                              &callback2);
+                              callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
   EXPECT_EQ(OK, rv);
 
   EXPECT_TRUE(trans->IsReadyToRestartForAuth());
-  TestOldCompletionCallback callback3;
-  rv = trans->RestartWithAuth(AuthCredentials(), &callback3);
+  TestCompletionCallback callback3;
+  rv = trans->RestartWithAuth(AuthCredentials(), callback3.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback3.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -3189,11 +3238,11 @@ TEST_F(HttpNetworkTransactionTest, NTLMAuth2) {
   ASSERT_FALSE(response == NULL);
   EXPECT_TRUE(CheckNTLMServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback4;
+  TestCompletionCallback callback4;
 
   // Now enter the right password.
   rv = trans->RestartWithAuth(AuthCredentials(kTestingNTLM, kTestingNTLM),
-                              &callback4);
+                              callback4.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback4.WaitForResult();
@@ -3201,10 +3250,10 @@ TEST_F(HttpNetworkTransactionTest, NTLMAuth2) {
 
   EXPECT_TRUE(trans->IsReadyToRestartForAuth());
 
-  TestOldCompletionCallback callback5;
+  TestCompletionCallback callback5;
 
   // One more roundtrip
-  rv = trans->RestartWithAuth(AuthCredentials(), &callback5);
+  rv = trans->RestartWithAuth(AuthCredentials(), callback5.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback5.WaitForResult();
@@ -3242,9 +3291,9 @@ TEST_F(HttpNetworkTransactionTest, LargeHeadersNoBody) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -3290,9 +3339,9 @@ TEST_F(HttpNetworkTransactionTest, DontRecycleTransportSocketForSSLTunnel) {
                                  data_writes1, arraysize(data_writes1));
   session_deps.socket_factory.AddSocketDataProvider(&data1);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -3339,9 +3388,9 @@ TEST_F(HttpNetworkTransactionTest, RecycleSocket) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -3398,12 +3447,12 @@ TEST_F(HttpNetworkTransactionTest, RecycleSSLSocket) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
 
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -3466,12 +3515,12 @@ TEST_F(HttpNetworkTransactionTest, RecycleDeadSSLSocket) {
   session_deps.socket_factory.AddSocketDataProvider(&data);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
 
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -3499,7 +3548,7 @@ TEST_F(HttpNetworkTransactionTest, RecycleDeadSSLSocket) {
 
   trans.reset(new HttpNetworkTransaction(session));
 
-  rv = trans->Start(&request, &callback, BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), BoundNetLog());
 
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -3550,9 +3599,9 @@ TEST_F(HttpNetworkTransactionTest, RecycleSocketAfterZeroContentLength) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -3646,9 +3695,9 @@ TEST_F(HttpNetworkTransactionTest, ResendRequestOnWriteBodyError) {
     scoped_ptr<HttpTransaction> trans(
         new HttpNetworkTransaction(session));
 
-    TestOldCompletionCallback callback;
+    TestCompletionCallback callback;
 
-    int rv = trans->Start(&request[i], &callback, BoundNetLog());
+    int rv = trans->Start(&request[i], callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback.WaitForResult();
@@ -3721,17 +3770,17 @@ TEST_F(HttpNetworkTransactionTest, AuthIdentityInURL) {
   session_deps.socket_factory.AddSocketDataProvider(&data1);
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
   EXPECT_EQ(OK, rv);
 
   EXPECT_TRUE(trans->IsReadyToRestartForAuth());
-  TestOldCompletionCallback callback2;
-  rv = trans->RestartWithAuth(AuthCredentials(), &callback2);
+  TestCompletionCallback callback2;
+  rv = trans->RestartWithAuth(AuthCredentials(), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback2.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -3819,17 +3868,17 @@ TEST_F(HttpNetworkTransactionTest, WrongAuthIdentityInURL) {
   session_deps.socket_factory.AddSocketDataProvider(&data2);
   session_deps.socket_factory.AddSocketDataProvider(&data3);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
   EXPECT_EQ(OK, rv);
 
   EXPECT_TRUE(trans->IsReadyToRestartForAuth());
-  TestOldCompletionCallback callback2;
-  rv = trans->RestartWithAuth(AuthCredentials(), &callback2);
+  TestCompletionCallback callback2;
+  rv = trans->RestartWithAuth(AuthCredentials(), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback2.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -3839,8 +3888,9 @@ TEST_F(HttpNetworkTransactionTest, WrongAuthIdentityInURL) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback3;
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback3);
+  TestCompletionCallback callback3;
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback3.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback3.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -3907,9 +3957,9 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
     session_deps.socket_factory.AddSocketDataProvider(&data1);
     session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-    TestOldCompletionCallback callback1;
+    TestCompletionCallback callback1;
 
-    int rv = trans->Start(&request, &callback1, BoundNetLog());
+    int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback1.WaitForResult();
@@ -3919,9 +3969,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
     ASSERT_TRUE(response != NULL);
     EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-    TestOldCompletionCallback callback2;
+    TestCompletionCallback callback2;
 
-    rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+    rv = trans->RestartWithAuth(
+        AuthCredentials(kFoo, kBar), callback2.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback2.WaitForResult();
@@ -3985,9 +4036,9 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
     session_deps.socket_factory.AddSocketDataProvider(&data1);
     session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-    TestOldCompletionCallback callback1;
+    TestCompletionCallback callback1;
 
-    int rv = trans->Start(&request, &callback1, BoundNetLog());
+    int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback1.WaitForResult();
@@ -4002,9 +4053,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
     EXPECT_EQ("MyRealm2", response->auth_challenge->realm);
     EXPECT_EQ("basic", response->auth_challenge->scheme);
 
-    TestOldCompletionCallback callback2;
+    TestCompletionCallback callback2;
 
-    rv = trans->RestartWithAuth(AuthCredentials(kFoo2, kBar2), &callback2);
+    rv = trans->RestartWithAuth(
+        AuthCredentials(kFoo2, kBar2), callback2.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback2.WaitForResult();
@@ -4048,9 +4100,9 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
                                    data_writes1, arraysize(data_writes1));
     session_deps.socket_factory.AddSocketDataProvider(&data1);
 
-    TestOldCompletionCallback callback1;
+    TestCompletionCallback callback1;
 
-    int rv = trans->Start(&request, &callback1, BoundNetLog());
+    int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback1.WaitForResult();
@@ -4110,17 +4162,17 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
     session_deps.socket_factory.AddSocketDataProvider(&data1);
     session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-    TestOldCompletionCallback callback1;
+    TestCompletionCallback callback1;
 
-    int rv = trans->Start(&request, &callback1, BoundNetLog());
+    int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback1.WaitForResult();
     EXPECT_EQ(OK, rv);
 
     EXPECT_TRUE(trans->IsReadyToRestartForAuth());
-    TestOldCompletionCallback callback2;
-    rv = trans->RestartWithAuth(AuthCredentials(), &callback2);
+    TestCompletionCallback callback2;
+    rv = trans->RestartWithAuth(AuthCredentials(), callback2.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
     rv = callback2.WaitForResult();
     EXPECT_EQ(OK, rv);
@@ -4199,17 +4251,17 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
     session_deps.socket_factory.AddSocketDataProvider(&data2);
     session_deps.socket_factory.AddSocketDataProvider(&data3);
 
-    TestOldCompletionCallback callback1;
+    TestCompletionCallback callback1;
 
-    int rv = trans->Start(&request, &callback1, BoundNetLog());
+    int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback1.WaitForResult();
     EXPECT_EQ(OK, rv);
 
     EXPECT_TRUE(trans->IsReadyToRestartForAuth());
-    TestOldCompletionCallback callback2;
-    rv = trans->RestartWithAuth(AuthCredentials(), &callback2);
+    TestCompletionCallback callback2;
+    rv = trans->RestartWithAuth(AuthCredentials(), callback2.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
     rv = callback2.WaitForResult();
     EXPECT_EQ(OK, rv);
@@ -4219,9 +4271,10 @@ TEST_F(HttpNetworkTransactionTest, BasicAuthCacheAndPreauth) {
     ASSERT_TRUE(response != NULL);
     EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-    TestOldCompletionCallback callback3;
+    TestCompletionCallback callback3;
 
-    rv = trans->RestartWithAuth(AuthCredentials(kFoo3, kBar3), &callback3);
+    rv = trans->RestartWithAuth(
+        AuthCredentials(kFoo3, kBar3), callback3.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback3.WaitForResult();
@@ -4292,9 +4345,9 @@ TEST_F(HttpNetworkTransactionTest, DigestPreAuthNonceCount) {
     session_deps.socket_factory.AddSocketDataProvider(&data1);
     session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-    TestOldCompletionCallback callback1;
+    TestCompletionCallback callback1;
 
-    int rv = trans->Start(&request, &callback1, BoundNetLog());
+    int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback1.WaitForResult();
@@ -4304,9 +4357,10 @@ TEST_F(HttpNetworkTransactionTest, DigestPreAuthNonceCount) {
     ASSERT_TRUE(response != NULL);
     EXPECT_TRUE(CheckDigestServerAuth(response->auth_challenge.get()));
 
-    TestOldCompletionCallback callback2;
+    TestCompletionCallback callback2;
 
-    rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+    rv = trans->RestartWithAuth(
+        AuthCredentials(kFoo, kBar), callback2.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback2.WaitForResult();
@@ -4353,9 +4407,9 @@ TEST_F(HttpNetworkTransactionTest, DigestPreAuthNonceCount) {
                                    data_writes1, arraysize(data_writes1));
     session_deps.socket_factory.AddSocketDataProvider(&data1);
 
-    TestOldCompletionCallback callback1;
+    TestCompletionCallback callback1;
 
-    int rv = trans->Start(&request, &callback1, BoundNetLog());
+    int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback1.WaitForResult();
@@ -4445,15 +4499,15 @@ TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificate) {
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl_bad);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
   EXPECT_EQ(ERR_CERT_AUTHORITY_INVALID, rv);
 
-  rv = trans->RestartIgnoringLastError(&callback);
+  rv = trans->RestartIgnoringLastError(callback.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4516,7 +4570,7 @@ TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificateViaProxy) {
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl_bad);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   for (int i = 0; i < 2; i++) {
     session_deps.socket_factory.ResetNextMockIndexes();
@@ -4524,13 +4578,13 @@ TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificateViaProxy) {
     scoped_ptr<HttpTransaction> trans(
         new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-    int rv = trans->Start(&request, &callback, BoundNetLog());
+    int rv = trans->Start(&request, callback.callback(), BoundNetLog());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback.WaitForResult();
     EXPECT_EQ(ERR_CERT_AUTHORITY_INVALID, rv);
 
-    rv = trans->RestartIgnoringLastError(&callback);
+    rv = trans->RestartIgnoringLastError(callback.callback());
     EXPECT_EQ(ERR_IO_PENDING, rv);
 
     rv = callback.WaitForResult();
@@ -4580,12 +4634,12 @@ TEST_F(HttpNetworkTransactionTest, HTTPSViaHttpsProxy) {
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
   session_deps.socket_factory.AddSSLSocketDataProvider(&tunnel_ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4630,12 +4684,12 @@ TEST_F(HttpNetworkTransactionTest, RedirectOfHttpsConnectViaHttpsProxy) {
   session_deps.socket_factory.AddSocketDataProvider(&data);
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4678,25 +4732,26 @@ TEST_F(HttpNetworkTransactionTest, RedirectOfHttpsConnectViaSpdyProxy) {
     MockRead(true, 0, 2),  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(
           1,  // wait for one write to finish before reading.
           data_reads, arraysize(data_reads),
           data_writes, arraysize(data_writes)));
   SSLSocketDataProvider proxy_ssl(true, OK);  // SSL to the proxy
   proxy_ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  proxy_ssl.next_proto = "spdy/2";
+  proxy_ssl.next_proto = "spdy/2.1";
   proxy_ssl.was_npn_negotiated = true;
+  proxy_ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
 
   session_deps.socket_factory.AddSocketDataProvider(data.get());
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4741,12 +4796,12 @@ TEST_F(HttpNetworkTransactionTest, ErrorResponseTofHttpsConnectViaHttpsProxy) {
   session_deps.socket_factory.AddSocketDataProvider(&data);
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4797,25 +4852,26 @@ TEST_F(HttpNetworkTransactionTest, ErrorResponseTofHttpsConnectViaSpdyProxy) {
     MockRead(true, 0, 3),  // EOF
   };
 
-  scoped_refptr<DelayedSocketData> data(
+  scoped_ptr<DelayedSocketData> data(
       new DelayedSocketData(
           1,  // wait for one write to finish before reading.
           data_reads, arraysize(data_reads),
           data_writes, arraysize(data_writes)));
   SSLSocketDataProvider proxy_ssl(true, OK);  // SSL to the proxy
   proxy_ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  proxy_ssl.next_proto = "spdy/2";
+  proxy_ssl.next_proto = "spdy/2.1";
   proxy_ssl.was_npn_negotiated = true;
+  proxy_ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
 
   session_deps.socket_factory.AddSocketDataProvider(data.get());
   session_deps.socket_factory.AddSSLSocketDataProvider(&proxy_ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4891,18 +4947,18 @@ TEST_F(HttpNetworkTransactionTest, HTTPSBadCertificateViaHttpsProxy) {
   session_deps.socket_factory.AddSocketDataProvider(&data);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
   EXPECT_EQ(ERR_CERT_AUTHORITY_INVALID, rv);
 
-  rv = trans->RestartIgnoringLastError(&callback);
+  rv = trans->RestartIgnoringLastError(callback.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4944,9 +5000,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_UserAgent) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -4982,9 +5038,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_UserAgentOverTunnel) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5022,9 +5078,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_Referer) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5059,9 +5115,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_PostContentLengthZero) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5096,9 +5152,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_PutContentLengthZero) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5133,9 +5189,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_HeadContentLengthZero) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5172,9 +5228,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_CacheControlNoCache) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5211,9 +5267,9 @@ TEST_F(HttpNetworkTransactionTest,
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5249,9 +5305,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_ExtraHeaders) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5291,9 +5347,9 @@ TEST_F(HttpNetworkTransactionTest, BuildRequest_ExtraHeadersStripped) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5334,9 +5390,9 @@ TEST_F(HttpNetworkTransactionTest, SOCKS4_HTTP_GET) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5390,9 +5446,9 @@ TEST_F(HttpNetworkTransactionTest, SOCKS4_SSL_GET) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5455,9 +5511,9 @@ TEST_F(HttpNetworkTransactionTest, SOCKS5_HTTP_GET) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5525,9 +5581,9 @@ TEST_F(HttpNetworkTransactionTest, SOCKS5_SSL_GET) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5574,10 +5630,10 @@ int GroupNameTransactionHelper(
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   // We do not complete this request, the dtor will clean the transaction up.
-  return trans->Start(&request, &callback, BoundNetLog());
+  return trans->Start(&request, callback.callback(), BoundNetLog());
 }
 
 TEST_F(HttpNetworkTransactionTest, GroupNameForDirectConnections) {
@@ -5797,9 +5853,9 @@ TEST_F(HttpNetworkTransactionTest, ReconsiderProxyAfterFailedConnection) {
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5826,7 +5882,6 @@ void BypassHostCacheOnRefreshHelper(int load_flags) {
   // Warm up the host cache so it has an entry for "www.google.com".
   AddressList addrlist;
   TestCompletionCallback callback;
-  TestOldCompletionCallback old_callback;
   int rv = session_deps.host_resolver->Resolve(
       HostResolver::RequestInfo(HostPortPair("www.google.com", 80)), &addrlist,
       callback.callback(), NULL, BoundNetLog());
@@ -5853,9 +5908,9 @@ void BypassHostCacheOnRefreshHelper(int load_flags) {
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
   // Run the request.
-  rv = trans->Start(&request, &old_callback, BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), BoundNetLog());
   ASSERT_EQ(ERR_IO_PENDING, rv);
-  rv = old_callback.WaitForResult();
+  rv = callback.WaitForResult();
 
   // If we bypassed the cache, we would have gotten a failure while resolving
   // "www.google.com".
@@ -5893,12 +5948,12 @@ TEST_F(HttpNetworkTransactionTest, RequestWriteError) {
                                 write_failure, arraysize(write_failure));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5923,12 +5978,12 @@ TEST_F(HttpNetworkTransactionTest, ConnectionClosedAfterStartOfHeaders) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -5997,11 +6052,11 @@ TEST_F(HttpNetworkTransactionTest, DrainResetOK) {
                                  data_writes2, arraysize(data_writes2));
   session_deps.socket_factory.AddSocketDataProvider(&data2);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -6011,9 +6066,10 @@ TEST_F(HttpNetworkTransactionTest, DrainResetOK) {
   ASSERT_TRUE(response != NULL);
   EXPECT_TRUE(CheckBasicServerAuth(response->auth_challenge.get()));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -6045,14 +6101,14 @@ TEST_F(HttpNetworkTransactionTest, HTTPSViaProxyWithExtraData) {
   session_deps.socket_factory.AddSocketDataProvider(&data);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   session_deps.socket_factory.ResetNextMockIndexes();
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -6077,9 +6133,9 @@ TEST_F(HttpNetworkTransactionTest, LargeContentLengthThenClose) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -6126,9 +6182,9 @@ TEST_F(HttpNetworkTransactionTest, UploadFileSmallerThanLength) {
   StaticSocketDataProvider data(data_reads, arraysize(data_reads), NULL, 0);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -6189,9 +6245,9 @@ TEST_F(HttpNetworkTransactionTest, UploadUnreadableFile) {
                                 arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback.WaitForResult();
@@ -6257,9 +6313,9 @@ TEST_F(HttpNetworkTransactionTest, UnreadableUploadFileAfterAuthRestart) {
                                 arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -6274,9 +6330,10 @@ TEST_F(HttpNetworkTransactionTest, UnreadableUploadFileAfterAuthRestart) {
   // Now make the file unreadable and try again.
   ASSERT_TRUE(file_util::MakeFileUnreadable(temp_file));
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
 
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback2);
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback2.WaitForResult();
@@ -6374,7 +6431,7 @@ TEST_F(HttpNetworkTransactionTest, ChangeAuthRealms) {
   session_deps.socket_factory.AddSocketDataProvider(&data3);
   session_deps.socket_factory.AddSocketDataProvider(&data4);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(
       new HttpNetworkTransaction(CreateSession(&session_deps)));
@@ -6382,7 +6439,7 @@ TEST_F(HttpNetworkTransactionTest, ChangeAuthRealms) {
   // Issue the first request with Authorize headers. There should be a
   // password prompt for first_realm waiting to be filled in after the
   // transaction completes.
-  int rv = trans->Start(&request, &callback1, BoundNetLog());
+  int rv = trans->Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback1.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -6398,8 +6455,9 @@ TEST_F(HttpNetworkTransactionTest, ChangeAuthRealms) {
   // Issue the second request with an incorrect password. There should be a
   // password prompt for second_realm waiting to be filled in after the
   // transaction completes.
-  TestOldCompletionCallback callback2;
-  rv = trans->RestartWithAuth(AuthCredentials(kFirst, kBaz), &callback2);
+  TestCompletionCallback callback2;
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFirst, kBaz), callback2.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback2.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -6416,8 +6474,9 @@ TEST_F(HttpNetworkTransactionTest, ChangeAuthRealms) {
   // a password prompt for first_realm waiting to be filled in. If the password
   // prompt is not present, it indicates that the HttpAuthCacheEntry for
   // first_realm was not correctly removed.
-  TestOldCompletionCallback callback3;
-  rv = trans->RestartWithAuth(AuthCredentials(kSecond, kFou), &callback3);
+  TestCompletionCallback callback3;
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kSecond, kFou), callback3.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback3.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -6431,8 +6490,9 @@ TEST_F(HttpNetworkTransactionTest, ChangeAuthRealms) {
   EXPECT_EQ("basic", challenge->scheme);
 
   // Issue the fourth request with the correct password and username.
-  TestOldCompletionCallback callback4;
-  rv = trans->RestartWithAuth(AuthCredentials(kFirst, kBar), &callback4);
+  TestCompletionCallback callback4;
+  rv = trans->RestartWithAuth(
+      AuthCredentials(kFirst, kBar), callback4.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   rv = callback4.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -6463,12 +6523,12 @@ TEST_F(HttpNetworkTransactionTest, HonorAlternateProtocolHeader) {
 
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   HostPortPair http_host_port_pair("www.google.com", 80);
@@ -6537,9 +6597,9 @@ TEST_F(HttpNetworkTransactionTest, MarkBrokenAlternateProtocolAndFallback) {
       NPN_SPDY_2);
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -6599,9 +6659,10 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortRestrictedBlocked) {
       NPN_SPDY_2);
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&restricted_port_request, &callback, BoundNetLog());
+  int rv = trans->Start(
+      &restricted_port_request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Invalid change to unrestricted port should fail.
   EXPECT_EQ(ERR_CONNECTION_REFUSED, callback.WaitForResult());
@@ -6647,9 +6708,10 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortRestrictedAllowed) {
       NPN_SPDY_2);
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&restricted_port_request, &callback, BoundNetLog());
+  int rv = trans->Start(
+      &restricted_port_request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Valid change to restricted port should pass.
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -6695,9 +6757,10 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortUnrestrictedAllowed1) {
       NPN_SPDY_2);
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&unrestricted_port_request, &callback, BoundNetLog());
+  int rv = trans->Start(
+      &unrestricted_port_request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Valid change to restricted port should pass.
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -6743,14 +6806,69 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolPortUnrestrictedAllowed2) {
       NPN_SPDY_2);
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&unrestricted_port_request, &callback, BoundNetLog());
+  int rv = trans->Start(
+      &unrestricted_port_request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // Valid change to an unrestricted port should pass.
   EXPECT_EQ(OK, callback.WaitForResult());
 
   HttpStreamFactory::set_use_alternate_protocols(false);
+}
+
+TEST_F(HttpNetworkTransactionTest, AlternateProtocolUnsafeBlocked) {
+  // Ensure that we're not allowed to redirect traffic via an alternate
+  // protocol to an unsafe port, and that we resume the second
+  // HttpStreamFactoryImpl::Job once the alternate protocol request fails.
+  HttpStreamFactory::set_use_alternate_protocols(true);
+  SessionDependencies session_deps;
+
+  HttpRequestInfo request;
+  request.method = "GET";
+  request.url = GURL("http://www.google.com/");
+  request.load_flags = 0;
+
+  // The alternate protocol request will error out before we attempt to connect,
+  // so only the standard HTTP request will try to connect.
+  MockRead data_reads[] = {
+    MockRead("HTTP/1.1 200 OK\r\n\r\n"),
+    MockRead("hello world"),
+    MockRead(true, OK),
+  };
+  StaticSocketDataProvider data(
+      data_reads, arraysize(data_reads), NULL, 0);
+  session_deps.socket_factory.AddSocketDataProvider(&data);
+
+  scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
+
+  HttpServerProperties* http_server_properties =
+      session->http_server_properties();
+  const int kUnsafePort = 7;
+  http_server_properties->SetAlternateProtocol(
+      HostPortPair::FromURL(request.url),
+      kUnsafePort,
+      NPN_SPDY_2);
+
+  scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
+  TestCompletionCallback callback;
+
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
+  EXPECT_EQ(ERR_IO_PENDING, rv);
+  // The HTTP request should succeed.
+  EXPECT_EQ(OK, callback.WaitForResult());
+
+  // Disable alternate protocol before the asserts.
+  HttpStreamFactory::set_use_alternate_protocols(false);
+
+  const HttpResponseInfo* response = trans->GetResponseInfo();
+  ASSERT_TRUE(response != NULL);
+  ASSERT_TRUE(response->headers != NULL);
+  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
+
+  std::string response_data;
+  ASSERT_EQ(OK, ReadTransaction(trans.get(), &response_data));
+  EXPECT_EQ("hello world", response_data);
 }
 
 TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
@@ -6776,8 +6894,9 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -6791,12 +6910,12 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
     MockRead(true, 0, 0),
   };
 
-  scoped_refptr<DelayedSocketData> spdy_data(
+  scoped_ptr<DelayedSocketData> spdy_data(
       new DelayedSocketData(
           1,  // wait for one write to finish before reading.
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   MockConnect never_finishing_connect(false, ERR_IO_PENDING);
   StaticSocketDataProvider hanging_non_alternate_protocol_socket(
@@ -6806,12 +6925,12 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
   session_deps.socket_factory.AddSocketDataProvider(
       &hanging_non_alternate_protocol_socket);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -6826,7 +6945,7 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForNpnSpdy) {
 
   trans.reset(new HttpNetworkTransaction(session));
 
-  rv = trans->Start(&request, &callback, BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -6877,8 +6996,9 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolWithSpdyLateBinding) {
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<spdy::SpdyFrame> req1(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -6899,22 +7019,22 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolWithSpdyLateBinding) {
     MockRead(true, 0, 0),
   };
 
-  scoped_refptr<DelayedSocketData> spdy_data(
+  scoped_ptr<DelayedSocketData> spdy_data(
       new DelayedSocketData(
           2,  // wait for writes to finish before reading.
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
   // Socket 4 is the successful Alternate-Protocol for transaction 3.
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   // Socket 5 is the unsuccessful non-Alternate-Protocol for transaction 3.
   session_deps.socket_factory.AddSocketDataProvider(&hanging_socket);
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
   HttpNetworkTransaction trans1(session);
 
-  int rv = trans1.Start(&request, &callback1, BoundNetLog());
+  int rv = trans1.Start(&request, callback1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback1.WaitForResult());
 
@@ -6927,14 +7047,14 @@ TEST_F(HttpNetworkTransactionTest, AlternateProtocolWithSpdyLateBinding) {
   ASSERT_EQ(OK, ReadTransaction(&trans1, &response_data));
   EXPECT_EQ("hello world", response_data);
 
-  TestOldCompletionCallback callback2;
+  TestCompletionCallback callback2;
   HttpNetworkTransaction trans2(session);
-  rv = trans2.Start(&request, &callback2, BoundNetLog());
+  rv = trans2.Start(&request, callback2.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
-  TestOldCompletionCallback callback3;
+  TestCompletionCallback callback3;
   HttpNetworkTransaction trans3(session);
-  rv = trans3.Start(&request, &callback3, BoundNetLog());
+  rv = trans3.Start(&request, callback3.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   EXPECT_EQ(OK, callback2.WaitForResult());
@@ -6985,8 +7105,9 @@ TEST_F(HttpNetworkTransactionTest, StallAlternateProtocolForNpnSpdy) {
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   MockConnect never_finishing_connect(false, ERR_IO_PENDING);
@@ -7000,12 +7121,12 @@ TEST_F(HttpNetworkTransactionTest, StallAlternateProtocolForNpnSpdy) {
   // 2nd request is just a copy of the first one, over HTTP again.
   session_deps.socket_factory.AddSocketDataProvider(&first_transaction);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -7020,7 +7141,7 @@ TEST_F(HttpNetworkTransactionTest, StallAlternateProtocolForNpnSpdy) {
 
   trans.reset(new HttpNetworkTransaction(session));
 
-  rv = trans->Start(&request, &callback, BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -7045,7 +7166,7 @@ class CapturingProxyResolver : public ProxyResolver {
 
   virtual int GetProxyForURL(const GURL& url,
                              ProxyInfo* results,
-                             OldCompletionCallback* callback,
+                             const CompletionCallback& callback,
                              RequestHandle* request,
                              const BoundNetLog& net_log) {
     ProxyServer proxy_server(ProxyServer::SCHEME_HTTP,
@@ -7075,7 +7196,7 @@ class CapturingProxyResolver : public ProxyResolver {
   }
 
   virtual int SetPacScript(const scoped_refptr<ProxyResolverScriptData>&,
-                           OldCompletionCallback* /*callback*/) {
+                           const CompletionCallback& /*callback*/) {
     return OK;
   }
 
@@ -7119,8 +7240,9 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForTunneledNpnSpdy) {
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -7142,11 +7264,11 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForTunneledNpnSpdy) {
     MockRead(true, 0, 0, 4),  // 6
   };
 
-  scoped_refptr<OrderedSocketData> spdy_data(
+  scoped_ptr<OrderedSocketData> spdy_data(
       new OrderedSocketData(
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   MockConnect never_finishing_connect(false, ERR_IO_PENDING);
   StaticSocketDataProvider hanging_non_alternate_protocol_socket(
@@ -7156,12 +7278,12 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForTunneledNpnSpdy) {
   session_deps.socket_factory.AddSocketDataProvider(
       &hanging_non_alternate_protocol_socket);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -7178,7 +7300,7 @@ TEST_F(HttpNetworkTransactionTest, UseAlternateProtocolForTunneledNpnSpdy) {
 
   trans.reset(new HttpNetworkTransaction(session));
 
-  rv = trans->Start(&request, &callback, BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -7225,8 +7347,9 @@ TEST_F(HttpNetworkTransactionTest,
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
   // Make sure we use ssl for spdy here.
   SpdySession::SetSSLMode(true);
@@ -7242,20 +7365,20 @@ TEST_F(HttpNetworkTransactionTest,
     MockRead(true, 0, 0),
   };
 
-  scoped_refptr<DelayedSocketData> spdy_data(
+  scoped_ptr<DelayedSocketData> spdy_data(
       new DelayedSocketData(
           1,  // wait for one write to finish before reading.
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
 
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -7281,7 +7404,7 @@ TEST_F(HttpNetworkTransactionTest,
             connection->Init(host_port_pair.ToString(),
                              transport_params,
                              LOWEST,
-                             &callback,
+                             callback.callback(),
                              session->GetTransportSocketPool(),
                              BoundNetLog()));
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -7294,7 +7417,8 @@ TEST_F(HttpNetworkTransactionTest,
   ssl_connection->set_socket(session_deps.socket_factory.CreateSSLClientSocket(
       connection.release(), HostPortPair("" , 443), ssl_config,
       NULL /* ssl_host_info */, context));
-  EXPECT_EQ(ERR_IO_PENDING, ssl_connection->socket()->Connect(&callback));
+  EXPECT_EQ(ERR_IO_PENDING,
+            ssl_connection->socket()->Connect(callback.callback()));
   EXPECT_EQ(OK, callback.WaitForResult());
 
   EXPECT_EQ(OK, spdy_session->InitializeWithSocket(ssl_connection.release(),
@@ -7302,7 +7426,7 @@ TEST_F(HttpNetworkTransactionTest,
 
   trans.reset(new HttpNetworkTransaction(session));
 
-  rv = trans->Start(&request, &callback, BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -7704,12 +7828,13 @@ TEST_F(HttpNetworkTransactionTest, GenerateAuthToken) {
             &ssl_socket_data_provider);
 
       // Start or restart the transaction.
-      TestOldCompletionCallback callback;
+      TestCompletionCallback callback;
       int rv;
       if (round == 0) {
-        rv = trans.Start(&request, &callback, BoundNetLog());
+        rv = trans.Start(&request, callback.callback(), BoundNetLog());
       } else {
-        rv = trans.RestartWithAuth(AuthCredentials(kFoo, kBar), &callback);
+        rv = trans.RestartWithAuth(
+            AuthCredentials(kFoo, kBar), callback.callback());
       }
       if (rv == ERR_IO_PENDING)
         rv = callback.WaitForResult();
@@ -7780,7 +7905,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   session_peer.SetClientSocketPoolManager(mock_pool_manager);
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   const MockWrite kGet(
       "GET / HTTP/1.1\r\n"
@@ -7836,7 +7961,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
 
   // First round of authentication.
   auth_handler->SetGenerateExpectation(false, OK);
-  rv = trans->Start(&request, &callback, BoundNetLog());
+  rv = trans->Start(&request, callback.callback(), BoundNetLog());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -7850,8 +7975,9 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   // claimed.
   scoped_ptr<HttpTransaction> trans_compete(
       new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback_compete;
-  rv = trans_compete->Start(&request, &callback_compete, BoundNetLog());
+  TestCompletionCallback callback_compete;
+  rv = trans_compete->Start(
+      &request, callback_compete.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   // callback_compete.WaitForResult at this point would stall forever,
   // since the HttpNetworkTransaction does not release the request back to
@@ -7859,7 +7985,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
 
   // Second round of authentication.
   auth_handler->SetGenerateExpectation(false, OK);
-  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback);
+  rv = trans->RestartWithAuth(AuthCredentials(kFoo, kBar), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -7870,7 +7996,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
 
   // Third round of authentication.
   auth_handler->SetGenerateExpectation(false, OK);
-  rv = trans->RestartWithAuth(AuthCredentials(), &callback);
+  rv = trans->RestartWithAuth(AuthCredentials(), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -7881,7 +8007,7 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
 
   // Fourth round of authentication, which completes successfully.
   auth_handler->SetGenerateExpectation(false, OK);
-  rv = trans->RestartWithAuth(AuthCredentials(), &callback);
+  rv = trans->RestartWithAuth(AuthCredentials(), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   EXPECT_EQ(OK, rv);
@@ -7893,11 +8019,11 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   // Read the body since the fourth round was successful. This will also
   // release the socket back to the pool.
   scoped_refptr<IOBufferWithSize> io_buf(new IOBufferWithSize(50));
-  rv = trans->Read(io_buf, io_buf->size(), &callback);
+  rv = trans->Read(io_buf, io_buf->size(), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   EXPECT_EQ(3, rv);
-  rv = trans->Read(io_buf, io_buf->size(), &callback);
+  rv = trans->Read(io_buf, io_buf->size(), callback.callback());
   EXPECT_EQ(0, rv);
   // There are still 0 idle sockets, since the trans_compete transaction
   // will be handed it immediately after trans releases it to the group.
@@ -7907,11 +8033,11 @@ TEST_F(HttpNetworkTransactionTest, MultiRoundAuth) {
   // read the body.
   rv = callback_compete.WaitForResult();
   EXPECT_EQ(OK, rv);
-  rv = trans_compete->Read(io_buf, io_buf->size(), &callback);
+  rv = trans_compete->Read(io_buf, io_buf->size(), callback.callback());
   if (rv == ERR_IO_PENDING)
     rv = callback.WaitForResult();
   EXPECT_EQ(3, rv);
-  rv = trans_compete->Read(io_buf, io_buf->size(), &callback);
+  rv = trans_compete->Read(io_buf, io_buf->size(), callback.callback());
   EXPECT_EQ(0, rv);
 
   // Finally, the socket is released to the group.
@@ -7973,9 +8099,9 @@ TEST_F(HttpNetworkTransactionTest, RestartAfterTLSDecompressionFailure) {
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -8015,9 +8141,9 @@ TEST_F(HttpNetworkTransactionTest,
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 
@@ -8059,6 +8185,7 @@ TEST_F(HttpNetworkTransactionTest, NpnWithHttpOverSSL) {
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
   ssl.next_proto = "http/1.1";
+  ssl.protocol_negotiated = SSLClientSocket::kProtoHTTP11;
 
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
@@ -8066,12 +8193,12 @@ TEST_F(HttpNetworkTransactionTest, NpnWithHttpOverSSL) {
                                 data_writes, arraysize(data_writes));
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
 
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
@@ -8107,8 +8234,9 @@ TEST_F(HttpNetworkTransactionTest, SpdyPostNPNServerHangup) {
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<spdy::SpdyFrame> req(ConstructSpdyGet(NULL, 0, false, 1, LOWEST));
@@ -8118,19 +8246,19 @@ TEST_F(HttpNetworkTransactionTest, SpdyPostNPNServerHangup) {
     MockRead(false, 0, 0)   // Not async - return 0 immediately.
   };
 
-  scoped_refptr<DelayedSocketData> spdy_data(
+  scoped_ptr<DelayedSocketData> spdy_data(
       new DelayedSocketData(
           0,  // don't wait in this case, immediate hangup.
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(ERR_CONNECTION_CLOSED, callback.WaitForResult());
 
@@ -8143,7 +8271,8 @@ TEST_F(HttpNetworkTransactionTest, SpdyAlternateProtocolThroughProxy) {
   // to https when doing an Alternate Protocol upgrade.
   HttpStreamFactory::set_use_alternate_protocols(true);
   HttpStreamFactory::set_next_protos(
-      MakeNextProtos("http/1.1", "http1.1", "spdy/2", "spdy", NULL));
+      MakeNextProtos(
+          "http/1.1", "http1.1", "spdy/2.1", "spdy/2", "spdy", NULL));
 
   SessionDependencies session_deps(ProxyService::CreateFixed("myproxy:70"));
   HttpAuthHandlerMock::Factory* auth_factory =
@@ -8233,14 +8362,15 @@ TEST_F(HttpNetworkTransactionTest, SpdyAlternateProtocolThroughProxy) {
     CreateMockRead(*data.get(), 6),
     MockRead(true, 0, 0, 6),
   };
-  scoped_refptr<OrderedSocketData> data_2(
+  scoped_ptr<OrderedSocketData> data_2(
       new OrderedSocketData(data_reads_2, arraysize(data_reads_2),
                             data_writes_2, arraysize(data_writes_2)));
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
 
   MockConnect never_finishing_connect(false, ERR_IO_PENDING);
   StaticSocketDataProvider hanging_non_alternate_protocol_socket(
@@ -8256,16 +8386,16 @@ TEST_F(HttpNetworkTransactionTest, SpdyAlternateProtocolThroughProxy) {
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
 
   // First round should work and provide the Alternate-Protocol state.
-  TestOldCompletionCallback callback_1;
+  TestCompletionCallback callback_1;
   scoped_ptr<HttpTransaction> trans_1(new HttpNetworkTransaction(session));
-  int rv = trans_1->Start(&request, &callback_1, BoundNetLog());
+  int rv = trans_1->Start(&request, callback_1.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback_1.WaitForResult());
 
   // Second round should attempt a tunnel connect and get an auth challenge.
-  TestOldCompletionCallback callback_2;
+  TestCompletionCallback callback_2;
   scoped_ptr<HttpTransaction> trans_2(new HttpNetworkTransaction(session));
-  rv = trans_2->Start(&request, &callback_2, BoundNetLog());
+  rv = trans_2->Start(&request, callback_2.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback_2.WaitForResult());
   const HttpResponseInfo* response = trans_2->GetResponseInfo();
@@ -8273,8 +8403,9 @@ TEST_F(HttpNetworkTransactionTest, SpdyAlternateProtocolThroughProxy) {
   ASSERT_FALSE(response->auth_challenge.get() == NULL);
 
   // Restart with auth. Tunnel should work and response received.
-  TestOldCompletionCallback callback_3;
-  rv = trans_2->RestartWithAuth(AuthCredentials(kFoo, kBar), &callback_3);
+  TestCompletionCallback callback_3;
+  rv = trans_2->RestartWithAuth(
+      AuthCredentials(kFoo, kBar), callback_3.callback());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback_3.WaitForResult());
 
@@ -8317,10 +8448,10 @@ TEST_F(HttpNetworkTransactionTest, SimpleCancel) {
   data.set_connect_data(mock_connect);
   session_deps.socket_factory.AddSocketDataProvider(&data);
 
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   CapturingBoundNetLog log(CapturingNetLog::kUnbounded);
-  int rv = trans->Start(&request, &callback, log.bound());
+  int rv = trans->Start(&request, callback.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   trans.reset();  // Cancel the transaction here.
 
@@ -8355,11 +8486,11 @@ TEST_F(HttpNetworkTransactionTest, ProxyGet) {
                                  data_writes1, arraysize(data_writes1));
   session_deps.socket_factory.AddSocketDataProvider(&data1);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -8412,11 +8543,11 @@ TEST_F(HttpNetworkTransactionTest, ProxyTunnelGet) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -8476,11 +8607,11 @@ TEST_F(HttpNetworkTransactionTest, ProxyTunnelGetHangup) {
   SSLSocketDataProvider ssl(true, OK);
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
-  TestOldCompletionCallback callback1;
+  TestCompletionCallback callback1;
 
   scoped_ptr<HttpTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback1, log.bound());
+  int rv = trans->Start(&request, callback1.callback(), log.bound());
   EXPECT_EQ(ERR_IO_PENDING, rv);
 
   rv = callback1.WaitForResult();
@@ -8512,17 +8643,18 @@ TEST_F(HttpNetworkTransactionTest, PreconnectWithExistingSpdySession) {
     MockRead(true, 0, 0),
   };
 
-  scoped_refptr<DelayedSocketData> spdy_data(
+  scoped_ptr<DelayedSocketData> spdy_data(
       new DelayedSocketData(
           1,  // wait for one write to finish before reading.
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
@@ -8534,12 +8666,12 @@ TEST_F(HttpNetworkTransactionTest, PreconnectWithExistingSpdySession) {
       session->spdy_session_pool()->Get(pair, BoundNetLog());
   scoped_refptr<TransportSocketParams> transport_params(
       new TransportSocketParams(host_port_pair, MEDIUM, false, false));
-  TestOldCompletionCallback callback;
+  TestCompletionCallback callback;
 
   scoped_ptr<ClientSocketHandle> connection(new ClientSocketHandle);
   EXPECT_EQ(ERR_IO_PENDING,
             connection->Init(host_port_pair.ToString(), transport_params,
-                             LOWEST, &callback,
+                             LOWEST, callback.callback(),
                              session->GetTransportSocketPool(), BoundNetLog()));
   EXPECT_EQ(OK, callback.WaitForResult());
   spdy_session->InitializeWithSocket(connection.release(), false, OK);
@@ -8554,7 +8686,7 @@ TEST_F(HttpNetworkTransactionTest, PreconnectWithExistingSpdySession) {
 
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
-  int rv = trans->Start(&request, &callback, BoundNetLog());
+  int rv = trans->Start(&request, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
   EXPECT_EQ(OK, callback.WaitForResult());
 }
@@ -8581,8 +8713,8 @@ static void CheckErrorIsPassedBack(int error, bool async) {
   scoped_refptr<HttpNetworkSession> session(CreateSession(&session_deps));
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&request_info, &callback, net::BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&request_info, callback.callback(), net::BoundNetLog());
   if (rv == net::ERR_IO_PENDING)
     rv = callback.WaitForResult();
   ASSERT_EQ(error, rv);
@@ -8659,8 +8791,8 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Direct_NoFalseStart) {
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
   // Begin the SSL handshake with the peer. This consumes ssl_data1.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&request_info, &callback, net::BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&request_info, callback.callback(), net::BoundNetLog());
   ASSERT_EQ(net::ERR_IO_PENDING, rv);
 
   // Complete the SSL handshake, which should abort due to requiring a
@@ -8672,7 +8804,7 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Direct_NoFalseStart) {
   // of SSLClientCertCache, NULL is just as meaningful as a real
   // certificate, so this is the same as supply a
   // legitimate-but-unacceptable certificate.
-  rv = trans->RestartWithCertificate(NULL, &callback);
+  rv = trans->RestartWithCertificate(NULL, callback.callback());
   ASSERT_EQ(net::ERR_IO_PENDING, rv);
 
   // Ensure the certificate was added to the client auth cache before
@@ -8764,8 +8896,8 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Direct_FalseStart) {
   scoped_ptr<HttpNetworkTransaction> trans(new HttpNetworkTransaction(session));
 
   // Begin the initial SSL handshake.
-  TestOldCompletionCallback callback;
-  int rv = trans->Start(&request_info, &callback, net::BoundNetLog());
+  TestCompletionCallback callback;
+  int rv = trans->Start(&request_info, callback.callback(), net::BoundNetLog());
   ASSERT_EQ(net::ERR_IO_PENDING, rv);
 
   // Complete the SSL handshake, which should abort due to requiring a
@@ -8777,7 +8909,7 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Direct_FalseStart) {
   // of SSLClientCertCache, NULL is just as meaningful as a real
   // certificate, so this is the same as supply a
   // legitimate-but-unacceptable certificate.
-  rv = trans->RestartWithCertificate(NULL, &callback);
+  rv = trans->RestartWithCertificate(NULL, callback.callback());
   ASSERT_EQ(net::ERR_IO_PENDING, rv);
 
   // Ensure the certificate was added to the client auth cache before
@@ -8858,8 +8990,9 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Proxy_Fail) {
         new HttpNetworkTransaction(session));
 
     // Begin the SSL handshake with the proxy.
-    TestOldCompletionCallback callback;
-    int rv = trans->Start(&requests[i], &callback, net::BoundNetLog());
+    TestCompletionCallback callback;
+    int rv = trans->Start(
+        &requests[i], callback.callback(), net::BoundNetLog());
     ASSERT_EQ(net::ERR_IO_PENDING, rv);
 
     // Complete the SSL handshake, which should abort due to requiring a
@@ -8871,7 +9004,7 @@ TEST_F(HttpNetworkTransactionTest, ClientAuthCertCache_Proxy_Fail) {
     // of SSLClientCertCache, NULL is just as meaningful as a real
     // certificate, so this is the same as supply a
     // legitimate-but-unacceptable certificate.
-    rv = trans->RestartWithCertificate(NULL, &callback);
+    rv = trans->RestartWithCertificate(NULL, callback.callback());
     ASSERT_EQ(net::ERR_IO_PENDING, rv);
 
     // Ensure the certificate was added to the client auth cache before
@@ -8956,8 +9089,9 @@ TEST_F(HttpNetworkTransactionTest, UseIPConnectionPooling) {
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<spdy::SpdyFrame> host1_req(ConstructSpdyGet(
@@ -8980,23 +9114,22 @@ TEST_F(HttpNetworkTransactionTest, UseIPConnectionPooling) {
     MockRead(true, 0, 7),
   };
 
-  scoped_refptr<OrderedSocketData> spdy_data(
+  scoped_ptr<OrderedSocketData> spdy_data(
       new OrderedSocketData(
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   TestCompletionCallback callback;
-  TestOldCompletionCallback old_callback;
   HttpRequestInfo request1;
   request1.method = "GET";
   request1.url = GURL("https://www.google.com/");
   request1.load_flags = 0;
   HttpNetworkTransaction trans1(session);
 
-  int rv = trans1.Start(&request1, &old_callback, BoundNetLog());
+  int rv = trans1.Start(&request1, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  EXPECT_EQ(OK, old_callback.WaitForResult());
+  EXPECT_EQ(OK, callback.WaitForResult());
 
   const HttpResponseInfo* response = trans1.GetResponseInfo();
   ASSERT_TRUE(response != NULL);
@@ -9029,9 +9162,9 @@ TEST_F(HttpNetworkTransactionTest, UseIPConnectionPooling) {
   request2.load_flags = 0;
   HttpNetworkTransaction trans2(session);
 
-  rv = trans2.Start(&request2, &old_callback, BoundNetLog());
+  rv = trans2.Start(&request2, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  EXPECT_EQ(OK, old_callback.WaitForResult());
+  EXPECT_EQ(OK, callback.WaitForResult());
 
   response = trans2.GetResponseInfo();
   ASSERT_TRUE(response != NULL);
@@ -9110,8 +9243,9 @@ TEST_F(HttpNetworkTransactionTest,
 
   SSLSocketDataProvider ssl(true, OK);
   ssl.next_proto_status = SSLClientSocket::kNextProtoNegotiated;
-  ssl.next_proto = "spdy/2";
+  ssl.next_proto = "spdy/2.1";
   ssl.was_npn_negotiated = true;
+  ssl.protocol_negotiated = SSLClientSocket::kProtoSPDY21;
   session_deps.socket_factory.AddSSLSocketDataProvider(&ssl);
 
   scoped_ptr<spdy::SpdyFrame> host1_req(ConstructSpdyGet(
@@ -9134,11 +9268,11 @@ TEST_F(HttpNetworkTransactionTest,
     MockRead(true, 0, 7),
   };
 
-  scoped_refptr<OrderedSocketData> spdy_data(
+  scoped_ptr<OrderedSocketData> spdy_data(
       new OrderedSocketData(
           spdy_reads, arraysize(spdy_reads),
           spdy_writes, arraysize(spdy_writes)));
-  session_deps.socket_factory.AddSocketDataProvider(spdy_data);
+  session_deps.socket_factory.AddSocketDataProvider(spdy_data.get());
 
   TestCompletionCallback callback;
   HttpRequestInfo request1;
@@ -9147,10 +9281,9 @@ TEST_F(HttpNetworkTransactionTest,
   request1.load_flags = 0;
   HttpNetworkTransaction trans1(session);
 
-  TestOldCompletionCallback old_callback;
-  int rv = trans1.Start(&request1, &old_callback, BoundNetLog());
+  int rv = trans1.Start(&request1, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  EXPECT_EQ(OK, old_callback.WaitForResult());
+  EXPECT_EQ(OK, callback.WaitForResult());
 
   const HttpResponseInfo* response = trans1.GetResponseInfo();
   ASSERT_TRUE(response != NULL);
@@ -9182,9 +9315,9 @@ TEST_F(HttpNetworkTransactionTest,
   IPPoolingAddAlias(host_resolver.GetMockHostResolver(), &pool_peer,
                     "www.google.com", 443, "127.0.0.1");
 
-  rv = trans2.Start(&request2, &old_callback, BoundNetLog());
+  rv = trans2.Start(&request2, callback.callback(), BoundNetLog());
   EXPECT_EQ(ERR_IO_PENDING, rv);
-  EXPECT_EQ(OK, old_callback.WaitForResult());
+  EXPECT_EQ(OK, callback.WaitForResult());
 
   response = trans2.GetResponseInfo();
   ASSERT_TRUE(response != NULL);

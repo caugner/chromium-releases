@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,7 +20,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/process_util.h"
 #include "chrome/browser/io_thread.h"
-#include "chrome/common/metrics_helpers.h"
+#include "chrome/common/metrics/metrics_service_base.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/url_fetcher_delegate.h"
 #include "content/public/browser/notification_observer.h"
@@ -73,6 +73,10 @@ class MetricsService : public content::NotificationObserver,
   // Returns the client ID for this client, or the empty string if metrics
   // recording is not currently running.
   std::string GetClientId();
+
+  // Force the client ID to be generated. This is useful in case it's needed
+  // before recording.
+  void ForceClientIdCreation();
 
   // At startup, prefs needs to be called with a list of all the pref names and
   // types we'll be using.

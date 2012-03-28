@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -11,6 +11,7 @@
 #include "base/string16.h"
 #include "base/threading/platform_thread.h"
 #include "base/utf_string_conversions.h"
+#include "chrome/common/automation_constants.h"
 #include "chrome/common/automation_messages.h"
 #include "chrome/test/automation/automation_json_requests.h"
 #include "chrome/test/automation/automation_proxy.h"
@@ -364,7 +365,8 @@ bool TabProxy::WaitForChildWindowCountToChange(int count, int* new_count,
                                                int wait_timeout) {
   int intervals = std::max(wait_timeout / automation::kSleepTime, 1);
   for (int i = 0; i < intervals; ++i) {
-    base::PlatformThread::Sleep(automation::kSleepTime);
+    base::PlatformThread::Sleep(
+        base::TimeDelta::FromMilliseconds(automation::kSleepTime));
     bool succeeded = GetConstrainedWindowCount(new_count);
     if (!succeeded)
       return false;
@@ -392,7 +394,8 @@ bool TabProxy::WaitForBlockedPopupCountToChangeTo(int target_count,
                                                   int wait_timeout) {
   int intervals = std::max(wait_timeout / automation::kSleepTime, 1);
   for (int i = 0; i < intervals; ++i) {
-    base::PlatformThread::Sleep(automation::kSleepTime);
+    base::PlatformThread::Sleep(
+        base::TimeDelta::FromMilliseconds(automation::kSleepTime));
     int new_count = -1;
     bool succeeded = GetBlockedPopupCount(&new_count);
     if (!succeeded)
@@ -627,7 +630,7 @@ bool TabProxy::PrintAsync() {
 
 bool TabProxy::SavePage(const FilePath& file_name,
                         const FilePath& dir_path,
-                        SavePackage::SavePackageType type) {
+                        content::SavePageType type) {
   if (!is_valid())
     return false;
 
@@ -723,14 +726,15 @@ bool TabProxy::CaptureEntirePageAsPNG(const FilePath& path) {
     return false;
 
   int browser_index, tab_index;
-  std::string error_msg;
+  automation::Error error;
   if (!SendGetIndicesFromTabHandleJSONRequest(
-         sender_, handle_, &browser_index, &tab_index, &error_msg)) {
+         sender_, handle_, &browser_index, &tab_index, &error)) {
     return false;
   }
 
-  return SendCaptureEntirePageJSONRequest(sender_, browser_index,
-                                          tab_index, path, &error_msg);
+  return SendCaptureEntirePageJSONRequest(
+      sender_, WebViewLocator::ForIndexPair(browser_index, tab_index),
+      path, &error);
 }
 
 #if defined(OS_WIN) && !defined(USE_AURA)

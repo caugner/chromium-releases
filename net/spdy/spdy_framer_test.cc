@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -85,7 +85,8 @@ void CompareCharArraysWithHexError(
 
 class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
  public:
-  static const size_t kDefaultHeaderBufferSize = 16 * 1024;
+  static const size_t kDefaultHeaderBufferSize = 64 * 1024;
+  static const size_t kDefaultCredentialBufferSize = 16 * 1024;
 
   TestSpdyVisitor()
     : use_compression_(false),
@@ -94,6 +95,7 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
       syn_reply_frame_count_(0),
       headers_frame_count_(0),
       goaway_count_(0),
+      credential_count_(0),
       data_bytes_(0),
       fin_frame_count_(0),
       fin_flag_count_(0),
@@ -107,7 +109,10 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
       header_buffer_size_(kDefaultHeaderBufferSize),
       header_stream_id_(-1),
       header_control_type_(NUM_CONTROL_FRAME_TYPES),
-      header_buffer_valid_(false) {
+      header_buffer_valid_(false),
+      credential_buffer_(new char[kDefaultCredentialBufferSize]),
+      credential_buffer_length_(0),
+      credential_buffer_size_(kDefaultCredentialBufferSize) {
   }
 
   void OnError(SpdyFramer* f) {
@@ -124,6 +129,7 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
   void OnStreamFrameData(SpdyStreamId stream_id,
                          const char* data,
                          size_t len) {
+    EXPECT_EQ(header_stream_id_, stream_id);
     if (len == 0)
       ++zero_length_data_frame_count_;
 
@@ -157,6 +163,9 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
       case GOAWAY:
         goaway_count_++;
         break;
+      case CREDENTIAL:
+        credential_count_++;
+        break;
       default:
         DLOG(FATAL);  // Error!
     }
@@ -164,10 +173,11 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
       ++fin_flag_count_;
   }
 
-  bool OnControlFrameHeaderData(SpdyStreamId stream_id,
+  bool OnControlFrameHeaderData(const SpdyControlFrame* control_frame,
                                 const char* header_data,
                                 size_t len) {
     ++control_frame_header_data_count_;
+    SpdyStreamId stream_id = SpdyFramer::GetControlFrameStreamId(control_frame);
     CHECK_EQ(header_stream_id_, stream_id);
     if (len == 0) {
       ++zero_length_control_frame_header_data_count_;
@@ -185,6 +195,26 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
     }
     memcpy(header_buffer_.get() + header_buffer_length_, header_data, len);
     header_buffer_length_ += len;
+    return true;
+  }
+
+  bool OnCredentialFrameData(const char* credential_data, size_t len) {
+    if (len == 0) {
+      if (!framer_.ParseCredentialData(credential_buffer_.get(),
+                                       credential_buffer_length_,
+                                       &credential_)) {
+        ++error_count_;
+      }
+      return true;
+    }
+    const size_t available =
+        credential_buffer_size_ - credential_buffer_length_;
+    if (len > available) {
+      return false;
+    }
+    memcpy(credential_buffer_.get() + credential_buffer_length_,
+           credential_data, len);
+    credential_buffer_length_ += len;
     return true;
   }
 
@@ -242,6 +272,7 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
   int syn_reply_frame_count_;
   int headers_frame_count_;
   int goaway_count_;
+  int credential_count_;
   int data_bytes_;
   int fin_frame_count_;  // The count of RST_STREAM type frames received.
   int fin_flag_count_;  // The count of frames with the FIN flag set.
@@ -260,6 +291,11 @@ class TestSpdyVisitor : public SpdyFramerVisitorInterface  {
   SpdyControlType header_control_type_;
   bool header_buffer_valid_;
   SpdyHeaderBlock headers_;
+
+  scoped_array<char> credential_buffer_;
+  size_t credential_buffer_length_;
+  size_t credential_buffer_size_;
+  SpdyCredential credential_;
 };
 
 }  // namespace test
@@ -285,24 +321,6 @@ using spdy::test::TestSpdyVisitor;
 
 namespace spdy {
 
-class SpdyFramerTest : public PlatformTest {
- public:
-  virtual void TearDown() {}
-
- protected:
-  void CompareFrame(const std::string& description,
-                    const SpdyFrame& actual_frame,
-                    const unsigned char* expected,
-                    const int expected_len) {
-    const unsigned char* actual =
-        reinterpret_cast<const unsigned char*>(actual_frame.data());
-    int actual_len = actual_frame.length() + SpdyFrame::kHeaderSize;
-    CompareCharArraysWithHexError(
-        description, actual, actual_len, expected, expected_len);
-  }
-};
-
-
 TEST(SpdyFrameBuilderTest, WriteLimits) {
   SpdyFrameBuilder builder(kLengthMask + 4);
   // length field should fail.
@@ -318,25 +336,51 @@ TEST(SpdyFrameBuilderTest, WriteLimits) {
   EXPECT_EQ(4 + kLengthMask, static_cast<unsigned>(builder.length()));
 }
 
-// Test that we can encode and decode a SpdyHeaderBlock.
-TEST_F(SpdyFramerTest, HeaderBlock) {
-  SpdyHeaderBlock headers;
-  headers["alpha"] = "beta";
-  headers["gamma"] = "charlie";
-  SpdyFramer framer;
+class SpdyFramerTest : public PlatformTest {
+ public:
+  virtual void TearDown() {}
 
-  // Encode the header block into a SynStream frame.
-  scoped_ptr<SpdySynStreamControlFrame> frame(
-      framer.CreateSynStream(1, 0, 1, CONTROL_FLAG_NONE, true, &headers));
-  EXPECT_TRUE(frame.get() != NULL);
+ protected:
+  void CompareFrame(const std::string& description,
+                    const SpdyFrame& actual_frame,
+                    const unsigned char* expected,
+                    const int expected_len) {
+    const unsigned char* actual =
+        reinterpret_cast<const unsigned char*>(actual_frame.data());
+    int actual_len = actual_frame.length() + SpdyFrame::kHeaderSize;
+    CompareCharArraysWithHexError(
+        description, actual, actual_len, expected, expected_len);
+  }
 
-  SpdyHeaderBlock new_headers;
-  EXPECT_TRUE(framer.ParseHeaderBlock(frame.get(), &new_headers));
+  // Returns true if the two header blocks have equivalent content.
+  bool CompareHeaderBlocks(const SpdyHeaderBlock* expected,
+                           const SpdyHeaderBlock* actual) {
+    if (expected->size() != actual->size()) {
+      LOG(ERROR) << "Expected " << expected->size() << " headers; actually got "
+                 << actual->size() << "." << std::endl;
+      return false;
+    }
+    for (SpdyHeaderBlock::const_iterator it = expected->begin();
+         it != expected->end();
+         ++it) {
+      SpdyHeaderBlock::const_iterator it2 = actual->find(it->first);
+      if (it2 == actual->end()) {
+        LOG(ERROR) << "Expected header name '" << it->first << "'."
+                   << std::endl;
+        return false;
+      }
+      if (it->second.compare(it2->second) != 0) {
+        LOG(ERROR) << "Expected header named '" << it->first
+                   << "' to have a value of '" << it->second
+                   << "'. The actual value received was '" << it2->second
+                   << "'." << std::endl;
+        return false;
+      }
+    }
+    return true;
+  }
+};
 
-  EXPECT_EQ(headers.size(), new_headers.size());
-  EXPECT_EQ(headers["alpha"], new_headers["alpha"]);
-  EXPECT_EQ(headers["gamma"], new_headers["gamma"]);
-}
 
 // Test that we can encode and decode a SpdyHeaderBlock in serialized form.
 TEST_F(SpdyFramerTest, HeaderBlockInBuffer) {
@@ -408,50 +452,9 @@ TEST_F(SpdyFramerTest, OutOfOrderHeaders) {
                                  syn_frame.header_block_len());
   SpdyFramer framer;
   framer.set_enable_compression(false);
-  EXPECT_TRUE(framer.ParseHeaderBlock(control_frame.get(), &new_headers));
-}
-
-TEST_F(SpdyFramerTest, WrongNumberOfHeaders) {
-  SpdyFrameBuilder frame1;
-  SpdyFrameBuilder frame2;
-
-  // a frame with smaller number of actual headers
-  frame1.WriteUInt16(kControlFlagMask | 1);
-  frame1.WriteUInt16(SYN_STREAM);
-  frame1.WriteUInt32(0);  // Placeholder for the length.
-  frame1.WriteUInt32(3);  // stream_id
-  frame1.WriteUInt16(0);  // Priority.
-
-  frame1.WriteUInt16(1);  // Wrong number of headers (underflow)
-  frame1.WriteString("gamma");
-  frame1.WriteString("gamma");
-  frame1.WriteString("alpha");
-  frame1.WriteString("alpha");
-  // write the length
-  frame1.WriteUInt32ToOffset(4, frame1.length() - SpdyFrame::kHeaderSize);
-
-  // a frame with larger number of actual headers
-  frame2.WriteUInt16(kControlFlagMask | 1);
-  frame2.WriteUInt16(SYN_STREAM);
-  frame2.WriteUInt32(0);  // Placeholder for the length.
-  frame2.WriteUInt32(3);  // stream_id
-  frame2.WriteUInt16(0);  // Priority.
-
-  frame2.WriteUInt16(100);  // Wrong number of headers (overflow)
-  frame2.WriteString("gamma");
-  frame2.WriteString("gamma");
-  frame2.WriteString("alpha");
-  frame2.WriteString("alpha");
-  // write the length
-  frame2.WriteUInt32ToOffset(4, frame2.length() - SpdyFrame::kHeaderSize);
-
-  SpdyHeaderBlock new_headers;
-  scoped_ptr<SpdyFrame> syn_frame1(frame1.take());
-  scoped_ptr<SpdyFrame> syn_frame2(frame2.take());
-  SpdyFramer framer;
-  framer.set_enable_compression(false);
-  EXPECT_FALSE(framer.ParseHeaderBlock(syn_frame1.get(), &new_headers));
-  EXPECT_FALSE(framer.ParseHeaderBlock(syn_frame2.get(), &new_headers));
+  EXPECT_TRUE(framer.ParseHeaderBlockInBuffer(serialized_headers.c_str(),
+                                              serialized_headers.size(),
+                                              &new_headers));
 }
 
 TEST_F(SpdyFramerTest, DuplicateHeader) {
@@ -482,7 +485,9 @@ TEST_F(SpdyFramerTest, DuplicateHeader) {
   SpdyFramer framer;
   framer.set_enable_compression(false);
   // This should fail because duplicate headers are verboten by the spec.
-  EXPECT_FALSE(framer.ParseHeaderBlock(control_frame.get(), &new_headers));
+  EXPECT_FALSE(framer.ParseHeaderBlockInBuffer(serialized_headers.c_str(),
+                                               serialized_headers.size(),
+                                               &new_headers));
 }
 
 TEST_F(SpdyFramerTest, MultiValueHeader) {
@@ -511,37 +516,11 @@ TEST_F(SpdyFramerTest, MultiValueHeader) {
                                  syn_frame.header_block_len());
   SpdyFramer framer;
   framer.set_enable_compression(false);
-  EXPECT_TRUE(framer.ParseHeaderBlock(control_frame.get(), &new_headers));
+  EXPECT_TRUE(framer.ParseHeaderBlockInBuffer(serialized_headers.c_str(),
+                                              serialized_headers.size(),
+                                              &new_headers));
   EXPECT_TRUE(new_headers.find("name") != new_headers.end());
   EXPECT_EQ(value, new_headers.find("name")->second);
-}
-
-TEST_F(SpdyFramerTest, ZeroLengthHeader) {
-  SpdyHeaderBlock header1;
-  SpdyHeaderBlock header2;
-  SpdyHeaderBlock header3;
-
-  header1[""] = "value2";
-  header2["name3"] = "";
-  header3[""] = "";
-
-  SpdyFramer framer;
-  SpdyHeaderBlock parsed_headers;
-
-  scoped_ptr<SpdySynStreamControlFrame> frame1(
-      framer.CreateSynStream(1, 0, 1, CONTROL_FLAG_NONE, true, &header1));
-  EXPECT_TRUE(frame1.get() != NULL);
-  EXPECT_FALSE(framer.ParseHeaderBlock(frame1.get(), &parsed_headers));
-
-  scoped_ptr<SpdySynStreamControlFrame> frame2(
-      framer.CreateSynStream(1, 0, 1, CONTROL_FLAG_NONE, true, &header2));
-  EXPECT_TRUE(frame2.get() != NULL);
-  EXPECT_FALSE(framer.ParseHeaderBlock(frame2.get(), &parsed_headers));
-
-  scoped_ptr<SpdySynStreamControlFrame> frame3(
-      framer.CreateSynStream(1, 0, 1, CONTROL_FLAG_NONE, true, &header3));
-  EXPECT_TRUE(frame3.get() != NULL);
-  EXPECT_FALSE(framer.ParseHeaderBlock(frame3.get(), &parsed_headers));
 }
 
 TEST_F(SpdyFramerTest, BasicCompression) {
@@ -575,6 +554,7 @@ TEST_F(SpdyFramerTest, BasicCompression) {
   EXPECT_EQ(0,
       memcmp(frame3->data(), frame4->data(),
       SpdyFrame::kHeaderSize + frame3->length()));
+
 
   // Expect frames 3 to be the same as a uncompressed frame created
   // from scratch.
@@ -673,7 +653,7 @@ TEST_F(SpdyFramerTest, Basic) {
   EXPECT_EQ(2, visitor.fin_frame_count_);
   EXPECT_EQ(0, visitor.fin_flag_count_);
   EXPECT_EQ(0, visitor.zero_length_data_frame_count_);
-  // EXPECT_EQ(4, visitor.data_frame_count_);
+  EXPECT_EQ(4, visitor.data_frame_count_);
 }
 
 // Test that the FIN flag on a data frame signifies EOF.
@@ -716,7 +696,7 @@ TEST_F(SpdyFramerTest, FinOnDataFrame) {
   EXPECT_EQ(0, visitor.fin_frame_count_);
   EXPECT_EQ(0, visitor.fin_flag_count_);
   EXPECT_EQ(1, visitor.zero_length_data_frame_count_);
-  // EXPECT_EQ(2, visitor.data_frame_count_);
+  EXPECT_EQ(2, visitor.data_frame_count_);
 }
 
 // Test that the FIN flag on a SYN reply frame signifies EOF.
@@ -750,18 +730,16 @@ TEST_F(SpdyFramerTest, FinOnSynReplyFrame) {
   EXPECT_EQ(0, visitor.fin_frame_count_);
   EXPECT_EQ(1, visitor.fin_flag_count_);
   EXPECT_EQ(1, visitor.zero_length_data_frame_count_);
-  // EXPECT_EQ(0, visitor.data_frame_count_);
+  EXPECT_EQ(0, visitor.data_frame_count_);
 }
 
-// Basic compression & decompression
-TEST_F(SpdyFramerTest, DataCompression) {
+TEST_F(SpdyFramerTest, HeaderCompression) {
   SpdyFramer send_framer;
   SpdyFramer recv_framer;
 
   send_framer.set_enable_compression(true);
   recv_framer.set_enable_compression(true);
 
-  // Mix up some SYNs and DATA frames since they use different compressors.
   const char kHeader1[] = "header1";
   const char kHeader2[] = "header2";
   const char kHeader3[] = "header3";
@@ -778,76 +756,64 @@ TEST_F(SpdyFramerTest, DataCompression) {
       send_framer.CreateSynStream(1, 0, 0, flags, true, &block));
   EXPECT_TRUE(syn_frame_1.get() != NULL);
 
-  // DATA #1
-  const char bytes[] = "this is a test test test test test!";
-  scoped_ptr<SpdyFrame> data_frame_1(
-      send_framer.CreateDataFrame(1, bytes, arraysize(bytes),
-                                  DATA_FLAG_COMPRESSED));
-  EXPECT_TRUE(data_frame_1.get() != NULL);
-
   // SYN_STREAM #2
   block[kHeader3] = kValue3;
-  scoped_ptr<SpdyFrame> syn_frame_2(
+  scoped_ptr<spdy::SpdyFrame> syn_frame_2(
       send_framer.CreateSynStream(3, 0, 0, flags, true, &block));
   EXPECT_TRUE(syn_frame_2.get() != NULL);
 
-  // DATA #2
-  scoped_ptr<SpdyFrame> data_frame_2(
-      send_framer.CreateDataFrame(3, bytes, arraysize(bytes),
-                                  DATA_FLAG_COMPRESSED));
-  EXPECT_TRUE(data_frame_2.get() != NULL);
-
   // Now start decompressing
   scoped_ptr<SpdyFrame> decompressed;
-  SpdyControlFrame* control_frame;
-  SpdyDataFrame* data_frame;
+  scoped_ptr<SpdyFrame> decompressed_syn_frame;
+  SpdySynStreamControlFrame* syn_frame;
+  scoped_ptr<std::string> serialized_headers;
   SpdyHeaderBlock decompressed_headers;
 
-  decompressed.reset(recv_framer.DuplicateFrame(*syn_frame_1.get()));
+  // Decompress SYN_STREAM #1
+  decompressed.reset(recv_framer.DecompressFrame(*syn_frame_1.get()));
   EXPECT_TRUE(decompressed.get() != NULL);
   EXPECT_TRUE(decompressed->is_control_frame());
-  control_frame = reinterpret_cast<SpdyControlFrame*>(decompressed.get());
-  EXPECT_EQ(SYN_STREAM, control_frame->type());
-  EXPECT_TRUE(recv_framer.ParseHeaderBlock(
-      control_frame, &decompressed_headers));
+  EXPECT_EQ(SYN_STREAM,
+            reinterpret_cast<SpdyControlFrame*>(decompressed.get())->type());
+  decompressed_syn_frame.reset(
+      new SpdySynStreamControlFrame(decompressed->data(), false));
+  syn_frame = reinterpret_cast<SpdySynStreamControlFrame*>(
+      decompressed_syn_frame.get());
+  serialized_headers.reset(new std::string(syn_frame->header_block(),
+                                           syn_frame->header_block_len()));
+  EXPECT_TRUE(recv_framer.ParseHeaderBlockInBuffer(serialized_headers->c_str(),
+                                                   serialized_headers->size(),
+                                                   &decompressed_headers));
   EXPECT_EQ(2u, decompressed_headers.size());
-  EXPECT_EQ(SYN_STREAM, control_frame->type());
   EXPECT_EQ(kValue1, decompressed_headers[kHeader1]);
   EXPECT_EQ(kValue2, decompressed_headers[kHeader2]);
 
-  decompressed.reset(recv_framer.DecompressFrame(*data_frame_1.get()));
-  EXPECT_TRUE(decompressed.get() != NULL);
-  EXPECT_FALSE(decompressed->is_control_frame());
-  data_frame = reinterpret_cast<SpdyDataFrame*>(decompressed.get());
-  EXPECT_EQ(arraysize(bytes), data_frame->length());
-  EXPECT_EQ(0, memcmp(data_frame->payload(), bytes, data_frame->length()));
-
-  decompressed.reset(recv_framer.DuplicateFrame(*syn_frame_2.get()));
+  // Decompress SYN_STREAM #2
+  decompressed.reset(recv_framer.DecompressFrame(*syn_frame_2.get()));
   EXPECT_TRUE(decompressed.get() != NULL);
   EXPECT_TRUE(decompressed->is_control_frame());
-  control_frame = reinterpret_cast<SpdyControlFrame*>(decompressed.get());
-  EXPECT_EQ(control_frame->type(), SYN_STREAM);
+  EXPECT_EQ(SYN_STREAM,
+            reinterpret_cast<SpdyControlFrame*>(decompressed.get())->type());
+  decompressed_syn_frame.reset(
+      new SpdySynStreamControlFrame(decompressed->data(), false));
+  syn_frame = reinterpret_cast<SpdySynStreamControlFrame*>(
+      decompressed_syn_frame.get());
+  serialized_headers.reset(new std::string(syn_frame->header_block(),
+                                           syn_frame->header_block_len()));
   decompressed_headers.clear();
-  EXPECT_TRUE(recv_framer.ParseHeaderBlock(
-      control_frame, &decompressed_headers));
+  EXPECT_TRUE(recv_framer.ParseHeaderBlockInBuffer(serialized_headers->c_str(),
+                                                   serialized_headers->size(),
+                                                   &decompressed_headers));
   EXPECT_EQ(3u, decompressed_headers.size());
-  EXPECT_EQ(SYN_STREAM, control_frame->type());
   EXPECT_EQ(kValue1, decompressed_headers[kHeader1]);
   EXPECT_EQ(kValue2, decompressed_headers[kHeader2]);
   EXPECT_EQ(kValue3, decompressed_headers[kHeader3]);
 
-  decompressed.reset(recv_framer.DecompressFrame(*data_frame_2.get()));
-  EXPECT_TRUE(decompressed.get() != NULL);
-  EXPECT_FALSE(decompressed->is_control_frame());
-  data_frame = reinterpret_cast<SpdyDataFrame*>(decompressed.get());
-  EXPECT_EQ(arraysize(bytes), data_frame->length());
-  EXPECT_EQ(0, memcmp(data_frame->payload(), bytes, data_frame->length()));
-
-  // We didn't close these streams, so the compressors should be active.
-  EXPECT_EQ(2, send_framer.num_stream_compressors());
+  // We didn't have data streams, so we shouldn't have (de)compressors.
+  EXPECT_EQ(0, send_framer.num_stream_compressors());
   EXPECT_EQ(0, send_framer.num_stream_decompressors());
   EXPECT_EQ(0, recv_framer.num_stream_compressors());
-  EXPECT_EQ(2, recv_framer.num_stream_decompressors());
+  EXPECT_EQ(0, recv_framer.num_stream_decompressors());
 }
 
 // Verify we don't leak when we leave streams unclosed
@@ -893,7 +859,7 @@ TEST_F(SpdyFramerTest, UnclosedStreamDataCompressors) {
   EXPECT_EQ(0, visitor.fin_frame_count_);
   EXPECT_EQ(0, visitor.fin_flag_count_);
   EXPECT_EQ(1, visitor.zero_length_data_frame_count_);
-  // EXPECT_EQ(1, visitor.data_frame_count_);
+  EXPECT_EQ(1, visitor.data_frame_count_);
 
   // We closed the streams, so all compressors should be down.
   EXPECT_EQ(0, visitor.framer_.num_stream_compressors());
@@ -1547,6 +1513,86 @@ TEST_F(SpdyFramerTest, CreateWindowUpdate) {
   }
 }
 
+TEST_F(SpdyFramerTest, CreateCredential) {
+  SpdyFramer framer;
+
+  {
+    const char kDescription[] = "CREDENTIAL frame";
+    const unsigned char kFrameData[] = {
+      0x80, 0x02, 0x00, 0x0A,
+      0x00, 0x00, 0x00, 0x3F,
+      0x00, 0x03, 0x00, 0x0A,
+      'g',  'o',  'o',  'g',
+      'l',  'e',  '.',  'c',
+      'o',  'm',  0x00, 0x00,
+      0x00, 0x05, 'p',  'r',
+      'o',  'o',  'f',  0x00,
+      0x00, 0x00, 0x06, 'a',
+      ' ',  'c',  'e',  'r',
+      't',  0x00, 0x00, 0x00,
+      0x0C, 'a',  'n',  'o',
+      't',  'h',  'e',  'r',
+      ' ',  'c',  'e',  'r',
+      't',  0x00,  0x00, 0x00,
+      0x0A, 'f',  'i',  'n',
+      'a',  'l',  ' ',  'c',
+      'e',  'r',  't',
+    };
+    SpdyCredential credential;
+    credential.slot = 3;
+    credential.origin = "google.com";
+    credential.proof = "proof";
+    credential.certs.push_back("a cert");
+    credential.certs.push_back("another cert");
+    credential.certs.push_back("final cert");
+    scoped_ptr<SpdyFrame> frame(framer.CreateCredentialFrame(credential));
+    CompareFrame(kDescription, *frame, kFrameData, arraysize(kFrameData));
+  }
+}
+
+TEST_F(SpdyFramerTest, ParseCredentialFrame) {
+  SpdyFramer framer;
+
+  {
+    unsigned char kFrameData[] = {
+      0x80, 0x02, 0x00, 0x0A,
+      0x00, 0x00, 0x00, 0x3F,
+      0x00, 0x03, 0x00, 0x0A,
+      'g',  'o',  'o',  'g',
+      'l',  'e',  '.',  'c',
+      'o',  'm',  0x00, 0x00,
+      0x00, 0x05, 'p',  'r',
+      'o',  'o',  'f',  0x00,
+      0x00, 0x00, 0x06, 'a',
+      ' ',  'c',  'e',  'r',
+      't',  0x00, 0x00, 0x00,
+      0x0C, 'a',  'n',  'o',
+      't',  'h',  'e',  'r',
+      ' ',  'c',  'e',  'r',
+      't',  0x00,  0x00, 0x00,
+      0x0A, 'f',  'i',  'n',
+      'a',  'l',  ' ',  'c',
+      'e',  'r',  't',
+    };
+    SpdyCredentialControlFrame frame(reinterpret_cast<char*>(kFrameData),
+                                     false);
+    SpdyCredential credential;
+    EXPECT_TRUE(SpdyFramer::ParseCredentialData(frame.payload(),
+                                                frame.length(),
+                                                &credential));
+    EXPECT_EQ(3u, credential.slot);
+    EXPECT_EQ("google.com", credential.origin);
+    EXPECT_EQ("proof", credential.proof);
+    EXPECT_EQ("a cert", credential.certs.front());
+    credential.certs.erase(credential.certs.begin());
+    EXPECT_EQ("another cert", credential.certs.front());
+    credential.certs.erase(credential.certs.begin());
+    EXPECT_EQ("final cert", credential.certs.front());
+    credential.certs.erase(credential.certs.begin());
+    EXPECT_TRUE(credential.certs.empty());
+  }
+}
+
 TEST_F(SpdyFramerTest, DuplicateFrame) {
   SpdyFramer framer;
 
@@ -1593,9 +1639,109 @@ TEST_F(SpdyFramerTest, ExpandBuffer_HeapSmash) {
     TestSpdyVisitor visitor;
     visitor.SimulateInFramer(
         reinterpret_cast<unsigned char*>(template_frame.get()->data()),
-         template_frame.get()->length() + SpdyControlFrame::size());
+         template_frame.get()->length() + SpdyControlFrame::kHeaderSize);
     EXPECT_EQ(1, visitor.syn_frame_count_);
   }
+}
+
+TEST_F(SpdyFramerTest, ReadCredentialFrame) {
+  SpdyCredential credential;
+  credential.slot = 3;
+  credential.origin = "google.com";
+  credential.proof = "proof";
+  credential.certs.push_back("a cert");
+  credential.certs.push_back("another cert");
+  credential.certs.push_back("final cert");
+  SpdyFramer framer;
+  scoped_ptr<SpdyFrame> control_frame(
+      framer.CreateCredentialFrame(credential));
+  EXPECT_TRUE(control_frame.get() != NULL);
+  TestSpdyVisitor visitor;
+  visitor.use_compression_ = false;
+  visitor.SimulateInFramer(
+      reinterpret_cast<unsigned char*>(control_frame.get()->data()),
+      control_frame.get()->length() + SpdyControlFrame::kHeaderSize);
+  EXPECT_EQ(0, visitor.error_count_);
+  EXPECT_EQ(1, visitor.credential_count_);
+  EXPECT_EQ(control_frame->length(), visitor.credential_buffer_length_);
+  EXPECT_EQ(credential.slot, visitor.credential_.slot);
+  EXPECT_EQ(credential.origin, visitor.credential_.origin);
+  EXPECT_EQ(credential.proof, visitor.credential_.proof);
+  EXPECT_EQ(credential.certs.size(), visitor.credential_.certs.size());
+  for (size_t i = 0; i < credential.certs.size(); i++) {
+    EXPECT_EQ(credential.certs[i], visitor.credential_.certs[i]);
+  }
+}
+
+TEST_F(SpdyFramerTest, ReadCredentialFrameWithCorruptOrigin) {
+  SpdyCredential credential;
+  credential.slot = 3;
+  credential.origin = "google.com";
+  credential.proof = "proof";
+  credential.certs.push_back("a cert");
+  credential.certs.push_back("another cert");
+  credential.certs.push_back("final cert");
+  SpdyFramer framer;
+  scoped_ptr<SpdyFrame> control_frame(
+      framer.CreateCredentialFrame(credential));
+  EXPECT_TRUE(control_frame.get() != NULL);
+  TestSpdyVisitor visitor;
+  visitor.use_compression_ = false;
+  unsigned char* data =
+      reinterpret_cast<unsigned char*>(control_frame.get()->data());
+  // Origin length is past the end of the frame
+  data[SpdyControlFrame::kHeaderSize + 2] = 0xFF;
+  visitor.SimulateInFramer(
+      data, control_frame.get()->length() + SpdyControlFrame::kHeaderSize);
+  EXPECT_EQ(1, visitor.error_count_);
+}
+
+TEST_F(SpdyFramerTest, ReadCredentialFrameWithCorruptProof) {
+  SpdyCredential credential;
+  credential.slot = 3;
+  credential.origin = "google.com";
+  credential.proof = "proof";
+  credential.certs.push_back("a cert");
+  credential.certs.push_back("another cert");
+  credential.certs.push_back("final cert");
+  SpdyFramer framer;
+  scoped_ptr<SpdyFrame> control_frame(
+      framer.CreateCredentialFrame(credential));
+  EXPECT_TRUE(control_frame.get() != NULL);
+  TestSpdyVisitor visitor;
+  visitor.use_compression_ = false;
+  unsigned char* data =
+      reinterpret_cast<unsigned char*>(control_frame.get()->data());
+  size_t offset = SpdyControlFrame::kHeaderSize + 4 +
+      credential.origin.length();
+  data[offset] = 0xFF;  // Proof length is past the end of the frame
+  visitor.SimulateInFramer(
+      data, control_frame.get()->length() + SpdyControlFrame::kHeaderSize);
+  EXPECT_EQ(1, visitor.error_count_);
+}
+
+TEST_F(SpdyFramerTest, ReadCredentialFrameWithCorruptCertificate) {
+  SpdyCredential credential;
+  credential.slot = 3;
+  credential.origin = "google.com";
+  credential.proof = "proof";
+  credential.certs.push_back("a cert");
+  credential.certs.push_back("another cert");
+  credential.certs.push_back("final cert");
+  SpdyFramer framer;
+  scoped_ptr<SpdyFrame> control_frame(
+      framer.CreateCredentialFrame(credential));
+  EXPECT_TRUE(control_frame.get() != NULL);
+  TestSpdyVisitor visitor;
+  visitor.use_compression_ = false;
+  unsigned char* data =
+      reinterpret_cast<unsigned char*>(control_frame.get()->data());
+  size_t offset = SpdyControlFrame::kHeaderSize + 4 +
+      credential.origin.length() + 4 + credential.proof.length();
+  data[offset] = 0xFF;  // Certificate length is past the end of the frame
+  visitor.SimulateInFramer(
+      data, control_frame.get()->length() + SpdyControlFrame::kHeaderSize);
+  EXPECT_EQ(1, visitor.error_count_);
 }
 
 TEST_F(SpdyFramerTest, ReadGarbage) {
@@ -1634,9 +1780,6 @@ TEST(SpdyFramer, StateToStringTest) {
   EXPECT_STREQ("READING_COMMON_HEADER",
                SpdyFramer::StateToString(
                    SpdyFramer::SPDY_READING_COMMON_HEADER));
-  EXPECT_STREQ("INTERPRET_CONTROL_FRAME_COMMON_HEADER",
-               SpdyFramer::StateToString(
-                   SpdyFramer::SPDY_INTERPRET_CONTROL_FRAME_COMMON_HEADER));
   EXPECT_STREQ("CONTROL_FRAME_PAYLOAD",
                SpdyFramer::StateToString(
                    SpdyFramer::SPDY_CONTROL_FRAME_PAYLOAD));
@@ -1652,9 +1795,12 @@ TEST(SpdyFramer, StateToStringTest) {
   EXPECT_STREQ("SPDY_CONTROL_FRAME_HEADER_BLOCK",
                SpdyFramer::StateToString(
                    SpdyFramer::SPDY_CONTROL_FRAME_HEADER_BLOCK));
+  EXPECT_STREQ("SPDY_CREDENTIAL_FRAME_PAYLOAD",
+               SpdyFramer::StateToString(
+                   SpdyFramer::SPDY_CREDENTIAL_FRAME_PAYLOAD));
   EXPECT_STREQ("UNKNOWN_STATE",
                SpdyFramer::StateToString(
-                   SpdyFramer::SPDY_CONTROL_FRAME_HEADER_BLOCK + 1));
+                   SpdyFramer::SPDY_CREDENTIAL_FRAME_PAYLOAD + 1));
 }
 
 TEST(SpdyFramer, ErrorCodeToStringTest) {
@@ -1722,6 +1868,8 @@ TEST(SpdyFramer, ControlTypeToStringTest) {
                SpdyFramer::ControlTypeToString(HEADERS));
   EXPECT_STREQ("WINDOW_UPDATE",
                SpdyFramer::ControlTypeToString(WINDOW_UPDATE));
+  EXPECT_STREQ("SETTINGS",
+               SpdyFramer::ControlTypeToString(SETTINGS));
   EXPECT_STREQ("UNKNOWN_CONTROL_TYPE",
                SpdyFramer::ControlTypeToString(NUM_CONTROL_FRAME_TYPES));
 }
@@ -1745,6 +1893,8 @@ TEST(SpdyFramer, GetMinimumControlFrameSizeTest) {
             SpdyFramer::GetMinimumControlFrameSize(HEADERS));
   EXPECT_EQ(SpdyWindowUpdateControlFrame::size(),
             SpdyFramer::GetMinimumControlFrameSize(WINDOW_UPDATE));
+  EXPECT_EQ(SpdyCredentialControlFrame::size(),
+            SpdyFramer::GetMinimumControlFrameSize(CREDENTIAL));
   EXPECT_EQ(static_cast<size_t>(0x7FFFFFFF),
             SpdyFramer::GetMinimumControlFrameSize(NUM_CONTROL_FRAME_TYPES));
 }
@@ -1754,42 +1904,6 @@ std::string RandomString(int length) {
   for (int index = 0; index < length; index++)
     rv += static_cast<char>('a' + (rand() % 26));
   return rv;
-}
-
-// Stress that we can handle a really large header block compression and
-// decompression.
-TEST_F(SpdyFramerTest, DISABLED_HugeHeaderBlock) {
-  // Loop targetting various sizes which will potentially jam up the
-  // frame compressor/decompressor.
-  SpdyFramer compress_framer;
-  SpdyFramer decompress_framer;
-  for (size_t target_size = 1024;
-       target_size < SpdyFramer::kControlFrameBufferInitialSize;
-       target_size += 1024) {
-    SpdyHeaderBlock headers;
-    for (size_t index = 0; index < target_size; ++index) {
-      std::string name = RandomString(4);
-      std::string value = RandomString(8);
-      headers[name] = value;
-    }
-
-    // Encode the header block into a SynStream frame.
-    scoped_ptr<SpdySynStreamControlFrame> frame(
-        compress_framer.CreateSynStream(1,
-                                        0,
-                                        1,
-                                        CONTROL_FLAG_NONE,
-                                        true,
-                                        &headers));
-    // The point of this test is to exercise the limits.  So, it is ok if the
-    // frame was too large to encode, or if the decompress fails.  We just want
-    // to make sure we don't crash.
-    if (frame.get() != NULL) {
-      // Now that same header block should decompress just fine.
-      SpdyHeaderBlock new_headers;
-      decompress_framer.ParseHeaderBlock(frame.get(), &new_headers);
-    }
-  }
 }
 
 }  // namespace

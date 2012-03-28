@@ -1,10 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #ifndef CHROME_BROWSER_CHROMEOS_INPUT_METHOD_CANDIDATE_WINDOW_VIEW_H_
 #define CHROME_BROWSER_CHROMEOS_INPUT_METHOD_CANDIDATE_WINDOW_VIEW_H_
 
+#include "base/gtest_prod_util.h"
 #include "chrome/browser/chromeos/input_method/ibus_ui_controller.h"
 #include "ui/views/view.h"
 
@@ -26,6 +27,9 @@ class CandidateWindowView : public views::View {
     // See comments at NotifyCandidateClicked() in chromeos_input_method_ui.h
     // for details about the parameters.
     virtual void OnCandidateCommitted(int index, int button, int flag) = 0;
+
+    virtual void OnCandidateWindowOpened() = 0;
+    virtual void OnCandidateWindowClosed() = 0;
   };
 
   explicit CandidateWindowView(views::Widget* parent_frame);
@@ -130,12 +134,22 @@ class CandidateWindowView : public views::View {
   virtual void OnBoundsChanged(const gfx::Rect& previous_bounds) OVERRIDE;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(CandidateWindowViewTest, MozcUpdateCandidateTest);
+
   // Initializes the candidate views if needed.
   void MaybeInitializeCandidateViews(
       const InputMethodLookupTable& lookup_table);
 
   // Returns the appropriate area (header or footer) to put auxiliary texts.
   InformationTextArea* GetAuxiliaryTextArea();
+
+  // Returns true if the candidate window is open.  The suggestion window does
+  // not count as the candidate window.
+  bool IsCandidateWindowOpen() const;
+
+  // Notifies observers if the candidate window's opened/closed state has
+  // changed from the previous call to this function.
+  void NotifyIfCandidateWindowOpenedOrClosed();
 
   // The lookup table (candidates).
   InputMethodLookupTable lookup_table_;
@@ -176,6 +190,24 @@ class CandidateWindowView : public views::View {
 
   // The last cursor location.
   gfx::Rect cursor_location_;
+
+  // This location is used by suggestion window rendering which is mostly used
+  // by ibus-mozc. The suggestion window should be aligned with the composition
+  // text as opposed to the cursor. In case of ibus-mozc, suggestion window
+  // location is calculated by engine and it carried by update_lookup_table
+  // signal as additional information. This value is available when
+  // is_suggestion_window_available is true.
+  gfx::Rect suggestion_window_location_;
+
+  bool is_suggestion_window_location_available_;
+
+  // True if the candidate window was open.  This is used to determine when to
+  // send OnCandidateWindowOpened and OnCandidateWindowClosed events.
+  bool was_candidate_window_open_;
+
+  // This function judge whether the candidate window should be shown or not,
+  // if should be, shows parent_frame and if not, hides parent_frame.
+  void UpdateParentArea();
 
   DISALLOW_COPY_AND_ASSIGN(CandidateWindowView);
 };

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,8 +23,8 @@
 #include "net/http/http_util.h"
 #include "net/url_request/url_request.h"
 #include "webkit/fileapi/file_system_callback_dispatcher.h"
+#include "webkit/fileapi/file_system_context.h"
 #include "webkit/fileapi/file_system_operation.h"
-#include "webkit/fileapi/file_system_path_manager.h"
 #include "webkit/fileapi/file_system_util.h"
 
 using net::URLRequest;
@@ -56,9 +56,12 @@ static net::HttpResponseHeaders* CreateHttpResponseHeaders() {
 class FileSystemURLRequestJob::CallbackDispatcher
     : public FileSystemCallbackDispatcher {
  public:
-  explicit CallbackDispatcher(FileSystemURLRequestJob* job)
-      : job_(job) {
-    DCHECK(job_);
+  // An instance of this class must be created by Create()
+  // (so that we do not leak ownerships).
+  static scoped_ptr<FileSystemCallbackDispatcher> Create(
+      FileSystemURLRequestJob* job) {
+    return scoped_ptr<FileSystemCallbackDispatcher>(
+        new CallbackDispatcher(job));
   }
 
   // fileapi::FileSystemCallbackDispatcher overrides.
@@ -94,6 +97,10 @@ class FileSystemURLRequestJob::CallbackDispatcher
   }
 
  private:
+  explicit CallbackDispatcher(FileSystemURLRequestJob* job) : job_(job) {
+    DCHECK(job_);
+  }
+
   // TODO(adamk): Get rid of the need for refcounting here by
   // allowing FileSystemOperations to be cancelled.
   scoped_refptr<FileSystemURLRequestJob> job_;
@@ -213,12 +220,19 @@ int FileSystemURLRequestJob::GetResponseCode() const {
 }
 
 void FileSystemURLRequestJob::StartAsync() {
-  if (request_) {
-    (new FileSystemOperation(new CallbackDispatcher(this),
-                             file_thread_proxy_,
-                             file_system_context_)
-                            )->GetMetadata(request_->url());
+  if (!request_)
+    return;
+  FileSystemOperationInterface* operation =
+      file_system_context_->CreateFileSystemOperation(
+          request_->url(),
+          CallbackDispatcher::Create(this),
+          file_thread_proxy_);
+  if (!operation) {
+    NotifyDone(URLRequestStatus(URLRequestStatus::FAILED,
+                                net::ERR_INVALID_URL));
+    return;
   }
+  operation->GetMetadata(request_->url());
 }
 
 void FileSystemURLRequestJob::DidGetMetadata(

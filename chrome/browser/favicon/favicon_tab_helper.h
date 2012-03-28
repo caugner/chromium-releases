@@ -9,17 +9,15 @@
 #include <vector>
 
 #include "base/basictypes.h"
-#include "base/bind.h"
+#include "base/callback.h"
 #include "chrome/browser/favicon/favicon_handler_delegate.h"
 #include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/common/favicon_url.h"
-#include "content/browser/tab_contents/tab_contents_observer.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "googleurl/src/gurl.h"
 
 class FaviconHandler;
-class NavigationEntry;
 class SkBitmap;
-class TabContents;
 
 // FaviconTabHelper works with FaviconHandlers to fetch the favicons.
 //
@@ -30,10 +28,10 @@ class TabContents;
 // DownloadImage downloads the specified icon and returns it through the given
 // callback.
 //
-class FaviconTabHelper : public TabContentsObserver,
+class FaviconTabHelper : public content::WebContentsObserver,
                          public FaviconHandlerDelegate {
  public:
-  explicit FaviconTabHelper(TabContents* tab_contents);
+  explicit FaviconTabHelper(content::WebContents* web_contents);
   virtual ~FaviconTabHelper();
 
   // Initiates loading the favicon for the specified url.
@@ -45,7 +43,7 @@ class FaviconTabHelper : public TabContentsObserver,
   // entries, which should rarely happen.
   SkBitmap GetFavicon() const;
 
-  // Returns true if we are not using the default favicon.
+  // Returns true if we have the favicon for the page.
   bool FaviconIsValid() const;
 
   // Returns whether the favicon should be displayed. If this returns false, no
@@ -75,15 +73,15 @@ class FaviconTabHelper : public TabContentsObserver,
                           const std::vector<FaviconURL>& candidates);
 
   // FaviconHandlerDelegate methods.
-  virtual NavigationEntry* GetActiveEntry() OVERRIDE;
+  virtual content::NavigationEntry* GetActiveEntry() OVERRIDE;
   virtual void StartDownload(int id, const GURL& url, int image_size) OVERRIDE;
   virtual void NotifyFaviconUpdated() OVERRIDE;
 
  private:
-  // TabContentsObserver overrides.
+  // content::WebContentsObserver overrides.
   virtual void NavigateToPendingEntry(
       const GURL& url,
-      NavigationController::ReloadType reload_type) OVERRIDE;
+      content::NavigationController::ReloadType reload_type) OVERRIDE;
   virtual void DidNavigateMainFrame(
       const content::LoadCommittedDetails& details,
       const content::FrameNavigateParams& params) OVERRIDE;

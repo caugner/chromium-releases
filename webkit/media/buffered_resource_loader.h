@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -37,9 +37,7 @@ const char kDataScheme[] = "data";
 // WebURLLoader and does the actual resource loading. This object does
 // buffering internally, it defers the resource loading if buffer is full
 // and un-defers the resource loading if it is under buffered.
-class BufferedResourceLoader
-    : public base::RefCountedThreadSafe<BufferedResourceLoader>,
-      public WebKit::WebURLLoaderClient {
+class BufferedResourceLoader : public WebKit::WebURLLoaderClient {
  public:
   // kNeverDefer - Aggresively buffer; never defer loading while paused.
   // kReadThenDefer - Request only enough data to fulfill read requests.
@@ -65,6 +63,7 @@ class BufferedResourceLoader
                          int bitrate,
                          float playback_rate,
                          media::MediaLog* media_log);
+  virtual ~BufferedResourceLoader();
 
   // Start the resource loading with the specified URL and range.
   // This method operates in asynchronous mode. Once there's a response from the
@@ -126,11 +125,9 @@ class BufferedResourceLoader
   // Returns resulting URL.
   virtual const GURL& url();
 
-  // Transfer ownership of an existing WebURLLoader instance for
-  // testing purposes.
-  //
   // |test_loader| will get used the next time Start() is called.
-  virtual void SetURLLoaderForTest(WebKit::WebURLLoader* test_loader);
+  virtual void SetURLLoaderForTest(
+      scoped_ptr<WebKit::WebURLLoader> test_loader);
 
   // WebKit::WebURLLoaderClient implementation.
   virtual void willSendRequest(
@@ -174,10 +171,6 @@ class BufferedResourceLoader
   // Sets the bitrate to the given value and updates buffer window
   // accordingly.
   void SetBitrate(int bitrate);
-
- protected:
-  friend class base::RefCountedThreadSafe<BufferedResourceLoader>;
-  virtual ~BufferedResourceLoader();
 
  private:
   friend class BufferedDataSourceTest;

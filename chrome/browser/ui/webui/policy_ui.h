@@ -10,14 +10,15 @@
 #include "base/values.h"
 #include "chrome/browser/policy/cloud_policy_subsystem.h"
 #include "chrome/browser/policy/configuration_policy_reader.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
+#include "content/public/browser/web_ui_message_handler.h"
 
 namespace policy {
 class CloudPolicyDataStore;
 }
 
 // The base class handler of Javascript messages of the about:policy page.
-class PolicyUIHandler : public WebUIMessageHandler,
+class PolicyUIHandler : public content::WebUIMessageHandler,
                         public policy::PolicyStatus::Observer {
  public:
   PolicyUIHandler();
@@ -69,9 +70,9 @@ class PolicyUIHandler : public WebUIMessageHandler,
 };
 
 // The Web UI handler for about:policy.
-class PolicyUI : public ChromeWebUI {
+class PolicyUI : public content::WebUIController {
  public:
-  explicit PolicyUI(TabContents* contents);
+  explicit PolicyUI(content::WebUI* web_ui);
   virtual ~PolicyUI();
 
  private:

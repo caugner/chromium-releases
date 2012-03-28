@@ -1,8 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 
+#include "base/at_exit.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -186,7 +187,7 @@ TEST_F(NetworkLibraryStubTest, NetworkLibraryAccessors) {
             cros_->FindWifiNetworkByPath("wifi1"));
   EXPECT_TRUE(cros_->wifi_connected());
   EXPECT_FALSE(cros_->wifi_connecting());  // Only true for active wifi.
-  EXPECT_EQ(7U, cros_->wifi_networks().size());
+  EXPECT_GE(cros_->wifi_networks().size(), 1U);
 
   // Cellular
   ASSERT_NE(static_cast<const CellularNetwork*>(NULL),
@@ -196,11 +197,11 @@ TEST_F(NetworkLibraryStubTest, NetworkLibraryAccessors) {
             cros_->FindCellularNetworkByPath("cellular1"));
   EXPECT_FALSE(cros_->cellular_connected());
   EXPECT_TRUE(cros_->cellular_connecting());
-  EXPECT_EQ(4U, cros_->cellular_networks().size());
+  EXPECT_GE(cros_->cellular_networks().size(), 1U);
 
   // VPN
   ASSERT_EQ(static_cast<const VirtualNetwork*>(NULL), cros_->virtual_network());
-  EXPECT_EQ(4U, cros_->virtual_networks().size());
+  EXPECT_GE(cros_->virtual_networks().size(), 1U);
 
   // Active network and global state
   EXPECT_TRUE(cros_->Connected());

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,6 +14,7 @@
 #include "base/file_path.h"
 #include "base/file_util.h"
 #import "base/logging.h"
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #import "base/mac/scoped_nsautorelease_pool.h"
@@ -25,6 +26,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/env_vars.h"
 #include "chrome/installer/util/google_update_settings.h"
+#include "native_client/src/trusted/service_runtime/osx/crash_filter.h"
 #include "policy/policy_constants.h"
 
 namespace {
@@ -85,6 +87,15 @@ bool FatalMessageHandler(int severity, const char* file, int line,
   return false;
 }
 
+#if !defined(DISABLE_NACL)
+bool NaClBreakpadCrashFilter(int exception_type,
+                             int exception_code,
+                             mach_port_t crashing_thread,
+                             void* context) {
+  return !NaClMachThreadIsInUntrusted(crashing_thread);
+}
+#endif
+
 }  // namespace
 
 bool IsCrashReporterEnabled() {
@@ -103,7 +114,7 @@ void InitCrashReporter() {
   // Helper processes may not have access to the disk or to the same data as
   // the browser process, so the browser passes the decision to them on the
   // command line.
-  NSBundle* main_bundle = base::mac::MainAppBundle();
+  NSBundle* main_bundle = base::mac::FrameworkBundle();
   bool is_browser = !base::mac::IsBackgroundOnlyProcess();
   bool enable_breakpad = false;
   CommandLine* command_line = CommandLine::ForCurrentProcess();
@@ -229,6 +240,12 @@ void InitCrashProcessInfo() {
   if (!process_type_switch.empty()) {
     process_type = base::SysUTF8ToNSString(process_type_switch);
   }
+
+#if !defined(DISABLE_NACL)
+  if (process_type_switch == switches::kNaClLoaderProcess) {
+    BreakpadSetFilterCallback(gBreakpadRef, NaClBreakpadCrashFilter, NULL);
+  }
+#endif
 
   // Store process type in crash dump.
   SetCrashKeyValue(@"ptype", process_type);

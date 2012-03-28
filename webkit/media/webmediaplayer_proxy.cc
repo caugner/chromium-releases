@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,10 +6,10 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop.h"
+#include "base/message_loop_proxy.h"
 #include "media/base/pipeline_status.h"
 #include "media/filters/chunk_demuxer.h"
-#include "webkit/media/video_renderer_impl.h"
+#include "media/filters/video_renderer_base.h"
 #include "webkit/media/webmediaplayer_impl.h"
 
 using media::NetworkEvent;
@@ -22,8 +22,9 @@ namespace webkit_media {
 // queue but gives up a pretty good latency on repaint.
 static const int kMaxOutstandingRepaints = 50;
 
-WebMediaPlayerProxy::WebMediaPlayerProxy(MessageLoop* render_loop,
-                                         WebMediaPlayerImpl* webmediaplayer)
+WebMediaPlayerProxy::WebMediaPlayerProxy(
+    const scoped_refptr<base::MessageLoopProxy>& render_loop,
+    WebMediaPlayerImpl* webmediaplayer)
     : render_loop_(render_loop),
       webmediaplayer_(webmediaplayer),
       outstanding_repaints_(0) {
@@ -45,56 +46,39 @@ void WebMediaPlayerProxy::Repaint() {
   }
 }
 
-void WebMediaPlayerProxy::SetVideoRenderer(
-    const scoped_refptr<VideoRendererImpl>& video_renderer) {
-  video_renderer_ = video_renderer;
-}
-
-WebDataSourceBuildObserverHack WebMediaPlayerProxy::GetBuildObserver() {
-  return base::Bind(&WebMediaPlayerProxy::AddDataSource, this);
+void WebMediaPlayerProxy::SetOpaque(bool opaque) {
+  render_loop_->PostTask(FROM_HERE, base::Bind(
+      &WebMediaPlayerProxy::SetOpaqueTask, this, opaque));
 }
 
 void WebMediaPlayerProxy::Paint(SkCanvas* canvas, const gfx::Rect& dest_rect) {
-  DCHECK(MessageLoop::current() == render_loop_);
-  if (video_renderer_) {
-    video_renderer_->Paint(canvas, dest_rect);
+  DCHECK(render_loop_->BelongsToCurrentThread());
+  if (frame_provider_) {
+    scoped_refptr<media::VideoFrame> video_frame;
+    frame_provider_->GetCurrentFrame(&video_frame);
+    video_renderer_.Paint(video_frame, canvas, dest_rect);
+    frame_provider_->PutCurrentFrame(video_frame);
   }
 }
 
 bool WebMediaPlayerProxy::HasSingleOrigin() {
-  DCHECK(MessageLoop::current() == render_loop_);
-
-  base::AutoLock auto_lock(data_sources_lock_);
-
-  for (DataSourceList::iterator itr = data_sources_.begin();
-       itr != data_sources_.end();
-       itr++) {
-    if (!(*itr)->HasSingleOrigin())
-      return false;
-  }
+  DCHECK(render_loop_->BelongsToCurrentThread());
+  if (data_source_)
+    return data_source_->HasSingleOrigin();
   return true;
 }
 
-void WebMediaPlayerProxy::AbortDataSources() {
-  DCHECK(MessageLoop::current() == render_loop_);
-  base::AutoLock auto_lock(data_sources_lock_);
-
-  for (DataSourceList::iterator itr = data_sources_.begin();
-       itr != data_sources_.end();
-       itr++) {
-    (*itr)->Abort();
-  }
+void WebMediaPlayerProxy::AbortDataSource() {
+  DCHECK(render_loop_->BelongsToCurrentThread());
+  if (data_source_)
+    data_source_->Abort();
 }
 
 void WebMediaPlayerProxy::Detach() {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   webmediaplayer_ = NULL;
-  video_renderer_ = NULL;
-
-  {
-    base::AutoLock auto_lock(data_sources_lock_);
-    data_sources_.clear();
-  }
+  data_source_ = NULL;
+  frame_provider_ = NULL;
 }
 
 void WebMediaPlayerProxy::PipelineInitializationCallback(
@@ -124,13 +108,8 @@ void WebMediaPlayerProxy::NetworkEventCallback(NetworkEvent type) {
       &WebMediaPlayerProxy::NetworkEventTask, this, type));
 }
 
-void WebMediaPlayerProxy::AddDataSource(WebDataSource* data_source) {
-  base::AutoLock auto_lock(data_sources_lock_);
-  data_sources_.push_back(make_scoped_refptr(data_source));
-}
-
 void WebMediaPlayerProxy::RepaintTask() {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   {
     base::AutoLock auto_lock(lock_);
     --outstanding_repaints_;
@@ -142,45 +121,51 @@ void WebMediaPlayerProxy::RepaintTask() {
 }
 
 void WebMediaPlayerProxy::PipelineInitializationTask(PipelineStatus status) {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   if (webmediaplayer_)
     webmediaplayer_->OnPipelineInitialize(status);
 }
 
 void WebMediaPlayerProxy::PipelineSeekTask(PipelineStatus status) {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   if (webmediaplayer_)
     webmediaplayer_->OnPipelineSeek(status);
 }
 
 void WebMediaPlayerProxy::PipelineEndedTask(PipelineStatus status) {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   if (webmediaplayer_)
     webmediaplayer_->OnPipelineEnded(status);
 }
 
 void WebMediaPlayerProxy::PipelineErrorTask(PipelineStatus error) {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   if (webmediaplayer_)
     webmediaplayer_->OnPipelineError(error);
 }
 
 void WebMediaPlayerProxy::NetworkEventTask(NetworkEvent type) {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   if (webmediaplayer_)
     webmediaplayer_->OnNetworkEvent(type);
 }
 
+void WebMediaPlayerProxy::SetOpaqueTask(bool opaque) {
+  DCHECK(render_loop_->BelongsToCurrentThread());
+  if (webmediaplayer_)
+    webmediaplayer_->SetOpaque(opaque);
+}
+
 void WebMediaPlayerProxy::GetCurrentFrame(
     scoped_refptr<media::VideoFrame>* frame_out) {
-  if (video_renderer_)
-    video_renderer_->GetCurrentFrame(frame_out);
+  if (frame_provider_)
+    frame_provider_->GetCurrentFrame(frame_out);
 }
 
 void WebMediaPlayerProxy::PutCurrentFrame(
     scoped_refptr<media::VideoFrame> frame) {
-  if (video_renderer_)
-    video_renderer_->PutCurrentFrame(frame);
+  if (frame_provider_)
+    frame_provider_->PutCurrentFrame(frame);
 }
 
 void WebMediaPlayerProxy::DemuxerOpened(media::ChunkDemuxer* demuxer) {
@@ -217,7 +202,7 @@ void WebMediaPlayerProxy::DemuxerShutdown() {
 
 void WebMediaPlayerProxy::DemuxerOpenedTask(
     const scoped_refptr<media::ChunkDemuxer>& demuxer) {
-  DCHECK(MessageLoop::current() == render_loop_);
+  DCHECK(render_loop_->BelongsToCurrentThread());
   chunk_demuxer_ = demuxer;
   if (webmediaplayer_)
     webmediaplayer_->OnDemuxerOpened();

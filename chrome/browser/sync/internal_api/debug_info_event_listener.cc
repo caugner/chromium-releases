@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -23,8 +23,6 @@ void DebugInfoEventListener::OnSyncCycleCompleted(
   sync_pb::SyncCycleCompletedEventInfo* sync_completed_event_info =
       event_info.mutable_sync_cycle_completed_event_info();
 
-  sync_completed_event_info->set_syncer_stuck(
-      snapshot->syncer_status.syncer_stuck);
   sync_completed_event_info->set_num_blocking_conflicts(
       snapshot->num_conflicting_updates);
   sync_completed_event_info->set_num_non_blocking_conflicts(
@@ -45,13 +43,18 @@ void DebugInfoEventListener::OnAuthError(
 }
 
 void DebugInfoEventListener::OnPassphraseRequired(
-    sync_api::PassphraseRequiredReason reason) {
+    sync_api::PassphraseRequiredReason reason,
+    const sync_pb::EncryptedData& pending_keys) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::PASSPHRASE_REQUIRED);
 }
 
-void DebugInfoEventListener::OnPassphraseAccepted(
-    const std::string& bootstrap_token) {
+void DebugInfoEventListener::OnPassphraseAccepted() {
   CreateAndAddEvent(sync_pb::DebugEventInfo::PASSPHRASE_ACCEPTED);
+}
+
+void DebugInfoEventListener::OnBootstrapTokenUpdated(
+    const std::string& bootstrap_token) {
+  CreateAndAddEvent(sync_pb::DebugEventInfo::BOOTSTRAP_TOKEN_UPDATED);
 }
 
 void DebugInfoEventListener::OnStopSyncingPermanently() {
@@ -73,7 +76,7 @@ void DebugInfoEventListener::OnClearServerDataSucceeded() {
 }
 
 void DebugInfoEventListener::OnEncryptedTypesChanged(
-    const syncable::ModelTypeSet& encrypted_types,
+    syncable::ModelTypeSet encrypted_types,
     bool encrypt_everything) {
   CreateAndAddEvent(sync_pb::DebugEventInfo::ENCRYPTED_TYPES_CHANGED);
 }

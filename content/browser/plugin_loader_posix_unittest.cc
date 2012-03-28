@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -74,7 +74,7 @@ class PluginLoaderPosixTest : public testing::Test {
   }
 
   virtual void SetUp() OVERRIDE {
-    PluginService::GetInstance()->Init();
+    PluginServiceImpl::GetInstance()->Init();
   }
 
   MessageLoop* message_loop() { return &message_loop_; }
@@ -104,7 +104,7 @@ class PluginLoaderPosixTest : public testing::Test {
 
 TEST_F(PluginLoaderPosixTest, QueueRequests) {
   int did_callback = 0;
-  PluginService::GetPluginsCallback callback =
+  content::PluginService::GetPluginsCallback callback =
       base::Bind(&VerifyCallback, base::Unretained(&did_callback));
 
   EXPECT_EQ(0u, plugin_loader()->number_of_pending_callbacks());
@@ -131,7 +131,7 @@ TEST_F(PluginLoaderPosixTest, QueueRequests) {
 
 TEST_F(PluginLoaderPosixTest, ThreeSuccessfulLoads) {
   int did_callback = 0;
-  PluginService::GetPluginsCallback callback =
+  content::PluginService::GetPluginsCallback callback =
       base::Bind(&VerifyCallback, base::Unretained(&did_callback));
 
   plugin_loader()->LoadPlugins(message_loop()->message_loop_proxy(), callback);
@@ -170,9 +170,52 @@ TEST_F(PluginLoaderPosixTest, ThreeSuccessfulLoads) {
   EXPECT_EQ(1, did_callback);
 }
 
+TEST_F(PluginLoaderPosixTest, ThreeSuccessfulLoadsThenCrash) {
+  int did_callback = 0;
+  content::PluginService::GetPluginsCallback callback =
+      base::Bind(&VerifyCallback, base::Unretained(&did_callback));
+
+  plugin_loader()->LoadPlugins(message_loop()->message_loop_proxy(), callback);
+
+  EXPECT_CALL(*plugin_loader(), LoadPluginsInternal()).Times(2);
+  message_loop()->RunAllPending();
+
+  AddThreePlugins();
+
+  EXPECT_EQ(0u, plugin_loader()->next_load_index());
+
+  const std::vector<webkit::WebPluginInfo>& plugins(
+      plugin_loader()->loaded_plugins());
+
+  plugin_loader()->TestOnPluginLoaded(0, plugin1_);
+  EXPECT_EQ(1u, plugin_loader()->next_load_index());
+  EXPECT_EQ(1u, plugins.size());
+  EXPECT_EQ(plugin1_.name, plugins[0].name);
+
+  message_loop()->RunAllPending();
+  EXPECT_EQ(0, did_callback);
+
+  plugin_loader()->TestOnPluginLoaded(1, plugin2_);
+  EXPECT_EQ(2u, plugin_loader()->next_load_index());
+  EXPECT_EQ(2u, plugins.size());
+  EXPECT_EQ(plugin2_.name, plugins[1].name);
+
+  message_loop()->RunAllPending();
+  EXPECT_EQ(0, did_callback);
+
+  plugin_loader()->TestOnPluginLoaded(2, plugin3_);
+  EXPECT_EQ(3u, plugins.size());
+  EXPECT_EQ(plugin3_.name, plugins[2].name);
+
+  message_loop()->RunAllPending();
+  EXPECT_EQ(1, did_callback);
+
+  plugin_loader()->OnProcessCrashed(42);
+}
+
 TEST_F(PluginLoaderPosixTest, TwoFailures) {
   int did_callback = 0;
-  PluginService::GetPluginsCallback callback =
+  content::PluginService::GetPluginsCallback callback =
       base::Bind(&VerifyCallback, base::Unretained(&did_callback));
 
   plugin_loader()->LoadPlugins(message_loop()->message_loop_proxy(), callback);
@@ -211,7 +254,7 @@ TEST_F(PluginLoaderPosixTest, TwoFailures) {
 
 TEST_F(PluginLoaderPosixTest, CrashedProcess) {
   int did_callback = 0;
-  PluginService::GetPluginsCallback callback =
+  content::PluginService::GetPluginsCallback callback =
       base::Bind(&VerifyCallback, base::Unretained(&did_callback));
 
   plugin_loader()->LoadPlugins(message_loop()->message_loop_proxy(), callback);
@@ -244,7 +287,7 @@ TEST_F(PluginLoaderPosixTest, CrashedProcess) {
 
 TEST_F(PluginLoaderPosixTest, InternalPlugin) {
   int did_callback = 0;
-  PluginService::GetPluginsCallback callback =
+  content::PluginService::GetPluginsCallback callback =
       base::Bind(&VerifyCallback, base::Unretained(&did_callback));
 
   plugin_loader()->LoadPlugins(message_loop()->message_loop_proxy(), callback);
@@ -293,7 +336,7 @@ TEST_F(PluginLoaderPosixTest, InternalPlugin) {
 
 TEST_F(PluginLoaderPosixTest, AllCrashed) {
   int did_callback = 0;
-  PluginService::GetPluginsCallback callback =
+  content::PluginService::GetPluginsCallback callback =
       base::Bind(&VerifyCallback, base::Unretained(&did_callback));
 
   plugin_loader()->LoadPlugins(message_loop()->message_loop_proxy(), callback);

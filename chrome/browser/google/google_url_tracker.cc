@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -20,9 +20,10 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
+#include "content/public/browser/navigation_controller.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/url_fetcher.h"
 #include "grit/generated_resources.h"
 #include "net/base/load_flags.h"
@@ -30,6 +31,11 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
 #include "ui/base/l10n/l10n_util.h"
+
+using content::NavigationController;
+using content::OpenURLParams;
+using content::Referrer;
+using content::WebContents;
 
 namespace {
 
@@ -72,10 +78,13 @@ string16 GoogleURLTrackerInfoBarDelegate::GetLinkText() const {
 
 bool GoogleURLTrackerInfoBarDelegate::LinkClicked(
     WindowOpenDisposition disposition) {
-  owner()->tab_contents()->OpenURL(google_util::AppendGoogleLocaleParam(GURL(
-      "https://www.google.com/support/chrome/bin/answer.py?answer=1618699")),
-      GURL(), (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
-      content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(
+      google_util::AppendGoogleLocaleParam(GURL(
+          "https://www.google.com/support/chrome/bin/answer.py?answer=1618699")),
+      Referrer(),
+      (disposition == CURRENT_TAB) ? NEW_FOREGROUND_TAB : disposition,
+      content::PAGE_TRANSITION_LINK, false);
+  owner()->web_contents()->OpenURL(params);
   return false;
 }
 
@@ -179,10 +188,11 @@ void GoogleURLTracker::QueueWakeupTask() {
   // browser is starting up, and if so, come back later", but there is currently
   // no function to do this.
   static const int kStartFetchDelayMS = 5000;
+
   MessageLoop::current()->PostDelayedTask(FROM_HERE,
       base::Bind(&GoogleURLTracker::FinishSleep,
                  weak_ptr_factory_.GetWeakPtr()),
-      kStartFetchDelayMS);
+      base::TimeDelta::FromMilliseconds(kStartFetchDelayMS));
 }
 
 void GoogleURLTracker::FinishSleep() {
@@ -303,9 +313,11 @@ void GoogleURLTracker::RedoSearch() {
   replacements.SetHost(google_url_.host().data(),
                        url_parse::Component(0, google_url_.host().length()));
   GURL new_search_url(search_url_.ReplaceComponents(replacements));
-  if (new_search_url.is_valid())
-    controller_->tab_contents()->OpenURL(new_search_url, GURL(), CURRENT_TAB,
-                                         content::PAGE_TRANSITION_GENERATED);
+  if (new_search_url.is_valid()) {
+    OpenURLParams params(new_search_url, Referrer(), CURRENT_TAB,
+                         content::PAGE_TRANSITION_GENERATED, false);
+    controller_->GetWebContents()->OpenURL(params);
+  }
 }
 
 void GoogleURLTracker::Observe(int type,
@@ -315,15 +327,15 @@ void GoogleURLTracker::Observe(int type,
     case content::NOTIFICATION_NAV_ENTRY_PENDING: {
       NavigationController* controller =
           content::Source<NavigationController>(source).ptr();
-      OnNavigationPending(source, controller->pending_entry()->url());
+      OnNavigationPending(source, controller->GetPendingEntry()->GetURL());
       break;
     }
 
     case content::NOTIFICATION_NAV_ENTRY_COMMITTED:
     case content::NOTIFICATION_TAB_CLOSED:
       OnNavigationCommittedOrTabClosed(
-          content::Source<NavigationController>(source).ptr()->tab_contents(),
-          type);
+          content::Source<NavigationController>(source).ptr()->
+              GetWebContents(), type);
       break;
 
     default:
@@ -361,12 +373,12 @@ void GoogleURLTracker::OnNavigationPending(
 }
 
 void GoogleURLTracker::OnNavigationCommittedOrTabClosed(
-    TabContents* tab_contents,
+    WebContents* web_contents,
     int type) {
   registrar_.RemoveAll();
 
   if (type == content::NOTIFICATION_NAV_ENTRY_COMMITTED) {
-    ShowGoogleURLInfoBarIfNecessary(tab_contents);
+    ShowGoogleURLInfoBarIfNecessary(web_contents);
   } else {
     controller_ = NULL;
     infobar_ = NULL;
@@ -374,16 +386,16 @@ void GoogleURLTracker::OnNavigationCommittedOrTabClosed(
 }
 
 void GoogleURLTracker::ShowGoogleURLInfoBarIfNecessary(
-    TabContents* tab_contents) {
+    WebContents* web_contents) {
   if (!need_to_prompt_)
     return;
   DCHECK(!fetched_google_url_.is_empty());
 
   // |tab_contents| can be NULL during tests.
   InfoBarTabHelper* infobar_helper = NULL;
-  if (tab_contents) {
+  if (web_contents) {
     TabContentsWrapper* wrapper =
-        TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+        TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
     infobar_helper = wrapper->infobar_tab_helper();
   }
   infobar_ = (*infobar_creator_)(infobar_helper, this, fetched_google_url_);

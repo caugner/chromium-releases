@@ -6,13 +6,15 @@
 
 #include "base/logging.h"
 #include "content/browser/debugger/devtools_netlog_observer.h"
-#include "content/browser/renderer_host/global_request_id.h"
 #include "content/browser/renderer_host/resource_dispatcher_host.h"
 #include "content/browser/renderer_host/resource_message_filter.h"
 #include "content/common/resource_messages.h"
+#include "content/public/browser/global_request_id.h"
 #include "content/public/browser/resource_dispatcher_host_delegate.h"
 #include "net/base/io_buffer.h"
 #include "net/http/http_response_headers.h"
+
+using content::GlobalRequestID;
 
 SyncResourceHandler::SyncResourceHandler(
     ResourceMessageFilter* filter,
@@ -43,7 +45,7 @@ bool SyncResourceHandler::OnRequestRedirected(
   net::URLRequest* request = rdh_->GetURLRequest(
       GlobalRequestID(filter_->child_id(), request_id));
   if (rdh_->delegate())
-    rdh_->delegate()->OnRequestRedirected(request, response, filter_);
+    rdh_->delegate()->OnRequestRedirected(request, response);
 
   DevToolsNetLogObserver::PopulateResponseInfo(request, response);
   // TODO(darin): It would be much better if this could live in WebCore, but

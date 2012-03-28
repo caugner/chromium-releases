@@ -1,4 +1,4 @@
-// Copyright (c) 2010 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_MACOSX)
+#include "base/mac/bundle_locations.h"
 #include "base/mac/mac_util.h"
 #include "base/mac/scoped_nsautorelease_pool.h"
 #include "base/path_service.h"
@@ -44,8 +45,8 @@ class TestShellTestSuite : public base::TestSuite {
  public:
   TestShellTestSuite(int argc, char** argv)
       : base::TestSuite(argc, argv),
-        test_shell_webkit_init_(true),
-        platform_delegate_(*CommandLine::ForCurrentProcess()) {
+        platform_delegate_(*CommandLine::ForCurrentProcess()),
+        test_shell_webkit_init_(true) {
   }
 
   virtual void Initialize() {
@@ -54,7 +55,7 @@ class TestShellTestSuite : public base::TestSuite {
     FilePath path;
     PathService::Get(base::DIR_EXE, &path);
     path = path.AppendASCII("TestShell.app");
-    base::mac::SetOverrideAppBundlePath(path);
+    base::mac::SetOverrideFrameworkBundlePath(path);
 #endif
 
     base::TestSuite::Initialize();
@@ -93,14 +94,14 @@ class TestShellTestSuite : public base::TestSuite {
   }
 
  private:
+  TestShellPlatformDelegate platform_delegate_;
+
   // Allocate a message loop for this thread.  Although it is not used
   // directly, its constructor sets up some necessary state.
   MessageLoopForUI main_message_loop_;
 
   // Initialize WebKit for this scope.
   TestShellWebKitInit test_shell_webkit_init_;
-
-  TestShellPlatformDelegate platform_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(TestShellTestSuite);
 };

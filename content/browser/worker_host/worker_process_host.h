@@ -11,15 +11,19 @@
 
 #include "base/basictypes.h"
 #include "base/file_path.h"
-#include "content/browser/browser_child_process_host.h"
+#include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
 #include "content/browser/worker_host/worker_document_set.h"
+#include "content/public/browser/browser_child_process_host_delegate.h"
+#include "content/public/browser/browser_child_process_host_iterator.h"
 #include "googleurl/src/gurl.h"
+#include "ipc/ipc_message.h"
 
-class ResourceDispatcherHost;
+class BrowserChildProcessHostImpl;
 
 namespace content {
 class ResourceContext;
+class WorkerServiceImpl;
 }  // namespace content
 
 // The WorkerProcessHost is the interface that represents the browser side of
@@ -28,7 +32,8 @@ class ResourceContext;
 // process, but that may change.  However, we do assume (by storing a
 // net::URLRequestContext) that a WorkerProcessHost serves a single
 // BrowserContext.
-class WorkerProcessHost : public BrowserChildProcessHost {
+class WorkerProcessHost : public content::BrowserChildProcessHostDelegate,
+                          public IPC::Message::Sender {
  public:
   // Contains information about each worker instance, needed to forward messages
   // between the renderer and worker processes.
@@ -108,10 +113,11 @@ class WorkerProcessHost : public BrowserChildProcessHost {
     const content::ResourceContext* const resource_context_;
   };
 
-  WorkerProcessHost(
-      const content::ResourceContext* resource_context,
-      ResourceDispatcherHost* resource_dispatcher_host);
+  explicit WorkerProcessHost(const content::ResourceContext* resource_context);
   virtual ~WorkerProcessHost();
+
+  // IPC::Message::Sender implementation:
+  virtual bool Send(IPC::Message* message) OVERRIDE;
 
   // Starts the process.  Returns true iff it succeeded.
   // |render_process_id| is the renderer process responsible for starting this
@@ -135,6 +141,8 @@ class WorkerProcessHost : public BrowserChildProcessHost {
   // Terminates the given worker, i.e. based on a UI action.
   CONTENT_EXPORT void TerminateWorker(int worker_route_id);
 
+  CONTENT_EXPORT const content::ChildProcessData& GetData();
+
   typedef std::list<WorkerInstance> Instances;
   const Instances& instances() const { return instances_; }
 
@@ -143,20 +151,17 @@ class WorkerProcessHost : public BrowserChildProcessHost {
   }
 
  protected:
-  friend class WorkerService;
+  friend class content::WorkerServiceImpl;
 
   Instances& mutable_instances() { return instances_; }
 
  private:
-  // Called when the process has been launched successfully.
+  // BrowserChildProcessHostDelegate implementation:
   virtual void OnProcessLaunched() OVERRIDE;
+  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   // Creates and adds the message filters.
   void CreateMessageFilters(int render_process_id);
-
-  // IPC::Channel::Listener implementation:
-  // Called when a message arrives from the worker process.
-  virtual bool OnMessageReceived(const IPC::Message& message) OVERRIDE;
 
   void OnWorkerContextClosed(int worker_route_id);
   void OnAllowDatabase(int worker_route_id,
@@ -189,9 +194,18 @@ class WorkerProcessHost : public BrowserChildProcessHost {
   // process.
   scoped_refptr<WorkerMessageFilter> worker_message_filter_;
 
-  ResourceDispatcherHost* const resource_dispatcher_host_;
+  scoped_ptr<BrowserChildProcessHostImpl> process_;
 
   DISALLOW_COPY_AND_ASSIGN(WorkerProcessHost);
+};
+
+class WorkerProcessHostIterator
+    : public content::BrowserChildProcessHostTypeIterator<WorkerProcessHost> {
+ public:
+  WorkerProcessHostIterator()
+      : content::BrowserChildProcessHostTypeIterator<WorkerProcessHost>(
+          content::PROCESS_TYPE_WORKER) {
+  }
 };
 
 #endif  // CONTENT_BROWSER_WORKER_HOST_WORKER_PROCESS_HOST_H_

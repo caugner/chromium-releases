@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,14 @@
 #define WEBKIT_PLUGINS_PPAPI_PPB_GRAPHICS_3D_IMPL_H_
 
 #include "base/memory/weak_ptr.h"
-#include "ppapi/shared_impl/graphics_3d_impl.h"
+#include "ppapi/shared_impl/ppb_graphics_3d_shared.h"
 #include "ppapi/shared_impl/resource.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
 namespace webkit {
 namespace ppapi {
 
-class PPB_Graphics3D_Impl : public ::ppapi::Resource,
-                            public ::ppapi::Graphics3DImpl {
+class PPB_Graphics3D_Impl : public ::ppapi::PPB_Graphics3D_Shared {
  public:
   virtual ~PPB_Graphics3D_Impl();
 
@@ -25,13 +24,9 @@ class PPB_Graphics3D_Impl : public ::ppapi::Resource,
                                PP_Resource share_context,
                                const int32_t* attrib_list);
 
-  // Resource override.
-  virtual ::ppapi::thunk::PPB_Graphics3D_API* AsPPB_Graphics3D_API() OVERRIDE;
-
   // PPB_Graphics3D_API trusted implementation.
-  virtual PP_Bool InitCommandBuffer(int32_t size) OVERRIDE;
-  virtual PP_Bool GetRingBuffer(int* shm_handle,
-                                uint32_t* shm_size) OVERRIDE;
+  virtual PP_Bool InitCommandBuffer() OVERRIDE;
+  virtual PP_Bool SetGetBuffer(int32_t transfer_buffer_id) OVERRIDE;
   virtual PP_Graphics3DTrustedState GetState() OVERRIDE;
   virtual int32_t CreateTransferBuffer(uint32_t size) OVERRIDE;
   virtual PP_Bool DestroyTransferBuffer(int32_t id) OVERRIDE;
@@ -51,9 +46,9 @@ class PPB_Graphics3D_Impl : public ::ppapi::Resource,
   // Returns the id of texture that can be used by the compositor.
   unsigned int GetBackingTextureId();
 
-  // Notifications that the view has rendered the page and that it has been
-  // flushed to the screen. These messages are used to send Flush callbacks to
-  // the plugin.
+  // Notifications about the view's progress painting.  See PluginInstance.
+  // These messages are used to send Flush callbacks to the plugin.
+  void ViewWillInitiatePaint();
   void ViewInitiatedPaint();
   void ViewFlushedPaint();
 
@@ -62,7 +57,7 @@ class PPB_Graphics3D_Impl : public ::ppapi::Resource,
   }
 
  protected:
-  // ppapi::Graphics3DImpl overrides.
+  // ppapi::PPB_Graphics3D_Shared overrides.
   virtual gpu::CommandBuffer* GetCommandBuffer() OVERRIDE;
   virtual int32 DoSwapBuffers() OVERRIDE;
 

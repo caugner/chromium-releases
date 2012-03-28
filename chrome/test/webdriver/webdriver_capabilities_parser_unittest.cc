@@ -7,6 +7,7 @@
 #include "base/file_util.h"
 #include "base/scoped_temp_dir.h"
 #include "base/values.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/zip.h"
 #include "chrome/test/webdriver/webdriver_capabilities_parser.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,7 +21,7 @@ namespace webdriver {
 TEST(CapabilitiesParser, NoCaps) {
   Capabilities caps;
   DictionaryValue dict;
-  CapabilitiesParser parser(&dict, FilePath(), &caps);
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
   ASSERT_FALSE(parser.Parse());
 }
 
@@ -34,19 +35,17 @@ TEST(CapabilitiesParser, SimpleCaps) {
   options->SetBoolean("detach", true);
   options->SetBoolean("loadAsync", true);
   options->SetBoolean("nativeEvents", true);
-  options->SetBoolean("verbose", true);
 
   Capabilities caps;
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  CapabilitiesParser parser(&dict, temp_dir.path(), &caps);
+  CapabilitiesParser parser(&dict, temp_dir.path(), Logger(), &caps);
   ASSERT_FALSE(parser.Parse());
   EXPECT_EQ(FILE_PATH_LITERAL("binary"), caps.command.GetProgram().value());
   EXPECT_STREQ("channel", caps.channel.c_str());
   EXPECT_TRUE(caps.detach);
   EXPECT_TRUE(caps.load_async);
   EXPECT_TRUE(caps.native_events);
-  EXPECT_TRUE(caps.verbose);
 }
 
 TEST(CapabilitiesParser, Args) {
@@ -63,7 +62,7 @@ TEST(CapabilitiesParser, Args) {
   Capabilities caps;
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  CapabilitiesParser parser(&dict, temp_dir.path(), &caps);
+  CapabilitiesParser parser(&dict, temp_dir.path(), Logger(), &caps);
   ASSERT_FALSE(parser.Parse());
   EXPECT_TRUE(caps.command.HasSwitch("arg1"));
   EXPECT_STREQ("val", caps.command.GetSwitchValueASCII("arg2").c_str());
@@ -83,7 +82,7 @@ TEST(CapabilitiesParser, Extensions) {
   Capabilities caps;
   ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
-  CapabilitiesParser parser(&dict, temp_dir.path(), &caps);
+  CapabilitiesParser parser(&dict, temp_dir.path(), Logger(), &caps);
   ASSERT_FALSE(parser.Parse());
   ASSERT_EQ(2u, caps.extensions.size());
   std::string contents;
@@ -114,7 +113,7 @@ TEST(CapabilitiesParser, Profile) {
   options->SetString("profile", base64);
 
   Capabilities caps;
-  CapabilitiesParser parser(&dict, temp_dir.path(), &caps);
+  CapabilitiesParser parser(&dict, temp_dir.path(), Logger(), &caps);
   ASSERT_FALSE(parser.Parse());
   std::string new_contents;
   ASSERT_TRUE(file_util::ReadFileToString(
@@ -126,16 +125,138 @@ TEST(CapabilitiesParser, UnknownCap) {
   Capabilities caps;
   DictionaryValue dict;
   dict.SetString("chromeOptions.nosuchcap", "none");
-  CapabilitiesParser parser(&dict, FilePath(), &caps);
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_TRUE(parser.Parse());
+}
+
+TEST(CapabilitiesParser, ProxyCap) {
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  const char kPacUrl[] = "test.wpad";
+  options->SetString("proxyType", "PAC");
+  options->SetString("proxyAutoconfigUrl", kPacUrl);
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_FALSE(parser.Parse());
+  EXPECT_STREQ(kPacUrl,
+      caps.command.GetSwitchValueASCII(switches::kProxyPacUrl).c_str());
+}
+
+TEST(CapabilitiesParser, ProxyTypeCapIncompatiblePac) {
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->SetString("proxyType", "pac");
+  options->SetString("httpProxy", "http://localhost:8001");
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_TRUE(parser.Parse());
+}
+
+TEST(CapabilitiesParser, ProxyTypeCapIncompatibleManual) {
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->SetString("proxyType", "manual");
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_TRUE(parser.Parse());
+}
+
+TEST(CapabilitiesParser, ProxyTypeCapNullValue) {
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->Set("proxyType", Value::CreateNullValue());
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_TRUE(parser.Parse());
+}
+
+TEST(CapabilitiesParser, ProxyTypeManualCap) {
+  const char kProxyServers[] = "ftp=localhost:9001;http=localhost:8001";
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->SetString("proxyType", "manual");
+  options->SetString("httpProxy", "localhost:8001");
+  options->SetString("ftpProxy", "localhost:9001");
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_FALSE(parser.Parse());
+  EXPECT_STREQ(kProxyServers,
+      caps.command.GetSwitchValueASCII(switches::kProxyServer).c_str());
+}
+
+TEST(CapabilitiesParser, ProxyBypassListCap) {
+  const char kBypassList[] = "google.com, youtube.com";
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->SetString("proxyType", "manual");
+  options->SetString("noProxy", kBypassList);
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_FALSE(parser.Parse());
+  EXPECT_STREQ(kBypassList,
+      caps.command.GetSwitchValueASCII(switches::kProxyBypassList).c_str());
+}
+
+TEST(CapabilitiesParser, ProxyBypassListCapNullValue) {
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->SetString("proxyType", "manual");
+  options->Set("noProxy", Value::CreateNullValue());
+  options->SetString("httpProxy", "localhost:8001");
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_FALSE(parser.Parse());
+  EXPECT_FALSE(caps.command.HasSwitch(switches::kProxyBypassList));
+}
+
+TEST(CapabilitiesParser, UnknownProxyCap) {
+  Capabilities caps;
+  DictionaryValue dict;
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->SetString("proxyType", "DIRECT");
+  options->SetString("badProxyCap", "error");
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
   ASSERT_FALSE(parser.Parse());
 }
 
-TEST(CapabilitiesParser, BadInput) {
+TEST(CapabilitiesParser, ProxyFtpServerCapNullValue) {
   Capabilities caps;
   DictionaryValue dict;
-  dict.SetString("chromeOptions.verbose", "false");
-  CapabilitiesParser parser(&dict, FilePath(), &caps);
-  ASSERT_TRUE(parser.Parse());
+  DictionaryValue* options = new DictionaryValue();
+  dict.Set("proxy", options);
+
+  options->SetString("proxyType", "manual");
+  options->SetString("httpProxy", "localhost:8001");
+  options->Set("ftpProxy", Value::CreateNullValue());
+
+  CapabilitiesParser parser(&dict, FilePath(), Logger(), &caps);
+  ASSERT_FALSE(parser.Parse());
+  EXPECT_STREQ("http=localhost:8001",
+      caps.command.GetSwitchValueASCII(switches::kProxyServer).c_str());
 }
 
 }  // namespace webdriver

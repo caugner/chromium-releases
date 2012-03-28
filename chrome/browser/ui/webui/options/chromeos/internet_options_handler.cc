@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,6 +26,7 @@
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
 #include "chrome/browser/chromeos/cros/cros_library.h"
 #include "chrome/browser/chromeos/cros/network_library.h"
+#include "chrome/browser/chromeos/cros/onc_constants.h"
 #include "chrome/browser/chromeos/cros_settings.h"
 #include "chrome/browser/chromeos/mobile_config.h"
 #include "chrome/browser/chromeos/options/network_config_view.h"
@@ -44,6 +45,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/time_format.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
@@ -172,7 +174,7 @@ NetworkInfoDictionary::NetworkInfoDictionary(const chromeos::Network* network) {
   set_remembered(false);
   set_shared(false);
   set_needs_new_plan(false);
-  set_policy_managed(chromeos::NetworkUIData::IsManaged(network));
+  set_policy_managed(chromeos::NetworkUIData::IsManaged(network->ui_data()));
 }
 
 NetworkInfoDictionary::NetworkInfoDictionary(
@@ -189,8 +191,7 @@ NetworkInfoDictionary::NetworkInfoDictionary(
   set_remembered(true);
   set_shared(remembered->profile_type() == chromeos::PROFILE_SHARED);
   set_needs_new_plan(false);
-  set_policy_managed(
-      network ? chromeos::NetworkUIData::IsManaged(network) : false);
+  set_policy_managed(chromeos::NetworkUIData::IsManaged(remembered->ui_data()));
 }
 
 DictionaryValue* NetworkInfoDictionary::BuildDictionary() {
@@ -302,6 +303,9 @@ void InternetOptionsHandler::GetLocalizedValues(
   localized_strings->SetString("buyplan_button",
       l10n_util::GetStringUTF16(
           IDS_OPTIONS_SETTINGS_BUY_PLAN));
+  localized_strings->SetString("view_account_button",
+        l10n_util::GetStringUTF16(
+            IDS_STATUSBAR_NETWORK_VIEW_ACCOUNT));
 
   localized_strings->SetString("changeProxyButton",
       l10n_util::GetStringUTF16(
@@ -549,47 +553,46 @@ void InternetOptionsHandler::Initialize() {
 
 void InternetOptionsHandler::RegisterMessages() {
   // Setup handlers specific to this panel.
-  DCHECK(web_ui_);
-  web_ui_->RegisterMessageCallback("buttonClickCallback",
+  web_ui()->RegisterMessageCallback("buttonClickCallback",
       base::Bind(&InternetOptionsHandler::ButtonClickCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("refreshCellularPlan",
+  web_ui()->RegisterMessageCallback("refreshCellularPlan",
       base::Bind(&InternetOptionsHandler::RefreshCellularPlanCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setPreferNetwork",
+  web_ui()->RegisterMessageCallback("setPreferNetwork",
       base::Bind(&InternetOptionsHandler::SetPreferNetworkCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setAutoConnect",
+  web_ui()->RegisterMessageCallback("setAutoConnect",
       base::Bind(&InternetOptionsHandler::SetAutoConnectCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setIPConfig",
+  web_ui()->RegisterMessageCallback("setIPConfig",
       base::Bind(&InternetOptionsHandler::SetIPConfigCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("enableWifi",
+  web_ui()->RegisterMessageCallback("enableWifi",
       base::Bind(&InternetOptionsHandler::EnableWifiCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("disableWifi",
+  web_ui()->RegisterMessageCallback("disableWifi",
       base::Bind(&InternetOptionsHandler::DisableWifiCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("enableCellular",
+  web_ui()->RegisterMessageCallback("enableCellular",
       base::Bind(&InternetOptionsHandler::EnableCellularCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("disableCellular",
+  web_ui()->RegisterMessageCallback("disableCellular",
       base::Bind(&InternetOptionsHandler::DisableCellularCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("buyDataPlan",
+  web_ui()->RegisterMessageCallback("buyDataPlan",
       base::Bind(&InternetOptionsHandler::BuyDataPlanCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("showMorePlanInfo",
-      base::Bind(&InternetOptionsHandler::BuyDataPlanCallback,
+  web_ui()->RegisterMessageCallback("showMorePlanInfo",
+      base::Bind(&InternetOptionsHandler::ShowMorePlanInfoCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setApn",
+  web_ui()->RegisterMessageCallback("setApn",
       base::Bind(&InternetOptionsHandler::SetApnCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("setSimCardLock",
+  web_ui()->RegisterMessageCallback("setSimCardLock",
       base::Bind(&InternetOptionsHandler::SetSimCardLockCallback,
                  base::Unretained(this)));
-  web_ui_->RegisterMessageCallback("changePin",
+  web_ui()->RegisterMessageCallback("changePin",
       base::Bind(&InternetOptionsHandler::ChangePinCallback,
                  base::Unretained(this)));
 }
@@ -620,11 +623,29 @@ void InternetOptionsHandler::DisableCellularCallback(const ListValue* args) {
   cros_->EnableCellularNetworkDevice(false);
 }
 
-void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {
-  if (!web_ui_)
+void InternetOptionsHandler::ShowMorePlanInfoCallback(const ListValue* args) {
+  if (!web_ui())
     return;
   Browser* browser = BrowserList::FindBrowserWithFeature(
-      Profile::FromWebUI(web_ui_), Browser::FEATURE_TABSTRIP);
+      Profile::FromWebUI(web_ui()), Browser::FEATURE_TABSTRIP);
+  if (!browser)
+    return;
+
+  const chromeos::CellularNetwork* cellular = cros_->cellular_network();
+  if (!cellular)
+    return;
+
+  browser->OpenURL(content::OpenURLParams(
+      cellular->GetAccountInfoUrl(), content::Referrer(),
+      NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK, false));
+}
+
+void InternetOptionsHandler::BuyDataPlanCallback(const ListValue* args) {
+  if (!web_ui())
+    return;
+  Browser* browser = BrowserList::FindBrowserWithFeature(
+      Profile::FromWebUI(web_ui()), Browser::FEATURE_TABSTRIP);
   if (browser)
     browser->OpenMobilePlanTabAndActivate();
 }
@@ -678,13 +699,13 @@ void InternetOptionsHandler::ChangePinCallback(const ListValue* args) {
 void InternetOptionsHandler::RefreshNetworkData() {
   DictionaryValue dictionary;
   FillNetworkInfo(&dictionary);
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "options.InternetOptions.refreshNetworkData", dictionary);
 }
 
 void InternetOptionsHandler::OnNetworkManagerChanged(
     chromeos::NetworkLibrary* cros) {
-  if (!web_ui_)
+  if (!web_ui())
     return;
   MonitorNetworks();
   RefreshNetworkData();
@@ -693,7 +714,7 @@ void InternetOptionsHandler::OnNetworkManagerChanged(
 void InternetOptionsHandler::OnNetworkChanged(
     chromeos::NetworkLibrary* cros,
     const chromeos::Network* network) {
-  if (web_ui_)
+  if (web_ui())
     RefreshNetworkData();
 }
 
@@ -726,7 +747,7 @@ void InternetOptionsHandler::MonitorNetworks() {
 
 void InternetOptionsHandler::OnCellularDataPlanChanged(
     chromeos::NetworkLibrary* cros) {
-  if (!web_ui_)
+  if (!web_ui())
     return;
   const chromeos::CellularNetwork* cellular = cros_->cellular_network();
   if (!cellular)
@@ -746,8 +767,10 @@ void InternetOptionsHandler::OnCellularDataPlanChanged(
   connection_plans.SetBoolean("activated",
       cellular->activation_state() == chromeos::ACTIVATION_STATE_ACTIVATED);
   connection_plans.Set("plans", plan_list);
-  SetActivationButtonVisibility(cellular, &connection_plans);
-  web_ui_->CallJavascriptFunction(
+  SetActivationButtonVisibility(cellular,
+                                &connection_plans,
+                                cros_->GetCellularHomeCarrierId());
+  web_ui()->CallJavascriptFunction(
       "options.InternetOptions.updateCellularPlans", connection_plans);
 }
 
@@ -759,7 +782,7 @@ void InternetOptionsHandler::Observe(
   OptionsPageUIHandler::Observe(type, source, details);
   if (type == chrome::NOTIFICATION_REQUIRE_PIN_SETTING_CHANGE_ENDED) {
     base::FundamentalValue require_pin(*content::Details<bool>(details).ptr());
-    web_ui_->CallJavascriptFunction(
+    web_ui()->CallJavascriptFunction(
         "options.InternetOptions.updateSecurityTab", require_pin);
   } else if (type == chrome::NOTIFICATION_ENTER_PIN_ENDED) {
     // We make an assumption (which is valid for now) that the SIM
@@ -769,7 +792,7 @@ void InternetOptionsHandler::Observe(
     if (cancelled) {
       base::DictionaryValue dictionary;
       FillNetworkInfo(&dictionary);
-      web_ui_->CallJavascriptFunction(
+      web_ui()->CallJavascriptFunction(
           "options.InternetOptions.setupAttributes", dictionary);
     }
     // The case in which the correct PIN was entered and the SIM is
@@ -862,10 +885,14 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
     const chromeos::Network* network) {
   DCHECK(network);
 
-  if (web_ui_) {
-    Profile::FromWebUI(web_ui_)->GetProxyConfigTracker()->UISetCurrentNetwork(
+  if (web_ui()) {
+    Profile::FromWebUI(web_ui())->GetProxyConfigTracker()->UISetCurrentNetwork(
         network->service_path());
   }
+
+  const base::DictionaryValue* ui_data = network->ui_data();
+  const base::DictionaryValue* onc =
+      cros_->FindOncForNetwork(network->unique_id());
 
   DictionaryValue dictionary;
   std::string hardware_address;
@@ -891,10 +918,10 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
       ipconfig_static.reset(ipconfig_dict.release());
   }
 
-  chromeos::NetworkPropertyUIData ipconfig_dhcp_ui_data(network, NULL);
+  chromeos::NetworkPropertyUIData ipconfig_dhcp_ui_data(ui_data);
   SetValueDictionary(&dictionary, "ipconfigDHCP", ipconfig_dhcp.release(),
                      ipconfig_dhcp_ui_data);
-  chromeos::NetworkPropertyUIData ipconfig_static_ui_data(network, NULL);
+  chromeos::NetworkPropertyUIData ipconfig_static_ui_data(ui_data);
   SetValueDictionary(&dictionary, "ipconfigStatic", ipconfig_static.release(),
                      ipconfig_static_ui_data);
 
@@ -915,8 +942,7 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
   dictionary.SetBoolean("showStaticIPConfig", staticIPConfig &&
       (type == chromeos::TYPE_WIFI || type == chromeos::TYPE_ETHERNET));
 
-  chromeos::NetworkPropertyUIData preferred_ui_data(
-      network, chromeos::NetworkUIData::kPropertyPreferred);
+  chromeos::NetworkPropertyUIData preferred_ui_data(ui_data);
   if (network_profile == chromeos::PROFILE_USER) {
     dictionary.SetBoolean("showPreferred", true);
     SetValueDictionary(&dictionary, "preferred",
@@ -928,8 +954,13 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
                        Value::CreateBooleanValue(network->preferred()),
                        preferred_ui_data);
   }
-  chromeos::NetworkPropertyUIData auto_connect_ui_data(
-      network, chromeos::NetworkUIData::kPropertyAutoConnect);
+  chromeos::NetworkPropertyUIData auto_connect_ui_data(ui_data);
+  if (type == chromeos::TYPE_WIFI)
+    auto_connect_ui_data.ParseOncProperty(
+        ui_data, onc,
+        base::StringPrintf("%s.%s",
+                           chromeos::onc::kWiFi,
+                           chromeos::onc::wifi::kAutoConnect));
   SetValueDictionary(&dictionary, "autoConnect",
                      Value::CreateBooleanValue(network->auto_connect()),
                      auto_connect_ui_data);
@@ -966,7 +997,7 @@ void InternetOptionsHandler::PopulateDictionaryDetails(
     dictionary.SetBoolean("deviceConnected", cros_->ethernet_connected());
   }
 
-  web_ui_->CallJavascriptFunction(
+  web_ui()->CallJavascriptFunction(
       "options.InternetOptions.showDetailedInfo", dictionary);
 }
 
@@ -1025,7 +1056,8 @@ void InternetOptionsHandler::PopulateCellularDetails(
   const chromeos::NetworkDevice* device =
       cros_->FindNetworkDeviceByPath(cellular->device_path());
   if (device) {
-    chromeos::NetworkPropertyUIData cellular_propety_ui_data(cellular, NULL);
+    chromeos::NetworkPropertyUIData cellular_propety_ui_data(
+        cellular->ui_data());
     dictionary->SetString("manufacturer", device->manufacturer());
     dictionary->SetString("modelId", device->model_id());
     dictionary->SetString("firmwareRevision", device->firmware_revision());
@@ -1048,7 +1080,7 @@ void InternetOptionsHandler::PopulateCellularDetails(
 
     chromeos::MobileConfig* config = chromeos::MobileConfig::GetInstance();
     if (config->IsReady()) {
-      std::string carrier_id = cros_->GetCellularHomeCarrierId();
+      const std::string& carrier_id = cros_->GetCellularHomeCarrierId();
       const chromeos::MobileConfig::Carrier* carrier =
           config->GetCarrier(carrier_id);
       if (carrier && !carrier->top_up_url().empty())
@@ -1065,7 +1097,9 @@ void InternetOptionsHandler::PopulateCellularDetails(
                        cellular_propety_ui_data);
   }
 
-  SetActivationButtonVisibility(cellular, dictionary);
+  SetActivationButtonVisibility(cellular,
+                                dictionary,
+                                cros_->GetCellularHomeCarrierId());
 }
 
 void InternetOptionsHandler::PopulateVPNDetails(
@@ -1081,7 +1115,8 @@ void InternetOptionsHandler::PopulateVPNDetails(
 
 void InternetOptionsHandler::SetActivationButtonVisibility(
     const chromeos::CellularNetwork* cellular,
-    DictionaryValue* dictionary) {
+    DictionaryValue* dictionary,
+    const std::string& carrier_id) {
   if (cellular->needs_new_plan()) {
     dictionary->SetBoolean("showBuyButton", true);
   } else if (cellular->activation_state() !=
@@ -1089,6 +1124,14 @@ void InternetOptionsHandler::SetActivationButtonVisibility(
              cellular->activation_state() !=
                  chromeos::ACTIVATION_STATE_ACTIVATED) {
     dictionary->SetBoolean("showActivateButton", true);
+  } else {
+    const chromeos::MobileConfig::Carrier* carrier =
+        chromeos::MobileConfig::GetInstance()->GetCarrier(carrier_id);
+    if (carrier && carrier->show_portal_button()) {
+      // This will trigger BuyDataPlanCallback() so that
+      // chrome://mobilesetup/ will open carrier specific portal.
+      dictionary->SetBoolean("showViewAccountButton", true);
+    }
   }
 }
 
@@ -1104,7 +1147,7 @@ gfx::NativeWindow InternetOptionsHandler::GetNativeWindow() const {
   // TODO(beng): This is an improper direct dependency on Browser. Route this
   // through some sort of delegate.
   Browser* browser =
-      BrowserList::FindBrowserWithProfile(Profile::FromWebUI(web_ui_));
+      BrowserList::FindBrowserWithProfile(Profile::FromWebUI(web_ui()));
   return browser->window()->GetNativeHandle();
 }
 

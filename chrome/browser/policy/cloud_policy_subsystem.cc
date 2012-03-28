@@ -136,6 +136,11 @@ void CloudPolicySubsystem::Reset() {
   device_token_fetcher_->Reset();
 }
 
+void CloudPolicySubsystem::RefreshPolicies() {
+  if (cloud_policy_controller_.get())
+    cloud_policy_controller_->RefreshPolicies();
+}
+
 // static
 void CloudPolicySubsystem::RegisterPrefs(PrefService* pref_service) {
   pref_service->RegisterIntegerPref(prefs::kDevicePolicyRefreshRate,
@@ -200,6 +205,8 @@ CloudPolicyCacheBase* CloudPolicySubsystem::GetCloudPolicyCacheBase() const {
 }
 
 CloudPolicySubsystem::CloudPolicySubsystem()
-    : refresh_pref_name_(NULL) {}
+    : refresh_pref_name_(NULL),
+      data_store_(NULL) {
+}
 
 }  // namespace policy

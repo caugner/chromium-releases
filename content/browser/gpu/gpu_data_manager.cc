@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -158,8 +158,11 @@ GpuDataManager::UserFlags::UserFlags()
       disable_accelerated_layers_(false),
       disable_experimental_webgl_(false),
       disable_gl_multisampling_(false),
+      disable_software_rasterizer_(false),
       ignore_gpu_blacklist_(false),
-      skip_gpu_data_loading_(false) {
+      skip_gpu_data_loading_(false),
+      blacklist_accelerated_compositing_(false),
+      blacklist_webgl_(false) {
 }
 
 void GpuDataManager::UserFlags::Initialize() {
@@ -176,11 +179,18 @@ void GpuDataManager::UserFlags::Initialize() {
       switches::kDisableExperimentalWebGL);
   disable_gl_multisampling_ = browser_command_line.HasSwitch(
       switches::kDisableGLMultisampling);
+  disable_software_rasterizer_ = browser_command_line.HasSwitch(
+      switches::kDisableSoftwareRasterizer);
 
   ignore_gpu_blacklist_ = browser_command_line.HasSwitch(
       switches::kIgnoreGpuBlacklist);
   skip_gpu_data_loading_ = browser_command_line.HasSwitch(
       switches::kSkipGpuDataLoading);
+
+  blacklist_accelerated_compositing_ = browser_command_line.HasSwitch(
+      switches::kBlacklistAcceleratedCompositing);
+  blacklist_webgl_ = browser_command_line.HasSwitch(
+      switches::kBlacklistWebGL);
 
   use_gl_ = browser_command_line.GetSwitchValueASCII(switches::kUseGL);
 
@@ -196,6 +206,7 @@ void GpuDataManager::UserFlags::ApplyPolicies() {
 
 GpuDataManager::GpuDataManager()
     : complete_gpu_info_already_requested_(false),
+      complete_gpu_info_available_(false),
       observer_list_(new GpuDataManagerObserverList),
       software_rendering_(false) {
   Initialize();
@@ -208,7 +219,10 @@ void GpuDataManager::Initialize() {
   if (!user_flags_.skip_gpu_data_loading()) {
     content::GPUInfo gpu_info;
     gpu_info_collector::CollectPreliminaryGraphicsInfo(&gpu_info);
-    UpdateGpuInfo(gpu_info);
+    {
+      base::AutoLock auto_lock(gpu_info_lock_);
+      gpu_info_ = gpu_info;
+    }
   }
 
 #if defined(OS_MACOSX)
@@ -229,7 +243,8 @@ GpuDataManager* GpuDataManager::GetInstance() {
 
 void GpuDataManager::RequestCompleteGpuInfoIfNeeded() {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  if (complete_gpu_info_already_requested_)
+
+  if (complete_gpu_info_already_requested_ || complete_gpu_info_available_)
     return;
   complete_gpu_info_already_requested_ = true;
 
@@ -240,20 +255,22 @@ void GpuDataManager::RequestCompleteGpuInfoIfNeeded() {
 }
 
 void GpuDataManager::UpdateGpuInfo(const content::GPUInfo& gpu_info) {
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+
+  complete_gpu_info_available_ =
+      complete_gpu_info_available_ || gpu_info.finalized;
+  complete_gpu_info_already_requested_ =
+      complete_gpu_info_already_requested_ || gpu_info.finalized;
   {
     base::AutoLock auto_lock(gpu_info_lock_);
     if (!Merge(&gpu_info_, gpu_info))
       return;
-  }
-
-  NotifyGpuInfoUpdate();
-
-  {
-    base::AutoLock auto_lock(gpu_info_lock_);
     content::GetContentClient()->SetGpuInfo(gpu_info_);
   }
 
   UpdateGpuFeatureFlags();
+  // We have to update GpuFeatureFlags before notify all the observers.
+  NotifyGpuInfoUpdate();
 }
 
 const content::GPUInfo& GpuDataManager::gpu_info() const {
@@ -380,6 +397,10 @@ Value* GpuDataManager::GetFeatureStatus() {
   return status;
 }
 
+GpuPerformanceStats GpuDataManager::GetPerformanceStats() const {
+  return GpuPerformanceStats::RetrieveGpuPerformanceStats();
+}
+
 std::string GpuDataManager::GetBlacklistVersion() const {
   GpuBlacklist* blacklist = GetGpuBlacklist();
   if (blacklist != NULL) {
@@ -483,6 +504,9 @@ void GpuDataManager::AppendGpuCommandLine(
   } else if (!user_flags_.use_gl().empty()) {
     command_line->AppendSwitchASCII(switches::kUseGL, user_flags_.use_gl());
   }
+
+  if (gpu_info().optimus)
+    command_line->AppendSwitch(switches::kReduceGpuSandbox);
 }
 
 void GpuDataManager::SetGpuBlacklist(GpuBlacklist* gpu_blacklist) {
@@ -514,6 +538,8 @@ DictionaryValue* GpuDataManager::GpuInfoAsDictionaryValue() const {
       "Vendor Id", base::StringPrintf("0x%04x", gpu_info().vendor_id)));
   basic_info->Append(NewDescriptionValuePair(
       "Device Id", base::StringPrintf("0x%04x", gpu_info().device_id)));
+  basic_info->Append(NewDescriptionValuePair(
+      "Optimus", Value::CreateBooleanValue(gpu_info().optimus)));
   basic_info->Append(NewDescriptionValuePair("Driver vendor",
                                              gpu_info().driver_vendor));
   basic_info->Append(NewDescriptionValuePair("Driver version",
@@ -555,13 +581,7 @@ void GpuDataManager::NotifyGpuInfoUpdate() {
 }
 
 void GpuDataManager::UpdateGpuFeatureFlags() {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
-        base::Bind(&GpuDataManager::UpdateGpuFeatureFlags,
-                   base::Unretained(this)));
-    return;
-  }
+  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   GpuBlacklist* gpu_blacklist = GetGpuBlacklist();
   // We don't set a lock around modifying gpu_feature_flags_ since it's just an
@@ -573,12 +593,19 @@ void GpuDataManager::UpdateGpuFeatureFlags() {
 
   {
     base::AutoLock auto_lock(gpu_info_lock_);
-    gpu_feature_flags_ = gpu_blacklist->DetermineGpuFeatureFlags(
+    GpuFeatureFlags flags = gpu_blacklist->DetermineGpuFeatureFlags(
         GpuBlacklist::kOsAny, NULL, gpu_info_);
+
+    // Force disable using the GPU for these features, even if they would
+    // otherwise be allowed.
+    if (user_flags_.blacklist_accelerated_compositing())
+      flags.set_flags(flags.flags() |
+          GpuFeatureFlags::kGpuFeatureAcceleratedCompositing);
+    if (user_flags_.blacklist_webgl())
+      flags.set_flags(flags.flags() | GpuFeatureFlags::kGpuFeatureWebgl);
+    gpu_feature_flags_ = flags;
   }
 
-  // Notify clients that GpuInfo state has changed
-  NotifyGpuInfoUpdate();
 
   uint32 flags = gpu_feature_flags_.flags();
   uint32 max_entry_id = gpu_blacklist->max_entry_id();
@@ -667,7 +694,8 @@ void GpuDataManager::EnableSoftwareRenderingIfNecessary() {
   if (!GpuAccessAllowed() ||
       (gpu_feature_flags_.flags() & GpuFeatureFlags::kGpuFeatureWebgl)) {
 #if defined(ENABLE_SWIFTSHADER)
-    if (!swiftshader_path_.empty())
+    if (!swiftshader_path_.empty() &&
+        !user_flags_.disable_software_rasterizer())
       software_rendering_ = true;
 #endif
   }
@@ -699,6 +727,7 @@ bool GpuDataManager::Merge(content::GPUInfo* object,
   if (!object->finalized) {
     object->finalized = other.finalized;
     object->initialization_time = other.initialization_time;
+    object->optimus |= other.optimus;
 
     if (object->driver_vendor.empty()) {
       changed |= object->driver_vendor != other.driver_vendor;

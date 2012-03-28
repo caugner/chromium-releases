@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -61,12 +61,11 @@
 #include "chrome/common/pref_names.h"
 #include "chrome/common/service_messages.h"
 #include "chrome/common/url_constants.h"
-#include "content/browser/download/download_manager.h"
-#include "content/browser/tab_contents/tab_contents.h"
-#include "content/browser/user_metrics.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/user_metrics.h"
 #include "grit/chromium_strings.h"
 #include "grit/generated_resources.h"
 #include "net/base/net_util.h"
@@ -75,6 +74,8 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 
 using content::BrowserThread;
+using content::DownloadManager;
+using content::UserMetricsAction;
 
 // 10.6 adds a public API for the Spotlight-backed search menu item in the Help
 // menu.  Provide the declaration so it can be called below when building with
@@ -87,6 +88,13 @@ using content::BrowserThread;
 #endif
 
 namespace {
+
+// Declare notification names from the 10.7 SDK.
+#if !defined(MAC_OS_X_VERSION_10_7) || \
+    MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_7
+NSString* NSPopoverDidShowNotification = @"NSPopoverDidShowNotification";
+NSString* NSPopoverDidCloseNotification = @"NSPopoverDidCloseNotification";
+#endif
 
 // True while AppController is calling Browser::OpenEmptyWindow(). We need a
 // global flag here, analogue to BrowserInit::InProcessStartup() because
@@ -241,11 +249,39 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
              name:NSWindowDidResignMainNotification
            object:nil];
 
+  if (base::mac::IsOSLionOrLater()) {
+    [notificationCenter
+        addObserver:self
+           selector:@selector(popoverDidShow:)
+               name:NSPopoverDidShowNotification
+             object:nil];
+    [notificationCenter
+        addObserver:self
+           selector:@selector(popoverDidClose:)
+               name:NSPopoverDidCloseNotification
+             object:nil];
+  }
+
   // Set up the command updater for when there are no windows open
   [self initMenuState];
 
   // Initialize the Profile menu.
   [self initProfileMenu];
+}
+
+- (void)unregisterEventHandlers {
+  NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
+  [em removeEventHandlerForEventClass:kInternetEventClass
+                           andEventID:kAEGetURL];
+  [em removeEventHandlerForEventClass:cloud_print::kAECloudPrintClass
+                           andEventID:cloud_print::kAECloudPrintClass];
+  [em removeEventHandlerForEventClass:kAECloudPrintInstallClass
+                           andEventID:kAECloudPrintInstallClass];
+  [em removeEventHandlerForEventClass:kAECloudPrintUninstallClass
+                           andEventID:kAECloudPrintUninstallClass];
+  [em removeEventHandlerForEventClass:'WWW!'
+                           andEventID:'OURL'];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 // (NSApplicationDelegate protocol) This is the Apple-approved place to override
@@ -281,8 +317,13 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   // Initiate a shutdown (via BrowserList::CloseAllBrowsers()) if we aren't
   // already shutting down.
-  if (!browser_shutdown::IsTryingToQuit())
+  if (!browser_shutdown::IsTryingToQuit()) {
+    content::NotificationService::current()->Notify(
+        content::NOTIFICATION_APP_EXITING,
+        content::NotificationService::AllSources(),
+        content::NotificationService::NoDetails());
     BrowserList::CloseAllBrowsers();
+  }
 
   return num_browsers == 0 ? YES : NO;
 }
@@ -320,14 +361,8 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
 // Called when the app is shutting down. Clean-up as appropriate.
 - (void)applicationWillTerminate:(NSNotification*)aNotification {
-  NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
-  [em removeEventHandlerForEventClass:kInternetEventClass
-                           andEventID:kAEGetURL];
-  [em removeEventHandlerForEventClass:'WWW!'
-                           andEventID:'OURL'];
-
   // There better be no browser windows left at this point.
-  CHECK_EQ(BrowserList::size(), 0u);
+  CHECK_EQ(0u, BrowserList::size());
 
   // Tell BrowserList not to keep the browser process alive. Once all the
   // browsers get dealloc'd, it will stop the RunLoop and fall back into main().
@@ -336,7 +371,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   // Close these off if they have open windows.
   [aboutController_ close];
 
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [self unregisterEventHandlers];
 }
 
 - (void)didEndMainMessageLoop {
@@ -354,15 +389,16 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 // If the window has a tab controller, make "close window" be cmd-shift-w,
 // otherwise leave it as the normal cmd-w. Capitalization of the key equivalent
 // affects whether the shift modifer is used.
-- (void)adjustCloseWindowMenuItemKeyEquivalent:(BOOL)hasTabs {
-  [closeWindowMenuItem_ setKeyEquivalent:(hasTabs ? @"W" : @"w")];
+- (void)adjustCloseWindowMenuItemKeyEquivalent:(BOOL)enableCloseTabShortcut {
+  [closeWindowMenuItem_ setKeyEquivalent:(enableCloseTabShortcut ? @"W" :
+                                                                   @"w")];
   [closeWindowMenuItem_ setKeyEquivalentModifierMask:NSCommandKeyMask];
 }
 
 // If the window has a tab controller, make "close tab" take over cmd-w,
 // otherwise it shouldn't have any key-equivalent because it should be disabled.
-- (void)adjustCloseTabMenuItemKeyEquivalent:(BOOL)hasTabs {
-  if (hasTabs) {
+- (void)adjustCloseTabMenuItemKeyEquivalent:(BOOL)enableCloseTabShortcut {
+  if (enableCloseTabShortcut) {
     [closeTabMenuItem_ setKeyEquivalent:@"w"];
     [closeTabMenuItem_ setKeyEquivalentModifierMask:NSCommandKeyMask];
   } else {
@@ -400,8 +436,9 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   BOOL hasTabs =
       [[window windowController] isKindOfClass:[TabWindowController class]];
-  [self adjustCloseWindowMenuItemKeyEquivalent:hasTabs];
-  [self adjustCloseTabMenuItemKeyEquivalent:hasTabs];
+  BOOL enableCloseTabShortcut = hasTabs && !hasPopover_;
+  [self adjustCloseWindowMenuItemKeyEquivalent:enableCloseTabShortcut];
+  [self adjustCloseTabMenuItemKeyEquivalent:enableCloseTabShortcut];
 }
 
 // Fix up the "close tab/close window" command-key equivalents. We do this
@@ -453,7 +490,8 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   // If the window changed to a new BrowserWindowController, update the profile.
   id windowController = [[notify object] windowController];
-  if ([windowController isKindOfClass:[BrowserWindowController class]]) {
+  if ([notify name] == NSWindowDidBecomeMainNotification &&
+      [windowController isKindOfClass:[BrowserWindowController class]]) {
     // If the profile is incognito, use the original profile.
     Profile* newProfile = [windowController profile]->GetOriginalProfile();
     [self windowChangedToProfile:newProfile];
@@ -461,6 +499,18 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
     [self windowChangedToProfile:
         g_browser_process->profile_manager()->GetLastUsedProfile()];
   }
+}
+
+// Called on Lion and later when a popover (e.g. dictionary) is shown.
+- (void)popoverDidShow:(NSNotification*)notify {
+  hasPopover_ = YES;
+  [self fixCloseMenuItemKeyEquivalents];
+}
+
+// Called on Lion and later when a popover (e.g. dictionary) is closed.
+- (void)popoverDidClose:(NSNotification*)notify {
+  hasPopover_ = NO;
+  [self fixCloseMenuItemKeyEquivalents];
 }
 
 // Called when the user has changed browser windows, meaning the backing profile
@@ -483,7 +533,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 
   bookmarkMenuBridge_.reset(new BookmarkMenuBridge(lastProfile_,
       [[[NSApp mainMenu] itemWithTag:IDC_BOOKMARKS_MENU] submenu]));
-  bookmarkMenuBridge_->BuildMenu();
+  // No need to |BuildMenu| here.  It is done lazily upon menu access.
 
   historyMenuBridge_.reset(new HistoryMenuBridge(lastProfile_));
   historyMenuBridge_->BuildMenu();
@@ -583,15 +633,13 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   NSString* waitTitle = nil;
   NSString* exitTitle = nil;
 
-  string16 product_name = l10n_util::GetStringUTF16(IDS_PRODUCT_NAME);
-
   // Set the dialog text based on whether or not there are multiple downloads.
   if (downloadCount == 1) {
     // Dialog text: warning and explanation.
-    warningText = l10n_util::GetNSStringF(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING, product_name);
-    explanationText = l10n_util::GetNSStringF(
-        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION, product_name);
+    warningText = l10n_util::GetNSString(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_WARNING);
+    explanationText = l10n_util::GetNSString(
+        IDS_SINGLE_DOWNLOAD_REMOVE_CONFIRM_EXPLANATION);
 
     // Cancel download and exit button text.
     exitTitle = l10n_util::GetNSString(
@@ -603,10 +651,10 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   } else {
     // Dialog text: warning and explanation.
     warningText = l10n_util::GetNSStringF(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING, product_name,
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_WARNING,
         base::IntToString16(downloadCount));
-    explanationText = l10n_util::GetNSStringF(
-        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION, product_name);
+    explanationText = l10n_util::GetNSString(
+        IDS_MULTIPLE_DOWNLOADS_REMOVE_CONFIRM_EXPLANATION);
 
     // Cancel downloads and exit button text.
     exitTitle = l10n_util::GetNSString(
@@ -824,7 +872,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
       break;
     }
     case IDC_SHOW_BOOKMARK_MANAGER:
-      UserMetrics::RecordAction(UserMetricsAction("ShowBookmarkManager"));
+      content::RecordAction(UserMetricsAction("ShowBookmarkManager"));
       if (Browser* browser = ActivateBrowser(lastProfile)) {
         // Open a bookmark manager tab.
         browser->OpenBookmarkManager();
@@ -874,7 +922,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
           ProfileSyncService::START_FROM_WRENCH);
       break;
     case IDC_TASK_MANAGER:
-      UserMetrics::RecordAction(UserMetricsAction("TaskManager"));
+      content::RecordAction(UserMetricsAction("TaskManager"));
       TaskManagerMac::Show(false);
       break;
     case IDC_OPTIONS:
@@ -927,10 +975,18 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   if (browser_shutdown::IsTryingToQuit())
     return NO;
 
-  // Don't do anything if there are visible windows.  This will cause
-  // AppKit to unminimize the most recently minimized window.
-  if (flag)
-    return YES;
+  // Don't do anything if there are visible tabbed or popup windows.  This will
+  // cause AppKit to unminimize the most recently minimized window. If the
+  // visible windows are panels or notifications, we still need to open a new
+  // window.
+  if (flag) {
+    for (BrowserList::const_iterator iter = BrowserList::begin();
+         iter != BrowserList::end(); ++iter) {
+      Browser* browser = *iter;
+      if (browser->is_type_tabbed() || browser->is_type_popup())
+        return YES;
+    }
+  }
 
   // If launched as a hidden login item (due to installation of a persistent app
   // or by the user, for example in System Preferenecs->Accounts->Login Items),
@@ -1057,7 +1113,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   }
 
   CommandLine dummy(CommandLine::NO_PROGRAM);
-  BrowserInit::IsFirstRun first_run = FirstRun::IsChromeFirstRun() ?
+  BrowserInit::IsFirstRun first_run = first_run::IsChromeFirstRun() ?
       BrowserInit::IS_FIRST_RUN : BrowserInit::IS_NOT_FIRST_RUN;
   BrowserInit::LaunchWithProfile launch(FilePath(), dummy, first_run);
   launch.OpenURLsInBrowser(browser, false, urls);
@@ -1079,7 +1135,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
 // process, gets the required data and launches Print dialog.
 - (void)submitCloudPrintJob:(NSAppleEventDescriptor*)event {
   // Pull parameter list out of Apple Event.
-  NSAppleEventDescriptor *paramList =
+  NSAppleEventDescriptor* paramList =
       [event paramDescriptorForKeyword:cloud_print::kAECloudPrintClass];
 
   if (paramList != nil) {
@@ -1252,7 +1308,7 @@ const AEEventClass kAECloudPrintUninstallClass = 'GCPu';
   return bookmarkMenuBridge_.get();
 }
 
-- (void)applicationDidChangeScreenParameters:(NSNotification *)notification {
+- (void)applicationDidChangeScreenParameters:(NSNotification*)notification {
   // During this callback the working area is not always already updated. Defer.
   [self performSelector:@selector(delayedPanelManagerScreenParametersUpdate)
              withObject:nil

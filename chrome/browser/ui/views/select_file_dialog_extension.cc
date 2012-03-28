@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/views/extensions/extension_dialog.h"
 #include "chrome/browser/ui/views/window.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -244,8 +243,14 @@ void SelectFileDialogExtension::SelectFileImpl(
       default_extension);
 
   ExtensionDialog* dialog = ExtensionDialog::Show(file_browser_url,
-      owner_browser, tab->tab_contents(),
-      kFileManagerWidth, kFileManagerHeight, string16(),
+      owner_browser, tab->web_contents(),
+      kFileManagerWidth, kFileManagerHeight,
+#if defined(USE_AURA)
+      file_manager_util::GetTitleFromType(type),
+#else
+      // HTML-based header used.
+      string16(),
+#endif
       this /* ExtensionDialog::Observer */);
   if (!dialog) {
     LOG(ERROR) << "Unable to create extension dialog";

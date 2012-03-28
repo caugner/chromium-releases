@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -26,7 +26,9 @@ class WebUILoginDisplay : public LoginDisplay,
   // LoginDisplay implementation:
   virtual void Init(const UserList& users,
                     bool show_guest,
+                    bool show_users,
                     bool show_new_user) OVERRIDE;
+  virtual void OnPreferencesChanged() OVERRIDE;
   virtual void OnBeforeUserRemoved(const std::string& username) OVERRIDE;
   virtual void OnUserImageChanged(const User& user) OVERRIDE;
   virtual void OnUserRemoved(const std::string& username) OVERRIDE;
@@ -37,6 +39,7 @@ class WebUILoginDisplay : public LoginDisplay,
   virtual void ShowError(int error_msg_id,
                          int login_attempts,
                          HelpAppLauncher::HelpTopic help_topic_id) OVERRIDE;
+  virtual void ShowGaiaPasswordChanged(const std::string& username) OVERRIDE;
 
   // SigninScreenHandlerDelegate implementation:
   virtual void CompleteLogin(const std::string& username,
@@ -54,6 +57,7 @@ class WebUILoginDisplay : public LoginDisplay,
                                         const std::string& password);
   virtual const UserList& GetUsers() const OVERRIDE;
   virtual bool IsShowGuest() const OVERRIDE;
+  virtual bool IsShowUsers() const OVERRIDE;
   virtual bool IsShowNewUser() const OVERRIDE;
   virtual void SetDisplayEmail(const std::string& email) OVERRIDE;
 
@@ -63,6 +67,9 @@ class WebUILoginDisplay : public LoginDisplay,
 
   // Whether to show guest login.
   bool show_guest_;
+
+  // Weather to show the user pads or a plain credentials dialogue.
+  bool show_users_;
 
   // Whether to show add new user.
   bool show_new_user_;

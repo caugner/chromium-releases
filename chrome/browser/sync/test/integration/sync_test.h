@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,7 +17,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/process_util.h"
-#include "base/task.h"
 #include "chrome/browser/sync/protocol/sync_protocol_error.h"
 #include "chrome/browser/sync/syncable/model_type.h"
 #include "net/base/mock_host_resolver.h"
@@ -154,7 +153,7 @@ class SyncTest : public InProcessBrowserTest {
   // Trigger a notification to be sent to all clients.  This operation
   // is available only if ServerSupportsNotificationControl() returned
   // true.
-  void TriggerNotification(const syncable::ModelTypeSet& changed_types);
+  void TriggerNotification(syncable::ModelTypeSet changed_types);
 
   // Returns true if the server being used supports injecting errors.
   bool ServerSupportsErrorTriggering() const;
@@ -162,7 +161,7 @@ class SyncTest : public InProcessBrowserTest {
   // Triggers a migration for one or more datatypes, and waits
   // for the server to complete it.  This operation is available
   // only if ServerSupportsErrorTriggering() returned true.
-  void TriggerMigrationDoneError(const syncable::ModelTypeSet& model_types);
+  void TriggerMigrationDoneError(syncable::ModelTypeSet model_types);
 
   // Triggers the server to set its birthday to a random value thereby
   // the server would return a birthday error on next sync.
@@ -171,6 +170,11 @@ class SyncTest : public InProcessBrowserTest {
   // Triggers a transient error on the server. Note the server will stay in
   // this state until shut down.
   void TriggerTransientError();
+
+  // Triggers an auth error on the server, simulating the case when the gaia
+  // password is changed at another location. Note the server will stay in
+  // this state until shut down.
+  void TriggerAuthError();
 
   // Triggers a sync error on the server.
   void TriggerSyncError(const browser_sync::SyncProtocolError& error);
@@ -314,9 +318,11 @@ class SyncTest : public InProcessBrowserTest {
   // The URLFetcherImplFactory instance used to instantiate |fake_factory_|.
   scoped_ptr<URLFetcherImplFactory> factory_;
 
+  // Number of default entries (as determined by the existing entries at setup
+  // time on client 0).
+  size_t number_of_default_sync_items_;
+
   DISALLOW_COPY_AND_ASSIGN(SyncTest);
 };
-
-DISABLE_RUNNABLE_METHOD_REFCOUNT(SyncTest);
 
 #endif  // CHROME_BROWSER_SYNC_TEST_INTEGRATION_SYNC_TEST_H_

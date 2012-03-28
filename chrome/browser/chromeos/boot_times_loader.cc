@@ -27,20 +27,22 @@
 #include "chrome/common/chrome_notification_types.h"
 #include "chrome/common/chrome_switches.h"
 #include "content/browser/renderer_host/render_widget_host_view.h"
-#include "content/browser/tab_contents/navigation_controller.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 
 using content::BrowserThread;
+using content::NavigationController;
+using content::WebContents;
 
 namespace {
 
 RenderWidgetHost* GetRenderWidgetHost(NavigationController* tab) {
-  TabContents* tab_contents = tab->tab_contents();
-  if (tab_contents) {
+  WebContents* web_contents = tab->GetWebContents();
+  if (web_contents) {
     RenderWidgetHostView* render_widget_host_view =
-        tab_contents->GetRenderWidgetHostView();
+        web_contents->GetRenderWidgetHostView();
     if (render_widget_host_view)
       return render_widget_host_view->GetRenderWidgetHost();
   }
@@ -54,7 +56,7 @@ const std::string GetTabUrl(RenderWidgetHost* rwh) {
        ++it) {
     Browser* browser = *it;
     for (int i = 0, tab_count = browser->tab_count(); i < tab_count; ++i) {
-      TabContents* tab = browser->GetTabContentsAt(i);
+      WebContents* tab = browser->GetWebContentsAt(i);
       if (tab->GetRenderWidgetHostView() == rwhv) {
         return tab->GetURL().spec();
       }
@@ -120,8 +122,8 @@ BootTimesLoader* BootTimesLoader::Get() {
 
 BootTimesLoader::Handle BootTimesLoader::GetBootTimes(
     CancelableRequestConsumerBase* consumer,
-    BootTimesLoader::GetBootTimesCallback* callback) {
-  if (!g_browser_process->file_thread()) {
+    const GetBootTimesCallback& callback) {
+  if (!BrowserThread::IsMessageLoopValid(BrowserThread::FILE)) {
     // This should only happen if Chrome is shutting down, so we don't do
     // anything.
     return 0;
@@ -211,7 +213,7 @@ static void SendBootTimesToUMA(const BootTimesLoader::BootTimes& boot_times) {
 }
 
 void BootTimesLoader::Backend::GetBootTimes(
-    scoped_refptr<GetBootTimesRequest> request) {
+    const scoped_refptr<GetBootTimesRequest>& request) {
   const FilePath::CharType kFirmwareBootTime[] = FPL("firmware-boot-time");
   const FilePath::CharType kPreStartup[] = FPL("pre-startup");
   const FilePath::CharType kChromeExec[] = FPL("chrome-exec");
@@ -254,8 +256,7 @@ void BootTimesLoader::Backend::GetBootTimes(
 
   SendBootTimesToUMA(boot_times);
 
-  request->ForwardResult(
-      GetBootTimesCallback::TupleType(request->handle(), boot_times));
+  request->ForwardResult(request->handle(), boot_times);
 }
 
 // Appends the given buffer into the file. Returns the number of bytes
@@ -349,19 +350,14 @@ void BootTimesLoader::LoginDone() {
                     content::NotificationService::AllSources());
   registrar_.Remove(this, content::NOTIFICATION_LOAD_STOP,
                     content::NotificationService::AllSources());
-  registrar_.Remove(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+  registrar_.Remove(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                     content::NotificationService::AllSources());
   registrar_.Remove(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
                     content::NotificationService::AllSources());
   // Don't swamp the FILE thread right away.
   BrowserThread::PostDelayedTask(
       BrowserThread::FILE, FROM_HERE,
-      // This doesn't compile without std::string(...), as
-      // NewRunnableFunction doesn't accept arrays.
-      base::Bind(WriteTimes,
-                 std::string(kLoginTimes),
-                 std::string(kUmaLogin),
-                 std::string(kUmaLoginPrefix),
+      base::Bind(&WriteTimes, kLoginTimes, kUmaLogin, kUmaLoginPrefix,
                  login_time_markers_),
       kLoginTimeWriteDelayMs);
 }
@@ -376,7 +372,7 @@ void BootTimesLoader::WriteLogoutTimes() {
 void BootTimesLoader::RecordStats(const std::string& name, const Stats& stats) {
   BrowserThread::PostTask(
       BrowserThread::FILE, FROM_HERE,
-      base::Bind(RecordStatsDelayed, name, stats.uptime, stats.disk));
+      base::Bind(&RecordStatsDelayed, name, stats.uptime, stats.disk));
 }
 
 BootTimesLoader::Stats BootTimesLoader::GetCurrentStats() {
@@ -412,7 +408,7 @@ void BootTimesLoader::RecordLoginAttempted() {
                    content::NotificationService::AllSources());
     registrar_.Add(this, content::NOTIFICATION_LOAD_STOP,
                    content::NotificationService::AllSources());
-    registrar_.Add(this, content::NOTIFICATION_TAB_CONTENTS_DESTROYED,
+    registrar_.Add(this, content::NOTIFICATION_WEB_CONTENTS_DESTROYED,
                    content::NotificationService::AllSources());
     registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_HOST_DID_PAINT,
                    content::NotificationService::AllSources());
@@ -472,10 +468,10 @@ void BootTimesLoader::Observe(
       }
       break;
     }
-    case content::NOTIFICATION_TAB_CONTENTS_DESTROYED: {
-      TabContents* tab_contents = content::Source<TabContents>(source).ptr();
+    case content::NOTIFICATION_WEB_CONTENTS_DESTROYED: {
+      WebContents* web_contents = content::Source<WebContents>(source).ptr();
       RenderWidgetHost* render_widget_host =
-          GetRenderWidgetHost(&tab_contents->controller());
+          GetRenderWidgetHost(&web_contents->GetController());
       render_widget_hosts_loading_.erase(render_widget_host);
       break;
     }

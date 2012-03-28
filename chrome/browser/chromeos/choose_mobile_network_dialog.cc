@@ -1,18 +1,21 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/chromeos/choose_mobile_network_dialog.h"
 
-#include "chrome/browser/chromeos/frame/bubble_window.h"
 #include "chrome/browser/chromeos/login/user_manager.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/views/html_dialog_view.h"
+#include "chrome/browser/ui/views/window.h"
 #include "chrome/common/url_constants.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+
+using content::WebContents;
+using content::WebUIMessageHandler;
 
 namespace {
 
@@ -27,25 +30,26 @@ namespace chromeos {
 // static
 void ChooseMobileNetworkDialog::ShowDialog(gfx::NativeWindow owning_window) {
   Profile* profile;
+  Browser* browser = NULL;
   if (UserManager::Get()->user_is_logged_in()) {
-    Browser* browser = BrowserList::GetLastActive();
+    browser = BrowserList::GetLastActive();
     DCHECK(browser);
     profile = browser->profile();
   } else {
     profile = ProfileManager::GetDefaultProfile();
   }
   HtmlDialogView* html_view =
-      new HtmlDialogView(profile, new ChooseMobileNetworkDialog);
+      new HtmlDialogView(profile, browser, new ChooseMobileNetworkDialog);
   html_view->InitDialog();
-  BubbleWindow::Create(owning_window, STYLE_FLUSH, html_view);
+  browser::CreateViewsWindow(owning_window, html_view, STYLE_FLUSH);
   html_view->GetWidget()->Show();
 }
 
 ChooseMobileNetworkDialog::ChooseMobileNetworkDialog() {
 }
 
-bool ChooseMobileNetworkDialog::IsDialogModal() const {
-  return true;
+ui::ModalType ChooseMobileNetworkDialog::GetDialogModalType() const {
+  return ui::MODAL_TYPE_SYSTEM;
 }
 
 string16 ChooseMobileNetworkDialog::GetDialogTitle() const {
@@ -72,7 +76,7 @@ void ChooseMobileNetworkDialog::OnDialogClosed(const std::string& json_retval) {
   delete this;
 }
 
-void ChooseMobileNetworkDialog::OnCloseContents(TabContents* source,
+void ChooseMobileNetworkDialog::OnCloseContents(WebContents* source,
                                                 bool* out_close_dialog) {
   if (out_close_dialog)
     *out_close_dialog = true;

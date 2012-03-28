@@ -20,10 +20,12 @@
 #include "chrome/common/extensions/extension_action.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/web_contents.h"
 #include "ui/gfx/rect.h"
 #include "ui/gfx/size.h"
+
+using content::WebContents;
 
 class BrowserActionApiTest : public ExtensionApiTest {
  public:
@@ -78,10 +80,10 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, Basic) {
       browser()->profile(), action->extension_id(), browser());
 
   // Verify the command worked.
-  TabContents* tab = browser()->GetSelectedTabContents();
+  WebContents* tab = browser()->GetSelectedWebContents();
   bool result = false;
   ASSERT_TRUE(ui_test_utils::ExecuteJavaScriptAndExtractBool(
-      tab->render_view_host(), L"",
+      tab->GetRenderViewHost(), L"",
       L"setInterval(function(){"
       L"  if(document.body.bgColor == 'red'){"
       L"    window.domAutomationController.send(true)}}, 100)",
@@ -191,7 +193,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionAddPopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedWebContents());
 
   ExtensionAction* browser_action = extension->browser_action();
   ASSERT_TRUE(browser_action)
@@ -246,7 +248,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, BrowserActionRemovePopup) {
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
 
-  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedTabContents());
+  int tab_id = ExtensionTabUtil::GetTabId(browser()->GetSelectedWebContents());
 
   ExtensionAction* browser_action = extension->browser_action();
   ASSERT_TRUE(browser_action)
@@ -316,12 +318,15 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
 
   const size_t size_before = service->extensions()->size();
 
-  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
-      "browser_action/basics")));
-  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
-      "browser_action/popup")));
-  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII(
-      "browser_action/add_popup")));
+  const Extension* extension_a = LoadExtension(test_data_dir_.AppendASCII(
+      "browser_action/basics"));
+  const Extension* extension_b = LoadExtension(test_data_dir_.AppendASCII(
+      "browser_action/popup"));
+  const Extension* extension_c = LoadExtension(test_data_dir_.AppendASCII(
+      "browser_action/add_popup"));
+  ASSERT_TRUE(extension_a);
+  ASSERT_TRUE(extension_b);
+  ASSERT_TRUE(extension_c);
 
   // Test that there are 3 browser actions in the toolbar.
   ASSERT_EQ(size_before + 3, service->extensions()->size());
@@ -329,10 +334,8 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
 
   // Now enable 2 of the extensions in incognito mode, and test that the browser
   // actions show up.
-  service->extension_prefs()->SetIsIncognitoEnabled(
-      service->extensions()->at(size_before)->id(), true);
-  service->extension_prefs()->SetIsIncognitoEnabled(
-      service->extensions()->at(size_before + 2)->id(), true);
+  service->extension_prefs()->SetIsIncognitoEnabled(extension_a->id(), true);
+  service->extension_prefs()->SetIsIncognitoEnabled(extension_c->id(), true);
 
   Profile* incognito_profile = browser()->profile()->GetOffTheRecordProfile();
   Browser* incognito_browser = Browser::Create(incognito_profile);
@@ -355,8 +358,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
   // regular and incognito mode.
 
   // ABC -> CAB
-  service->toolbar_model()->MoveBrowserAction(
-      service->extensions()->at(size_before + 2), 0);
+  service->toolbar_model()->MoveBrowserAction(extension_c, 0);
 
   EXPECT_EQ(kTooltipC, GetBrowserActionsBar().GetTooltip(0));
   EXPECT_EQ(kTooltipA, GetBrowserActionsBar().GetTooltip(1));
@@ -366,8 +368,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionApiTest, IncognitoDragging) {
   EXPECT_EQ(kTooltipA, incognito_bar.GetTooltip(1));
 
   // CAB -> CBA
-  service->toolbar_model()->MoveBrowserAction(
-      service->extensions()->at(size_before + 1), 1);
+  service->toolbar_model()->MoveBrowserAction(extension_b, 1);
 
   EXPECT_EQ(kTooltipC, GetBrowserActionsBar().GetTooltip(0));
   EXPECT_EQ(kTooltipB, GetBrowserActionsBar().GetTooltip(1));

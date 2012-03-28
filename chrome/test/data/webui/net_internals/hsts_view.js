@@ -1,6 +1,9 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
+// Include test fixture.
+GEN_INCLUDE(['net_internals_test.js']);
 
 // Anonymous namespace
 (function() {
@@ -37,7 +40,7 @@ var QueryResultType = {
  *     error and not found results.
  * @param {QueryResultType} queryResultType The expected result type of the
  *     results of the query.
- * @extends {netInternalsTest.Task}
+ * @extends {NetInternalsTest.Task}
  */
 function CheckQueryResultTask(domain, subdomains, publicKeyHashes,
                               queryResultType) {
@@ -45,11 +48,11 @@ function CheckQueryResultTask(domain, subdomains, publicKeyHashes,
   this.subdomains_ = subdomains;
   this.publicKeyHashes_ = publicKeyHashes;
   this.queryResultType_ = queryResultType;
-  netInternalsTest.Task.call(this);
+  NetInternalsTest.Task.call(this);
 }
 
 CheckQueryResultTask.prototype = {
-  __proto__: netInternalsTest.Task.prototype,
+  __proto__: NetInternalsTest.Task.prototype,
 
   /**
    * Starts watching for the query results.
@@ -110,7 +113,26 @@ CheckQueryResultTask.prototype = {
   checkSuccess_: function(result) {
     expectEquals(QueryResultType.SUCCESS, this.queryResultType_);
     expectEquals(this.subdomains_, result.subdomains);
-    expectEquals(this.publicKeyHashes_, result.public_key_hashes);
+
+    // |public_key_hashes| is an old synonym for what is now
+    // |preloaded_spki_hashes|. Look for both, and also for
+    // |dynamic_spki_hashes|.
+    if (typeof result.public_key_hashes === 'undefined')
+      result.public_key_hashes = '';
+    if (typeof result.preloaded_spki_hashes === 'undefined')
+      result.preloaded_spki_hashes = '';
+    if (typeof result.dynamic_spki_hashes === 'undefined')
+      result.dynamic_spki_hashes = '';
+
+    var hashes = [];
+    if (result.public_key_hashes)
+      hashes.push(result.public_key_hashes);
+    if (result.preloaded_spki_hashes)
+      hashes.push(result.preloaded_spki_hashes);
+    if (result.dynamic_spki_hashes)
+      hashes.push(result.dynamic_spki_hashes);
+
+    expectEquals(this.publicKeyHashes_, hashes.join(","));
 
     // Verify that the domain appears somewhere in the displayed text.
     outputText = $(HSTSView.QUERY_OUTPUT_DIV_ID).innerText;
@@ -208,70 +230,98 @@ DeleteTask.prototype = {
   }
 };
 
-netInternalsTest.test('netInternalsHSTSViewQueryNotFound', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Checks that querying a domain that was never added fails.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewQueryNotFound', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new QueryTask('somewhere.com', false, '',
                                   QueryResultType.NOT_FOUND));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewQueryError', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Checks that querying a domain with an invalid name returns an error.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewQueryError', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new QueryTask('\u3024', false, '', QueryResultType.ERROR));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewDeleteNotFound', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Deletes a domain that was never added.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewDeleteNotFound', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new DeleteTask('somewhere.com', QueryResultType.NOT_FOUND));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewDeleteError', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Deletes a domain that returns an error on lookup.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewDeleteError', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new DeleteTask('\u3024', QueryResultType.ERROR));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewAddDelete', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Adds a domain and then deletes it.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewAddDelete', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new AddTask('somewhere.com', false, VALID_HASH,
                                 QueryResultType.SUCCESS));
   taskQueue.addTask(new DeleteTask('somewhere.com', QueryResultType.NOT_FOUND));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewAddFail', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Tries to add a domain with an invalid name.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewAddFail', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new AddTask('~', false, '', QueryResultType.NOT_FOUND));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewAddError', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Tries to add a domain with a name that errors out on lookup due to having
+ * non-ASCII characters in it.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewAddError', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new AddTask('\u3024', false, '', QueryResultType.ERROR));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewAddInvalidHash', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Adds a domain with an invalid hash.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewAddInvalidHash', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new AddTask('somewhere.com', true, INVALID_HASH,
                                 QueryResultType.SUCCESS));
   taskQueue.addTask(new DeleteTask('somewhere.com', QueryResultType.NOT_FOUND));
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewAddOverwrite', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Adds the same domain twice in a row, modifying some values the second time.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewAddOverwrite', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new AddTask('somewhere.com', true, VALID_HASH,
                                 QueryResultType.SUCCESS));
   taskQueue.addTask(new AddTask('somewhere.com', false, '',
@@ -280,9 +330,12 @@ netInternalsTest.test('netInternalsHSTSViewAddOverwrite', function() {
   taskQueue.run();
 });
 
-netInternalsTest.test('netInternalsHSTSViewAddTwice', function() {
-  netInternalsTest.switchToView('hsts');
-  taskQueue = new netInternalsTest.TaskQueue(true);
+/**
+ * Adds two different domains and then deletes them.
+ */
+TEST_F('NetInternalsTest', 'netInternalsHSTSViewAddTwice', function() {
+  NetInternalsTest.switchToView('hsts');
+  taskQueue = new NetInternalsTest.TaskQueue(true);
   taskQueue.addTask(new AddTask('somewhere.com', false, VALID_HASH,
                                 QueryResultType.SUCCESS));
   taskQueue.addTask(new QueryTask('somewhereelse.com', false, '',

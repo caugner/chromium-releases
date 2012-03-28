@@ -13,9 +13,9 @@
 #include "chrome/browser/notifications/notification_ui_manager.h"
 #include "chrome/common/chrome_notification_types.h"
 #include "content/browser/renderer_host/render_view_host.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "grit/generated_resources.h"
 #include "grit/theme_resources.h"
 #include "grit/theme_resources_standard.h"
@@ -37,7 +37,7 @@ TaskManagerNotificationResource::TaskManagerNotificationResource(
     default_icon_ = rb.GetBitmapNamed(IDR_PLUGIN);
   }
   process_handle_ =
-      balloon_host_->tab_contents()->render_view_host()->process()->GetHandle();
+      balloon_host_->web_contents()->GetRenderProcessHost()->GetHandle();
   pid_ = base::GetProcId(process_handle_);
   title_ = l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_NOTIFICATION_PREFIX,
                                       balloon_host_->GetSource());
@@ -72,7 +72,7 @@ bool TaskManagerNotificationResource::CanInspect() const {
 
 void TaskManagerNotificationResource::Inspect() const {
   DevToolsWindow::OpenDevToolsWindow(
-      balloon_host_->tab_contents()->render_view_host());
+      balloon_host_->web_contents()->GetRenderViewHost());
 }
 
 bool TaskManagerNotificationResource::SupportNetworkUsage() const {

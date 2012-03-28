@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,10 +24,10 @@ namespace {
 
 struct PP_Var GetSelectedText(PP_Instance instance, PP_Bool html) {
   DebugPrintf("PPP_Selection_Dev::GetSelectedText: "
-              "instance=%"NACL_PRIu32"\n", instance);
+              "instance=%"NACL_PRId32"\n", instance);
   NaClSrpcChannel* channel = GetMainSrpcChannel(instance);
-  nacl_abi_size_t text_size = kMaxVarSize;
-  nacl::scoped_array<char> text_bytes(new char[kMaxVarSize]);
+  nacl_abi_size_t text_size = kMaxReturnVarSize;
+  nacl::scoped_array<char> text_bytes(new char[text_size]);
   NaClSrpcError srpc_result =
       PppSelectionRpcClient::PPP_Selection_GetSelectedText(
           channel,
@@ -41,8 +41,7 @@ struct PP_Var GetSelectedText(PP_Instance instance, PP_Bool html) {
 
   PP_Var selected_text = PP_MakeUndefined();
   if (srpc_result == NACL_SRPC_RESULT_OK) {
-    (void) DeserializeTo(
-        channel, text_bytes.get(), text_size, 1, &selected_text);
+    (void) DeserializeTo(text_bytes.get(), text_size, 1, &selected_text);
   }
   return selected_text;
 }
@@ -57,4 +56,3 @@ const PPP_Selection_Dev* BrowserSelection::GetInterface() {
 }
 
 }  // namespace ppapi_proxy
-

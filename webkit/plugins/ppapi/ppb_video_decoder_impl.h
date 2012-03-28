@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,19 +9,17 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
-#include "base/memory/scoped_callback_factory.h"
 #include "base/memory/scoped_ptr.h"
 #include "ppapi/c/dev/pp_video_dev.h"
+#include "ppapi/c/dev/ppp_video_decoder_dev.h"
 #include "ppapi/c/pp_var.h"
+#include "ppapi/shared_impl/ppb_video_decoder_shared.h"
 #include "ppapi/shared_impl/resource.h"
-#include "ppapi/shared_impl/video_decoder_impl.h"
 #include "ppapi/thunk/ppb_video_decoder_api.h"
 #include "webkit/plugins/ppapi/plugin_delegate.h"
 
 struct PP_PictureBuffer_Dev;
 struct PP_VideoBitstreamBuffer_Dev;
-struct PPB_VideoDecoder_Dev;
-struct PPP_VideoDecoder_Dev;
 
 namespace gpu {
 namespace gles2 {
@@ -32,8 +30,7 @@ class GLES2Implementation;
 namespace webkit {
 namespace ppapi {
 
-class PPB_VideoDecoder_Impl : public ::ppapi::Resource,
-                              public ::ppapi::VideoDecoderImpl,
+class PPB_VideoDecoder_Impl : public ::ppapi::PPB_VideoDecoder_Shared,
                               public media::VideoDecodeAccelerator::Client {
  public:
   virtual ~PPB_VideoDecoder_Impl();
@@ -42,9 +39,6 @@ class PPB_VideoDecoder_Impl : public ::ppapi::Resource,
   static PP_Resource Create(PP_Instance instance,
                             PP_Resource graphics_context,
                             PP_VideoDecoder_Profile profile);
-
-  // Resource overrides.
-  virtual PPB_VideoDecoder_API* AsPPB_VideoDecoder_API() OVERRIDE;
 
   // PPB_VideoDecoder_API implementation.
   virtual int32_t Decode(const PP_VideoBitstreamBuffer_Dev* bitstream_buffer,
@@ -62,7 +56,6 @@ class PPB_VideoDecoder_Impl : public ::ppapi::Resource,
   virtual void DismissPictureBuffer(int32 picture_buffer_id) OVERRIDE;
   virtual void PictureReady(const media::Picture& picture) OVERRIDE;
   virtual void NotifyInitializeDone() OVERRIDE;
-  virtual void NotifyEndOfStream() OVERRIDE;
   virtual void NotifyError(
       media::VideoDecodeAccelerator::Error error) OVERRIDE;
   virtual void NotifyFlushDone() OVERRIDE;

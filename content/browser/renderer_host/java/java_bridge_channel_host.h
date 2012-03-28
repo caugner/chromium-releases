@@ -11,7 +11,13 @@
 class JavaBridgeChannelHost : public NPChannelBase {
  public:
   static JavaBridgeChannelHost* GetJavaBridgeChannelHost(
-      int renderer_id, base::MessageLoopProxy*);
+      int renderer_id,
+      base::MessageLoopProxy* ipc_message_loop);
+
+  // A threadsafe function to generate a unique route ID. Used by the
+  // JavaBridgeDispatcherHost on the UI thread and this class on the Java
+  // Bridge's background thread.
+  static int ThreadsafeGenerateRouteID();
 
   // NPChannelBase implementation:
   virtual int GenerateRouteID() OVERRIDE;
@@ -20,7 +26,10 @@ class JavaBridgeChannelHost : public NPChannelBase {
   virtual bool Init(base::MessageLoopProxy* ipc_message_loop,
                     bool create_pipe_now,
                     base::WaitableEvent* shutdown_event) OVERRIDE;
-  virtual bool Send(IPC::Message* msg) OVERRIDE;
+
+ protected:
+  // NPChannelBase override:
+  virtual bool OnControlMessageReceived(const IPC::Message& message) OVERRIDE;
 
  private:
   JavaBridgeChannelHost() {}
@@ -30,6 +39,9 @@ class JavaBridgeChannelHost : public NPChannelBase {
   static NPChannelBase* ClassFactory() {
     return new JavaBridgeChannelHost();
   }
+
+  // Message handlers
+  void OnGenerateRouteID(int* route_id);
 
   DISALLOW_COPY_AND_ASSIGN(JavaBridgeChannelHost);
 };

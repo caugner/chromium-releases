@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -25,10 +25,9 @@ class ExtensionPrefs;
 class ExtensionPrefValueMap;
 class NetPrefObserver;
 class PrefService;
-class ProfileSyncComponentsFactory;
+class ProfileSyncService;
 class PromoResourceService;
 class SpeechInputPreferences;
-class SpellCheckProfile;
 class SSLConfigServiceManager;
 class VisitedLinkEventListener;
 
@@ -51,14 +50,14 @@ class ProfileImpl : public Profile,
   // content::BrowserContext implementation:
   virtual FilePath GetPath() OVERRIDE;
   virtual SSLHostState* GetSSLHostState() OVERRIDE;
-  virtual DownloadManager* GetDownloadManager() OVERRIDE;
+  virtual content::DownloadManager* GetDownloadManager() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContext() OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForRenderProcess(
       int renderer_child_id) OVERRIDE;
   virtual net::URLRequestContextGetter* GetRequestContextForMedia() OVERRIDE;
   virtual const content::ResourceContext& GetResourceContext() OVERRIDE;
-  virtual HostZoomMap* GetHostZoomMap() OVERRIDE;
-  virtual GeolocationPermissionContext*
+  virtual content::HostZoomMap* GetHostZoomMap() OVERRIDE;
+  virtual content::GeolocationPermissionContext*
       GetGeolocationPermissionContext() OVERRIDE;
   virtual SpeechInputPreferences* GetSpeechInputPreferences() OVERRIDE;
   virtual quota::QuotaManager* GetQuotaManager() OVERRIDE;
@@ -110,15 +109,12 @@ class ProfileImpl : public Profile,
   virtual net::SSLConfigService* GetSSLConfigService() OVERRIDE;
   virtual HostContentSettingsMap* GetHostContentSettingsMap() OVERRIDE;
   virtual UserStyleSheetWatcher* GetUserStyleSheetWatcher() OVERRIDE;
-  virtual FindBarState* GetFindBarState() OVERRIDE;
-  virtual bool HasProfileSyncService() const OVERRIDE;
+  virtual bool HasProfileSyncService() OVERRIDE;
   virtual bool DidLastSessionExitCleanly() OVERRIDE;
   virtual BookmarkModel* GetBookmarkModel() OVERRIDE;
   virtual ProtocolHandlerRegistry* GetProtocolHandlerRegistry() OVERRIDE;
   virtual bool IsSameProfile(Profile* profile) OVERRIDE;
   virtual base::Time GetStartTime() const OVERRIDE;
-  virtual SpellCheckHost* GetSpellCheckHost() OVERRIDE;
-  virtual void ReinitializeSpellCheckHost(bool force) OVERRIDE;
   virtual void MarkAsCleanShutdown() OVERRIDE;
   virtual void InitExtensions(bool extensions_enabled) OVERRIDE;
   virtual void InitPromoResources() OVERRIDE;
@@ -126,17 +122,13 @@ class ProfileImpl : public Profile,
   virtual FilePath last_selected_directory() OVERRIDE;
   virtual void set_last_selected_directory(const FilePath& path) OVERRIDE;
   virtual ProfileSyncService* GetProfileSyncService() OVERRIDE;
-  virtual ProfileSyncService* GetProfileSyncService(
-      const std::string& cros_user) OVERRIDE;
   virtual TokenService* GetTokenService() OVERRIDE;
-  void InitSyncService(const std::string& cros_user);
   virtual ExtensionInfoMap* GetExtensionInfoMap() OVERRIDE;
   virtual PromoCounter* GetInstantPromoCounter() OVERRIDE;
   virtual ChromeURLDataManager* GetChromeURLDataManager() OVERRIDE;
   virtual chrome_browser_net::Predictor* GetNetworkPredictor() OVERRIDE;
   virtual void ClearNetworkingHistorySince(base::Time time) OVERRIDE;
   virtual GURL GetHomePage() OVERRIDE;
-  virtual NetworkActionPredictor* GetNetworkActionPredictor() OVERRIDE;
   virtual void SaveSessionState() OVERRIDE;
 
 #if defined(OS_CHROMEOS)
@@ -187,9 +179,12 @@ class ProfileImpl : public Profile,
 
   void CreateQuotaManagerAndClients();
 
-  SpellCheckProfile* GetSpellCheckProfile();
-
   void UpdateProfileUserNameCache();
+
+
+  // Updates the ProfileInfoCache with data from this profile.
+  void UpdateProfileNameCache();
+  void UpdateProfileAvatarCache();
 
   void GetCacheParameters(bool is_media_context,
                           FilePath* cache_path,
@@ -215,14 +210,12 @@ class ProfileImpl : public Profile,
   scoped_ptr<PrefService> otr_prefs_;
   scoped_ptr<VisitedLinkEventListener> visited_link_event_listener_;
   scoped_ptr<VisitedLinkMaster> visited_link_master_;
+  ProfileImplIOData::Handle io_data_;
   // Keep extension_prefs_ on top of extension_service_ because the latter
   // maintains a pointer to the first and shall be destructed first.
   scoped_ptr<ExtensionPrefs> extension_prefs_;
   scoped_ptr<ExtensionService> extension_service_;
   scoped_refptr<UserScriptMaster> user_script_master_;
-
-  ProfileImplIOData::Handle io_data_;
-
   scoped_refptr<ExtensionDevToolsManager> extension_devtools_manager_;
   // extension_info_map_ needs to outlive extension_process_manager_.
   scoped_refptr<ExtensionInfoMap> extension_info_map_;
@@ -244,18 +237,15 @@ class ProfileImpl : public Profile,
   scoped_refptr<ProtocolHandlerRegistry> protocol_handler_registry_;
 
   scoped_ptr<TokenService> token_service_;
-  scoped_ptr<ProfileSyncComponentsFactory> profile_sync_factory_;
-  scoped_ptr<ProfileSyncService> sync_service_;
 
   scoped_ptr<SSLConfigServiceManager> ssl_config_service_manager_;
 
   scoped_refptr<HostContentSettingsMap> host_content_settings_map_;
-  scoped_refptr<HostZoomMap> host_zoom_map_;
-  scoped_refptr<GeolocationPermissionContext>
+  scoped_refptr<content::HostZoomMap> host_zoom_map_;
+  scoped_refptr<content::GeolocationPermissionContext>
       geolocation_permission_context_;
   scoped_refptr<SpeechInputPreferences> speech_input_preferences_;
   scoped_refptr<UserStyleSheetWatcher> user_style_sheet_watcher_;
-  scoped_ptr<FindBarState> find_bar_state_;
   scoped_ptr<GAIAInfoUpdateService> gaia_info_update_service_;
   scoped_refptr<HistoryService> history_service_;
   scoped_ptr<FaviconService> favicon_service_;
@@ -266,8 +256,6 @@ class ProfileImpl : public Profile,
   scoped_refptr<WebKitContext> webkit_context_;
   scoped_refptr<fileapi::FileSystemContext> file_system_context_;
   scoped_refptr<quota::QuotaManager> quota_manager_;
-  scoped_ptr<NetworkActionPredictor> network_action_predictor_;
-  bool profile_sync_service_created_;
   bool history_service_created_;
   bool favicon_service_created_;
   bool created_web_data_service_;
@@ -282,8 +270,6 @@ class ProfileImpl : public Profile,
 
   // See GetStartTime for details.
   base::Time start_time_;
-
-  scoped_ptr<SpellCheckProfile> spellcheck_profile_;
 
 #if defined(OS_WIN)
   bool checked_instant_promo_;
@@ -314,6 +300,20 @@ class ProfileImpl : public Profile,
   scoped_ptr<PrefProxyConfigTracker> pref_proxy_config_tracker_;
 
   scoped_ptr<ChromeURLDataManager> chrome_url_data_manager_;
+
+  // STOP!!!! DO NOT ADD ANY MORE ITEMS HERE!!!!
+  //
+  // Instead, make your Service/Manager/whatever object you're hanging off the
+  // Profile use our new ProfileKeyedServiceFactory system instead. You can
+  // find the design document here:
+  //
+  //   https://sites.google.com/a/chromium.org/dev/developers/design-documents/profile-architecture
+  //
+  // and you can read the raw headers here:
+  //
+  //   chrome/browser/profile/profile_keyed_service.h
+  //   chrome/browser/profile/profile_keyed_service_factory.{h,cc}
+  //   chrome/browser/profile/profile_keyed_dependency_manager.{h,cc}
 
   Profile::Delegate* delegate_;
 

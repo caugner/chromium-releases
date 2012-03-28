@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Native Client Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,12 +9,13 @@
 #include <map>
 #include <vector>
 
-#include "examples/fullscreen_tumbler/cube.h"
-#include "examples/fullscreen_tumbler/opengl_context.h"
-#include "examples/fullscreen_tumbler/opengl_context_ptrs.h"
-#include "examples/fullscreen_tumbler/scripting_bridge.h"
 #include "ppapi/cpp/fullscreen.h"
 #include "ppapi/cpp/instance.h"
+
+#include "cube.h"
+#include "opengl_context.h"
+#include "opengl_context_ptrs.h"
+#include "scripting_bridge.h"
 
 namespace pp {
 class KeyboardInputEvent;

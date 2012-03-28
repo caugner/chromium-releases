@@ -10,10 +10,9 @@
 
 #include "base/basictypes.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
+#include "content/public/browser/web_ui_controller.h"
 
 class Profile;
-class TabContents;
 
 // We expose this class because the OOBE flow may need to explicitly add the
 // chrome://terms source outside of the normal flow.
@@ -43,9 +42,9 @@ class AboutUIHTMLSource : public ChromeURLDataManager::DataSource {
   DISALLOW_COPY_AND_ASSIGN(AboutUIHTMLSource);
 };
 
-class AboutUI : public ChromeWebUI {
+class AboutUI : public content::WebUIController {
  public:
-  explicit AboutUI(TabContents* contents, const std::string& host);
+  explicit AboutUI(content::WebUI* web_ui, const std::string& host);
   virtual ~AboutUI() {}
 
  private:

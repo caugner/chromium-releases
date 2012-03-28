@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -14,7 +14,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task.h"
 #include "base/threading/non_thread_safe.h"
 #include "base/time.h"
 #include "base/timer.h"
@@ -32,12 +31,16 @@ namespace base {
 class DictionaryValue;
 }
 
+namespace content {
+class WebContents;
+}
+
 #if defined(COMPILER_GCC)
 
-namespace __gnu_cxx {
+namespace BASE_HASH_NAMESPACE {
 template <>
-struct hash<TabContents*> {
-  std::size_t operator()(TabContents* value) const {
+struct hash<content::WebContents*> {
+  std::size_t operator()(content::WebContents* value) const {
     return reinterpret_cast<std::size_t>(value);
   }
 };
@@ -118,13 +121,13 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Cancels all active prerenders.
   void CancelAllPrerenders();
 
-  // For a given TabContents that wants to navigate to the URL supplied,
+  // For a given WebContents that wants to navigate to the URL supplied,
   // determines whether a prerendered version of the URL can be used,
-  // and substitutes the prerendered RVH into the TabContents. |opener_url| is
-  // set to the window.opener url that the TabContents should have set and
+  // and substitutes the prerendered RVH into the WebContents. |opener_url| is
+  // set to the window.opener url that the WebContents should have set and
   // will be empty if there is no opener set. Returns whether or not a
   // prerendered RVH could be used or not.
-  bool MaybeUsePrerenderedPage(TabContents* tab_contents,
+  bool MaybeUsePrerenderedPage(content::WebContents* web_contents,
                                const GURL& url,
                                const GURL& opener_url);
 
@@ -139,7 +142,7 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // This must be called on the UI thread.
   static void RecordPerceivedPageLoadTime(
       base::TimeDelta perceived_page_load_time,
-      TabContents* tab_contents,
+      content::WebContents* web_contents,
       const GURL& url);
 
   // Returns whether prerendering is currently enabled for this manager.
@@ -159,17 +162,17 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   static bool IsControlGroup();
   static bool IsNoUseGroup();
 
-  // Query the list of current prerender pages to see if the given tab contents
+  // Query the list of current prerender pages to see if the given web contents
   // is prerendering a page.
-  bool IsTabContentsPrerendering(TabContents* tab_contents) const;
+  bool IsWebContentsPrerendering(content::WebContents* web_contents) const;
 
-  // Maintaining and querying the set of TabContents belonging to this
+  // Maintaining and querying the set of WebContents belonging to this
   // PrerenderManager that are currently showing prerendered pages.
-  void MarkTabContentsAsPrerendered(TabContents* tab_contents);
-  void MarkTabContentsAsWouldBePrerendered(TabContents* tab_contents);
-  void MarkTabContentsAsNotPrerendered(TabContents* tab_contents);
-  bool IsTabContentsPrerendered(TabContents* tab_contents) const;
-  bool WouldTabContentsBePrerendered(TabContents* tab_contents) const;
+  void MarkWebContentsAsPrerendered(content::WebContents* web_contents);
+  void MarkWebContentsAsWouldBePrerendered(content::WebContents* web_contents);
+  void MarkWebContentsAsNotPrerendered(content::WebContents* web_contents);
+  bool IsWebContentsPrerendered(content::WebContents* web_contents) const;
+  bool WouldWebContentsBePrerendered(content::WebContents* web_contents) const;
   bool IsOldRenderViewHost(const RenderViewHost* render_view_host) const;
 
   // Checks whether navigation to the provided URL has occurred in a visible
@@ -198,9 +201,13 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   void ClearData(int clear_flags);
 
   // Record a final status of a prerendered page in a histogram.
-  void RecordFinalStatus(Origin origin,
-                         uint8 experiment_id,
-                         FinalStatus final_status) const;
+  // This variation allows specifying whether prerendering had been started
+  // (necessary to flag MatchComplete dummies).
+  void RecordFinalStatusWithMatchCompleteStatus(
+      Origin origin,
+      uint8 experiment_id,
+      PrerenderContents::MatchCompleteStatus mc_status,
+      FinalStatus final_status) const;
 
   const Config& config() const { return config_; }
   Config& mutable_config() { return config_; }
@@ -279,11 +286,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   PrerenderContents* GetEntry(const GURL& url);
 
   // Identical to GetEntry, with one exception:
-  // The TabContents specified indicates the TC in which to swap the
-  // prerendering into.  If the TabContents specified is the one
+  // The WebContents specified indicates the WC in which to swap the
+  // prerendering into.  If the WebContents specified is the one
   // to doing the prerendered itself, will return NULL.
-  PrerenderContents* GetEntryButNotSpecifiedTC(const GURL& url,
-                                               TabContents* tc);
+  PrerenderContents* GetEntryButNotSpecifiedWC(const GURL& url,
+                                               content::WebContents* wc);
 
   // Starts scheduling periodic cleanups.
   void StartSchedulingPeriodicCleanups();
@@ -365,6 +372,19 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   // Used both on destruction, and when clearing the browsing history.
   void DestroyAllContents(FinalStatus final_status);
 
+  // Helper function to destroy a PrerenderContents with the specified
+  // final_status, while at the same time recording that for the MatchComplete
+  // case, that this prerender would have been used.
+  void DestroyAndMarkMatchCompleteAsUsed(PrerenderContents* prerender_contents,
+                                         FinalStatus final_status);
+
+  // Record a final status of a prerendered page in a histogram.
+  // This is a helper function which will ultimately call
+  // RecordFinalStatusWthMatchCompleteStatus, using MATCH_COMPLETE_DEFAULT.
+  void RecordFinalStatus(Origin origin,
+                         uint8 experiment_id,
+                         FinalStatus final_status) const;
+
   // The configuration.
   Config config_;
 
@@ -389,11 +409,11 @@ class PrerenderManager : public base::SupportsWeakPtr<PrerenderManager>,
   std::list<PrerenderContents*> pending_delete_list_;
 
   // Set of TabContents which are currently displaying a prerendered page.
-  base::hash_set<TabContents*> prerendered_tab_contents_set_;
+  base::hash_set<content::WebContents*> prerendered_tab_contents_set_;
 
   // Set of TabContents which would be displaying a prerendered page
   // (for the control group).
-  base::hash_set<TabContents*> would_be_prerendered_tab_contents_set_;
+  base::hash_set<content::WebContents*> would_be_prerendered_tab_contents_set_;
 
   scoped_ptr<PrerenderContents::Factory> prerender_contents_factory_;
 

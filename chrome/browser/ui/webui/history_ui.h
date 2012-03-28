@@ -9,23 +9,21 @@
 #include <string>
 
 #include "base/string16.h"
+#include "chrome/browser/cancelable_request.h"
 #include "chrome/browser/history/history.h"
 #include "chrome/browser/ui/webui/chrome_url_data_manager.h"
-#include "chrome/browser/ui/webui/chrome_web_ui.h"
-#include "content/browser/cancelable_request.h"
 #include "content/public/browser/notification_registrar.h"
-
-class GURL;
+#include "content/public/browser/web_ui_controller.h"
+#include "content/public/browser/web_ui_message_handler.h"
 
 // The handler for Javascript messages related to the "history" view.
-class BrowsingHistoryHandler : public WebUIMessageHandler,
+class BrowsingHistoryHandler : public content::WebUIMessageHandler,
                                public content::NotificationObserver {
  public:
   BrowsingHistoryHandler();
   virtual ~BrowsingHistoryHandler();
 
   // WebUIMessageHandler implementation.
-  virtual WebUIMessageHandler* Attach(WebUI* web_ui) OVERRIDE;
   virtual void RegisterMessages() OVERRIDE;
 
   // Callback for the "getHistory" message.
@@ -78,9 +76,9 @@ class BrowsingHistoryHandler : public WebUIMessageHandler,
   DISALLOW_COPY_AND_ASSIGN(BrowsingHistoryHandler);
 };
 
-class HistoryUI : public ChromeWebUI {
+class HistoryUI : public content::WebUIController {
  public:
-  explicit HistoryUI(TabContents* contents);
+  explicit HistoryUI(content::WebUI* web_ui);
 
   // Return the URL for a given search term.
   static const GURL GetHistoryURLWithSearchText(const string16& text);

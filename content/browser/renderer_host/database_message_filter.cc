@@ -11,12 +11,12 @@
 #include "base/string_util.h"
 #include "base/threading/thread.h"
 #include "base/utf_string_conversions.h"
-#include "content/browser/user_metrics.h"
 #include "content/common/database_messages.h"
+#include "content/public/browser/user_metrics.h"
 #include "content/public/common/result_codes.h"
 #include "googleurl/src/gurl.h"
-#include "third_party/sqlite/sqlite3.h"
 #include "third_party/WebKit/Source/WebKit/chromium/public/WebSecurityOrigin.h"
+#include "third_party/sqlite/sqlite3.h"
 #include "webkit/database/database_util.h"
 #include "webkit/database/vfs_backend.h"
 #include "webkit/quota/quota_manager.h"
@@ -25,7 +25,9 @@
 #include "base/file_descriptor_posix.h"
 #endif
 
+using content::BrowserMessageFilter;
 using content::BrowserThread;
+using content::UserMetricsAction;
 using quota::QuotaManager;
 using quota::QuotaManagerProxy;
 using quota::QuotaStatusCode;
@@ -120,8 +122,6 @@ void DatabaseMessageFilter::OnDatabaseOpenFile(const string16& vfs_file_name,
                                                IPC::Message* reply_msg) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   base::PlatformFile file_handle = base::kInvalidPlatformFileValue;
-  IPC::PlatformFileForTransit target_handle =
-      IPC::InvalidPlatformFileForTransit();
   string16 origin_identifier;
   string16 database_name;
 
@@ -160,7 +160,7 @@ void DatabaseMessageFilter::OnDatabaseOpenFile(const string16& vfs_file_name,
   // database tracker.
   bool auto_close = !db_tracker_->HasSavedIncognitoFileHandle(vfs_file_name);
   DCHECK_NE(base::kInvalidPlatformFileValue, file_handle);
-  target_handle =
+  IPC::PlatformFileForTransit target_handle =
       IPC::GetFileHandleForProcess(file_handle, peer_handle(), auto_close);
 
   DatabaseHostMsg_OpenFile::WriteReplyParams(reply_msg, target_handle);
@@ -300,7 +300,7 @@ void DatabaseMessageFilter::OnDatabaseModified(
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (!database_connections_.IsDatabaseOpened(
           origin_identifier, database_name)) {
-    UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    content::RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
     BadMessageReceived();
     return;
   }
@@ -313,7 +313,7 @@ void DatabaseMessageFilter::OnDatabaseClosed(const string16& origin_identifier,
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
   if (!database_connections_.IsDatabaseOpened(
           origin_identifier, database_name)) {
-    UserMetrics::RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
+    content::RecordAction(UserMetricsAction("BadMessageTerminate_DBMF"));
     BadMessageReceived();
     return;
   }

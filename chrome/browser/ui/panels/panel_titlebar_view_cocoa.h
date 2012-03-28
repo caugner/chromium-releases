@@ -7,6 +7,7 @@
 
 #import <Cocoa/Cocoa.h>
 
+#import "base/mac/cocoa_protocols.h"
 #import "chrome/browser/ui/cocoa/tracking_area.h"
 
 @class CrTrackingArea;
@@ -32,7 +33,15 @@ enum PanelDragState {
   PANEL_DRAG_SUPPRESSED  // Ignore drag events until PANEL_DRAG_CAN_START.
 };
 
-@interface PanelTitlebarViewCocoa : NSView {
+@interface RepaintAnimation : NSAnimation {
+ @private
+  NSView* targetView_;
+}
+- (id)initWithView:(NSView*)targetView duration:(double) duration;
+- (void)setCurrentProgress:(NSAnimationProgress)progress;
+@end
+
+@interface PanelTitlebarViewCocoa : NSView<NSAnimationDelegate> {
  @private
   IBOutlet PanelWindowControllerCocoa* controller_;
   IBOutlet NSView* icon_;
@@ -50,6 +59,10 @@ enum PanelDragState {
   PanelDragState dragState_;
   BOOL isDrawingAttention_;
   NSPoint dragStartLocation_;
+  // "Glint" animation is used in "Draw Attention" mode.
+  scoped_nsobject<RepaintAnimation> glintAnimation_;
+  scoped_nsobject<NSTimer> glintAnimationTimer_;
+  double glintInterval_;
 }
 
   // Callback from Close button.
@@ -88,6 +101,10 @@ enum PanelDragState {
 - (void)drawAttention;
 - (void)stopDrawingAttention;
 - (BOOL)isDrawingAttention;
+- (void)startGlintAnimation;
+- (void)restartGlintAnimation:(NSTimer*)timer;
+- (void)stopGlintAnimation;
+
 @end  // @interface PanelTitlebarView
 
 // Methods which are either only for testing, or only public for testing.

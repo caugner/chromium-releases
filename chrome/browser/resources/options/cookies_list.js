@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -160,7 +160,6 @@ cr.define('options', function() {
         this.classList.add('show-items');
       } else {
         if (this.list.expandedItem == this) {
-          this.list.leadItemHeight = 0;
           this.list.expandedItem = null;
         }
         this.style.height = '';
@@ -213,8 +212,6 @@ cr.define('options', function() {
       this.classList.remove('measure-items');
       this.itemsChild.style.height = itemsHeight + 'px';
       this.style.height = fixedHeight + 'px';
-      if (this.expanded)
-        this.list.leadItemHeight = fixedHeight;
     },
 
     /**
@@ -521,6 +518,8 @@ cr.define('options', function() {
             var name = info[i][0];
             if (name != 'id' && this.data[name])
               nodes[name].textContent = this.data[name];
+            else
+              nodes[name].textContent = '';
           }
           table = infoNodes[this.data.type].table;
         }
@@ -623,6 +622,7 @@ cr.define('options', function() {
       sm.addEventListener('leadIndexChange', this.cookieLeadChange_.bind(this));
       this.selectionModel = sm;
       this.infoNodes = {};
+      this.fixedHeight = false;
       var doc = this.ownerDocument;
       // Create a table for each type of site data (e.g. cookies, databases,
       // etc.) and save it so that we can reuse it for all origins.

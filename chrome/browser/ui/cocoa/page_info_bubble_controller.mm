@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -10,7 +10,6 @@
 #include "base/message_loop.h"
 #include "base/sys_string_conversions.h"
 #include "chrome/browser/certificate_viewer.h"
-#include "chrome/browser/google/google_util.h"
 #include "chrome/browser/page_info_model.h"
 #include "chrome/browser/page_info_model_observer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -22,6 +21,7 @@
 #import "chrome/browser/ui/cocoa/location_bar/location_bar_view_mac.h"
 #include "chrome/common/url_constants.h"
 #include "content/browser/cert_store.h"
+#include "content/public/browser/ssl_status.h"
 #include "grit/generated_resources.h"
 #include "grit/locale_settings.h"
 #include "net/base/cert_status_flags.h"
@@ -30,6 +30,10 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/image/image.h"
+
+using content::OpenURLParams;
+using content::Referrer;
+using content::SSLStatus;
 
 @interface PageInfoBubbleController (Private)
 - (PageInfoModel*)model;
@@ -153,7 +157,7 @@ namespace browser {
 void ShowPageInfoBubble(gfx::NativeWindow parent,
                         Profile* profile,
                         const GURL& url,
-                        const NavigationEntry::SSLStatus& ssl,
+                        const SSLStatus& ssl,
                         bool show_history) {
   PageInfoModelBubbleBridge* bridge = new PageInfoModelBubbleBridge();
   PageInfoModel* model =
@@ -163,7 +167,7 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
                                                 modelObserver:bridge
                                                  parentWindow:parent];
   bridge->set_controller(controller);
-  [controller setCertID:ssl.cert_id()];
+  [controller setCertID:ssl.cert_id];
   [controller showWindow:nil];
 }
 
@@ -208,11 +212,11 @@ void ShowPageInfoBubble(gfx::NativeWindow parent,
 }
 
 - (IBAction)showHelpPage:(id)sender {
-  GURL url = google_util::AppendGoogleLocaleParam(
-      GURL(chrome::kPageInfoHelpCenterURL));
   Browser* browser = BrowserList::GetLastActive();
-  browser->OpenURL(
-      url, GURL(), NEW_FOREGROUND_TAB, content::PAGE_TRANSITION_LINK);
+  OpenURLParams params(
+      GURL(chrome::kPageInfoHelpCenterURL), Referrer(), NEW_FOREGROUND_TAB,
+      content::PAGE_TRANSITION_LINK, false);
+  browser->OpenURL(params);
 }
 
 // This will create the subviews for the page info window. The general layout

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -24,8 +24,8 @@
 #include "chrome/common/thumbnail_score.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/browser/browser_thread_impl.h"
-#include "content/browser/notification_service_impl.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
@@ -234,8 +234,9 @@ int main(int argc, const char* argv[]) {
 
   chrome::RegisterPathProvider();
   ui::RegisterPathProvider();
-  ResourceBundle::InitSharedInstance("en-US");
-  NotificationServiceImpl notification_service;
+  ResourceBundle::InitSharedInstanceWithLocale("en-US");
+  scoped_ptr<content::NotificationService> notification_service(
+      content::NotificationService::Create());
   MessageLoopForUI message_loop;
   content::BrowserThreadImpl ui_thread(BrowserThread::UI, &message_loop);
   content::BrowserThreadImpl db_thread(BrowserThread::DB, &message_loop);

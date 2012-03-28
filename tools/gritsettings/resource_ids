@@ -1,4 +1,4 @@
-# Copyright (c) 2011 The Chromium Authors. All rights reserved.
+# Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 #
@@ -30,9 +30,6 @@
   },
   "chrome/common/common_resources.grd": {
     "includes": [2500],
-  },
-  "chrome/default_plugin/default_plugin_resources.grd": {
-    "includes": [3000],
   },
   "chrome/renderer/renderer_resources.grd": {
     "includes": [3500],
@@ -150,11 +147,14 @@
     "includes": [21000],
   },
   # This file is generated during the build.
-  "chrome/browser/debugger/frontend/devtools_frontend_resources.grd": {
+  "chrome/browser/debugger/frontend/devtools_discovery_page_resources.grd": {
     "includes": [21500],
   },
   "chrome/browser/resources/options_resources.grd": {
     "includes": [22000],
+  },
+  "chrome/browser/resources/options2_resources.grd": {
+    "includes": [22200],
   },
   "cloud_print/virtual_driver/win/install/virtual_driver_setup_resources.grd": {
     "messages": [22500],
@@ -174,5 +174,8 @@
   },
   "content/content_resources.grd": {
     "includes": [24500],
+  },
+  "content/shell/shell_resources.grd": {
+    "includes": [25000],
   },
 }

@@ -33,7 +33,6 @@
 #include "base/message_loop.h"
 #include "base/string16.h"
 #include "base/string_util.h"
-#include "base/task.h"
 #include "base/threading/non_thread_safe.h"
 #include "content/common/content_export.h"
 
@@ -193,7 +192,7 @@ class DeviceDataProviderImplBase : public DeviceDataProviderImplBaseHack {
   // Calls DeviceDataUpdateAvailable() on all registered listeners.
   typedef std::set<ListenerInterface*> ListenersSet;
   void NotifyListeners() {
-    // Always make the nitofy callback via a posted task, se we can unwind
+    // Always make the notify callback via a posted task, so we can unwind
     // callstack here and make callback without causing client re-entrancy.
     client_loop_->PostTask(FROM_HERE, base::Bind(
         &DeviceDataProviderImplBase<DataType>::NotifyListenersInClientLoop,

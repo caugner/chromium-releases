@@ -1,11 +1,11 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "chrome/browser/sync/glue/password_data_type_controller.h"
 
+#include "base/bind.h"
 #include "base/metrics/histogram.h"
-#include "base/task.h"
 #include "chrome/browser/password_manager/password_store.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/api/sync_error.h"
@@ -20,9 +20,11 @@ namespace browser_sync {
 
 PasswordDataTypeController::PasswordDataTypeController(
     ProfileSyncComponentsFactory* profile_sync_factory,
-    Profile* profile)
+    Profile* profile,
+    ProfileSyncService* sync_service)
     : NonFrontendDataTypeController(profile_sync_factory,
-                                    profile) {
+                                    profile,
+                                    sync_service) {
 }
 
 PasswordDataTypeController::~PasswordDataTypeController() {

@@ -9,7 +9,6 @@
 
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/task.h"
 #include "base/tracked_objects.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
@@ -24,8 +23,16 @@
 #include "chrome/browser/ui/webui/chrome_web_ui_data_source.h"
 #include "chrome/common/extensions/extension_messages.h"
 #include "chrome/common/url_constants.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_ui.h"
 #include "grit/sync_internals_resources.h"
 #include "ui/base/resource/resource_bundle.h"
+
+using browser_sync::JsArgList;
+using browser_sync::JsEventDetails;
+using browser_sync::JsReplyHandler;
+using browser_sync::WeakHandle;
+using content::WebContents;
 
 namespace {
 
@@ -56,11 +63,6 @@ ChromeWebUIDataSource* CreateSyncInternalsHTMLSource() {
 
 }  // namespace
 
-using browser_sync::JsArgList;
-using browser_sync::JsEventDetails;
-using browser_sync::JsReplyHandler;
-using browser_sync::WeakHandle;
-
 namespace {
 
 // Gets the ProfileSyncService of the underlying original profile.
@@ -71,11 +73,11 @@ ProfileSyncService* GetProfileSyncService(Profile* profile) {
 
 }  // namespace
 
-SyncInternalsUI::SyncInternalsUI(TabContents* contents)
-    : ChromeWebUI(contents),
+SyncInternalsUI::SyncInternalsUI(content::WebUI* web_ui)
+    : WebUIController(web_ui),
       weak_ptr_factory_(ALLOW_THIS_IN_INITIALIZER_LIST(this)) {
   // TODO(akalin): Fix.
-  Profile* profile = Profile::FromBrowserContext(contents->browser_context());
+  Profile* profile = Profile::FromWebUI(web_ui);
   profile->GetChromeURLDataManager()->AddDataSource(
       CreateSyncInternalsHTMLSource());
   ProfileSyncService* sync_service = GetProfileSyncService(profile);
@@ -93,9 +95,9 @@ SyncInternalsUI::~SyncInternalsUI() {
   }
 }
 
-void SyncInternalsUI::OnWebUISend(const GURL& source_url,
-                                  const std::string& name,
-                                  const ListValue& content) {
+bool SyncInternalsUI::OverrideHandleWebUIMessage(const GURL& source_url,
+                                                 const std::string& name,
+                                                 const ListValue& content) {
   scoped_ptr<ListValue> content_copy(content.DeepCopy());
   JsArgList args(content_copy.get());
   VLOG(1) << "Received message: " << name << " with args "
@@ -106,7 +108,8 @@ void SyncInternalsUI::OnWebUISend(const GURL& source_url,
     ListValue return_args;
     DictionaryValue* about_info = new DictionaryValue();
     return_args.Append(about_info);
-    ProfileSyncService* service = GetProfileSyncService(GetProfile());
+    Profile* profile = Profile::FromWebUI(web_ui());
+    ProfileSyncService* service = GetProfileSyncService(profile);
     sync_ui_util::ConstructAboutInformation(service, about_info);
     HandleJsReply(name, JsArgList(&return_args));
   } else {
@@ -119,6 +122,7 @@ void SyncInternalsUI::OnWebUISend(const GURL& source_url,
                    << " with args " << args.ToString();
     }
   }
+  return true;
 }
 
 void SyncInternalsUI::HandleJsEvent(
@@ -127,7 +131,7 @@ void SyncInternalsUI::HandleJsEvent(
           << details.ToString();
   const std::string& event_handler = "chrome.sync." + name + ".fire";
   std::vector<const Value*> arg_list(1, &details.Get());
-  CallJavascriptFunction(event_handler, arg_list);
+  web_ui()->CallJavascriptFunction(event_handler, arg_list);
 }
 
 void SyncInternalsUI::HandleJsReply(
@@ -136,5 +140,5 @@ void SyncInternalsUI::HandleJsReply(
           << args.ToString();
   const std::string& reply_handler = "chrome.sync." + name + ".handleReply";
   std::vector<const Value*> arg_list(args.Get().begin(), args.Get().end());
-  CallJavascriptFunction(reply_handler, arg_list);
+  web_ui()->CallJavascriptFunction(reply_handler, arg_list);
 }

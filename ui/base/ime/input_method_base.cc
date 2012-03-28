@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -53,12 +53,17 @@ TextInputClient* InputMethodBase::GetTextInputClient() const {
 void InputMethodBase::OnTextInputTypeChanged(const TextInputClient* client) {
   if (!IsTextInputClientFocused(client))
     return;
-  // TODO(yusukes): Support TextInputTypeTracker for TOUCH_UI.
+  // TODO(yusukes): Support TextInputTypeTracker for USE_VIRTUAL_KEYBOARD.
 }
 
 TextInputType InputMethodBase::GetTextInputType() const {
   TextInputClient* client = GetTextInputClient();
   return client ? client->GetTextInputType() : TEXT_INPUT_TYPE_NONE;
+}
+
+bool InputMethodBase::CanComposeInline() const {
+  TextInputClient* client = GetTextInputClient();
+  return client ? client->CanComposeInline() : true;
 }
 
 bool InputMethodBase::IsTextInputClientFocused(const TextInputClient* client) {
@@ -71,7 +76,7 @@ bool InputMethodBase::IsTextInputTypeNone() const {
 
 void InputMethodBase::OnInputMethodChanged() const {
   TextInputClient* client = GetTextInputClient();
-  if (client && client->GetTextInputType() != TEXT_INPUT_TYPE_NONE)
+  if (!IsTextInputTypeNone())
     client->OnInputMethodChanged();
 }
 

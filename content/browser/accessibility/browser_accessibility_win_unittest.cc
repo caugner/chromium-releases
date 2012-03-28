@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -366,43 +366,169 @@ TEST_F(BrowserAccessibilityTest, TestTextBoundaries) {
   ASSERT_EQ(0, CountedBrowserAccessibility::global_obj_count_);
 }
 
-TEST_F(BrowserAccessibilityTest, TestScrollingLogic) {
-  #define SCROLL BrowserAccessibility::ComputeBestScrollOffset
+TEST_F(BrowserAccessibilityTest, TestSimpleHypertext) {
+  WebAccessibility text1;
+  text1.id = 11;
+  text1.role = WebAccessibility::ROLE_STATIC_TEXT;
+  text1.state = 0;
+  text1.name = L"One two three.";
 
-  // Test some cases where the focus is already within the viewport.
-  EXPECT_EQ(0, SCROLL(0, 25, 75, 25, 75, 0, 100));
-  EXPECT_EQ(100, SCROLL(100, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(105, SCROLL(105, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(125, SCROLL(125, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(75, SCROLL(75, 125, 175, 125, 175, 0, 100));
+  WebAccessibility text2;
+  text2.id = 12;
+  text2.role = WebAccessibility::ROLE_STATIC_TEXT;
+  text2.state = 0;
+  text2.name = L" Four five six.";
 
-  // Subfocus should be ignored if focus is already within the viewport.
-  EXPECT_EQ(100, SCROLL(100, 125, 125, 125, 175, 0, 100));
-  EXPECT_EQ(100, SCROLL(100, 175, 175, 125, 175, 0, 100));
-  EXPECT_EQ(100, SCROLL(100, -50, -50, 125, 175, 0, 100));
+  WebAccessibility root;
+  root.id = 1;
+  root.role = WebAccessibility::ROLE_DOCUMENT;
+  root.state = 0;
+  root.children.push_back(text1);
+  root.children.push_back(text2);
 
-  // Test some cases where the focus needs to be scrolled to fit.
-  EXPECT_EQ(75, SCROLL(74, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(75, SCROLL(50, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(75, SCROLL(0, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(125, SCROLL(126, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(125, SCROLL(150, 125, 175, 125, 175, 0, 100));
-  EXPECT_EQ(125, SCROLL(200, 125, 175, 125, 175, 0, 100));
+  CountedBrowserAccessibility::global_obj_count_ = 0;
+  BrowserAccessibilityManager* manager = BrowserAccessibilityManager::Create(
+      GetDesktopWindow(), root, NULL,
+      new CountedBrowserAccessibilityFactory());
+  ASSERT_EQ(3, CountedBrowserAccessibility::global_obj_count_);
 
-  // Test some cases where the focus doesn't fit, so the subfocus is used.
-  EXPECT_EQ(125, SCROLL(0, 125, 130, 125, 175, 0, 25));
-  EXPECT_EQ(125, SCROLL(125, 125, 130, 125, 175, 0, 25));
-  EXPECT_EQ(125, SCROLL(175, 125, 130, 125, 175, 0, 25));
-  EXPECT_EQ(125, SCROLL(500, 125, 130, 125, 175, 0, 25));
-  EXPECT_EQ(140, SCROLL(0, 140, 145, 125, 175, 0, 25));
-  EXPECT_EQ(150, SCROLL(0, 170, 175, 125, 175, 0, 25));
+  BrowserAccessibilityWin* root_obj =
+      manager->GetRoot()->toBrowserAccessibilityWin();
 
-  // Test some cases where the viewport is a single point - which can be
-  // used to force an object to be scrolled to a specific location.
-  EXPECT_EQ(50, SCROLL(0, 125, 175, 125, 175, 75, 75));
-  EXPECT_EQ(25, SCROLL(0, 125, 175, 125, 175, 100, 100));
-  EXPECT_EQ(0, SCROLL(0, 125, 175, 125, 175, 125, 125));
+  BSTR text;
 
-  #undef SCROLL
+  long text_len;
+  ASSERT_EQ(S_OK, root_obj->get_nCharacters(&text_len));
+
+  ASSERT_EQ(S_OK, root_obj->get_text(0, text_len, &text));
+  EXPECT_EQ(text, text1.name + text2.name);
+  SysFreeString(text);
+
+  long hyperlink_count;
+  ASSERT_EQ(S_OK, root_obj->get_nHyperlinks(&hyperlink_count));
+  EXPECT_EQ(0, hyperlink_count);
+
+  base::win::ScopedComPtr<IAccessibleHyperlink> hyperlink;
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlink(-1, hyperlink.Receive()));
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlink(0, hyperlink.Receive()));
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlink(28, hyperlink.Receive()));
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlink(29, hyperlink.Receive()));
+
+  long hyperlink_index;
+  EXPECT_EQ(E_FAIL, root_obj->get_hyperlinkIndex(0, &hyperlink_index));
+  EXPECT_EQ(-1, hyperlink_index);
+  EXPECT_EQ(E_FAIL, root_obj->get_hyperlinkIndex(28, &hyperlink_index));
+  EXPECT_EQ(-1, hyperlink_index);
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlinkIndex(-1, &hyperlink_index));
+  EXPECT_EQ(-1, hyperlink_index);
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlinkIndex(29, &hyperlink_index));
+  EXPECT_EQ(-1, hyperlink_index);
+
+  // Delete the manager and test that all BrowserAccessibility instances are
+  // deleted.
+  delete manager;
+  ASSERT_EQ(0, CountedBrowserAccessibility::global_obj_count_);
 }
 
+TEST_F(BrowserAccessibilityTest, TestComplexHypertext) {
+  WebAccessibility text1;
+  text1.id = 11;
+  text1.role = WebAccessibility::ROLE_STATIC_TEXT;
+  text1.state = 0;
+  text1.name = L"One two three.";
+
+  WebAccessibility text2;
+  text2.id = 12;
+  text2.role = WebAccessibility::ROLE_STATIC_TEXT;
+  text2.state = 0;
+  text2.name = L" Four five six.";
+
+  WebAccessibility button1, button1_text;
+  button1.id = 13;
+  button1_text.id = 15;
+  button1_text.name = L"red";
+  button1.role = WebAccessibility::ROLE_BUTTON;
+  button1_text.role = WebAccessibility::ROLE_STATIC_TEXT;
+  button1.state = 0;
+  button1.children.push_back(button1_text);
+
+  WebAccessibility link1, link1_text;
+  link1.id = 14;
+  link1_text.id = 16;
+  link1_text.name = L"blue";
+  link1.role = WebAccessibility::ROLE_LINK;
+  link1_text.role = WebAccessibility::ROLE_STATIC_TEXT;
+  link1.state = 0;
+  link1.children.push_back(link1_text);
+
+  WebAccessibility root;
+  root.id = 1;
+  root.role = WebAccessibility::ROLE_DOCUMENT;
+  root.state = 0;
+  root.children.push_back(text1);
+  root.children.push_back(button1);
+  root.children.push_back(text2);
+  root.children.push_back(link1);
+
+  CountedBrowserAccessibility::global_obj_count_ = 0;
+  BrowserAccessibilityManager* manager = BrowserAccessibilityManager::Create(
+      GetDesktopWindow(), root, NULL,
+      new CountedBrowserAccessibilityFactory());
+  ASSERT_EQ(7, CountedBrowserAccessibility::global_obj_count_);
+
+  BrowserAccessibilityWin* root_obj =
+      manager->GetRoot()->toBrowserAccessibilityWin();
+
+  BSTR text;
+
+  long text_len;
+  ASSERT_EQ(S_OK, root_obj->get_nCharacters(&text_len));
+
+  ASSERT_EQ(S_OK, root_obj->get_text(0, text_len, &text));
+  const string16 embed = BrowserAccessibilityWin::kEmbeddedCharacter;
+  EXPECT_EQ(text, text1.name + embed + text2.name + embed);
+  SysFreeString(text);
+
+  long hyperlink_count;
+  ASSERT_EQ(S_OK, root_obj->get_nHyperlinks(&hyperlink_count));
+  EXPECT_EQ(2, hyperlink_count);
+
+  base::win::ScopedComPtr<IAccessibleHyperlink> hyperlink;
+  base::win::ScopedComPtr<IAccessibleText> hypertext;
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlink(-1, hyperlink.Receive()));
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlink(2, hyperlink.Receive()));
+  EXPECT_EQ(E_INVALIDARG, root_obj->get_hyperlink(28, hyperlink.Receive()));
+
+  EXPECT_EQ(S_OK, root_obj->get_hyperlink(0, hyperlink.Receive()));
+  EXPECT_EQ(S_OK,
+            hyperlink.QueryInterface<IAccessibleText>(hypertext.Receive()));
+  EXPECT_EQ(S_OK, hypertext->get_text(0, 3, &text));
+  EXPECT_EQ(text, string16(L"red"));
+  SysFreeString(text);
+  hyperlink.Release();
+  hypertext.Release();
+
+  EXPECT_EQ(S_OK, root_obj->get_hyperlink(1, hyperlink.Receive()));
+  EXPECT_EQ(S_OK,
+            hyperlink.QueryInterface<IAccessibleText>(hypertext.Receive()));
+  EXPECT_EQ(S_OK, hypertext->get_text(0, 4, &text));
+  EXPECT_EQ(text, string16(L"blue"));
+  SysFreeString(text);
+  hyperlink.Release();
+  hypertext.Release();
+
+  long hyperlink_index;
+  EXPECT_EQ(E_FAIL, root_obj->get_hyperlinkIndex(0, &hyperlink_index));
+  EXPECT_EQ(-1, hyperlink_index);
+  EXPECT_EQ(E_FAIL, root_obj->get_hyperlinkIndex(28, &hyperlink_index));
+  EXPECT_EQ(-1, hyperlink_index);
+  EXPECT_EQ(S_OK, root_obj->get_hyperlinkIndex(14, &hyperlink_index));
+  EXPECT_EQ(0, hyperlink_index);
+  EXPECT_EQ(S_OK, root_obj->get_hyperlinkIndex(30, &hyperlink_index));
+  EXPECT_EQ(1, hyperlink_index);
+
+  // Delete the manager and test that all BrowserAccessibility instances are
+  // deleted.
+  delete manager;
+  ASSERT_EQ(0, CountedBrowserAccessibility::global_obj_count_);
+}

@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -6,15 +6,20 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/tabs/tab_strip_model.h"
-#include "content/browser/tab_contents/tab_contents.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_wrapper.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/sessions/restore_tab_helper.h"
 #include "chrome/browser/extensions/extension_tabs_module_constants.h"
+#include "content/public/browser/favicon_status.h"
+#include "content/public/browser/navigation_entry.h"
+#include "content/public/browser/web_contents.h"
 
 namespace keys = extension_tabs_module_constants;
 namespace errors = extension_manifest_errors;
+
+using content::NavigationEntry;
+using content::WebContents;
 
 int ExtensionTabUtil::GetWindowId(const Browser* browser) {
   return browser->session_id().id();
@@ -31,9 +36,9 @@ int ExtensionTabUtil::GetWindowIdOfTabStripModel(
 }
 
 // TODO(sky): this function should really take a TabContentsWrapper.
-int ExtensionTabUtil::GetTabId(const TabContents* tab_contents) {
+int ExtensionTabUtil::GetTabId(const WebContents* web_contents) {
   const TabContentsWrapper* tab =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
   return tab ? tab->restore_tab_helper()->session_id().id() : -1;
 }
 
@@ -42,9 +47,9 @@ std::string ExtensionTabUtil::GetTabStatusText(bool is_loading) {
 }
 
 // TODO(sky): this function should really take a TabContentsWrapper.
-int ExtensionTabUtil::GetWindowIdOfTab(const TabContents* tab_contents) {
+int ExtensionTabUtil::GetWindowIdOfTab(const WebContents* web_contents) {
   const TabContentsWrapper* tab =
-      TabContentsWrapper::GetCurrentWrapperForContents(tab_contents);
+      TabContentsWrapper::GetCurrentWrapperForContents(web_contents);
   return tab ? tab->restore_tab_helper()->window_id().id() : -1;
 }
 
@@ -69,8 +74,7 @@ std::string ExtensionTabUtil::GetWindowShowStateText(const Browser* browser) {
   return keys::kShowStateValueNormal;
 }
 
-DictionaryValue* ExtensionTabUtil::CreateTabValue(
-    const TabContents* contents) {
+DictionaryValue* ExtensionTabUtil::CreateTabValue(const WebContents* contents) {
   // Find the tab strip and index of this guy.
   TabStripModel* tab_strip = NULL;
   int tab_index;
@@ -86,13 +90,13 @@ ListValue* ExtensionTabUtil::CreateTabList(const Browser* browser) {
   TabStripModel* tab_strip = browser->tabstrip_model();
   for (int i = 0; i < tab_strip->count(); ++i) {
     tab_list->Append(ExtensionTabUtil::CreateTabValue(
-        tab_strip->GetTabContentsAt(i)->tab_contents(), tab_strip, i));
+        tab_strip->GetTabContentsAt(i)->web_contents(), tab_strip, i));
   }
 
   return tab_list;
 }
 
-DictionaryValue* ExtensionTabUtil::CreateTabValue(const TabContents* contents,
+DictionaryValue* ExtensionTabUtil::CreateTabValue(const WebContents* contents,
                                                   TabStripModel* tab_strip,
                                                   int tab_index) {
   DictionaryValue* result = new DictionaryValue();
@@ -113,13 +117,22 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(const TabContents* contents,
                      tab_strip && tab_strip->IsTabPinned(tab_index));
   result->SetString(keys::kTitleKey, contents->GetTitle());
   result->SetBoolean(keys::kIncognitoKey,
-                     contents->browser_context()->IsOffTheRecord());
+                     contents->GetBrowserContext()->IsOffTheRecord());
+
+  if (tab_strip) {
+    content::NavigationController* opener =
+        tab_strip->GetOpenerOfTabContentsAt(tab_index);
+    if (opener) {
+      result->SetInteger(keys::kOpenerTabIdKey,
+                         ExtensionTabUtil::GetTabId(opener->GetWebContents()));
+    }
+  }
 
   if (!is_loading) {
-    NavigationEntry* entry = contents->controller().GetActiveEntry();
+    NavigationEntry* entry = contents->GetController().GetActiveEntry();
     if (entry) {
-      if (entry->favicon().is_valid())
-        result->SetString(keys::kFaviconUrlKey, entry->favicon().url().spec());
+      if (entry->GetFavicon().valid)
+        result->SetString(keys::kFaviconUrlKey, entry->GetFavicon().url.spec());
     }
   }
 
@@ -127,7 +140,7 @@ DictionaryValue* ExtensionTabUtil::CreateTabValue(const TabContents* contents,
 }
 
 DictionaryValue* ExtensionTabUtil::CreateTabValueActive(
-    const TabContents* contents,
+    const WebContents* contents,
     bool active) {
   DictionaryValue* result = ExtensionTabUtil::CreateTabValue(contents);
   result->SetBoolean(keys::kSelectedKey, active);
@@ -165,17 +178,17 @@ DictionaryValue* ExtensionTabUtil::CreateWindowValue(const Browser* browser,
   return result;
 }
 
-bool ExtensionTabUtil::GetTabStripModel(const TabContents* tab_contents,
+bool ExtensionTabUtil::GetTabStripModel(const WebContents* web_contents,
                                         TabStripModel** tab_strip_model,
                                         int* tab_index) {
-  DCHECK(tab_contents);
+  DCHECK(web_contents);
   DCHECK(tab_strip_model);
   DCHECK(tab_index);
 
   for (BrowserList::const_iterator it = BrowserList::begin();
       it != BrowserList::end(); ++it) {
     TabStripModel* tab_strip = (*it)->tabstrip_model();
-    int index = tab_strip->GetWrapperIndex(tab_contents);
+    int index = tab_strip->GetWrapperIndex(web_contents);
     if (index != -1) {
       *tab_strip_model = tab_strip;
       *tab_index = index;
@@ -195,7 +208,7 @@ bool ExtensionTabUtil::GetDefaultTab(Browser* browser,
   *contents = browser->GetSelectedTabContentsWrapper();
   if (*contents) {
     if (tab_id)
-      *tab_id = ExtensionTabUtil::GetTabId((*contents)->tab_contents());
+      *tab_id = ExtensionTabUtil::GetTabId((*contents)->web_contents());
     return true;
   }
 

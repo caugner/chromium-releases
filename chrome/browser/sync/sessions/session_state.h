@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -65,9 +65,6 @@ struct SyncerStatus {
 
   // True when we get such an INVALID_STORE error from the server.
   bool invalid_store;
-  // True iff we're stuck.
-  bool syncer_stuck;
-  bool sync_in_progress;
   int num_successful_commits;
   // This is needed for monitoring extensions activity.
   int num_successful_bookmark_commits;
@@ -106,6 +103,11 @@ struct ErrorCounters {
 
   // Any protocol errors that we received during this sync session.
   SyncProtocolError sync_protocol_error;
+
+  // Records the most recent results of PostCommit and GetUpdates commands.
+  SyncerError last_download_updates_result;
+  SyncerError last_post_commit_result;
+  SyncerError last_process_commit_response_result;
 };
 
 // Caller takes ownership of the returned dictionary.
@@ -121,7 +123,7 @@ struct SyncSessionSnapshot {
       const ErrorCounters& errors,
       int64 num_server_changes_remaining,
       bool is_share_usable,
-      const syncable::ModelTypeBitSet& initial_sync_ended,
+      syncable::ModelTypeSet initial_sync_ended,
       const std::string
           (&download_progress_markers)[syncable::MODEL_TYPE_COUNT],
       bool more_to_sync,
@@ -132,7 +134,8 @@ struct SyncSessionSnapshot {
       bool did_commit_items,
       const SyncSourceInfo& source,
       size_t num_entries,
-      base::Time sync_start_time);
+      base::Time sync_start_time,
+      bool retry_scheduled);
   ~SyncSessionSnapshot();
 
   // Caller takes ownership of the returned dictionary.
@@ -144,7 +147,7 @@ struct SyncSessionSnapshot {
   const ErrorCounters errors;
   const int64 num_server_changes_remaining;
   const bool is_share_usable;
-  const syncable::ModelTypeBitSet initial_sync_ended;
+  const syncable::ModelTypeSet initial_sync_ended;
   const std::string download_progress_markers[syncable::MODEL_TYPE_COUNT];
   const bool has_more_to_sync;
   const bool is_silenced;
@@ -155,6 +158,7 @@ struct SyncSessionSnapshot {
   const SyncSourceInfo source;
   const size_t num_entries;
   base::Time sync_start_time;
+  const bool retry_scheduled;
 };
 
 // Tracks progress of conflicts and their resolution using conflict sets.
@@ -172,6 +176,7 @@ class ConflictProgress {
   std::set<ConflictSet*>::const_iterator ConflictSetsBegin() const;
   std::set<ConflictSet*>::const_iterator ConflictSetsEnd() const;
   std::set<ConflictSet*>::size_type ConflictSetsSize() const;
+  bool HasSimpleConflictItem(const syncable::Id& id) const;
 
   // Various mutators for tracking commit conflicts.
   void AddConflictingItemById(const syncable::Id& the_id);
@@ -196,17 +201,8 @@ class ConflictProgress {
   std::map<syncable::Id, ConflictSet*> id_to_conflict_set_;
   std::set<ConflictSet*> conflict_sets_;
 
-  // Nonblocking conflicts are those which should not block forward progress
-  // (they will not result in the syncer being stuck). This currently only
-  // includes entries we cannot yet decrypt because the passphrase has not
-  // arrived.
-  // With nonblocking conflicts, we want to go to the syncer's
-  // APPLY_UPDATES_TO_RESOLVE_CONFLICTS step, but we want to ignore them after.
-  // Because they are not passed to the conflict resolver, they do not trigger
-  // syncer_stuck.
-  // TODO(zea): at some point we may have nonblocking conflicts that should be
-  // resolved in the conflict resolver. We'll need to change this then.
-  // See http://crbug.com/76596.
+  // Nonblocking conflicts are not processed by the conflict resolver, but
+  // they will be processed in the APPLY_UDPATES_TO_RESOLVE_CONFLICTS step.
   std::set<syncable::Id> nonblocking_conflicting_item_ids_;
 
   // Whether a conflicting item was added or removed since
@@ -264,14 +260,9 @@ class UpdateProgress {
 };
 
 struct SyncCycleControlParameters {
-  SyncCycleControlParameters() : conflict_sets_built(false),
-                                 conflicts_resolved(false),
+  SyncCycleControlParameters() : conflicts_resolved(false),
                                  items_committed(false),
                                  debug_info_sent(false) {}
-  // Set to true by BuildAndProcessConflictSetsCommand if the RESOLVE_CONFLICTS
-  // step is needed.
-  bool conflict_sets_built;
-
   // Set to true by ResolveConflictsCommand if any forward progress was made.
   bool conflicts_resolved;
 
@@ -319,7 +310,7 @@ struct AllModelTypeState {
   ClientToServerResponse commit_response;
   // We GetUpdates for some combination of types at once.
   // requested_update_types stores the set of types which were requested.
-  syncable::ModelTypeBitSet updates_request_types;
+  syncable::ModelTypeSet updates_request_types;
   ClientToServerResponse updates_response;
   // Used to build the shared commit message.
   DirtyOnWrite<std::vector<int64> > unsynced_handles;

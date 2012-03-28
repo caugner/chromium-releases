@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,13 +9,13 @@
 #include <vector>
 
 #include "ipc/ipc_platform_file.h"
+#include "ppapi/c/pp_bool.h"
 #include "ppapi/c/pp_instance.h"
 #include "ppapi/c/pp_module.h"
 #include "ppapi/c/pp_time.h"
+#include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/proxy/interface_proxy.h"
 #include "ppapi/shared_impl/host_resource.h"
-
-struct PPB_Flash;
 
 namespace ppapi {
 
@@ -31,7 +31,9 @@ class PPB_Flash_Proxy : public InterfaceProxy {
   explicit PPB_Flash_Proxy(Dispatcher* dispatcher);
   virtual ~PPB_Flash_Proxy();
 
-  static const PPB_Flash* GetInterface();
+  // Returns the corresponding version of the Flash interface pointer.
+  static const PPB_Flash_11* GetInterface11();
+  static const PPB_Flash_12_0* GetInterface12_0();
 
   // InterfaceProxy implementation.
   virtual bool OnMessageReceived(const IPC::Message& msg);
@@ -48,7 +50,7 @@ class PPB_Flash_Proxy : public InterfaceProxy {
   void OnMsgNavigate(PP_Instance instance,
                      const PPB_URLRequestInfo_Data& data,
                      const std::string& target,
-                     bool from_user_action,
+                     PP_Bool from_user_action,
                      int32_t* result);
   void OnMsgRunMessageLoop(PP_Instance instance);
   void OnMsgQuitMessageLoop(PP_Instance instance);

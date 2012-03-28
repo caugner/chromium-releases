@@ -1,4 +1,4 @@
-// Copyright (c) 2011 The Chromium Authors. All rights reserved.
+// Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -17,6 +17,7 @@
 #include "base/process.h"
 #include "base/scoped_temp_dir.h"
 #include "base/string16.h"
+#include "chrome/browser/automation/ui_controls.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/test/automation/dom_element_proxy.h"
 #include "content/public/browser/browser_thread.h"
@@ -54,7 +55,12 @@ namespace browser {
 struct NavigateParams;
 }
 
+namespace content {
+class WebContents;
+}
+
 namespace gfx {
+class Point;
 class Size;
 }
 
@@ -106,7 +112,7 @@ void WaitForBrowserActionUpdated(ExtensionAction* browser_action);
 
 // Waits for a load stop for the specified |tab|'s controller, if the tab is
 // currently loading.  Otherwise returns immediately.
-void WaitForLoadStop(TabContents* tab);
+void WaitForLoadStop(content::WebContents* tab);
 
 // Waits for a new browser to be created, returning the browser.
 Browser* WaitForNewBrowser();
@@ -192,7 +198,7 @@ GURL GetFileUrlWithQuery(const FilePath& path, const std::string& query_string);
 AppModalDialog* WaitForAppModalDialog();
 
 // Causes the specified tab to crash. Blocks until it is crashed.
-void CrashTab(TabContents* tab);
+void CrashTab(content::WebContents* tab);
 
 // Performs a find in the page of the specified tab. Returns the number of
 // matches found.  |ordinal| is an optional parameter which is set to the index
@@ -259,6 +265,13 @@ bool SendKeyPressAndWait(const Browser* browser,
                          int type,
                          const content::NotificationSource& source)
                              WARN_UNUSED_RESULT;
+
+// Sends a move event blocking until received. Returns true if the event was
+// successfully received. This uses ui_controls::SendMouse***NotifyWhenDone, see
+// it for details.
+bool SendMouseMoveSync(const gfx::Point& location) WARN_UNUSED_RESULT;
+bool SendMouseEventsSync(ui_controls::MouseButton type,
+                         int state) WARN_UNUSED_RESULT;
 
 // Run a message loop only for the specified amount of time.
 class TimedMessageLoopRunner {
@@ -452,10 +465,11 @@ class WindowedNotificationObserverWithDetails
 // Watches title changes on a tab, blocking until an expected title is set.
 class TitleWatcher : public content::NotificationObserver {
  public:
-  // |tab_contents| must be non-NULL and needs to stay alive for the
+  // |web_contents| must be non-NULL and needs to stay alive for the
   // entire lifetime of |this|. |expected_title| is the title that |this|
   // will wait for.
-  TitleWatcher(TabContents* tab_contents, const string16& expected_title);
+  TitleWatcher(content::WebContents* web_contents,
+               const string16& expected_title);
   virtual ~TitleWatcher();
 
   // Adds another title to watch for.
@@ -472,7 +486,7 @@ class TitleWatcher : public content::NotificationObserver {
                        const content::NotificationSource& source,
                        const content::NotificationDetails& details) OVERRIDE;
 
-  TabContents* tab_contents_;
+  content::WebContents* web_contents_;
   std::vector<string16> expected_titles_;
   content::NotificationRegistrar notification_registrar_;
 
